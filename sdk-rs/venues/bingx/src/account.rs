@@ -322,17 +322,17 @@ impl Account {
         let native = market.id.clone();
         let generation = self.metadata_generations.entry(symbol.clone()).or_default();
         *generation = generation.wrapping_add(1);
-        Self::request(
+        let generation = *generation;
+        self.request(
             cx,
             credentials,
-            Method::Get,
-            crate::paths::LEVERAGE,
+            (Method::Get, crate::paths::LEVERAGE),
             Params::new().str("symbol", &native),
             Request::Metadata {
                 command,
                 symbol,
                 revision: self.settings_revision,
-                generation: *generation,
+                generation,
                 publish,
                 leverage: None,
             },
@@ -393,14 +393,15 @@ impl Account {
     }
 
     fn request(
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         credentials: &Credentials,
-        method: Method,
-        path: &'static str,
+        target: (Method, &'static str),
         params: Params,
         request: Request,
         stream: bool,
     ) {
+        let (method, path) = target;
         let at = stream.then(|| {
             if path == OPEN_ORDERS {
                 ArrayAt::EnvelopeFieldOrNested("data", "orders")
@@ -409,17 +410,41 @@ impl Account {
             }
         });
         let scope = auth_scope(&request);
-        let id = crate::issue(
-            cx,
-            Some(credentials),
-            method,
-            path,
-            params,
-            at,
-            Pending::Account(request),
-        );
         if let Some(scope) = scope {
-            tag_read(cx, id, method, credentials, scope);
+            match crate::managed::read(
+                cx,
+                credentials,
+                crate::managed::Read {
+                    method,
+                    path,
+                    params,
+                    at,
+                },
+                Pending::Account(request),
+                safe_cex_engine::request_context::Scope::Background,
+            ) {
+                Ok(id) => tag_read(cx, id, method, credentials, scope),
+                Err((pending, error)) => {
+                    let (pending, context) = match *pending {
+                        Pending::Signed(signed) => (signed.inner, signed.context),
+                        pending => (pending, None),
+                    };
+                    if let Pending::Account(request) = pending {
+                        self.on_sign_failed(cx, request, error, credentials);
+                    }
+                    crate::managed::finish(cx, context);
+                }
+            }
+        } else {
+            crate::issue(
+                cx,
+                Some(credentials),
+                method,
+                path,
+                params,
+                at,
+                Pending::Account(request),
+            );
         }
     }
 
@@ -429,11 +454,10 @@ impl Account {
         }
         self.key_in_flight = true;
         self.supervisor.connecting(cx);
-        Self::request(
+        self.request(
             cx,
             credentials,
-            Method::Post,
-            LISTEN_KEY,
+            (Method::Post, LISTEN_KEY),
             Params::new(),
             Request::ListenKey { epoch: self.epoch },
             false,
@@ -444,11 +468,10 @@ impl Account {
             return;
         }
         self.mode_in_flight = true;
-        Self::request(
+        self.request(
             cx,
             credentials,
-            Method::Get,
-            POSITION_MODE,
+            (Method::Get, POSITION_MODE),
             Params::new(),
             Request::PositionMode {
                 revision: self.positions_revision,
@@ -461,11 +484,10 @@ impl Account {
             return;
         }
         self.balance_in_flight = Some(self.balance_revision);
-        Self::request(
+        self.request(
             cx,
             credentials,
-            Method::Get,
-            BALANCE,
+            (Method::Get, BALANCE),
             Params::new(),
             Request::Balance {
                 revision: self.balance_revision,
@@ -482,11 +504,10 @@ impl Account {
         }
         self.last_positions = cx.now;
         self.positions_in_flight = Some(self.positions_revision);
-        Self::request(
+        self.request(
             cx,
             credentials,
-            Method::Get,
-            POSITIONS,
+            (Method::Get, POSITIONS),
             Params::new(),
             Request::Positions {
                 revision: self.positions_revision,
@@ -503,11 +524,10 @@ impl Account {
             return;
         }
         self.orders_in_flight = Some(self.orders_revision);
-        Self::request(
+        self.request(
             cx,
             credentials,
-            Method::Get,
-            OPEN_ORDERS,
+            (Method::Get, OPEN_ORDERS),
             Params::new(),
             Request::OpenOrders {
                 revision: self.orders_revision,
@@ -601,11 +621,10 @@ impl Account {
         if self.keepalive == Some(timer) {
             self.keepalive = None;
             if let Some(key) = self.key.as_deref() {
-                Self::request(
+                self.request(
                     cx,
                     credentials,
-                    Method::Put,
-                    LISTEN_KEY,
+                    (Method::Put, LISTEN_KEY),
                     Params::new().str("listenKey", key),
                     Request::Keepalive { epoch: self.epoch },
                     false,
@@ -906,11 +925,10 @@ impl Account {
                         );
                         return;
                     };
-                    Self::request(
+                    self.request(
                         cx,
                         credentials,
-                        Method::Get,
-                        "/openApi/swap/v2/trade/marginType",
+                        (Method::Get, "/openApi/swap/v2/trade/marginType"),
                         Params::new().str("symbol", &market.id),
                         Request::Metadata {
                             command,

@@ -6,6 +6,8 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_bingx::Bingx;
 mod support;
+use safe_cex_engine::request_context::{Claim, HttpAction, Preparation, Prepared};
+use std::collections::{HashMap, VecDeque};
 
 struct Parked(Provider);
 impl Signer for Parked {
@@ -22,6 +24,7 @@ impl Signer for Parked {
 struct Harness {
     engine: Engine<Bingx>,
     local: Provider,
+    routes: HashMap<safe_cex_engine::RequestId, Preparation>,
     signs: Vec<(safe_cex_engine::RequestId, SignRequest)>,
     http: Vec<HttpRequest>,
     errors: Vec<VenueError>,
@@ -52,6 +55,7 @@ impl Harness {
         Self {
             engine,
             local,
+            routes: HashMap::new(),
             signs: vec![],
             http: vec![],
             errors: vec![],
@@ -62,8 +66,45 @@ impl Harness {
     }
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(1_000., event);
-        for action in self.engine.drain_actions() {
+        let mut queue = VecDeque::from(self.engine.drain_actions().collect::<Vec<_>>());
+        while let Some(action) = queue.pop_front() {
             match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => {
+                        assert!(self.routes.insert(request.id, preparation).is_none());
+                        self.engine.http_prepared(
+                            1_000.,
+                            preparation,
+                            Prepared {
+                                id: u64::from(request.id.0),
+                                expires_at: None,
+                            },
+                        );
+                    }
+                    HttpAction::Bind {
+                        preparation,
+                        permit,
+                        request,
+                    } => {
+                        assert_eq!(self.routes.remove(&request.id), Some(preparation));
+                        if matches!(
+                            self.engine.claim_http(1_000., permit),
+                            Ok(Claim::Released(_))
+                        ) {
+                            self.http.push(request);
+                        }
+                    }
+                    HttpAction::Cancel { preparation, .. } => {
+                        let request = preparation.attempt().request;
+                        if self.routes.get(&request) == Some(&preparation) {
+                            self.routes.remove(&request);
+                        }
+                    }
+                },
                 Action::Sign { attempt, work, .. } => self.signs.push((attempt, work)),
                 Action::Http(r) => self.http.push(r),
                 Action::Notice(Notice::CommandFailed { error, .. }) => self.errors.push(error),
@@ -77,6 +118,15 @@ impl Harness {
                     panic!("provider refusal is not venue auth evidence")
                 }
                 _ => (),
+            }
+            for action in self
+                .engine
+                .drain_actions()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+            {
+                queue.push_front(action);
             }
         }
     }

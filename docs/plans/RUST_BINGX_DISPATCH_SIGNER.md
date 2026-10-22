@@ -253,3 +253,21 @@ remains explicitly legacy-owned until the shared Completion bridge and read-only
 validator are actual; no invented root bound or numeric-command continuation.
 Keep session/history conversion targets in the body and remove the temporary
 stage when both shared boundaries are adopted. Hosted admission remains off.
+
+First-slice implementation checkpoint: original `4e63f492b85` reproduces two
+actual-builder preparation assertions. The managed builders correct both; six
+route/sign/bind/claim controls also cover exact context completion, native
+rejection, provider and route refusal, duplicate result and original deadline.
+Existing account/auth/identity assertions remain intact through the explicit
+managed fixture handoff. Identity's original no-retry path is declared Never and
+is pinned with a native100001 response; it does not inherit snapshot retry policy.
+Both source reviews are CLEAR, including identity context completion and fixture
+preservation. Strict Clippy uses boxed error Pending and grouped method/path
+arguments, with no lint exemptions. Full inventory closure, candles, metadata,
+write evidence/aggregation, same-PR final caller rewrite and CI/proof remain open.
+
+Validation at this intermediate slice: 490 BingX/Binance all-target tests pass;
+the late identity-no-retry preservation correction repeats all 204 BingX tests.
+Strict all-target engine/BingX/Binance Clippy and final BingX Clippy/fmt pass.
+The legacy inventory remains an explicit full-port gate; this checkpoint neither
+updates allowances nor declares the remaining legacy builders ready for merge.

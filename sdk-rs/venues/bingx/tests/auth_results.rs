@@ -10,7 +10,7 @@ const MARKETS: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","c
 const DAILY: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#;
 const PREMIUM: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#;
 fn drain(e: &mut Engine<Bingx>) -> Vec<Action> {
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 1000.)
 }
 fn http(actions: &[Action], path: &str) -> HttpRequest {
     actions

@@ -27,7 +27,7 @@ fn engine(read: bool, public: bool) -> Engine<Bingx> {
 }
 fn ask(e: &mut Engine<Bingx>) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
 }
 fn request(e: &mut Engine<Bingx>) -> HttpRequest {
     let actions = ask(e);
@@ -94,7 +94,7 @@ fn respond(e: &mut Engine<Bingx>, r: &HttpRequest, status: u16, body: &str) -> V
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
 }
 #[test]
 fn identity_returns_exact_response_ids_without_mutating_live_account() {
@@ -164,7 +164,7 @@ fn identity_missing_false_empty_or_failed_read_rejects_once_and_preserves_state(
                     error: "connection lost",
                 },
             );
-            e.drain_actions().collect()
+            safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
         } else {
             respond(&mut e, &r, 503, "unavailable")
         };

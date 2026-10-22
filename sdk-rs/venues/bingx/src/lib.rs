@@ -3,6 +3,7 @@ pub mod account;
 pub mod account_wire;
 mod history;
 mod identity;
+mod managed;
 pub mod paths;
 pub mod sign;
 mod trading;
@@ -62,6 +63,7 @@ pub struct Signed {
     params: Params,
     at: Option<ArrayAt>,
     resent: bool,
+    context: Option<safe_cex_engine::request_context::Context>,
 }
 
 /// Signs and sends a request; signed requests can be re-signed after a 100001.
@@ -82,6 +84,7 @@ pub(crate) fn issue(
             params: params.clone(),
             at,
             resent: false,
+            context: None,
         }))
     } else {
         pending
@@ -265,15 +268,32 @@ impl Bingx {
         {
             self.live_tickers.begin();
         }
-        issue(
-            cx,
-            self.credentials.as_ref(),
-            Method::Get,
-            path,
-            Params::new(),
-            Some(ArrayAt::EnvelopeField("data")),
-            pending,
-        );
+        if let Some(credentials) = &self.credentials {
+            if let Err((pending, error)) = managed::read(
+                cx,
+                credentials,
+                managed::Read {
+                    method: Method::Get,
+                    path,
+                    params: Params::new(),
+                    at: Some(ArrayAt::EnvelopeField("data")),
+                },
+                pending,
+                safe_cex_engine::request_context::Scope::Background,
+            ) {
+                self.on_sign_error(cx, *pending, error);
+            }
+        } else {
+            issue(
+                cx,
+                None,
+                Method::Get,
+                path,
+                Params::new(),
+                Some(ArrayAt::EnvelopeField("data")),
+                pending,
+            );
+        }
     }
 
     fn resend(&self, cx: &mut Cx<'_, Pending>, signed: Signed) {
@@ -301,6 +321,7 @@ impl Bingx {
             params: params.clone(),
             at,
             resent: true,
+            context: None,
         }));
         let id = sign::stage(
             cx,
@@ -313,6 +334,30 @@ impl Bingx {
         );
         if let (Some(scope), Some(credentials)) = (scope, self.credentials.as_ref()) {
             account::tag_read(cx, id, method, credentials, scope);
+        }
+    }
+
+    fn resend_managed(&mut self, cx: &mut Cx<'_, Pending>, signed: Signed) {
+        let scope = match &signed.inner {
+            Pending::Account(request) => account::auth_scope(request),
+            _ => None,
+        };
+        let Some(credentials) = self.credentials.as_ref() else {
+            self.on_sign_error(
+                cx,
+                Pending::Signed(Box::new(signed)),
+                safe_cex_engine::VenueError::new("BingX managed read has no credentials"),
+            );
+            return;
+        };
+        let method = signed.method;
+        match managed::retry(cx, credentials, signed) {
+            Ok(id) => {
+                if let Some(scope) = scope {
+                    account::tag_read(cx, id, method, credentials, scope);
+                }
+            }
+            Err((pending, error)) => self.on_sign_error(cx, *pending, error),
         }
     }
 
@@ -856,10 +901,24 @@ impl Venue for Bingx {
         }
         let pending = match pending {
             Pending::Signed(signed) => {
-                if !signed.resent && signature_rejected(response.body) {
-                    self.resend(cx, *signed);
+                if !signed.resent
+                    && !matches!(&signed.inner, Pending::Identity(_))
+                    && signature_rejected(response.body)
+                {
+                    if signed.context.is_some() {
+                        self.resend_managed(cx, *signed);
+                    } else {
+                        self.resend(cx, *signed);
+                    }
                 } else {
-                    self.on_response(cx, signed.inner, response);
+                    let context = signed.context;
+                    match (&context, signed.inner) {
+                        (Some(context), Pending::Identity(_)) => {
+                            self.identity_response_context(cx, context, response)
+                        }
+                        (_, pending) => self.on_response(cx, pending, response),
+                    }
+                    managed::finish(cx, context);
                 }
                 return;
             }
@@ -1027,10 +1086,22 @@ impl Venue for Bingx {
         response: Response<'_>,
     ) {
         match pending {
-            Pending::Signed(signed) if !signed.resent && signature_rejected(response.body) => {
-                self.resend(cx, *signed)
+            Pending::Signed(signed)
+                if !signed.resent
+                    && !matches!(&signed.inner, Pending::Identity(_))
+                    && signature_rejected(response.body) =>
+            {
+                if signed.context.is_some() {
+                    self.resend_managed(cx, *signed);
+                } else {
+                    self.resend(cx, *signed);
+                }
             }
-            Pending::Signed(signed) => self.on_stream_error(cx, signed.inner, response),
+            Pending::Signed(signed) => {
+                let context = signed.context;
+                self.on_stream_error(cx, signed.inner, response);
+                managed::finish(cx, context);
+            }
             pending => self.on_request_failed(
                 cx,
                 pending,
@@ -1049,12 +1120,22 @@ impl Venue for Bingx {
     ) {
         match pending {
             Pending::Signed(signed) => {
+                if let Some(context) = &signed.context
+                    && matches!(&signed.inner, Pending::Identity(_))
+                {
+                    let _ = cx.command_error_context(context, error.message.clone());
+                    let _ = cx.fail_context(context, error);
+                    managed::finish(cx, signed.context);
+                    return;
+                }
                 if signed.resent && matches!(&signed.inner, Pending::Trade(_)) {
                     // Only the retry was refused before release. The original
                     // write reached the venue, so reconciliation is still required.
                     error.outcome = Some(safe_cex_engine::Outcome::Unknown);
                 }
+                let context = signed.context;
                 self.on_sign_error(cx, signed.inner, error);
+                managed::finish(cx, context);
             }
             Pending::Identity(command) => {
                 cx.command_error(command, &error.message);
@@ -1080,7 +1161,17 @@ impl Venue for Bingx {
         );
         match pending {
             Pending::Signed(signed) => {
+                if let Some(context) = &signed.context
+                    && matches!(&signed.inner, Pending::Identity(_))
+                {
+                    let _ = cx.command_error_context(context, error.to_owned());
+                    let _ = cx.fail_context(context, error);
+                    managed::finish(cx, signed.context);
+                    return;
+                }
+                let context = signed.context;
                 self.on_request_failed(cx, signed.inner, error);
+                managed::finish(cx, context);
                 return;
             }
             Pending::Identity(command) => {

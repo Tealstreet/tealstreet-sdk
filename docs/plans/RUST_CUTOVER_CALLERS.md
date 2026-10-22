@@ -4078,3 +4078,22 @@ WASM/SDK acceptance tests. The venue uses hex HMAC and an API key without a
 passphrase, so those checks may use the landed presentation contract; no new
 WS-auth/session ownership is claimed. Existing hosted callers must retain their
 current supported route until the family admission gates are complete.
+
+## BingX managed single-owner reads (draft #1779 checkpoint)
+
+Credentialed startup quotes, rare account identity and recurring private snapshot
+reads prepare their route before provider signing, using the same native primary
+or secondary credential selection and exact header/query/body bytes. A read keeps
+its original raw 20s deadline through route/provider delays and its existing
+one-signature retry; identity retains its native no-retry behavior. Identity
+success and failures complete through generation-bearing Context authority.
+Provider or route refusal stays typed and does not become native account-auth
+evidence. Account snapshot, revision, settings and stale-owner publication fences
+remain native and unchanged.
+
+This checkpoint is not whole-family cutover: candle reads, paired metadata and
+command writes continue in the next slices. Session upkeep and history remain
+explicitly legacy-owned under the single temporary provider-stage allowance,
+to be removed after shared session Context and managed history completion/read
+validation adoption. Hosted admission stays disabled. No NX deployment or
+persisted identity migration is claimed for this intermediate checkpoint.

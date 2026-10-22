@@ -69,7 +69,7 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
@@ -146,7 +146,10 @@ impl Harness {
         let i = self
             .timers
             .iter()
-            .position(|(_, t)| *t == at)
+            // Drive the freshly rearmed native timer when an older managed
+            // response deadline shares its timestamp. This harness deliberately
+            // leaves unrelated physical deadlines parked; dedicated tests drive them.
+            .rposition(|(_, t)| *t == at)
             .unwrap_or_else(|| panic!("no timer at {at}; have {:?}", self.timers));
         let (timer, _) = self.timers.remove(i);
         self.now = at;
@@ -841,8 +844,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
