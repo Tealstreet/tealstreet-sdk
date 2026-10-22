@@ -396,7 +396,15 @@ and nested synthetic timeout events). A stale token cannot seal a reused numeric
 command ID belonging to a newer generation. Explicit leg completion also retains
 its prior-send journal.
 
-Cx.done/fail seals managed command evidence once. No release ->NotSent; all sent
+Context-bearing Cx.done_context/fail_context seal managed command evidence once
+through one private seal/retire/publish path. Numeric done/fail remain explicitly
+unsealed legacy bridge calls and cannot bypass a live managed journal or delivery.
+Managed venue migrations must use the Context-bearing finalizers. Their authority
+validates issuer and live owner generation even after logical HTTP-handle removal;
+a missing/retired owner is stale rather than legacy. Managed delivery must also
+match the owner and current physical attempt. Logical command timers retain their
+owner Context; physical timers retain an Attempt and use fail_http_attempt, so
+an old same-generation physical timeout cannot settle its newer retry. No release ->NotSent; all sent
 writes effects-free refused ->Rejected; known accepted/rejected mix ->None+Partial
 IDs and terminal rejected-leg notices; unresolved sent attempt or prior release
 then failed retry ->Unknown. A recovered retry does not report its old refusal.

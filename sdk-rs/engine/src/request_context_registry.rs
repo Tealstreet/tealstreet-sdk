@@ -1,7 +1,11 @@
 //! Engine-issued logical context identities. Physical attempts and transport
 //! resources are registered only after this immutable logical bound is valid.
-use super::{CommandId, Cx};
-use crate::request_context::{Context, Error, Owner, Policy, RetryEvidence, Scope};
+use super::{CommandId, Cx, RequestId};
+use crate::VenueError;
+use crate::request_context::{
+    Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RetryEvidence, Scope,
+    WriteResult,
+};
 use std::collections::HashMap;
 
 const CAPACITY: usize = 256;
@@ -10,6 +14,23 @@ struct CommandOwner {
     generation: u64,
     /// Owner retention only. This never extends any issued logical deadline.
     last_deadline: f64,
+    writes: Option<CommandWrites>,
+    mutation_declared: bool,
+    pending: usize,
+    deliveries: usize,
+}
+
+#[derive(Clone)]
+pub(super) struct Delivery {
+    pub context: Context,
+    pub attempt: Attempt,
+}
+
+pub(super) enum Seal {
+    Legacy(Option<VenueError>),
+    Stale,
+    Success,
+    Failure(VenueError, Vec<String>),
 }
 
 #[derive(Default)]
@@ -33,7 +54,16 @@ impl ContextRegistry {
         // Abandoned handles must not permanently exhaust the bounded registry.
         // Retiring expired metadata is safe even if the new policy is refused.
         self.contexts.retain(|_, old| old.deadline() > now);
-        self.commands.retain(|_, old| old.last_deadline > now);
+        // A delayed original timer must not let unrelated new work erase sent
+        // evidence. Active journals are bounded and survive live-handle expiry.
+        self.commands.retain(|_, old| {
+            old.last_deadline > now || old.writes.is_some() || old.pending > 0 || old.deliveries > 0
+        });
+        if matches!(scope, Scope::Command(id) if self.commands.get(&id)
+            .is_some_and(|owner| (owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0) && now >= owner.last_deadline))
+        {
+            return Err(Error::State);
+        }
         let identity = u64::from(identity);
         let owner = match scope {
             Scope::Command(id) => Owner::Command {
@@ -72,13 +102,20 @@ impl ContextRegistry {
             let last_deadline = self.commands.get(&id).map_or(context.deadline(), |old| {
                 old.last_deadline.max(context.deadline())
             });
-            self.commands.insert(
-                id,
-                CommandOwner {
+            self.commands
+                .entry(id)
+                .and_modify(|owner| {
+                    owner.last_deadline = last_deadline;
+                    owner.mutation_declared |= context.operation() == Operation::Mutation;
+                })
+                .or_insert(CommandOwner {
                     generation,
                     last_deadline,
-                },
-            );
+                    writes: None,
+                    mutation_declared: context.operation() == Operation::Mutation,
+                    pending: 0,
+                    deliveries: 0,
+                });
         }
         self.contexts.insert(identity, context.clone());
         Ok(context)
@@ -99,6 +136,183 @@ impl ContextRegistry {
             return Err(Error::Revoked);
         }
         Ok(())
+    }
+
+    fn command_mut(&mut self, context: &Context) -> Result<&mut CommandOwner, Error> {
+        if !context.issued_by(&self.issuer) {
+            return Err(Error::Revoked);
+        }
+        let Owner::Command { id, generation } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.commands
+            .get_mut(&id)
+            .filter(|owner| owner.generation == generation)
+            .ok_or(Error::Revoked)
+    }
+
+    pub(super) fn register_attempt(
+        &mut self,
+        context: &Context,
+        request: RequestId,
+        now: f64,
+    ) -> Result<(), Error> {
+        self.validate(context, now)?;
+        if matches!(context.owner(), Owner::Background { .. })
+            && context.operation() == Operation::Read
+        {
+            return Ok(());
+        }
+        let owner = self.command_mut(context)?;
+        let pending = owner.pending.checked_add(1).ok_or(Error::Capacity)?;
+        if context.operation() == Operation::Mutation {
+            if let Some(writes) = owner.writes.as_mut() {
+                if let Some(previous) = writes.latest(context.leg()) {
+                    context.retry(RetryEvidence::DefinitiveRefusal, now)?;
+                    writes.retry(previous, request)?;
+                } else {
+                    writes.register(request, context.leg())?;
+                }
+            } else {
+                let mut writes = CommandWrites::new(CAPACITY)?;
+                writes.register(request, context.leg())?;
+                owner.writes = Some(writes);
+            }
+        }
+        owner.pending = pending;
+        Ok(())
+    }
+
+    pub(super) fn retire_attempt(&mut self, context: &Context) {
+        if let Ok(owner) = self.command_mut(context) {
+            owner.pending = owner
+                .pending
+                .checked_sub(1)
+                .expect("registered physical attempt retired once");
+        }
+    }
+
+    pub(super) fn enter_delivery(&mut self, delivery: &Delivery) {
+        if let Ok(owner) = self.command_mut(&delivery.context) {
+            owner.deliveries = owner
+                .deliveries
+                .checked_add(1)
+                .expect("bounded engine delivery nesting");
+        }
+    }
+
+    pub(super) fn exit_delivery(&mut self, delivery: &Delivery) {
+        if let Ok(owner) = self.command_mut(&delivery.context) {
+            owner.deliveries = owner
+                .deliveries
+                .checked_sub(1)
+                .expect("scoped engine delivery exited once");
+        }
+    }
+
+    pub(super) fn release_flag(
+        &mut self,
+        context: &Context,
+        request: RequestId,
+    ) -> Result<Option<&mut bool>, Error> {
+        if context.operation() != Operation::Mutation {
+            return Ok(None);
+        }
+        self.command_mut(context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .release_flag(request)
+            .map(Some)
+    }
+
+    pub(super) fn result(&mut self, delivery: &Delivery, result: WriteResult) -> Result<(), Error> {
+        if delivery.context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.command_mut(&delivery.context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .result(delivery.attempt.request, result)
+    }
+
+    pub(super) fn seal(
+        &mut self,
+        command: CommandId,
+        delivery: Option<&Delivery>,
+        authority: Option<&Context>,
+        error: Option<VenueError>,
+    ) -> Seal {
+        // Managed completion always has explicit generation-bearing authority.
+        // Numeric calls remain legacy-only; a live journal/managed delivery
+        // cannot be finalized by that bridge.
+        if let Some(authority) = authority {
+            if !authority.issued_by(&self.issuer)
+                || !matches!(authority.owner(), Owner::Command { id, generation } if id == command
+                    && self.commands.get(&id).is_some_and(|owner| owner.generation == generation))
+            {
+                return Seal::Stale;
+            }
+        } else if delivery.is_some()
+            || self
+                .commands
+                .get(&command)
+                .is_some_and(|owner| owner.mutation_declared)
+        {
+            return Seal::Stale;
+        }
+        if let Some(delivery) = delivery {
+            let Owner::Command { id, generation } = delivery.context.owner() else {
+                return Seal::Stale;
+            };
+            if id != command
+                || !delivery.context.issued_by(&self.issuer)
+                || self
+                    .commands
+                    .get(&id)
+                    .is_none_or(|owner| owner.generation != generation)
+                || (delivery.context.operation() == Operation::Mutation
+                    && self
+                        .commands
+                        .get(&id)
+                        .and_then(|owner| owner.writes.as_ref())
+                        .and_then(|writes| writes.latest(delivery.context.leg()))
+                        != Some(delivery.attempt.request))
+            {
+                return Seal::Stale;
+            }
+        }
+        let declared = self
+            .commands
+            .get(&command)
+            .is_some_and(|owner| owner.mutation_declared);
+        let mut writes = match self
+            .commands
+            .get_mut(&command)
+            .and_then(|owner| owner.writes.take())
+        {
+            Some(writes) => writes,
+            None if declared => {
+                CommandWrites::new(CAPACITY).expect("fixed positive journal capacity")
+            }
+            None => return Seal::Legacy(error),
+        };
+        if error.is_none() && writes.succeed().is_ok() {
+            return Seal::Success;
+        }
+        let error = error
+            .unwrap_or_else(|| VenueError::new("Command writes are not all confirmed accepted"));
+        match writes.fail(error) {
+            Ok(error) => Seal::Failure(
+                error,
+                writes
+                    .rejections()
+                    .map(|(_, error)| error.message.clone())
+                    .collect(),
+            ),
+            Err(_) => Seal::Stale,
+        }
     }
 
     pub(super) fn finish(&mut self, command: CommandId) {
@@ -134,6 +348,67 @@ impl<P> Cx<'_, P> {
     ) -> Result<Context, Error> {
         self.io.request_contexts.validate(context, self.now)?;
         context.retry(evidence, self.now)
+    }
+
+    /// Generation-bearing finalization for callbacks and logical command timers.
+    /// Physical-attempt timers must retain/check their attempt token separately.
+    pub fn done_context(&mut self, context: &Context, result: String) -> Result<(), Error> {
+        let Owner::Command { id, .. } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.finish_command(id, Ok(result), Some(context))
+    }
+
+    pub fn fail_context(
+        &mut self,
+        context: &Context,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        let Owner::Command { id, .. } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.finish_command(id, Err(error.into()), Some(context))
+    }
+
+    /// A physical timer carries its original attempt token. A logical Context
+    /// alone cannot distinguish an old physical timeout from its newer retry.
+    pub fn fail_http_attempt(
+        &mut self,
+        context: &Context,
+        attempt: Attempt,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        let delivery = self
+            .io
+            .managed_http
+            .get(&attempt.request)
+            .ok_or(Error::Revoked)?
+            .delivery();
+        if delivery.attempt != attempt
+            || delivery.context != *context
+            || !context.issued_by(&self.io.request_contexts.issuer)
+        {
+            return Err(Error::Revoked);
+        }
+        let previous = self.io.http_delivery.replace(delivery);
+        let result = self.fail_context(context, error);
+        self.io.http_delivery = previous;
+        result
+    }
+
+    /// Record only native codec facts for the exact currently delivered attempt.
+    /// Transport and signing failures are recorded by the engine, never inferred
+    /// from venue exception text or a caller-provided numeric request id.
+    pub fn http_write_result(
+        &mut self,
+        context: &Context,
+        result: WriteResult,
+    ) -> Result<(), Error> {
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.request_contexts.issuer) {
+            return Err(Error::Revoked);
+        }
+        self.io.request_contexts.result(delivery, result)
     }
 
     /// Retire a fully completed logical read/page join or write leg. Do not call
@@ -380,5 +655,479 @@ mod tests {
         cx.now = 1_100.;
         let reused = cx.http_context(Scope::Command(7), policy()).unwrap();
         assert_ne!(reused.owner(), sibling.owner());
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+    use crate::{Notice, Outcome, Store};
+
+    fn policy() -> Policy {
+        Policy {
+            operation: Operation::Mutation,
+            credential: None,
+            timeout_ms: 100,
+            pacing: None,
+            retry: crate::request_context::RetryPolicy::DefinitiveRefusal,
+        }
+    }
+    fn delivery(context: &Context, id: u32) -> Delivery {
+        Delivery {
+            context: context.clone(),
+            attempt: Attempt {
+                request: RequestId(id),
+                generation: u64::from(id),
+            },
+        }
+    }
+    fn rejected() -> WriteResult {
+        WriteResult::Rejected(VenueError::new("native refusal").venue_code("10002"))
+    }
+    fn accepted() -> WriteResult {
+        WriteResult::Accepted {
+            order_ids: vec!["accepted-id".into()],
+        }
+    }
+
+    #[test]
+    fn engine_done_cannot_erase_unsent_unresolved_native_refusal_or_known_partial() {
+        for state in 0..5 {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            let first = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts
+                .register_attempt(&first, RequestId(11), 0.)
+                .unwrap();
+            if state != 0 {
+                *io.request_contexts
+                    .release_flag(&first, RequestId(11))
+                    .unwrap()
+                    .unwrap() = true;
+            }
+            if state >= 2 {
+                io.request_contexts
+                    .result(
+                        &delivery(&first, 11),
+                        if state == 2 { rejected() } else { accepted() },
+                    )
+                    .unwrap();
+            }
+            if state == 4 {
+                let second = io
+                    .request_contexts
+                    .issue(2, Scope::Command(7), policy(), 0.)
+                    .unwrap();
+                io.request_contexts
+                    .register_attempt(&second, RequestId(12), 0.)
+                    .unwrap();
+                *io.request_contexts
+                    .release_flag(&second, RequestId(12))
+                    .unwrap()
+                    .unwrap() = true;
+                io.request_contexts
+                    .result(&delivery(&second, 12), rejected())
+                    .unwrap();
+            }
+            io.http_delivery = Some(delivery(&first, 11));
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut store,
+                io: &mut io,
+            };
+            cx.done_context(&first, "[]".into()).unwrap();
+            cx.io.http_delivery = None;
+            assert_eq!(
+                cx.done_context(&first, "duplicate".into()),
+                Err(Error::Revoked)
+            );
+            assert_eq!(cx.fail_context(&first, "late timer"), Err(Error::Revoked));
+            let done = cx
+                .io
+                .actions
+                .iter()
+                .filter(|a| matches!(a, crate::Action::Notice(Notice::CommandDone { .. })))
+                .count();
+            let failed = cx
+                .io
+                .actions
+                .iter()
+                .filter_map(|a| match a {
+                    crate::Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if state == 3 {
+                assert_eq!(done, 1);
+                assert!(failed.is_empty());
+            } else {
+                assert_eq!(done, 0);
+                assert_eq!(failed.len(), 1);
+                assert_eq!(
+                    failed[0].outcome,
+                    match state {
+                        0 => Some(Outcome::NotSent),
+                        1 => Some(Outcome::Unknown),
+                        2 => Some(Outcome::Rejected),
+                        _ => None,
+                    }
+                );
+                if state == 4 {
+                    assert_eq!(
+                        failed[0].partial.as_ref().unwrap().order_ids,
+                        ["accepted-id"]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn prior_send_evidence_survives_native_refusal_retry_and_signer_failure() {
+        let mut registry = ContextRegistry::default();
+        let context = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        registry
+            .register_attempt(&context, RequestId(11), 0.)
+            .unwrap();
+        *registry
+            .release_flag(&context, RequestId(11))
+            .unwrap()
+            .unwrap() = true;
+        registry
+            .result(&delivery(&context, 11), rejected())
+            .unwrap();
+        registry
+            .register_attempt(&context, RequestId(12), 1.)
+            .unwrap();
+        registry
+            .result(
+                &delivery(&context, 12),
+                WriteResult::Failed(VenueError::new("provider refused").outcome(Outcome::NotSent)),
+            )
+            .unwrap();
+        let Seal::Failure(error, _) = registry.seal(
+            7,
+            Some(&delivery(&context, 12)),
+            Some(&context),
+            Some(VenueError::new("fallback")),
+        ) else {
+            panic!("typed failure");
+        };
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+    }
+
+    #[test]
+    fn expired_live_handles_and_sibling_issuance_do_not_erase_sent_journals() {
+        let mut registry = ContextRegistry::default();
+        let context = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        registry
+            .register_attempt(&context, RequestId(11), 0.)
+            .unwrap();
+        *registry
+            .release_flag(&context, RequestId(11))
+            .unwrap()
+            .unwrap() = true;
+        registry.issue(2, Scope::Command(7), policy(), 0.).unwrap();
+        registry
+            .issue(3, Scope::Background, policy(), 101.)
+            .unwrap();
+        assert_eq!(registry.validate(&context, 101.), Err(Error::TimedOut));
+        assert_eq!(
+            registry.issue(4, Scope::Command(7), policy(), 101.),
+            Err(Error::State)
+        );
+        let Seal::Failure(error, _) =
+            registry.seal(7, None, Some(&context), Some(VenueError::new("timeout")))
+        else {
+            panic!("sent journal retained");
+        };
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+    }
+
+    #[test]
+    fn stale_delivery_cannot_settle_a_new_command_reusing_the_numeric_id() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let old = io
+            .request_contexts
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        io.request_contexts.finish(7);
+        let current = io
+            .request_contexts
+            .issue(2, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        io.request_contexts
+            .register_attempt(&current, RequestId(12), 0.)
+            .unwrap();
+        io.http_delivery = Some(delivery(&old, 11));
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        cx.done(7, "old success".into());
+        cx.fail(7, "old failure");
+        assert!(cx.io.actions.is_empty());
+        assert_eq!(
+            cx.http_write_result(&current, accepted()),
+            Err(Error::Revoked)
+        );
+        assert!(cx.io.request_contexts.validate(&current, 1.).is_ok());
+    }
+
+    #[test]
+    fn denied_release_and_unproven_retry_consume_no_release_or_new_attempt() {
+        let mut registry = ContextRegistry::default();
+        let context = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        registry
+            .register_attempt(&context, RequestId(11), 0.)
+            .unwrap();
+        let _uncommitted = registry.release_flag(&context, RequestId(11)).unwrap();
+        assert_eq!(
+            registry.result(&delivery(&context, 11), accepted()),
+            Err(Error::State)
+        );
+        assert_eq!(
+            registry.register_attempt(&context, RequestId(12), 1.),
+            Err(Error::RetryForbidden)
+        );
+        let Seal::Failure(error, _) = registry.seal(
+            7,
+            None,
+            Some(&context),
+            Some(VenueError::new("refused before release")),
+        ) else {
+            panic!("failure");
+        };
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+    }
+
+    #[test]
+    fn a_sibling_command_delivery_cannot_take_or_seal_another_command_journal() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let first = io
+            .request_contexts
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        let second = io
+            .request_contexts
+            .issue(2, Scope::Command(8), policy(), 0.)
+            .unwrap();
+        io.request_contexts
+            .register_attempt(&first, RequestId(11), 0.)
+            .unwrap();
+        io.request_contexts
+            .register_attempt(&second, RequestId(12), 0.)
+            .unwrap();
+        *io.request_contexts
+            .release_flag(&second, RequestId(12))
+            .unwrap()
+            .unwrap() = true;
+        io.request_contexts
+            .result(&delivery(&second, 12), accepted())
+            .unwrap();
+        io.http_delivery = Some(delivery(&first, 11));
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.done_context(&second, "wrong delivery".into()),
+            Err(Error::Revoked)
+        );
+        assert_eq!(
+            cx.fail_context(&second, "wrong delivery"),
+            Err(Error::Revoked)
+        );
+        assert!(cx.io.actions.is_empty());
+        cx.io.http_delivery = None;
+        cx.done(8, "unqualified".into());
+        cx.fail(8, "unqualified");
+        assert!(
+            cx.io.actions.is_empty(),
+            "numeric finalizers cannot bypass an active managed journal"
+        );
+        cx.done_context(&second, "accepted".into()).unwrap();
+        assert!(matches!(
+            cx.io.actions.as_slice(),
+            [crate::Action::Notice(Notice::CommandDone {
+                command: 8,
+                ..
+            })]
+        ));
+        assert!(cx.io.request_contexts.validate(&first, 1.).is_ok());
+    }
+
+    #[test]
+    fn a_historical_attempt_cannot_seal_the_newer_retry_of_the_same_command() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let context = io
+            .request_contexts
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        io.request_contexts
+            .register_attempt(&context, RequestId(11), 0.)
+            .unwrap();
+        *io.request_contexts
+            .release_flag(&context, RequestId(11))
+            .unwrap()
+            .unwrap() = true;
+        io.request_contexts
+            .result(&delivery(&context, 11), rejected())
+            .unwrap();
+        io.request_contexts
+            .register_attempt(&context, RequestId(12), 1.)
+            .unwrap();
+        io.http_delivery = Some(delivery(&context, 11));
+        let mut cx = Cx {
+            now: 2.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.done_context(&context, "late old ACK".into()),
+            Err(Error::Revoked)
+        );
+        assert_eq!(
+            cx.fail_context(&context, "late old failure"),
+            Err(Error::Revoked)
+        );
+        assert!(cx.io.actions.is_empty());
+        cx.io.http_delivery = Some(delivery(&context, 12));
+        cx.fail_context(&context, "new signer failed").unwrap();
+        assert!(
+            matches!(cx.io.actions.last(), Some(crate::Action::Notice(Notice::CommandFailed { error, .. })) if error.outcome == Some(Outcome::Unknown))
+        );
+    }
+
+    #[test]
+    fn a_retired_command_context_never_falls_back_to_legacy_without_a_delivery_marker() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let context = io
+            .request_contexts
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        io.request_contexts
+            .register_attempt(&context, RequestId(11), 0.)
+            .unwrap();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        cx.fail_context(&context, "before send").unwrap();
+        assert_eq!(
+            cx.done_context(&context, "late".into()),
+            Err(Error::Revoked)
+        );
+        assert_eq!(
+            cx.fail_context(&context, "late socket"),
+            Err(Error::Revoked)
+        );
+        let current = cx
+            .io
+            .request_contexts
+            .issue(2, Scope::Command(7), policy(), 1.)
+            .unwrap();
+        assert_eq!(
+            cx.done_context(&context, "old reused id".into()),
+            Err(Error::Revoked)
+        );
+        assert!(cx.io.request_contexts.validate(&current, 2.).is_ok());
+        assert_eq!(cx.io.actions.len(), 1);
+    }
+
+    #[test]
+    fn preparation_failure_before_any_attempt_registration_is_still_not_sent() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let context = io
+            .request_contexts
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        assert!(
+            io.request_contexts.commands[&7].writes.is_none(),
+            "no phantom physical attempt"
+        );
+        let mut read = policy();
+        read.operation = Operation::Read;
+        read.retry = crate::request_context::RetryPolicy::Never;
+        let read = io
+            .request_contexts
+            .issue(2, Scope::Command(7), read, 0.)
+            .unwrap();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        cx.done(7, "unqualified".into());
+        assert!(cx.io.actions.is_empty());
+        cx.fail_context(&read, "recipe refused before registration")
+            .unwrap();
+        assert!(
+            matches!(cx.io.actions.as_slice(), [crate::Action::Notice(Notice::CommandFailed { error, .. })] if error.outcome == Some(Outcome::NotSent))
+        );
+        assert_eq!(
+            cx.done_context(&context, "duplicate".into()),
+            Err(Error::Revoked)
+        );
+    }
+
+    #[test]
+    fn expired_read_preflight_keeps_declared_write_completion_without_a_phantom_write() {
+        let mut registry = ContextRegistry::default();
+        let mutation = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        let mut read = policy();
+        read.operation = Operation::Read;
+        read.retry = crate::request_context::RetryPolicy::Never;
+        let preflight = registry.issue(2, Scope::Command(7), read, 0.).unwrap();
+        registry
+            .register_attempt(&preflight, RequestId(12), 0.)
+            .unwrap();
+        assert!(registry.commands[&7].writes.is_none());
+        let callback = delivery(&preflight, 12);
+        registry.enter_delivery(&callback);
+        registry.retire_attempt(&preflight);
+        registry
+            .issue(3, Scope::Background, policy(), 101.)
+            .unwrap();
+        assert_eq!(registry.validate(&mutation, 101.), Err(Error::TimedOut));
+        let Seal::Failure(error, _) = registry.seal(
+            7,
+            Some(&callback),
+            Some(&mutation),
+            Some(VenueError::new("preflight timed out")),
+        ) else {
+            panic!("pending completion retained");
+        };
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        registry.finish(7);
+        registry.exit_delivery(&callback);
+        assert!(!registry.commands.contains_key(&7));
+    }
+
+    #[test]
+    fn abandoned_unqueued_mutation_intents_still_release_capacity_at_deadline() {
+        let mut registry = ContextRegistry::default();
+        for id in 1..=CAPACITY as u32 {
+            registry
+                .issue(id, Scope::Command(id), policy(), 0.)
+                .unwrap();
+        }
+        assert_eq!(registry.commands.len(), CAPACITY);
+        registry
+            .issue(1000, Scope::Command(1000), policy(), 101.)
+            .unwrap();
+        assert_eq!(registry.commands.len(), 1);
+        assert_eq!(registry.contexts.len(), 1);
     }
 }

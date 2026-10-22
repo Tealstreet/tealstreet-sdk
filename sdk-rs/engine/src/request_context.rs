@@ -784,19 +784,32 @@ impl CommandWrites {
         });
         Ok(())
     }
-    pub fn released(&mut self, id: RequestId) -> Result<(), Error> {
+    pub(crate) fn latest(&self, leg: u64) -> Option<RequestId> {
+        self.attempts
+            .iter()
+            .rfind(|attempt| attempt.leg == leg)
+            .map(|attempt| attempt.id)
+    }
+
+    /// A borrow of this flag reserves the validated journal slot across final
+    /// admission. Committing the release is then an infallible assignment.
+    pub(crate) fn release_flag(&mut self, id: RequestId) -> Result<&mut bool, Error> {
         if self.sealed {
             return Err(Error::State);
         }
         let attempt = self
             .attempts
             .iter_mut()
-            .find(|a| a.id == id)
+            .find(|attempt| attempt.id == id)
             .ok_or(Error::Invalid)?;
         if attempt.released || attempt.result.is_some() {
             return Err(Error::State);
         }
-        attempt.released = true;
+        Ok(&mut attempt.released)
+    }
+
+    pub fn released(&mut self, id: RequestId) -> Result<(), Error> {
+        *self.release_flag(id)? = true;
         Ok(())
     }
     pub fn result(&mut self, id: RequestId, result: WriteResult) -> Result<(), Error> {

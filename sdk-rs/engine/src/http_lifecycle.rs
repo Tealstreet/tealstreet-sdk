@@ -14,6 +14,15 @@ pub(super) struct Managed {
     recipe: Option<crate::signing_dispatch::Pending>,
 }
 
+impl Managed {
+    pub(super) fn delivery(&self) -> request_context_registry::Delivery {
+        request_context_registry::Delivery {
+            context: self.lifecycle.context().clone(),
+            attempt: self.lifecycle.attempt(),
+        }
+    }
+}
+
 impl<P> Cx<'_, P> {
     /// Queue a semantic, unsigned public read. Private recipes use the signed
     /// entry point; a missing signing recipe must never send an unsigned account
@@ -98,6 +107,16 @@ impl<P> Cx<'_, P> {
         } else {
             None
         };
+        if let Err(error) = self
+            .io
+            .request_contexts
+            .register_attempt(&context, request, self.now)
+        {
+            if signing_attempt.is_some() {
+                self.io.signing.remove_request(request);
+            }
+            return Err((pending, error));
+        }
         let intent = context.routing_intent();
         let deadline = context.deadline();
         let lifecycle = Lifecycle::new(
@@ -194,6 +213,8 @@ impl<P> Io<P> {
 
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
+        self.request_contexts
+            .retire_attempt(managed.lifecycle.context());
         self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
         self.actions.push(Action::ClearTimer {
@@ -380,6 +401,7 @@ impl<V: Venue> Engine<V> {
             self.reprepare_http(now, token);
             return;
         }
+        let delivery = managed.delivery();
         error.outcome = Some(crate::Outcome::NotSent);
         if error.kind.is_none() {
             error.kind = Some(match reason {
@@ -390,7 +412,15 @@ impl<V: Venue> Engine<V> {
                 _ => ErrorKind::Internal,
             });
         }
+        if delivery.context.operation() == Operation::Mutation {
+            let _ = self.io.request_contexts.result(
+                &delivery,
+                crate::request_context::WriteResult::Failed(error.clone()),
+            );
+        }
+        self.io.request_contexts.enter_delivery(&delivery);
         if let Some(pending) = self.io.discard_managed(request) {
+            let previous = self.io.http_delivery.replace(delivery.clone());
             self.venue.on_http_preparation_failed(
                 &mut Cx {
                     now,
@@ -401,7 +431,9 @@ impl<V: Venue> Engine<V> {
                 reason,
                 error,
             );
+            self.io.http_delivery = previous;
         }
+        self.io.request_contexts.exit_delivery(&delivery);
     }
 
     /// The host checks its bound resource, calls this, and immediately invokes
@@ -431,6 +463,10 @@ impl<V: Venue> Engine<V> {
             );
             return Err(error);
         }
+        let release_flag = self
+            .io
+            .request_contexts
+            .release_flag(managed.lifecycle.context(), request)?;
         let pending = self.io.pending.get_mut(&request).ok_or(Error::Revoked)?;
         let time = ReleaseTime {
             raw_ms: now,
@@ -444,6 +480,9 @@ impl<V: Venue> Engine<V> {
                     self.venue.on_http_release(&mut pending.value, release)
                 });
         if let Ok(Claim::Released(release)) = result {
+            if let Some(released) = release_flag {
+                *released = true;
+            }
             managed.recipe = None;
             managed.signing_attempt = None;
             #[cfg(feature = "order-locks")]
@@ -715,14 +754,14 @@ mod tests {
             self.responses += 1;
             cx.finish_http_context(&pending.0).unwrap();
         }
-        fn on_item(&mut self, cx: &mut Cx<'_, Pending>, _: &mut Pending, _: &str) {
+        fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, _: &str) {
             self.items += 1;
             if let Some(fail) = self.finish_in_item {
-                let command = self.command.unwrap();
                 if fail {
-                    cx.fail(command, "stopped during streaming");
+                    cx.fail_context(&pending.0, "stopped during streaming")
+                        .unwrap();
                 } else {
-                    cx.done(command, "null".into());
+                    cx.done_context(&pending.0, "null".into()).unwrap();
                 }
             }
         }
@@ -1365,6 +1404,47 @@ mod tests {
             engine.claim_http(3., second),
             Ok(Claim::Released(_))
         ));
+    }
+
+    #[test]
+    fn old_physical_timer_cannot_finish_a_new_attempt_with_the_same_logical_context() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            command: Some(7),
+            ..Probe::default()
+        });
+        let old = tokens[0].attempt();
+        let context = engine.io.pending.get(&old.request).unwrap().value.0.clone();
+        let replacement = {
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.request_managed(
+                context.clone(),
+                Method::Post,
+                "https://venue.test/read".into(),
+                None,
+                Pending(context.clone()),
+            )
+            .unwrap()
+        };
+        engine.io.discard_managed(old.request);
+        engine.drain_actions().for_each(drop);
+        let mut cx = Cx {
+            now: 2.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        assert_eq!(
+            cx.fail_http_attempt(&context, old, "old timer"),
+            Err(Error::Revoked)
+        );
+        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.managed_http.contains_key(&replacement));
+        assert!(cx.io.request_contexts.validate(&context, 2.).is_ok());
+        assert!(cx.io.http_delivery.is_none());
     }
 
     #[test]

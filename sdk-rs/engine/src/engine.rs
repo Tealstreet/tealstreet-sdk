@@ -1059,6 +1059,7 @@ impl Polls {
 
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
+    http_delivery: Option<request_context_registry::Delivery>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
     entropy: Option<crate::entropy::Entropy>,
@@ -1105,6 +1106,7 @@ impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
             request_contexts: Default::default(),
+            http_delivery: None,
             managed_http: HashMap::new(),
             http_pacing: Default::default(),
             entropy: None,
@@ -1682,18 +1684,9 @@ impl<P> Cx<'_, P> {
         self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
-    /// Completes `command` successfully with its JSON result; failures use [`Cx::fail`].
+    /// Legacy numeric finalization. Managed commands use `done_context`.
     pub fn done(&mut self, command: CommandId, result: String) {
-        self.io.retire_http_command(command);
-        self.io.request_contexts.finish(command);
-        #[cfg(feature = "order-locks")]
-        {
-            self.io.order_locks.finish(command, false);
-            self.io.active_commands.remove(&command);
-        }
-        self.io
-            .actions
-            .push(Action::Notice(Notice::CommandDone { command, result }));
+        let _ = self.finish_command(command, Ok(result), None);
     }
 
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
@@ -1726,24 +1719,58 @@ impl<P> Cx<'_, P> {
             .push(Action::Notice(Notice::StartupFailed { error }));
     }
 
+    /// Legacy numeric finalization. Managed commands use `fail_context`.
     pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
-        self.fail_with(command, error.into());
+        let _ = self.finish_command(command, Err(error.into()), None);
     }
 
-    // Out of line so the hundreds of venue call sites share one body (wasm size budget).
+    // One non-generic seal/retire/publish path, including success conversion.
     #[inline(never)]
-    fn fail_with(&mut self, command: CommandId, error: VenueError) {
+    fn finish_command(
+        &mut self,
+        command: CommandId,
+        result: Result<String, VenueError>,
+        authority: Option<&crate::request_context::Context>,
+    ) -> Result<(), crate::request_context::Error> {
+        let (success, error) = match result {
+            Ok(result) => (Some(result), None),
+            Err(error) => (None, Some(error)),
+        };
+        let result = match self.io.request_contexts.seal(
+            command,
+            self.io.http_delivery.as_ref(),
+            authority,
+            error,
+        ) {
+            request_context_registry::Seal::Stale => {
+                return Err(crate::request_context::Error::Revoked);
+            }
+            request_context_registry::Seal::Legacy(Some(error)) => Err(error),
+            request_context_registry::Seal::Legacy(None)
+            | request_context_registry::Seal::Success => Ok(success.unwrap_or_default()),
+            request_context_registry::Seal::Failure(error, rejections) => {
+                for message in rejections {
+                    self.command_error(command, message);
+                }
+                Err(error)
+            }
+        };
         self.io.retire_http_command(command);
         self.io.request_contexts.finish(command);
         #[cfg(feature = "order-locks")]
         {
-            self.io.order_locks.finish(command, true);
+            self.io.order_locks.finish(command, result.is_err());
             self.io.active_commands.remove(&command);
         }
-        count_auth_failure(self.io, Some(&error));
-        self.io
-            .actions
-            .push(Action::Notice(Notice::CommandFailed { command, error }));
+        let notice = match result {
+            Ok(result) => Notice::CommandDone { command, result },
+            Err(error) => {
+                count_auth_failure(self.io, Some(&error));
+                Notice::CommandFailed { command, error }
+            }
+        };
+        self.io.actions.push(Action::Notice(notice));
+        Ok(())
     }
 
     /// Every placement in this response is proven accepted or explicitly rejected.
@@ -2437,6 +2464,40 @@ impl<V: Venue> Engine<V> {
     }
 
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
+        let request = match &event {
+            Event::HttpResponse { request, .. }
+            | Event::HttpStart { request, .. }
+            | Event::HttpChunk { request, .. }
+            | Event::HttpEnd { request }
+            | Event::HttpFailed { request, .. } => Some(*request),
+            _ => None,
+        };
+        let delivery = request
+            .and_then(|request| self.io.managed_http.get(&request))
+            .map(|managed| managed.delivery());
+        if let Event::HttpFailed { error, .. } = &event
+            && let Some(delivery) = delivery.as_ref()
+            && delivery.context.operation() == crate::request_context::Operation::Mutation
+        {
+            let _ = self.io.request_contexts.result(
+                delivery,
+                crate::request_context::WriteResult::Failed(
+                    VenueError::new(*error).kind(ErrorKind::Network),
+                ),
+            );
+        }
+        if let Some(delivery) = delivery.as_ref() {
+            self.io.request_contexts.enter_delivery(delivery);
+        }
+        let previous = std::mem::replace(&mut self.io.http_delivery, delivery.clone());
+        self.handle_event_scoped(now, event);
+        self.io.http_delivery = previous;
+        if let Some(delivery) = delivery.as_ref() {
+            self.io.request_contexts.exit_delivery(delivery);
+        }
+    }
+
+    fn handle_event_scoped(&mut self, now: f64, event: Event<'_>) {
         if self.venue.cancel_needs_stored_order()
             && !self.releasing
             && let Event::Command(command) = &event
