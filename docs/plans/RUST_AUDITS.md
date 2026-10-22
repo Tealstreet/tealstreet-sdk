@@ -1899,5 +1899,7 @@ Background proposals carry shared observation stamps; stale callbacks cannot
 replace newer settings/native caches. Existing per-family fallback/error codecs
 and financial revision fences remain. Four original-RED native controls pass;
 this is not a claim of all-family adoption or cutover completion. Actual #1741
-physical-release integration, lease/denial controls and final integrated CI/proof
-remain open. [Implementation and limits](RUST_METADATA_FRESHNESS.md).
+and #1759 are integrated; common issuer-bound Epoch/Stamp and shared release/denial
+controls pass. Private production release wiring awaits real family signers and
+the one shared observer-group completion/expiry mechanism; final CI/proof remains
+open. [Implementation and limits](RUST_METADATA_FRESHNESS.md).

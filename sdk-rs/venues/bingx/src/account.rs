@@ -302,7 +302,7 @@ impl Account {
         token: Token,
         result: Result<Proposal, safe_cex_engine::VenueError>,
     ) {
-        if let Some(completion) = cx.store.finish_metadata(token, result) {
+        if let Some(completion) = cx.store.finish_metadata(&token, result) {
             if completion.published {
                 self.bump_positions();
             }
@@ -872,7 +872,7 @@ impl Account {
                 symbol,
                 leverage,
             } => {
-                let current = cx.store.metadata_eligible(token);
+                let current = cx.store.metadata_eligible(&token);
                 if let Some((buy, sell)) = leverage {
                     if !current {
                         self.metadata_done(cx, token, Rails::new(buy, sell).map(Proposal::rails));
@@ -1088,7 +1088,7 @@ impl Account {
                     cx.store.set_positions(rows);
                     for (symbol, value) in settings {
                         if let Ok(value) = ObservedSetting::new(value) {
-                            cx.store.observe_setting(&symbol, settings_stamp, value);
+                            cx.store.observe_setting(&symbol, &settings_stamp, value);
                         }
                     }
                 } else {

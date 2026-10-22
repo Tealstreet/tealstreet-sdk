@@ -34,6 +34,7 @@ pub struct Request {
     kind: Kind,
     revision: u64,
     settings_stamp: safe_cex_engine::metadata::Observation,
+    settings_revision: safe_cex_engine::metadata::Observation,
     page: u32,
     page_rows: usize,
     orders: Vec<Order>,
@@ -365,7 +366,7 @@ impl WeexFutures {
             }
             let revision = match kind {
                 Kind::Normal | Kind::Algo => self.account.orders_revision,
-                Kind::Config | Kind::Metadata => cx.store.metadata_revision(),
+                Kind::Config | Kind::Metadata => 0,
                 _ => self.account.revision,
             };
             let request = Request {
@@ -373,6 +374,7 @@ impl WeexFutures {
                 kind,
                 revision,
                 settings_stamp: cx.store.metadata_observation(),
+                settings_revision: cx.store.metadata_revision(),
                 page: if matches!(kind, Kind::Algo) { 1 } else { 0 },
                 page_rows: 0,
                 orders: vec![],
@@ -575,13 +577,17 @@ impl WeexFutures {
                         safe_cex_engine::metadata::ObservedSetting::new(config.setting)
                         && cx
                             .store
-                            .observe_setting(&symbol, request.settings_stamp, setting)
+                            .observe_setting(&symbol, &request.settings_stamp, setting)
                     {
                         self.account.configs.insert(symbol, config);
                     }
                 }
             }
-            Kind::Metadata if request.revision == cx.store.metadata_revision() => {
+            Kind::Metadata
+                if cx
+                    .store
+                    .metadata_revision_current(&request.settings_revision) =>
+            {
                 let Ok(row) = serde_json::from_str::<AccountConfig>(response.body) else {
                     self.account_failed(cx, request, "malformed account configuration");
                     return;
@@ -1137,6 +1143,7 @@ mod auth_envelopes {
                 kind,
                 revision: 0,
                 settings_stamp: Default::default(),
+                settings_revision: Default::default(),
                 page: 0,
                 page_rows: 0,
                 orders: vec![],

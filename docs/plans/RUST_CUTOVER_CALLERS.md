@@ -3996,7 +3996,16 @@ Callers must still handle ordinary native/parse failures; no new NX constructor,
 argument or handler migration is introduced by this draft.
 
 This section describes the draft implementation, not a landed or deployed
-contract. Physical request/release leases and scheduler admission await #1741;
-no queue-time lease or per-venue substitute is introduced. Other-family metadata
-fan-out and final native/WASM/replay proof remain open. See
+contract. Actual #1741 and #1759 are integrated. Metadata tokens and background
+observations now bind to the Store issuer through common Epoch/Stamp; foreign,
+default or exhausted authority cannot publish. The account settings revision is
+an opaque snapshot validated separately from unrelated read issuance.
+
+Shared scheduler denial/continuation controls and unsigned managed HTTP probes
+pass, but the WEEX/BingX private metadata requests remain legacy. Their real
+family dispatch signers and the shared Hyro/metadata observer-group completion
+and expiry mechanism are prerequisites for physical production adoption. No
+queue-time lease, numeric managed-completion fallback or native-header signing
+compatibility path is introduced. Other-family fan-out and final integrated
+native/WASM/replay proof remain open. See
 [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).

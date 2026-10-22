@@ -1,19 +1,21 @@
 //! Per-symbol metadata ownership. Dispatch, leases and retry permission remain
 //! with RequestContext/read_scheduler; this module owns waiters and publication.
+use crate::fence::{Epoch, Stamp};
 use crate::store::MarketSetting;
 use crate::{CommandId, Cx, ErrorKind, Outcome, VenueError};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const MAX_ATTEMPTS: usize = 256;
 const MAX_WAITERS: usize = 64;
 const MAX_SYMBOLS: usize = 4096;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Token(u64);
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Token(Stamp);
 
 /// Observation of a background settings read, before any native response rows.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Observation(u64);
+#[derive(Clone, Debug, Default)]
+pub struct Observation(Option<Stamp>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fallback {
@@ -21,7 +23,7 @@ pub enum Fallback {
     CompleteSetting,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Admission {
     Start(Token),
     Joined,
@@ -138,8 +140,8 @@ impl Completion {
 
 struct Attempt {
     symbol: String,
-    revision: u64,
-    global: u64,
+    revision: Stamp,
+    global: Option<Stamp>,
     publish: bool,
     fallback: Fallback,
     commands: Vec<CommandId>,
@@ -147,63 +149,84 @@ struct Attempt {
 
 #[derive(Default)]
 pub(crate) struct State {
-    serial: u64,
-    global: u64,
-    exhausted: bool,
-    account_fence: u64,
-    revisions: HashMap<String, u64>,
-    observation_floors: HashMap<String, u64>,
+    epoch: Epoch,
+    global: Option<Stamp>,
+    account_fence: Option<Stamp>,
+    revisions: HashMap<String, Stamp>,
+    observation_floors: HashMap<String, Stamp>,
     current: HashMap<String, Token>,
     attempts: HashMap<Token, Attempt>,
     writes: HashMap<CommandId, Option<String>>,
 }
 impl State {
-    fn tick(&mut self) -> u64 {
-        if let Some(next) = self.serial.checked_add(1) {
-            self.serial = next;
-        } else {
-            self.exhausted = true;
-        }
-        self.serial
+    fn tick(&mut self) -> Option<Stamp> {
+        self.epoch.advance();
+        self.epoch.stamp()
+    }
+    fn live(&self, stamp: &Stamp) -> bool {
+        self.epoch.compare(stamp, stamp) == Some(Ordering::Equal)
     }
     pub(crate) fn observation(&mut self) -> Observation {
         Observation(self.tick())
     }
-    pub(crate) fn observe(&mut self, symbol: &str, stamp: Observation) -> bool {
-        if self.exhausted
-            || self.global > stamp.0
-            || self.observation_floors.get(symbol).copied().unwrap_or(0) >= stamp.0
+    pub(crate) fn observe(&mut self, symbol: &str, observation: &Observation) -> bool {
+        let Some(stamp) = observation.0.as_ref() else {
+            return false;
+        };
+        if !self.live(stamp)
+            || self
+                .global
+                .as_ref()
+                .is_some_and(|f| self.epoch.compare(f, stamp) != Some(Ordering::Less) && f != stamp)
+            || self
+                .observation_floors
+                .get(symbol)
+                .is_some_and(|f| self.epoch.compare(f, stamp) != Some(Ordering::Less))
             || (!self.revisions.contains_key(symbol) && self.revisions.len() >= MAX_SYMBOLS)
         {
             return false;
         }
-        // Order background proposals by issue, not completion. A later-issued
-        // read may supersede an earlier commit, but never a later write/event.
-        let version = self.tick();
+        // One issuer orders observations by issue, mutations by commit; issuing
+        // an unrelated read alone must never revoke a symbol's publication.
+        let Some(version) = self.tick() else {
+            return false;
+        };
         self.revisions.insert(symbol.to_owned(), version);
-        self.observation_floors.insert(symbol.to_owned(), stamp.0);
+        self.observation_floors
+            .insert(symbol.to_owned(), stamp.clone());
         true
     }
     pub(crate) fn changed(&mut self, symbol: Option<&str>) {
-        let next = self.tick();
+        let Some(next) = self.tick() else {
+            return;
+        };
         if let Some(symbol) = symbol {
             if !self.revisions.contains_key(symbol) && self.revisions.len() >= MAX_SYMBOLS {
-                // Never forget an invalidation because the bounded map is full.
-                self.global = next;
+                self.global = Some(next);
             } else {
-                self.revisions.insert(symbol.to_owned(), next);
+                self.revisions.insert(symbol.to_owned(), next.clone());
                 self.observation_floors.insert(symbol.to_owned(), next);
             }
         } else {
-            self.global = next;
+            self.global = Some(next);
         }
     }
     pub(crate) fn invalidate(&mut self, symbol: Option<&str>) {
         self.changed(symbol);
-        self.account_fence = self.serial;
+        self.account_fence = self.epoch.stamp();
     }
-    pub(crate) fn revision(&self) -> u64 {
-        self.account_fence
+    pub(crate) fn revision(&mut self) -> Observation {
+        Observation(self.account_fence.clone().or_else(|| self.epoch.stamp()))
+    }
+    pub(crate) fn revision_current(&self, observation: &Observation) -> bool {
+        let Some(stamp) = observation.0.as_ref() else {
+            return false;
+        };
+        self.live(stamp)
+            && self
+                .account_fence
+                .as_ref()
+                .is_none_or(|fence| fence == stamp)
     }
     pub(crate) fn write_started(
         &mut self,
@@ -235,7 +258,7 @@ impl State {
         fallback: Fallback,
     ) -> Result<Admission, VenueError> {
         let publish = publish && !self.write_pending(symbol);
-        if self.exhausted {
+        if self.epoch.stamp().is_none() {
             return Err(invalid("metadata token space exhausted"));
         }
         if self
@@ -247,7 +270,7 @@ impl State {
         }
         if let Some(token) = self.current.get(symbol)
             && let Some(read) = self.attempts.get_mut(token)
-            && read.revision == self.revisions.get(symbol).copied().unwrap_or(0)
+            && self.revisions.get(symbol) == Some(&read.revision)
             && read.global == self.global
             && read.publish == publish
             && read.fallback == fallback
@@ -263,21 +286,22 @@ impl State {
         {
             return Err(invalid("metadata read capacity exceeded"));
         }
-        // Ownership starts here; publication freshness changes only on an
-        // accepted proposal or write/event, never merely because I/O was queued.
-        self.tick();
-        let revision = *self.revisions.entry(symbol.to_owned()).or_default();
-        if self.exhausted {
-            return Err(invalid("metadata token space exhausted"));
-        }
-        let token = Token(self.serial);
-        self.current.insert(symbol.to_owned(), token);
+        let stamp = self
+            .tick()
+            .ok_or_else(|| invalid("metadata token space exhausted"))?;
+        let revision = self
+            .revisions
+            .entry(symbol.to_owned())
+            .or_insert_with(|| stamp.clone())
+            .clone();
+        let token = Token(stamp);
+        self.current.insert(symbol.to_owned(), token.clone());
         self.attempts.insert(
-            token,
+            token.clone(),
             Attempt {
                 symbol: symbol.to_owned(),
                 revision,
-                global: self.global,
+                global: self.global.clone(),
                 publish,
                 fallback,
                 commands: vec![command],
@@ -285,27 +309,27 @@ impl State {
         );
         Ok(Admission::Start(token))
     }
-    pub(crate) fn eligible(&self, token: Token) -> bool {
-        self.attempts.get(&token).is_some_and(|read| {
-            !self.exhausted
-                && read.publish
-                && read.global == self.global
-                && self.revisions.get(&read.symbol) == Some(&read.revision)
-                && self.current.get(&read.symbol) == Some(&token)
-        })
+    pub(crate) fn eligible(&self, token: &Token) -> bool {
+        self.live(&token.0)
+            && self.attempts.get(token).is_some_and(|read| {
+                read.publish
+                    && read.global == self.global
+                    && self.revisions.get(&read.symbol) == Some(&read.revision)
+                    && self.current.get(&read.symbol) == Some(token)
+            })
     }
-    pub(crate) fn symbol(&self, token: Token) -> Option<&str> {
-        self.attempts.get(&token).map(|read| read.symbol.as_str())
+    pub(crate) fn symbol(&self, token: &Token) -> Option<&str> {
+        self.attempts.get(token).map(|read| read.symbol.as_str())
     }
     pub(crate) fn complete(
         &mut self,
-        token: Token,
+        token: &Token,
         result: Result<Proposal, VenueError>,
         cached: Option<MarketSetting>,
     ) -> Option<(Completion, Option<MarketSetting>)> {
         let eligible = self.eligible(token);
-        let read = self.attempts.remove(&token)?;
-        if self.current.get(&read.symbol) == Some(&token) {
+        let read = self.attempts.remove(token)?;
+        if self.current.get(&read.symbol) == Some(token) {
             self.current.remove(&read.symbol);
         }
         let mut publication = None;
@@ -413,8 +437,8 @@ mod tests {
         let a = start(&mut one, "BTC", 1, true, Fallback::CompleteSetting);
         let b = start(&mut two, "BTC", 2, true, Fallback::CompleteSetting);
         assert_ne!(a, b, "attempt tokens must bind the Store issuer");
-        assert!(two.finish_metadata(a, Ok(proposal(7.0, 9.0))).is_none());
-        assert!(two.metadata_eligible(b));
+        assert!(two.finish_metadata(&a, Ok(proposal(7.0, 9.0))).is_none());
+        assert!(two.metadata_eligible(&b));
     }
 
     #[test]
@@ -423,9 +447,49 @@ mod tests {
         let mut two = Store::default();
         let foreign = one.metadata_observation();
         assert!(!two.observe_setting(
-            "BTC", foreign, ObservedSetting::new(setting(99.0, 99.0)).unwrap()
+            "BTC",
+            &foreign,
+            ObservedSetting::new(setting(99.0, 99.0)).unwrap()
         ));
         assert!(two.setting("BTC").is_none());
+    }
+
+    #[test]
+    fn account_revision_ignores_read_issuance_but_not_settings_invalidation() {
+        let mut store = Store::default();
+        let revision = store.metadata_revision();
+        assert!(store.metadata_revision_current(&revision));
+        let _background = store.metadata_observation();
+        let _read = start(&mut store, "ETH", 2, true, Fallback::CompleteSetting);
+        assert!(store.metadata_revision_current(&revision));
+        store.invalidate_metadata(Some("BTC"));
+        assert!(!store.metadata_revision_current(&revision));
+        let fresh = store.metadata_revision();
+        let _another_read = store.metadata_observation();
+        assert!(store.metadata_revision_current(&fresh));
+    }
+
+    #[test]
+    fn default_foreign_and_exhausted_account_revisions_never_authorize() {
+        let mut one = Store::default();
+        let mut two = Store::default();
+        let foreign = one.metadata_revision();
+        let own = two.metadata_revision();
+        assert!(!two.metadata_revision_current(&foreign));
+        assert!(!two.metadata_revision_current(&Observation::default()));
+        assert!(!two.observe_setting(
+            "BTC",
+            &Observation::default(),
+            ObservedSetting::new(setting(7.0, 9.0)).unwrap()
+        ));
+        let mut state = State::default();
+        let current = state.revision();
+        state.epoch.exhaust_for_test();
+        assert!(!state.revision_current(&current));
+        let exhausted = state.revision();
+        assert!(!state.revision_current(&exhausted));
+        assert!(!state.observe("BTC", &current));
+        assert!(two.metadata_revision_current(&own));
     }
 
     #[test]
@@ -439,14 +503,14 @@ mod tests {
             Admission::Joined
         );
         let done = store
-            .finish_metadata(token, Ok(proposal(7.0, 9.0)))
+            .finish_metadata(&token, Ok(proposal(7.0, 9.0)))
             .unwrap();
         assert!(done.published);
         assert_eq!(done.commands(), [1, 2]);
         assert_eq!(store.setting("BTC"), Some(setting(7.0, 9.0)));
         assert!(
             store
-                .finish_metadata(token, Ok(proposal(99.0, 99.0)))
+                .finish_metadata(&token, Ok(proposal(99.0, 99.0)))
                 .is_none()
         );
         assert_eq!(store.setting("BTC"), Some(setting(7.0, 9.0)));
@@ -460,7 +524,7 @@ mod tests {
             .begin_metadata("BTC", 2, true, Fallback::CompleteSetting)
             .unwrap();
         let error = VenueError::new("timeout").kind(ErrorKind::Timeout);
-        let done = store.finish_metadata(token, Err(error.clone())).unwrap();
+        let done = store.finish_metadata(&token, Err(error.clone())).unwrap();
         assert!(!done.published);
         assert_eq!(done.commands(), [1, 2]);
         assert_eq!(done.result().as_ref().unwrap_err(), &error);
@@ -469,10 +533,10 @@ mod tests {
         assert_ne!(next, token);
         assert!(
             store
-                .finish_metadata(token, Ok(proposal(99.0, 99.0)))
+                .finish_metadata(&token, Ok(proposal(99.0, 99.0)))
                 .is_none()
         );
-        assert!(store.metadata_eligible(next));
+        assert!(store.metadata_eligible(&next));
     }
     #[test]
     fn writes_fence_old_read_and_new_waiters_do_not_join_it() {
@@ -481,14 +545,14 @@ mod tests {
         store.invalidate_metadata(Some("BTC"));
         store.update_setting("BTC", |s| *s = setting(30.0, 40.0));
         let next = start(&mut store, "BTC", 2, true, Fallback::IndependentRails);
-        let stale = store.finish_metadata(old, Ok(proposal(7.0, 9.0))).unwrap();
+        let stale = store.finish_metadata(&old, Ok(proposal(7.0, 9.0))).unwrap();
         assert!(!stale.published);
         assert_eq!(stale.commands(), [1]);
         assert_eq!(stale.result().as_ref().unwrap().buy, 30.0);
-        assert!(store.metadata_eligible(next));
+        assert!(store.metadata_eligible(&next));
         assert!(
             store
-                .finish_metadata(next, Ok(proposal(50.0, 60.0)))
+                .finish_metadata(&next, Ok(proposal(50.0, 60.0)))
                 .unwrap()
                 .published
         );
@@ -497,17 +561,17 @@ mod tests {
     fn pending_write_publication_restriction_is_sticky() {
         let mut store = Store::default();
         let restricted = start(&mut store, "BTC", 1, false, Fallback::IndependentRails);
-        assert!(!store.metadata_eligible(restricted));
+        assert!(!store.metadata_eligible(&restricted));
         let next = start(&mut store, "BTC", 2, true, Fallback::IndependentRails);
         let done = store
             .finish_metadata(
-                restricted,
+                &restricted,
                 Ok(Proposal::rails(Rails::new(7.0, 9.0).unwrap())),
             )
             .unwrap();
         assert!(!done.published);
         assert!(store.setting("BTC").is_none());
-        assert!(store.metadata_eligible(next));
+        assert!(store.metadata_eligible(&next));
     }
     #[test]
     fn symbol_changes_do_not_revoke_an_unrelated_read() {
@@ -515,17 +579,17 @@ mod tests {
         let btc = start(&mut store, "BTC", 1, true, Fallback::CompleteSetting);
         let eth = start(&mut store, "ETH", 2, true, Fallback::CompleteSetting);
         store.invalidate_metadata(Some("BTC"));
-        assert!(!store.metadata_eligible(btc));
-        assert!(store.metadata_eligible(eth));
+        assert!(!store.metadata_eligible(&btc));
+        assert!(store.metadata_eligible(&eth));
         store.invalidate_metadata(None);
-        assert!(!store.metadata_eligible(eth));
+        assert!(!store.metadata_eligible(&eth));
     }
     #[test]
     fn a_partial_proposal_never_publishes() {
         let mut store = Store::default();
         let token = start(&mut store, "BTC", 1, true, Fallback::IndependentRails);
         let done = store
-            .finish_metadata(token, Ok(Proposal::rails(Rails::new(7.0, 9.0).unwrap())))
+            .finish_metadata(&token, Ok(Proposal::rails(Rails::new(7.0, 9.0).unwrap())))
             .unwrap();
         assert!(done.result().is_err());
         assert!(!done.published);
@@ -554,7 +618,7 @@ mod tests {
             });
             let token = start(&mut store, "BTC", 1, false, fallback);
             let done = store
-                .finish_metadata(token, Ok(proposal(7.0, 9.0)))
+                .finish_metadata(&token, Ok(proposal(7.0, 9.0)))
                 .unwrap();
             let value = done.result().as_ref().unwrap();
             assert_eq!(
@@ -574,23 +638,23 @@ mod tests {
         let old = store.metadata_observation();
         let token = start(&mut store, "BTC", 1, true, Fallback::CompleteSetting);
         store
-            .finish_metadata(token, Ok(proposal(7.0, 9.0)))
+            .finish_metadata(&token, Ok(proposal(7.0, 9.0)))
             .unwrap();
         assert!(!store.observe_setting(
             "BTC",
-            old,
+            &old,
             ObservedSetting::new(setting(2.0, 2.0)).unwrap()
         ));
         let fresh = store.metadata_observation();
         assert!(store.observe_setting(
             "ETH",
-            fresh,
+            &fresh,
             ObservedSetting::new(setting(3.0, 3.0)).unwrap()
         ));
         store.invalidate_metadata(Some("BTC"));
         assert!(!store.observe_setting(
             "BTC",
-            fresh,
+            &fresh,
             ObservedSetting::new(setting(4.0, 4.0)).unwrap()
         ));
         assert_eq!(store.setting("BTC"), Some(setting(7.0, 9.0)));
@@ -618,24 +682,22 @@ mod tests {
                 .is_err()
         );
         let done = store
-            .finish_metadata(token, Ok(proposal(7.0, 9.0)))
+            .finish_metadata(&token, Ok(proposal(7.0, 9.0)))
             .unwrap();
         assert_eq!(done.commands().len(), MAX_WAITERS);
     }
     #[test]
     fn token_exhaustion_fails_closed_without_reusing_identity() {
-        let mut state = State {
-            serial: u64::MAX - 1,
-            ..State::default()
-        };
+        let mut state = State::default();
         let Admission::Start(token) = state
             .begin("BTC", 1, true, Fallback::CompleteSetting)
             .unwrap()
         else {
             panic!()
         };
+        state.epoch.exhaust_for_test();
         state.changed(Some("BTC"));
-        assert!(!state.eligible(token));
+        assert!(!state.eligible(&token));
         assert!(
             state
                 .begin("BTC", 2, true, Fallback::CompleteSetting)
@@ -651,30 +713,30 @@ mod tests {
             if newer_first {
                 assert!(store.observe_setting(
                     "BTC",
-                    new,
+                    &new,
                     ObservedSetting::new(setting(20.0, 20.0)).unwrap()
                 ));
                 assert!(!store.observe_setting(
                     "BTC",
-                    old,
+                    &old,
                     ObservedSetting::new(setting(10.0, 10.0)).unwrap()
                 ));
             } else {
                 assert!(store.observe_setting(
                     "BTC",
-                    old,
+                    &old,
                     ObservedSetting::new(setting(10.0, 10.0)).unwrap()
                 ));
                 assert!(store.observe_setting(
                     "BTC",
-                    new,
+                    &new,
                     ObservedSetting::new(setting(20.0, 20.0)).unwrap()
                 ));
             }
             assert_eq!(store.setting("BTC"), Some(setting(20.0, 20.0)));
             assert!(!store.observe_setting(
                 "BTC",
-                new,
+                &new,
                 ObservedSetting::new(setting(99.0, 99.0)).unwrap()
             ));
         }
@@ -686,11 +748,11 @@ mod tests {
         let token = start(&mut store, "BTC", 1, true, Fallback::IndependentRails);
         assert!(store.observe_setting(
             "BTC",
-            background,
+            &background,
             ObservedSetting::new(setting(20.0, 20.0)).unwrap()
         ));
         let result = store
-            .finish_metadata(token, Ok(proposal(7.0, 9.0)))
+            .finish_metadata(&token, Ok(proposal(7.0, 9.0)))
             .unwrap();
         assert!(!result.published);
         assert_eq!(result.result().as_ref().unwrap().buy, 20.0);
@@ -698,13 +760,13 @@ mod tests {
         let fresh = start(&mut store, "BTC", 2, true, Fallback::IndependentRails);
         assert!(
             store
-                .finish_metadata(fresh, Ok(proposal(30.0, 40.0)))
+                .finish_metadata(&fresh, Ok(proposal(30.0, 40.0)))
                 .unwrap()
                 .published
         );
         assert!(!store.observe_setting(
             "BTC",
-            old,
+            &old,
             ObservedSetting::new(setting(99.0, 99.0)).unwrap()
         ));
     }
@@ -748,24 +810,24 @@ mod tests {
         assert!(!store.metadata_write_pending("ETH"));
         let blocked = start(&mut store, "BTC", 1, true, Fallback::IndependentRails);
         let eth = start(&mut store, "ETH", 2, true, Fallback::IndependentRails);
-        assert!(!store.metadata_eligible(blocked));
-        assert!(store.metadata_eligible(eth));
+        assert!(!store.metadata_eligible(&blocked));
+        assert!(store.metadata_eligible(&eth));
         store.metadata_write_finished(80);
         assert!(!store.metadata_write_pending("BTC"));
-        assert!(!store.metadata_eligible(blocked));
+        assert!(!store.metadata_eligible(&blocked));
         let next = start(&mut store, "BTC", 3, true, Fallback::IndependentRails);
-        assert!(store.metadata_eligible(next));
+        assert!(store.metadata_eligible(&next));
         let old = store
             .finish_metadata(
-                blocked,
+                &blocked,
                 Err(VenueError::new("canceled").kind(ErrorKind::Timeout)),
             )
             .unwrap();
         assert_eq!(old.commands(), [1]);
-        assert!(store.metadata_eligible(next));
+        assert!(store.metadata_eligible(&next));
         store.metadata_write_started(81, None).unwrap();
         assert!(store.metadata_write_pending("ETH"));
-        assert!(!store.metadata_eligible(eth));
+        assert!(!store.metadata_eligible(&eth));
         store.metadata_write_finished(81);
     }
     #[test]
@@ -786,10 +848,10 @@ mod tests {
                 .begin_metadata("overflow", 999, true, Fallback::IndependentRails)
                 .is_err()
         );
-        let first = tokens[0];
+        let first = tokens[0].clone();
         store
             .finish_metadata(
-                first,
+                &first,
                 Err(VenueError::new("expired").kind(ErrorKind::Timeout)),
             )
             .unwrap();
@@ -797,10 +859,10 @@ mod tests {
         assert_ne!(next, first);
         assert!(
             store
-                .finish_metadata(first, Ok(proposal(99.0, 99.0)))
+                .finish_metadata(&first, Ok(proposal(99.0, 99.0)))
                 .is_none()
         );
-        assert!(store.metadata_eligible(next));
+        assert!(store.metadata_eligible(&next));
     }
     #[test]
     fn bounded_symbol_state_never_forgets_an_overflow_invalidation() {
@@ -820,7 +882,11 @@ mod tests {
             panic!()
         };
         state.changed(Some("overflow"));
-        assert!(!state.eligible(token));
+        assert!(!state.eligible(&token));
         assert_eq!(state.revisions.len(), MAX_SYMBOLS);
     }
 }
+
+#[cfg(test)]
+#[path = "metadata_release_tests.rs"]
+mod release_tests;

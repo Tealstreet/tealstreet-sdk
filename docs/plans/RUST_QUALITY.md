@@ -428,5 +428,8 @@ per-symbol command joining, sticky write restrictions, background issue ordering
 and validated atomic publication, adopted by WEEX and BingX. Native codecs and
 financial position fences remain adapter facts. This removes those two families'
 local metadata ownership policy, not all-family duplication. Physical scheduler
-release/deadline integration is still blocked on actual #1741 and is not
-reimplemented in venues. [Scope and proof](RUST_METADATA_FRESHNESS.md).
+release/deadline integration now has actual #1741/#1759 available and common
+Epoch/Stamp plus scheduler/unsigned managed-read controls. Private production
+adoption remains blocked on real WEEX/BingX signers and shared observer-group
+completion/expiry; no signing, scheduler or completion substitute is added in
+venues. [Scope and proof](RUST_METADATA_FRESHNESS.md).

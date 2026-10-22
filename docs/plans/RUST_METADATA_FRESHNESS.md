@@ -1,8 +1,10 @@
 # Engine-owned metadata reads and settings freshness
 
-Status: shared core and WEEX/BingX adapters implemented; draft pending #1741
-physical-release integration and final CI/proof. No universal fan-out or runtime
-deployment closure claimed.
+Status: engine/Store core and legacy WEEX/BingX adapters implemented; common
+Epoch/Stamp adopted after actual #1741/#1759 integration. Shared scheduler and
+unsigned managed-read release controls pass. Private production adoption remains
+blocked on real family signers and shared observer-group completion/expiry.
+Final CI/proof, universal fan-out and runtime deployment remain open.
 
 Owner assignment: architecture audit §G, rank 13. Start from actual
 `ecc84a798163c9f61ea9439e90001a98bb07b907`; retain the later decision-only merge
@@ -265,3 +267,32 @@ Clippy/fmt and existing SDK metadata-hook controls via Corepack Yarn. Independen
 correctness/adversarial reviews precede the final checkpoint. Fresh current
 landing integration, CI and source-bound proof are still required. This is one
 engine policy boundary, not per-venue scheduler/signing workarounds.
+
+## Issuer and release-contract checkpoint
+
+The metadata clock now uses the existing common Epoch/Stamp primitive, including
+foreign-Store identity and permanent exhaustion. Two new assertion-RED controls
+failed on the original scalar implementation (equal tokens across Stores and
+foreign observation publication); both are GREEN. Account settings revision is
+now an opaque issuer-bound snapshot with a current-validator. Observation issue
+and unrelated symbol reads do not invalidate that account mutation fence.
+Twenty metadata unit controls and 364 WEEX/BingX native controls pass.
+
+Eleven additional engine controls exercise the existing Scheduler directly,
+including real unsigned managed HTTP prepare/bind/claim, typed unsent denial,
+neutral cleanup, first-release anchoring, same-lease continuation, exact admission
+and response expiry, pauses before/after release, stale canceled reservations,
+invalid/sub-ULP times, and superseded-publication fallback versus read liveness.
+A two-leg unsigned probe uses `http_leg_context`: the second release retains
+both the original logical deadline and scheduler lease; a denied second leg
+cannot publish partial settings or succeed. No replacement scheduler wrapper
+or second policy is needed. These are shared-kernel/unsigned-adapter controls,
+not proof of private metadata production adoption or active response-lease timers.
+
+The observer-group capability will be the same engine mechanism as Hyro fan-out,
+owned by the RequestContext lane. Its acceptance cases include independent live
+observer generations, first/follower detach and expiry, command-ID reuse, late
+join without deadline extension, per-leg denial and exact once-only terminal
+delivery. Publication freshness remains separate from observer/read liveness.
+No numeric managed completion, raw-secret signing recipe, public-credential
+placeholder or legacy-header compatibility path is introduced.

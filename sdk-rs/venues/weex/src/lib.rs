@@ -295,7 +295,7 @@ impl WeexFutures {
             }
         };
         let task = Task::Leverage {
-            token,
+            token: token.clone(),
             symbol: symbol.clone(),
         };
         let query = format!("symbol={market_id}");
@@ -364,7 +364,7 @@ impl WeexFutures {
             native = Some(config);
             Ok(safe_cex_engine::metadata::Proposal::complete(snapshot))
         });
-        if let Some(completion) = cx.store.finish_metadata(token, proposal) {
+        if let Some(completion) = cx.store.finish_metadata(&token, proposal) {
             if completion.published {
                 self.account
                     .configs

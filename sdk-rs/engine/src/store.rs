@@ -719,7 +719,7 @@ impl Store {
             .begin(symbol, command, publish, fallback)
     }
 
-    pub fn metadata_eligible(&self, token: crate::metadata::Token) -> bool {
+    pub fn metadata_eligible(&self, token: &crate::metadata::Token) -> bool {
         self.metadata
             .as_ref()
             .is_some_and(|metadata| metadata.eligible(token))
@@ -732,17 +732,20 @@ impl Store {
     pub fn invalidate_metadata(&mut self, symbol: Option<&str>) {
         self.metadata_state().invalidate(symbol);
     }
-    pub fn metadata_revision(&self) -> u64 {
+    pub fn metadata_revision(&mut self) -> crate::metadata::Observation {
+        self.metadata_state().revision()
+    }
+    pub fn metadata_revision_current(&self, stamp: &crate::metadata::Observation) -> bool {
         self.metadata
             .as_ref()
-            .map_or(0, |metadata| metadata.revision())
+            .is_some_and(|state| state.revision_current(stamp))
     }
 
     /// A background read cannot overwrite a newer read or settings write.
     pub fn observe_setting(
         &mut self,
         symbol: &str,
-        stamp: crate::metadata::Observation,
+        stamp: &crate::metadata::Observation,
         setting: crate::metadata::ObservedSetting,
     ) -> bool {
         if !self.metadata_state().observe(symbol, stamp) {
@@ -773,7 +776,7 @@ impl Store {
     /// Native caches must be updated infallibly before notifying its waiters.
     pub fn finish_metadata(
         &mut self,
-        token: crate::metadata::Token,
+        token: &crate::metadata::Token,
         result: Result<crate::metadata::Proposal, crate::VenueError>,
     ) -> Option<crate::metadata::Completion> {
         let symbol = self.metadata.as_ref()?.symbol(token)?.to_owned();
