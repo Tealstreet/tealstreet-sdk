@@ -3795,6 +3795,18 @@ query ingestion/coverage and typed rejection handling remain required. This is
 shared-core/native-test evidence, not deployed runtime proof or universal history
 fan-out closure. [Owner and scope](RUST_OWNED_HISTORY.md).
 
+## KuCoin Spot fallback Fill amounts
+
+KuCoin Spot matches without `matchSize` now deliver only the new suffix of
+`filledSize` beyond an admitted native bootstrap/execution prefix. Previously
+those rows emitted the whole cumulative amount again. Consumers of the Rust
+FILLS stream must accumulate these incremental amounts without applying a second
+cumulative subtraction. The wire shape, IDs (including absent public Fill ID),
+side, direct `matchSize` quantities and late distinct-execution behavior remain.
+The native20,000-order prefix retention is bounded; an authoritative last with
+no cumulative endpoint cannot establish its overlap with a later fallback.
+No caller deployment, TS removal or live evidence claim is bundled.
+
 ### Backpack histories: shared owner with native offset requests
 
 Fills, closed orders, funding income and single-page public trades now use the
