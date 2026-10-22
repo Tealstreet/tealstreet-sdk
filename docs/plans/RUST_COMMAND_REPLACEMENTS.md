@@ -619,3 +619,34 @@ current delivery/latest-attempt hold until Failed plus central seal commits.
 Tests must prove prior Accepted/KnownPartial IDs survive sibling cancellation,
 late auth-looking bodies cannot observe/count/clean up, and repeated sibling
 unproven callbacks produce one terminal result and one native discard hook.
+
+Concrete engine-only evidence/guard seam, before source:
+
+- `ResponseProof::from_status(u16)` owns the existing408-or->=500 decision.
+  Unproven errors have fixed Timeout/VenueUnavailable kind and Unknown outcome;
+  native evidence cannot grant an authentication classification. Lower invalid
+  status policy remains deferred. Managed Mutation already requires a Command
+  owner at register_attempt; this does not introduce a background-write policy.
+- Public native-facing `UnprovenEvidence` exposes only bounded `order_id(&str)`,
+  `venue_code(&str)` and `venue_message(&str)` operations, with private state.
+  Construct it inside the journal using its existing EvidenceBudget copy; native
+  hooks receive a mutable borrow only. First diagnostics consume the same text
+  quota; row IDs consume the same command-wide exact-ID quota. No outcome/kind,
+  accepted/rejected, total, failed-index, retry or arbitrary Error setters.
+- Private `CommandWrites::unproven_result(request,status,capture)` validates the
+  live released attempt with no prior result before calling the capture closure.
+  The writer yields the already-charged Failed fact/overflow/budget; one commit
+  sets it without calling the ordinary normalizer again. No reports are created.
+  Registry wiring checks issuer/owner/generation/current delivery first. Failed
+  admission never invokes native decoding or changes the quota/journal.
+- Venue evidence is `&self`, borrowed Pending/Response and the narrow writer.
+  Native plan discard receives only validated Owner after successful shared
+  fail_context seal/retirement. Late unproven replies skip both codec hooks and
+  Store-capable reconciliation. Keep ordinary successful response handling and
+  exactly-once scope/status/deferred-drain accounting unchanged.
+- Pure tests cover fixed classification, duplicate result refusal before capture,
+  exact shared remaining ID/text budgets, overflow without identity truncation,
+  preserving prior accepted/KnownPartial facts, and no double charging at seal.
+  Then wire the original hostile native/late engine controls to this shared seam
+  before adopting Binance and ordinary Bybit. Native evidence ID namespaces need
+  a separate read-only audit before those two family adapters are implemented.
