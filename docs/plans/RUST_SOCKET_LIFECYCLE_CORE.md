@@ -389,3 +389,12 @@ not prove that eventual engine boundary yet. Raw-close/signing cancellation,
 health/event admission, subscription drains and the two actual adoptions remain
 unwired; the six original venue RED tests are still expected to fail. No live
 runtime, allocator, hosted wire, replay or cutover-readiness claim is made here.
+
+## Physical-close seam before runtime wiring
+
+Extract the existing Cx.close transport/signing-cancellation body into a private
+engine-module method. Public close delegates unchanged until managed routing is
+wired. The future retirement effect consumer can then use the private method
+without reentering lifecycle retirement. This changes no close action, timer,
+health or public suppression behavior and touches no allocator/HTTP dispatch
+region. Verify the existing Supervisor controls and review the exact extraction.
