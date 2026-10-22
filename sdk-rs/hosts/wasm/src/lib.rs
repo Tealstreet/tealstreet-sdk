@@ -45,6 +45,8 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 trait AnyEngine {
+    fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError>;
+    fn prepare_dispatch(&mut self, now: f64);
     fn set_entropy(
         &mut self,
         _fill: safe_cex_engine::entropy::Fill,
@@ -71,6 +73,12 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+        self.set_signer(None)
+    }
+    fn prepare_dispatch(&mut self, now: f64) {
+        Engine::prepare_dispatch(self, now);
+    }
     fn set_entropy(
         &mut self,
         fill: safe_cex_engine::entropy::Fill,
@@ -177,6 +185,12 @@ enum ActionOut<'a> {
         headers: Vec<(&'a str, &'a str)>,
         #[serde(skip_serializing_if = "Option::is_none")]
         body: Option<&'a str>,
+    },
+    Sign {
+        attempt: u32,
+        work: &'a safe_cex_engine::signing::SignRequest,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u32,
     },
     SignPayload {
         request: u32,
@@ -299,6 +313,16 @@ fn encode(actions: &[Action]) -> String {
                     )
                     .collect(),
                 body: request.body.as_deref(),
+            },
+            Action::SignedOutbound { .. } => unreachable!("engine drain unwraps signed outbound"),
+            Action::Sign {
+                attempt,
+                work,
+                timeout_ms,
+            } => ActionOut::Sign {
+                attempt: attempt.0,
+                work,
+                timeout_ms: *timeout_ms,
             },
             Action::SignPayload {
                 request,
@@ -545,6 +569,49 @@ impl WasmEngine {
         self.inner
             .set_entropy(callback_entropy(source).map_err(construction_error)?, true)
             .map_err(construction_error)
+    }
+
+    /// JS providers execute atomic batches outside the engine. Must be installed before start.
+    #[wasm_bindgen(js_name = useExternalSigner)]
+    pub fn use_external_signer(&mut self) -> Result<(), js_sys::Error> {
+        self.inner.external_signer().map_err(construction_error)
+    }
+
+    #[wasm_bindgen(js_name = signed)]
+    pub fn signed(&mut self, attempt: u32, result_json: &str, now: f64) -> String {
+        let result = serde_json::from_str::<safe_cex_engine::signing::SignResult>(result_json)
+            .map_err(|_| safe_cex_engine::signing::SignError::InvalidResult);
+        self.inner.handle(
+            now,
+            Event::Signed {
+                attempt: RequestId(attempt),
+                result,
+            },
+        );
+        self.flush()
+    }
+    #[wasm_bindgen(js_name = signFailed)]
+    pub fn sign_failed(&mut self, attempt: u32, code: &str, now: f64) -> String {
+        use safe_cex_engine::signing::SignError;
+        let error = match code {
+            "timedOut" => SignError::TimedOut,
+            "unavailable" => SignError::Unavailable,
+            "invalidResult" => SignError::InvalidResult,
+            _ => SignError::Refused,
+        };
+        self.inner.handle(
+            now,
+            Event::Signed {
+                attempt: RequestId(attempt),
+                result: Err(error),
+            },
+        );
+        self.flush()
+    }
+    #[wasm_bindgen(js_name = prepareDispatch)]
+    pub fn prepare_dispatch(&mut self, now: f64) -> String {
+        self.inner.prepare_dispatch(now);
+        self.flush()
     }
 
     /// Resolved account choices; contains no credentials.

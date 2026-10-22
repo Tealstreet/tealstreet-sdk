@@ -3575,6 +3575,7 @@ dependencies = [
  "hmac 0.12.1",
  "p256",
  "poseidon-hash",
+ "safe-cex-engine",
  "serde",
  "serde_json",
  "sha2 0.10.9",

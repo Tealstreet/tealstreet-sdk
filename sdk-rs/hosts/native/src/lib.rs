@@ -44,6 +44,10 @@ pub enum HostEvent {
     HttpChunk(RequestId, Vec<u8>),
     HttpEnd(RequestId),
     HttpFailed(RequestId, String),
+    Signed(
+        RequestId,
+        Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>,
+    ),
     PayloadSigned(RequestId, PayloadSignerResult),
     PayloadSignFailed(RequestId, String),
     Timer(TimerId),
@@ -89,6 +93,15 @@ impl<V: Venue, T: Transport> Host<V, T> {
             timers: HashMap::new(),
             clock: now_ms,
         }
+    }
+
+    /// Host-owned provider handle; key material stays inside the implementation.
+    pub fn with_signer(
+        mut self,
+        signer: safe_cex_engine::signing::Provider,
+    ) -> Result<Self, safe_cex_engine::VenueError> {
+        self.engine.set_signer(Some(signer))?;
+        Ok(self)
     }
 
     pub fn with_entropy(
@@ -214,6 +227,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     error: &error,
                 },
             ),
+            HostEvent::Signed(attempt, result) => {
+                engine.handle(now, Event::Signed { attempt, result })
+            }
             HostEvent::PayloadSigned(request, result) => engine.handle(
                 now,
                 Event::PayloadSigned {
@@ -237,6 +253,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn execute(&mut self, on_notice: &mut impl FnMut(Notice)) {
+        self.engine.prepare_dispatch((self.clock)());
         let actions: Vec<Action> = self.engine.drain_actions().collect();
         for action in actions {
             match action {
@@ -269,6 +286,30 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     self.sockets.remove(&socket);
                 }
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
+                Action::SignedOutbound { .. } => {
+                    unreachable!("engine drain unwraps signed outbound")
+                }
+                Action::Sign {
+                    attempt,
+                    work,
+                    timeout_ms,
+                } => {
+                    let signer = self.engine.signer();
+                    let events = self.events.clone();
+                    tokio::spawn(async move {
+                        use safe_cex_engine::signing::SignError;
+                        let result = match signer {
+                            Some(signer) => tokio::time::timeout(
+                                Duration::from_millis(u64::from(timeout_ms)),
+                                signer.sign(work),
+                            )
+                            .await
+                            .unwrap_or(Err(SignError::TimedOut)),
+                            None => Err(SignError::Unavailable),
+                        };
+                        let _ = events.send(HostEvent::Signed(attempt, result));
+                    });
+                }
                 Action::SignPayload {
                     request,
                     payload,

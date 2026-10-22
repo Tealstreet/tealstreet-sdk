@@ -44,18 +44,22 @@ mod tests {
     #[test]
     fn signs_the_documented_example() {
         // developers.binance.com, "SIGNED Endpoint Examples for POST /fapi/v1/order".
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../crypto/tests/fixtures/hmac/binance.json"
+        ))
+        .unwrap();
         let credentials = Credentials {
             key: String::new(),
-            secret: "2b5eb11e18796d12d88f13dc27dbbd02c2cc51ff7059765ed9821957d82bb4d9".into(),
+            secret: vector["secret"].as_str().unwrap().into(),
         };
-        let payload = "symbol=BTCUSDT&side=BUY&type=LIMIT&quantity=1&price=9000&timeInForce=GTC&recvWindow=5000&timestamp=1591702613943";
+        let payload = vector["payload"].as_str().unwrap();
         assert_eq!(
             hmac_sha256(
                 credentials.secret.as_bytes(),
                 payload.as_bytes(),
                 Encoding::Hex
             ),
-            "3c661234138461fcc7a7d8746c6558c9842d4e10870d2ecbedf7777cad694af9"
+            vector["signature"].as_str().unwrap()
         );
         let signed =
             Query::new()

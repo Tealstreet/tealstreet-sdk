@@ -29,6 +29,10 @@ export class WasmEngine implements WasmEngineLike {
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
+  useExternalSigner(): void;
+  signed(attempt: number, resultJson: string, now: number): string;
+  signFailed(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;
+  prepareDispatch(now: number): string;
   payloadSigned(request: number, signature: string, headers: string, now: number): string;
   payloadSignFailed(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;
