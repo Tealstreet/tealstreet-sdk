@@ -2,6 +2,7 @@ use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
+use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -122,7 +123,7 @@ pub struct Account {
     ws_order_revisions: HashMap<String, u64>,
     executed: HashSet<String>,
     executed_order: std::collections::VecDeque<String>,
-    filled: HashMap<String, (f64, f64)>,
+    filled: HashMap<String, (Cursor, f64)>,
     rest_paused_until: f64,
     last_payload: f64,
     write_check: Option<(TimerId, f64)>,
@@ -1871,48 +1872,24 @@ impl BitgetFutures {
     }
 
     fn emit_execution(&mut self, cx: &mut Cx<'_, Pending>, raw: &OrderRow<'_>, order: &Order) {
-        let previous = self
-            .account
-            .filled
-            .get(&order.id)
-            .map(|(filled, _)| *filled)
-            .or_else(|| cx.store.order(&order.id).map(|o| o.filled))
-            .unwrap_or(0.0);
+        let previous = if let Some((cursor, _)) = self.account.filled.get(&order.id) {
+            *cursor
+        } else {
+            let historical = cx.store.order(&order.id).map_or(0.0, |order| order.filled);
+            let Ok(seed) = Cursor::seed(historical, None) else {
+                return;
+            };
+            // Pin the pre-observation bootstrap even if this delivery is unpriced.
+            // The display order below may advance; it is not delivery evidence.
+            self.account.filled.insert(order.id.clone(), (seed, cx.now));
+            seed
+        };
         let cumulative = first(&[
             raw.acc_base_volume,
             raw.cum_exec_qty,
             raw.filled_qty,
             raw.acc_fill_sz,
         ]);
-        let amount = if self.account.uta {
-            cumulative
-                .map(|total| (total - previous).max(0.0))
-                .or(raw.base_volume.0)
-        } else {
-            raw.base_volume
-                .0
-                .or_else(|| cumulative.map(|total| (total - previous).max(0.0)))
-        }
-        .unwrap_or(0.0);
-        let execution = first_text(&[&raw.trade_id.text(), &raw.exec_id.text()]).to_owned();
-        let key = if execution.is_empty() {
-            format!(
-                "{}:{}:{}:{}",
-                order.id,
-                cumulative.unwrap_or(order.filled),
-                raw.fill_time.or(raw.u_time.get()),
-                amount
-            )
-        } else {
-            format!("{}:{execution}", order.symbol)
-        };
-        if amount <= 0.0 || !self.remember_execution(key) {
-            return;
-        }
-        self.account.filled.insert(
-            order.id.clone(),
-            (cumulative.unwrap_or(previous + amount), cx.now),
-        );
         let price = first(&[
             raw.fill_price,
             raw.price_avg,
@@ -1921,14 +1898,47 @@ impl BitgetFutures {
             raw.px,
         ])
         .unwrap_or(order.price);
+        let report = if let Some(amount) = raw.base_volume.0 {
+            Report::Last {
+                amount,
+                cumulative,
+                price,
+            }
+        } else {
+            Report::Cumulative {
+                quantity: cumulative.unwrap_or(0.0),
+                price: CumulativePrice::Direct(price),
+            }
+        };
+        let Ok(Some(prepared)) = previous.prepare(report, Arithmetic::Binary) else {
+            return;
+        };
+        let execution = first_text(&[&raw.trade_id.text(), &raw.exec_id.text()]).to_owned();
+        let key = if execution.is_empty() {
+            format!(
+                "{}:{}:{}:{}",
+                order.id,
+                cumulative.unwrap_or(order.filled),
+                raw.fill_time.or(raw.u_time.get()),
+                prepared.amount()
+            )
+        } else {
+            format!("{}:{execution}", order.symbol)
+        };
+        if !self.remember_execution(key) {
+            return;
+        }
         cx.fill(Fill {
             id: None,
             order_id: order.id.clone(),
             symbol: order.symbol.clone(),
             side: order.side,
-            price,
-            amount,
+            price: prepared.price(),
+            amount: prepared.amount(),
         });
+        self.account
+            .filled
+            .insert(order.id.clone(), (prepared.next(), cx.now));
     }
 
     fn remember_execution(&mut self, key: String) -> bool {

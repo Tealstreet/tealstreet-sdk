@@ -368,6 +368,26 @@ fn hyro_order_fill_deltas_use_executed_value_and_ignore_duplicates() {
 }
 
 #[test]
+fn cumulative_preparation_hyro_unpriced_report_keeps_corrected_fill_eligible() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    emitted_fills(&mut h);
+    let unpriced = hyro_fill_frame("PartiallyFilled", "0.4", "0")
+        .replace("\"price\":\"120\"", "\"price\":\"0\"")
+        .replace("\"avgPrice\":\"106\"", "\"avgPrice\":\"0\"");
+    h.message("/v5/private", &unpriced);
+    assert!(emitted_fills(&mut h).is_empty());
+    let corrected = hyro_fill_frame("PartiallyFilled", "0.4", "40");
+    h.message("/v5/private", &corrected);
+    assert_eq!(emitted_fills(&mut h), vec![(100.0, 0.4)]);
+    h.message("/v5/private", &corrected);
+    assert!(emitted_fills(&mut h).is_empty());
+    h.message("/v5/private", &hyro_fill_frame("Filled", "1", "106"));
+    assert_eq!(emitted_fills(&mut h), vec![(110.0, 0.6)]);
+}
+
+#[test]
 fn hyro_reconnect_snapshot_seeds_prior_fills_without_reemitting() {
     let mut h = startup(Variant::Hyrotrader);
     handshake(&mut h);
@@ -408,6 +428,38 @@ fn hyro_regressing_fill_value_does_not_invent_a_fill() {
     assert!(emitted_fills(&mut h).is_empty());
     assert!(!h.closed.is_empty());
     assert_eq!(h.engine.store().order("delta-fill").unwrap().filled, 0.4);
+}
+
+#[test]
+fn cumulative_seed_hyro_negative_quote_retains_existing_regression_recovery() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    emitted_fills(&mut h);
+    h.message(
+        "/v5/private",
+        &hyro_fill_frame("PartiallyFilled", "0.4", "40"),
+    );
+    assert_eq!(emitted_fills(&mut h), vec![(100.0, 0.4)]);
+    h.message(
+        "/v5/private",
+        &hyro_fill_frame("PartiallyFilled", "0.5", "-1"),
+    );
+    assert!(emitted_fills(&mut h).is_empty());
+    assert!(!h.closed.is_empty());
+    assert_eq!(h.engine.store().order("delta-fill").unwrap().filled, 0.4);
+}
+
+#[test]
+fn cumulative_seed_hyro_unavailable_average_does_not_invent_zero_quote() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime", 200, r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","orderId":"delta-fill","side":"Buy","orderType":"Limit","orderStatus":"PartiallyFilled","price":"120","qty":"1","cumExecQty":"0.4","avgPrice":"0","leavesQty":"0.6"}],"nextPageCursor":""}}"#);
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(emitted_fills(&mut h).is_empty());
+    h.message("/v5/private", &hyro_fill_frame("Filled", "1", "106"));
+    assert_eq!(emitted_fills(&mut h), vec![(106.0, 0.6)]);
 }
 
 #[test]
