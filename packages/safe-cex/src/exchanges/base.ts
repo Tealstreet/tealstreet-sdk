@@ -61,9 +61,8 @@ import {
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
 import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
 import { adjust } from '../utils/safe-math';
-import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
 import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
-import { tryParseJson } from '../utils/tryParseJson';
+import { signHttpCapture } from '../utils/signHttpCapture';
 import { BaseWebSocket } from './base.ws';
 import {
   clientOrderIdShapeMessage,
@@ -2320,39 +2319,7 @@ export class BaseExchange implements Exchange {
       return { id: request.id, error: 'Exchange does not have xhr for signing' };
     }
 
-    let captured: any = null;
-
-    // Use per-request adapter to avoid corrupting xhr.defaults.adapter
-    // (other requests on the same xhr instance would get the capture adapter during the await)
-    await xhr.request({
-      method: request.config!.method,
-      url: request.config!.url,
-      baseURL: request.config!.baseURL,
-      params: tryParseJson(request.config!.params),
-      data: tryParseJson(request.config!.data),
-      headers: request.config!.headers,
-      // Nothing leaves the browser here — the adapter below short-circuits with
-      // a synthetic 200. Interceptors still run, so telemetry must be able to
-      // tell this apart from a real request. See `utils/signingCapture.ts`.
-      [SIGNING_CAPTURE_FLAG]: true,
-      adapter: (config: any) => {
-        captured = config;
-        return Promise.resolve({ data: null, status: 200, statusText: 'OK', headers: {}, config });
-      },
-    });
-
-    const headers: Record<string, string> = {};
-    if (captured?.headers?.toJSON) {
-      for (const [k, v] of Object.entries(captured.headers.toJSON(true))) {
-        if (v != null) headers[k] = String(v);
-      }
-    } else if (captured?.headers) {
-      for (const [k, v] of Object.entries(captured.headers)) {
-        if (v != null) headers[k] = String(v);
-      }
-    }
-
-    return { id: request.id, config: { headers, url: captured?.url, params: captured?.params, data: captured?.data } };
+    return signHttpCapture(xhr, request);
   };
 
   /**

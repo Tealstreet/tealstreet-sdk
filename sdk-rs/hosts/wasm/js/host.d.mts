@@ -248,6 +248,12 @@ export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondar
 /** Canonical facts in protocol UTC milliseconds; neither field is fabricated. */
 export interface SignReceipt { stampMs?: number; expiryMs?: number }
 export interface SignResult { values: number[][]; receipt: SignReceipt }
+
+export interface HostedSigningClock { stampMs: number; revision: string }
+export type HostedSigningInput = { kind: 'credential' }
+  | { kind: 'http'; payload: string; stampMs: number; revision: string }
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' };
+export interface HostedSigningOutput { credential?: string; signature?: string }
 export interface SignRequest {
   receipt: SignReceipt;
   operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
@@ -383,6 +389,11 @@ export interface WasmEngineLike {
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner?(): boolean;
   useExternalSigner?(): void;
+  hostedSigningClock?(now: number): string;
+  prepareHostedSigning?(inputJson: string, now: number): string;
+  localHostedSigning?(id: number, now: number): string;
+  finishHostedSigning?(id: number, resultJson: string, now: number): string;
+  cancelHostedSigning?(id: number): void;
   signed?(attempt: number, resultJson: string, now: number): string;
   signFailed?(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;
   prepareDispatch?(now: number): string;
@@ -398,6 +409,9 @@ export class EngineHost {
   capabilities(): EngineCapabilities;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: EngineHostOptions);
   start(): void;
+  /** Sign compatibility bytes without startup, transport actions or account mutation. */
+  hostedSigningClock(): HostedSigningClock;
+  hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */

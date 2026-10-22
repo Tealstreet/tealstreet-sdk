@@ -1,14 +1,12 @@
 import type { ExchangeOptions } from '../../types';
 
-import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
 import qs from 'qs';
 
-import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
-import { signBinanceRequest } from './binance.signing';
-import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binancespot.types';
+import { createBinanceRequestInterceptor } from './binance.signing';
+import { BASE_URL, RECV_WINDOW } from './binancespot.types';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import {
   isBinanceStyleSignatureRejection,
@@ -42,20 +40,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       networkErrorOnRead()(error) || signatureRejectedResponse(isBinanceStyleSignatureRejection)(error),
   });
 
-  xhr.interceptors.request.use((config) => {
-    const isPublicEndPoint = PUBLIC_ENDPOINTS.includes(`${config.url}`);
-    if (isPublicEndPoint) {
-      return markSkipRemoteSigning({
-        ...config,
-        headers: AxiosHeaders.from({
-          'Content-Type': 'application/json, charset=utf-8',
-        }),
-        timeout: 20_000,
-      });
-    }
-
-    return signBinanceRequest(config, options, exchange.name, options?.extra?.recvWindow ?? RECV_WINDOW);
-  });
+  xhr.interceptors.request.use(createBinanceRequestInterceptor(options, exchange.name));
 
   // Last, so a resend is not put through any later interceptor twice.
   xhr.interceptors.response.use(
