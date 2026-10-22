@@ -135,6 +135,7 @@ fn declared_http_policy_protects_auth_but_preserves_callback_window_precedence()
             payload_supported: true,
             payload_rest_only: true,
             protected_headers: Some(&["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]),
+            ..Default::default()
         },
         ..Default::default()
     }
