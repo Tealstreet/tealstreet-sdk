@@ -621,7 +621,9 @@ test('managed recorder holds original command stage across parked preparation an
   recorder.command({ op: 'fetchBalance' }, () => {});
   finishPrepare(); const prepared = await preparing;
   events.length = 0;
-  const ready = prepared.bind({ ...request, headers: { 'X-MBX-APIKEY': secrets.key } });
+  const packet = { ...request, headers: { 'X-MBX-APIKEY': secrets.key } };
+  const ready = prepared.bind(packet);
+  packet.method = 'DELETE'; packet.url = 'https://mutated.invalid';
   assert.equal(prepared.expiresAt, 200);
   assert.equal(ready.ready(), true);
   assert.deepEqual(events, []);
@@ -629,6 +631,8 @@ test('managed recorder holds original command stage across parked preparation an
   const http = recorder.records.filter((row) => row.type === 'http');
   assert.equal(http.length, 1);
   assert.equal(http[0].afterCommand, 1);
+  assert.equal(http[0].method, 'POST');
+  assert.equal(http[0].url, request.url);
   assert.deepEqual(events, ['send', 'http']);
   assert.equal(JSON.stringify(recorder.records).includes(secrets.key), false);
   assert.equal(JSON.parse(http[0].body).orderId, 'native-1');
@@ -656,4 +660,19 @@ test('managed recorder writer failure follows physical dispatch and cancels bind
   assert.equal(sent, 1);
   assert.ok(recorder.failure);
   assert.equal(typeof createPrivateRecorder(makeLive(), { secrets }).transport.prepareHttp, 'undefined');
+});
+
+
+test('managed recorder redaction refusal cancels preparation before bind or send', async () => {
+  let canceled = 0, bound = 0;
+  const live = { ...makeLive(), prepareHttp: () => ({
+    cancel() { canceled++; }, bind() { bound++; throw new Error('must not bind'); },
+  }) };
+  const recorder = createPrivateRecorder(live, { secrets });
+  const request = { method: 'POST', url: 'https://exchange.example/order' };
+  const prepared = await recorder.transport.prepareHttp(request);
+  assert.throws(() => prepared.bind({ ...request, headers: { signature: 'x' } }), /transport preparation failed/);
+  assert.equal(canceled, 1);
+  assert.equal(bound, 0);
+  assert.ok(recorder.failure);
 });

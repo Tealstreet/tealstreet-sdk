@@ -1254,3 +1254,20 @@ same redirect:error and min(configured timeout, 20s) limit via prepareFetch.
 Tests cover delayed binding, callback/redaction failures and underlying dispatch
 first. Independent plan/preservation review CLEAN, architecture No; actual1758
 all seven incoming blobs and all5,288 other paths remain exact after integration.
+
+Wrapper implementation verification: the original four new controls failed by
+assertion before the shared wrapper fix; the corrected full harness suite passes
+1,145 tests, including final-packet fencing, original write stage across parked
+preparation, immutable redacted capture, dispatch before recording and cleanup on
+bind/redaction failure. Legacy request remains async. Independent implementation
+review CLEAN, architecture No (shared prepared-transport wrapper integration).
+All ten scripted lifecycle assertions, clocks and timeouts are unchanged; their
+rebuilt-WASM recovery still requires fresh CI. Actual #1758 integration also
+passes995 engine/Binance/Phemex native tests and scoped formatting.
+
+Post-#1758 ratchet plan: prune only the three removed legacy completion calls
+from venues/phemex/src/income.rs (9->6); global inventory1274->1271. The remaining
+six fingerprints and every other path map are unchanged; no new fingerprints,
+call kinds or bootstrap exception. Existing adversarial shrink/regrowth controls
+must pass before updating the manifest, followed by the full ban gate. Record
+exact map hashes in the PR body. The bridge still must reach zero before master.
