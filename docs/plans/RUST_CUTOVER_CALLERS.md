@@ -319,7 +319,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1686 / `850bc25e5` | GRVT adds an unsigned request-owned MDG REST book query. Known markets POST `{i: nativeId, d: 50}` to `/lite/v1/book`, correcting the TS request against the official schema; caller limit is ignored. Unknown markets resolve an owned empty book without HTTP. Full/lite aliases retain native order and cumulative base-amount totals, without IDs/version or decimal rescaling. Query failures do not refresh the private session. |
 | #1687 / `90df20d2f` | Paradex adds unsigned request-owned REST books on live/testnet roots with encoded raw symbols, default depth20 and explicit caller depth unchanged. Native order, duplicates and zero quantities remain; each level's `total` is price × amount in quote units, not cumulative. No IDs/version, scaling or subscription publication is added. |
 | #1690 / `2ff8452aa` | WEEX adds an owned unsigned Contract V3 REST book query, default limit200 and explicit limit unchanged. Native order, null-coalesced aliases, cumulative base-amount totals and exact string `lastUpdateId` remain; no contractVal scaling or level IDs. Strict malformed financial/version parsing rejects atomically. Shared GET pause may defer a new owner without retrying the failed owner. |
-| #1693 / `fa960d9cf` | Hyperliquid perpetual `scheduleCancel(time?: number \| null): Promise<void>` now arms a signed absolute UTC-ms deadline or clears on null/omitted time. SDK/host pre-JSON guards prevent unsafe values becoming accidental clears; native deadlines are checked again before signing. The owned promise requires an accepted control ACK; uncertainty stays `unknown` without replay or account-state inference. Renewal remains caller-owned; spot stays unsupported. |
+| #1693 / `fa960d9cf` | Hyperliquid perpetual `scheduleCancel(time?: number \| null): Promise<void>` now arms a signed absolute UTC-ms deadline or clears on null/omitted time. SDK/host pre-JSON guards prevent unsafe values becoming accidental clears; native deadlines are checked again before signing. The owned promise requires an accepted control ACK; uncertainty stays `unknown` without replay or account-state inference. Renewal remains caller-owned; spot stays unsupported. The newly enabled perp hostClock adopts synchronized SDK time for all perpetual engine work/signing, not only scheduling. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2607,9 +2607,12 @@ direct default producer or new caller argument.
 
 The existing perpetual `scheduleCancel(time?: number | null): Promise<void>`
 now dispatches a signed native control, with `scheduleCancel` at appended
-capability flag bit25 and the existing hostClock enabled. Upgrade the SDK/host
-capability readers and producer together. Native spot retains unsupported/
-`notSent`; prior capability positions remain unchanged.
+capability flag bit25. It also newly sets hostClock true on the perpetual
+engine: the existing SDK clock path supplies synchronized time before start
+and on later callbacks, affecting all perpetual engine work/signing rather
+than only scheduleCancel. Upgrade the SDK/host capability readers and producer
+together. Native spot retains unsupported/`notSent` and hostClock false; prior
+capability positions remain unchanged.
 
 To arm, pass a safe integer absolute UTC timestamp in milliseconds at least
 five seconds beyond synchronized current time. SDK validation precedes JSON
