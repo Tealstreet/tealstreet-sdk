@@ -48,6 +48,26 @@ impl ContextRegistry {
         policy: Policy,
         now: f64,
     ) -> Result<Context, Error> {
+        self.issue_bound(identity, scope, policy, now, None)
+    }
+
+    fn issue_bound(
+        &mut self,
+        identity: u32,
+        scope: Scope,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+    ) -> Result<Context, Error> {
+        if let Some(parent) = parent {
+            self.validate(parent, now)?;
+            if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
+                return Err(Error::Invalid);
+            }
+        }
+        if scope == Scope::Background && policy.operation == Operation::Mutation {
+            return Err(Error::Invalid);
+        }
         if !now.is_finite() || policy.timeout_ms == 0 {
             return Err(Error::Invalid);
         }
@@ -65,18 +85,24 @@ impl ContextRegistry {
             return Err(Error::State);
         }
         let identity = u64::from(identity);
-        let owner = match scope {
-            Scope::Command(id) => Owner::Command {
-                id,
-                generation: self
-                    .commands
-                    .get(&id)
-                    .map_or(identity, |old| old.generation),
-            },
-            Scope::Background => Owner::Background {
-                generation: identity,
+        let owner = match parent.map(Context::owner) {
+            Some(owner) => owner,
+            None => match scope {
+                Scope::Command(id) => Owner::Command {
+                    id,
+                    generation: self
+                        .commands
+                        .get(&id)
+                        .map_or(identity, |old| old.generation),
+                },
+                Scope::Background => Owner::Background {
+                    generation: identity,
+                },
             },
         };
+        let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
+            parent.deadline().min(now + f64::from(policy.timeout_ms))
+        });
         // Validate before committing an owner, context, pending slot or action.
         let mut context = Context::new(
             owner,
@@ -84,7 +110,7 @@ impl ContextRegistry {
             policy.operation,
             policy.credential,
             now,
-            now + f64::from(policy.timeout_ms),
+            deadline,
             policy.pacing,
         )?
         .with_retry(policy.retry)?;
@@ -332,11 +358,36 @@ impl<P> Cx<'_, P> {
     /// Capture the logical raw deadline and engine-owned owner/leg generation.
     /// This neither queues HTTP nor reserves admission, a transport or pacing.
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
+        self.make_http_context(scope, policy, None)
+    }
+
+    /// A new physical leg under the same logical authority. Preserve its exact
+    /// raw deadline; integer timeout recomputation cannot round the bound up.
+    pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
+        self.io.request_contexts.validate(parent, self.now)?;
+        let scope = match parent.owner() {
+            Owner::Command { id, .. } => Scope::Command(id),
+            Owner::Background { .. } => Scope::Background,
+        };
+        self.make_http_context(scope, policy, Some(parent))
+    }
+
+    fn make_http_context(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        parent: Option<&Context>,
+    ) -> Result<Context, Error> {
         let identity = self.io.next();
-        let context = self
-            .io
-            .request_contexts
-            .issue(identity, scope, policy, self.now)?;
+        let context = if let Some(parent) = parent {
+            self.io
+                .request_contexts
+                .issue_bound(identity, scope, policy, self.now, Some(parent))?
+        } else {
+            self.io
+                .request_contexts
+                .issue(identity, scope, policy, self.now)?
+        };
         #[cfg(feature = "order-locks")]
         if context.operation() == Operation::Mutation
             && let Owner::Command { id, .. } = context.owner()
@@ -435,6 +486,94 @@ mod tests {
     use super::*;
     use crate::request_context::{Operation, RetryPolicy};
     use crate::{Notice, Store};
+
+    #[test]
+    fn child_contexts_keep_exact_parent_deadline_owner_and_no_transport_resources() {
+        for scope in [Scope::Command(7), Scope::Background] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            let mut cx = Cx {
+                now: 100.125,
+                store: &mut store,
+                io: &mut io,
+            };
+            let parent = cx.http_context(scope, policy()).unwrap();
+            cx.now = 599.9999;
+            let child = cx.http_leg_context(&parent, policy()).unwrap();
+            assert_eq!(child.owner(), parent.owner());
+            assert_ne!(child.leg(), parent.leg());
+            assert_eq!(child.deadline(), 600.125);
+            let grandchild = cx.http_leg_context(&child, policy()).unwrap();
+            assert_eq!(grandchild.deadline(), parent.deadline());
+            assert_eq!(grandchild.owner(), parent.owner());
+            assert!(cx.io.pending.is_empty());
+            assert!(cx.io.timers.is_empty());
+            assert!(cx.io.actions.is_empty());
+            let count = cx.io.request_contexts.contexts.len();
+            cx.now = parent.deadline();
+            assert_eq!(cx.http_leg_context(&parent, policy()), Err(Error::TimedOut));
+            assert_eq!(cx.io.request_contexts.contexts.len(), count);
+        }
+    }
+
+    #[test]
+    fn a_child_can_shorten_but_foreign_retired_or_reused_authority_cannot_issue_it() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 100.125,
+            store: &mut store,
+            io: &mut io,
+        };
+        let parent = cx.http_context(Scope::Command(7), policy()).unwrap();
+        let mut shorter = policy();
+        shorter.timeout_ms = 1;
+        cx.now = 100.25;
+        let child = cx.http_leg_context(&parent, shorter).unwrap();
+        assert_eq!(child.deadline(), 101.25);
+        let mut other = ContextRegistry::default();
+        let foreign = other
+            .issue(1, Scope::Command(7), policy(), 100.125)
+            .unwrap();
+        assert_eq!(cx.http_leg_context(&foreign, policy()), Err(Error::Revoked));
+        cx.finish_http_context(&parent).unwrap();
+        assert_eq!(cx.http_leg_context(&parent, policy()), Err(Error::Revoked));
+        assert_eq!(cx.io.request_contexts.validate(&child, cx.now), Ok(()));
+        cx.done_context(&child, "[]".into()).unwrap();
+        let replacement = cx.http_context(Scope::Command(7), policy()).unwrap();
+        assert_ne!(replacement.owner(), child.owner());
+        assert_eq!(cx.http_leg_context(&child, policy()), Err(Error::Revoked));
+        assert!(cx.io.pending.is_empty());
+        assert!(cx.io.timers.is_empty());
+    }
+
+    #[test]
+    fn read_authority_cannot_issue_a_mutation_or_create_background_write_authority() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let parent = cx.http_context(Scope::Command(7), policy()).unwrap();
+        let mut mutation = policy();
+        mutation.operation = Operation::Mutation;
+        mutation.retry = RetryPolicy::Never;
+        assert_eq!(
+            cx.http_leg_context(&parent, mutation.clone()),
+            Err(Error::Invalid)
+        );
+        assert_eq!(
+            cx.http_context(Scope::Background, mutation),
+            Err(Error::Invalid)
+        );
+        assert_eq!(cx.io.request_contexts.contexts.len(), 1);
+        assert_eq!(cx.io.request_contexts.commands.len(), 1);
+        assert!(cx.io.pending.is_empty());
+        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.timers.is_empty());
+    }
 
     fn policy() -> Policy {
         Policy {
@@ -840,7 +979,15 @@ mod write_tests {
             .unwrap() = true;
         registry.issue(2, Scope::Command(7), policy(), 0.).unwrap();
         registry
-            .issue(3, Scope::Background, policy(), 101.)
+            .issue(
+                3,
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    ..policy()
+                },
+                101.,
+            )
             .unwrap();
         assert_eq!(registry.validate(&context, 101.), Err(Error::TimedOut));
         assert_eq!(
@@ -1106,7 +1253,15 @@ mod write_tests {
         registry.enter_delivery(&callback);
         registry.retire_attempt(&preflight);
         registry
-            .issue(3, Scope::Background, policy(), 101.)
+            .issue(
+                3,
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    ..policy()
+                },
+                101.,
+            )
             .unwrap();
         assert_eq!(registry.validate(&mutation, 101.), Err(Error::TimedOut));
         let Seal::Failure(error, _) = registry.seal(

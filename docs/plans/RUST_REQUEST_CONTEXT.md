@@ -548,3 +548,10 @@ timer is created on invalid/expired/foreign parent. References retain the origin
 command authority; HTTP children may shorten its bound, never extend it. Tests
 cover fractional now/deadlines, sibling expiry, foreign/retired parent and command
 ID reuse. This extends the engine issuer once, not per-venue deadline arithmetic.
+
+
+Parent-bound checkpoint validation: 62 focused Context/registry tests and strict
+engine Clippy pass. Replacing the deadline clamp with a maximum fails the exact
+fractional-deadline assertion; restoration passes. Independent API review CLEAN
+(architecture No). Existing expiry probes now issue actual unrelated Read policy,
+preserving all prior assertions under the explicit background-mutation rejection.
