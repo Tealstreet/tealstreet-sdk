@@ -18,6 +18,8 @@ or trade. SDK fixes/green CI do not establish NX adoption or live evidence.
 | **Bybit split preflight: ACCEPTED** | Accept whole-batch rejection before any writes when one split lot cannot format; TS skips that order. The policy decision is closed; preserve preflight regressions. Partial TP/SL semantics remain decided. [Bybit retained findings](RUST_AUDITS.md#bybit-family). |
 | **Coinbase CFM accounting: ACCEPTED** | Accept native PnL. Verify downstream CFM/spot equity consumers apply it once; the old TS zero-PnL behavior is not the target. This is integration proof, not an open accounting-policy choice. [Accounting evidence](RUST_AUDITS.md#coinbase-already-defaults-to-rust). |
 
+| **Request lifecycle legacy bridge — hard gate** | The staged bridge is authorized only during family migration. Its exact legacy call-site allowlist may only shrink; new legacy callers fail CI. Before landing → master, finish fan-out and delete both the empty allowlist and bridge. Legacy work has no inferred semantics, generic replay or outcome-sealing claim. [Lifecycle and removal contract](RUST_REQUEST_CONTEXT.md). |
+
 Owner provenance, recorded in the local handoff
 `.aimux/plans/overseer-handoff-claude-limit.md:72,84` (2026-10-22):
 

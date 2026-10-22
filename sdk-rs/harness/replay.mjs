@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createReplayEntropy } from './replay-entropy.mjs';
+import { prepareRecordedHttp } from './recorded-http.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -243,6 +244,7 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
+    prepareHttp: prepareRecordedHttp,
     connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       if (!values.performance) venue.validateSocket?.(url, headers);
       const socket = tape.connect(

@@ -259,6 +259,45 @@ export function createPrivateRecorder(live, { venue = {}, options = {}, secrets 
   };
   emit({ type: 'meta', epoch, private: true, liveSmoke: true, venue: typeof venue === 'string' ? venue : venue.rust });
   emit({ type: 'config', private: true, options: scrub.redact(options) });
+  const prepareRecording = (request, stage) => {
+    const writeRequest = venue.isWrite?.(request.method, request.url) ?? isWriteRequest(request.method, request.url);
+    // Discover request/header secrets before any response echoes are persisted.
+    requiredRedaction(() => scrub.headers(request.headers));
+    const safeUrl = requiredRedaction(() => scrub.url(request.url, callerIds, venue));
+    const requestBody = request.body === undefined ? undefined : requiredRedaction(() => scrub.redact(textOf(request.body)));
+    return { method: request.method, stage, writeRequest, safeUrl, requestBody };
+  };
+  const recordResponse = async (pending, { method, stage, writeRequest, safeUrl, requestBody }) => {
+    let response;
+    try { response = await pending; }
+    catch { throw new Error('Live-smoke transport request failed'); }
+    const headers = requiredRedaction(() => scrub.headers(response.headers));
+    const captured = (body) => {
+      try { return emit({ type: 'http', method, url: safeUrl,
+        ...(requestBody === undefined ? {} : { requestBody }), status: response.status, headers,
+        // A delayed read first exposes its state at completion. Writes remain
+        // attached to the command that issued them so replay can await them.
+        body: scrub.redact(body), afterCommand: writeRequest ? stage : commandIndex }); }
+      catch { failed(); throw new Error('Live-smoke transport response recording failed'); }
+    };
+    if (response.body instanceof Uint8Array || response.body instanceof ArrayBuffer) {
+      captured(requiredRedaction(() => textOf(response.body)));
+      return response;
+    }
+    return { ...response, body: (async function* () {
+      const decoder = new TextDecoder('utf-8', { fatal: true });
+      let body = '';
+      try {
+        for await (const chunk of response.body) { body += decoder.decode(chunk, { stream: true }); yield chunk; }
+        captured(body + decoder.decode());
+      } catch { failed(); throw new Error('Live-smoke transport response recording failed'); }
+    })() };
+  };
+  const preparationFailure = (error) => {
+    const safe = new Error('Live-smoke transport preparation failed');
+    if (['UNSUPPORTED', 'TIMED_OUT', 'STALE', 'INVALID', 'NETWORK'].some((code) => error?.code === `HTTP_PREPARATION_${code}`)) safe.code = error.code;
+    return safe;
+  };
   const transport = {
     ...live,
     connect(url, handlers) {
@@ -289,37 +328,41 @@ export function createPrivateRecorder(live, { venue = {}, options = {}, secrets 
         close() { connection.close(); },
       };
     },
-    async request(request) {
+    prepareHttp: typeof live.prepareHttp !== 'function' ? undefined : async (request) => {
       const stage = commandIndex;
-      const writeRequest = venue.isWrite?.(request.method, request.url) ?? isWriteRequest(request.method, request.url);
-      // Discover request/header secrets before any response echoes are persisted.
-      requiredRedaction(() => scrub.headers(request.headers));
-      const safeUrl = requiredRedaction(() => scrub.url(request.url, callerIds, venue));
-      const requestBody = request.body === undefined ? undefined : requiredRedaction(() => scrub.redact(textOf(request.body)));
-      let response;
-      try { response = await live.request(request); }
-      catch { throw new Error('Live-smoke transport request failed'); }
-      const headers = requiredRedaction(() => scrub.headers(response.headers));
-      const captured = (body) => {
-        try { return emit({ type: 'http', method: request.method, url: safeUrl,
-          ...(requestBody === undefined ? {} : { requestBody }), status: response.status, headers,
-          // A delayed read first exposes its state at completion. Writes remain
-          // attached to the command that issued them so replay can await them.
-          body: scrub.redact(body), afterCommand: writeRequest ? stage : commandIndex }); }
-        catch { failed(); throw new Error('Live-smoke transport response recording failed'); }
+      let prepared;
+      try { prepared = await live.prepareHttp(request); }
+      catch (error) { throw preparationFailure(error); }
+      return {
+        expiresAt: prepared.expiresAt,
+        cancel: () => prepared.cancel?.(),
+        bind(packet) {
+          try {
+            const capture = prepareRecording(packet, stage);
+            const bound = prepared.bind(packet);
+            return {
+              ready: () => bound.ready(),
+              cancel: () => bound.cancel?.(),
+              dispatch() {
+                let response;
+                try { response = bound.dispatch(); }
+                catch { throw new Error('Live-smoke transport request failed'); }
+                return recordResponse(response, capture);
+              },
+            };
+          } catch (error) {
+            try { prepared.cancel?.(); } catch { /* Preserve the refusal and cleanup. */ }
+            throw preparationFailure(error);
+          }
+        },
       };
-      if (response.body instanceof Uint8Array || response.body instanceof ArrayBuffer) {
-        captured(requiredRedaction(() => textOf(response.body)));
-        return response;
-      }
-      return { ...response, body: (async function* () {
-        const decoder = new TextDecoder('utf-8', { fatal: true });
-        let body = '';
-        try {
-          for await (const chunk of response.body) { body += decoder.decode(chunk, { stream: true }); yield chunk; }
-          captured(body + decoder.decode());
-        } catch { failed(); throw new Error('Live-smoke transport response recording failed'); }
-      })() };
+    },
+    async request(request) {
+      const capture = prepareRecording(request, commandIndex);
+      let response;
+      try { response = live.request(request); }
+      catch { throw new Error('Live-smoke transport request failed'); }
+      return recordResponse(response, capture);
     },
   };
   const command = (frame, run) => {
