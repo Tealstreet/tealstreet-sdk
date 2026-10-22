@@ -632,3 +632,38 @@ are rejected outright. Trusted comparisons enumerate every HEAD parent and the
 exact PR-event base commit, in addition to HEAD and landing. The fixture Git test
 proves path resolution from sdk-rs and rejects manifest growth even when HEAD and
 its parent already agree on the expanded inventory. No semantic provenance claim.
+
+
+### Binance trading reference implementation plan
+
+First migrate the existing sequential trading Job as one command authority,
+leaving unrelated legacy branches explicitly inventoried until their own adapter
+slice. Job keeps the issuer-owned Context and a stop/continue flag, not
+reached_venue/effective or outcome classifications. Each planned physical write
+derives a distinct child with original command bound; Pending::Trade retains
+that exact child. Canonical bytes and signing recipe stay unchanged. Native
+codecs report Accepted/Rejected/Failed facts on the delivered child; engine
+preparation/transport failures supply their own evidence. Central done_context
+converts an optimistic success with refused/unresolved evidence to the honest
+outcome; fail_context joins every sent leg, never first-error classification.
+Preserve IDs/progress, silent-native-code reporting policy and strict cancellation
+proofs. Do not issue retries after unresolved native effects.
+
+Use the existing 120s JS command lifecycle as the root default and the existing
+20s transport operation default for each HTTP child, both captured as raw bounds;
+no new timeout option. Children always cap at the root. Shared constants and
+constructors belong in the engine once. Preparation/signing failure after prior
+sent siblings must join centrally; skipped unsent future steps confer no fake
+release. A no-I/O empty job completes without inventing a mutation attempt.
+
+Reconciliation must retain bounded native correlation only, never full Pending,
+URL/query/body/signing recipe. Extract cancellation ACK validation/patch facts
+from existing native proof logic if needed so the late codec can use the limited
+revision-fenced view without Cx or a second command finalizer. Late ACK cannot
+reopen a command, authenticate, schedule, or resolve uncertainty. Keep all
+financial fixes and native row/identity assertions. Original RED controls cover
+signer-refused sibling + real rejection, accepted/rejected callback permutations,
+known partial IDs, transport loss after release, and late cancellation revision
+fencing. The common journal owns outcome and rejected-leg publication; codecs
+supply native facts/reporting metadata, including per-item batch messages,
+without duplicating aggregation or first-error logic.
