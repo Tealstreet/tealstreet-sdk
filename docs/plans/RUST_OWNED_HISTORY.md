@@ -265,5 +265,25 @@ accounting, recovered hedge income, cross-window cause retention and category
 recovery with sorted global limits. Original adapter source fails five new
 account regressions at their intended assertions (typed first failure, retained
 later failure, hedge recovery, early cycle refusal and cross-window recovery);
-corrected code passes all eight new account/product tests. Final focused gates,
+corrected code passes all nine new account/product tests. Final focused gates,
 actual signer dependency integration, final independent review and CI remain.
+
+
+Actual signer #1714 `ad0e6fa1e42` is real-integrated at `dae6e76b666` with no
+conflicts. All six history source/test changes and four own docs are preserved;
+incoming signer construction/dispatch, tests and plans remain unchanged. This
+phase's caller catch-up also pins that actual signer API and the separately
+required NX trusted bootstrap migration; it claims neither remote signing nor
+NX runtime adoption. Final native checks and integration reviews run from this
+shared-engine dependency before publishing the PR.
+
+
+Final integration audit is clean: all 83 incoming signer paths are byte-identical
+to the actual merge, and all six reviewed history source/test files were preserved
+through the porcelain merge. Strict touched-crate Clippy, fmt, banned-pattern
+checks and 89 relative doc links pass. Two additional original-source controls
+prove missing required list data otherwise becomes empty success and a later
+category failure otherwise loses prior rows; both are corrected. Together with
+the five initial failing regressions this gives seven original-RED/core-GREEN
+controls; duplicate-count and empty-page checks preserve existing policy. Root
+typecheck/lint pass; root tests and final-head CI complete before merging.

@@ -2900,3 +2900,27 @@ fn owned_history_window_recovery_preserves_first_incomplete_cause() {
         Some(safe_cex_engine::Notice::CommandDone { command: 807, .. })
     ));
 }
+
+#[test]
+fn owned_history_missing_required_list_never_proves_empty_complete_coverage() {
+    for kind in 0..4 {
+        for body in [
+            r#"{"retCode":0}"#,
+            r#"{"retCode":0,"result":null}"#,
+            r#"{"retCode":0,"result":{}}"#,
+            r#"{"retCode":0,"result":{"list":null}}"#,
+        ] {
+            let mut h = ready();
+            h.notices.clear();
+            let (query, path) = owned_history_query(kind, None);
+            h.command(Command::Query {
+                command: 808,
+                query,
+            });
+            h.respond(path, 200, body);
+            assert!(h.result(808).unwrap().is_err(), "kind {kind}: {body}");
+            assert!(owned_history_markers(&h, 808).is_empty());
+            assert!(!h.has_request(path));
+        }
+    }
+}
