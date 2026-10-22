@@ -5,6 +5,10 @@ use crate::request_context::{
     Preparation, Prepared, ReleaseTime,
 };
 
+#[cfg(test)]
+#[path = "http_unsigned_headers_tests.rs"]
+mod unsigned_headers_tests;
+
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
