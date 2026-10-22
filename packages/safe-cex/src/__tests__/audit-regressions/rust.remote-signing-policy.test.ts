@@ -10,9 +10,9 @@ describe('shared delegated signing declarations', () => {
     expect(policy?.payloadRestOnly).toBe(true);
     expect(policy?.protectedHeaders).toEqual(binance.includes(name) ? [] : ['X-BAPI-SIGN', 'X-BAPI-API-KEY', 'X-BAPI-TIMESTAMP']);
   });
-  it('declarations preserve closed admission: only the landed Binance family is enabled', () => {
+  it('declarations retain the landed dispatch-signing flags without enabling other families', () => {
     for (const name of binance) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
-    for (const name of bybit) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(false);
+    for (const name of bybit) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
     for (const name of ['okx', 'mexc', 'kraken'] as ExchangeName[]) expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
   });
 });

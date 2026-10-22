@@ -4,8 +4,9 @@ mod support;
 
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{Command, Event, HttpRequest};
-use safe_cex_venue_bybit::{Endpoints, Options, Variant};
+use safe_cex_venue_bybit::{Endpoints, Variant};
 use support::Harness;
+use support::Options;
 
 const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
 const OK: &str = r#"{"retCode":0,"retMsg":"OK","result":{}}"#;

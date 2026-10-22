@@ -304,7 +304,7 @@ fn spot_refresh_has_no_pagination_parameters_and_hyro_keeps_filtering_and_dedupl
         safe_cex_venue_bybit::Variant::Spot,
         safe_cex_venue_bybit::Variant::Hyrotrader,
     ] {
-        let mut h = Harness::started(safe_cex_venue_bybit::Options {
+        let mut h = Harness::started(support::Options {
             variant,
             public_data_only: true,
             endpoints: variant.is_hyro().then(|| safe_cex_venue_bybit::Endpoints {
