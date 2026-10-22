@@ -448,3 +448,25 @@ cached-row restoration. Partial admitted joins still report unsupported rows.
 Original native compatibility controls cover failed/incomplete/stale joins,
 terminal-ACK invalidation, retained exposure and account swapping; no defect RED
 or complete persistent-reporter fan-out claim. See RUST_ROW_ADMISSION.md.
+
+
+### BloFin/Kraken native reporting boundaries (2026-10-23)
+
+Five reporter collections now consume existing engine reporting policy across
+BloFin and both Kraken modes. Original-GREEN controls pin all three BloFin order
+aliases, decoded per-key forgetting before later failures while unrelated
+anonymous memory remains, held position snapshots, and Once remaining quiet
+when a kept position disappears. Kraken controls pin unlisted symbols across
+feeds/reconnect (with a fresh-symbol positive), silent zero quantity, reporting
+before failed/stale REST admission, rejected-identity duplicate protection,
+stale WS no-rearm followed by current-clean positive re-arm, coin/order/empty
+identity isolation, rejected versus admitted stale balance reads, and Spot's
+native unfiltered REST versus filtered WS duplicate re-arm. All126 original
+account tests pass before migration. No new engine API, financial/admission
+policy change, local replay/timing run, threshold, budget or manifest change.
+Full green CI, current artifacts and independent source/caller/data reviews
+remain required; this slice does not close the remaining reporter inventory.
+
+Migrated focused suites pass1253 native tests; strict all-target Clippy, scoped
+fmt, bans and root checks pass. Both independent implementation reviews confirm
+that only reporter memory/adapters changed in the three production files.

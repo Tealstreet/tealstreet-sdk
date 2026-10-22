@@ -1,7 +1,7 @@
 use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
@@ -17,7 +17,6 @@ use std::{
 };
 
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
-const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Clone)]
 pub enum Kind {
@@ -55,27 +54,16 @@ pub struct Account {
     wallet_valuation_pending: bool,
     wallet_valuation_warnings: u8,
     /// `coin:`/`order:` + key of rows already logged as skipped.
-    skip_logged: HashSet<String>,
+    skip_logged: RowReports<String>,
 }
 impl Account {
     /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
     fn log_skip(&mut self, cx: &mut Cx<'_, Pending>, key: String, level: Level, message: String) {
-        if self.skip_logged.len() >= SKIP_LOG_LIMIT {
-            self.skip_logged.clear();
-        }
-        if self.skip_logged.insert(key) {
-            cx.notice(level, code::ROW_SKIPPED, message);
-        }
+        self.skip_logged.report(cx, key, level, message);
     }
     /// Re-arms the skip logs of `prefix`: all after a clean read, else those `ids` mapped.
     fn rearm_skips<'a>(&mut self, prefix: &str, clean: bool, ids: impl Iterator<Item = &'a str>) {
-        if clean {
-            self.skip_logged.retain(|key| !key.starts_with(prefix));
-        } else {
-            for id in ids {
-                self.skip_logged.remove(&format!("{prefix}{id}"));
-            }
-        }
+        self.skip_logged.rearm_namespace(prefix, clean, ids);
     }
 }
 #[derive(Deserialize)]

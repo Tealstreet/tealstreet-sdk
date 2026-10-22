@@ -629,7 +629,8 @@ Store/freshness, signing, request authority, WS lifecycle or history changes.
    Keep the thin native formatting adapter, exact skip severity and empty IDs.
    Decode-based `forget` stays before mapping/final read acceptance, including
    reads that later fail or become stale. Accepted position revision clearing
-   stays at its native site even for a held builder; order clearing stays only
+   stays at its native Balance-response site; rejected Positions bypass that
+   response, and order clearing stays only
    on its clean accepted path. Once never gains Warn-to-Error upgrades.
 2. Kraken futures skip memory becomes bounded ErrorUpgrade, explicitly selected
    in the real `Account::new` constructor. Preserve order/position namespaces,
@@ -671,3 +672,20 @@ slot comes first; integrate its actual shared inputs before final proof. Coordin
 BloFin/Kraken whole-family signing with its owner; those signer edits remain held
 for this slice's actual pin. Re-audit the remaining bounded and unbounded reporter
 inventory after this slice; this plan makes no all-venue closure claim.
+
+
+### BloFin/Kraken implementation checkpoint
+
+The plan above is implemented using existing RowReports only: BloFin's two
+bounded Once memories, Kraken futures' explicit bounded ErrorUpgrade and
+separate unbounded Once, and Kraken Spot's bounded Once. Thin formatting/re-arm
+adapters retain the native sites and iterator choices. Eleven new native
+compatibility controls pass together with all126 account tests on unchanged
+actual #1775 production before migration. The original source/test/log receipt
+is `aa9137471325c9cb881aaa2cf4bf16f060e482db5ad4943038a5a37521489bc6`.
+Independent plan/test-design/source/caller reviews are CLEAN. Migrated checks
+pass1253 focused native tests across68 groups, strict all-target Clippy, scoped
+fmt, bans and root44 typecheck/28 lint (root tasks cached). #1781 integration,
+fresh full CI/current-head raw proof, final data reviews and separate guard/merge
+are still required. This checkpoint makes no product-RED,
+private parity or all-venue fan-out completion claim.
