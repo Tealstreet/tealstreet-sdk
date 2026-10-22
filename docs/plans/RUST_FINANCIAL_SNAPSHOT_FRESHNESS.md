@@ -85,9 +85,9 @@ impl Store {
 
 Methods used by venues are public; representation stays private. Token ownership
 makes final consumption single-use without an active-read registry. Capture once
-and move through pages/join state. Final commit rejects an empty token inventory,
-foreign/exhausted/stale tokens before invoking the native closure or changing
-rows, loaded flags or dirty state. All fallible decoding/financial checks finish
+and move through pages/join state. Final commit rejects empty inputs. Admission also rejects another issuer,
+expired revisions and exhausted domains before invoking the native closure or
+changing rows, loaded flags or dirty state. All fallible decoding/financial checks finish
 first. The closure is infallible, synchronous native-cache application and final
 owned-row construction. It receives the current rows read-only and cannot
 reborrow the same Store. Publish the returned rows only after it returns. No transport, async work,
