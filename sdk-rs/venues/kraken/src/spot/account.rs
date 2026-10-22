@@ -2,6 +2,7 @@ use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
 use safe_cex_engine::url;
@@ -1008,6 +1009,32 @@ impl KrakenSpot {
                 },
                 crate::history::timestamp(&e.timestamp).unwrap_or(cx.now),
             );
+            // A failed delivery must not consume the display baseline or row fences.
+            let delivery = if !snapshot && e.exec_type == "trade" {
+                let price = e.last_price.or(e.avg_price).unwrap_or(o.price);
+                let report = match e.last_qty {
+                    Some(amount) => Report::Last {
+                        amount,
+                        cumulative: e.cum_qty,
+                        price,
+                    },
+                    None => Report::Cumulative {
+                        quantity: filled,
+                        price: CumulativePrice::Direct(price),
+                    },
+                };
+                match Cursor::seed(existing.map_or(0., |o| o.filled), None)
+                    .and_then(|cursor| cursor.prepare(report, Arithmetic::Binary))
+                {
+                    Ok(delivery) => delivery,
+                    Err(_) => {
+                        rejected.push(e.order_id.to_string());
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
             times.insert(e.order_id.to_string(), time);
             if e.exec_type == "filled" || o.remaining == 0. {
                 o.status = OrderStatus::Closed;
@@ -1016,29 +1043,24 @@ impl KrakenSpot {
             if !e.order_type.is_empty() {
                 provenance.insert(o.id.clone(), e.order_type.to_string());
             }
-            let progress = (filled - existing.map_or(0., |o| o.filled)).max(0.);
             // Only trade rows describe executions; filled rows are lifecycle updates.
-            if !snapshot && e.exec_type == "trade" {
-                let qty = e.last_qty.unwrap_or(progress);
-                let price = e.last_price.or(e.avg_price).unwrap_or(o.price);
+            if let Some(delivery) = delivery {
                 let key = if !e.exec_id.is_empty() {
                     e.exec_id.to_string()
                 } else {
                     format!("{}:{filled}:{}", e.order_id, e.timestamp)
                 };
-                if qty > 0. && price > 0. {
-                    fills.push((
-                        key,
-                        Fill {
-                            id: None,
-                            order_id: o.id.clone(),
-                            symbol,
-                            side,
-                            price,
-                            amount: qty,
-                        },
-                    ));
-                }
+                fills.push((
+                    key,
+                    Fill {
+                        id: None,
+                        order_id: o.id.clone(),
+                        symbol,
+                        side,
+                        price: delivery.price(),
+                        amount: delivery.amount(),
+                    },
+                ));
             }
             if let Some(index) = row_indices.get(&o.id).copied() {
                 rows[index] = o;
