@@ -607,7 +607,7 @@ const historyNotice = (command) => ({
   op: 'event', level: 'warn', code: 'history.incomplete', message: 'private coverage', fields: { command },
 });
 
-test('Workers routes the native WEEX incomplete failure fixture only to its translated owner', async () => {
+test('Workers routes the native WEEX incomplete fixture only to its translated owner', async () => {
   const event = JSON.parse(readFileSync(new URL('../../../venues/weex/tests/fixtures/incomplete-query-event.json', import.meta.url), 'utf8'));
   const { object, clients, messages } = await eventObject(false, false);
   try {
@@ -616,14 +616,15 @@ test('Workers routes the native WEEX incomplete failure fixture only to its tran
     assert.deepEqual(messages, [[], []], 'only the actual native fixture supplies a marker');
     object.host.run(JSON.stringify([
       event,
-      { op: 'done', command: 1, error: 'page reset' },
+      { op: 'done', command: 1, result: '[{"tranId":"kept"}]' },
       { op: 'done', command: 2, result: '[]' },
     ]));
     await Promise.all([first, second]);
     assert.deepEqual(messages[0].map((row) => row.op), ['event', 'done']);
     assert.deepEqual(messages[0][0], { ...event, fields: { command: 77 } });
     assert.equal(messages[0][1].id, 77);
-    assert.equal(messages[0][1].error, 'page reset');
+    assert.deepEqual(messages[0][1].result, [{ tranId: 'kept' }]);
+    assert.equal(messages[0][1].error, undefined);
     assert.deepEqual(messages[1].map((row) => row.op), ['done']);
     assert.equal(messages[1][0].id, 77);
   } finally { for (const client of clients) object.leave(client); }

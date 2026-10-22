@@ -279,8 +279,17 @@ native-priced suffix before the venue commits execution identity, observations
 or terminal state; its existing authoritative Last policy remains distinct.
 Four original-source RED financial regressions and two original compatibility
 controls cover correction recovery, stored-state isolation, fallback and quiet
-identity admission. AsterDEX, KuCoin Spot fallback and Orderly cumulative paths
-still need fan-out before reporting policy and snapshot-token work.
+identity admission. KuCoin Spot fallback and Orderly cumulative adoption remain
+open. The owner prioritized the shared financial snapshot freshness core
+immediately after AsterDEX, before remaining fan-out and reporting. AsterDEX
+now uses the same capped
+preparation and validated observation type for its native no-ID path and
+one-time REST seed. Negative observations cannot consume retention slots and
+evict healthy fill anchors; native direct-ID delivery, duplicate observations,
+accepted quiet rows and10,000-entry bounds remain. One original assertion RED
+and ten original compatibility controls are all GREEN through the existing
+engine path; no second local subtraction/minimum helper was introduced.
+
 
 
 
@@ -292,3 +301,55 @@ and fills fallback remain. The shared probe-stage operation preserves cycle and
 lifecycle checks while preventing result-row admission from hiding coverage.
 Queued auth/preparation rejection stays distinct from actual-page recovery.
 [Scope and proof](RUST_OWNED_HISTORY.md); other families remain unconverted.
+
+
+
+
+
+
+Lighter general histories now adopt CursorHistory for staged/accepted rows,
+command-owned completion and native cursor facts. One owner spans trade/funding
+income with a stage output baseline; actual later failures recover accepted
+pages only. Native saturation/cycle/budget and synchronous auth preparation
+refusals remain strict. No new engine API or universal migration claim.
+
+
+
+
+
+
+
+
+Coinbase Advanced Trade history owner adoption now routes fills, orders and
+public trades through existing CursorHistory, with one completion across CFM
+and Spot stages. Only complete validated response pages affect shared identity
+membership/admission; native fingerprints remain conflict-integrity proof before
+filters. The engine owns paging progress, accepted-only later failure and one
+command-bound coverage marker. Preparation/native policy refusals remain strict.
+No new core API or venue pager/marker emitter; other history adapters and NX B11
+coverage remain open. [Scope and evidence](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+
+
+WEEX income now adopts RangeHistory for bounded reads and CursorHistory for
+single-page/equal-bound reads. The shared core admits validated native coverage
+gaps and enforces an optional lifetime request budget using the existing walker
+count. Five local income marker emitters are gone; only successful finalization
+can publish one owned gap. First/zero-accepted failure rejects; later actual
+failure stops and retains accepted pages. Fills/order/public-trade lists and their
+remaining native completeness fact still need conversion; this is not universal
+history enforcement or B11/deployment closure.
+
+
+WEEX fills/orders/public-trade lists now adopt the existing CursorHistory owner
+across native windows and paired normal/algo reads. Shared owner dedupe and
+window generation replace native accepted-row/dedupe/window-loop state. Coverage
+facts publish only after whole-page admission and final success; no native
+HISTORY_INCOMPLETE emitters remain in WEEX histories. Explicit algo continuation
+is an owned gap, with no new paging algorithm. Income remains the prior slice;
+other families and caller/deployment proof remain open.
