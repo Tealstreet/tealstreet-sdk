@@ -988,3 +988,16 @@ original clock/result/Store assertion. Run Binance native tests and strict engin
 Binance checks, bans/shrink-only inventory, secret scan and independent review.
 Architecture gate: No; these are semantic declarations/native callback adoption
 of the already shared engine lifecycle, not a second venue-owned lifecycle.
+
+Plan-audit correction: background timeout cleanup must allow an expired CURRENT
+issuer-bound Context without granting send rights. Extract provenance/current-
+handle validation from the existing timed send validator; finish_http_context
+uses that cleanup-only check, while send/retry validation keeps its original
+raw-deadline check. Retire background context before terminal native callbacks
+can enqueue replacement work at registry capacity. Cleanup failure never suppresses
+the already engine-admitted native terminal callback (a sibling may have pruned
+an expired handle). Keep scoped auth/order-response evidence untouched; unwrap
+before weight observation to avoid duplicate processing. Test expired/foreign/
+reused cleanup and first-free-capacity replacement. No expiry extension or new
+send permission. Independent plan audit: architecture No; these are shared
+retirement semantics, with native reference adoption only.
