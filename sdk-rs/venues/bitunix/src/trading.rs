@@ -828,7 +828,7 @@ impl BitunixFutures {
                     job.created.push(id);
                 }
                 self.account.generations[2] += 1;
-                self.account.order_write_revision += 1;
+                cx.store.invalidate_order_snapshots();
                 self.trading.jobs.insert(command, job);
                 self.advance(cx, command);
             }
@@ -1212,7 +1212,7 @@ impl BitunixFutures {
         };
         let Some(mut step) = job.steps.pop_front() else {
             let job = self.trading.jobs.remove(&command).unwrap();
-            self.account.order_write_revision += 1;
+            cx.store.invalidate_order_snapshots();
             cx.store
                 .remove_orders(&job.created.iter().map(String::as_str).collect::<Vec<_>>());
             if let Some(error) = job.error {
@@ -1231,7 +1231,7 @@ impl BitunixFutures {
         }
         if let Call::Cancel { ids, .. } = &step.call {
             self.account.generations[2] += 1;
-            self.account.order_write_revision += 1;
+            cx.store.invalidate_order_snapshots();
             for id in ids {
                 if cx.store.order(id).is_some_and(|row| {
                     matches!(row.status, OrderStatus::Closed | OrderStatus::Canceled)
@@ -1262,7 +1262,7 @@ impl BitunixFutures {
             );
             return;
         }
-        self.account.order_write_revision += 1;
+        cx.store.invalidate_order_snapshots();
         self.signed_request(
             cx,
             Method::Post,
@@ -1308,7 +1308,7 @@ impl BitunixFutures {
     ) {
         let mut failure = Some(error);
         if let Some(mut job) = self.trading.jobs.remove(&request.command) {
-            self.account.order_write_revision += 1;
+            cx.store.invalidate_order_snapshots();
             if let Some(current) = failure.take() {
                 error::append(&mut job.error, current);
             }
@@ -1343,7 +1343,7 @@ impl BitunixFutures {
         // Fence before parsing: a partial cancellation ACK can apply accepted
         // effects and then exit on a rejected/malformed sibling.
         if write {
-            self.account.order_write_revision += 1;
+            cx.store.invalidate_order_snapshots();
         }
         let body = match error::response_data(&response, write) {
             Ok(body) => body,

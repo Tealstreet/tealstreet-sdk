@@ -156,6 +156,12 @@ Medium:
    stored copy and logs once (Error when none is kept); snapshots still hold
    while discovery or the catalogue is incomplete, and structural failures stay
    fatal. Skips are coded `row.skipped` notices.
+   Financial freshness now also has one engine boundary:
+   [RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md](RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md).
+   Issuer-bound checked epochs and linear Store tokens admit native cache effects
+   and rows together for Binance/Bitunix; native semantic fences and Bitunix WS
+   healthy-peer progress remain. This first core does not claim metadata or all
+   venue adoption, nor safe RequestContext late-ACK patches.
    Standardization continues in [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md):
    `RowAdmission` now owns bounded coverage, unknown/overflow conflict policy,
    silent page/stream merge and coded reporting; `SnapshotCoverage` remains its
