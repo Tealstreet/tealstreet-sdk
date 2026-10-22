@@ -550,3 +550,27 @@ every unowned path matches landing, and all three append-conflict doc blocks are
 retained incoming first/verbatim once. Integrated engine/OKX/Bitunix unit checks
 pass436 tests. Fresh CI must remeasure both public families and authenticate
 complete replay output; no first-run failure is dismissed or normalized away.
+
+## Actual RequestContext integration and retained-interest correction
+
+Actual #1741 `b2fe97324763e1e2702c69ac5b839da37102928b` is merged at
+`c3b0646d35b`. The three engine ingress/finalization conflict resolutions were
+explicitly approved on #1771; both independent ordering reviews confirm every
+HTTP admission, delivery scope, managed signing and settlement rail is retained.
+A new original-RED control proves socket callbacks cannot borrow an outer HTTP
+delivery; the shared callback boundary clears/restores it on return. The four
+engine/OKX/Bitunix/Binance crates pass 1,343 native tests after integration.
+
+The previous CI correction fixed CPU and checkpoint book regressions and passes
+Bitunix. Its remaining unexpected gate is OKX EEA-XPerp retained memory:
+Rust 8,004,952 versus TS 7,205,904 bytes. Shared interest maps deep-copy immutable
+records and transiently clone the released map. This phase shares immutable
+`Arc<Interest>` records between desired/released maps, reuses unchanged desired
+records, and moves released state only after every validation/encoding/coverage
+check succeeds. The public Interest/encoder API, exact frames and release order,
+epoch/auth/ACK/repair behavior and logical byte budgets remain unchanged.
+Original-RED allocation-identity controls accompany same-key argument replacement,
+failed-transaction atomicity and reconnect replay checks. Fresh CI establishes
+actual retained memory; pointer sharing alone makes no numeric savings claim.
+Independent plan review is CLEAR; nonempty payloads pin actual allocations,
+and logical double-copy reservations remain unchanged despite physical sharing.
