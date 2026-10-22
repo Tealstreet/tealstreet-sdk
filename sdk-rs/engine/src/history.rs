@@ -123,6 +123,7 @@ pub struct CursorHistory<T> {
     walk: CursorWalk,
     stall_message: fn(Stall) -> String,
     finished: bool,
+    lifecycle_error: Option<&'static str>,
 }
 
 impl<T> CursorHistory<T> {
@@ -137,6 +138,7 @@ impl<T> CursorHistory<T> {
             walk,
             stall_message,
             finished: false,
+            lifecycle_error: None,
         }
     }
 
@@ -156,8 +158,21 @@ impl<T> CursorHistory<T> {
         self.rows.stage(row);
     }
 
+    /// Start a new endpoint window/stage with a fresh page budget and cursor
+    /// history, retaining accepted rows, identities and missing-coverage cause.
+    #[must_use]
+    pub fn restart_stage(&mut self) -> bool {
+        if !self.finished || !self.rows.pending.is_empty() || self.lifecycle_error.is_some() {
+            self.lifecycle_error = Some("history cursor stage restarted before completion");
+            return false;
+        }
+        self.walk.restart();
+        self.finished = false;
+        true
+    }
+
     pub fn advance(&mut self, page: CursorPage) -> CursorStep {
-        if self.finished {
+        if self.finished || self.lifecycle_error.is_some() {
             return CursorStep::Done;
         }
         self.rows.accept_page();
@@ -172,14 +187,15 @@ impl<T> CursorHistory<T> {
     }
 
     pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
-        if result.is_ok() && !self.finished {
-            return self.rows.completion.finish(
-                cx,
-                Err(
-                    VenueError::new("history cursor completed with a page still pending")
-                        .kind(ErrorKind::Internal),
-                ),
-            );
+        let lifecycle_error = self.lifecycle_error.or_else(|| {
+            (result.is_ok() && !self.finished)
+                .then_some("history cursor completed with a page still pending")
+        });
+        if let Some(message) = lifecycle_error {
+            return self
+                .rows
+                .completion
+                .finish(cx, Err(VenueError::new(message).kind(ErrorKind::Internal)));
         }
         self.rows.finish(cx, result);
     }

@@ -208,3 +208,122 @@ fn keyless_sessions_read_nothing() {
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(done(&out), Some(Ok("[]".into())));
 }
+
+#[test]
+fn first_page_failures_are_typed_and_never_return_empty_complete_rows() {
+    for body in [
+        r#"{"code":"50011","msg":"rate limited","data":[]}"#,
+        r#"{"code":"0","msg":"OK"}"#,
+    ] {
+        let mut e = trading_engine();
+        fetch(&mut e, None, None, None);
+        let first = request(&mut e);
+        reply(&mut e, &first, body, NOW);
+        let out = actions(&mut e);
+        assert!(
+            matches!(done(&out), Some(Err(_))),
+            "first failed page must reject"
+        );
+        assert!(
+            out.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: 77, error }) if error.kind.is_some()
+            )),
+            "first-page rejection must be typed"
+        );
+        assert!(!out.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+        )));
+    }
+}
+
+#[test]
+fn failed_later_page_returns_only_validated_rows_with_owned_completeness() {
+    let mut e = trading_engine();
+    e.set_log_level(safe_cex_engine::Level::Error);
+    fetch(&mut e, None, None, None);
+    let first = request(&mut e);
+    let rows: Vec<_> = (0..100)
+        .map(|i| row(i, 1_709_500_000_000 + i as u64))
+        .collect();
+    reply(&mut e, &first, &page(&rows), NOW);
+    let timer = actions(&mut e)
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 100.0, Event::TimerFired { timer });
+    let second = request(&mut e);
+    let failed = format!(
+        r#"{{"code":"50011","msg":"rate limited","data":[{}]}}"#,
+        row(999, 1_709_400_000_000)
+    );
+    reply(&mut e, &second, &failed, NOW);
+    let out = actions(&mut e);
+    assert!(
+        matches!(done(&out), Some(Ok(_))),
+        "later failure must retain accepted rows"
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&done(&out).unwrap().unwrap()).unwrap();
+    assert_eq!(rows.len(), 100);
+    assert!(rows.iter().all(|row| row["closeTotalPos"] != "999"));
+    let notices: Vec<_> = out.iter().filter(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+    ) || matches!(a, Action::Notice(Notice::CommandDone { command: 77, .. }
+        | Notice::CommandFailed { command: 77, .. }))).collect();
+    assert_eq!(notices.len(), 2);
+    assert!(matches!(notices[0], Action::Notice(Notice::Event(event))
+        if event.fields == vec![("command", safe_cex_engine::Value::Num(77.0))]));
+    assert!(matches!(
+        notices[1],
+        Action::Notice(Notice::CommandDone { command: 77, .. })
+    ));
+}
+
+#[test]
+fn seeded_cursor_preserves_immediate_unchanged_endpoint_termination() {
+    let mut e = trading_engine();
+    let to = 1_710_000_000_000.0;
+    fetch(&mut e, None, None, Some(to));
+    let first = request(&mut e);
+    assert!(url(&first).contains("after=1710000000000"));
+    let rows: Vec<_> = (0..100).map(|i| row(i, 1_710_000_000_001)).collect();
+    reply(&mut e, &first, &page(&rows), NOW);
+    let out = actions(&mut e);
+    assert!(matches!(done(&out), Some(Ok(_))));
+    assert!(!out.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    assert!(!out.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+    )));
+}
+
+#[test]
+fn a_nonadjacent_close_time_cursor_cycle_stops_in_the_shared_pager() {
+    let mut e = trading_engine();
+    fetch(&mut e, None, None, None);
+    let mut terminal = Vec::new();
+    for time in [1000, 500, 1000] {
+        let current = request(&mut e);
+        let rows: Vec<_> = (0..100).map(|i| row(i, time)).collect();
+        reply(&mut e, &current, &page(&rows), NOW);
+        terminal = actions(&mut e);
+        if let Some(timer) = terminal.iter().find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        }) {
+            e.handle(NOW + 100.0, Event::TimerFired { timer });
+        }
+    }
+    assert!(
+        matches!(done(&terminal), Some(Ok(_))),
+        "cycle must stop instead of scheduling another read"
+    );
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&done(&terminal).unwrap().unwrap()).unwrap();
+    assert_eq!(rows.len(), 300);
+    assert!(terminal.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+            && event.fields == vec![("command", safe_cex_engine::Value::Num(77.0))]
+    )));
+}
