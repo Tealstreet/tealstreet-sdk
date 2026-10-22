@@ -263,13 +263,12 @@ impl ContextRegistry {
             .result(delivery.attempt.request, result)
     }
 
-    pub(super) fn seal(
-        &mut self,
+    fn validate_completion(
+        &self,
         command: CommandId,
         delivery: Option<&Delivery>,
         authority: Option<&Context>,
-        error: Option<VenueError>,
-    ) -> Seal {
+    ) -> Result<(), Error> {
         // Managed completion always has explicit generation-bearing authority.
         // Numeric calls remain legacy-only; a live journal/managed delivery
         // cannot be finalized by that bridge.
@@ -278,7 +277,7 @@ impl ContextRegistry {
                 || !matches!(authority.owner(), Owner::Command { id, generation } if id == command
                     && self.commands.get(&id).is_some_and(|owner| owner.generation == generation))
             {
-                return Seal::Stale;
+                return Err(Error::Revoked);
             }
         } else if delivery.is_some()
             || self
@@ -286,11 +285,11 @@ impl ContextRegistry {
                 .get(&command)
                 .is_some_and(|owner| owner.mutation_declared)
         {
-            return Seal::Stale;
+            return Err(Error::Revoked);
         }
         if let Some(delivery) = delivery {
             let Owner::Command { id, generation } = delivery.context.owner() else {
-                return Seal::Stale;
+                return Err(Error::Revoked);
             };
             if id != command
                 || !delivery.context.issued_by(&self.issuer)
@@ -306,8 +305,24 @@ impl ContextRegistry {
                         .and_then(|writes| writes.latest(delivery.context.leg()))
                         != Some(delivery.attempt.request))
             {
-                return Seal::Stale;
+                return Err(Error::Revoked);
             }
+        }
+        Ok(())
+    }
+
+    pub(super) fn seal(
+        &mut self,
+        command: CommandId,
+        delivery: Option<&Delivery>,
+        authority: Option<&Context>,
+        error: Option<VenueError>,
+    ) -> Seal {
+        if self
+            .validate_completion(command, delivery, authority)
+            .is_err()
+        {
+            return Seal::Stale;
         }
         let declared = self
             .commands
@@ -409,12 +424,27 @@ impl<P> Cx<'_, P> {
         context.retry(evidence, self.now)
     }
 
+    /// Validate a synchronous managed completion before publishing its companion
+    /// event. This is completion authority only: no send permission or deadline
+    /// extension. The caller must finish in the same callback without yielding.
+    pub(crate) fn validate_completion_context(&self, context: &Context) -> Result<(), Error> {
+        let Owner::Command { id, .. } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.io.request_contexts.validate_completion(
+            id,
+            self.io.http_delivery.as_ref(),
+            Some(context),
+        )
+    }
+
     /// Generation-bearing finalization for callbacks and logical command timers.
     /// Physical-attempt timers must retain/check their attempt token separately.
     pub fn done_context(&mut self, context: &Context, result: String) -> Result<(), Error> {
         let Owner::Command { id, .. } = context.owner() else {
             return Err(Error::Invalid);
         };
+        self.validate_completion_context(context)?;
         self.finish_command(id, Ok(result), Some(context))
     }
 
@@ -573,6 +603,51 @@ mod tests {
         assert!(cx.io.pending.is_empty());
         assert!(cx.io.actions.is_empty());
         assert!(cx.io.timers.is_empty());
+    }
+
+    #[test]
+    fn completion_validation_is_read_only_and_does_not_grant_post_deadline_send_permission() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let context = cx.http_context(Scope::Command(7), policy()).unwrap();
+        let background = cx.http_context(Scope::Background, policy()).unwrap();
+        let foreign = ContextRegistry::default()
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        assert_eq!(
+            cx.validate_completion_context(&background),
+            Err(Error::Invalid)
+        );
+        assert_eq!(
+            cx.validate_completion_context(&foreign),
+            Err(Error::Revoked)
+        );
+        cx.now = context.deadline();
+        assert_eq!(cx.validate_completion_context(&context), Ok(()));
+        assert_eq!(cx.validate_completion_context(&context), Ok(()));
+        assert_eq!(
+            cx.http_retry_context(&context, RetryEvidence::ReadFailure),
+            Err(Error::TimedOut)
+        );
+        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.timers.is_empty());
+        cx.done_context(&context, "[]".into()).unwrap();
+        assert_eq!(
+            cx.validate_completion_context(&context),
+            Err(Error::Revoked)
+        );
+        let replacement = cx.http_context(Scope::Command(7), policy()).unwrap();
+        assert_eq!(
+            cx.validate_completion_context(&context),
+            Err(Error::Revoked)
+        );
+        assert_eq!(cx.validate_completion_context(&replacement), Ok(()));
+        assert_eq!(cx.io.actions.len(), 1);
     }
 
     fn policy() -> Policy {
@@ -1092,6 +1167,7 @@ mod write_tests {
             store: &mut store,
             io: &mut io,
         };
+        assert_eq!(cx.validate_completion_context(&second), Err(Error::Revoked));
         assert_eq!(
             cx.done_context(&second, "wrong delivery".into()),
             Err(Error::Revoked)
