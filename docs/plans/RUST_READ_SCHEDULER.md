@@ -36,9 +36,11 @@ Independent correctness/adversarial review found two foundation edge cases:
 non-representable positive leases could expire immediately, and checking an idle
 key's lease could block a healthy peer. Strict future lease validation now applies
 only to due, unpaused candidates before state/entropy changes. Response validation
-also preserves the unsent reservation on error. Three regression groups fail with
-the earlier implementations and pass with those fixes. The foundation has thirteen
-state-machine regression tests; existing startup/poll/financial controls remain.
+also preserves the unsent reservation on error. A further adversarial check found
+equal-time hot-key starvation; successful reservations now rotate behind peers
+when due times tie. Four regression groups fail with the earlier implementations
+and pass with those fixes. The foundation has fourteen state-machine regression
+tests; existing startup/poll/financial controls remain.
 
 ## Committable phases
 

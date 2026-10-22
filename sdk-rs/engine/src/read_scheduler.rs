@@ -127,7 +127,7 @@ struct Group<G> {
     until: f64,
 }
 
-/// Bounded registry; stable registration order breaks equal-deadline ties.
+/// Bounded registry; least-recently-reserved order breaks equal-deadline ties.
 ///
 /// Groups are fixed at construction so retiring the last key cannot erase a
 /// pause and let a newly registered key escape it. Separate instances do not
@@ -324,7 +324,12 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
             return Ok(None);
         };
         self.serial = self.serial.checked_add(1).ok_or(Error::TokenExhausted)?;
-        let read = &mut self.reads[index];
+        // Rotate successful reservations behind their peers. With a zero
+        // debounce and repeated same-time callbacks, a hot key must not win
+        // every equal-deadline tie and starve another ready key.
+        let read = self.reads.remove(index);
+        self.reads.push(read);
+        let read = self.reads.last_mut().expect("reserved registered read");
         let token = Attempt(self.serial);
         read.pending = None;
         read.active = Some(Active {
@@ -820,8 +825,13 @@ mod tests {
         let deadline = scheduler.next_deadline();
         assert_eq!(scheduler.mark_issued(token, now), Err(Error::InvalidTime));
         assert_eq!(scheduler.next_deadline(), deadline);
-        assert!(!scheduler.reads[0].active.unwrap().issued);
-        scheduler.reads[0].policy.response_timeout_ms = 100.0;
+        let read = scheduler
+            .reads
+            .iter_mut()
+            .find(|read| read.key == "orders")
+            .unwrap();
+        assert!(!read.active.unwrap().issued);
+        read.policy.response_timeout_ms = 100.0;
         assert!(scheduler.mark_issued(token, now).unwrap());
     }
 
@@ -847,5 +857,41 @@ mod tests {
             assert_eq!(*key, "positions");
             assert!(scheduler.mark_issued(token, now).unwrap());
         }
+    }
+
+    #[test]
+    fn repeated_same_time_dirty_reads_cannot_starve_an_equal_deadline_peer() {
+        let mut scheduler = scheduler();
+        for read in &mut scheduler.reads {
+            read.policy.debounce_ms = 0.0;
+        }
+        for key in ["orders", "positions"] {
+            scheduler.request(&key, 0.0, Demand::Refresh).unwrap();
+        }
+        let first = ready(&mut scheduler, 0.0);
+        scheduler.mark_issued(first, 0.0).unwrap();
+        scheduler
+            .request(&"orders", 0.0, Demand::Invalidate)
+            .unwrap();
+        scheduler
+            .finish(first, 0.0, true, |_| unreachable!())
+            .unwrap();
+        let (key, second) = scheduler
+            .take_ready(0.0, |_| unreachable!())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            *key, "positions",
+            "hot orders may not win every equal-time tie"
+        );
+        scheduler.mark_issued(second, 0.0).unwrap();
+        scheduler
+            .finish(second, 0.0, true, |_| unreachable!())
+            .unwrap();
+        let (key, _) = scheduler
+            .take_ready(0.0, |_| unreachable!())
+            .unwrap()
+            .unwrap();
+        assert_eq!(*key, "orders", "the coalesced repair is retained");
     }
 }
