@@ -261,3 +261,17 @@ empty error compatibility, UTF-8/BOM and sparse arrays have focused regressions.
 All 38 SDK provider tests, package typecheck/lint and independent adversarial
 review pass. Construction, routing and private-feed admission remain unchanged;
 this standalone checkpoint does not yet make keyless accounts run on Rust.
+
+
+Half-2 shared result checkpoint: optional callback headers now cross the same
+SignResult through Rust and the JS host, with unchanged empty-result serialization.
+Trusted SignStep policy is copied into Pending; only HTTP/single-sign recipes may
+opt in. Full metadata validates before recipe application and is merged into the
+same fresh action afterward, including removal of dynamic protected aliases even
+for empty callbacks. Unsigned recipes never retain callback values. Existing raw
+operation deadlines, calibration revision/freshness and final release fences
+remain in force; capture work defaults to denying headers. Dense bounded JS
+snapshots reject sparse/provider-overridden arrays and mutable getter swaps.
+All 383 native engine tests, 178 JS host tests and strict Clippy pass; two
+independent reviews are clean after the protected-shadow and snapshot corrections.
+No family recipe opts in yet; the standalone SDK adapter is still not installed.

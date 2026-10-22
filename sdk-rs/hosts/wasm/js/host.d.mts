@@ -247,7 +247,12 @@ export interface LocalIdentityMetadata {
 export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondary?: LocalIdentityMetadata }
 /** Canonical facts in protocol UTC milliseconds; neither field is fabricated. */
 export interface SignReceipt { stampMs?: number; expiryMs?: number }
-export interface SignResult { values: number[][]; receipt: SignReceipt }
+export interface SignResult {
+  values: number[][];
+  receipt: SignReceipt;
+  /** Bounded same-attempt callback metadata; trusted native HTTP policy owns precedence. */
+  headers?: [string, string][];
+}
 
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }

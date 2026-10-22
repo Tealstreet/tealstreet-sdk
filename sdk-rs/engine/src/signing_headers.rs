@@ -45,6 +45,14 @@ pub fn validate(headers: &[(String, String)]) -> Result<(), SignError> {
 }
 
 impl ResultHeaderPolicy {
+    pub fn validate(self, callback: &[(String, String)]) -> Result<(), SignError> {
+        validate(callback)?;
+        if matches!(self, Self::Deny) && !callback.is_empty() {
+            return Err(SignError::InvalidResult);
+        }
+        Ok(())
+    }
+
     /// Validate the entire callback before changing outbound data. Call only on
     /// the fresh signed HTTP action, never on the retained unsigned recipe.
     pub fn apply(
@@ -52,7 +60,7 @@ impl ResultHeaderPolicy {
         native: &mut Vec<(String, String)>,
         callback: &[(String, String)],
     ) -> Result<(), SignError> {
-        validate(callback)?;
+        self.validate(callback)?;
         let protected = match self {
             Self::Deny if callback.is_empty() => return Ok(()),
             Self::Deny => return Err(SignError::InvalidResult),
@@ -71,8 +79,12 @@ impl ResultHeaderPolicy {
                     return true;
                 }
                 if replaced {
+                    use zeroize::Zeroize;
+                    current_value.zeroize();
                     return false;
                 }
+                use zeroize::Zeroize;
+                current_value.zeroize();
                 current_value.clone_from(value);
                 replaced = true;
                 true
@@ -80,6 +92,49 @@ impl ResultHeaderPolicy {
             if !replaced {
                 native.push((name.clone(), value.clone()));
             }
+        }
+        Ok(())
+    }
+
+    /// Keep fixed-name native headers in their original representation. Only
+    /// names actually overridden by this callback move to delegated custody.
+    pub fn apply_http(
+        self,
+        http: &mut crate::HttpRequest,
+        callback: &[(String, String)],
+    ) -> Result<(), SignError> {
+        self.validate(callback)?;
+        if let Self::Http { protected } = self {
+            http.signer_headers.retain_mut(|(name, value)| {
+                if protected
+                    .iter()
+                    .any(|fixed| fixed.eq_ignore_ascii_case(name))
+                {
+                    use zeroize::Zeroize;
+                    value.zeroize();
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        self.apply(&mut http.signer_headers, callback)?;
+        if let Self::Http { protected } = self {
+            http.headers.retain_mut(|(name, value)| {
+                if !protected
+                    .iter()
+                    .any(|fixed| fixed.eq_ignore_ascii_case(name))
+                    && callback
+                        .iter()
+                        .any(|(key, _)| key.eq_ignore_ascii_case(name))
+                {
+                    use zeroize::Zeroize;
+                    value.zeroize();
+                    false
+                } else {
+                    true
+                }
+            });
         }
         Ok(())
     }
@@ -218,5 +273,33 @@ mod tests {
         assert!(validate(&exact).is_ok()); // 4 * (1 + 8191) = 32768.
         exact[0].1.push('x');
         assert!(validate(&exact).is_err()); // 32769, with each value still <=8192.
+    }
+
+    #[test]
+    fn protected_native_headers_cannot_be_shadowed_by_existing_dynamic_aliases() {
+        for callback in [vec![], vec![pair("X-Custom", "callback")]] {
+            let mut http = crate::HttpRequest {
+                id: crate::RequestId(1),
+                method: crate::Method::Get,
+                route: None,
+                timeout_ms: None,
+                url: String::new(),
+                body: None,
+                headers: vec![("X-BAPI-SIGN", "native".into())],
+                signer_headers: vec![
+                    pair("x-bapi-sign", "stale"),
+                    pair("X-Unrelated", "unchanged"),
+                ],
+            };
+            ResultHeaderPolicy::Http {
+                protected: &["X-BAPI-SIGN"],
+            }
+            .apply_http(&mut http, &callback)
+            .unwrap();
+            assert_eq!(http.headers, vec![("X-BAPI-SIGN", "native".into())]);
+            let mut expected = vec![pair("X-Unrelated", "unchanged")];
+            expected.extend(callback);
+            assert_eq!(http.signer_headers, expected);
+        }
     }
 }

@@ -290,7 +290,10 @@ impl SignRequest {
     /// Validate provider output against this exact atomic request. Dispatch and
     /// signing-only capture share receipt, result-count and byte-shape policy.
     pub fn validate_result(&self, result: &SignResult) -> Result<(), SignError> {
-        validate_result_shape(&self.expected_result_lengths(), self.receipt, result)
+        validate_result_shape(&self.expected_result_lengths(), self.receipt, result)?;
+        // One-off compatibility captures and arbitrary primitive work cannot
+        // grant HTTP header authority. Dispatch uses its trusted recipe policy.
+        crate::signing_headers::ResultHeaderPolicy::Deny.validate(&result.headers)
     }
 
     pub(crate) fn expected_result_lengths(&self) -> Vec<Option<usize>> {
@@ -372,6 +375,7 @@ pub(crate) fn validate_result_shape(
     receipt: SignReceipt,
     result: &SignResult,
 ) -> Result<(), SignError> {
+    crate::signing_headers::validate(&result.headers)?;
     if result.receipt.validate().is_err()
         || result.receipt != receipt
         || result.values.len() != expected.len()
@@ -391,10 +395,18 @@ pub(crate) fn validate_result_shape(
 pub struct SignResult {
     pub values: Vec<Vec<u8>>,
     pub receipt: SignReceipt,
+    /// Optional callback metadata for this atomic attempt. Trusted dispatch
+    /// policy decides whether it may modify the fresh HTTP action.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<(String, String)>,
 }
 impl SignResult {
     pub fn new(values: Vec<Vec<u8>>, receipt: SignReceipt) -> Self {
-        Self { values, receipt }
+        Self {
+            values,
+            receipt,
+            headers: vec![],
+        }
     }
 }
 
@@ -403,6 +415,9 @@ impl Drop for SignResult {
         use zeroize::Zeroize;
         for bytes in &mut self.values {
             bytes.zeroize();
+        }
+        for (_, value) in &mut self.headers {
+            value.zeroize();
         }
     }
 }
