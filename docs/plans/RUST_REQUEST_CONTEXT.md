@@ -1117,3 +1117,18 @@ Add valid wide-token controls and malformed/mismatched/unknown-phase controls
 that fail on the old checker; run existing conformance tests and bans. This is
 required new-wire recognition in the existing harness choke point, not another
 capability policy or a valid-state proof exemption. Architecture No.
+
+Bitget public-path source audit after repeated provisional timing misses:
+independent review finds common-event custody pruning/managed admission checks
+and delivery-scope save/restore, plus an empty managed-map lookup for legacy
+stream chunks and a per-row optional managed guard. Public WS events take
+non-HTTP branches with empty lifecycle/signing maps; no new per-frame allocation,
+row scan, hash/signing work or managed timer was identified. Legacy HTTP bootstrap
+and periodic replies do run the added constant checks. The replay uses
+EngineHost+tape transport, not native reqwest/HOW, SDK proxy preparation or the
+new default fetch transport. Bitget source/profile and JS WS/frame decoding are
+unchanged. This is static scope evidence, not a CPU causality proof or a noise
+disposition: constant checks/codegen layout may still affect a narrow margin.
+No obviously unintended expensive work was found; remeasure final integrated CI
+and escalate a repeat with measured evidence before proposing any optimization.
+Architecture No; no Bitget-specific workaround or budget/profile change.
