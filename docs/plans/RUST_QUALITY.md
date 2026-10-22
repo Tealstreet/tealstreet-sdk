@@ -281,3 +281,14 @@ Four original-source RED financial regressions and two original compatibility
 controls cover correction recovery, stored-state isolation, fallback and quiet
 identity admission. AsterDEX, KuCoin Spot fallback and Orderly cumulative paths
 still need fan-out before reporting policy and snapshot-token work.
+
+
+
+
+Paradex histories also reuse CursorHistory for staged/accepted rows, command
+ownership and completeness instead of local row vectors, walker ownership and
+marker emission. Native lookup proof, strict cursor/unbounded-budget refusals
+and fills fallback remain. The shared probe-stage operation preserves cycle and
+lifecycle checks while preventing result-row admission from hiding coverage.
+Queued auth/preparation rejection stays distinct from actual-page recovery.
+[Scope and proof](RUST_OWNED_HISTORY.md); other families remain unconverted.

@@ -1,12 +1,11 @@
 //! Rare cursor-paged reads never mutate the account store.
 use crate::{Pending, account::Account};
-use safe_cex_engine::Level;
-use safe_cex_engine::log::code;
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, json::ArrayAt};
+use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
 
 /// Fills pages before the read falls back to order history or stops.
@@ -33,23 +32,43 @@ fn page_cap(query: &Query) -> u32 {
 #[derive(Default)]
 pub struct History;
 pub struct Request {
-    command: CommandId,
     query: Query,
-    walk: CursorWalk,
+    history: Box<CursorHistory<Output>>,
     valid: bool,
     raw_rows: usize,
     fallback: bool,
     lookup_history: bool,
     lookup_complete: bool,
     open_complete: bool,
-    rows: Rows,
 }
-enum Rows {
-    Fills(Vec<Execution>),
-    Orders(Vec<HistoricalOrder>),
-    Income(Vec<Income>),
-    Trades(Vec<PublicTrade>),
-    Lookup(Vec<safe_cex_engine::model::Order>),
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Output {
+    Fill(Execution),
+    Order(HistoricalOrder),
+    Income(Income),
+    Trade(PublicTrade),
+    Lookup(safe_cex_engine::model::Order),
+}
+impl Output {
+    fn timestamp(&self) -> f64 {
+        match self {
+            Self::Fill(row) => row.timestamp,
+            Self::Order(row) => row.created_time,
+            Self::Income(row) => row.timestamp,
+            Self::Trade(row) => row.timestamp,
+            Self::Lookup(_) => 0.0,
+        }
+    }
+}
+fn stall_message(reason: Stall) -> String {
+    match reason {
+        Stall::PageBudget => "Paradex history reached page cap".into(),
+        _ => "Paradex repeated history cursor".into(),
+    }
+}
+fn encode_rows(rows: &[Output]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string()))
 }
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -291,16 +310,13 @@ impl History {
             cx.done(command, "[]".into());
             return;
         }
-        let rows = match query {
-            Query::Fills { .. } => Rows::Fills(Vec::new()),
-            Query::OrderHistory { .. } => Rows::Orders(Vec::new()),
-            Query::Income { .. } => Rows::Income(Vec::new()),
-            Query::PublicTrades { .. } => Rows::Trades(Vec::new()),
-            Query::OrderByClientId { .. } => Rows::Lookup(Vec::new()),
-        };
         let request = Request {
-            command,
-            walk: CursorWalk::new(page_cap(&query)),
+            history: Box::new(CursorHistory::new(
+                Completion::new(command),
+                CursorWalk::new(page_cap(&query)),
+                stall_message,
+                encode_rows,
+            )),
             query,
             valid: true,
             raw_rows: 0,
@@ -308,11 +324,10 @@ impl History {
             lookup_history: false,
             lookup_complete: false,
             open_complete: false,
-            rows,
         };
         self.issue(cx, account, request);
     }
-    fn issue(&self, cx: &mut Cx<'_, Pending>, account: &mut Account, request: Request) {
+    fn issue(&self, cx: &mut Cx<'_, Pending>, account: &mut Account, mut request: Request) {
         let mut params = Vec::new();
         let (path, symbol, from, to, page_size, public) = match &request.query {
             Query::Fills {
@@ -386,23 +401,29 @@ impl History {
         if from.into_iter().chain(to).any(|v| !v.is_finite())
             || matches!((from, to), (Some(a),Some(b)) if a>b)
         {
-            cx.fail(request.command, "invalid Paradex history time range");
+            self.on_rejected(cx, request, "invalid Paradex history time range");
             return;
         }
         if !public && account.credentials().is_none() {
-            cx.fail(request.command, "Paradex private auth is not initialized");
+            self.on_rejected(cx, request, "Paradex private auth is not initialized");
             return;
         }
         if let Some(symbol) = symbol {
             let Some(market) = cx.store.market(symbol) else {
-                cx.done(
-                    request.command,
-                    if matches!(request.query, Query::OrderByClientId { .. }) {
-                        "{\"found\":false,\"definitive\":false}".into()
-                    } else {
-                        "[]".into()
-                    },
-                );
+                let result = if matches!(request.query, Query::OrderByClientId { .. }) {
+                    "{\"found\":false,\"definitive\":false}"
+                } else {
+                    "[]"
+                };
+                request.history.advance(CursorPage {
+                    next: None,
+                    rows: 0,
+                    fresh: 0,
+                    want_more: false,
+                });
+                request
+                    .history
+                    .finish_with(cx, Ok(()), |_| Ok(result.into()));
                 return;
             };
             params.push(format!("market={}", encode(&market.id)));
@@ -421,7 +442,7 @@ impl History {
         if let Some(to) = to {
             params.push(format!("end_at={}", safe_cex_engine::num::format(to)));
         }
-        if let Some(cursor) = request.walk.cursor() {
+        if let Some(cursor) = request.history.cursor() {
             params.push(format!("cursor={}", encode(cursor)));
         }
         let path = format!("{path}?{}", params.join("&"));
@@ -446,24 +467,21 @@ impl History {
     }
     pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
         request.raw_rows += 1;
-        if let Rows::Lookup(rows) = &mut request.rows {
+        if let Query::OrderByClientId {
+            symbol,
+            client_order_id,
+        } = &request.query
+        {
             let Ok(row) = serde_json::from_str::<crate::account::NativeOrder>(item) else {
                 request.valid = false;
                 return;
             };
-            let Query::OrderByClientId {
-                symbol,
-                client_order_id,
-            } = &request.query
-            else {
-                return;
-            };
             if row.market == *symbol
                 && row.client_id == *client_order_id
-                && request.walk.fresh(row.id.clone())
+                && request.history.fresh(row.id.clone())
             {
                 if let Ok(order) = crate::account::map_order(&row) {
-                    rows.push(order);
+                    request.history.stage(Output::Lookup(order));
                 } else {
                     request.valid = false;
                 }
@@ -492,11 +510,11 @@ impl History {
         if request.fallback && row.order_id.is_empty() {
             row.order_id = row.id.clone();
         }
-        if !row.id.is_empty() && !request.walk.fresh(row.id.clone()) {
+        if !row.id.is_empty() && !request.history.fresh(row.id.clone()) {
             return;
         }
-        match &mut request.rows {
-            Rows::Fills(rows) => {
+        match &request.query {
+            Query::Fills { .. } => {
                 let Query::Fills {
                     symbol,
                     order_id,
@@ -534,7 +552,7 @@ impl History {
                 let Some(side) = side(&row.side) else {
                     return;
                 };
-                rows.push(Execution {
+                request.history.stage(Output::Fill(Execution {
                     id: row.id,
                     timestamp: (timestamp / 1000.).floor(),
                     symbol: row.market,
@@ -556,15 +574,15 @@ impl History {
                         .ok()
                         .filter(|v| v.is_finite()),
                     maker: (!row.liquidity.is_empty()).then(|| row.liquidity == "MAKER"),
-                });
+                }));
             }
-            Rows::Orders(rows) => {
+            Query::OrderHistory { .. } => {
                 if let Some(order) = map_order(&row) {
-                    rows.push(order);
+                    request.history.stage(Output::Order(order));
                 }
             }
-            Rows::Lookup(_) => unreachable!(),
-            Rows::Income(rows) => {
+            Query::OrderByClientId { .. } => unreachable!(),
+            Query::Income { .. } => {
                 let timestamp = number(&row.created_at);
                 if timestamp <= 0. || row.market.is_empty() {
                     return;
@@ -607,7 +625,7 @@ impl History {
                         _ => None,
                     };
                     if value != 0. && wanted.is_none_or(|kind| kind == income_type) {
-                        rows.push(Income {
+                        request.history.stage(Output::Income(Income {
                             symbol: row.market.clone(),
                             income_type,
                             income: value,
@@ -616,13 +634,13 @@ impl History {
                             tran_id: format!("{}:{suffix}", row.id),
                             trade_id: row.id.clone(),
                             category,
-                        });
+                        }));
                     }
                 }
             }
-            Rows::Trades(rows) => {
+            Query::PublicTrades { .. } => {
                 if let Some(side) = side(&row.side) {
-                    rows.push(PublicTrade {
+                    request.history.stage(Output::Trade(PublicTrade {
                         id: row.id,
                         symbol: row.market,
                         price: number(&row.price),
@@ -630,7 +648,7 @@ impl History {
                         quote_qty: number(&row.size) * number(&row.price),
                         side,
                         timestamp: number(&row.created_at),
-                    });
+                    }));
                 }
             }
         }
@@ -651,17 +669,29 @@ impl History {
             return;
         }
         #[derive(Deserialize)]
-        struct Envelope {
+        struct Envelope<'a> {
             next: Option<String>,
+            #[serde(borrow, rename = "results")]
+            rows: &'a serde_json::value::RawValue,
         }
-        let Ok(envelope) = serde_json::from_str::<Envelope>(response.body) else {
+        let Ok(envelope) = serde_json::from_str::<Envelope<'_>>(response.body) else {
             self.on_failed(cx, request, "invalid Paradex history envelope");
             return;
         };
+        if !envelope.rows.get().starts_with('[') {
+            self.on_failed(cx, request, "invalid Paradex history list");
+            return;
+        }
         let next = envelope.next.filter(|s| !s.is_empty());
         if matches!(request.query, Query::OrderByClientId { .. }) && !request.lookup_history {
-            if matches!(&request.rows, Rows::Lookup(rows) if !rows.is_empty()) {
-                self.finish(cx, request);
+            if request.history.staged_len() > 0 {
+                request.history.advance(CursorPage {
+                    next: None,
+                    rows: request.raw_rows,
+                    fresh: request.raw_rows,
+                    want_more: false,
+                });
+                self.finish(cx, request, Ok(()));
                 return;
             }
             let page = CursorPage {
@@ -670,50 +700,65 @@ impl History {
                 fresh: request.raw_rows,
                 want_more: true,
             };
-            match request.walk.advance(page) {
+            match request.history.advance_probe(page) {
                 CursorStep::More(_) => {
                     self.issue(cx, account, request);
                     return;
                 }
                 CursorStep::Stalled(Stall::RepeatedCursor) => {
-                    self.on_failed(cx, request, "Paradex repeated open-order cursor");
+                    request
+                        .history
+                        .reject(cx, VenueError::new("Paradex repeated open-order cursor"));
                     return;
                 }
                 CursorStep::Stalled(_) | CursorStep::Done => {}
             }
             request.open_complete = next.is_none();
             request.lookup_history = true;
-            request.walk.restart();
+            if !request.history.restart_stage() {
+                request
+                    .history
+                    .reject(cx, VenueError::new("invalid Paradex lookup stage"));
+                return;
+            }
             self.issue(cx, account, request);
             return;
         }
         if matches!(request.query, Query::Fills { .. })
             && request.raw_rows == 0
             && !request.fallback
-            && (next.is_none() || request.walk.pages() + 1 >= FILL_PAGES)
+            && (next.is_none() || request.history.pages() + 1 >= FILL_PAGES)
         {
+            // Native aggregate fallback ends this empty discovery stage; it is
+            // not a partial fill result or a new command/completion owner.
+            request.history.advance(CursorPage {
+                next: None,
+                rows: 0,
+                fresh: 0,
+                want_more: false,
+            });
             request.fallback = true;
-            request.walk.restart();
+            if !request.history.restart_stage() {
+                request
+                    .history
+                    .reject(cx, VenueError::new("invalid Paradex fills stage"));
+                return;
+            }
             self.issue(cx, account, request);
             return;
         }
-        // A bounded read stops once it keeps enough rows (filters run after the
-        // page arrives): Paradex pages newest first, so those are the rows a
-        // full walk would keep. Only an unbounded read can exhaust its pages.
-        let (enough, bounded) = match (&request.query, &request.rows) {
-            (Query::Fills { limit, .. }, Rows::Fills(rows)) => (
-                rows.len() >= limit.unwrap_or(100).clamp(1, 500) as usize,
-                true,
-            ),
-            (Query::OrderHistory { limit, .. }, Rows::Orders(rows)) => {
-                limit_reached(*limit, rows.len())
+        let kept = request.history.accepted_len() + request.history.staged_len();
+        let (enough, bounded) = match &request.query {
+            Query::Fills { limit, .. } => {
+                (kept >= limit.unwrap_or(100).clamp(1, 500) as usize, true)
             }
-            (Query::Income { limit, .. }, Rows::Income(rows)) => limit_reached(*limit, rows.len()),
-            (Query::OrderByClientId { .. }, Rows::Lookup(rows)) => (!rows.is_empty(), true),
+            Query::OrderHistory { limit, .. } | Query::Income { limit, .. } => {
+                limit_reached(*limit, kept)
+            }
+            Query::OrderByClientId { .. } => (kept > 0, true),
             _ => (false, false),
         };
         request.lookup_complete = request.open_complete && request.lookup_history && next.is_none();
-        // The orders fallback and public trades are single pages.
         let single = request.fallback || matches!(request.query, Query::PublicTrades { .. });
         let page = CursorPage {
             next: if single { None } else { next },
@@ -721,72 +766,44 @@ impl History {
             fresh: request.raw_rows,
             want_more: !enough,
         };
-        match request.walk.advance(page) {
+        match request.history.advance(page) {
             CursorStep::More(_) => {
                 self.issue(cx, account, request);
                 return;
             }
-            // A bounded read keeps what its pages found, as before: a lookup
-            // reports a non-definitive miss. An unbounded read is incomplete.
-            CursorStep::Stalled(Stall::PageBudget) if bounded => cx.event(
-                Level::Warn,
-                code::HISTORY_INCOMPLETE,
-                "Paradex history reached page cap",
-                vec![(
-                    "command",
-                    safe_cex_engine::Value::Num(f64::from(request.command)),
-                )],
-            ),
+            CursorStep::Stalled(Stall::PageBudget) if bounded => {}
             CursorStep::Stalled(Stall::PageBudget) => {
-                self.on_failed(cx, request, "INCOMPLETE: Paradex history page cap reached");
+                request.history.reject(
+                    cx,
+                    VenueError::new("INCOMPLETE: Paradex history page cap reached"),
+                );
                 return;
             }
             CursorStep::Stalled(_) => {
-                self.on_failed(cx, request, "Paradex repeated history cursor");
+                request
+                    .history
+                    .reject(cx, VenueError::new("Paradex repeated history cursor"));
                 return;
             }
             CursorStep::Done => {}
         }
-        self.finish(cx, request);
+        self.finish(cx, request, Ok(()));
     }
-    fn finish(&self, cx: &mut Cx<'_, Pending>, request: Request) {
+    fn finish(&self, cx: &mut Cx<'_, Pending>, request: Request, result: Result<(), VenueError>) {
         let limit = match request.query {
-            Query::Fills { limit, .. } => Some(limit.unwrap_or(100).clamp(1, 500) as usize),
+            Query::Fills { limit, .. } | Query::PublicTrades { limit, .. } => {
+                Some(limit.unwrap_or(100).clamp(1, 500) as usize)
+            }
             Query::OrderHistory { limit, .. } | Query::Income { limit, .. } => {
                 limit.filter(|v| *v > 0).map(|v| v as usize)
             }
-            Query::PublicTrades { limit, .. } => Some(limit.unwrap_or(100).clamp(1, 500) as usize),
             _ => None,
         };
-        let result = match request.rows {
-            Rows::Fills(mut rows) => {
-                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                if let Some(n) = limit {
-                    rows.truncate(n);
-                }
-                serde_json::to_string(&rows)
-            }
-            Rows::Orders(mut rows) => {
-                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                if let Some(n) = limit {
-                    rows.truncate(n);
-                }
-                serde_json::to_string(&rows)
-            }
-            Rows::Income(mut rows) => {
-                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                if let Some(n) = limit {
-                    rows.truncate(n);
-                }
-                serde_json::to_string(&rows)
-            }
-            Rows::Trades(mut rows) => {
-                if let Some(n) = limit {
-                    rows.truncate(n);
-                }
-                serde_json::to_string(&rows)
-            }
-            Rows::Lookup(rows) => {
+        let lookup = matches!(request.query, Query::OrderByClientId { .. });
+        let sort = !matches!(request.query, Query::PublicTrades { .. });
+        let definitive = request.lookup_complete;
+        request.history.finish_with(cx, result, move |mut rows| {
+            if lookup {
                 #[derive(Serialize)]
                 struct Lookup<'a> {
                     found: bool,
@@ -795,19 +812,36 @@ impl History {
                     #[serde(skip_serializing_if = "Option::is_none")]
                     order: Option<&'a safe_cex_engine::model::Order>,
                 }
-                serde_json::to_string(&Lookup {
-                    found: !rows.is_empty(),
-                    definitive: rows.is_empty().then_some(request.lookup_complete),
-                    order: rows.first(),
+                let order = rows.first().and_then(|row| match row {
+                    Output::Lookup(order) => Some(order),
+                    _ => None,
+                });
+                return serde_json::to_string(&Lookup {
+                    found: order.is_some(),
+                    definitive: order.is_none().then_some(definitive),
+                    order,
                 })
+                .map_err(|e| VenueError::new(e.to_string()));
             }
-        };
-        match result.map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(request.command, data),
-            Err(error) => cx.fail(request.command, error),
-        };
+            if sort {
+                rows.sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
+            }
+            if let Some(limit) = limit {
+                rows.truncate(limit);
+            }
+            encode_rows(&rows)
+        });
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        cx.fail(request.command, error);
+        if matches!(request.query, Query::OrderByClientId { .. }) {
+            request.history.reject(cx, VenueError::new(error));
+        } else {
+            self.finish(cx, request, Err(VenueError::new(error)));
+        }
+    }
+    pub fn on_rejected(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        request
+            .history
+            .reject(cx, VenueError::new(error).outcome(Outcome::NotSent));
     }
 }
