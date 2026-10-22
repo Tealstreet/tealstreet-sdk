@@ -93,7 +93,8 @@ These warnings never fail the job on latency. Revisit a hard gate only after
 and browser cohorts reviewed; dispatches, skipped and cancelled runs do not
 count. A hard timing gate remains a separate decision.
 
-`raw.json.warnings` is an array (empty when no median exceeds its threshold).
+Completed reports carry a `raw.json.warnings` array (empty when no median
+exceeds its threshold). Failed reports can omit it if completion is not reached.
 Each warning records the artifact, unrounded median, threshold, source/run and
 runner/runtime cohort; the same record is emitted as an escaped GitHub warning
 annotation. Raw observations and the median table remain intact. Local tests:
