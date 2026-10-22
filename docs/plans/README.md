@@ -32,6 +32,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Artifacts and performance | Retained plan/evidence | Changing artifact layout, compilation profiles, budgets or performance evidence. | [RUST_FAMILY_WASM_SIZE.md](RUST_FAMILY_WASM_SIZE.md) |
 | Artifacts and performance | Retained plan/evidence | Changing artifact layout, compilation profiles, budgets or performance evidence. | [RUST_GATE_TIMING.md](RUST_GATE_TIMING.md) |
 | Artifacts and performance | Retained plan/evidence | Changing artifact layout, compilation profiles, budgets or performance evidence. | [RUST_WASM_ARTIFACT_SIZE.md](RUST_WASM_ARTIFACT_SIZE.md) |
+| AsterDEX whole-family throughput restoration | In progress | Read before changing its standalone WASM compiler profile or interpreting repeated public timing misses | [RUST_ASTERDEX_THROUGHPUT.md](RUST_ASTERDEX_THROUGHPUT.md) |
 | Artifacts and performance | Retained plan/evidence | Changing artifact layout, compilation profiles, budgets or performance evidence. | [RUST_WASM_FAMILIES.md](RUST_WASM_FAMILIES.md) |
 | AsterDEX Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_ASTERDEX.md](RUST_ASTERDEX.md) |
 | Backpack Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_BACKPACK.md](RUST_BACKPACK.md) |
