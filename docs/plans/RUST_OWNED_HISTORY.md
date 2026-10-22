@@ -800,6 +800,91 @@ WASM, timing or full replay sweep was run.
 
 
 
+
+## Next fan-out: Lighter cursor histories
+
+Plan from owner-pinned actual `2c5c5f6987f35cafc0e272282e54da37c0a66d4f`.
+Paradex #1748 is separate and watched; merge it on exact-head green under the
+announced separate guard/merge flow, then integrate its actual shared dependency
+before final Lighter proof. Bybit, Kraken Spot and Paradex native sources are
+out of scope here. #1747 remains a separate draft waiting on #1741.
+
+Lighter still owns a CursorWalk, mutable result vector and per-query command in
+history.rs. Replace those with the existing `CursorHistory<Row>` completion and
+staged/accepted rows. No new engine API, pager, marker helper or scheduler.
+Keep native wire mapping, cross-stage trade/funding identity namespaces,
+principal checks and schema validation; a failed response's prefix never enters
+accepted rows. First failure before mapped rows rejects typed; later actual
+HTTP/native/stream/row/list failure returns only accepted pages with one owned
+incomplete Warn before success, including Error-only logging. A wrong-principal
+failed page contributes no rows. Empty/fully filtered pages alone cannot permit
+partial recovery. Multiplexed transport/decode callbacks retain Internal rather
+than inventing Network classification.
+
+All-income keeps one owner through trades then funding. Admit the final valid
+trade page and terminal stage before restart, retaining accepted rows, dedupe and
+first missing-coverage cause. Record the accepted-length baseline at the native
+stage transition so each stage's existing output-limit stopping rule uses shared
+accepted/staged counts; do not add another paging/accepted-row counter. Preserve
+limit defaults/clamps (1..200), native request limit 100, 1000-page stage budget,
+URL/cursor escaping, market/account/order selection, optional no-I/O behavior,
+raw row counts, lower-bound past-window termination, financial units and fee/
+rebate/PnL mapping, stable final sort and global truncation.
+
+Repeated cursor/budget and saturated full page without a continuation remain
+strict endpoint-policy rejections even after accepted rows. Synchronous auth-token
+preparation failure remains strict, now typed Internal/notSent through the owner;
+never route it through recoverable HTTP-page failure. Do not alter signer/auth
+implementation, add resends, weaken principal validation, or touch account/live
+reconciliation. Native successful mappings and request sequences must remain.
+
+Before implementation, run existing native history/request-sequence preservation
+controls and commit original-RED typed-first/later-page/cross-stage failure tests.
+Cover HTTP/native/transport/malformed/truncated/missing-list failures, failed
+prefix exclusion, empty/filtered zero-accepted rejection, cross-command ownership
+at Error-only logging, funding-stage failure after accepted trade income, strict
+cursor/saturation and auth preparation refusal, and unchanged no-I/O/filter/order
+contracts. Update caller/audit/quality scope without closing B11 or other-family
+fan-out. If layout grows, box only the owner where needed for Pending size.
+
+Expected source scope: Lighter history.rs and native history tests only. Seek a
+narrow callback arm only if a real preparation seam needs it; no engine/host/
+dispatch/request/signing/clock/metadata/execution/coverage changes. Coordinate
+with the other lanes before edits. Plan/correctness/adversarial reviews must
+answer the architecture gate: one existing engine owner adopted by a native
+adapter, not a per-venue paging/completeness implementation. Focused engine/
+Lighter/Binance and shared history references, strict Clippy/fmt/bans/links; final
+actual dependencies plus exact-head CI/replay proof, normal owner queue, separate
+guard and merge. No local release WASM/full replay/timing sweep or NX edits.
+
+
+Lighter implementation receipt: original source passed 19 controls and failed
+six assertion groups for typed first/zero-accepted failures, accepted-page
+recovery, cross-stage income, concurrent owner isolation and strict typed auth
+preparation. The preserved cursor/saturation and request-sequence controls stay
+strict. The adapter now owns one boxed CursorHistory<Row>; native Row is serialized
+untagged to preserve the same output objects. No engine or signing API changes.
+Required native list validation rejects missing/null/object lists; streamed
+prefixes remain staged until the complete response verdict. Independent plan,
+correctness and adversarial review found no blockers. Review-requested controls
+also check no incomplete marker on strict refusal, truncated streamed prefixes,
+malformed funding after prior trade income and orders/public-trade completion.
+One review precision fix preserved original malformed-envelope and principal-row
+legacy text instead of adding a new prefix. Caller metadata does change where
+previously unclassified errors become Internal, and auth refusal gains NotSent;
+those changes are explicitly recorded in the caller section.
+
+Focused engine/Lighter/Binance/BloFin verification passes 1004 native tests and
+strict all-target Clippy. Final touched-venue checks, formatting and repository
+bans run before committing. Actual shared/build dependencies must be integrated
+before final proof/merge: the active owner hold is #1746, then #1728, then the
+ready #1748/#1749; this Lighter follow-on has no exception. No CI or deployed
+runtime closure is claimed by local controls.
+
+
+
+
+
 ## Coinbase Advanced Trade owner adoption (2026-10-22)
 
 Fresh branch from actual1746 `3f0e3e450b2`: move Advanced Trade fills,

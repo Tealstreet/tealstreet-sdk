@@ -298,6 +298,19 @@ Queued auth/preparation rejection stays distinct from actual-page recovery.
 
 
 
+Lighter general histories now adopt CursorHistory for staged/accepted rows,
+command-owned completion and native cursor facts. One owner spans trade/funding
+income with a stage output baseline; actual later failures recover accepted
+pages only. Native saturation/cycle/budget and synchronous auth preparation
+refusals remain strict. No new engine API or universal migration claim.
+
+
+
+
+
+
+
+
 Coinbase Advanced Trade history owner adoption now routes fills, orders and
 public trades through existing CursorHistory, with one completion across CFM
 and Spot stages. Only complete validated response pages affect shared identity

@@ -3536,6 +3536,41 @@ handling; no additional NX migration is introduced by this slice.
 
 
 
+### Lighter histories: shared cursor owner across trade and funding stages
+
+Lighter fills, historical orders, public trades and income now use the existing
+engine CursorHistory owner. Actual HTTP/native, transport, malformed/foreign-row
+or missing-list failures before accepted mapped rows reject typed with the
+engine's `internal` fallback. After accepted pages, actual page failure instead
+returns only earlier accepted rows with one command-owned Warn
+`history.incomplete` before success, including Error-only logging. Failed page
+prefixes never enter the result. Empty or filtered pages alone do not authorize
+partial recovery. Transport and stream decoding share a callback, so this slice
+does not claim every callback failure is `network`.
+
+All-income keeps the same owner from trade fee/PnL rows through funding; a
+funding failure can retain validated trade income and earlier funding pages.
+Each stage keeps its own output-limit stopping rule, followed by the existing
+global stable time sort and truncation. Native raw row counts, cursor escaping,
+100-row requests, 1000-page stage budget, time/principal filters, trade/order/
+funding dedupe namespaces, financial units and row shapes remain unchanged.
+Repeated cursors/page-budget exhaustion and saturated full pages without a
+continuation remain strict rejections without an incomplete success. Synchronous
+auth-token preparation refusal also stays strict after accepted rows, now typed
+`internal`/`notSent` where it previously had neither kind nor outcome. Existing
+admission and keyless no-I/O behavior remains. SDK arguments do not change and
+no new NX handler is required by this slice; B11's request-scoped ingestion,
+coverage gating and typed rejection handling remain required. Other-family
+history fan-out and deployed caller proof remain open.
+[Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+
+
 ### Coinbase Advanced Trade histories: one accepted-page owner
 
 Fills, historical orders and public trades now use the engine CursorHistory
