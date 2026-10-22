@@ -7,6 +7,7 @@
 use crate::socket::{Config, Timeout};
 use crate::{ErrorKind, SocketChannel, SocketId, VenueError};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 
 pub const MAX_FEEDS: usize = 512;
 pub const MAX_INTERESTS: usize = 8192;
@@ -227,8 +228,8 @@ struct QueuedBatch {
 }
 #[derive(Default)]
 struct Interests {
-    desired: BTreeMap<String, Interest>,
-    released: BTreeMap<String, Interest>,
+    desired: BTreeMap<String, Arc<Interest>>,
+    released: BTreeMap<String, Arc<Interest>>,
     revision: u64,
     queue: VecDeque<QueuedBatch>,
 }
@@ -610,7 +611,7 @@ impl Lifecycle {
             .interests
             .desired
             .values()
-            .cloned()
+            .map(|i| i.as_ref().clone())
             .collect())
     }
     /// Pure transactional preparation. The engine invokes its native encoder
@@ -724,7 +725,21 @@ impl Lifecycle {
             .revision
             .checked_add(1)
             .ok_or(SocketError::Capacity)?;
-        let desired: BTreeMap<_, _> = interests.into_iter().map(|i| (i.key.clone(), i)).collect();
+        // Reuse immutable rows only when both key and native arguments match.
+        // Changed arguments keep a distinct released row until unsubscribe.
+        let desired: BTreeMap<_, _> = interests
+            .into_iter()
+            .map(|i| {
+                let row = f
+                    .interests
+                    .desired
+                    .get(&i.key)
+                    .filter(|previous| previous.as_ref() == &i)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::new(i));
+                (row.key.clone(), row)
+            })
+            .collect();
         let forced: BTreeSet<_> = repair.iter().collect();
         if forced.len() != repair.len() || forced.iter().any(|k| !desired.contains_key(*k)) {
             return Err(SocketError::InvalidInterest);
@@ -734,12 +749,12 @@ impl Lifecycle {
             .released
             .values()
             .filter(|i| desired.get(&i.key) != Some(i) || forced.contains(&i.key))
-            .cloned()
+            .map(|i| i.as_ref().clone())
             .collect();
         let added: Vec<_> = desired
             .values()
             .filter(|i| f.interests.released.get(&i.key) != Some(i) || forced.contains(&i.key))
-            .cloned()
+            .map(|i| i.as_ref().clone())
             .collect();
         let mut queue = VecDeque::new();
         let mut queued_bytes = 0usize;
@@ -799,9 +814,13 @@ impl Lifecycle {
                 return Err(SocketError::InvalidCoverage);
             }
         }
-        self.feeds[feed.0].interests = Interests {
+        // No fallible work remains. Move prior release evidence instead of
+        // cloning its map while old/new desired state and frames are live.
+        let state = &mut self.feeds[feed.0].interests;
+        let released = std::mem::take(&mut state.released);
+        *state = Interests {
             desired,
-            released: f.interests.released.clone(),
+            released,
             revision,
             queue,
         };
@@ -1085,15 +1104,32 @@ mod tests {
         assert_eq!(l.release_batch(e, true), None);
         assert!(l.feeds[f.0].interests.released.is_empty());
         assert_eq!(l.release_batch(e, false).as_deref(), Some("+:A"));
-        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(
+            l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
+            pointer
+        );
         let bytes = l.feeds[f.0].interests.bytes();
-        l.replace_interests(f, vec![interest("A"), interest("B")], encode).unwrap();
-        assert_eq!(l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(), pointer);
-        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
-        assert!(l.feeds[f.0].interests.bytes() > bytes, "logical budgets still count both maps");
+        l.replace_interests(f, vec![interest("A"), interest("B")], encode)
+            .unwrap();
+        assert_eq!(
+            l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(),
+            pointer
+        );
+        assert_eq!(
+            l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
+            pointer
+        );
+        assert!(
+            l.feeds[f.0].interests.bytes() > bytes,
+            "logical budgets still count both maps"
+        );
         assert_eq!(l.release_batch(e, false).as_deref(), Some("+:B"));
-        l.replace_interests(f, vec![interest("A"), interest("B")], encode).unwrap();
-        assert_eq!(l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(), pointer);
+        l.replace_interests(f, vec![interest("A"), interest("B")], encode)
+            .unwrap();
+        assert_eq!(
+            l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(),
+            pointer
+        );
         assert_eq!(l.release_batch(e, false), None);
     }
 
@@ -1103,35 +1139,61 @@ mod tests {
         l.replace_interests(f, vec![interest("A")], encode).unwrap();
         l.release_batch(e, false).unwrap();
         let pointer = l.feeds[f.0].interests.released["A"].wire_args.as_ptr();
-        l.replace_interests(f, vec![Interest { key: "A".into(), wire_args: "new-A".into() }], encode).unwrap();
+        l.replace_interests(
+            f,
+            vec![Interest {
+                key: "A".into(),
+                wire_args: "new-A".into(),
+            }],
+            encode,
+        )
+        .unwrap();
         assert_eq!(l.feeds[f.0].interests.released["A"].wire_args, "A");
-        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
-        assert_ne!(l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(
+            l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
+            pointer
+        );
+        assert_ne!(
+            l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(),
+            pointer
+        );
         assert_eq!(l.release_batch(e, false).as_deref(), Some("-:A"));
         assert!(l.feeds[f.0].interests.released.is_empty());
         assert_eq!(l.release_batch(e, false).as_deref(), Some("+:new-A"));
-        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
-                   l.feeds[f.0].interests.desired["A"].wire_args.as_ptr());
+        assert_eq!(
+            l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
+            l.feeds[f.0].interests.desired["A"].wire_args.as_ptr()
+        );
     }
 
     #[test]
     fn partially_encoded_failure_preserves_shared_rows_revision_and_old_queue() {
         let (mut l, f, e) = started(AuthMode::None);
-        l.replace_interests(f, vec![interest("A"), interest("B")], encode).unwrap();
+        l.replace_interests(f, vec![interest("A"), interest("B")], encode)
+            .unwrap();
         l.release_batch(e, false).unwrap();
         let pointer = l.feeds[f.0].interests.released["A"].wire_args.as_ptr();
         let desired = l.feeds[f.0].interests.desired["B"].wire_args.as_ptr();
         let revision = l.feeds[f.0].interests.revision;
         let mut emitted = 0;
-        assert_eq!(l.replace_interests(f, vec![interest("C")], |op, rows, emit| {
-            encode(op, rows, emit)?;
-            emitted += 1;
+        assert_eq!(
+            l.replace_interests(f, vec![interest("C")], |op, rows, emit| {
+                encode(op, rows, emit)?;
+                emitted += 1;
+                Err(SocketError::Capacity)
+            }),
             Err(SocketError::Capacity)
-        }), Err(SocketError::Capacity));
+        );
         assert_eq!(emitted, 1);
         assert_eq!(l.feeds[f.0].interests.revision, revision);
-        assert_eq!(l.feeds[f.0].interests.desired["B"].wire_args.as_ptr(), desired);
-        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(
+            l.feeds[f.0].interests.desired["B"].wire_args.as_ptr(),
+            desired
+        );
+        assert_eq!(
+            l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
+            pointer
+        );
         assert_eq!(l.release_batch(e, false).as_deref(), Some("+:B"));
         assert_eq!(l.release_batch(e, false), None);
     }
@@ -1147,12 +1209,19 @@ mod tests {
         l.grant_retry(f).unwrap();
         let current = l.begin(f, SocketId(2)).unwrap();
         l.opened(current).unwrap();
-        l.replace_interests(f, l.desired(f).unwrap(), encode).unwrap();
+        l.replace_interests(f, l.desired(f).unwrap(), encode)
+            .unwrap();
         assert!(l.feeds[f.0].interests.released.is_empty());
-        assert_eq!(l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(
+            l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(),
+            pointer
+        );
         assert_eq!(l.release_batch(old, false), None);
         assert_eq!(l.release_batch(current, false).as_deref(), Some("+:A"));
-        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(
+            l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
+            pointer
+        );
     }
 
     #[test]

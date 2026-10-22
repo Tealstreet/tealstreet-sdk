@@ -574,3 +574,12 @@ failed-transaction atomicity and reconnect replay checks. Fresh CI establishes
 actual retained memory; pointer sharing alone makes no numeric savings claim.
 Independent plan review is CLEAR; nonempty payloads pin actual allocations,
 and logical double-copy reservations remain unchanged despite physical sharing.
+
+Shared-storage controls reproduce three original allocation-identity assertion
+failures with 23 compatibility passes, then all 26 lifecycle controls pass. Both
+independent implementation reviews are CLEAR: logical budgets and original
+released arguments survive sharing, failure remains atomic, and the public
+encoder receives the same values. Four-crate native unit checks, strict
+all-target Clippy, formatting and bans pass on the corrected source. Fresh CI
+will measure memory and replay the full Binance dependency; no result from the
+previous socket head is relabeled. Safe-ID widening remains a separate PR.
