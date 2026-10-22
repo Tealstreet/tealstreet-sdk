@@ -1001,3 +1001,89 @@ fn unidentified_rest_neighbor_preserves_exactly_one_fresh_option_greek_and_remov
         }
     }
 }
+
+#[test]
+fn owned_history_category_failure_keeps_sorted_globally_limited_prior_rows() {
+    let mut h = ready(true);
+    h.notices.clear();
+    h.engine.set_log_level(safe_cex_engine::Level::Error);
+    h.command(Command::Query {
+        command: 811,
+        query: Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(2),
+        },
+    });
+    let row = |symbol: &str, id: &str, time: u64| {
+        format!(
+            r#"{{"symbol":"{symbol}","execId":"{id}","orderId":"o","side":"Buy","execPrice":"100","execQty":"1","execTime":"{time}"}}"#
+        )
+    };
+    let body = |rows: Vec<String>, cursor: &str| {
+        format!(
+            r#"{{"retCode":0,"result":{{"list":[{}],"nextPageCursor":"{cursor}"}}}}"#,
+            rows.join(",")
+        )
+    };
+    respond(
+        &mut h,
+        "execution/list",
+        "linear",
+        None,
+        &body(
+            vec![
+                row("BTCUSDT", "old", 1760000000000),
+                row("BTCUSDT", "new", 1760000001000),
+            ],
+            "unused-limit-satisfied",
+        ),
+    );
+    respond(
+        &mut h,
+        "execution/list",
+        "inverse",
+        None,
+        &body(vec![row("BTCUSD", "newest", 1760000002000)], "cursor"),
+    );
+    respond(
+        &mut h,
+        "execution/list",
+        "inverse",
+        Some("cursor=cursor"),
+        r#"{"retCode":0,"result":{"list":[false]}}"#,
+    );
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(811).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["id"], "newest");
+    assert_eq!(rows[1]["id"], "new");
+    assert!(
+        !h.has_request("execution/list"),
+        "stop after failed category, never infer later coverage"
+    );
+    let markers: Vec<_> = h
+        .notices
+        .iter()
+        .enumerate()
+        .filter_map(|(index, notice)| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                assert_eq!(
+                    event.fields,
+                    [("command", safe_cex_engine::Value::Num(811.0))]
+                );
+                Some(index)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(markers.len(), 1);
+    assert!(matches!(
+        h.notices.get(markers[0] + 1),
+        Some(safe_cex_engine::Notice::CommandDone { command: 811, .. })
+    ));
+}
