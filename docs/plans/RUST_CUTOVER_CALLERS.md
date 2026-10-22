@@ -3975,3 +3975,54 @@ reconcile through reads, and perform no automatic write replay. These are requir
 NX migration tests; this docs-only backfill does not execute or close them.
 The engine/host contract and remaining legacy gate are detailed in
 [RUST_REQUEST_CONTEXT.md](RUST_REQUEST_CONTEXT.md).
+
+## Selected RemoteSigner runtime mode (proposed shared correction)
+
+When both `remoteSigner` and `payloadSigner` are configured on an admitted Rust
+account, RemoteSigner remains the selected provider. The proposed shared setup
+fix also uses that selection for private PayloadSigner admission and the native
+feed flag. It restores normal private streaming for Binance's four aliases and
+Bybit's five aliases (including Hyro), instead of incorrectly treating the unused
+PayloadSigner as a REST-only account. Hyro accepts the selected RemoteSigner;
+private PayloadSigner alone remains typed `unsupported` / `notSent`, even if a
+local secret is supplied. The eight supported PayloadSigner-only aliases retain
+their REST-only behavior.
+
+Raw `publicMode` callback-presence intent retains both fields for construction
+resolution; it is separate from the selected native runtime mode. Invalid
+explicit callback shapes still reject, including an invalid unused callback.
+Unavailable, refused or malformed RemoteSigner work cannot fall back to the
+PayloadSigner or a local secret. Caller input, callback receiver custody and the
+external sign-request/sign-response wire do not change. No new caller option or
+persisted identity mapping is required. The fix is queued after #1741; actual
+merge and final CI/proof remain pending. See [RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md).
+
+### Hyperliquid perp histories: shared inclusive-page ownership
+
+Perp fills, orders, income and public trades now use the engine CursorHistory
+page-admission and completion owner. An actual HTTP/stream/decode/transport
+failure before eligible output was accepted rejects typed with `internal` where
+legacy failures had no kind; callers and error telemetry now see that category.
+After accepted output, a later actual failure returns only accepted pages with
+one command-owned Warn `history.incomplete` before success, including Error-only
+logging. Failed-page prefixes and zero-income or filtered native rows cannot
+authorize partial recovery. Histories never mutate live Store.
+
+Full inclusive-page stalls and the existing 200-page stage cap now retain
+accepted output with owned incompleteness instead of discarding it. A valid
+coverage-limited response may still yield incomplete `[]`; that is no proof of
+complete coverage. Mixed income keeps one owner and the first gap through
+fill-derived PnL/fees and funding, continuing funding after a capped/stalled fill
+stage. Rolling historicalOrders retention (at least 2,000 raw rows) flows through
+the same owner rather than a venue-local marker. The gap remains query-scoped.
+
+Physical time bounds remain inclusive: short positive pages still issue the
+existing duplicate/empty terminal probe; same-time distinct IDs still advance.
+Native transition timestamp/rank ties fold before order filtering; native sorting,
+limits (including the fills default and clamp), ID/time units, gross historical
+PnL, rebate signs, fee assets, builder revenue fields and vault/master selection
+remain. Spot and client-ID lookup keep their existing separate behavior, including
+lookup's scalar completion and admission errors. No SDK argument or history row
+shape changes. Existing B11 request-scoped incomplete ingestion/coverage and typed
+rejection handling remain required; this native/shared-owner scope does not close
+B11, managed Context migration or deployed runtime proof. [Scope](RUST_OWNED_HISTORY.md).
