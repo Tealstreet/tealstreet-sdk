@@ -541,3 +541,12 @@ checks are unchanged. Both independent correctness and adversarial reviews are
 CLEAR, including idle-to-pending repair/one-shot coverage. The 408-engine / 7-OKX
 unit run passes; the complete four-crate native rerun and fresh CI are pending.
 No performance or complete replay equality is inferred from these local checks.
+
+Correction verification: all 1,195 engine/OKX/Bitunix/Binance native tests pass,
+with strict four-crate all-target Clippy, fmt, bans and diff checks. Actual row
+reporting #1769 at90dc6637d6e is genuinely integrated atb2a390201fe. Independent
+preservation confirms every owned Rust source/test blob matches reviewedc71,
+every unowned path matches landing, and all three append-conflict doc blocks are
+retained incoming first/verbatim once. Integrated engine/OKX/Bitunix unit checks
+pass436 tests. Fresh CI must remeasure both public families and authenticate
+complete replay output; no first-run failure is dismissed or normalized away.
