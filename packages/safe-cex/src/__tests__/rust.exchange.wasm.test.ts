@@ -602,19 +602,19 @@ describe('RustEngineExchange', () => {
     { secondary_key: 'read-key' },
     { secondary_secret: 'read-secret' },
     { secondary_key: '', secondary_secret: 'read-secret' },
-  ])('rejects incomplete secondary signing keys before transport creation: %o', async (secondary) => {
+  ])('rejects incomplete secondary signing keys before transport creation: %o', (secondary) => {
     let transports = 0;
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => {
       transports++;
       return recordedTransport().transport;
     });
-    exchange = new RustEngineExchange(
+    // The trusted setup boundary now rejects before BaseExchange can retain options.
+    expect(() => new RustEngineExchange(
       'binance',
       { key: 'primary-key', secret: 'primary-secret', ...secondary },
       new DefaultStore(),
-    );
-    await expect(exchange.start()).rejects.toThrow('secondary signing keys require a nonempty key and secret');
+    )).toThrow('secondary signing keys require a nonempty key and secret');
     expect(transports).toBe(0);
   });
 

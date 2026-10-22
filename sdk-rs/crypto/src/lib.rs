@@ -43,6 +43,7 @@ pub mod ethereum;
 pub mod lighter;
 pub mod nonce;
 pub mod secrets;
+pub mod signer;
 pub mod starknet;
 pub mod uuid;
 pub mod zklink;

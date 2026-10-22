@@ -42,6 +42,20 @@ combined budgets, public CPU/memory gates and complete raw replay comparison,
 retaining identities and financial fields. Native release builds share the
 package setting; measured performance evidence covers WASM.
 
+Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
+The construction-rules `dispatchSigning` flag selects provider setup, currently
+Binance's four aliases. High-level credential input is consumed by a trusted
+`LocalSignerSetup` before `BaseExchange` retains options; generic options contain
+no primary/secondary signing credentials. The WASM constructor's optional third
+argument is private provider setup, separate from engine-options JSON. Cached
+construction metadata preserves `canSign`/public mode; transport receives only
+read-identity presence and uses materialised outbound headers for routing.
+Callers must provision worker/hosted providers separately rather than copy
+`exchange.options` as credentials, and use readiness/public-mode metadata instead
+of checking `options.key`. Raw legacy native/WASM input is a trusted compatibility
+adapter until those cutover callers migrate; it converges on the same provider
+path and must be removed before TS venue/reference deletion.
+
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and
 `ExchangeWorker`. Registry defaults remain independent of that opt-in.

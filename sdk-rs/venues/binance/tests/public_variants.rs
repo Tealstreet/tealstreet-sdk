@@ -1,7 +1,8 @@
 //! Examples derived from Binance Spot and COIN-M market-data documentation.
+use support::Options;
 mod support;
 use safe_cex_engine::{Command, Event};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 const SPOT_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","baseAssetPrecision":8,"quoteAssetPrecision":8,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.01"},{"filterType":"LOT_SIZE","stepSize":"0.00001","minQty":"0.00001","maxQty":"9000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0","minQty":"0","maxQty":"10"}]}]}"#;

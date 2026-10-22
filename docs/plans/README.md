@@ -99,6 +99,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Hosts and SDK transports | Retained plan/evidence | Changing host/frame contracts, SDK forwarding or platform integration. | [RUST_MOBILE_B3.md](RUST_MOBILE_B3.md) |
 | Hosts and SDK transports | Retained plan/evidence | Changing host/frame contracts, SDK forwarding or platform integration. | [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md) |
 | Hosts and SDK transports | Retained plan/evidence | Changing host/frame contracts, SDK forwarding or platform integration. | [RUST_SERVER_ADAPTER_PROGRESS.md](RUST_SERVER_ADAPTER_PROGRESS.md) |
+| Standard signing path | Active core implementation | Before dispatch/signature/provider changes or follow-up venue migration. | [RUST_SIGNER.md](RUST_SIGNER.md) |
 | Hosts and SDK transports | Retained plan/evidence | Changing host/frame contracts, SDK forwarding or platform integration. | [RUST_TRANSPORT.md](RUST_TRANSPORT.md) |
 | Hyperliquid Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [HYPERLIQUID_RUST_PORT.md](HYPERLIQUID_RUST_PORT.md) |
 | Hyperliquid and Kraken spot products | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md) |

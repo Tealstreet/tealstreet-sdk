@@ -1,11 +1,12 @@
 //! Private data and trading against Binance's documented payloads.
+use support::Options;
 mod support;
 
 use safe_cex_engine::model::{
     MarginType, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide, RejectReason,
 };
 use safe_cex_engine::{Command, Event, Method, Query};
-use safe_cex_venue_binance::Options;
+
 use support::Harness;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.

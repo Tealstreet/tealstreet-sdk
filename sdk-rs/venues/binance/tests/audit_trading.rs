@@ -1,11 +1,12 @@
 //! Cancel/replace races from the USD-M and portfolio-margin cancel-order contracts.
 //! https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Cancel-Order
 //! https://developers.binance.com/docs/derivatives/portfolio-margin/trade/Cancel-UM-Order
+use support::Options;
 mod support;
 
 use safe_cex_engine::model::OrderStatus;
 use safe_cex_engine::{Command, Event, Method};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn root(variant: Variant) -> &'static str {
