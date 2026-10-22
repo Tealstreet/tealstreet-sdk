@@ -13,6 +13,7 @@ pub(crate) struct OrderLocks {
 struct Scope {
     placing: bool,
     sent: bool,
+    managed: bool,
     unknown_symbol: bool,
     ids: Vec<String>,
     symbols: Vec<String>,
@@ -51,6 +52,7 @@ impl OrderLocks {
             all_symbol: None,
             placing: false,
             sent: false,
+            managed: false,
             unknown_symbol: false,
         };
         let input = command;
@@ -211,7 +213,17 @@ impl OrderLocks {
         if let Some((_, scope)) = self
             .active
             .iter_mut()
-            .find(|(id, scope)| *id == command && scope.placing)
+            .find(|(id, scope)| *id == command && scope.placing && !scope.managed)
+        {
+            scope.sent = false;
+        }
+    }
+
+    pub fn managed_resolved(&mut self, command: CommandId) {
+        if let Some((_, scope)) = self
+            .active
+            .iter_mut()
+            .find(|(id, scope)| *id == command && scope.placing && scope.managed)
         {
             scope.sent = false;
         }
@@ -219,9 +231,23 @@ impl OrderLocks {
 
     pub fn note_write(&mut self) {
         for (_, scope) in &mut self.active {
-            if scope.placing {
+            if scope.placing && !scope.managed {
                 scope.sent = true;
             }
+        }
+    }
+
+    pub fn manage(&mut self, command: CommandId) {
+        if let Some((_, scope)) = self.active.iter_mut().find(|(id, _)| *id == command) {
+            scope.managed = true;
+        }
+    }
+
+    pub fn note_command_write(&mut self, command: CommandId) {
+        if let Some((_, scope)) = self.active.iter_mut().find(|(id, _)| *id == command)
+            && scope.placing
+        {
+            scope.sent = true;
         }
     }
 
@@ -258,5 +284,59 @@ impl OrderLocks {
         } else {
             self.uncertain.retain(|_, epoch| *epoch > token);
         }
+    }
+}
+
+#[cfg(test)]
+mod managed_tests {
+    use super::*;
+
+    #[test]
+    fn one_managed_release_and_an_opaque_legacy_send_cannot_mark_an_unsent_sibling_sent() {
+        let mut locks = OrderLocks::default();
+        let store = Store::default();
+        for command in [7, 8] {
+            locks
+                .acquire(
+                    &Command::PlaceOrders {
+                        command,
+                        orders: vec![],
+                    },
+                    &store,
+                    true,
+                )
+                .unwrap();
+            locks.manage(command);
+        }
+        locks.note_command_write(7);
+        locks.note_write(); // An unrelated legacy request cannot supply evidence.
+        locks.finish(8, true);
+        assert!(
+            !locks.uncertain(""),
+            "unsent sibling acquired phantom uncertainty"
+        );
+        locks.finish(7, true);
+        assert!(
+            locks.uncertain(""),
+            "released unresolved write lost its uncertainty"
+        );
+    }
+
+    #[test]
+    fn legacy_placement_uncertainty_is_preserved_until_its_migration() {
+        let mut locks = OrderLocks::default();
+        locks
+            .acquire(
+                &Command::PlaceOrders {
+                    command: 7,
+                    orders: vec![],
+                },
+                &Store::default(),
+                true,
+            )
+            .unwrap();
+        locks.note_write();
+        locks.finish(7, true);
+        assert!(locks.uncertain(""));
     }
 }

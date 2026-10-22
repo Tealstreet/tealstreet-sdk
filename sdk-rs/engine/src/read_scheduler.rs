@@ -403,6 +403,23 @@ impl<K: PartialEq, G: PartialEq> Scheduler<K, G> {
         self.admit_inner(token, now, true)
     }
 
+    /// Typed final-release adapter. `None` from scheduler admission is a denial,
+    /// never permission to send an unleased read. Arithmetic is checked before
+    /// the existing admission path mutates its first-release state.
+    pub fn admit_http(
+        &mut self,
+        token: Attempt,
+        release: &crate::request_context::HttpRelease,
+    ) -> Result<crate::request_context::Admission, Error> {
+        use crate::request_context::{Admission, ResponseLease};
+        match self.admit_inner(token, release.time.raw_ms, true)? {
+            Some(deadline) => Ok(Admission::Scheduled(ResponseLease::from_scheduler(
+                deadline,
+            ))),
+            None => Ok(Admission::Denied),
+        }
+    }
+
     fn admit_inner(
         &mut self,
         token: Attempt,

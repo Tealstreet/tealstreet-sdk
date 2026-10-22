@@ -16,6 +16,38 @@ export interface HttpResponse {
   body: Uint8Array | AsyncIterable<Uint8Array>;
 }
 
+export class HttpPreparationError extends Error {
+  readonly code: string;
+  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network');
+}
+
+export interface HttpPacket {
+  /** Required for managed requests; absent on older transport callers. */
+  request?: number;
+  method: string;
+  route?: 'direct' | 'publicCors' | 'primary';
+  /** Remaining original lifecycle timeout, never renewed by binding. */
+  timeoutMs?: number;
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+}
+export interface PreparedHttp {
+  /** Optional absolute engine raw time. */
+  expiresAt?: number;
+  /** Validate/build synchronously; may not send or await. */
+  bind(packet: HttpPacket): BoundHttp;
+  /** Release only this prepared resource; idempotent. */
+  cancel?(): void;
+}
+export interface BoundHttp {
+  ready(): boolean;
+  /** Invoke the transport API synchronously, return its response promise. */
+  dispatch(): Promise<HttpResponse>;
+  cancel?(): void;
+}
+
 export interface Transport {
   /** Default account HTTP adapter, resolved by the routing host. */
   httpMode?: 'direct' | 'how';
@@ -36,18 +68,9 @@ export interface Transport {
     url: string,
     handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
   ): Socket;
-  request(request: {
-    method: string;
-    /** Host policy; this is metadata, never an HTTP header or parameter. */
-    route?: 'direct' | 'publicCors' | 'primary';
-    /** Whole-operation deadline; defaults to 20 seconds. */
-    timeoutMs?: number;
-    url: string;
-    headers: Record<string, string>;
-    body?: string;
-    /** Aborted on host disposal; check again after asynchronous authorization. */
-    signal?: AbortSignal;
-  }): Promise<HttpResponse>;
+  /** Explicit prepare/bind/claim support is mandatory for managed HTTP. */
+  prepareHttp?(request: HttpPacket & { intent: 'public' | 'primary' | 'secondary' }): PreparedHttp | Promise<PreparedHttp>;
+  request(request: HttpPacket): Promise<HttpResponse>;
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
 }
@@ -391,6 +414,12 @@ export interface WasmEngineLike {
   httpChunk(request: number, data: Uint8Array, now: number): string;
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
+  signingPending?(attempt: number): boolean;
+  httpPreparationPending?(preparation: string): boolean;
+  httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
+  httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
+  /** Scalar status only: never drain work before the synchronous handoff. */
+  httpClaim?(permit: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner?(): boolean;
   useExternalSigner?(): void;

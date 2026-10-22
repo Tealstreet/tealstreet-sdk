@@ -78,6 +78,52 @@ export function requireCapabilityEngine(create, label) {
   return instance;
 }
 
+const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const u32 = (value) => Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff;
+const headers = (value) => Array.isArray(value) && value.every((pair) => Array.isArray(pair)
+  && pair.length === 2 && pair.every((item) => typeof item === 'string'));
+function closed(value, required, optional = []) {
+  return object(value) && required.every((key) => Object.hasOwn(value, key))
+    && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
+}
+function token(value, prefix, count) {
+  if (typeof value !== 'string' || value.length > 80) return;
+  const words = value.split(':');
+  if (words.shift() !== prefix || words.length !== count
+    || words.some((word) => !/^(?:0|[1-9][0-9]*)$/.test(word) || word.length > 20)) return;
+  const values = words.map((word) => BigInt(word));
+  if (values.some((part) => part > 0xffff_ffff_ffff_ffffn)
+    || values[0] === 0n || values[0] > 0xffff_ffffn || values[1] === 0n
+    || (prefix === 'r1' && values[3] === 0n)) return;
+  return words;
+}
+function managedHttp(action) {
+  const preparation = token(action.preparation, 'p1', 3);
+  if (!preparation) return false;
+  if (action.phase === 'cancel') {
+    return closed(action, ['op', 'phase', 'preparation'], ['signing'])
+      && (!Object.hasOwn(action, 'signing') || u32(action.signing));
+  }
+  if (action.phase === 'prepare') {
+    if (!closed(action, ['op', 'phase', 'preparation', 'intent', 'packet'])
+      || !['public', 'primary', 'secondary'].includes(action.intent)) return false;
+  } else if (action.phase === 'bind') {
+    if (!closed(action, ['op', 'phase', 'preparation', 'permit', 'packet'])) return false;
+    const permit = token(action.permit, 'r1', 4);
+    // Resource id and preparation sequence are different counters. Only the
+    // physical request and attempt generation must match across these tokens.
+    if (!permit || permit[0] !== preparation[0] || permit[1] !== preparation[1]) return false;
+  } else return false;
+  const packet = action.packet;
+  return closed(packet, ['request', 'method', 'url', 'headers'], ['route', 'timeoutMs', 'body'])
+    && u32(packet.request) && String(packet.request) === preparation[0]
+    && ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(packet.method)
+    && typeof packet.url === 'string' && headers(packet.headers)
+    && (!Object.hasOwn(packet, 'route') || ['primary', 'direct', 'publicCors'].includes(packet.route))
+    && (!Object.hasOwn(packet, 'timeoutMs') || u32(packet.timeoutMs))
+    && (!Object.hasOwn(packet, 'body') || typeof packet.body === 'string');
+}
+
 export function probeCapabilityCommand(instance, command, label) {
   let output;
   assert.doesNotThrow(() => { output = instance.command(JSON.stringify(command), 0); },
@@ -95,6 +141,7 @@ export function probeCapabilityCommand(instance, command, label) {
     const optional = (key, validate) => !Object.hasOwn(action, key) || validate(action[key]);
     let valid;
     switch (action.op) {
+      case 'managedHttp': valid = managedHttp(action); break;
       case 'http': valid = integer(action.request) && ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(action.method)
         && typeof action.url === 'string' && headers(action.headers) && optional('body', (v) => typeof v === 'string'); break;
       case 'sign': valid = integer(action.attempt) && object(action.work) && Number.isFinite(action.timeoutMs); break;
@@ -143,7 +190,8 @@ export function probeCapabilityCommand(instance, command, label) {
   // This result is ingress evidence, not valid-state positive handler proof.
   const terminal = actions.find((action) => action.op === 'done');
   const evidence = terminal ? (Object.hasOwn(terminal, 'error') ? 'precondition' : 'terminal')
-    : actions.some((action) => ['http', 'sign', 'signPayload', 'wsSend'].includes(action.op)) ? 'request' : 'deferred';
+    : actions.some((action) => ['http', 'sign', 'signPayload', 'wsSend'].includes(action.op)
+      || (action.op === 'managedHttp' && ['prepare', 'bind'].includes(action.phase))) ? 'request' : 'deferred';
   return { evidence, actions };
 }
 

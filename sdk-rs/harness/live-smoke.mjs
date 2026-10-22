@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
+import { prepareFetch } from '../hosts/wasm/js/managed-http.mjs';
 import { Frame, LOADED_FLAG, MARKET_COLUMNS, MARKET_FLAG, orderEnums } from '../hosts/wasm/js/wire.mjs';
 import { loadEngine } from './engine.mjs';
 import { venueOf } from './venues.mjs';
@@ -333,6 +334,24 @@ export function fencedTransport(live, profile) {
         socket.send(text);
       } };
     },
+    prepareHttp: typeof live.prepareHttp !== 'function' ? undefined : async (request) => {
+      if (!profile.allowUrl(request.url, 'http')) fail('http-endpoint-refused');
+      const prepared = await live.prepareHttp(request);
+      return {
+        expiresAt: prepared.expiresAt,
+        cancel: () => prepared.cancel?.(),
+        bind(packet) {
+          try {
+            if (!profile.allowUrl(packet.url, 'http')) fail('http-endpoint-refused');
+            profile.validateRequest?.(packet);
+            return prepared.bind(packet);
+          } catch (error) {
+            try { prepared.cancel?.(); } catch { /* Preserve the original refusal. */ }
+            throw error;
+          }
+        },
+      };
+    },
     request(request) {
       if (!profile.allowUrl(request.url, 'http')) fail('http-endpoint-refused');
       profile.validateRequest?.(request);
@@ -362,6 +381,8 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     process.on('SIGTERM', interrupt);
     const network = nativeTransport();
     // fetch's default follows redirects, which could escape the endpoint fence.
+    network.prepareHttp = (request) => prepareFetch({ ...request,
+      timeoutMs: Math.min(request.timeoutMs ?? 20000, values.timeoutMs, 20000) });
     network.request = async ({ method, url, headers, body, signal }) => {
       const timeout = AbortSignal.timeout(Math.min(values.timeoutMs, 20000));
       const response = await fetch(url, { method, headers, body, redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout });

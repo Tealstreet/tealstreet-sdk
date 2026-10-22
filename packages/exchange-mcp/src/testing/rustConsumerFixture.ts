@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 
+import { prepareRecordedHttp } from '@tealstreet/safe-cex/src/__tests__/support/managedHttp';
 import { directTransport } from '@tealstreet/safe-cex/src/transport/direct';
 
 /** Offline host routing: the separate routing contract suite covers proxies. */
@@ -37,6 +38,7 @@ const consumerFixture = (records: RecordRow[], name: string, privateAccount: boo
   const sockets: string[] = [];
   const connections: Array<{ url: string; closed: boolean; onMessage(text: string): void }> = [];
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     webSocketHeaders: true,
     connect(url, handlers) {
