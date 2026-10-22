@@ -1436,6 +1436,14 @@ Normal inputs send the same requests as TS; the risk is resilience.
 
 Signing, integer scaling, tx encoding and nonces match TS.
 
+Owned-history follow-up: ~~later page failure discards validated earlier history~~
+now retains accepted pages with one command-owned incomplete marker through the
+shared engine owner, including trade-to-funding income. Failed prefixes remain
+excluded; first/zero-accepted failures reject typed. Native cursor/saturation
+proof and synchronous auth preparation stay strict; account reconciliation,
+signing arithmetic and the remaining cross-family history fan-out are unchanged.
+
+
 - High: ~~position `initial_margin_fraction` ("20.00" = 5x) read in basis points
   (`lighter/src/account.rs:424,877`), so leverage reads as the market max and a
   margin-mode change signs max leverage (`trading.rs:567`).~~ Position-only

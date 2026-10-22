@@ -80,7 +80,15 @@ fn fail_page(e: &mut Engine<Lighter>, r: &HttpRequest, mode: u8) {
             &json!({"code":200,"trades":[trade("failed-prefix", NOW as u64),{"trade_id":"bad"}]})
                 .to_string(),
         ),
-        4 => reply(e, r, 200, r#"{"code":200,"trades":["#),
+        4 => reply(
+            e,
+            r,
+            200,
+            &format!(
+                r#"{{"code":200,"trades":[{},"#,
+                trade("failed-prefix", NOW as u64)
+            ),
+        ),
         5 => reply(e, r, 200, r#"{"code":200}"#),
         6 => {
             let mut foreign = trade("foreign", NOW as u64);
@@ -93,6 +101,8 @@ fn fail_page(e: &mut Engine<Lighter>, r: &HttpRequest, mode: u8) {
                     .to_string(),
             );
         }
+        7 => reply(e, r, 200, r#"{"code":200,"trades":null}"#),
+        8 => reply(e, r, 200, r#"{"code":200,"trades":{}}"#),
         _ => unreachable!(),
     }
 }
@@ -170,7 +180,7 @@ fn all_income(limit: Option<u32>) -> Query {
 
 #[test]
 fn owned_first_page_failure_is_typed_and_never_complete() {
-    for mode in 0..7 {
+    for mode in 0..9 {
         let (mut e, _) = ready();
         let r = query(&mut e, fills(None));
         fail_page(&mut e, &r, mode);
@@ -179,7 +189,7 @@ fn owned_first_page_failure_is_typed_and_never_complete() {
 }
 #[test]
 fn owned_later_failure_returns_only_accepted_rows_and_its_command_marker() {
-    for mode in 0..7 {
+    for mode in 0..9 {
         let (mut e, _) = ready();
         e.set_log_level(safe_cex_engine::Level::Error);
         let r = query(&mut e, fills(None));
@@ -256,6 +266,55 @@ fn income_stage_limits_are_independent_and_funding_is_still_requested() {
     assert_eq!(rows.as_array().unwrap().len(), 2);
     assert_eq!(rows[0]["tranId"], "8");
     assert_eq!(rows[1]["tranId"], "7");
+}
+
+#[test]
+fn owned_malformed_funding_prefix_cannot_enter_an_accepted_prior_stage() {
+    let (mut e, _) = ready();
+    let r = query(&mut e, all_income(None));
+    answer(&mut e, &r, vec![trade("1", NOW as u64)], None);
+    let r = requests(&mut e).remove(0);
+    reply(&mut e, &r, 200, &json!({"code":200,"position_fundings":[{"funding_id":"failed-prefix","market_id":1,"timestamp":NOW/1000.0,"change":"-0.25"},{"funding_id":"bad"}]}).to_string());
+    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 2);
+}
+
+#[test]
+fn owned_order_and_public_trade_pages_share_the_completion_contract() {
+    for public in [false, true] {
+        for later in [false, true] {
+            let (mut e, _) = ready();
+            e.set_log_level(safe_cex_engine::Level::Error);
+            let read = if public {
+                Query::PublicTrades {
+                    symbol: "ETH".into(),
+                    limit: None,
+                }
+            } else {
+                Query::OrderHistory {
+                    symbol: Some("ETH".into()),
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                }
+            };
+            let mut r = query(&mut e, read);
+            if later {
+                if public {
+                    answer(&mut e, &r, vec![trade("1", NOW as u64)], Some("p2"));
+                } else {
+                    reply(&mut e,&r,200,&json!({"code":200,"orders":[{"order_index":"45","market_id":1,"type":"limit","status":"filled","is_ask":false,"initial_base_amount":"2","remaining_base_amount":"0","filled_base_amount":"2","price":"100","created_at":NOW-500.0,"updated_at":NOW}],"next_cursor":"p2"}).to_string());
+                }
+                r = requests(&mut e).remove(0);
+            }
+            fail_page(&mut e, &r, 0);
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            if later {
+                owned_partial(&actions, 1);
+            } else {
+                typed_failure(&actions, false);
+            }
+        }
+    }
 }
 #[test]
 fn owned_partial_does_not_complete_or_mark_a_neighbour() {
@@ -449,7 +508,7 @@ fn repeated_cursor_stays_strict_after_accepted_rows() {
     answer(&mut e, &r, vec![trade("1", NOW as u64)], Some("same"));
     let next = requests(&mut e).into_iter().next().unwrap();
     answer(&mut e, &next, vec![trade("2", NOW as u64)], Some("same"));
-    assert!(result(&mut e).is_err());
+    typed_failure(&e.drain_actions().collect::<Vec<_>>(), false);
     assert_eq!(e.store().orders().len(), 1);
 }
 
@@ -465,7 +524,9 @@ fn saturated_page_without_cursor_fails_if_requested_history_is_incomplete() {
             .collect(),
         None,
     );
-    assert!(result(&mut e).unwrap_err().contains("saturated"));
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    typed_failure(&actions, false);
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.message.contains("saturated"))));
 }
 
 #[test]

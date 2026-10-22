@@ -738,3 +738,27 @@ adapter, not a per-venue paging/completeness implementation. Focused engine/
 Lighter/Binance and shared history references, strict Clippy/fmt/bans/links; final
 actual dependencies plus exact-head CI/replay proof, normal owner queue, separate
 guard and merge. No local release WASM/full replay/timing sweep or NX edits.
+
+
+Lighter implementation receipt: original source passed 19 controls and failed
+six assertion groups for typed first/zero-accepted failures, accepted-page
+recovery, cross-stage income, concurrent owner isolation and strict typed auth
+preparation. The preserved cursor/saturation and request-sequence controls stay
+strict. The adapter now owns one boxed CursorHistory<Row>; native Row is serialized
+untagged to preserve the same output objects. No engine or signing API changes.
+Required native list validation rejects missing/null/object lists; streamed
+prefixes remain staged until the complete response verdict. Independent plan,
+correctness and adversarial review found no blockers. Review-requested controls
+also check no incomplete marker on strict refusal, truncated streamed prefixes,
+malformed funding after prior trade income and orders/public-trade completion.
+One review precision fix preserved original malformed-envelope and principal-row
+legacy text instead of adding a new prefix. Caller metadata does change where
+previously unclassified errors become Internal, and auth refusal gains NotSent;
+those changes are explicitly recorded in the caller section.
+
+Focused engine/Lighter/Binance/BloFin verification passes 1004 native tests and
+strict all-target Clippy. Final touched-venue checks, formatting and repository
+bans run before committing. Actual shared/build dependencies must be integrated
+before final proof/merge: the active owner hold is #1746, then #1728, then the
+ready #1748/#1749; this Lighter follow-on has no exception. No CI or deployed
+runtime closure is claimed by local controls.

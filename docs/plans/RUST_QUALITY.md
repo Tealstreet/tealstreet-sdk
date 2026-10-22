@@ -271,3 +271,10 @@ single-page fills, 50/100 page caps and final sorting/limits remain. First-page
 failure rejects typed; later failure returns accepted pages with owned
 incompleteness, excluding staged failed-page prefixes. Signing preparation
 refusal stays strict notSent. No engine API extension or universal fan-out claim.
+
+
+Lighter general histories now adopt CursorHistory for staged/accepted rows,
+command-owned completion and native cursor facts. One owner spans trade/funding
+income with a stage output baseline; actual later failures recover accepted
+pages only. Native saturation/cycle/budget and synchronous auth preparation
+refusals remain strict. No new engine API or universal migration claim.
