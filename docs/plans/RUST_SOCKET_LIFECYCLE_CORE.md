@@ -333,3 +333,13 @@ ping cadence. Enabling an already enabled guard is idempotent and cannot extend
 its deadline. New unit controls cover exact expiry, non-consuming queries,
 first-pong activation, and ping/auth independence. This phase does not wire
 managed ingress or turn the six original venue RED tests green by itself.
+
+The Supervisor hooks pass all 14 focused socket unit tests, including the four
+new expiry/activation controls, and strict all-target engine Clippy. Correctness
+and adversarial reviews are CLEAR: default-enabled idle keeps legacy deadline
+priority, watchdog cadence, ping and backoff behavior unchanged. Runtime driver
+integration must disable idle on **every** new first-pong epoch and check expiry
+before activation/traffic/auth. Bitunix current text must still reach the stable
+backoff observation even before its first pong; idle activation and stability
+proof remain independent. The six venue runtime RED controls remain unresolved
+until driver/adoption work; this checkpoint makes no runtime closure claim.
