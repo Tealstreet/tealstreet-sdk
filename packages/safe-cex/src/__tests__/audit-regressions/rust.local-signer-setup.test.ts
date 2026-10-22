@@ -41,8 +41,8 @@ describe('trusted local signer setup', () => {
     );
     expect(calls[0][1]).not.toContain('audit-secret-sentinel');
     expect(JSON.parse(calls[0][2] as string)).toEqual({
-      primary: { key: input.key, secret: input.secret },
-      secondary: { key: input.secondary_key, secret: input.secondary_secret },
+      primary: { key: input.key, secret: input.secret, passphrase: input.passphrase },
+      secondary: { key: input.secondary_key, secret: input.secondary_secret, passphrase: input.secondary_passphrase },
     });
     expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed/);
     expect(JSON.stringify(setup)).not.toContain('audit-secret-sentinel');
@@ -69,6 +69,49 @@ describe('trusted local signer setup', () => {
       expect(
         () => new LocalSignerSetup({ ...withoutSigningCredentials(options()), ...read } as ExchangeOptions),
       ).toThrow(/nonempty key and secret/);
+  });
+  it('carries trusted metadata and an empty passphrase only through the one-use setup', () => {
+    const input = { ...options(), passphrase: '', localSigner: {
+      primary: { stableId: 'account/17', secretEncoding: 'base64' as const, trimCredential: true },
+      secondary: { stableId: 'read/17' },
+    } };
+    const setup = new LocalSignerSetup(input);
+    expect(withoutSigningCredentials(input)).not.toHaveProperty('localSigner');
+    let received: unknown;
+    class Engine {
+      constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); }
+    }
+    setup.construct(Engine as never, 'binance', '{}');
+    expect(received).toMatchObject({
+      primary: { passphrase: '', ...input.localSigner.primary },
+      secondary: { ...input.localSigner.secondary },
+    });
+    expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed/);
+  });
+  it('refuses provider metadata on unmigrated Rust families before construction', () => {
+    expect(() => new RustEngineExchange('bybit', { ...options(), localSigner: {} }, new DefaultStore()))
+      .toThrow(/not supported/);
+  });
+  it('rejects malformed or unknown setup metadata before constructing an engine', () => {
+    let constructors = 0;
+    class Engine { constructor() { constructors++; } }
+    for (const localSigner of [
+      null, [], 'base64', { tertiary: {} }, { primary: [] },
+      { primary: { secretEncodng: 'base64' } },
+      { primary: { secretEncoding: 'unknown' } },
+      { primary: { trimCredential: 'true' } },
+      { primary: { stableId: '' } },
+      { primary: { stableId: 'bad\nidentity' } },
+      { primary: { stableId: 'x'.repeat(257) } },
+    ]) {
+      let failure: unknown;
+      try {
+        new LocalSignerSetup({ ...options(), localSigner } as unknown as ExchangeOptions)
+          .construct(Engine as never, 'binance', '{}');
+      } catch (error) { failure = error; }
+      expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+      expect(constructors).toBe(0);
+    }
   });
 });
 

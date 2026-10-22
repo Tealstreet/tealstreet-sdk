@@ -1,3 +1,13 @@
+// Return only the closed numeric record; never serialize arbitrary provider data.
+function signingReceipt(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some((key) => key !== 'stampMs' && key !== 'expiryMs')) return undefined;
+  const { stampMs, expiryMs } = value;
+  if ([stampMs, expiryMs].some((time) => time !== undefined && (!Number.isSafeInteger(time) || time < 0))
+    || (stampMs !== undefined && expiryMs !== undefined && expiryMs <= stampMs)) return undefined;
+  return { ...(stampMs === undefined ? {} : { stampMs }), ...(expiryMs === undefined ? {} : { expiryMs }) };
+}
+
 // Runs a WasmEngine against a transport: executes its actions (sockets, HTTP,
 // timers) and feeds the results back in. The same host serves browser workers,
 // Cloudflare Workers, and the replay harness; only the transport differs.
@@ -575,6 +585,7 @@ export class EngineHost {
   }
 
   sign(action) {
+    const expectedReceipt = signingReceipt(action.work.receipt);
     const id = action.attempt;
     const controller = new AbortController();
     const finish = (result, code) => {
@@ -597,13 +608,16 @@ export class EngineHost {
       return this.signer(action.work, { signal: controller.signal });
     }).then((result) => {
       if (controller.signal.aborted || this.disposed) return;
-      if (!Array.isArray(result) || result.length !== action.work.operations.length
-        || result.some((bytes) => !Array.isArray(bytes) || bytes.length > 1048576
+      const receipt = signingReceipt(result?.receipt);
+      if (!receipt || !expectedReceipt || receipt.stampMs !== expectedReceipt.stampMs
+        || receipt.expiryMs !== expectedReceipt.expiryMs
+        || !Array.isArray(result?.values) || result.values.length !== action.work.operations.length
+        || result.values.some((bytes) => !Array.isArray(bytes) || bytes.length > 1048576
           || bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))) {
         finish(undefined, 'invalidResult');
         return;
       }
-      finish(result);
+      finish({ values: result.values.map((bytes) => Array.from(bytes)), receipt });
     }).catch(() => finish(undefined, 'refused'));
   }
 

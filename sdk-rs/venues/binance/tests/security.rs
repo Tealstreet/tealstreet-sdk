@@ -16,6 +16,7 @@ fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
     };
     assert!(!format!("{options:?}").contains("audit-secret-sentinel"));
     let request = SignRequest {
+        receipt: Default::default(),
         context: Default::default(),
         operations: vec![Operation::Sign {
             algorithm: Algorithm::HmacSha256,
@@ -28,6 +29,7 @@ fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
     assert_eq!(signer.sign_now(&request), Err(SignError::Unavailable));
     signer.remove(&identity.credential);
     let request = SignRequest {
+        receipt: Default::default(),
         context: Default::default(),
         operations: vec![Operation::Present {
             key: identity.credential,

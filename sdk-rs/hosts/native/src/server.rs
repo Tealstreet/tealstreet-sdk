@@ -2263,7 +2263,7 @@ mod tests {
                     )
                     .unwrap();
                 let (signer, identities) =
-                    safe_cex_crypto::signer::LocalSigner::from_setup(Default::default());
+                    safe_cex_crypto::signer::LocalSigner::from_setup(Default::default()).unwrap();
                 let setup = serde_json::json!({ "publicDataOnly": true, "signing": identities })
                     .to_string();
                 server

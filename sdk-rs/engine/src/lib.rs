@@ -25,7 +25,7 @@ pub mod public_feed;
 pub mod read_scheduler;
 pub mod signing;
 mod signing_dispatch;
-pub use signing_dispatch::SignStep;
+pub use signing_dispatch::{DispatchContext, SignStep};
 pub mod socket;
 pub mod startup;
 pub mod store;
@@ -43,8 +43,9 @@ pub use credentials::ReadCredentials;
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CredentialSlot, Cx, Engine, Event,
     Fill, FillFinancials, HttpRequest, MergedScopeAuth, Method, Notice, PayloadSignRequest,
-    PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
-    SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
+    PollTimerBounds, Query, RequestId, RequestRoute, Response, SignatureTarget, SigningTarget,
+    SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction,
+    unsupported_venue_action,
 };
 pub use error::{
     BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,
