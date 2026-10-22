@@ -97,3 +97,12 @@ it('actual WASM consumes separate local setup and rejects malformed or unsupport
     expect(signature).toBe(createHmac('sha256', vector.secret).update(canonical).digest('hex'));
   } finally { host.dispose(); }
 });
+
+
+it('actual WASM refuses external-provider override on an unmigrated family', async () => {
+  const { WasmEngine } = await loadNodeEngine();
+  const engine = new WasmEngine('bybit', JSON.stringify({ publicDataOnly: true }));
+  try {
+    expect(() => new EngineHost(engine, makeTransport([]), {}, { signer: () => [] })).toThrow(/not supported/);
+  } finally { engine.free?.(); }
+});

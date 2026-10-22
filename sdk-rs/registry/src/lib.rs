@@ -502,21 +502,26 @@ pub fn local_signer_from_json(
 /// Constructs `venue`'s engine from `options`, enforcing its construction rules.
 pub fn build<T: Visit>(
     venue: &str,
-    mut options: EngineOptions,
+    options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
     #[cfg(feature = "binance")]
-    let signer =
-        if construction::bridge(venue, &options).dispatch_signing && options.signing.is_none() {
+    let (options, signer) = {
+        let mut options = options;
+        let signer = if construction::bridge(venue, &options).dispatch_signing
+            && options.signing.is_none()
+        {
             let (provider, identities) = prepare_local_signer(&mut options)?;
             options.signing = Some(identities);
             Some(provider)
         } else {
             None
         };
+        (options, signer)
+    };
     #[cfg(not(feature = "binance"))]
     let signer = None;
     build_with_signer(venue, options, entropy, signer, visitor)

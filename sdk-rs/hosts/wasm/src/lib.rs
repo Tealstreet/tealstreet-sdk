@@ -519,6 +519,7 @@ fn construction_error(detail: safe_cex_engine::VenueError) -> js_sys::Error {
 
 #[wasm_bindgen]
 pub struct WasmEngine {
+    dispatch_signing: bool,
     external_signer: bool,
     construction: String,
     inner: Box<dyn AnyEngine>,
@@ -564,12 +565,15 @@ impl WasmEngine {
     ) -> Result<WasmEngine, js_sys::Error> {
         // Own the setup buffer before any parsing or feature/venue refusal.
         let signer_setup_json = signer_setup_json.map(zeroize::Zeroizing::new);
-        let mut options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
+        let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
             .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
+        #[cfg(feature = "binance")]
+        let mut options = options;
+        let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
         let external_signer = options.signing.is_some() && signer_setup_json.is_none();
         #[cfg(feature = "binance")]
         let signer = if let Some(mut input) = signer_setup_json {
-            if !options.construction(venue).bridge.dispatch_signing {
+            if !dispatch_signing {
                 return Err(js_sys::Error::new(
                     "Local signer setup is not supported for this venue yet",
                 ));
@@ -581,7 +585,7 @@ impl WasmEngine {
             Some(signer)
         } else if external_signer {
             Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
-        } else if options.construction(venue).bridge.dispatch_signing {
+        } else if dispatch_signing {
             let (signer, identities) =
                 safe_cex_venues::prepare_local_signer(&mut options).map_err(construction_error)?;
             options.signing = Some(identities);
@@ -611,6 +615,7 @@ impl WasmEngine {
         Ok(Self {
             inner,
             construction,
+            dispatch_signing,
             external_signer,
         })
     }
@@ -631,6 +636,15 @@ impl WasmEngine {
     /// JS providers execute atomic batches outside the engine. Must be installed before start.
     #[wasm_bindgen(js_name = useExternalSigner)]
     pub fn use_external_signer(&mut self) -> Result<(), js_sys::Error> {
+        if !self.dispatch_signing {
+            return Err(construction_error(
+                safe_cex_engine::VenueError::new(
+                    "Injected signing is not supported for this venue yet",
+                )
+                .kind(safe_cex_engine::ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+            ));
+        }
         self.inner.external_signer().map_err(construction_error)?;
         self.external_signer = true;
         Ok(())
@@ -1467,6 +1481,7 @@ mod tests {
         let events = Rc::new(RefCell::new(Vec::new()));
         let drains = Rc::new(Cell::new(0));
         let mut engine = WasmEngine {
+            dispatch_signing: false,
             external_signer: false,
             construction: "{}".into(),
             inner: Box::new(Commands {
@@ -1742,6 +1757,7 @@ mod tests {
         }
         let health: serde_json::Value = serde_json::from_str(
             &WasmEngine {
+                dispatch_signing: false,
                 external_signer: false,
                 construction: "{}".into(),
                 inner: Box::new(Counted),
@@ -1761,6 +1777,7 @@ mod tests {
     #[test]
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
+            dispatch_signing: false,
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
@@ -1786,11 +1803,13 @@ mod tests {
     #[test]
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
+            dispatch_signing: false,
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
+            dispatch_signing: false,
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
