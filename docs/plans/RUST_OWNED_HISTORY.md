@@ -602,3 +602,82 @@ Focused engine/Bitunix/Lighter/TxFlow/Binance gates pass 1,133 native tests;
 strict all-target Clippy and formatting pass. Adversarial source review is clean:
 the six replacements are emitter-only, and the existing Cx::notice path already
 delegates to Cx::event. The only event contract change is the explicit scope.
+
+
+## Next fan-out: Bitunix fills, orders and income
+
+Plan from actual background merge `b1dfdb43291d5a6de7dd8808b486adddda4cb118`.
+Bybit and Kraken Spot are excluded because their lanes are active. Bitunix's
+three history queries still keep local row vectors, a dedupe set, page counters
+and direct history.incomplete emission. A later failed page currently rejects
+its earlier accepted rows; first-page failures reject without a typed kind.
+
+Use the existing shared `CursorHistory` for all three query kinds, with one
+owner and flat serialized native result variants. Stage mapped rows until the
+HTTP/envelope/stream verdict succeeds. Native facts select the time cursor for
+orders and offset token for income; the engine owns dedupe/progression, the
+50-order/100-income page budgets, missing-coverage notice and final completion.
+Fills stay single-page. Native invalid/nonadvancing order-time bounds are
+projected to a repeated opaque cursor so the existing core reports the same
+stall; an unbounded initial token never enters the wire request. Do not add or
+extend a pager/completion API or edit shared engine dispatch, clock or signing.
+
+Preserve native request ordering, inclusive boundaries, raw-ID progress before
+mapper filters, skip increments, response aliases, income PnL/fee derivation,
+units, sorting/truncation, keyless/unknown-fill-market no-I/O, and unsupported
+public-trade/client-ID lookup admission. The common first-page failure path
+becomes typed; later HTTP/native/stream failure resolves only accepted pages
+plus exactly one command-owned Warn before done. Staged failed-page prefixes
+never leak. Signing/credential preparation refusal remains strict even after
+accepted rows, via one history-specific rejection arm in fail_private; do not
+change credentials, signatures or native account reducers.
+
+Original-RED controls: typed first-page failure, accepted-prefix recovery after
+later transport/HTTP/native/malformed/missing-list failure, failed-page prefix
+exclusion, a full mapper-filtered page followed by failure, Error-only single
+owned marker ordering, concurrent query isolation, and strict signing-entropy
+refusal with notSent. Existing cursor stalls/page caps/valid-empty/filter/time/
+alias/ledger tests remain semantic-preservation controls; update the old strict
+later-failure expectation only where owner policy explicitly supersedes it.
+
+Intended source scope: Bitunix history.rs, the single fail_private history arm
+in account.rs, and native history tests. Append caller/audit/quality notes as
+appropriate. Coordinate that account arm with the other lanes before editing;
+no Bybit/Kraken Spot, source outside this venue, shared core or harness/workflow
+changes. Run focused engine/Bitunix/Binance tests, strict Clippy/fmt, independent
+plan/correctness/adversarial reviews, full CI and the separate guard/merge in the
+owner queue. Architecture gate: reuse one engine history choke point rather
+than introducing a venue-specific completeness/paging policy. Integrate actual
+shared dependencies before final proof; #1737 conformance stays separate.
+
+
+Plan review is clean with preservation constraints: seed orders via
+CursorWalk::starting_at so invalid first-page bounds repeat a registered token;
+do not use end_on_unchanged_cursor. Keep raw added counts separate from staged
+mapped rows, no early order-limit completion, and income skip 100..9900. A truly
+empty page ends natively, so the zero-accepted-rows/later-failure control uses a
+full raw page whose rows are all mapper-filtered but retain native ID/time
+progress. Separately prove genuine empty-page termination. RequestContext lane
+confirmed no Bitunix edits; the one fail_private arm remains disjoint.
+
+
+Implementation keeps the CursorHistory owner inline: boxing it shrank History
+far below the pre-existing Private continuation and triggered large_enum_variant.
+Inlining preserves the existing Pending size balance and avoids a new allocation
+or unrelated account-continuation boxing. No lib.rs or reducer changes needed.
+
+Original-RED checkpoint e2aae0aa398 failed all six new failure-contract groups
+against the old implementation (15 preservation tests passed). The shared-owner
+implementation passes those controls plus four boundary controls: genuine empty
+termination, invalid unbounded first cursor, unchanged explicit endTime, and
+final-only requested order limit. Signing preparation remains strict, now with
+typed notSent metadata instead of an unclassified rejection; callbacks
+multiplexing transport and decode retain the shared Internal
+fallback rather than inventing a Network classification. The owner is the sole
+command identity and emits incompleteness only at successful finalization.
+
+Focused engine/Bitunix/Binance gates pass 848 native tests, including all 25
+Bitunix history tests; strict all-target Clippy and formatting pass. Correctness
+review confirms unchanged raw progress/filter ordering and seeded request bounds.
+Full CI and the current owner merge queue still apply; this is not a landing or
+deployed-runtime claim.
