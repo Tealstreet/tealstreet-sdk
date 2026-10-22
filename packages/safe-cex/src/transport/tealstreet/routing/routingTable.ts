@@ -26,8 +26,8 @@ const OKX_JA = 'wss://okx-proxy-ja.tealstreet.io';
 // host+path-prefix; these must match `RELAY_ALLOWED_UPSTREAMS` on the tunnel).
 const RELAY_UPSTREAM = {
   bybitPrivate: 'wss://stream.bybit.com/v5/private',
-  okxPrivate: 'wss://ws.okx.com:8443/ws/v5/private',
-  okxBusiness: 'wss://ws.okx.com:8443/ws/v5/business',
+  okxPrivate: 'wss://ws.okx.com/ws/v5/private',
+  okxBusiness: 'wss://ws.okx.com/ws/v5/business',
   bitgetPrivate: 'wss://ws.bitget.com/v2/ws/private',
   bitgetPrivateUta: 'wss://ws.bitget.com/v3/ws/private',
 } as const;
