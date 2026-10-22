@@ -4089,6 +4089,6 @@ malformed/HTTP/transport errors reject `internal` rather than an unclassified
 string failure. The existing command-error diagnostic on request failure stays.
 Spot lookup and disabled order-history/income stubs remain unchanged, and public
 trades remains unsupported. No signing helper, credential selection, constructor
-argument, capability, NX bootstrap or runtime deployment changes are included.
-Existing B11 completeness ingestion/coverage obligations still apply; this slice
-alone does not close them or add a new NX caller migration.
+argument, capability or NX bootstrap changes are included. Callers must ingest
+command-scoped incomplete-query warnings, gate coverage accordingly and handle
+typed query rejection as unavailable history.
