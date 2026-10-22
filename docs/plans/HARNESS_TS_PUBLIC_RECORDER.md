@@ -100,3 +100,41 @@ separately reviewed contract. The bounded ts-oracle/fixer-contracts/legacy-fill
 review found no additional demonstrated circular/overbroad defect; retain the
 executable TS references and reconstruction caveats. Combined/family/browser
 labels remain distinct. No production cleanup or threshold change is claimed.
+
+## Implementation refinements and current evidence
+
+The plan was independently reviewed and committed as `21bd3346148` before code.
+The actual production Binance constructor is exercised offline with all network
+attempts forbidden; its owned clients resolve to standard HTTP adapters. The
+loader also refuses a pre-existing non-direct TS transport. Metadata source is
+`live-ts-public`; none of the fake test output is a committed capture fixture.
+
+The HTTP delegate requests arraybuffer bytes to avoid Axios's lossy UTF-8 decode
+and BOM stripping. Recording validates UTF-8 fatally and preserves a BOM; the
+original caller gets its normal text/BOM or Buffer representation before its
+unchanged response transforms, including error-status handling. These are
+HTTP-adapter payload bytes after its normal decompression, not HTTP framing or
+compressed network bytes. Mutable socket bytes and header arrays are snapshotted
+at observation. Async incoming Blob conversion stays ordered and bounded;
+outgoing Blobs are refused because public/auth inspection must precede send.
+Supported string/buffer sends must be Binance public read methods or ping/pong.
+
+Existing-socket cleanup unsubscribe sends are captured before closure; new
+HTTP/socket dispatch stops. Module loading and readiness share a deadline and
+race capture failure. Sink failure during unresolved loading, missing books,
+unsubscribe failure and incomplete cleanup refuse publication and restore hooks.
+Thirty-two focused controls, all 1,114 serial harness tests, 44 root typecheck
+and 28 lint tasks pass. Three negative controls fail on omitted outgoing sends,
+unsafe large-ID JSON reserialization and omitted typed-auth checking; the
+restored implementation passes. Final independent code/docs review is clean.
+Relative event times and startup deadlines use monotonic time, with a separate
+wall-clock metadata epoch. Actual docs-only landing `e42a32a8e94` is integrated
+with all incoming/owned bytes preserved. Full PR-head CI and a fresh separate
+guard remain merge gates; no live recording was run.
+
+Example command (requires separately approved live recording; NOT run here):
+
+```sh
+corepack yarn -s node --import tsx sdk-rs/harness/record-ts.mjs \
+  --venue binance --books BTCUSDT,ETHUSDT --seconds 60 --out /tmp/binance-ts-public.jsonl
+```
