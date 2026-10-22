@@ -169,3 +169,12 @@ regression that keeps its original Store row and seals Unknown for those gateway
 responses, including retCode0 and110001; retain a valid200 already-gone control.
 This tests the approved native certainty boundary without inventing a missing
 initial guard. Source remains unchanged until shared-journal plan/audit gates.
+
+Local original-native RED checkpoint (no production edits): the new real engine
+Demo cancellation matrix confirms all four gateway408/500 plus retCode0/110001
+responses remove the existing row and report success. Expected: unchanged row
+and Unknown. The identical native200/110001 already-gone control passes. Exact
+assertion failure is retained in /tmp/codex-command-replacement-gateway-original-red.log;
+the existing fallback/client-identity diagnostic assertions remain untouched.
+This branch is intentionally RED until the reviewed shared lifecycle/native-fact
+adoption phase; do not push or open a PR before actual #1741.

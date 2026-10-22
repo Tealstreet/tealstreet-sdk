@@ -1990,3 +1990,63 @@ fn spot_tpsl_streamed_before_the_seed_and_committed_after_it_is_relabelled() {
     let order = h.engine.store().order("stop").expect("spot stop stored");
     assert_eq!(order.kind, OrderType::StopLoss);
 }
+
+#[test]
+fn ordinary_gateway_already_gone_text_cannot_authorize_cancellation_effects() {
+    use safe_cex_engine::Outcome;
+    let mut observed = Vec::new();
+    for (status, code) in [
+        (408, 0),
+        (500, 0),
+        (408, 110001),
+        (500, 110001),
+        (200, 110001),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message(
+            "/v5/private",
+            r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"kept","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#,
+        );
+        let before = h
+            .engine
+            .store()
+            .order("kept")
+            .cloned()
+            .expect("native order seed");
+        h.command(Command::CancelOrders {
+            command: 91,
+            ids: vec!["kept".into()],
+        });
+        let request = h.take("/v5/order/cancel-batch");
+        h.reply(
+            request.id,
+            status,
+            &format!(r#"{{"retCode":{code},"retMsg":"order not exists or too late to cancel"}}"#),
+        );
+        observed.push((
+            status,
+            code,
+            h.engine.store().order("kept") == Some(&before),
+            h.outcomes
+                .iter()
+                .find(|(id, _)| *id == 91)
+                .and_then(|(_, outcome)| *outcome),
+            h.result(91).expect("one final outcome").is_err(),
+        ));
+        assert!(
+            !h.has_request("/v5/order/cancel"),
+            "no automatic cancel replay"
+        );
+    }
+    assert_eq!(
+        observed,
+        vec![
+            (408, 0, true, Some(Outcome::Unknown), true),
+            (500, 0, true, Some(Outcome::Unknown), true),
+            (408, 110001, true, Some(Outcome::Unknown), true),
+            (500, 110001, true, Some(Outcome::Unknown), true),
+            (200, 110001, false, None, false),
+        ],
+        "gateway status dominates benign text; only a definitive native response may cancel",
+    );
+}
