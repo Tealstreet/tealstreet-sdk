@@ -122,3 +122,24 @@ mutation is considered adopted until that release/reconciliation path is proven.
 Architecture gate: SignStep, provider setup, managed lifecycle and unsigned
 headers remain shared choke points. WEEX supplies native codec bytes and maps its
 existing semantic owners; it implements no signing custody or lifecycle service.
+
+## Additive canonical-work checkpoint
+
+Start implementation with opaque native recipe components on this actual-1765
+branch while #1780 is unmerged. Add `dispatch_signing::{Http, Upgrade}` in
+`src/sign/dispatch.rs`, exported separately from the existing raw legacy signer.
+`Http::new(identity, method, path_query, body)` retains exact immutable intent;
+`unsigned()` returns its native URL, two static public headers and optional body.
+`Upgrade::new(identity)` attests the fixed private WS endpoint and public headers.
+Both prepare from the injected integer protocol stamp, use the shared HMAC work
+builder plus provider-owned passphrase Present, and apply exactly the six native
+headers in credential-first order. Shared header validation supplies grammar and
+bounds; recipes hold refs/bytes only, with no local crypto or material cache.
+
+Original assertion-RED tests exercise this new contract through the actual engine
+provider path, then independent existing REST/WS vectors and tamper/refusal tests
+prove it. This additive phase does not rewire production builders, enable hosted
+or managed construction, or claim raw-credential removal. Trusted setup and actual
+builder/managed lifetime adoption follow, consuming actual #1780 before final
+proof. The eventual HTTP recipe implements that shared declaration getter when
+its managed builder lands; no empty-header workaround is used for admission.
