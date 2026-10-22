@@ -638,6 +638,22 @@ fn overflowing_average_cannot_replace_a_trusted_rest_quote_basis() {
     assert!(h.fills().is_empty());
 }
 
+#[test]
+fn corrected_quote_at_a_delivered_endpoint_prices_the_next_suffix_once() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","l":"1","L":"100","ap":"1e308"}}"#);
+    assert_eq!(h.fills(), [(100.0, 10.0)], "uniform execution evidence is independently valid");
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","ap":"100"}}"#);
+    assert!(h.fills().is_empty(), "quote correction cannot replay quantity");
+    let next = r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"2","ap":"110"}}"#;
+    h.ws(next);
+    assert_eq!(h.fills(), [(120.0, 10.0)], "the exact corrected endpoint proves the new suffix VWAP");
+    h.ws(next);
+    assert!(h.fills().is_empty());
+    assert_eq!(h.e.store().orders()[0].filled, 20.0);
+}
+
 const LOG_SECRET: &str = "audit-private-stream-secret";
 const SIGNED_STREAM_URL: &str =
     "wss://fapiws.bitrue.com/stream?listenKey=futures-key&signature=audit-private-stream-signature";

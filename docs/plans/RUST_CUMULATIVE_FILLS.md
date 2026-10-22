@@ -389,3 +389,34 @@ fill; its duplicate changes none. Original byte restoration is verified in
 /tmp/codex-cumulative-fanout-woo-unpriced-original-receipt.json. This additional
 financial fix is within the owner's standing same-contract approval and was
 reported explicitly; it is not a claim that all observation behavior is unchanged.
+
+### Missing delivered quote enrichment checkpoint
+
+Actual history1719 fa89bc0b59c integrated e0a8cb39fcf with all incoming/owned
+source blobs and both shared doc patches preserved. Actual signer1721
+802e9c8c6e9 integrated46ed8ffcb4a, all26 incoming+9 owned blobs preserved;
+actual tree equals greenf8d6. Family signing is unblocked separately, not part
+of this PR. Owner grants current WOO/Bitrue/Binance/execution/num dependency hold;
+scheduler-only #1723 may land under an explicit clean-trial exception.
+
+The final targeted review proves a fifth native control RED on actual1721:
+Bitrue direct z1/l1/L100/ap1e308 delivers10@100 independently of its invalid
+aggregate quote; corrected z1/ap100 supplies the exact missing endpoint quote
+without another Fill; z2/ap110 should then deliver10@120 but emits none because
+delivered quote evidence was not enriched. Original source was byte-restored,
+receipt /tmp/codex-cumulative-fanout-bitrue-enrich-original-receipt.json. This is
+the planned valid duplicate/no-delivery quote-observation contract, within the
+owner's standing approval, not a new quote ledger or fresh quantity admission.
+
+Before implementation, extend Cursor with enrich_quote(observation: Cursor)
+-> Option<Cursor>: return the validated observation ONLY when its quantity
+exactly equals self.quantity, self.value is missing and observation.value is
+known. Never advance/rewind quantity, overwrite an existing known quote or emit
+Fill. Bitrue TRADE admission selects its existing basis and valid aggregate quote;
+the helper can fill missing delivered quote evidence at that exact endpoint,
+independent of zero-length interval delivery. Existing quote selection ensures
+an observed-only basis beyond delivered progress cannot pass quantity equality.
+Add engine controls for mismatched endpoints, existing known value, explicit
+zero quote and absent evidence; keep original native correction/duplicate
+financial assertions. Freeze this slice after these five controls/four financial
+bug classes; broader findings go to the next phase unless they block this API.
