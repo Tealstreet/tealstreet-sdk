@@ -896,6 +896,76 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn final_release_transfers_queued_coverage_key_storage() {
+        let (mut l, f, e) = started(AuthMode::None);
+        let key = "a-nonempty-owned-coverage-key";
+        l.replace_interests(f, vec![interest(key)], encode).unwrap();
+        let queued = &l.feeds[f.0]
+            .interests
+            .queue
+            .front()
+            .unwrap()
+            .batch
+            .covered_keys[0];
+        let allocation = queued.as_ptr();
+        assert_eq!(
+            l.release_batch(e, false).as_deref(),
+            Some("+:a-nonempty-owned-coverage-key")
+        );
+        let released = l.feeds[f.0].interests.released.keys().next().unwrap();
+        assert_eq!(
+            released.as_ptr(),
+            allocation,
+            "move the consumed coverage key instead of cloning it"
+        );
+    }
+
+    #[test]
+    fn release_barrier_and_stale_epoch_preserve_queued_coverage_storage() {
+        let (mut l, f, e) = started(AuthMode::None);
+        l.replace_interests(f, vec![interest("owned-key")], encode)
+            .unwrap();
+        let allocation = l.feeds[f.0]
+            .interests
+            .queue
+            .front()
+            .unwrap()
+            .batch
+            .covered_keys[0]
+            .as_ptr();
+        assert_eq!(l.release_batch(e, true), None);
+        assert_eq!(
+            l.feeds[f.0]
+                .interests
+                .queue
+                .front()
+                .unwrap()
+                .batch
+                .covered_keys[0]
+                .as_ptr(),
+            allocation
+        );
+        let stale = Epoch {
+            socket: SocketId(99),
+            ..e
+        };
+        assert_eq!(l.release_batch(stale, false), None);
+        assert_eq!(
+            l.feeds[f.0]
+                .interests
+                .queue
+                .front()
+                .unwrap()
+                .batch
+                .covered_keys[0]
+                .as_ptr(),
+            allocation
+        );
+        assert!(l.feeds[f.0].interests.released.is_empty());
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("+:owned-key"));
+    }
+
+    #[test]
     fn legacy_and_unknown_managed_ingress_are_distinct() {
         let mut l = Lifecycle::default();
         assert_eq!(
