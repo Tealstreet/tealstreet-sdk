@@ -49,10 +49,15 @@ state and joined command waiters bounded and fail closed on exhaustion.
    Reads admitted while a write is pending retain their publication restriction
    after that write finishes. Preserve existing conservative invalidation on
    write issue/refusal unless a separately proven correction is authorized.
-4. A superseded valid read returns usable current cached rails, with validated
-   per-rail read fallback where the existing contract requires it, without stale
-   STORE publication. Never publish a mixed/partial proposal or treat malformed
-   native data as a cache hit. Genuine transport/native/parse failures still fail.
+4. A superseded valid read returns usable current settings without stale STORE
+   publication. Preserve native result contracts: BingX uses independent cached
+   rails with validated per-rail read fallback; WEEX uses a complete cached
+   rails/margin triplet or the whole validated proposal. Never publish a mixed
+   or partial proposal. BingX already discards a superseded margin response
+   before parsing it, using its previously validated rails/current cache; retain
+   and test that stage-specific behavior. Eligible margin proposals must parse
+   and validate fully. Native/transport errors and required-stage parse failures
+   still fail; this refactor does not strengthen stale-stage parsing policy.
 5. Background settings/config proposals use the same per-symbol commit fence:
    an older account read must not overwrite newer metadata or accepted writes.
    Preserve initial/partial readiness rules and newer-position fences. This
@@ -62,9 +67,12 @@ state and joined command waiters bounded and fail closed on exhaustion.
    success for an empty/partial proposal, auto-retry writes or start mirror engines.
 
 Ready/public-only policy must be explicit at the shared boundary: automatic
-metadata hooks do no private I/O before readiness or in public-only mode;
-explicit unsupported/pre-start operations retain typed refusal/SDK lifecycle
-handling. Validate actual adapter lifecycle flags before selecting the gate.
+metadata hooks do no private I/O before readiness or in public-only mode. SDK
+explicit operations retain their pending-start/typed-refusal handling. Separate
+that production lifecycle from raw native embedders: WEEX's existing prepared
+market/credential tests issue explicit reads without Engine::start. Do not add
+a blanket start requirement or change that raw contract accidentally. Validate
+actual adapter lifecycle flags and read intent before selecting the core gate.
 
 ## Scheduler, request lifecycle and other owners
 
@@ -112,8 +120,10 @@ WEEX/BingX metadata overlap; its first scheduler adoption is Bitunix balance.
 For each family prove: cached and uncached/flat symbols; one physical read per
 joined group; both owners receive one success/error; independent symbols;
 out-of-order old/new reads; writes between issue/legs/commit; pending-at-admission
-stickiness; refused writes; malformed or missing rails/margin; partial initial
-data; genuine errors; public-only and no-start/no-private-I/O; retry after failure
+stickiness; refused writes; malformed or missing eligible rails/margin and the
+superseded-margin discard control; partial initial data; genuine errors;
+automatic public-only/no-start no-private-I/O and prepared native explicit-read
+preservation; retry after failure
 and cleanup after timeout/cancellation. BingX's second leg cannot extend the
 logical raw deadline or publish its first leg. WEEX native config and settings
 must agree after the shared commit. Prove existing metadata-to-position fencing
