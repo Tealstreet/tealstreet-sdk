@@ -405,6 +405,17 @@ export class HyrotraderExchange extends BybitExchange {
     }
   }
 
+  // Hyro's simulator wraps the same "already gone" semantic as live Bybit in
+  // different phrasings ("Order does not exist or is no longer open" alongside
+  // the Bybit-live "order not exists" / "too late to cancel"). Keep both sets
+  // accepted so chase-cancel races never surface as user-visible errors from
+  // the single-cancel path or from inherited bulk/cancel-all paths.
+  protected isAlreadyGoneCancelMessage(message: unknown): boolean {
+    if (super.isAlreadyGoneCancelMessage(message)) return true;
+    const normalized = `${message || ''}`.toLowerCase();
+    return normalized.includes('does not exist') || normalized.includes('no longer open');
+  }
+
   cancelOrdersHelper = async (orders: Order[], category: string) => {
     for (const order of orders) {
       try {
@@ -414,8 +425,9 @@ export class HyrotraderExchange extends BybitExchange {
           orderId: order.id,
         });
         const status = getBybitResponseMeta(data);
-        const gone = /order (?:not|does not) exist|no longer open|too late to cancel/i.test(status.retMsg || '');
-        if (!status.isSuccess && !gone) this.fail(status.retMsg || 'HyroTrader cancellation failed');
+        if (!status.isSuccess && !this.isAlreadyGoneCancelMessage(status.retMsg)) {
+          this.fail(status.retMsg || 'HyroTrader cancellation failed');
+        }
         this.retireCancelledOrders([
           order,
           ...this.store.orders.filter(
@@ -443,6 +455,14 @@ export class HyrotraderExchange extends BybitExchange {
 
   get supportsTradeDerivedCandles() {
     return false;
+  }
+
+  // Hyro's public WS rejects oversized subscribe batches with
+  // "at most 32 topics per connection". Keep bulk kline subscribes well below
+  // that cap; the base Bybit livenet default of 50 would get the connection
+  // closed by the simulator.
+  get publicKlineSubscribeChunkSize() {
+    return 10;
   }
 
   get supportedCategories() {

@@ -1227,8 +1227,11 @@ trade-derived candle path is unchanged. Orderbook snapshot/delta and ticker pars
 remain shared, but Hyro public endpoints are the venue source of truth for this
 adapter; do not swap in direct Bybit L2 as an assumed-equivalent fallback. Hyro's
 public WS rejects oversized subscribe batches with `at most 32 topics per
-connection`; keep shared Bybit public subscribe chunking below that limit for
-tickers and kline bulk subscriptions.
+connection`. The shared ticker/reconnect subscribe path already chunks at 10
+and is safe for both venues; the bulk kline subscribe (`listenOHLCVs`) stays at
+50 for ordinary Bybit livenet and is overridden to 10 on `HyrotraderExchange`
+via `publicKlineSubscribeChunkSize`. Do not blanket-shrink the kline chunk on
+the shared Bybit path.
 
 Configure the web build before enabling the connector:
 

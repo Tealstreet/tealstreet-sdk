@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { isBaseCapabilityFallback } from '../../exchanges/base';
+import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -126,6 +127,38 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
     await exchange.cancelOrders(rows);
     expect(post).toHaveBeenCalledTimes(1);
     expect(store.orders).toEqual([]);
+  });
+  it('retires rows silently when cancel-all races a simulator "no longer open" response', async () => {
+    const { exchange, store } = setup();
+    const rows = ['first', 'second'].map((id) => ({ ...order, id, status: OrderStatus.Open }) as Order);
+    store.update({ orders: rows });
+    const mockXhr = {
+      post: vi
+        .fn()
+        .mockResolvedValue({ data: { retCode: 110001, retMsg: 'Order does not exist or is no longer open' } }),
+    } as any;
+    exchange.xhr = mockXhr;
+    exchange.unlimitedXHR = mockXhr;
+    await exchange.cancelSymbolOrders('BTCUSDT');
+    expect(exchange.emitAndLogError).not.toHaveBeenCalled();
+    expect(store.orders).toEqual([]);
+  });
+  it('does not leak the Hyro gone-phrase acceptance into ordinary Bybit', async () => {
+    // The base classifier only accepts Bybit livenet's "order not exists" /
+    // "too late to cancel" phrasing. Hyro extends it via `isAlreadyGoneCancelMessage`
+    // without mutating the shared regex; this guard keeps that boundary.
+    const store = new DefaultStore();
+    const bybit = new BybitExchange('bybit' as any, { key: 'k', secret: 's' }, store);
+    exchanges.push(bybit as unknown as TestHyroExchange);
+    const emit = vi.spyOn(bybit, 'emitAndLogError').mockImplementation(() => {});
+    bybit.xhr = {
+      post: vi
+        .fn()
+        .mockResolvedValue({ data: { retCode: 110001, retMsg: 'Order does not exist or is no longer open' } }),
+    } as any;
+    bybit.unlimitedXHR = bybit.xhr;
+    await bybit.cancelSymbolOrders('BTCUSDT');
+    expect(emit).toHaveBeenCalledWith('Order does not exist or is no longer open');
   });
   it('disables unsupported capabilities without sending requests', async () => {
     const { exchange } = setup();
