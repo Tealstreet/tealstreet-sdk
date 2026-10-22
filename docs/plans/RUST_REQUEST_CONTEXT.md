@@ -286,3 +286,22 @@ final CI/replay proof remain open. Local compiled-WASM integration tests current
 find a stale single-family artifact (unsupported Binance/Phemex); native WASM-host
 unit tests and JS host/Workers unit checks are separate evidence, not a rebuilt
 combined-WASM claim.
+
+### Signed-read wiring audit
+
+Reserve the existing Dispatch sequence when the managed request is created, then
+hold recipe preparation until host route readiness. Use the same SignStep and
+provider/result validation as legacy dispatch. A completed signature produces a
+bound host packet but retains only its unsigned recipe and freshness metadata in
+the engine until final claim. Publish receipts only after final release admission.
+Stale route/protocol/signature metadata cancels the exact old preparation/provider,
+reserves a new signing attempt and prepares again under the unchanged raw deadline.
+Retiring a logical owner aborts its route, pending signer and bound packet; late
+provider success cannot escape through the legacy outbound branch.
+
+The next phase enables signed reads only, keeping mutation gating until command
+ledger/reconciliation wiring. Tests cover reversed route/provider readiness,
+original deadline and protocol-revision replacement, duplicate/late completion,
+receipt publication at claim, cancellation of a hung primitive provider, and the
+native parked-provider/fast-ACK 450 ms final-handoff probe. Legacy WS signing and
+its subscription sequencing stay on the same Dispatch; no second signing queue.
