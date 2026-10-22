@@ -747,3 +747,97 @@ Independent plan/source/RED audit confirms valid namespace choices and native
 cleanup gap. The decoder must validate the complete array before publishing any
 row evidence; native Cow string decoding may allocate transient body-bounded
 memory before the retained writer quota, so make no zero-copy claim.
+
+
+Native implementation review corrections before checkpoint approval:
+
+- A batch can return a native error object rather than an array. Decode that
+  object for bounded code/message only; never accept object orderId as a batch
+  row. A compiled control removing only that object branch fails exactly
+  venue_code=None versus -1007; fixed source restored byte-identically
+  (SHA6676689c9028b48f9a11ba15bd7c8f8986a45b684f92a048b9863d90ea5dcc6e).
+  Receipt/log: /tmp/codex-binance-batch-object-control-{receipt.json,red.log}.
+- Derived Deserialize accepts positional arrays as struct fields. Two original
+  controls show regular and nested-batch [null,null,12,null,null,null,null]
+  incorrectly yield ID12. Require JSON-whitespace plus object opening before
+  complete typed decode in both paths. Full root-array validation still precedes
+  row publication. Logs: /tmp/codex-binance-unproven-shape-original-red.{log,json}.
+- Use ordinary if-let for batch Call selection. matches!(request.call,...) makes
+  the deliberately conservative lexical checker treat its local variable token
+  request as an opaque legacy macro escape. Equivalent nonmacro control flow
+  needs no allowance; every full inventory map remains unchanged and bans pass.
+- Existing native account fixtures retain all statuses, clocks, Store and ID
+  assertions. Owner confirmed 503/-1007 and503/-2019 now have shared
+  VenueUnavailable/Unknown rather than native Timeout/Rejected kind; 502 HTML
+  also has VenueUnavailable. The fixed uncertainty summary replaces the primary
+  native text, while exact native code/message stay in venue_code/venue_message.
+  Keep these caller-visible changes in CALLERS and the eventual PR body. The
+  existing cancel-all fixture still cancels only the definitively accepted row
+  and retains the unresolved row; add exact preserved diagnostic assertions.
+
+Independent final native source/expectation review: CLEAN, subject to the pending
+full native/strict gates. No further concrete blocker in object/row shape,
+namespace selection, contradictory code+ID rejection, complete-array validation,
+retained budgets or matching-generation Job discard. Architecture gate: No.
+The earlier four focused native binaries passed before these review corrections;
+that is historical evidence, not final full-suite proof.
+
+
+Shared observer fan-out follow-on: metadata + Hyro (owner scope, design pending)
+
+Design one engine execution-group/completion authority for both Hyro coalesced
+writes and metadata joined reads; do not implement a second metadata mechanism.
+This is a draft constraint set, not a frozen API or an implemented capability.
+An opaque group root must outlive an individually cancelled/expired observer
+while another observer still needs the same execution. Reuse existing managed
+physical legs, preparation/signing/final claim and response custody. Observer
+Contexts retain exact caller owner generations/deadlines and completion authority;
+joining grants no raw numeric completion, independent resend or deadline extension.
+Group/observer allocation, release facts, expiry and terminal fan-out belong in
+the engine. Publication freshness is separate from read liveness: an otherwise
+valid caller may receive the approved cached fallback without granting stale
+Store/native-cache publication. Metadata::Completion remains explicitly legacy
+until this shared contract lands.
+
+Required metadata acceptance cases supplied by cxxyqr, alongside Hyro cases:
+first physical read joins two command generations; each completes once on success
+or error; expire/cancel first while second survives without cancelling physical
+work; cancel follower without resurrection; reused numeric ID cannot be completed
+by an old generation; late join never extends the original group bound; BingX
+second leg inherits the exact root deadline; pause/admission/preparation/signing
+failure and timeout retire the exact group and every waiter once with typed
+outcomes; stale delivery has neither publication nor new-generation completion
+rights; sticky pending-write/superseded reads preserve approved cached fallback.
+
+Plan/API audit must settle independent physical versus observer deadlines,
+explicit detach versus whole-group cancellation, mutation release/prior-attempt
+facts for late joiners, atomic publication/completion and bounded observer/evidence
+capacity. In particular, allocation failure must not erase already-sent evidence
+or manufacture NotSent for an observer of an existing write. Use the common
+issuer/generation/resource-ID authorities and existing command evidence budget;
+no extra venue counter, generic side executor or owner0 bypass. Commit the exact
+shared API and independent audit before implementation or adapter promises.
+
+
+Final local Binance native checkpoint: 24 exact test binaries, 293 tests PASS,
+0 ignored. The serial cargo run reached its480s process-group bound while
+starting another binary; preserve that log/receipt. A sampled unit process was
+801/801 samples in macOS _dyld_start before Rust main (96KB), so do not attribute
+the delay to a started Rust test or change lifecycle clocks. Preserve eight
+completed full suites, then execute only the remaining sixteen compiled binaries
+with four workers and one Rust test thread per worker (total four), each bounded
+at120s. All sixteen exit0 with one full unfiltered summary and unchanged binary
+hashes; source inventory/hashes remain exact. Final targeted request_context22
+and account36 suites also pass; do not double-count their tests.
+
+Independent final local verification is CLEAN: all24 target names and executable
+hashes, source set/hashes, prior/current logs and 293-test total recomputed. This
+is local native verification, not CI, a reproducible-build proof or a raw replay
+claim. Receipt /tmp/codex-binance-unproven-remaining/receipt.json
+SHA530f61a8290e3caa03558f7f83cf9e2c56d9800477adddbe862b570add25c8f6;
+manifest SHA8db813bda551e76d54675b94034e031a0d591d1fb355ddf9af8506db6c23e1d9.
+Strict all-target Clippy, fmt, diff check, bans and12 ratchet controls pass. The
+legacy inventory is unchanged; no broad allowance or new request site. Ordinary
+Bybit gateway regression remains deliberately RED until its separate adoption.
+
+Binance documentation tests also pass (zero cases); no doctest examples exist.

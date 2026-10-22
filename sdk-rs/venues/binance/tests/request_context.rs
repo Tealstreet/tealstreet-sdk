@@ -728,6 +728,7 @@ fn unproven_placement_ids_are_evidence_only_and_match_the_native_endpoint() {
     let mut observations = Vec::new();
     for (algo, body, expected) in [
         (false, r#"{"orderId":12}"#, vec!["12"]),
+        (false, "[null,null,12,null,null,null,null]", vec![]),
         (false, r#"{"algoId":13}"#, vec![]),
         (true, r#"{"algoId":13}"#, vec!["13"]),
         (true, r#"{"orderId":12}"#, vec![]),
@@ -785,6 +786,7 @@ fn unproven_batch_ids_validate_the_whole_envelope_without_caller_attribution() {
     let mut observations = Vec::new();
     for (body, expected) in [
         (r#"[{"orderId":12},{"orderId":13}]"#, vec!["12", "13"]),
+        ("[[null,null,12,null,null,null,null]]", vec![]),
         (
             r#"[{"orderId":12},{"code":-2015,"msg":"auth refused"}]"#,
             vec!["12"],
@@ -872,4 +874,43 @@ fn unproven_cancellation_and_settings_do_not_invent_placement_ids() {
         assert_eq!(h.engine.store().orders(), before);
         assert!(!h.engine.store().hedged());
     }
+}
+
+#[test]
+fn unproven_batch_error_object_keeps_bounded_native_diagnostics_without_ids() {
+    let mut h = ready();
+    let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_str(
+        r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+    )
+    .unwrap();
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 724,
+        orders: vec![order; 6],
+    }));
+    let request = h.take("/fapi/v1/batchOrders");
+    h.reply(
+        request.id,
+        503,
+        "",
+        r#"{"code":-1007,"msg":"Timeout waiting for response","orderId":12}"#,
+    );
+    let failure = &h.failures.iter().find(|(id, _)| *id == 724).unwrap().1;
+    assert_eq!(failure.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        failure.kind,
+        Some(safe_cex_engine::ErrorKind::VenueUnavailable)
+    );
+    assert_eq!(failure.venue_code.as_deref(), Some("-1007"));
+    assert_eq!(
+        failure.venue_message.as_deref(),
+        Some("Timeout waiting for response")
+    );
+    assert!(
+        failure
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.has_request("/fapi/v1/order"));
 }

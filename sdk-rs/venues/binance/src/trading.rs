@@ -6,18 +6,22 @@ use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::json::{ArrayAt, ArraySplitter, ItemCheck};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::request_context::{
-    Context, Credential, Operation, Policy, RejectionReports, RetryPolicy, Scope, WriteResult,
+    Context, Credential, Operation, Owner, Policy, RejectionReports, RetryPolicy, Scope,
+    UnprovenEvidence, WriteResult,
 };
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
+use serde::Deserialize;
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 
 const BROKER_PREFIX: &str = "x-s3vFFRQp";
@@ -63,6 +67,46 @@ enum Call {
     PositionMode {
         hedged: bool,
     },
+}
+
+/// Borrow native facts only. Wrong or duplicate known fields invalidate a row;
+/// the caller's intended identity is never a substitute for a native echo.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnprovenOrder<'a> {
+    code: Option<i64>,
+    #[serde(borrow)]
+    msg: Option<Cow<'a, str>>,
+    order_id: Option<u64>,
+    algo_id: Option<u64>,
+    #[serde(borrow)]
+    client_order_id: Option<Cow<'a, str>>,
+    strategy_id: Option<u64>,
+    #[serde(borrow)]
+    new_client_strategy_id: Option<Cow<'a, str>>,
+}
+
+impl<'a> UnprovenOrder<'a> {
+    fn parse(body: &'a str) -> Option<Self> {
+        // Derive also accepts positional sequences. Native placement facts
+        // require an object, never an array interpreted as struct fields.
+        if !body
+            .trim_start_matches([' ', '\t', '\r', '\n'])
+            .starts_with('{')
+        {
+            return None;
+        }
+        serde_json::from_str(body).ok()
+    }
+
+    fn capture_diagnostics(&self, evidence: &mut UnprovenEvidence) {
+        if let Some(code) = self.code {
+            evidence.venue_code(&code.to_string());
+        }
+        if let Some(message) = self.msg.as_deref() {
+            evidence.venue_message(message);
+        }
+    }
 }
 
 struct Planned {
@@ -577,6 +621,100 @@ impl BinanceFutures {
         }
     }
 
+    pub(crate) fn capture_unproven_trade(
+        &self,
+        request: &Request,
+        response: Response<'_>,
+        evidence: &mut UnprovenEvidence,
+    ) {
+        if let Call::PlaceBatch { .. } = &request.call {
+            // A batch-wide native refusal has an object envelope. Preserve its
+            // bounded diagnostics, but a non-array can never supply batch IDs.
+            if let Some(row) = UnprovenOrder::parse(response.body) {
+                row.capture_diagnostics(evidence);
+                return;
+            }
+            // Validate every row and the complete envelope before emitting a
+            // prefix. Keep at most one row, never an intermediate result Vec.
+            let mut validator = ArraySplitter::new(ArrayAt::Root);
+            validator.feed(response.body.as_bytes(), |_| {});
+            if !validator.finished() {
+                return;
+            }
+            drop(validator);
+            let mut rows = ArraySplitter::with_item_check(ArrayAt::Root, ItemCheck::Venue);
+            rows.feed(response.body.as_bytes(), |row| {
+                self.capture_unproven_trade_row(request, row, evidence);
+            });
+        } else {
+            self.capture_unproven_trade_row(request, response.body, evidence);
+        }
+    }
+
+    fn capture_unproven_trade_row(
+        &self,
+        request: &Request,
+        body: &str,
+        evidence: &mut UnprovenEvidence,
+    ) {
+        let Some(row) = UnprovenOrder::parse(body) else {
+            return;
+        };
+        row.capture_diagnostics(evidence);
+        // A refusal carrying an ID is contradictory native placement proof.
+        if row.code.is_some() {
+            return;
+        }
+        let positive = |id: Option<u64>| id.filter(|id| *id > 0);
+        let futures = !self.is_spot() && !self.options.portfolio_margin;
+        match &request.call {
+            Call::PlaceOne { client_id: None } | Call::PlaceBatch { .. } if futures => {
+                if let Some(id) = positive(row.order_id) {
+                    evidence.order_id(&id.to_string());
+                }
+            }
+            Call::PlaceAlgo { client_id: None } if futures && !self.is_inverse() => {
+                if let Some(id) = positive(row.algo_id) {
+                    evidence.order_id(&id.to_string());
+                }
+            }
+            Call::PlaceOne {
+                client_id: Some(expected),
+            } if (self.is_spot() || self.options.portfolio_margin)
+                && positive(row.order_id).is_some()
+                && row.client_order_id.as_deref() == Some(expected.as_str()) =>
+            {
+                evidence.order_id(row.client_order_id.as_deref().expect("matched native echo"));
+            }
+            Call::PlaceAlgo {
+                client_id: Some(expected),
+            } if self.options.portfolio_margin
+                && positive(row.strategy_id).is_some()
+                && row.new_client_strategy_id.as_deref() == Some(expected.as_str()) =>
+            {
+                evidence.order_id(
+                    row.new_client_strategy_id
+                        .as_deref()
+                        .expect("matched native echo"),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn discard_unproven_trade(&mut self, owner: Owner) {
+        let Owner::Command { id, .. } = owner else {
+            return;
+        };
+        if self.trading.jobs.get(&id).is_some_and(|job| {
+            job.context
+                .as_ref()
+                .is_some_and(|context| context.owner() == owner)
+        }) {
+            self.trading.jobs.remove(&id);
+        }
+    }
+
     pub(crate) fn on_trade_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -611,17 +749,12 @@ impl BinanceFutures {
         let mut reports = Vec::new();
         let mut batch_reports = false;
         let mut continue_after_item_refusal = false;
-        // A gateway failure is unproven whatever body it carries.
-        let mut unproven = response
-            .as_ref()
-            .is_ok_and(|r| r.status == 408 || r.status >= 500);
+        // The shared engine filters unproven envelopes before this reducer.
+        // Native malformed/mixed replies still supply their native facts here.
+        let mut unproven = false;
         let outcome = match response {
             Ok(response) => match venue_error(&response) {
                 Some(error) => Err(error),
-                None if unproven => Err((
-                    0,
-                    "Binance HTTP response does not prove the write outcome".into(),
-                )),
                 None => Ok(response.body),
             },
             Err(error) => Err((0, error.to_owned())),
