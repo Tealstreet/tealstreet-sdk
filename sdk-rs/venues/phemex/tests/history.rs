@@ -680,7 +680,7 @@ fn income_keeps_distinct_equal_time_postings_and_filters_after_coverage() {
     assert_ne!(rows[0].tran_id, rows[1].tran_id);
 }
 #[test]
-fn income_failed_currency_or_saturated_timestamp_never_returns_partial_success() {
+fn income_failed_currency_and_saturated_timestamp_return_owned_accepted_rows() {
     let mut e = engine(true);
     let a = query(&mut e, income(1000., 2000., None));
     let x = ledger(1100, "1", "100", "REALIZED_PNL", "USDT");
@@ -689,7 +689,7 @@ fn income_failed_currency_or_saturated_timestamp_never_returns_partial_success()
     respond(&mut e, &a, &format!("[{x}]"), false);
     let a = next_http(&mut e);
     respond(&mut e, &a, r#"{"code":10001,"msg":"denied"}"#, false);
-    assert!(result(&mut e).is_err());
+    owned_income::assert_partial(&actions(&mut e), 10, 1);
 
     let mut e = engine(true);
     let mut a = query(&mut e, income(1000., 2000., None));
@@ -697,22 +697,31 @@ fn income_failed_currency_or_saturated_timestamp_never_returns_partial_success()
     respond(&mut e, &a, &body, true);
     a = next_http(&mut e);
     respond(&mut e, &a, &body, true);
-    // A full duplicate-only timestamp is ambiguous. The shared pager marks
-    // incomplete and probes the remaining span, then completion must fail.
-    for _ in 0..60 {
+    // Saturation remains incomplete, but the shared owner preserves accepted
+    // rows and continues the other currency before completing once.
+    let mut reached_usdc = false;
+    for _ in 0..100 {
         let output = actions(&mut e);
         if let Some(failed) = output.iter().find_map(|a| match a {
             Action::Notice(Notice::CommandDone { .. }) => Some(false),
             Action::Notice(Notice::CommandFailed { .. }) => Some(true),
             _ => None,
         }) {
-            assert!(failed);
+            assert!(!failed);
+            assert!(
+                reached_usdc,
+                "incomplete USDT stage does not discard USDC coverage"
+            );
+            owned_income::assert_partial(&output, 10, 200);
             return;
         }
         let a = output
             .into_iter()
             .find(|a| matches!(a, Action::Http(_)))
             .expect("coverage probe");
+        if let Action::Http(request) = &a {
+            reached_usdc |= request.url.contains("currency=USDC");
+        }
         respond(&mut e, &a, "[]", true);
     }
     panic!("must terminate visibly incomplete");
@@ -908,7 +917,7 @@ mod owned_income {
         }
     }
 
-    fn assert_partial(output: &[Action], owner: u32, count: usize) {
+    pub(super) fn assert_partial(output: &[Action], owner: u32, count: usize) {
         let notices = markers(output);
         assert_eq!(notices.len(), 1, "exactly one owned marker: {output:?}");
         assert_eq!(notices[0].level, Level::Warn);
@@ -1041,5 +1050,56 @@ mod owned_income {
         assert!(output.iter().any(|action| matches!(action,
             Action::Notice(Notice::CommandFailed { command: 10, error }) if error.kind == Some(ErrorKind::Internal)
         )), "no eligible output was accepted; failure must stay typed");
+    }
+
+    #[test]
+    fn concurrent_query_failures_keep_their_own_coverage() {
+        let mut e = engine(true);
+        e.set_log_level(Level::Error);
+        let first = query(&mut e, income(1000., 2000., None));
+        let row = ledger(1100, "1", "101", "REALIZED_PNL", "USDT");
+        respond(&mut e, &first, &format!("[{row}]"), true);
+        let later_page = next_http(&mut e);
+        e.handle(
+            3.,
+            Event::Command(Command::Query {
+                command: 42,
+                query: income(1000., 2000., None),
+            }),
+        );
+        let other_first = next_http(&mut e);
+        fail_page(&mut e, &later_page, 0, true);
+        assert_partial(&actions(&mut e), 10, 1);
+        fail_page(&mut e, &other_first, 0, true);
+        let output = actions(&mut e);
+        assert!(markers(&output).is_empty(), "owner 42 has no accepted rows");
+        assert!(output.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed { command: 42, error }) if error.kind == Some(ErrorKind::Internal)
+        )));
+        assert!(
+            !output
+                .iter()
+                .any(|action| matches!(action, Action::Notice(Notice::CommandDone { .. })))
+        );
+    }
+
+    #[test]
+    fn equal_bound_coverage_uses_the_effective_native_request_range() {
+        for streamed in [false, true] {
+            let mut e = engine(true);
+            let first = query(&mut e, income(1000., 1000., None));
+            let outside = ledger(1001, "1", "101", "REALIZED_PNL", "USDT");
+            respond(&mut e, &first, &format!("[{outside}]"), streamed);
+            let next = next_http(&mut e);
+            let Action::Http(request) = &next else {
+                unreachable!()
+            };
+            assert!(
+                request.url.contains("currency=USDC&start=1000&end=1000"),
+                "outside row cannot generate an inverted or out-of-window native request"
+            );
+            respond(&mut e, &next, "[]", streamed);
+            assert_partial(&actions(&mut e), 10, 0);
+        }
     }
 }

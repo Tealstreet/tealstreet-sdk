@@ -437,6 +437,30 @@ impl<T> RangeHistory<T> {
         }
     }
 
+    /// Bind a selected fetch to narrower native request bounds before issuing
+    /// it. Inclusive endpoints may pad a zero-width walk only internally;
+    /// coverage must use the range actually requested from the venue.
+    #[must_use]
+    pub fn restrict_active_range(&mut self, from: f64, to: f64) -> bool {
+        let valid = self.active.is_some_and(|(selected_from, selected_to)| {
+            from.is_finite()
+                && to.is_finite()
+                && selected_from <= from
+                && from <= to
+                && to <= selected_to
+        }) && !self.finished
+            && self.lifecycle_error.is_none()
+            && self.pending_facts.is_empty()
+            && self.rows.staged_len() == 0;
+        if !valid {
+            self.lifecycle_error
+                .get_or_insert("history range request bounds are invalid or already staged");
+            return false;
+        }
+        self.active = Some((from, to));
+        true
+    }
+
     /// Row and native range facts are staged together, never independently.
     pub fn stage(&mut self, row: T, facts: PageRow) {
         if self.active.is_none() || self.finished || self.lifecycle_error.is_some() {
@@ -808,5 +832,57 @@ mod range_stage_tests {
         assert_eq!(history.step(), Step::Finished);
         assert!(history.active.is_none());
         assert_eq!(history.request_budget, Some((1, "original budget".into())));
+    }
+
+    #[test]
+    fn clipped_native_range_preserves_outside_row_coverage_without_continuation() {
+        let mut history = RangeHistory::new(
+            Completion::new(71),
+            RangeWalk::new(0., 1., 1., 200),
+            |_| "gap".into(),
+            |_: &[String]| Ok("[]".into()),
+        );
+        assert_eq!(next_fetch(&mut history), (0., 1.));
+        assert!(history.restrict_active_range(0., 0.));
+        history.stage(
+            "outside".into(),
+            PageRow {
+                timestamp: 1.,
+                identity: "outside".into(),
+            },
+        );
+        history.accept_page_where(|_| false);
+        assert_eq!(history.accepted_len(), 0);
+        assert_eq!(
+            history.step(),
+            Step::Finished,
+            "outside row cannot extend the native range"
+        );
+        assert!(history.walk.incomplete_chunks() > 0);
+    }
+
+    #[test]
+    fn native_bounds_cannot_expand_invert_or_change_after_staging() {
+        for (from, to) in [(-1., 1.), (0., 11.), (2., 1.), (f64::NAN, 1.)] {
+            let mut history = owner();
+            next_fetch(&mut history);
+            assert!(!history.restrict_active_range(from, to));
+            assert_eq!(history.active, Some((0., 10.)));
+            assert!(history.lifecycle_error.is_some());
+        }
+        let mut history = owner();
+        assert!(!history.restrict_active_range(0., 1.));
+        let mut history = owner();
+        next_fetch(&mut history);
+        history.stage(
+            "pending".into(),
+            PageRow {
+                timestamp: 1.,
+                identity: "pending".into(),
+            },
+        );
+        assert!(!history.restrict_active_range(0., 1.));
+        assert_eq!(history.rows.pending, ["pending"]);
+        assert_eq!(history.active, Some((0., 10.)));
     }
 }

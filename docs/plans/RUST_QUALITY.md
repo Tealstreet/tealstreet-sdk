@@ -353,3 +353,11 @@ facts publish only after whole-page admission and final success; no native
 HISTORY_INCOMPLETE emitters remain in WEEX histories. Explicit algo continuation
 is an owned gap, with no new paging algorithm. Income remains the prior slice;
 other families and caller/deployment proof remain open.
+
+Phemex income uses one engine range/completion owner across both currency stages.
+Original-source RED controls pin typed first failure, eligible-only partial
+recovery, later-currency loss and failed streamed-page prefixes. Core controls
+cover first gaps, stage lifecycle, cumulative budgets, filtering after coverage
+and actual native-bound restrictions; concurrent owners and Error-only logging
+stay isolated. Saturation intentionally continues USDC with an owned gap; no
+per-venue completeness emitter or positive deployed-runtime claim is introduced.

@@ -1293,3 +1293,17 @@ owned marker. Test that additional stage explicitly. Healthy request sequences
 stay unchanged. Preserve equal-bound padding only inside the walker
 (`end.max(start + 1)`), native-request clipping to actual end, and output filtering
 against the actual caller end rather than the padded synthetic bound.
+
+Phemex implementation checkpoint: the four original-source behavior assertions
+are RED before adoption and GREEN through the shared range owner. New core
+controls cover composite ownership/first gaps, early restart, filtered coverage
+and cumulative budgets. Independent review found a boundary regression in the
+initial adapter: a padded equal-bound walk admitted against the synthetic end
+while native HTTP used the actual end. A new assertion reproduced an inverted
+continuation. Additive shared `restrict_active_range` now binds narrower native
+bounds before dispatch and rejects expansion/inversion or changes after staging;
+coverage still sees all decoded row facts. Both direct and streamed edge cases
+are corrected, with additional core restriction controls. The range owner is
+boxed inside the native request to keep Pending's enum variants bounded, rather
+than suppressing the strict Clippy size check. This does not change completion
+authority, request wire or the planned physical-release integration boundary.
