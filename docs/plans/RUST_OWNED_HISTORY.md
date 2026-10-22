@@ -8,8 +8,9 @@ Reference merged in #1710 at `1910baa65a3`; fan-out remains active.
 Fresh `feat/rust-owned-history-range` starts from actual scheduler landing
 `faf799268857` while #1720 owns the source merge window. Commit this plan first,
 then locally integrate the reviewed frozen #1719 foundation `35ee0ea84af` to
-exercise its contextual finalization. This is an unmerged local dependency,
-not a landed API claim. Do not publish/merge this phase before #1719 lands;
+exercise its contextual finalization. The reviewed local dependency was subsequently merged as actual #1719
+`fa89bc0b59c` and real-integrated before publication; this owner API is now landed.
+Do not publish/merge this phase before that actual integration;
 real-integrate actual #1720/#1719 and other shared-engine dependencies before
 final proof. No dispatch/request/signing/host, clock, lib.rs, row/account reducer
 or financial helper edits. Engine source stays in history.rs (and paging.rs only
@@ -424,3 +425,13 @@ read. The legacy account test for discarded earlier fill windows now asserts
 retained rows and marker ordering; no comparator/fixture/budget is weakened.
 Both Refused and TimedOut supplied signing errors preserve strict typed notSent
 rejection after accepted rows. Actual #1719 is still required before publication.
+
+
+Actual #1719 `fa89bc0b59ccb36bc36d87428950fddc67217e51` is now
+real-integrated after its exact frozen ed757 head passed full CI and a separate
+guard/merge. This dependency merge is content-neutral: the reviewed history
+foundation and all incoming source/tests remain intact. Actual financial #1720
+and protocol-clock #1722 are already ancestors. Signer prerequisites #1721 have
+next merge priority; this range reference can run provisional CI, but it must
+real-integrate that actual shared-engine merge before final proof/guard. No
+unmerged signer API or caller migration is claimed in these docs.
