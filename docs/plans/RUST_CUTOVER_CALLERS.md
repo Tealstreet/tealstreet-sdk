@@ -4081,6 +4081,6 @@ The original owner survives the single signature resend and three eligible GET
 retries. Reset drops only the unvalidated page and its native attempt identities;
 retry budgets, timestamp advancement, exact URLs, quantities/IDs, filtering,
 final descending sort/limit and no live Store writes are preserved. No SDK
-argument/result shape or new NX handler is added. Numeric completion remains
-legacy authority; managed completion and B11 caller ingestion/coverage remain
-separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+argument/result shape or new NX handler is added. Numeric completion uses legacy
+authority rather than managed Context completion. Callers must handle typed query
+rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
