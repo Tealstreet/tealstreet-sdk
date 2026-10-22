@@ -1256,3 +1256,15 @@ strict touched Clippy/fmt/bans locally with four Cargo jobs; no local WASM relea
 full replay, size or timing sweep. Update caller/AUDITS/QUALITY with exact scope,
 then current-head CI/source-bound proof, queue announcement, separate guard and
 separate merge. Keep #1758's watch active; no cutover/NX/deployment closure.
+
+Independent GRVT plan review is CLEAN with preservation refinements: every
+terminal failure of an order-filtered fill proof stays strict, including actual
+later HTTP/decode/transport loss after accepted fills. Keep fail_pending strict
+for deferred/bootstrap/session-refresh failure; only explicit final history
+HTTP/stream/transport call sites use recoverable owner finish. Retain native
+stage_count independently of total accepted rows, especially after funding to
+fills. Discard preserves admitted rows, first gap, cursor/pages/dedupe/stage state;
+calling it after completion/poisoning poisons strict completion. Add exhaustion,
+refresh-failure, filtered later-failure and lifecycle-misuse controls. RequestContext
+owner explicitly confirmed these additive lower HistoryRows/CursorHistory regions
+clear; Completion authority and its pending follow-on API are untouched.
