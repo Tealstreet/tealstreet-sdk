@@ -320,3 +320,16 @@ engine driver and adapters are wired; this checkpoint does not claim otherwise.
 Next: driver effects/timer/signing/health admission using the existing ID types,
 then both adoptions. No allocator source is changed here; actual #1741 and the
 separate shared widening PR remain required before production merge.
+
+## Driver supervision phase
+
+Extend the existing Supervisor with a read-only `expired(now)` query and explicit
+idle activation. The engine will query expiry before ingress, using the exact
+same predicate as timer delivery; it must not maintain a second deadline model.
+Idle activation defaults to enabled, preserving all existing callers. A managed
+Bitunix private feed disables it until a real pong, then enables it with the
+current raw timestamp. Disabling idle does not disable connect/auth bounds or
+ping cadence. Enabling an already enabled guard is idempotent and cannot extend
+its deadline. New unit controls cover exact expiry, non-consuming queries,
+first-pong activation, and ping/auth independence. This phase does not wire
+managed ingress or turn the six original venue RED tests green by itself.
