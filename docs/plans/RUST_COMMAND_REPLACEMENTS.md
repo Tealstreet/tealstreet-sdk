@@ -841,3 +841,18 @@ legacy inventory is unchanged; no broad allowance or new request site. Ordinary
 Bybit gateway regression remains deliberately RED until its separate adoption.
 
 Binance documentation tests also pass (zero cases); no doctest examples exist.
+
+
+Actual dependency integration: local 9353557a26d6754f7f9541d8d3696099470ac91d is a genuine porcelain merge of
+native checkpoint7934515719530ee373a31e1e59d4fc43367646ec and actual#1765
+ a3a89719d4079c97d56297bb4738fdc13c659ceb (including actual#1776
+35ba549959cfb6e00fe7bccf2fb06826fc1b10f7). All5307 entries preserve exact
+18owned/16incoming path sets; sole README overlap equals incoming bytes plus
+one unchanged owned row. Both independent preservation checks CLEAN. Refreshed
+SDK73 focused tests, package typecheck/lint, bans and13 ratchet controls PASS.
+All engine/Binance source/test blobs remain byte-identical to the verified native
+checkpoint; no new native runtime run is claimed. Inventory total 1258, SHA
+f88ba46b09e7dc4c13d087c53f0bcdce87d5732f6ae6c11c9168d41f8f7f89aa, is the exact incoming landed inventory;
+this native guard phase neither grows nor rehashes any legacy site. Caller notes
+now explicitly include shared unproven-status classification and bounded native
+diagnostics, with ordinary Bybit still pending.
