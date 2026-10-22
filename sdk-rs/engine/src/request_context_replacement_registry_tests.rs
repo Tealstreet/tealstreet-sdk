@@ -389,6 +389,9 @@ struct PhysicalReplacement {
     root: Option<Context>,
     children: Vec<Context>,
     callbacks: usize,
+    signed: bool,
+    settled_children: usize,
+    accepted_ids: Vec<String>,
 }
 
 fn physical_policy() -> Policy {
@@ -396,6 +399,68 @@ fn physical_policy() -> Policy {
         credential: None,
         pacing: None,
         ..policy()
+    }
+}
+
+impl PhysicalReplacement {
+    fn request_policy(&self) -> Policy {
+        Policy {
+            credential: self.signed.then(|| policy().credential.unwrap()),
+            ..physical_policy()
+        }
+    }
+
+    fn finish_child(&mut self, cx: &mut Cx<'_, Context>) {
+        self.settled_children += 1;
+        if self.settled_children == 2 {
+            // Deliberately optimistic: only the engine may decide whether a
+            // refused or unresolved replacement child prevents success.
+            cx.done_context(
+                self.root.as_ref().unwrap(),
+                serde_json::to_string(&self.accepted_ids).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+}
+
+struct ReplacementRecipe;
+impl crate::SignStep for ReplacementRecipe {
+    fn freshness_ms(&self) -> f64 {
+        1_000.
+    }
+
+    fn prepare(
+        &mut self,
+        _: &mut crate::Action,
+        cx: &crate::DispatchContext<'_>,
+    ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+        Ok(crate::signing::SignRequest {
+            receipt: crate::signing::SignReceipt {
+                stamp_ms: Some(cx.stamp_ms()),
+                expiry_ms: None,
+            },
+            context: Default::default(),
+            operations: vec![crate::signing::Operation::Present {
+                key: crate::signing::KeyRef("replacement-test".into()),
+            }],
+        })
+    }
+
+    fn apply(
+        &mut self,
+        action: &mut crate::Action,
+        result: &crate::signing::SignResult,
+    ) -> Result<(), crate::signing::SignError> {
+        let crate::Action::Http(request) = action else {
+            return Err(crate::signing::SignError::InvalidRequest);
+        };
+        request.signer_headers.push((
+            "x-test-credential".into(),
+            String::from_utf8(result.values[0].clone())
+                .map_err(|_| crate::signing::SignError::InvalidResult)?,
+        ));
+        Ok(())
     }
 }
 
@@ -409,20 +474,50 @@ impl crate::Venue for PhysicalReplacement {
     }
     fn start(&mut self, cx: &mut Cx<'_, Context>) {
         let root = cx
-            .http_context(Scope::Command(7), physical_policy())
+            .http_context(Scope::Command(7), self.request_policy())
             .unwrap();
-        cx.request_managed(
-            root.clone(),
-            crate::Method::Post,
-            "https://replacement.test/write".into(),
-            None,
-            root.clone(),
-        )
-        .unwrap();
+        if self.signed {
+            cx.request_signed_managed(
+                root.clone(),
+                crate::Method::Post,
+                "https://replacement.test/write".into(),
+                None,
+                Box::new(ReplacementRecipe),
+                root.clone(),
+            )
+            .unwrap();
+        } else {
+            cx.request_managed(
+                root.clone(),
+                crate::Method::Post,
+                "https://replacement.test/write".into(),
+                None,
+                root.clone(),
+            )
+            .unwrap();
+        }
         self.root = Some(root);
     }
-    fn on_response(&mut self, cx: &mut Cx<'_, Context>, root: Context, _: crate::Response<'_>) {
+    fn on_response(
+        &mut self,
+        cx: &mut Cx<'_, Context>,
+        root: Context,
+        response: crate::Response<'_>,
+    ) {
         self.callbacks += 1;
+        if self.signed && self.root.as_ref().unwrap().leg() != root.leg() {
+            let id: String = serde_json::from_str(response.body).unwrap();
+            cx.http_write_result(
+                &root,
+                WriteResult::Accepted {
+                    order_ids: vec![id.clone()],
+                },
+            )
+            .unwrap();
+            self.accepted_ids.push(id);
+            self.finish_child(cx);
+            return;
+        }
         cx.http_write_result(
             &root,
             WriteResult::Rejected(VenueError::new("native batch refusal")),
@@ -431,7 +526,7 @@ impl crate::Venue for PhysicalReplacement {
         cx.command_error_context(&root, "native batch refused; replacing with singles")
             .unwrap();
         self.children = cx
-            .http_replacement_contexts(&root, &[physical_policy(), physical_policy()])
+            .http_replacement_contexts(&root, &[self.request_policy(), self.request_policy()])
             .unwrap();
         // This is the actual original HTTP callback, not fabricated Delivery.
         // Passing the retained root cannot launder superseded physical authority.
@@ -449,6 +544,32 @@ impl crate::Venue for PhysicalReplacement {
             cx.http_retry_context(&root, RetryEvidence::DefinitiveRefusal)
                 .is_err()
         );
+        if self.signed {
+            for child in &self.children {
+                cx.request_signed_managed(
+                    child.clone(),
+                    crate::Method::Post,
+                    "https://replacement.test/single".into(),
+                    None,
+                    Box::new(ReplacementRecipe),
+                    child.clone(),
+                )
+                .unwrap();
+            }
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Context>,
+        child: Context,
+        _: Error,
+        error: VenueError,
+    ) {
+        assert!(self.signed);
+        assert!(self.children.contains(&child));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        // Attempt failure has already been registered by the engine.
+        self.finish_child(cx);
     }
     fn on_open(&mut self, _: &mut Cx<'_, Context>, _: crate::SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, Context>, _: crate::SocketId, _: &str) {}

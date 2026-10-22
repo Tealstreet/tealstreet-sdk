@@ -342,3 +342,12 @@ must not change callback, diagnostic or terminal counts. Reuse the original100ms
 raw cap; allow normal cancellation/tombstone retention. This drives the engine's
 emitted Sign/action protocol, not an executing native-host SignFuture. Independent
 plan review CLEAN, architecture No; no production or phase-completion claim.
+
+Local signed-fixture scaffold checkpoint only: opt-in test recipe/child callback
+paths compile; all21 existing replacement-filtered engine controls, strict engine
+Clippy and formatting pass. Independent scaffold review CLEAN, architecture No:
+default plain behavior and every original plain-handoff assertion remain intact,
+child facts retain child Delivery and optimistic root completion stays inside it.
+The actual signed acceptance tests have not yet been added, so this is not new
+signed coverage or a completed phase. Return to #1741 as its rebuilt-WASM Binance
+job/lifecycle replay passes; maina0 stays frozen for final CI and evidence.
