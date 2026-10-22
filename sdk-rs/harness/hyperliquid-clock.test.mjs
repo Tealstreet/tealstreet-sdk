@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Tape, expectedCheckpointPlan } from './tape.mjs';
 import { venueOf } from './venues.mjs';
+import { signHyperliquidFrame } from './hyperliquid-test-utils.mjs';
 
 const originalHashes = [
   'a44f3bf62cb55f571d3fa6eb7f617a5499137d2e24b37ad49d29e038c9a4daa4',
@@ -26,9 +27,10 @@ const generate = (spot) => {
 
 for (const spot of [false, true]) {
   const label = spot ? 'embedded Spot' : 'perp';
-  test(`Hyperliquid ${label} fences reconciliation behind command ACKs despite timer pumping`, () => {
+  test(`Hyperliquid ${label} fences reconciliation behind command ACKs despite timer pumping`, async () => {
     const records = generate(spot);
-    const tape = new Tape(records, venueOf('hyperliquid'), true);
+    const options = records.find((record) => record.type === 'config').options;
+    const tape = new Tape(records, venueOf('hyperliquid'), true, 30000, undefined, [], options);
     const reads = records.filter((record) => record.type === 'http' &&
       JSON.parse(record.requestBody).type === 'frontendOpenOrders');
     const core = reads.find((record) => !JSON.parse(record.requestBody).dex);
@@ -50,15 +52,17 @@ for (const spot of [false, true]) {
       [[], []], [[3001], []], [[], []], [[3002], []], [[], []],
       [[], [3003]], [[], []], [[], []], ...(spot ? [[[3005], []], [[], []]] : []),
     ];
-    writes.forEach((write, index) => {
+    const nonceBase = Date.now();
+    for (const [index, write] of writes.entries()) {
       tape.commandIndex = index + 1;
       tape.settledCommands = index;
       assert.deepEqual([ids(core), ids(hip3)], stages[index], `before ACK ${index + 1}`);
-      assert.equal(tape.respond(write.method, write.url, write.requestBody).status, 200);
+      const frame = await signHyperliquidFrame(JSON.parse(write.requestBody).action, { nonce: nonceBase + index });
+      assert.equal(tape.respond(write.method, write.url, JSON.stringify(frame)).status, 200);
       assert.deepEqual([ids(core), ids(hip3)], stages[index + 1], `after ACK ${index + 1}`);
       tape.settledCommands = index + 1;
       assert.deepEqual([ids(core), ids(hip3)], stages[index + 1], `next command not issued after ${index + 1}`);
-    });
+    }
     tape.assertWritesConsumed();
   });
 
