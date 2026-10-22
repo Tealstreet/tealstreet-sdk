@@ -681,3 +681,54 @@ Bitunix history tests; strict all-target Clippy and formatting pass. Correctness
 review confirms unchanged raw progress/filter ordering and seeded request bounds.
 Full CI and the current owner merge queue still apply; this is not a landing or
 deployed-runtime claim.
+
+## Coinbase Advanced Trade owner adoption (2026-10-22)
+
+Fresh branch from actual1746 `3f0e3e450b2`: move Advanced Trade fills,
+historical orders and public trades onto existing engine `CursorHistory<Row>`.
+This is existing history-owner fan-out, not another per-venue pagination policy.
+No Starbase integration, account reducer, signing/dispatch, engine source/API,
+metadata, scheduler, host runtime or public query argument changes. Keep the
+current Spot/INTX/CFM endpoints; one owner spans CFM then Spot family reads.
+The queued Bybit/Kraken/Paradex/Lighter/WEEX/Bitunix/BloFin/Binance slices are
+excluded. Coordinate Coinbase signer/account ownership before source edits.
+
+Current Request stores CursorWalk, cumulative rows, fingerprint identity proof
+and per-family accepted count itself. Streamed rows enter that cumulative set
+before final HTTP/envelope validation; later failures discard every accepted
+page through cx.fail. Replace cumulative rows/walk with shared owner, keep a
+response-local mapped candidate buffer, validate full HTTP/native envelope,
+required rows and all row mappings before admitting it. Native fingerprint
+comparison remains a mapping-integrity proof for conflicting IDs; shared owner
+owns dedupe membership and staged/accepted coverage. Preserve filtered identity
+checks and make repeated identical rows non-progress without inventing retries.
+
+First/zero-admitted page transport/decode/row failure rejects typed Internal;
+a later failed page returns only prior admitted rows plus exactly one command-
+owned history.incomplete Warn before successful completion. Page budget or
+repeated native cursor becomes shared-owner incomplete coverage. Invalid native
+cursor shape/length, proof_token_required, request construction and signer
+preparation remain strict rejection even after acceptance; preparation errors
+report notSent without manufacturing a successful ledger. No failed response
+prefix or failed family can publish rows or mutate account state. Terminal
+paths remove active command ownership; concurrent queries remain isolated at
+Error-only logging. Preserve existing admission errors outside started history.
+
+Keep 50-page budget PER family, original family order, product filters, cursor
+escaping, immediate continuation, 1..1000 result limit and per-request native
+limits. Preserve strict identity conflict checks, first-wins identical repeats,
+UTC inclusive filters/RFC3339 rounding, CFM native contract units, public maker-
+side inversion, stable descending timestamp sort and final global truncation.
+Do not claim Starbase parity, live coverage or B11 NX closure.
+
+Commit original-RED regressions before production: typed first failure; accepted-
+only later transport/HTTP/decode/mapping failure with failed-prefix exclusion;
+filtered/empty first pages do not authorize partial success; shared repeated-
+cursor coverage; CFM-to-Spot accepted recovery; concurrent owner/Error-only
+marker binding; strict proof-token/preparation control. Preserve existing native
+request/shaping/unit tests, adjust only their old later-failure contract. Run
+focused engine/Coinbase/Binance tests, strict Clippy/fmt/bans/link checks and
+independent plan/correctness/adversarial architecture reviews, then full exact-
+head CI/replay with actual shared/build predecessors before separate guard/merge.
+Expected own paths: Coinbase history.rs/history tests (native test support only
+if strict preparation needs it), existing OWNED_HISTORY/AUDITS/QUALITY/CALLERS.
