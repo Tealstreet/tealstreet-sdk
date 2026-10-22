@@ -1,3 +1,6 @@
+import { ManagedHttp, prepareFetch } from './managed-http.mjs';
+export { HttpPreparationError } from './managed-http.mjs';
+
 // Return only the closed numeric record; never serialize arbitrary provider data.
 function signingReceipt(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -308,6 +311,7 @@ export class EngineHost {
     this.timers = new Map();
     this.commands = new Map();
     this.requests = new Map();
+    this.managedHttp = new ManagedHttp(this);
     this.signings = new Map();
     this.socketFailures = new Map();
     this.nextCommand = 1;
@@ -555,6 +559,7 @@ export class EngineHost {
     for (const id of this.socketFailures.keys()) attempt(() => this.clearSocketFailure(id));
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
+    attempt(() => this.managedHttp.dispose());
     for (const pending of this.signings.values()) {
       attempt(() => pending.controller.abort());
       attempt(() => this.transport.clearTimeout(pending.timer));
@@ -580,32 +585,34 @@ export class EngineHost {
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
-  async receive(id, { status, headers = '', body }) {
-    if (this.disposed) return;
+  async receive(id, { status, headers = '', body }, active = () => true) {
+    if (this.disposed || !active()) return;
     const { engine, transport } = this;
     this.run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
-    if (this.disposed) return;
+    if (this.disposed || !active()) return;
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
-          if (this.disposed) return;
+          if (this.disposed || !active()) return;
           this.run(this.invoke(engine.httpChunk, id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
+          if (this.disposed || !active()) return;
         }
       } else {
         for await (const chunk of body) {
-          if (this.disposed) return;
+          if (this.disposed || !active()) return;
           for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
-            if (this.disposed) return;
+            if (this.disposed || !active()) return;
             this.run(this.invoke(engine.httpChunk, id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+            if (this.disposed || !active()) return;
           }
         }
       }
     } catch {
-      if (this.disposed) return;
+      if (this.disposed || !active()) return;
       this.run(this.invoke(engine.httpFailed, id, 'HTTP response body failed', transport.now()));
       return;
     }
-    if (this.disposed) return;
+    if (this.disposed || !active()) return;
     this.run(this.invoke(engine.httpEnd, id, transport.now()));
   }
 
@@ -678,6 +685,7 @@ export class EngineHost {
   }
 
   sign(action) {
+    if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
     const id = action.attempt;
     const pending = this.primitiveSigning(action.work, action.timeoutMs,
       this.signer && ((context) => this.signer(action.work, context)), (result, code) => {
@@ -977,6 +985,9 @@ export class EngineHost {
         this.sockets.delete(action.socket);
         this.socketClosed(action.socket, 1000);
         break;
+      case 'managedHttp':
+        this.managedHttp.execute(action);
+        break;
       case 'http': {
         void this.request(action);
         break;
@@ -1116,23 +1127,6 @@ export class EngineHost {
   }
 }
 
-/** A fetch body's chunks; an empty body yields nothing. */
-async function* chunks(stream) {
-  if (!stream) return;
-  const reader = stream.getReader();
-  let complete = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) { complete = true; return; }
-      yield value;
-    }
-  } finally {
-    if (!complete) await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-}
-
 /** Decode binary feeds in arrival order while leaving text feeds synchronous. */
 export const socketMessages = (onMessage, onError, binary = false) => {
   let pending;
@@ -1204,14 +1198,8 @@ export const nativeTransport = () => {
     ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
-  async request({ method, url, headers, body, signal, route, timeoutMs }) {
-    if (route === 'publicCors') throw new Error('Public CORS request routing is not configured');
-    const deadline = AbortSignal.timeout(Math.max(1,timeoutMs ?? 20_000));
-    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline, redirect: 'error' });
-    const lines = [];
-    response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
-    return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
-  },
+  prepareHttp(request) { return prepareFetch(request); },
+  async request(request) { return prepareFetch(request).bind(request).dispatch(); },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),
 };

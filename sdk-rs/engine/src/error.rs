@@ -48,8 +48,9 @@ pub enum Outcome {
     Unknown,
 }
 
-/// Orders a batch placed before it stopped at `failed_index`. A venue that
-/// cannot map its requests back to the caller's orders leaves the counts unset.
+/// Exact native order identities retained for partial or uncertain commands.
+/// With Unknown, identities are reconciliation evidence, not proof of attributed
+/// caller-leg success. Codecs unable to map rows to caller orders leave counts unset.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Partial {

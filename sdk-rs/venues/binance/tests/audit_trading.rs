@@ -683,7 +683,19 @@ fn pm_known_old_snapshot_before_cancel_ack_preserves_new_symbol_but_unseen_nativ
         h.reply(regular.id, 200, "", r#"{"code":200,"msg":"success"}"#);
         h.reply(strategy.id, 200, "", r#"{"code":200,"msg":"success"}"#);
         assert_eq!(h.engine.store().orders(), before);
-        assert!(h.result(100).unwrap().is_ok());
+        // Both account polls retain their original clocks. The ACK is now
+        // exactly at the immutable HTTP deadline, so it cannot reopen the
+        // command or change the newer native incarnations.
+        assert!(h.result(100).unwrap().is_err());
+        assert_eq!(
+            h.failures
+                .iter()
+                .find(|(id, _)| *id == 100)
+                .unwrap()
+                .1
+                .outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
     }
 }
 

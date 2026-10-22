@@ -13,6 +13,7 @@
 //      levels are debug/info/warn/error; code is stable, message is display data
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
+import { prepareFetch } from './managed-http.mjs';
 
 /** Header-capable WebSocket constructor for HOW/relay in Workers. */
 export class WorkersWebSocket extends EventTarget {
@@ -141,33 +142,11 @@ export const workersTransport = () => ({
       },
     };
   },
-  async request({ method, url, headers, body, signal, route, timeoutMs }) {
-    if (route === 'publicCors') throw new Error('Public CORS request routing is not configured');
-    const deadline = AbortSignal.timeout(Math.max(1, timeoutMs ?? 20_000));
-    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline, redirect: 'error' });
-    const lines = [];
-    response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
-    return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
-  },
+  prepareHttp(request) { return prepareFetch(request); },
+  async request(request) { return prepareFetch(request).bind(request).dispatch(); },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),
 });
-
-async function* chunks(stream) {
-  if (!stream) return;
-  const reader = stream.getReader();
-  let complete = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) { complete = true; return; }
-      yield value;
-    }
-  } finally {
-    if (!complete) await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-}
 
 /** While clients are connected the object wakes itself this often. */
 const KEEPALIVE_MS = 30_000;

@@ -325,14 +325,15 @@ pub fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
 }
 
 impl BinanceFutures {
-    pub(crate) fn request_leverage_brackets(&self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn request_leverage_brackets(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.is_spot() {
             return;
         }
-        self.signed_streamed(
+        self.background_signed_read(
             cx,
             self.paths.leverage_bracket,
             Query::new(),
+            Some(safe_cex_engine::json::ArrayAt::Root),
             Pending::Account(Request::LeverageBrackets(HashMap::new())),
         );
     }
@@ -345,11 +346,11 @@ impl BinanceFutures {
         self.account.listen_key_failures = 0;
         self.request_listen_key(cx);
         if !self.is_spot() {
-            self.signed(
+            self.background_signed_read(
                 cx,
-                Method::Get,
                 self.paths.position_mode,
                 Query::new(),
+                None,
                 Pending::Account(Request::PositionMode),
             );
         }
@@ -430,10 +431,11 @@ impl BinanceFutures {
             failed: false,
         });
         self.account.pending_position_events = false;
-        self.signed_streamed(
+        self.background_signed_read(
             cx,
             self.paths.position_risk,
             Query::new(),
+            Some(safe_cex_engine::json::ArrayAt::Root),
             Pending::Account(Request::PositionRisk {
                 generation,
                 rows: Vec::new(),
@@ -442,10 +444,11 @@ impl BinanceFutures {
             }),
         );
         if let Some(path) = symbol_config {
-            self.signed_streamed(
+            self.background_signed_read(
                 cx,
                 path,
                 Query::new(),
+                Some(safe_cex_engine::json::ArrayAt::Root),
                 Pending::Account(Request::SymbolConfig {
                     generation,
                     configs: Vec::new(),
@@ -459,11 +462,11 @@ impl BinanceFutures {
             return;
         }
         self.account.account_read_predates_event = false;
-        self.signed(
+        self.background_signed_read(
             cx,
-            Method::Get,
             self.paths.balance,
             Query::new(),
+            None,
             Pending::Account(Request::Account {
                 version: self.account.account_version,
             }),
@@ -496,11 +499,11 @@ impl BinanceFutures {
             rejected_symbols: HashMap::new(),
             failed: false,
         });
-        self.signed(
+        self.background_signed_read(
             cx,
-            Method::Get,
             self.paths.open_orders,
             Query::new(),
+            None,
             Pending::Account(Request::OpenOrders { generation }),
         );
         if self.is_spot() || self.is_inverse() {
@@ -511,11 +514,11 @@ impl BinanceFutures {
         } else {
             Query::new().str("algoType", "CONDITIONAL")
         };
-        self.signed(
+        self.background_signed_read(
             cx,
-            Method::Get,
             self.paths.open_conditional_orders,
             conditional,
+            None,
             Pending::Account(Request::OpenAlgoOrders { generation }),
         );
     }
