@@ -99,7 +99,7 @@ pub struct PageCursor<'a> {
 #[derive(Deserialize)]
 pub struct Listed<T> {
     #[serde(rename = "retCode", default, deserialize_with = "integer")]
-    pub ret_code: Option<i64>,
+    pub _ret_code: Option<i64>,
     #[serde(default = "none")]
     pub result: Option<ListResult<T>>,
 }
