@@ -58,6 +58,7 @@ const ENVIRONMENT_PROBE_TIMEOUT_MS: u32 = 2_000;
 
 #[derive(Clone, Default)]
 pub struct Options {
+    pub signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     /// Optional tighter signing receive window in milliseconds.
     pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::signing::Identity>,
@@ -244,6 +245,7 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     recv_window: Option<u32>,
     category: Category,
     primary_category: Category,
@@ -468,6 +470,7 @@ impl BybitLinear {
             .flatten()
             .filter(|identity| identity.validate().is_ok());
         Self {
+            signing_policy: options.signing_policy,
             category,
             primary_category: category,
             products,
@@ -642,11 +645,10 @@ impl BybitLinear {
             let Some(credentials) = credentials else {
                 return;
             };
-            Some(sign::Http::new(
-                credentials.clone(),
-                rest.payload.clone(),
-                self.recv_window,
-            ))
+            Some(
+                sign::Http::new(credentials.clone(), rest.payload.clone(), self.recv_window)
+                    .with_header_policy(self.signing_policy.header_policy()),
+            )
         } else {
             None
         };
@@ -696,6 +698,9 @@ impl BybitLinear {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        if channel == Channel::Private && !cx.private_feed_policy().streaming() {
+            return;
+        }
         let url = match channel {
             Channel::Public => self.paths.public_ws.as_str(),
             Channel::Private => self.paths.private_ws.as_str(),
@@ -936,7 +941,8 @@ impl BybitLinear {
         if credentials.validate().is_err() {
             return false;
         }
-        let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window);
+        let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window)
+            .with_header_policy(self.signing_policy.header_policy());
         self.environment_probe_attempted = true;
         let timer = cx.set_timer(f64::from(ENVIRONMENT_PROBE_TIMEOUT_MS));
         self.environment_probe = Some(EnvironmentProbe {
