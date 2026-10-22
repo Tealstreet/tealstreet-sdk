@@ -3266,3 +3266,24 @@ wire and makes no NX migration or server-held-key deployment claim. External
 remote signing and later family migrations remain required. The legacy raw-input
 adapter is transitional: remove it before TS venue/reference deletion after
 trusted bootstrap adoption. [Current core contract](RUST_SIGNER.md).
+
+
+## Cumulative-fill reference correctness (#1720)
+
+Actual merge `9fc2a7c174ad` introduces shared engine financial preparation for
+Hyro's Bybit adapter and Bitget Classic order-derived fills. Quantity, price and
+next delivery progress are validated before native dedupe/progress commits.
+An unpriced Hyro observation no longer consumes a later corrected cumulative
+fill; an invalid/unpriced Classic observation neither emits a negative-price
+fill nor consumes the corrected report's execution eligibility. Late authoritative
+Classic fills no longer rewind the cumulative anchor and allow a subsequent
+cumulative catch-up to re-emit an already delivered interval. Hyro's zero average
+means unavailable quote evidence, preserving its authorized fallback price
+instead of deriving an inflated price from a fabricated zero-value seed.
+
+These five repairs intentionally change notifications on the demonstrated bad /
+corrected / late report paths; they are not merely internal refactoring. Existing
+FILLS shape, native identity/duplicate rules, bootstrap-versus-live separation
+and direct Bitget UTA delivery remain. No new SDK method argument or mandatory
+NX handler migration is introduced. Other cumulative-fill consumers still need
+adoption of the shared boundary. [Reference scope and regressions](RUST_CUMULATIVE_FILLS.md).
