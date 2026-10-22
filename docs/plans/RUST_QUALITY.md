@@ -174,7 +174,8 @@ Medium:
    route `tickInterval` to every venue.~~ Done: `sdk-rs/registry` builds every
    venue for the wasm and native hosts and owns the credential rules (#1467,
    #1469, #1476); TS sends one uniform options blob (#1519); the virtual-clock
-   venue list is the `hostClock` capability (#1520); polling is the runtime
+   venue list became the `hostClock` capability (#1520), now retired by the
+   [shared engine clock ingress](RUST_ENGINE_CLOCK.md); polling is the runtime
    policy (#1392). AsterDEX version inference is shared by native construction
    and registry metadata; the bridge forwards only explicit overrides and reads
    the native version after WASM loads. Its synchronous pre-host fallback stays

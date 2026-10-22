@@ -3,11 +3,9 @@ use safe_cex_engine::{Action, Event, Response, SocketChannel, Venue};
 use safe_cex_venue_bitunix::{BitunixFutures, Options};
 
 #[test]
-fn bitunix_requires_the_synchronized_host_clock() {
+fn bitunix_uses_the_shared_engine_clock_without_a_capability_opt_in() {
     let venue = BitunixFutures::new(Options::default());
-    let mut expected = safe_cex_engine::Capabilities::BASE;
-    expected.host_clock = true;
-    assert_eq!(venue.capabilities(), expected);
+    assert_eq!(venue.capabilities(), safe_cex_engine::Capabilities::BASE);
 }
 
 #[test]

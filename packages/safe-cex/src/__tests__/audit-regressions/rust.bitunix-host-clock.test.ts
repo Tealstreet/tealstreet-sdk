@@ -20,7 +20,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it.each([true, false])('adopts Bitunix hostClock=%s before the first start and later private open', async (hostClock) => {
+it.each([true, false])('preserves the explicit Bitunix clock despite legacy hostClock=%s', async (hostClock) => {
   const local = 1_760_000_600_000;
   let synced = 1_760_000_000_000;
   vi.spyOn(Date, 'now').mockReturnValue(local);
@@ -30,7 +30,7 @@ it.each([true, false])('adopts Bitunix hostClock=%s before the first start and l
   let handlers!: Parameters<Transport['connect']>[1];
   const idle = () => '[]';
   const engine: WasmEngineLike = {
-    capabilities: () => engineCapabilities('bitunix', hostClock ? {} : { hostClock: false }),
+    capabilities: () => JSON.stringify({ ...JSON.parse(engineCapabilities('bitunix')), hostClock }),
     start: (now) => {
       startTimes.push(now);
       return JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://clock.invalid/private', channel: 'private' }]);
@@ -61,8 +61,8 @@ it.each([true, false])('adopts Bitunix hostClock=%s before the first start and l
   const exchange = new RustEngineExchange('bitunix', { key: 'replay-key', secret: 'replay-secret' }, store);
   exchanges.push(exchange);
   await exchange.start();
-  expect(startTimes).toEqual([hostClock ? synced : local]);
+  expect(startTimes).toEqual([local]);
   synced += 12_345;
   handlers.onOpen();
-  expect(loginTimes).toEqual([hostClock ? synced : local]);
+  expect(loginTimes).toEqual([local]);
 });
