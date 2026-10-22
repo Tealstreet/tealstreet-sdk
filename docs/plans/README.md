@@ -82,6 +82,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Historical gate receipts | Retained JSON evidence | Checking the named historical gate set; not a current CI certificate. | [venue-ports/PARITY_GATES.json](venue-ports/PARITY_GATES.json) |
 | Historical gate receipts | Retained JSON evidence | Checking the named historical gate set; not a current CI certificate. | [venue-ports/PARITY_PUBLIC_ONLY_FIX_GATES.json](venue-ports/PARITY_PUBLIC_ONLY_FIX_GATES.json) |
 | Historical gate receipts | Retained JSON evidence | Checking the named historical gate set; not a current CI certificate. | [venue-ports/SOCKET_SUPERVISOR_GATES.json](venue-ports/SOCKET_SUPERVISOR_GATES.json) |
+| History completion and pagination | Active core plan | Shared command-owned completeness, pager fan-out and capability conformance follow-up. | [RUST_OWNED_HISTORY.md](RUST_OWNED_HISTORY.md) |
 | History and completeness | Retained plan/evidence | Changing history paging, request-owned incomplete results or transport propagation. | [RUST_BITUNIX_HISTORY_COMPLETENESS.md](RUST_BITUNIX_HISTORY_COMPLETENESS.md) |
 | History and completeness | Retained plan/evidence | Changing history paging, request-owned incomplete results or transport propagation. | [RUST_BLOFIN_HISTORY_MARKER_OWNER.md](RUST_BLOFIN_HISTORY_MARKER_OWNER.md) |
 | History and completeness | Retained plan/evidence | Changing history paging, request-owned incomplete results or transport propagation. | [RUST_BYBIT_HISTORY_MARKER_OWNER.md](RUST_BYBIT_HISTORY_MARKER_OWNER.md) |
