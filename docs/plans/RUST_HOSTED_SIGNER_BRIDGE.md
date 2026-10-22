@@ -195,3 +195,35 @@ and cfg(test) fixtures, with no new runtime secret holders or crypto execution.
 The actual-WASM HTTP/WS fixture requires rebuilt CI artifacts; no local release
 build or replay was run. Fresh CI, replay preservation and final separate guard
 remain gates, and half 2 is unimplemented.
+
+
+## Half 2 implementation slices (Binance first)
+
+Plan, 2026-10-22. Fresh branch from actual signing-side bridge #1745
+`5743c485d44e348e3d29039c4ebe83f6a78f0186`. Implementation remains local during
+#1746's build-policy window; switch back to finish Bybit #1728 when it lands.
+
+1. Add a shared account-local remote-provider adapter and declarative alias
+   policy. Preserve exact primitive preimages, owned ref checks, existing
+   ws-auth request/response envelope and primary-only RemoteSigner authority;
+   reject required-secondary work. PayloadSigner keeps its explicit public-key
+   selector and existing precedence. Declare the nine-alias REST-only private
+   feed rule centrally, enabling runtime adoption for Binance first.
+2. Extend bounded optional callback headers through the existing SignResult
+   validation and dispatch custody, coordinated with RequestContext ownership
+   before touching its files. Declare venue precedence as data: Binance callback
+   overrides, Bybit fixed SIGN/APIKEY/TIMESTAMP with callback RECV-WINDOW allowed.
+   Never keep an independent header map or mutate after transport bind.
+3. Wire Binance trusted setup/SDK/factory/worker routing to the shared provider;
+   admit keyless construction only with its owned configured provider. Suppress
+   private subscription/listen-key work for PayloadSigner at its policy boundary.
+   Add real-WASM plus SDK paired hosted/provider tests, preserving public bypass,
+   ref/account/id/shape validation, abort/disposal/availability, deadlines and
+   native retry/unknown outcomes. Bybit runtime adoption follows actual #1728.
+4. Integrate actual build/RequestContext dependencies before final exact-head CI,
+   full authenticated replay proof, independent review and separate merge guard.
+
+Architecture gate: this extends shared signer/setup/provider policies. No venue
+crypto, credential fallback, socket lifecycle service or pacing policy is added.
+The unchanged external wire gains no required field or acknowledgement. Focused
+local unit/type/lint/native gates use existing scripts; CI owns WASM/replays.
