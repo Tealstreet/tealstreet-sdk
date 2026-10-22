@@ -187,3 +187,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Shared signer setup field policy | In progress | Changing trusted per-family credential transforms or synchronous signing intent. | [RUST_SIGNER_SETUP_POLICY.md](RUST_SIGNER_SETUP_POLICY.md) |
 | Bitget public CPU | Historical investigation | Read before changing public parsing or Bitget family throughput profiles | [RUST_BITGET_PUBLIC_CPU.md](RUST_BITGET_PUBLIC_CPU.md) |
 | Shared JSON WASM profile | CI experiment | Before changing shared JSON optimization or removing whole-family throughput exceptions. | [RUST_JSON_WASM_PROFILE.md](RUST_JSON_WASM_PROFILE.md) |
+| Capability and compiled-feature conformance | Planned CI checker | When changing a capability, command decoder feature or shipped family | [RUST_CAPABILITY_CONFORMANCE.md](RUST_CAPABILITY_CONFORMANCE.md) |
