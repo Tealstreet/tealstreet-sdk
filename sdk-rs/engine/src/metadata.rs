@@ -407,6 +407,28 @@ mod tests {
     }
 
     #[test]
+    fn foreign_store_tokens_are_distinct_and_cannot_finish_another_owner() {
+        let mut one = Store::default();
+        let mut two = Store::default();
+        let a = start(&mut one, "BTC", 1, true, Fallback::CompleteSetting);
+        let b = start(&mut two, "BTC", 2, true, Fallback::CompleteSetting);
+        assert_ne!(a, b, "attempt tokens must bind the Store issuer");
+        assert!(two.finish_metadata(a, Ok(proposal(7.0, 9.0))).is_none());
+        assert!(two.metadata_eligible(b));
+    }
+
+    #[test]
+    fn foreign_store_observation_cannot_publish_settings() {
+        let mut one = Store::default();
+        let mut two = Store::default();
+        let foreign = one.metadata_observation();
+        assert!(!two.observe_setting(
+            "BTC", foreign, ObservedSetting::new(setting(99.0, 99.0)).unwrap()
+        ));
+        assert!(two.setting("BTC").is_none());
+    }
+
+    #[test]
     fn joined_owners_share_one_atomic_publication() {
         let mut store = Store::default();
         let token = start(&mut store, "BTC", 1, true, Fallback::IndependentRails);
