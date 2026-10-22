@@ -1740,6 +1740,7 @@ impl<P> Cx<'_, P> {
             Ok(result) => (Some(result), None),
             Err(error) => (None, Some(error)),
         };
+        let mut write_sealed = false;
         let result = match self.io.request_contexts.seal(
             command,
             self.io.http_delivery.as_ref(),
@@ -1750,9 +1751,13 @@ impl<P> Cx<'_, P> {
                 return Err(crate::request_context::Error::Revoked);
             }
             request_context_registry::Seal::Legacy(Some(error)) => Err(error),
-            request_context_registry::Seal::Legacy(None)
-            | request_context_registry::Seal::Success => Ok(success.unwrap_or_default()),
+            request_context_registry::Seal::Legacy(None) => Ok(success.unwrap_or_default()),
+            request_context_registry::Seal::Success => {
+                write_sealed = true;
+                Ok(success.unwrap_or_default())
+            }
             request_context_registry::Seal::Failure(error, rejections) => {
+                write_sealed = true;
                 for message in rejections {
                     self.command_error(command, message);
                 }
@@ -1763,9 +1768,19 @@ impl<P> Cx<'_, P> {
         self.io.request_contexts.finish(command);
         #[cfg(feature = "order-locks")]
         {
+            if write_sealed
+                && result
+                    .as_ref()
+                    .err()
+                    .is_none_or(|error| error.outcome != Some(crate::Outcome::Unknown))
+            {
+                self.io.order_locks.managed_resolved(command);
+            }
             self.io.order_locks.finish(command, result.is_err());
             self.io.active_commands.remove(&command);
         }
+        #[cfg(not(feature = "order-locks"))]
+        let _ = write_sealed;
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {

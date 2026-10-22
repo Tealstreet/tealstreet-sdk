@@ -333,9 +333,17 @@ impl<P> Cx<'_, P> {
     /// This neither queues HTTP nor reserves admission, a transport or pacing.
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
         let identity = self.io.next();
-        self.io
+        let context = self
+            .io
             .request_contexts
-            .issue(identity, scope, policy, self.now)
+            .issue(identity, scope, policy, self.now)?;
+        #[cfg(feature = "order-locks")]
+        if context.operation() == Operation::Mutation
+            && let Owner::Command { id, .. } = context.owner()
+        {
+            self.io.order_locks.manage(id);
+        }
+        Ok(context)
     }
 
     /// Validate context provenance and retry policy without extending its bound.

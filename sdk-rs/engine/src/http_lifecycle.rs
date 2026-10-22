@@ -535,12 +535,16 @@ impl<V: Venue> Engine<V> {
             }
             #[cfg(feature = "order-locks")]
             {
-                if managed.lifecycle.context().operation() == Operation::Mutation {
-                    self.io.order_locks.note_write();
+                if managed.lifecycle.context().operation() == Operation::Mutation
+                    && let Owner::Command { id, .. } = managed.lifecycle.context().owner()
+                {
+                    self.io.order_locks.note_command_write(id);
                 }
-                self.io
-                    .order_read_tokens
-                    .insert(request, self.io.order_locks.token());
+                if managed.lifecycle.context().operation() == Operation::Read {
+                    self.io
+                        .order_read_tokens
+                        .insert(request, self.io.order_locks.token());
+                }
             }
             self.venue.on_signing_receipt(
                 SigningTarget::Http {
@@ -2023,6 +2027,99 @@ mod tests {
         assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
         assert_eq!(engine.venue.command_calls, vec![8]);
         assert!(engine.venue.releases.is_empty());
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn managed_lock_uncertainty_uses_the_sealed_journal_not_the_presence_of_an_error() {
+        use crate::request_context::WriteResult;
+        for state in 0..4 {
+            let (mut engine, _) = start(Probe::default());
+            engine
+                .io
+                .order_locks
+                .acquire(
+                    &Command::PlaceOrders {
+                        command: 7,
+                        orders: vec![],
+                    },
+                    &engine.store,
+                    true,
+                )
+                .unwrap();
+            let (first, first_token, _) = mutation(&mut engine, 7, 0.);
+            if state != 0 {
+                let permit = bind(&mut engine, first_token, 1.);
+                engine.claim_http(2., permit).unwrap();
+            }
+            if state == 1 || state == 2 {
+                let delivery = engine
+                    .io
+                    .managed_http
+                    .get(&first_token.attempt().request)
+                    .unwrap()
+                    .delivery();
+                engine
+                    .io
+                    .request_contexts
+                    .result(
+                        &delivery,
+                        if state == 1 {
+                            WriteResult::Rejected(VenueError::new("native refusal"))
+                        } else {
+                            WriteResult::Accepted {
+                                order_ids: vec!["accepted".into()],
+                            }
+                        },
+                    )
+                    .unwrap();
+            }
+            if state == 2 {
+                let (_, second, _) = mutation(&mut engine, 7, 3.);
+                let permit = bind(&mut engine, second, 4.);
+                engine.claim_http(5., permit).unwrap();
+                let delivery = engine
+                    .io
+                    .managed_http
+                    .get(&second.attempt().request)
+                    .unwrap()
+                    .delivery();
+                engine
+                    .io
+                    .request_contexts
+                    .result(
+                        &delivery,
+                        WriteResult::Rejected(VenueError::new("native refusal")),
+                    )
+                    .unwrap();
+            }
+            // A legacy venue helper is not managed write evidence. In
+            // particular it cannot clear the unresolved fourth case's fence.
+            Cx {
+                now: 6.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            }
+            .placement_resolved(7);
+            fail_mutation(&mut engine, &first, 6.);
+            assert_eq!(engine.io.order_locks.uncertain(""), state == 3);
+            let error = engine
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                error.outcome,
+                [
+                    Some(crate::Outcome::NotSent),
+                    Some(crate::Outcome::Rejected),
+                    None,
+                    Some(crate::Outcome::Unknown)
+                ][state]
+            );
+        }
     }
 
     #[test]

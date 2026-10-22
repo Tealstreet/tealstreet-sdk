@@ -506,3 +506,34 @@ seal resolves that command's sent marker before ordinary lock retirement. Legacy
 lock behavior stays unchanged. Controls must cover two active commands with only
 one physically sent, all-definitive refusals, known partial effects and unresolved
 sent effects. This is shared engine lifecycle work, not venue policy.
+
+
+Scoped lock checkpoint: Context issuance marks a managed command's lock scope;
+legacy opaque sends and placement_resolved cannot provide or erase its evidence.
+Actual managed release records only its own command. Central known journal seals
+resolve that scope; Unknown keeps its uncertainty. Legacy locks retain existing
+behavior. Independent review CLEAN / architecture No. Three behavioral faults
+(legacy send, known seal, legacy resolver) fail exact assertions; restored full
+engine/Binance suite: 737 tests, strict Clippy with/without order locks, fmt/bans.
+
+### Activation and reference migration plan
+
+Next remove only the closed mutation queue gate after the shared reconciliation
+and scoped-lock controls above. Replace white-box mutation fixture staging with
+the actual public request_managed/request_signed_managed lifecycle; test default
+missing-capture refusal, real public queue rejection rollback, signed provider
+failure before release and exactly-once completion through normal event delivery.
+No legacy API is promoted or silently wrapped as managed work.
+
+Binance reference: keep one Context authority per logical command and distinct
+physical leg Contexts under its original bound. Trading jobs retain authority,
+not aggregate reached_venue/effective/unknown flags; native codecs report typed
+facts, preserving ACK IDs, native partials and command-error reporting. Background
+reads use explicit read contexts. Shared history Completion needs an additive
+Context-bearing authority path (owned/coordinated with cxxyqr), not a copied
+Binance finalizer or numeric bypass. Preserve HTTP/WS signing bytes and the
+existing independent test oracles. Update native test drivers to execute the same
+prepare/bind/claim contract, retaining fail-closed unsupported cases. Then actual
+Bybit uses the same journal instead of refused/effective/unknown/resent inference.
+Legacy session-token work remains its explicitly tracked later WS-auth core;
+the exact caller ratchet freezes every remaining opaque site and may only shrink.
