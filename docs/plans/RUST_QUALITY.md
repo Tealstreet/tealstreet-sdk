@@ -303,3 +303,19 @@ command-owned completion and native cursor facts. One owner spans trade/funding
 income with a stage output baseline; actual later failures recover accepted
 pages only. Native saturation/cycle/budget and synchronous auth preparation
 refusals remain strict. No new engine API or universal migration claim.
+
+
+
+
+
+
+
+
+Coinbase Advanced Trade history owner adoption now routes fills, orders and
+public trades through existing CursorHistory, with one completion across CFM
+and Spot stages. Only complete validated response pages affect shared identity
+membership/admission; native fingerprints remain conflict-integrity proof before
+filters. The engine owns paging progress, accepted-only later failure and one
+command-bound coverage marker. Preparation/native policy refusals remain strict.
+No new core API or venue pager/marker emitter; other history adapters and NX B11
+coverage remain open. [Scope and evidence](RUST_OWNED_HISTORY.md).
