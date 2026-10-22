@@ -10,10 +10,10 @@ inverse, spot, demo and HyroTrader. No cumulative-fill or read-scheduler changes
    Adopt the existing SignStep dispatch path for ordinary REST, the opposite-host
    environment probe and static private WS authentication (no transient token).
    Preserve GET secondary selection, POST/WS primary selection and request routes.
-2. Canonical preparation reads DispatchContext.now_ms only. REST signs exact
-   floored timestamp + private credential interpolation + clamped receive window
+2. Canonical preparation uses shared DispatchContext.stamp_ms(). REST signs exact
+   integer protocol timestamp + private credential interpolation + clamped receive window
    + existing ordered query/body, using HMAC-SHA256 lowercase hex. WS signs
-   GET/realtime plus floor(protocol time + 10000), preserving string expiry and
+   GET/realtime plus shared integer protocol stamp + 10000, preserving string expiry and
    Hyro req_id. Declare actual stamp/expiry receipts without changing wire bytes.
    Preserve immutable client IDs, host-clock timers, one eligible rejection resend,
    environment diagnostics and every existing financial/currentness fence.
@@ -47,9 +47,10 @@ separate and must preserve raw lease/deadline ownership.
 The five-alias venue uses only opaque identities; HTTP/probe and static WS recipes
 stage through the existing engine dispatch. Original signing code remains a
 cfg(test) oracle, with the signing-site ratchet now scanning this sign module too.
-The shared dispatch-signing Cargo feature enables provider setup in standalone
-registry/WASM artifacts, selected by existing construction policy rather than
-another venue setup path. Typed signer failures retain owned NotSent outcomes and
+The generic provider feature seam was extracted and landed independently in
+#1731 at `06b321192a65562db61489b2cbcdcfe4fce5d055`. This PR only opts
+Bybit into that landed feature and its construction policy; it adds no other
+provider bootstrap or execution path. Typed signer failures retain owned NotSent outcomes and
 prior effective/ambiguous aggregate evidence; history keeps its existing finalizer.
 
 347 Bybit native tests pass, including thirteen dispatch/provider regression groups;
@@ -60,11 +61,14 @@ Its supported owned-read and static WS paths are exercised by venue regressions.
 Focused SDK 18 tests, typecheck, lint, strict Bybit/standalone registry Clippy pass.
 Independent source review and CI/replay evidence are still required.
 
-Owner sequencing: cumulative-fill #1725 first, shared wire-stamp PR second,
-this Bybit migration third. The frozen shared DispatchContext.stamp_ms API is now consumed by both REST and
-WS recipes; the independent old oracle keeps its original flooring. Actual
-prerequisite merge pins still need verification before this PR can merge. RequestContext is a later shared fan-out, not a gate on this
-signer migration; the existing legacy bridge remains explicit until that adoption.
+Current owner sequence: actual #1731 provider seam, then #1734 Aster profile
+rollback, then this migration. Actual #1726 stamp
+`e09e34486259f4efb44cc04c84a9eec6f37c5974`, #1727 history
+`361a4ccafadcf0385d0f708d124596601da83402`, #1729 financial
+`6e10b0e8a23dbb8d34f761e8199a83c6068fadb1` and #1731 are integrated.
+#1734 is pending and must be integrated before final CI/proof.
+RequestContext remains a later shared fan-out, not a gate on this Bybit
+migration; the existing legacy bridge stays explicit until that adoption.
 
 Command outcome aggregation remains an explicit RequestContext consolidation
 target: Binance's reached_venue guard and Bybit's refused/effective/unknown flags
@@ -85,11 +89,14 @@ mutation is sent and planned identity/body stay immutable. Precise native
 Rejected versus transport Unknown provenance remains RequestContext work.
 These cases compiled and failed before the change; all thirteen groups pass now.
 
-Integration checkpoint: actual financial #1725 `64bc8d60147` is a real ancestor.
-Frozen stamp #1726 `283add0ff27` (tree-identical to `cca20d878841`) and frozen
-history #1727 `2cf4366867cc` are preintegrated, explicitly unmerged dependencies.
-A preservation review verified the exact 47-file Bybit manifest against the stamp
-head, every other blob including the financial changes intact, and both index
-rows retained. 1,025 focused engine/Binance/Bybit/registry/host tests and strict
-checks pass after stamp integration; registry/host gates pass again after the
-history integration. Final CI/replay proof and actual dependency pins remain open.
+Integration checkpoint: actual landing through #1731 is merged by porcelain.
+Generic provider gates are now unchanged from landing. Conflicts involved two
+feature comments and appended host tests; both intents are retained. The shared
+negative injection/public-host controls move from newly migrated Bybit to
+unmigrated Bitunix. The two existing actual-WASM SDK rejection fixtures do the
+same, and a positive Bybit primary/secondary identity-read case verifies exact
+headers, MAC and venue userID/inviterID mapping.
+
+Historical pre-extraction validation was 1,025 focused engine/Binance/Bybit/
+registry/host tests plus strict checks. Final integration tests, actual-WASM CI
+and authenticated replay proof are pending; no final signature-equality claim.
