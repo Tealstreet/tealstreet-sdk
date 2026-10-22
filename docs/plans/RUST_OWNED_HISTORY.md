@@ -1268,3 +1268,29 @@ calling it after completion/poisoning poisons strict completion. Add exhaustion,
 refresh-failure, filtered later-failure and lifecycle-misuse controls. RequestContext
 owner explicitly confirmed these additive lower HistoryRows/CursorHistory regions
 clear; Completion authority and its pending follow-on API are untouched.
+
+
+GRVT local implementation receipt: regression-only `5a3d2f20fbb` has 24 existing
+controls GREEN and five new behavior groups assertion RED on original production
+source. Shared owner adoption makes them GREEN. Additional controls pin exhausted
+streamed retries (all six attempts, byte-identical native body), strict later
+order-filtered failure, strict failed session refresh, and a general repeated
+cursor's owned partial result. Existing successful retry/refresh, full four-leg
+income request sequence, large IDs/nanosecond bounds, lifecycle proof, lookup and
+row-skipped controls remain. Two engine controls pin safe discard retaining
+accepted output/first gap/cursor/pages/identity and strict lifecycle poisoning
+after completion. Lower-core regions were explicitly cleared with RequestContext
+owner before editing; managed Completion authority is untouched. Independent
+implementation reviews and final focused checks precede publication.
+
+
+GRVT independent implementation and final tests/docs reviews are CLEAN. All 834
+focused engine/GRVT/Binance tests and strict Clippy passed before three additional
+adversarial controls; final focused history tests pass with those controls,
+including 34 GRVT history tests. The additions pin discard after existing
+poisoning, limit-one mixed income with native stage counts and stable newest-row
+selection, and the real 50-page general cap with no 51st request. API docs state
+that staged-page discard does not roll back direct shared fresh observations;
+GRVT keeps retryable identity facts local until admission. First-kind telemetry,
+strict filtered/session proofs and B11 limits are recorded in the caller doc.
+Full artifact CI/proof and actual queued predecessors remain required.
