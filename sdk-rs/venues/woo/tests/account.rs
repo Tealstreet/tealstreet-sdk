@@ -1605,3 +1605,51 @@ fn fractional_socket_open_uses_integer_auth_stamp_and_matching_signature() {
         )
     );
 }
+
+#[test]
+fn skipped_summary_repeats_on_text_change_and_rearms_on_clean_positions() {
+    let (mut e, _, mut reads, mut timer) = start();
+    load(&mut e, &mut reads);
+    let a = POS.replace("\"leverage\":10", "\"leverage\":0");
+    let b = a.replace("]}}", ",{}]}}");
+    let mut summaries = Vec::new();
+    for (i, body) in [&a, &a, &b, &a, POS, &a].into_iter().enumerate() {
+        e.drain_actions().for_each(drop);
+        let at = 2020.0 * (i + 1) as f64;
+        e.handle(at, Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        timer = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, .. } => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        let mut http: Vec<_> = actions
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        let p = take(&mut http, "/v3/positions");
+        response(&mut e, &p, at + 5.0, body);
+        summaries.extend(e.drain_actions().filter_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.message.starts_with("WOO positions: skipped") =>
+            {
+                Some(event.message)
+            }
+            _ => None,
+        }));
+    }
+    assert_eq!(
+        summaries,
+        [
+            "WOO positions: skipped 1 unmappable row(s) [BTCUSDT]",
+            "WOO positions: skipped 2 unmappable row(s) [BTCUSDT]",
+            "WOO positions: skipped 1 unmappable row(s) [BTCUSDT]",
+            "WOO positions: skipped 1 unmappable row(s) [BTCUSDT]",
+        ]
+    );
+}
