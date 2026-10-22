@@ -318,6 +318,7 @@ test('Workers applies factory protocol options after caller flags while retainin
 });
 
 test('Workers requests honor typed deadlines through response bodies and consume routing metadata', async (t) => {
+  t.mock.method(Date, 'now', () => 1_700_000_000_000);
   const deadlines = [];
   const requests = [];
   t.mock.method(AbortSignal, 'timeout', (milliseconds) => {
