@@ -92,3 +92,42 @@ This is an intermediate checkpoint, not PR readiness: typed owner failure routin
 existing-state conservative outcome RED controls, revision-fenced cleanup, caller
 section, exact ratchet shrink and hosted/CI proof remain. Work pauses here for
 the owner's #1757 final integration priority after actual #1737.
+
+## Typed owner-failure checkpoint plan
+
+Resumed from `f0849701476`, genuinely integrated actual #1762 `2cf8c4c91dd`
+at `c5472306109`. Owner approved the construction JSON conflict: retain incoming
+Binance/Bybit policies verbatim, add only BingX dispatchSigning. The existing
+registry build generator regenerates its table; construction-codegen checks and
+independent full-tree preservation review pass. No hosted admission is enabled.
+
+1. Add original runtime RED controls through the actual BingX engine and provider
+   failure events: identity, history and metadata retain typed kind/outcome/code;
+   first unsent trade is NotSent; already resent write is Unknown; mixed successful,
+   refused and unsent legs preserve existing accepted IDs and conservative evidence.
+   Add account owner controls proving old revisions/epochs cannot clear newer
+   read reservations or retire replacement sessions. No raw signer values appear.
+2. Route `Venue::on_sign_error` by the existing Pending owner. Trading uses its
+   existing job/error/effective/ids state and finalizer; history removes its owned
+   read then rejects strictly; metadata propagates the original typed error.
+   Account background cleanup compares the captured request revision against its
+   existing in-flight token (not the current financial revision), retaining native
+   backoff and listen-key epoch checks. Position mode keeps its sole-owner bool.
+   Provider refusal never becomes venue auth evidence or a signature retry.
+3. Keep prior-attempt uncertainty through existing Signed.resent; never call an
+   operation wholly NotSent after a write reached the venue. Keep the current
+   partial-ID contract, with the BingX finalizer explicitly a RequestContext
+   consolidation target. Do not add a ledger, evidence flags, retry policy or core.
+4. Tighten the signing ratchet to the actual scan; add the caller section in the
+   same PR. Audit TS hosted canonical bytes, labels and public sign methods.
+   Hosted admission is allowed only if existing hex/API-key presentation suffices
+   and actual WASM/SDK positives cover every supported public/remote API. Any
+   missing shared presentation/session contract blocks that part for owner review.
+5. Verify BingX plus Binance, registry generation/checks, strict fmt/Clippy and
+   focused SDK type/lint/tests; independent correctness/adversarial source reviews
+   before committing. Keep #1763 watchers active. Full CI and authenticated replay
+   proof/guard remain required before any merge; this is a native checkpoint.
+
+Architecture gate: pending-owner adapters consume the shared signer failure,
+using existing recovery/outcome state only. Shared outcome consolidation belongs
+to RequestContext, not a new BingX implementation.
