@@ -1266,3 +1266,7 @@ impl TxFlow {
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/account_coverage.rs"]
+mod account_coverage_tests;

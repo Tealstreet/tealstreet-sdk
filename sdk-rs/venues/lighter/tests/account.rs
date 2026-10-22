@@ -1343,3 +1343,37 @@ fn skipped_position_rows_keep_the_balance_updating() {
         );
     }
 }
+
+#[test]
+fn exhausted_backfill_is_account_scoped_without_a_query_owner() {
+    use safe_cex_engine::{Level, Notice, Value};
+    use safe_cex_engine::log::code;
+    let (mut e, s) = ready();
+    e.set_log_level(Level::Error);
+    message(&mut e, s, NOW + 500.0, BASELINE);
+    e.take_frame(NOW + 500.0);
+    let (_, reads) = reconnect(&mut e, s);
+    let first = reads.iter().find(|r| r.url.contains("/api/v1/trades?")).unwrap();
+    reply_at(&mut e, NOW + 3100.0, first, 200, r#"{"code":429,"message":"too many requests"}"#);
+    let retry = e.drain_actions().find_map(|action| match action {
+        Action::SetTimer { timer, at_ms } if at_ms == NOW + 5100.0 => Some(timer),
+        _ => None,
+    }).expect("one existing backfill retry");
+    e.handle(NOW + 5100.0, Event::TimerFired { timer: retry });
+    let reads = requests(&mut e);
+    let second = reads.iter().find(|r| r.url.contains("/api/v1/trades?")).unwrap();
+    reply_at(&mut e, NOW + 5200.0, second, 200, r#"{"code":429,"message":"too many requests"}"#);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let events = actions.iter().filter_map(|action| match action {
+        Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE => Some(event),
+        _ => None,
+    }).collect::<Vec<_>>();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].level, Level::Warn);
+    assert!(events[0].message.starts_with("Lighter fill backfill failed; fills during the outage may be missing until the next reconnect:"));
+    assert_eq!(events[0].fields, vec![("scope", Value::Str("account/background".into()))]);
+    assert!(!actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) | Action::SetTimer { .. }
+    )));
+    assert_eq!(e.take_frame(NOW + 5200.0).map_or(0, fill_count), 0);
+}
