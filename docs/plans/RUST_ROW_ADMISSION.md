@@ -347,3 +347,13 @@ Initial head `148c941fed6` suffered four unrelated Corepack registry503 failures
 before replay; its complete Orderly48-output comparison is unchanged. Initial
 CI is historical iteration evidence; final actual clock/workflow dependencies,
 full green head and complete138-output proof still gate merge.
+
+Clock refresh: actual #1709 `6f815755c37de240d1a87bfec6edc1e4d4c8b614`
+was integrated by clean porcelain merge `3a80a651c8b7`. Exact six-file scope
+survives against that landing: all nonshared incoming/owned blobs and both quality
+hunks are preserved, with the three reviewed source/test blobs unchanged. Final
+proof baseline is clock CI `39714718741`, head `07cd88601774`, whose tree equals
+the actual clock merge. Owner queue is history #1712 first, then this PR; signer
+and install-retry infra follow-up hold. The owner permits a clean trial against
+actual #1712 only if its real diff and dependency review show no overlap with
+this change; otherwise integrate it and refresh normally. No general waiver.
