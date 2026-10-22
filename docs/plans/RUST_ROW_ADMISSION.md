@@ -508,7 +508,8 @@ state and no venue names/messages:
 - `RowKeys`: keep nonempty known IDs uniquely in first-seen order; count every
   anonymous or empty-ID row separately. `Default`, `add(Option<&str>)`,
   `ids() -> &[String]`, `anonymous() -> usize`, `count() -> usize`, `any()`
-  expose WOO's existing policy. No sorting or new collection/capacity limit.
+  expose WOO's existing policy. `into_ids(self) -> Vec<String>` preserves the
+  existing pagination move without cloning strings. No sorting or new limit.
 - Each collector's `summary(format: impl FnOnce(&Self) -> String)
   -> Option<String>` calls the formatter once only for a native nonempty group.
   RowCount tests first-state presence, preserving the existing report boundary;
@@ -585,3 +586,12 @@ reviews are CLEAN. Preserve WOO retention/page-progress accessors and Bybit extr
 product account swapping. Original-GREEN compatibility controls precede migration;
 no product defect or RED claim is made. Signing/RequestContext owners explicitly
 cleared these AccountState constructors and accepted-join diagnostic regions.
+
+Phase2 original compatibility checkpoint: all233 selected native account/public/
+product tests pass on byte-identical actual1769 production, including the final
+new stale-join and two-known-ID first-seen-order controls. Both native test/API
+reviews are CLEAN; the consuming RowKeys ID accessor preserves WOO pagination
+move semantics. Early extra-product fixture cadence and an intermediate WOO
+fixture edit were corrected before this exact original-GREEN run; neither is a
+product defect/RED. Native source/test/log hashes are sealed in the local receipt
+`/tmp/codex-row-grouped-original-receipt.json`; CI proof remains pending.
