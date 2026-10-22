@@ -113,3 +113,11 @@ unsupported input symbol stays ingress-only. Error presence, not truthiness,
 classifies terminal failures, including an empty message. The 17 focused
 controls pass. Independent correctness review is clean; adversarial findings
 were addressed with these bounded negative controls before publication.
+
+
+A facade call-graph cross-check extends the catalogue for enum-backed commands:
+`account: afterLoad` still sends FetchAccount after startup, and every cancel-all
+mode sends CancelSymbolOrders (empty symbol only for native mode). These belong
+in ingress checks even though their decoder variants are not feature-gated.
+The additional regression selects these from the actual enum values; it adds no
+venue expectation table or production change.

@@ -42,13 +42,13 @@ function record(extra = {}) {
 }
 
 test('only runtime-advertised commands are selected; policy fields add no ops', () => {
-  assert.deepEqual(advertisedCommands(record()), []);
+  assert.deepEqual(advertisedCommands(record()).map((probe) => probe.command.op), ['cancelSymbolOrders']);
   const probes = advertisedCommands(record({
     orderBookQuery: true, scheduleCancel: true, options: true,
     bybitExecutionControls: true, quantityUnits: 'contractCount',
   }));
   assert.deepEqual(probes.map((probe) => probe.command.op), [
-    'fetchOrderBook', 'fetchOptionChain', 'fetchOptionExpiries', 'fetchAccountGreeks',
+    'cancelSymbolOrders', 'fetchOrderBook', 'fetchOptionChain', 'fetchOptionExpiries', 'fetchAccountGreeks',
     'scheduleCancel', 'scheduleCancel',
   ]);
   assert.equal(new Set(probes.map((probe) => probe.command.command)).size, probes.length);
@@ -101,9 +101,9 @@ test('each probe gets a fresh instance and all instances are freed', () => {
       free: () => freed.push(id),
     };
   }, 'isolated');
-  assert.deepEqual(calls, [1, 2]);
-  assert.deepEqual(freed, [0, 1, 2]);
-  assert.deepEqual(proofs.map((proof) => proof.evidence), ['precondition', 'precondition']);
+  assert.deepEqual(calls, [1, 2, 3]);
+  assert.deepEqual(freed, [0, 1, 2, 3]);
+  assert.deepEqual(proofs.map((proof) => proof.evidence), ['precondition', 'precondition', 'precondition']);
 });
 
 test('decoder rejection and unsupported dispatch never become deferred evidence', () => {
@@ -111,10 +111,10 @@ test('decoder rejection and unsupported dispatch never become deferred evidence'
   let freed = 0;
   assert.throws(() => checkAdvertisedCommands(() => ({
     capabilities: () => JSON.stringify(record({ orderBookQuery: true })),
-    command: () => JSON.stringify([{ op: 'done', command: 1, error: 'unsupported' }]),
+    command: (json) => { const input = JSON.parse(json); return JSON.stringify([input.op === 'fetchOrderBook' ? { op: 'done', command: input.command, error: 'unsupported' } : { op: 'done', command: input.command, result: '[]' }]); },
     free: () => freed++,
   }), 'lying capability'), /lying capability/);
-  assert.equal(freed, 2);
+  assert.equal(freed, 3);
 });
 
 
@@ -152,4 +152,13 @@ test('real generic action fallback and named-method refusals cannot pass', () =>
   assert.equal(probeCapabilityCommand(engine([
     { op: 'done', command: 17, error: '' },
   ]), command, 'empty error').evidence, 'precondition');
+});
+
+
+test('after-load identities and every cancel-all mode retain their underlying command', () => {
+  assert.ok(advertisedCommands(record({ account: 'afterLoad' })).some((probe) => probe.command.op === 'fetchAccount'));
+  for (const mode of ['native', 'eachOpenSymbol', 'eachPlacedSymbol']) {
+    const probe = advertisedCommands(record({ cancelAll: mode })).find((probe) => probe.command.op === 'cancelSymbolOrders');
+    assert.equal(probe.command.symbol === '', mode === 'native');
+  }
 });

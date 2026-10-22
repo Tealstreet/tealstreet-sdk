@@ -21,8 +21,8 @@ const policies = new Set([
   'isolatedBookSubscriptions', 'inverseClosedPositions',
 ]);
 const conditional = {
-  account: (v) => v === 'query' ? [{ op: 'fetchAccount' }] : [],
-  cancelAll: (v) => v === 'native' ? [{ op: 'cancelSymbolOrders', symbol: '' }] : [],
+  account: (v) => v !== 'unsupported' ? [{ op: 'fetchAccount' }] : [],
+  cancelAll: (v) => [{ op: 'cancelSymbolOrders', symbol: v === 'native' ? '' : symbol }],
   leverageQuery: (v) => v !== 'settings' ? [{ op: 'fetchLeverage', symbol }] : [],
   maxLeverage: (v) => v === 'query' ? [{ op: 'fetchMaxLeverage', symbol }] : [],
   clientOrderLookup: () => [{ op: 'findOrderByClientOrderId', symbol, clientOrderId: 'probe' }],
