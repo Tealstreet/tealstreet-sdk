@@ -343,3 +343,26 @@ before activation/traffic/auth. Bitunix current text must still reach the stable
 backoff observation even before its first pong; idle activation and stability
 proof remain independent. The six venue runtime RED controls remain unresolved
 until driver/adoption work; this checkpoint makes no runtime closure claim.
+
+## Supervised transition driver phase
+
+The next internal component couples Lifecycle to the existing Supervisor using
+real Cx timers, before adding engine ingress hooks. It owns per-feed Supervisor
+and coalesced login-retry timers; transitions return bounded, owned effects for
+Engine to deliver after restoring the registry borrow. No venue callback runs
+while this component is detached. Retirement revokes the epoch and cancels its
+timers before any effect is exposed. A required invalidation acknowledgment is
+needed before the Supervisor can schedule reconnect; terminal groups cancel
+inactive sibling timers too and never regain a grant. Timer events are scoped
+and retired ones cannot reach venue callbacks. The component remains private to
+the engine and is staged under the focused native harness until engine wiring.
+
+Observe-only auth requires an explicit `Authenticated { first }` effect distinct
+from Ready: Bitunix accepts native server-push before login ACK and has no private
+subscription batch, but its first accepted ACK still starts account recovery.
+Duplicate positives cancel a pending same-socket login retry without granting a
+second Ready/recovery. Expiry is checked before both ingress and auth/traffic;
+current text may reset Bitunix's stable backoff before its first pong, while idle
+activation still requires the pong. This is codec-independent policy, tested via
+a probe using actual Engine/Cx timers; no allocator or HTTP dispatch source edit
+belongs to this phase.
