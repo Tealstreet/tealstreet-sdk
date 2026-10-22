@@ -332,3 +332,13 @@ late/duplicate parent/provider/permit rejection and retained original diagnostic
 Review the test plan before edits. Use focused --lib replacement controls and
 strict engine Clippy; no local WASM/replay. No PR/push until actual #1741, whose
 exact-head CI/archive watches remain active. Return for any core failure/dependency.
+
+Signed-test plan review: native facts must use each emitted child Context while
+root completion runs within that real child's Delivery; never clear callback
+scope. Provider/deadline failures are engine-owned, with no invented fixture fact.
+Count only successful physical claims (parent+2, parent+1, parent-only) and retain
+exact IDs from accepted native responses. Repeated parent/provider/permit events
+must not change callback, diagnostic or terminal counts. Reuse the original100ms
+raw cap; allow normal cancellation/tombstone retention. This drives the engine's
+emitted Sign/action protocol, not an executing native-host SignFuture. Independent
+plan review CLEAN, architecture No; no production or phase-completion claim.
