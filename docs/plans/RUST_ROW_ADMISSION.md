@@ -411,8 +411,8 @@ The concrete phase-1 API in existing `engine/src/coverage.rs` is:
   where applicable. No hidden eviction or new per-family threshold.
 - `report<P>(&mut self, cx: &mut Cx<'_, P>, key: K, level: Level,
   message: impl Into<String>) -> bool`: update memory independently of host log
-  filtering, and emit only through `row_skipped`. Return whether a report was
-  emitted. Once ignores later severity changes; ErrorUpgrade permits exactly
+  filtering, and emit only through `row_skipped`. Return whether repeat
+  suppression admitted a call to `row_skipped`, even if the host filters it. Once ignores later severity changes; ErrorUpgrade permits exactly
   the old non-Error-to-Error upgrade; ChangedMessage compares exact text, with
   no new severity-based repeat. Empty/unknown identity remains a native key.
 - `forget<Q>(&mut self, key: &Q) -> bool` with borrowed-key lookup, and `clear`.
@@ -453,3 +453,16 @@ no local release WASM build/replay/timing sweep and no changed thresholds or
 allowances. Standing TS classes require fresh complete controls; any other
 difference blocks. Announce a fresh separate guard, merge separately, audit the
 actual parents/whole tree and report each actual pin before the next fresh slice.
+
+
+Both independent phase-1 plan/API reviews are CLEAN. Compatibility controls
+must pin Warn→Error→Warn→Error, text A→B→A, capacity reset on a duplicate key,
+empty-key re-arm, namespace isolation and filtered notices followed by repeats.
+Coinbase and WOO must select their policies explicitly in `Account::new`;
+Crypto.com retains its two independent default Once reporters. Preserve
+Crypto.com's decoded-key forget before market lookup, its clean position clear,
+and its order clear only after both joined lists are clean. Coinbase order
+namespace re-arm stays after revision rejection and before newer-cache merging.
+WOO position reporting remains before bad/freshness rejection, while order
+reporting retains its distinct generation/bad/envelope ordering. No grouped
+collector or native reporting boundary moves in phase1.
