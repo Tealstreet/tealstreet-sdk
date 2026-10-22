@@ -194,13 +194,52 @@ def manifest(text):
     return value
 
 
+# Owner-authorized initial bootstrap refresh for already-landed #1748 only.
+# These exact path maps cannot authorize arbitrary sites or later regrowth.
+BOOTSTRAP_PATH = 'venues/paradex/src/history.rs'
+BOOTSTRAP_OLD = {'156d12f0af1aa73d997695a9ee5ae2f0b10efdaf05fbf3c5a44b49c0b8c67eb3': 2,
+ '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 1,
+ '2c8a5478f2609d37bd412269796524fb8757001af77ca0e1149e8094776b413d': 1,
+ '4f41451eb1e1a039f8b647eaee00abfdc9027246d230dff2fad9129e9919c3e7': 1,
+ '505f08f644bfce6b593ea547dd3ae8e5d06afb1ddfe5f51c015a1cb6b95cef64': 1,
+ '552d45a1b59d0f22ccc9a74886bba18ab8ed7ed63abbbaf21329272a874b4ace': 1,
+ '55fe601b0e4d079ab998430cfbafaa7ea570dd124789ffb38859d78b00696d10': 1,
+ '5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2': 2,
+ '60ad9d1f92b48483572276a3a75cf6e7c6579a0c8d0118a9f9f51688b851c9aa': 1,
+ '664a43c5bfd1ecbc0d29239d7915e542f15fa544270f4b084e9c8f8a0ebd2516': 1,
+ '7e6ac08cf11a9f2f3a366e224d2c5df531cef78fd5b215d673548273ddd1fe50': 1,
+ '8153debcec98fa16c1dfc5c29c116571f0f4f5735aa73f778c9fafc32448211b': 1,
+ '8b8381599d79ae4e48be97e0eb5449852a4d8611cbba96c3dc1eed24a44faa0c': 1,
+ 'a81744f9afdaf13c609cee0a6b18b04c80c9fa876308896b9d619fd75c8c7b9c': 1,
+ 'a876e5300951dc42d8c9828d78f0d32d52e42b439cbaf763cc6cdd6b63174865': 1,
+ 'aa71c1d92e34443bf9b99a67bc669e086e750105b16ed6b6d1835d2e7f2c2c0f': 1,
+ 'df2ddf42002aefae252f397c268458bbfd87f8511704a888f81560d2d7088665': 1}
+BOOTSTRAP_LANDED = {'156d12f0af1aa73d997695a9ee5ae2f0b10efdaf05fbf3c5a44b49c0b8c67eb3': 4,
+ '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 1,
+ '4f41451eb1e1a039f8b647eaee00abfdc9027246d230dff2fad9129e9919c3e7': 2,
+ '552d45a1b59d0f22ccc9a74886bba18ab8ed7ed63abbbaf21329272a874b4ace': 1,
+ '55fe601b0e4d079ab998430cfbafaa7ea570dd124789ffb38859d78b00696d10': 1,
+ '60ad9d1f92b48483572276a3a75cf6e7c6579a0c8d0118a9f9f51688b851c9aa': 1,
+ '7e6ac08cf11a9f2f3a366e224d2c5df531cef78fd5b215d673548273ddd1fe50': 1,
+ '8153debcec98fa16c1dfc5c29c116571f0f4f5735aa73f778c9fafc32448211b': 1,
+ 'a81744f9afdaf13c609cee0a6b18b04c80c9fa876308896b9d619fd75c8c7b9c': 1,
+ 'a876e5300951dc42d8c9828d78f0d32d52e42b439cbaf763cc6cdd6b63174865': 1}
+
+
+def subset(counts, baseline):
+    return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
+
+
 def check(current, allowed, previous):
     failures = []
     if current != allowed:
         failures.append('current sites must exactly match the inventory (prune removals; no new sites)')
     for label, baseline in previous:
         for path, counts in allowed.items():
-            if any(count > baseline.get(path, {}).get(digest, 0) for digest, count in counts.items()):
+            bound = baseline.get(path, {})
+            if path == BOOTSTRAP_PATH and bound == BOOTSTRAP_OLD:
+                bound = BOOTSTRAP_LANDED
+            if not subset(counts, bound):
                 failures.append(f'{path}: inventory grew against {label}')
     return failures
 

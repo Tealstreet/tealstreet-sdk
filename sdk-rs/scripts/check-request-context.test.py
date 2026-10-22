@@ -80,6 +80,35 @@ class RequestContextBan(unittest.TestCase):
         # Bootstrap only establishes the reviewed initial inventory.
         self.assertFalse(ban.check(one, one, []))
 
+    def test_exact_landed_bootstrap_transition_never_allows_regrowth(self):
+        path = ban.BOOTSTRAP_PATH
+        old = {path: dict(ban.BOOTSTRAP_OLD)}
+        landed = {path: dict(ban.BOOTSTRAP_LANDED)}
+        self.assertEqual(sum(old[path].values()), 19)
+        self.assertEqual(sum(landed[path].values()), 14)
+        self.assertFalse(ban.check(landed, landed, [('original', old)]))
+        pruned = {path: dict(landed[path])}
+        digest = next(iter(pruned[path]))
+        del pruned[path][digest]
+        self.assertFalse(ban.check(pruned, pruned, [('original', old), ('landed', landed)]))
+        # An older original map must not override a newer, independently pruned
+        # parent/base. It remains a permanent independent shrinking constraint.
+        self.assertTrue(ban.check(landed, landed, [('original', old), ('parent', pruned)]))
+        altered = {path: dict(old[path])}
+        altered[path][next(iter(altered[path]))] += 1
+        self.assertTrue(ban.check(landed, landed, [('altered', altered)]))
+        extra = {path: dict(landed[path])}
+        extra[path]['f' * 64] = 1
+        self.assertTrue(ban.check(extra, extra, [('original', old)]))
+        increased = {path: dict(landed[path])}
+        increased[path][next(iter(increased[path]))] += 1
+        self.assertTrue(ban.check(increased, increased, [('original', old)]))
+        other = dict(landed)
+        other['venues/other/src/history.rs'] = dict(landed[path])
+        self.assertTrue(ban.check(other, other, [('original', old)]))
+        # Source changes still have to exactly match the frozen manifest.
+        self.assertTrue(ban.check(extra, landed, [('original', old)]))
+
     def test_strict_manifest_schema_and_duplicates(self):
         digest = 'a' * 64
         good = {'venues/reference/src/lib.rs': {digest: 1}}
