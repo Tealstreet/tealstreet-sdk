@@ -578,3 +578,26 @@ success emits no Bind/receipt. An actual native-refusal response followed by
 provider or host-preparation failure on the retry seals Unknown from central
 prior-release evidence. These are engine Event/claim controls, not an external
 asynchronous provider or venue replay proof. Reference migrations remain open.
+
+
+### Legacy provenance ratchet implementation plan
+
+Add scripts/check-request-context.py and focused Python controls, invoked by
+the existing check-bans.sh. A Rust lexical scanner excludes comments/string
+contents as syntax (retaining literals in call fingerprints), recognizes dotted
+and qualified references to request/request_streamed/request_streamed_body,
+sign_http, done and fail in venue src, and hashes normalized complete token
+sequences per path/count into request-legacy-sites.json. Tests are included, as
+with the signing ratchet. Method references without a call are frozen too; no
+method, retry or outcome inference is attached to any legacy site. Comments or
+line wrapping cannot bypass detection, and duplicated/changed/new sites fail.
+
+The allowlist must match current sites exactly (removed sites are pruned). It
+may only shrink versus every available committed parent/HEAD and landing-base
+manifest; CI explicitly resolves its base ref and fails closed if that ref is
+unavailable. The first reviewed bootstrap is permitted only when no trusted
+base manifest exists. Negative tests cover multiline/comments/raw strings,
+duplicated/qualified/reference calls, harmless literal examples, stale entries
+and attempts to enlarge the manifest alongside new source. No auto-update mode
+is wired into CI. The bridge plus manifest must be empty and deleted before
+landing->master, as the existing blockers row requires.
