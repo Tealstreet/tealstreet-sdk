@@ -1,4 +1,6 @@
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Query, Response};
+use safe_cex_engine::{ErrorKind, Level, Value};
+use safe_cex_engine::log::code;
 use safe_cex_venue_grvt::{Grvt, Options};
 use serde::Deserialize;
 const NOW: f64 = 1_700_000_000_000.;
@@ -9,6 +11,7 @@ struct Harness {
     requests: Vec<HttpRequest>,
     results: Vec<(u32, Result<String, String>)>,
     logs: Vec<String>,
+    notices: Vec<Notice>,
     now: f64,
 }
 impl Harness {
@@ -27,6 +30,7 @@ impl Harness {
             requests: vec![],
             results: vec![],
             logs: vec![],
+            notices: vec![],
             now: NOW,
         };
         h.collect();
@@ -42,6 +46,9 @@ impl Harness {
     }
     fn collect(&mut self) {
         for a in self.e.drain_actions() {
+            if let Action::Notice(notice) = &a {
+                self.notices.push(notice.clone());
+            }
             match a {
                 Action::Http(r) => self.requests.push(r),
                 Action::Notice(Notice::CommandDone { command, result }) => {
@@ -59,11 +66,14 @@ impl Harness {
         &self.logs
     }
     fn query(&mut self, q: Query) {
+        self.query_with_id(8, q);
+    }
+    fn query_with_id(&mut self, command: u32, q: Query) {
         self.now += 1.;
         self.e.handle(
             self.now,
             Event::Command(Command::Query {
-                command: 8,
+                command,
                 query: q,
             }),
         );
@@ -911,4 +921,117 @@ fn an_undecodable_order_from_another_subaccount_still_fails_the_read() {
         "",
     );
     assert!(h.result().is_err());
+}
+
+fn incomplete_pairs(h: &Harness, command: u32) -> Vec<&Notice> {
+    h.notices.iter().filter(|notice| match notice {
+        Notice::Event(event) => event.code == code::HISTORY_INCOMPLETE
+            && event.fields == vec![("command", Value::Num(f64::from(command)))],
+        Notice::CommandDone { command: id, .. } | Notice::CommandFailed { command: id, .. } => *id == command,
+        _ => false,
+    }).collect()
+}
+
+fn http_failure(h: &mut Harness, request: HttpRequest) {
+    h.now += 1.;
+    h.e.handle(h.now, Event::HttpResponse {
+        request: request.id,
+        response: Response { status: 503, headers: "", body: r#"{"c":999,"m":"fixture unavailable"}"# },
+    });
+    h.collect();
+}
+
+#[test]
+fn first_history_failure_is_typed_without_empty_success_or_incomplete_marker() {
+    let mut h = Harness::new(true);
+    h.e.set_log_level(Level::Error);
+    h.query(fills(None, None));
+    let request = h.take("fill_history");
+    http_failure(&mut h, request);
+    let notices = incomplete_pairs(&h, 8);
+    assert_eq!(notices.len(), 1);
+    assert!(matches!(notices[0], Notice::CommandFailed { error, .. }
+        if error.kind == Some(ErrorKind::Internal)));
+}
+
+#[test]
+fn later_page_failure_retains_only_accepted_rows_with_one_owned_marker() {
+    for malformed in [false, true] {
+        let mut h = Harness::new(true);
+        h.e.set_log_level(Level::Error);
+        let orders = h.e.store().orders().to_vec();
+        h.query(fills(None, None));
+        h.reply("fill_history", &format!(r#"{{"r":[{FILL}],"n":"next"}}"#), "");
+        let request = h.take("fill_history");
+        if malformed {
+            let prefix = FILL.replace("-1", "-2");
+            let bad = FILL.replace("-1", "-3").replace("\"0.2\"", "\"invalid\"");
+            h.respond(request, &format!(r#"{{"r":[{prefix},{bad}],"n":""}}"#), "");
+        } else {
+            http_failure(&mut h, request);
+        }
+        let notices = incomplete_pairs(&h, 8);
+        assert_eq!(notices.len(), 2);
+        assert!(matches!(notices[0], Notice::Event(event) if event.level == Level::Warn));
+        let Notice::CommandDone { result, .. } = notices[1] else { panic!("accepted rows must resolve") };
+        let rows: Vec<Execution> = serde_json::from_str(result).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "9007199254740993-1");
+        assert_eq!(h.e.store().orders(), orders);
+    }
+}
+
+#[test]
+fn income_second_stage_failure_keeps_funding_and_command_owner() {
+    let mut h = Harness::new(true);
+    h.e.set_log_level(Level::Error);
+    h.query(Query::Income { symbol: None, kind: None, from_ms: Some(NOW - 1000.), to_ms: Some(NOW), limit: None });
+    h.reply("funding_payment_history", r#"{"r":[{"et":"1700000000000000000","sa":"777","i":"BTC_USDT_Perp","ti":"funding-1","c":"USDT","a":"25"}],"n":""}"#, "");
+    let request = h.take("fill_history");
+    http_failure(&mut h, request);
+    let notices = incomplete_pairs(&h, 8);
+    assert_eq!(notices.len(), 2);
+    assert!(matches!(notices[0], Notice::Event(_)));
+    let Notice::CommandDone { result, .. } = notices[1] else { panic!("funding remains accepted") };
+    let rows: Vec<Ledger> = serde_json::from_str(result).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].income_type, "FUNDING_FEE");
+    assert_eq!(rows[0].income, -25.);
+}
+
+#[test]
+fn filtered_native_rows_cannot_authorize_empty_partial_recovery() {
+    let mut h = Harness::new(true);
+    h.e.set_log_level(Level::Error);
+    let mut query = fills(None, None);
+    if let Query::Fills { from_ms, to_ms, .. } = &mut query {
+        *from_ms = Some(NOW + 10.);
+        *to_ms = Some(NOW + 20.);
+    }
+    h.query(query);
+    h.reply("fill_history", &format!(r#"{{"r":[{FILL}],"n":"next"}}"#), "");
+    let request = h.take("fill_history");
+    http_failure(&mut h, request);
+    let notices = incomplete_pairs(&h, 8);
+    assert_eq!(notices.len(), 1);
+    assert!(matches!(notices[0], Notice::CommandFailed { error, .. } if error.kind == Some(ErrorKind::Internal)));
+}
+
+#[test]
+fn concurrent_history_failures_keep_their_own_markers_before_success() {
+    let mut h = Harness::new(true);
+    h.e.set_log_level(Level::Error);
+    let mut second_pages = Vec::new();
+    for command in [8, 9] {
+        h.query_with_id(command, fills(None, None));
+        h.reply("fill_history", &format!(r#"{{"r":[{FILL}],"n":"next"}}"#), "");
+        second_pages.push(h.take("fill_history"));
+    }
+    for (command, request) in [9, 8].into_iter().zip(second_pages.into_iter().rev()) {
+        http_failure(&mut h, request);
+        let notices = incomplete_pairs(&h, command);
+        assert_eq!(notices.len(), 2);
+        assert!(matches!(notices[0], Notice::Event(_)));
+        assert!(matches!(notices[1], Notice::CommandDone { .. }));
+    }
 }
