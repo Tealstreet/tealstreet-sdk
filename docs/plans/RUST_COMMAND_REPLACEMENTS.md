@@ -387,3 +387,15 @@ new Prepare or Bind, and the fresh accepted child must prove no stale failure
 fact was recorded. Extract only the existing signed-test helpers into one local
 test module so both acceptance tests drive identical actual Engine APIs.
 Independent plan review CLEAN; architecture No.
+
+Local reprepare acceptance checkpoint: both protocol-revision and route-Stale
+cases pass, along with all23 replacement-filtered controls and strict engine
+Clippy. Helper extraction preserves the prior three signed scenarios. Each fresh
+child keeps its exact Context/HTTP attempt/raw100ms deadline, receives distinct
+preparation/provider authority with90ms remaining timeout, and rejects live old
+permits/results/cleanup without another diagnostic. Fresh children still return
+exact success/IDs and retire physical work. The initial newly written expiry
+expectation was corrected: this recipe declares no absolute signature expiry,
+so None is correct; the Context bound is separately asserted. Independent final
+review CLEAN, architecture No. Full registry atomicity and ordinary Bybit
+adoption remain open, with its original gateway RED retained. Local/unpublished.
