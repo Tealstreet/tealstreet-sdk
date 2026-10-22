@@ -22,7 +22,12 @@ jobs:
         with:
           node-version: 22
       - uses: ./.github/actions/prepare-yarn
-      - run: corepack yarn install --frozen-lockfile --network-timeout 600000
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - run: corepack yarn -s node --test .github/tests/*.test.cjs
       - run: corepack yarn check:licenses
       - run: corepack yarn typecheck

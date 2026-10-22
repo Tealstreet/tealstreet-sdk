@@ -52,6 +52,7 @@ jobs:
           node-version: 22
           check-latest: true
       - uses: ./.github/actions/prepare-yarn
+        id: yarn
 
       - name: Use npm with trusted publishing support
         run: npm install -g npm@^11.5.1 && npm --version
@@ -100,7 +101,11 @@ jobs:
             fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
           '
 
-      - run: corepack yarn install --frozen-lockfile --network-timeout 600000
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
 
       - name: Typecheck
         run: corepack yarn --cwd "$PACKAGE_DIR" typecheck
