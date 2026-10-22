@@ -1298,3 +1298,12 @@ controls and harness tests verify the extraction; the unchanged actual-WASM
 lifecycle assertion is the CI regression for wiring. Review this shared seam
 before source, then fresh CI. Run502caee remains failed historical evidence, not
 a complete Binance ledger or final replay proof. Respect the #1764 merge hold.
+
+Recorded helper extraction verification before replay wiring: the original
+function body/comments are mechanically identical after type erasure; SDK
+support path is a typed re-export, runtime MJS has no imports/network/clock
+patches. All1,146 harness tests and the three unchanged SDK helper tests pass;
+SDK typecheck/lint pass. The new plain-Node control verifies original receiver,
+exact final packet/header snapshot, deferred single dispatch, identical lazy
+response stream and abort propagation. Independent review CLEAN, architecture
+No. No replay recovery claim until the hook is wired and rebuilt-WASM CI passes.
