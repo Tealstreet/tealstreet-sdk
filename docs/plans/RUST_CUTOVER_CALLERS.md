@@ -3807,6 +3807,73 @@ The native20,000-order prefix retention is bounded; an authoritative last with
 no cumulative endpoint cannot establish its overlap with a later fallback.
 No caller deployment, TS removal or live evidence claim is bundled.
 
+### GRVT histories: shared owner with strict order-fill proofs
+
+GRVT fills, closed orders, funding/fill-derived income and public trades now use
+the shared CursorHistory completion and page admission owner. A terminal actual
+HTTP/stream/decode/transport failure before eligible output was accepted rejects
+typed; after accepted output, a general query returns only earlier accepted pages
+with one command-owned Warn `history.incomplete` before success, visible at
+Error-only logging. Failed page prefixes are excluded, including when the same
+page exhausts its five existing transport retries. Funding accepted before a
+failed fill-derived income stage is retained. A general repeated/capped walk now
+returns accepted rows with owned incompleteness; a zero-output failed walk rejects.
+
+Order-ID-filtered fills promise complete totals and remain strict on every
+terminal failure, even after accepted pages: lifecycle ambiguity/missing proof,
+limit/cursor/cap refusal and terminal HTTP/decode/transport loss all reject.
+Session/bootstrap/deferred preparation failure also remains strict for every
+query. These paths publish neither partial output nor an incomplete-success
+marker. Typed finalization now supplies `internal` where those legacy failures
+previously had no kind; the shared callback multiplexes origins, so it does not
+claim every failure is Network. Initial query admission and client-ID lookup
+retain their existing separate behavior.
+
+Five read retries and one session-refresh resend retain the exact native page,
+cursor and body. Retrying discards only unvalidated output and native page facts;
+accepted rows, page budget, first coverage cause and lifecycle ledgers survive.
+Native large IDs, nanosecond bounds, units, order lifecycle isolation, row.skipped
+policy, stage-specific limits and stable descending final sort stay intact.
+No history row enters live Store, and no SDK argument, result shape, new NX
+handler or deployment proof is introduced. B11's existing request-scoped
+incomplete-query ingestion/coverage and typed-rejection requirements remain.
+[Scope and controls](RUST_OWNED_HISTORY.md).
+
+
+### Crypto.com histories: shared owner with exact native cursor proofs
+
+Crypto.com fills, historical orders, income and public trades now use the shared
+CursorHistory owner for staged/accepted output and final completion. A first or
+zero-eligible-output terminal actual HTTP/native/decode/transport failure rejects
+typed. After accepted output, a later actual failure returns only those accepted
+rows with one command-owned Warn `history.incomplete` before success, including
+Error-only logging. Failed streamed prefixes never enter output, even when
+transport retries exhaust. Finalization now supplies `internal` where the legacy
+history failures had no kind; the callback multiplexes origins, so it does not
+classify every failure Network.
+
+Native exact `u64` nanosecond bounds and overlapping `oldest + 1` end cursors stay
+intact. When continuation is needed, a missing exact cursor or non-decreasing
+bound remains a strict refusal after prior accepted rows, with no partial success
+or marker. A short duplicate page still proves completion before requiring exact
+cursors; a full duplicate page may continue to an older bound. No normal 50-page
+cap is added. The shared walk's representable ceiling is a strict safety refusal.
+
+The existing single retry counter is preserved: `40101` retries below one; other
+transport loss retries below three. Retries discard only the current staged page
+and newly observed native IDs; admitted overlap identities, output and owner
+survive. Retry/continuation timers remain 1000ms, separately respecting existing
+per-method/key pacing. Native result order, limits, fee sign, timestamp units,
+large IDs, fractional bounds and income mappings remain. Explicitly ranged
+income still ignores the requested output limit, including zero; other effective
+zero-limit and equal-bound queries keep no-I/O success. Public reads remain
+unsigned one-page GETs with native duplicates and existing retry behavior.
+
+No SDK argument/result shape, new NX handler or live Store publication is added.
+B11 request-scoped incomplete-query ingestion/coverage and typed rejection
+handling remain required; other adapters, runtime proof and managed Context
+completion remain separate work. [Scope and controls](RUST_OWNED_HISTORY.md).
+
 ## Orderly incremental Fill quote correction
 
 Orderly broker Fill consumers continue to receive incremental native amounts in
