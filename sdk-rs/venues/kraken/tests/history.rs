@@ -585,7 +585,15 @@ fn rejected_zero_size_attempt_is_a_canceled_historical_order_without_executions(
 }
 
 fn owned_actions(e: &mut Engine<Kraken>, command: u32) -> Vec<Action> {
-    e.drain_actions()
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_))),
+        "terminal history must not dispatch another request"
+    );
+    actions
+        .into_iter()
         .filter(|a| match a {
             Action::Notice(Notice::CommandDone { command: id, .. })
             | Action::Notice(Notice::CommandFailed { command: id, .. }) => *id == command,
@@ -663,20 +671,26 @@ fn owned_first_actual_failures_are_typed_and_never_empty_success() {
             limit: Some(200),
         },
     ] {
-        let (mut e, _) = ready();
-        let r = query(&mut e, q);
-        e.handle(
-            NOW,
-            Event::HttpFailed {
-                request: r.id,
-                error: "lost before acceptance",
-            },
-        );
-        let a = owned_actions(&mut e, 91);
-        assert_eq!(a.len(), 1);
-        assert!(
-            matches!(&a[0],Action::Notice(Notice::CommandFailed{command:91,error}) if error.kind==Some(safe_cex_engine::ErrorKind::Internal))
-        );
+        for failure in 0..3 {
+            let (mut e, _) = ready();
+            let r = query(&mut e, q.clone());
+            match failure {
+                0 => e.handle(
+                    NOW,
+                    Event::HttpFailed {
+                        request: r.id,
+                        error: "lost before acceptance",
+                    },
+                ),
+                1 => reply(&mut e, &r, 503, r#"{"result":"error","error":"temporary"}"#),
+                _ => reply(&mut e, &r, 200, "{"),
+            }
+            let a = owned_actions(&mut e, 91);
+            assert_eq!(a.len(), 1);
+            assert!(
+                matches!(&a[0],Action::Notice(Notice::CommandFailed{command:91,error}) if error.kind==Some(safe_cex_engine::ErrorKind::Internal))
+            );
+        }
     }
 }
 #[test]
@@ -803,5 +817,228 @@ fn owned_order_continuation_proof_refusals_remain_strict() {
         assert_eq!(a.len(), 1);
         assert!(matches!(a[0], Action::Notice(Notice::CommandFailed { .. })));
         assert!(requests(&mut e).is_empty());
+    }
+}
+
+#[test]
+fn owned_fiftieth_terminal_page_is_complete_without_an_extra_request() {
+    let (mut e, _) = ready();
+    let mut q = fills();
+    if let Query::Fills { limit, from_ms, .. } = &mut q {
+        *limit = Some(1);
+        *from_ms = Some(NOW - 7.0 * 86_400_000.0);
+    }
+    let mut r = query(&mut e, q);
+    for page in 0..49 {
+        let time = format!("2023-11-14T22:12:{:02}.123Z", 59 - page);
+        answer(
+            &mut e,
+            &r,
+            "fills",
+            (0..100)
+                .map(|i| fill(&format!("{page}:{i}"), &time))
+                .collect(),
+        );
+        r = requests(&mut e)
+            .pop()
+            .expect("fills must not stop at the output limit");
+    }
+    answer(&mut e, &r, "fills", Vec::new());
+    let a = owned_actions(&mut e, 91);
+    assert_eq!(a.len(), 1);
+    assert!(
+        matches!(&a[0],Action::Notice(Notice::CommandDone{result,..}) if serde_json::from_str::<Value>(result).unwrap().as_array().unwrap().len()==1)
+    );
+    assert!(requests(&mut e).is_empty());
+}
+#[test]
+fn owned_saturated_orders_without_native_continuation_proof_reject_after_acceptance() {
+    let (mut e, _) = ready();
+    let next = owned_continuation(&mut e, 2);
+    reply(&mut e,&next,200,&json!({"len":1000,"elements":(0..1000).map(|i|event(&format!("missing-{i}"),&format!("id-{i}"),"OrderCancelled",NOW-1.0)).collect::<Vec<_>>()} ).to_string());
+    let a = owned_actions(&mut e, 91);
+    assert_eq!(a.len(), 1);
+    assert!(
+        matches!(&a[0],Action::Notice(Notice::CommandFailed{error,..}) if error.message.contains("no continuation token"))
+    );
+    assert!(requests(&mut e).is_empty());
+}
+#[test]
+fn owned_ledger_above_end_keeps_descending_gap_and_filtered_gap_can_be_empty() {
+    for filtered in [false, true] {
+        let (mut e, _) = ready();
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let mut q = income();
+        if let Query::Income { to_ms, kind, .. } = &mut q {
+            *to_ms = Some(NOW - 1000.0);
+            if filtered {
+                *kind = Some("absent-category".into());
+            }
+        }
+        let r = query(&mut e, q);
+        answer(
+            &mut e,
+            &r,
+            "logs",
+            (0..500)
+                .map(|i| {
+                    ledger(
+                        &format!("gap-{i}"),
+                        if i == 0 {
+                            "2023-11-14T22:13:20Z"
+                        } else {
+                            "2023-11-14T22:13:18Z"
+                        },
+                    )
+                })
+                .collect(),
+        );
+        let rows = owned_partial(&owned_actions(&mut e, 91), 91);
+        assert_eq!(
+            rows.as_array().unwrap().len(),
+            if filtered { 0 } else { 1996 }
+        );
+        assert!(requests(&mut e).is_empty());
+    }
+}
+#[test]
+fn owned_concurrent_partial_and_complete_queries_keep_distinct_delivery_owners() {
+    let (mut e, _) = ready();
+    let lost = owned_continuation(&mut e, 0);
+    e.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 92,
+            query: income(),
+        }),
+    );
+    let other = requests(&mut e).pop().unwrap();
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: lost.id,
+            error: "only owner91 lost a page",
+        },
+    );
+    let rows = owned_partial(&owned_actions(&mut e, 91), 91);
+    assert_eq!(rows.as_array().unwrap().len(), 100);
+    answer(
+        &mut e,
+        &other,
+        "logs",
+        vec![ledger("other", "2023-11-14T22:13:20Z")],
+    );
+    let a = owned_actions(&mut e, 92);
+    assert_eq!(a.len(), 1);
+    assert!(matches!(
+        &a[0],
+        Action::Notice(Notice::CommandDone { command: 92, .. })
+    ));
+}
+#[test]
+fn owned_order_equal_timestamp_keeps_first_terminal_state_and_setup_stays_strict() {
+    let (mut e, _) = ready();
+    let next = owned_continuation(&mut e, 2);
+    let mut same = event("different-event", "native", "OrderCancelled", NOW - 10.0);
+    same["event"]["OrderCancelled"]["order"]["limitPrice"] = json!(999);
+    reply(
+        &mut e,
+        &next,
+        200,
+        &json!({"len":1,"elements":[same]}).to_string(),
+    );
+    let rows = result(&mut e).unwrap();
+    assert_eq!(rows[0]["price"], 110.0);
+    let (mut e, _) = ready_with(safe_cex_venue_kraken::Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    e.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 91,
+            query: fills(),
+        }),
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    let a: Vec<_> = a
+        .into_iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: 91, .. })
+                    | Action::Notice(Notice::CommandDone { command: 91, .. })
+                    | Action::Notice(Notice::Event(_))
+            )
+        })
+        .collect();
+    assert_eq!(a.len(), 1);
+    assert!(matches!(
+        &a[0],
+        Action::Notice(Notice::CommandFailed { .. })
+    ));
+}
+
+#[test]
+fn owned_interrupted_stream_discards_valid_unfinished_prefix_after_accepted_pages() {
+    for mode in 0..4 {
+        let (mut e, _) = ready();
+        let next = owned_continuation(&mut e, mode);
+        let (field, row) = match mode {
+            0 => (
+                "fills",
+                fill("interrupted-prefix", "2023-11-14T22:13:19.000Z"),
+            ),
+            1 => (
+                "logs",
+                ledger("interrupted-prefix", "2023-11-14T22:13:19.000Z"),
+            ),
+            2 => (
+                "elements",
+                event("interrupted-event", "native", "OrderCancelled", NOW - 1.0),
+            ),
+            _ => (
+                "history",
+                json!({"trade_id":"interrupted-prefix","time":"2023-11-14T22:13:19.000Z","price":101,"size":"0.5","side":"buy"}),
+            ),
+        };
+        e.handle(
+            NOW,
+            Event::HttpStart {
+                request: next.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        let chunk = format!("{{\"{field}\":[{row},");
+        e.handle(
+            NOW,
+            Event::HttpChunk {
+                request: next.id,
+                data: chunk.as_bytes(),
+            },
+        );
+        assert!(e.drain_actions().all(|action| match action {
+            Action::Notice(Notice::CommandDone { .. })
+            | Action::Notice(Notice::CommandFailed { .. })
+            | Action::Http(_) => false,
+            Action::Notice(Notice::Event(event)) =>
+                event.code != safe_cex_engine::log::code::HISTORY_INCOMPLETE,
+            _ => true,
+        }));
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: next.id,
+                error: "body interrupted after valid prefix",
+            },
+        );
+        let rows = owned_partial(&owned_actions(&mut e, 91), 91);
+        assert_eq!(rows.as_array().unwrap().len(), [100, 2000, 1, 100][mode]);
+        assert!(!rows.to_string().contains("interrupted-prefix"));
+        if mode == 2 {
+            assert_eq!(rows[0]["updatedTime"], NOW - 10.0);
+        }
     }
 }

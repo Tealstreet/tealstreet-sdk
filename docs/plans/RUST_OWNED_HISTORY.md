@@ -1612,3 +1612,19 @@ explicit strict token-proof, empty-with-token and native ledger-precedence
 refinements. Existing CursorHistory/Completion APIs suffice; no production
 source or tests are edited in this plan checkpoint. Both reviews confirm the
 shared-engine architecture gate. Original-RED controls precede implementation.
+
+Kraken futures regression-only checkpoint `f2389ff658b` leaves production
+unchanged: nineteen controls pass (including the new strict-proof compatibility
+control), and four new assertion groups fail on untyped first/filtered failures,
+accepted-page loss and failed newer-order-prefix isolation. Existing engine
+owner adoption makes all four groups green. Added compatibility controls pin
+terminal page fifty versus continuing cap fifty/no page fifty-one, strict empty
+or missing/conflicting order continuation after accepted rows, declared length
+mismatch, first native/transport/decode typing, ledger descending-above-to gap
+precedence and filtered-empty coverage, concurrent owners, first order state on
+equal timestamp, and no-I/O strict consuming setup. Terminal helpers inspect
+physical HTTP actions before filtering notices, preventing vacuous no-resend
+assertions. Independent source correctness/adversarial reviews are CLEAN and
+confirm existing-engine choke-point adoption; no engine API or managed completion
+policy is added. Final focused/strict checks and tests/caller review precede
+draft publication; actual shared dependencies and full CI/evidence remain.

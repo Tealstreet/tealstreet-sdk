@@ -1842,3 +1842,15 @@ accepted rows only. Exact cursor proof refusals stay strict. Native time bounds,
 identity rollback, mixed retry counter, pacing, public duplicates and ranged
 income limits remain. Other adapters and B11 runtime coverage stay open.
 [Scope](RUST_OWNED_HISTORY.md).
+
+## Kraken futures owned-history fan-out
+
+~~Kraken futures histories retain rows, cursor sets, page counters and terminal
+ledger completeness emission in the venue.~~ Fills, closed orders, ledger and
+public trades now adopt the existing engine CursorHistory/Completion owner.
+Actual first/zero-eligible failure rejects typed; later actual failure retains
+only admitted pages with command-owned incompleteness. Native strict cursor/
+continuation-proof/budget refusals remain strict; terminal order folding sees
+only admitted rows. Native request/identity/units/filter/signing and ledger
+coverage facts remain unchanged. Other adapters, managed completion and B11
+coverage/runtime proof stay open. [Scope](RUST_OWNED_HISTORY.md).

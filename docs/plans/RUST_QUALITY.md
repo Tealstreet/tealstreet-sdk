@@ -395,3 +395,14 @@ coverage marker; the adapter supplies exact u64 native cursor/identity facts and
 retains native strict proof checks. No new engine API, copied marker emitter or
 paging/retention implementation; other adapters and caller runtime coverage
 remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+Kraken futures histories now adopt existing CursorHistory for staged admission,
+identity/cursor progress, fifty-page bounds and query-owned completion/coverage.
+No venue-local HISTORY_INCOMPLETE emitter or accepted-row owner remains. Actual
+first/zero-eligible failure rejects typed; later actual loss returns admitted
+rows only. Missing/conflicting continuation proof, repeated/empty/no-fresh
+continuations and cap exhaustion stay strict; a terminal fiftieth page completes.
+Closed-order folds cannot admit a failed newer prefix. Ledger since-only gap
+precedence, eligible limit suppression, exact native units/IDs/request sequences
+and strict consuming setup are preserved. Other adapters, B11/runtime proof and
+managed Context completion remain open. [Scope](RUST_OWNED_HISTORY.md).

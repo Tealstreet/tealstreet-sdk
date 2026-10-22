@@ -3873,3 +3873,37 @@ No SDK argument/result shape, new NX handler or live Store publication is added.
 B11 request-scoped incomplete-query ingestion/coverage and typed rejection
 handling remain required; other adapters, runtime proof and managed Context
 completion remain separate work. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+### Kraken futures histories: admitted pages with strict native proof refusals
+
+Fills, closed orders, ledger and public trades now use the existing engine
+CursorHistory/Completion owner. Actual HTTP/native-envelope/stream/decode/row
+failure before eligible output was admitted rejects typed; later actual loss
+returns only earlier admitted rows with one command-owned history.incomplete
+Warn before Done, visible at Error-only logging. Failed-page prefixes, including
+a newer terminal update to an admitted native order, never enter the result.
+Terminal orders fold across admitted rows only, preserving strict latest-time
+selection and first encounter on equal timestamps.
+
+Native continuation-proof refusal remains strict even after earlier pages:
+missing token on a saturated order page, conflicting decoded body/header tokens,
+repeated/empty/no-fresh continuations and fifty-page exhaustion return no partial
+result or success marker. A terminal fiftieth page completes without a fifty-first
+request. The ledger's validated since-only coverage gap now goes through the
+engine marker owner with its existing message, native predicate precedence and
+eligible-output-limit suppression. Valid filtered-empty coverage may still be
+explicitly incomplete; filtered rows cannot authorize actual-failure recovery.
+
+Shared owner finalization supplies kind internal for formerly unclassified
+actual-page errors and strict cursor/proof/budget refusals, affecting typed
+caller handling and telemetry categories. Existing range admission, explicit
+unsupported client-ID lookup and consuming signed-setup refusal retain their
+separate paths/classification; no notSent/unknown outcome is invented. Exact
+ISO/opaque/since cursor request bytes, native IDs, output fields/units, final
+sort/limits, cash/position ledger filtering, public unsigned dispatch and live
+Store isolation are preserved. Kraken Spot is separate and unchanged.
+
+No SDK argument/row-shape change, NX edit or deployed cutover proof is claimed.
+Numeric Completion remains legacy authority; this is not managed Context
+completion. B11 request-scoped incomplete-query ingestion/coverage and typed
+rejection handling remain required. [Scope](RUST_OWNED_HISTORY.md).
