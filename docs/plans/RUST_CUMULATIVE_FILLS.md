@@ -181,3 +181,133 @@ and both complete shared README/lib line sets preserved, exact12 owned files.
 The same reviewed production changes remain unchanged. Fresh exact-head CI and
 complete246-output proof must now use actual scheduler source-equivalent green
 CI39721449594/headf1008a2b48da713c5db2bf378d3196b3619b6a8d as baseline.
+
+## Actual reference-core receipt and full fan-out order
+
+#1720 merged `9fc2a7c174adb60494dbba902826ac20a6094f94` at04:52:56Z. Parents
+[faf799268857f7aed35badba5349b572ef836c4a,b10fff339b5664d5751e2b84329e45616b8375d0];
+actual treee1f633986c70d8e38ad2d7c7480749b64ada54c2 equals the green head.
+43 checks SUCCESS/browser SKIP, Rust39723320673, PR39723320702/push39723315915;
+1134 local native and strict checks pass. Fresh246/246 raw outputs (123 Rust,
+24 cases,70 stable groups,10 PASS/14 known FAIL) match actual scheduler baseline,
+only top metrics excluded. Eight replay archives, eight matching CI packages,
+24 file hashes, fingerprints and source trees/parents independently verified.
+Fresh exact12 guard then separate merge and actual whole-tree/blob audit passed;
+all four coordinating lanes received the actual pin and priority released.
+
+The owner explicitly orders ALL remaining public cumulative consumers, plus the
+KuCoin Spot fallback, onto the engine path BEFORE row reporting and snapshot
+freshness. This is not completed by the two reference adapters. Remaining native
+policies: Bitunix, Coinbase(+spot), WOO, BloFin, BingX, Bitrue, AsterDEX, Kraken
+Spot, Orderly and KuCoin Spot. ApeX cumulative notifications remain forbidden;
+its synthetic execution/history contract stays distinct. Signing fan-out waits
+for actual signer prerequisites. Queue after #1720 is clock #1722, history #1719,
+then signer prerequisites #1721; integrate their actual dependencies before any
+new final proof/merge, preserving every incoming file.
+
+## Fan-out phase 1 plan: observed suffixes and priced intervals
+
+Fresh branch `feat/rust-cumulative-fill-fanout` from actual #1720. This plan is
+committed before new tests or source edits. Architecture YES: extend one engine
+financial boundary BEFORE replacing additional per-venue arithmetic. Staged
+fan-out: (1) engine observed/interval policies and WOO+Bitrue; (2) engine checked
+average/quote/rounding evidence and Bitunix/Coinbase/BloFin/Orderly/Kraken Spot;
+(3) remaining BingX/AsterDEX/KuCoin Spot quantity/fallback policies through the
+same engine path. These are successive small PRs, not permission to leave the
+remaining copies indefinitely or start reporting early. Exact later slices may
+combine once native contracts are verified; no per-venue workaround copies.
+
+Current phase files: engine/src/execution.rs and num.rs; WOO/Bitrue account.rs
+and native account tests; this existing plan and audit/quality ledger. The plan
+already has its README index row. Avoid engine.rs, lib.rs, dispatch/signing/hosts,
+clock/auth, scheduler/startup, history/paging, harness/workflows, fixtures,
+manifest/normalizer and caller API changes. Coordinate before account signer
+migration overlap. No live capture, native shadow deployment or invented data.
+
+### Shared evidence and preparation
+
+Add generic engine observed-suffix and priced-interval preparation, not venue-
+named helpers. Keep existing Cursor/Report reference contracts unchanged.
+
+Observed preparation takes a validated native observed baseline, a delivered
+Cursor and typed direct-price report: cumulative-only evidence, or authoritative
+last amount with optional cumulative progress. The engine owns the conditional
+previous quantity selection, checked subtraction/addition/maxima and positive/
+finite validation. WOO rule: when total exceeds observed, previous=max(observed,
+delivered); otherwise previous=delivered. A fresh native execution ID authorizes
+last quantity when present; no-ID reports use only cumulative growth. Missing
+last quantity with an ID uses the same observed-suffix growth. Return separate
+validated public delivery and optimistic position quantity, preserving
+min(delivery, new-observed-delta), plus validated next anchors. A public Fill can
+exceed the new position delta. Native order observation, IDs/freshness/status,
+terminal retention, repair scheduling and position application remain native.
+An invalid/unpriced delivery must not advance the delivered anchor or consume
+its native ID, even when the valid order observation advances display progress.
+
+Priced-interval preparation owns a bounded union of delivered quantity intervals
+and a bootstrap/retirement floor. Native order keys and outer500-order eviction
+stay native. Start with exact existing500-interval cap: clamp to floor, subtract
+overlaps, append/sort/merge before eviction, then retire the earliest interval
+by advancing the floor. Floor suppression is policy, not proof every earlier
+quantity was delivered. A higher endpoint must not suppress an uncovered older
+interval: [6,8] then [4,6] both deliver once. Pure preparation returns validated
+financials and an opaque commit decision; only the admitted native path commits
+the interval and quote state. Keep it synchronous, with no host I/O/await or
+asynchronous pending token. Choose a compute-only proposal/commit API that
+reuses the interval Vec rather than allocating a full clone on every execution;
+validate against the current basis before commit if preparation can be separated
+by native state changes. General snapshot freshness remains the later phase.
+
+Typed price evidence distinguishes a uniform direct execution price from two
+cumulative quote endpoints tied to the same quantity endpoints. Native last
+quantity identifies only its own suffix; a last price never prices a blind gap.
+Do not use aggregate interval VWAP for a clipped subset without its own evidence.
+Keep separate native observed and delivered quote anchors, including valid
+duplicate/no-delivery quote observations. Engine constructors perform checked
+scale products, cumulative-average products, quote subtraction/division and
+financial rounding; native code selects the available protocol evidence only.
+Reject nonfinite/negative financial inputs and all invalid derived results before
+any delivery interval, quote anchor or native dedup commit. Missing quote is
+unknown, never zero; preserve the established explicit-zero distinction.
+
+Preserve WOO binary arithmetic and Bitrue exact rounding locations/order. Bitrue
+decimal() is fifteen significant digits via its existing formatting routine, not
+Bybit decimal-place subtraction. Move that pure routine into engine num if
+needed, retaining native wrappers used by other mappings. Scale conversion and
+rounding before interval identity, overlap subtraction and final price/amount
+rounding must remain identical on valid data. No new lot rounding or universal
+clamping policy; existing interval zero clamp stays explicit and bounded.
+
+### Native evidence, controls and gates
+
+Source-only candidates, NOT proven bugs: WOO currently advances delivered
+execution_cumulative before freshness/positive-last admission; try zero/negative
+last then corrected cumulative-only evidence. Bitrue derived quote products and
+observed quote insertion are not uniformly finite-guarded; try overflow then
+corrected evidence. First prove meaningful native assertion-RED on actual source,
+then report cause and obtain explicit owner scope approval before repairing a
+new defect. Do not manufacture RED or call a source suspicion financial loss.
+
+Preserve existing native controls: WOO REST-ahead delayed fills, public amount
+versus position delta, no-ID dedup and blind-gap suffix; Bitrue interval VWAP,
+REST quote reseeding, late intervals, invalid last quantities and missing-last
+blind-gap refusal. Add engine controls for partial overlap, bridging, reversed
+arrival, zero/invalid/unpriced evidence followed by correction, floor clipping,
+cap eviction and finite products/division. Preserve same-ID retries, native
+retention, ordered notices and delivery independent of display timestamps.
+
+Run focused engine/WOO/Bitrue/Binance native tests, plus Bybit/Bitget reference
+controls when shared existing execution contracts change; strict all-target
+Clippy/fmt/bans and root typecheck/lint with CARGO_BUILD_JOBS=4 and incremental0.
+CI owns all release/size/timing/replays. Freeze exact WOO/Bitrue/Binance archive
+workloads before comparison; authenticate real heads, complete indexed runs,
+archive digests/ZIP members and matching package fingerprints. Compare complete
+raw JSON excluding only top metrics; preserve full IDs, requests, receipts,
+checkpoints and ordered diagnostics. Healthy cases stay byte-identical. Any
+deliberate fix delta requires exact native/CI evidence and owner review, never
+widened allowances. No manifest/comparator/fixture change without that evidence.
+
+Independent plan, code/adversarial, preservation and final raw-evidence reviews
+answer architecture YES/engine-first. Full green exact head, actual dependency
+integration, fresh fail-closed guard and separate merge remain mandatory, then
+actual parents/tree/owned-and-incoming blob audit and immediate Aimux report.
