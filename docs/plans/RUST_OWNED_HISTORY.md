@@ -10,20 +10,28 @@ Implementation pending; this plan does not claim migrations have landed.
    command at construction. Shared paging owns cursor/page counts, deduplication,
    budget and stall decisions. Finishing consumes the context and sends any
    command-owned `history.incomplete` before successful retained rows, including
-   at Error-only logging. Failed pages reject; they never become complete empty
-   success. Keep existing BloFin URLs, ordering, raw rows, short/duplicate-page
+   at Error-only logging. Failure before accepted rows rejects; a later failed
+   page returns only previously accepted rows with owned incompleteness. Failed
+   response bodies never become accepted rows or complete empty success. Keep
+   existing BloFin URLs, ordering, raw rows, short/duplicate-page
    completion and page-cap message. New policy changes need explicit regressions.
 2. Fan-out on fresh branches: use the same completion path for remaining marker
    families (Binance, Bitunix, Bybit, Hyperliquid, Kraken, Lighter, OKX, Paradex,
    TxFlow, WEEX) and other paged history consumers. Extend the shared core for
    timestamp, range, offset, multi-stage and composite walks; do not create a
    second venue implementation. Preserve each endpoint's limits, ordering,
-   continuation evidence, failed-page rejection and bounded/unbounded contract.
+   continuation evidence and bounded/unbounded contract, with the shared failure
+   policy: first-page/no-accepted-row failure rejects; later failure retains only
+   accepted rows with a command-owned incomplete marker.
    Query-associated markers require command ownership; background diagnostics
    remain distinct. Add a CI prohibition on venue-owned completeness emission
    after conversion, and retain B11's downstream NX ingestion/coverage work.
-3. Separate follow-up PR after history fan-out: capability/feature conformance in
-   CI for combined and standalone family builds. Every advertised command must
+3. Small follow-on after query fan-out: route the six background account-coverage
+   diagnostics (Bitunix/Lighter/TxFlow) through one engine-owned account/background
+   coverage notice, retaining the code and explicit scope without a command ID.
+   These are not query outcomes and must not use fabricated request attribution.
+4. Separate follow-up PR after history/background fan-out: capability/feature
+   conformance in CI for combined and standalone family builds. Every advertised command must
    survive actual command decoding and reach a supported handler under that
    family's Cargo features. Prove the MEXC standalone order-book missing-feature
    regression red/green; cover aliases and intentional unsupported profiles.
@@ -34,8 +42,9 @@ Implementation pending; this plan does not claim migrations have landed.
 - Add `engine/src/history.rs`, export it from `engine/src/lib.rs`, and extend
   shared `paging.rs` only where the reference actually needs reusable policy.
   Completion carries the command, first incompleteness reason/message and
-  consumes itself through success/failure; no free-form command field at marker
-  sites. A shared cursor wrapper records stalls and produces completion states.
+  consumes itself through success/failure. `HistoryRows<T>` stages streamed rows
+  separately from accepted pages and owns encoding/recovery; no free-form command
+  field at marker sites. A shared cursor wrapper records stalls and produces completion states.
 - Convert `venues/blofin/src/closed.rs`; remove its raw marker, cursor/page state
   and dedupe ownership in favor of the shared pager. Keep schema-specific ID
   comparison and URL construction local.
@@ -72,8 +81,10 @@ Independent read-only audit: reference design is cross-cutting core work, not a
 per-venue fix. Preserve duplicate/short/missing/unchanged-cursor termination,
 untrimmed dedupe versus trimmed numeric continuation, and caller-limit versus
 safety-budget completion. Shared cursor policy will explicitly represent legacy
-end-on-duplicate/unchanged behavior. Failed later pages and failed serialization
-reject without publishing a completeness marker. A consuming token prevents its
+end-on-duplicate/unchanged behavior. The original plan's strict later-page rejection was superseded by the owner:
+first failure before accepted rows rejects; later failure retains only accepted
+rows with owned incompleteness. Failed serialization and lifecycle invariant
+failures still reject without a marker or successful result. A consuming token prevents its
 own reuse, not arbitrary reconstruction or bypass through legacy Cx APIs; final
 fan-out must include the venue-emission prohibition. Multi-stage query owners must
 survive pager restarts without clearing incompleteness.
@@ -102,3 +113,26 @@ integration tests plus six closed-position tests pass. Touched engine/BloFin
 strict all-target Clippy, fmt, bans and touched relative doc links pass. Full
 engine/BloFin/Binance tests and CI remain final merge gates; no local WASM build
 or full replay/performance sweep is being run on the shared machine.
+
+## Owner failure-policy revision (before final reference CI)
+
+Overseer direction explicitly supersedes the original later-page rejection:
+first failure with no accepted rows is a typed rejection, never empty success;
+a later failed page returns prior accepted rows with one owned incomplete marker.
+The engine now owns staged/accepted row buffers and encoding, so a failed envelope
+cannot leak its streamed rows. An accepted empty page is insufficient for row
+recovery. Serialization failure and premature success are strict errors, not
+recoverable page failures. The independent implementation reviews caught the
+premature-success-after-accepted-page edge; it now has a strict path and regression.
+
+Actual row core `b2f074bf2637` is integrated by porcelain merge `06b9f5cff29`;
+its README/quality/source additions are retained. The source overlap remains
+outside signer dispatch and clock/row implementation paths.
+
+Revised-policy verification: original BloFin source fails both first-page typed
+rejection and later-page accepted-row recovery regressions at their intended
+assertions; the corrected seven-test closed-position suite passes. After actual
+row-core integration, 695 engine/BloFin/Binance tests pass, as do touched-crate
+strict all-target Clippy, fmt, bans and touched doc links. Independent correctness
+and adversarial delta reviews are clean after the strict invariant fix. Full CI
+must run on the revised final head before merge.

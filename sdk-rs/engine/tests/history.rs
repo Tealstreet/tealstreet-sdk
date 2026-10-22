@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::book::Book;
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{Completion, CursorHistory, HistoryRows};
 use safe_cex_engine::log::code;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::{
@@ -10,7 +10,8 @@ use safe_cex_engine::{
 
 enum Read {
     Direct(Completion),
-    Cursor(CursorHistory),
+    Cursor(CursorHistory<String>),
+    Rows(HistoryRows<String>),
 }
 
 struct Fixture;
@@ -23,14 +24,27 @@ impl Venue for Fixture {
     fn on_timer(&mut self, _: &mut Cx<'_, Read>, _: TimerId) {}
     fn on_command(&mut self, cx: &mut Cx<'_, Read>, command: Command) {
         if let Command::Query { command, query } = command {
-            let read = if matches!(query, Query::Income { .. }) {
+            let read = if let Query::Fills { symbol, .. } = &query {
+                let encode: fn(&[String]) -> Result<String, VenueError> =
+                    if symbol.as_deref() == Some("serialize-failure") {
+                        |_| Err(VenueError::new("serialization failed").kind(ErrorKind::Internal))
+                    } else {
+                        |rows| Ok(format!("[{}]", rows.join(",")))
+                    };
+                Read::Rows(HistoryRows::new(Completion::new(command), encode))
+            } else if matches!(query, Query::Income { .. }) {
                 Read::Cursor(CursorHistory::new(
                     Completion::new(command),
-                    CursorWalk::new(1),
+                    CursorWalk::new(if matches!(&query, Query::Income { kind: Some(_), .. }) {
+                        2
+                    } else {
+                        1
+                    }),
                     |reason| {
                         assert_eq!(reason, Stall::PageBudget);
                         "page cap".into()
                     },
+                    |rows| Ok(format!("[{}]", rows.join(","))),
                 ))
             } else {
                 Read::Direct(Completion::new(command))
@@ -46,6 +60,17 @@ impl Venue for Fixture {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Read>, read: Read, response: Response<'_>) {
         match read {
+            Read::Rows(mut rows) => {
+                if response.body == "later" {
+                    rows.stage("1".into());
+                    rows.accept_page();
+                }
+                rows.stage("999".into()); // From the response which failed validation.
+                rows.finish(
+                    cx,
+                    Err(VenueError::new("page failed").kind(ErrorKind::Network)),
+                );
+            }
             Read::Direct(mut completion) => {
                 if response.body != "complete" {
                     completion.incomplete("missing rows");
@@ -59,6 +84,20 @@ impl Venue for Fixture {
                 completion.finish(cx, result);
             }
             Read::Cursor(mut history) => {
+                if response.body == "premature-after-accepted" {
+                    history.stage("1".into());
+                    assert!(matches!(
+                        history.advance(CursorPage {
+                            next: Some("next".into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        }),
+                        CursorStep::More(_)
+                    ));
+                    history.finish(cx, Ok(()));
+                    return;
+                }
                 if response.body != "premature" {
                     let next = (response.body != "limit").then(|| "next".into());
                     let step = history.advance(CursorPage {
@@ -76,7 +115,7 @@ impl Venue for Fixture {
                 let result = if response.body == "failed" {
                     Err("failed after paging decision".into())
                 } else {
-                    Ok("[]".into())
+                    Ok(())
                 };
                 history.finish(cx, result);
             }
@@ -84,6 +123,7 @@ impl Venue for Fixture {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Read>, read: Read, error: &str) {
         match read {
+            Read::Rows(history) => history.finish(cx, Err(error.into())),
             Read::Direct(history) => history.finish(cx, Err(error.into())),
             Read::Cursor(history) => history.finish(cx, Err(error.into())),
         }
@@ -249,4 +289,118 @@ fn requested_limit_is_complete_but_pending_page_cannot_complete_silently() {
             }
         }
     }
+}
+
+#[test]
+fn only_accepted_pages_can_be_returned_after_failure_and_encoding_failure_still_rejects() {
+    for (body, serialize) in [("first", false), ("later", false), ("later", true)] {
+        let mut engine = support::seeded_engine(Fixture);
+        engine.set_log_level(Level::Error);
+        engine.handle(
+            0.,
+            Event::Command(Command::Query {
+                command: 13,
+                query: Query::Fills {
+                    symbol: serialize.then(|| "serialize-failure".into()),
+                    order_id: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+            }),
+        );
+        let request = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(request) => Some(request.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            0.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let notices: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(notice) => Some(notice),
+                _ => None,
+            })
+            .collect();
+        if body == "first" || serialize {
+            assert_eq!(notices.len(), 1);
+            let kind = if serialize {
+                ErrorKind::Internal
+            } else {
+                ErrorKind::Network
+            };
+            assert!(
+                matches!(&notices[0], Notice::CommandFailed { command: 13, error }
+                if error.kind == Some(kind))
+            );
+        } else {
+            assert_eq!(notices.len(), 2);
+            assert!(matches!(&notices[0], Notice::Event(event)
+                if event.code == code::HISTORY_INCOMPLETE && event.message.contains("page failed")
+                && event.fields == vec![("command", Value::Num(13.0))]));
+            assert!(
+                matches!(&notices[1], Notice::CommandDone { command: 13, result } if result == "[1]")
+            );
+        }
+    }
+}
+
+#[test]
+fn an_accepted_page_does_not_turn_premature_success_into_partial_history() {
+    let mut engine = support::seeded_engine(Fixture);
+    engine.handle(
+        0.,
+        Event::Command(Command::Query {
+            command: 14,
+            query: Query::Income {
+                symbol: None,
+                kind: Some("two-pages".into()),
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        }),
+    );
+    let request = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(request) => Some(request.id),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.,
+        Event::HttpResponse {
+            request,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "premature-after-accepted",
+            },
+        },
+    );
+    let notices: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(notice) => Some(notice),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(notices.len(), 1);
+    assert!(
+        matches!(&notices[0], Notice::CommandFailed { command: 14, error }
+        if error.kind == Some(ErrorKind::Internal))
+    );
 }

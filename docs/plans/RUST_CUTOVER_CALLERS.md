@@ -3131,8 +3131,11 @@ notice. Deployment is Sam's call; neither logging PR deploys anything.
 BloFin closed positions now finish through the shared engine history owner and
 cursor pager. The successful partial-result contract stays the same: an owned
 Warn `history.incomplete` precedes retained rows, including at Error-only log
-level. Failed pages still reject without publishing partial success. A repeated
-non-adjacent continuation now stops with an owned incomplete result instead of
+level. Failure before any accepted rows rejects with a typed error. A failed later
+page now returns only prior accepted rows plus the owned marker; unvalidated rows
+from that failed response are excluded. Callers must honor incompleteness before
+using these rows as complete coverage. Encoding or lifecycle invariant failures
+still reject. A repeated non-adjacent continuation now stops with an owned incomplete result instead of
 cycling to the page cap; short pages, repeated identities and immediate unchanged
 cursors keep the existing termination behavior. No SDK method arguments, worker
 completeness envelope or NX ingestion requirement changes. B11 remains open for

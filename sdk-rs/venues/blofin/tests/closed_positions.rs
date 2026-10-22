@@ -155,18 +155,80 @@ fn unknown_symbols_read_nothing_and_the_page_cap_warns() {
 }
 
 #[test]
-fn second_page_failure_rejects_without_partial_success_or_completeness() {
+fn second_page_failure_returns_only_accepted_rows_with_owned_incomplete() {
+    let mut h = Harness::new();
+    h.seed();
+    h.actions.clear();
+    h.e.set_log_level(safe_cex_engine::Level::Error);
+    fetch(&mut h, None, None, None);
+    let rows: Vec<_> = (1000..1100).map(|id| row(&id.to_string(), "p")).collect();
+    h.reply("positions-history", &page(&rows));
+    // The body is streamed before the envelope verdict. This row must not be
+    // admitted merely because earlier pages succeeded.
+    h.reply(
+        "positions-history",
+        &format!(
+            r#"{{"code":"152002","msg":"Parameter error","data":[{}]}}"#,
+            row("999", "untrusted")
+        ),
+    );
+    assert!(
+        matches!(result(&h), Some(Ok(_))),
+        "later page failure must retain accepted rows"
+    );
+    let got: Vec<serde_json::Value> = serde_json::from_str(&result(&h).unwrap().unwrap()).unwrap();
+    assert_eq!(
+        got.len(),
+        100,
+        "a failed page cannot leak into accepted rows"
+    );
+    assert!(got.iter().all(|row| row["positionId"] == "p"));
+    let notices: Vec<_> = h
+        .actions
+        .iter()
+        .filter(|action| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                true
+            }
+            Action::Notice(
+                Notice::CommandDone { command: 9, .. } | Notice::CommandFailed { command: 9, .. },
+            ) => true,
+            _ => false,
+        })
+        .collect();
+    assert_eq!(notices.len(), 2);
+    assert!(matches!(notices[0], Action::Notice(Notice::Event(event))
+        if event.fields == vec![("command", safe_cex_engine::Value::Num(9.0))]
+        && event.message.contains("152002")));
+    assert!(matches!(
+        notices[1],
+        Action::Notice(Notice::CommandDone { command: 9, .. })
+    ));
+}
+
+#[test]
+fn first_page_failure_cannot_resolve_unvalidated_rows_as_complete_history() {
     let mut h = Harness::new();
     h.seed();
     h.actions.clear();
     fetch(&mut h, None, None, None);
-    let rows: Vec<_> = (1000..1100).map(|id| row(&id.to_string(), "p")).collect();
-    h.reply("positions-history", &page(&rows));
     h.reply(
         "positions-history",
-        r#"{"code":"152002","msg":"Parameter error","data":[]}"#,
+        &format!(
+            r#"{{"code":"152002","msg":"Parameter error","data":[{}]}}"#,
+            row("999", "untrusted")
+        ),
     );
-    assert!(matches!(result(&h), Some(Err(_))));
+    assert!(
+        matches!(result(&h), Some(Err(_))),
+        "first failed page must reject"
+    );
+    assert!(
+        h.failures.last().unwrap().kind.is_some(),
+        "first-page rejection is typed"
+    );
     assert!(!h.actions.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone { command: 9, .. })

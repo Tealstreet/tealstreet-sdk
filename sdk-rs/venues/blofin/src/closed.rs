@@ -12,14 +12,13 @@ const PAGE: usize = 100;
 const MAX_PAGES: u32 = 100;
 
 pub struct Request {
-    history: CursorHistory,
+    history: CursorHistory<String>,
     instrument: Option<String>,
     from: Option<f64>,
     to: Option<f64>,
     count: usize,
     added: usize,
     oldest: Option<String>,
-    rows: Vec<String>,
     failed: bool,
 }
 
@@ -91,6 +90,7 @@ impl Blofin {
                         ),
                         _ => "BloFin closed positions stopped at a repeated cursor; older positions were not fetched".into(),
                     },
+                    |rows| Ok(format!("[{}]", rows.join(","))),
                 ),
                 instrument,
                 from: from_ms,
@@ -98,7 +98,6 @@ impl Blofin {
                 count: 0,
                 added: 0,
                 oldest: None,
-                rows: Vec::new(),
                 failed: false,
             },
         );
@@ -168,7 +167,7 @@ impl Blofin {
             return;
         }
         request.added += 1;
-        request.rows.push(item.to_owned());
+        request.history.stage(item.to_owned());
     }
 
     pub(crate) fn closed_response(
@@ -202,8 +201,6 @@ impl Blofin {
     }
 
     fn finish_closed(cx: &mut Cx<'_, Pending>, request: Request) {
-        request
-            .history
-            .finish(cx, Ok(format!("[{}]", request.rows.join(","))));
+        request.history.finish(cx, Ok(()));
     }
 }

@@ -26,7 +26,7 @@ impl Completion {
     }
 
     /// Retain the first missing-coverage cause across later successful pages.
-    /// Nothing is published if this query subsequently fails.
+    /// Nothing is published on terminal rejection or failed serialization.
     pub fn incomplete(&mut self, message: impl Into<String>) {
         if self.incomplete.is_none() {
             self.incomplete = Some(message.into());
@@ -48,29 +48,92 @@ impl Completion {
                 }
                 cx.done(self.command, result);
             }
-            Err(error) => cx.fail(self.command, error),
+            Err(mut error) => {
+                // Unclassified legacy page failures remain visible typed failures;
+                // preserve specific native/transport kinds when supplied.
+                if error.kind.is_none() {
+                    error.kind = Some(ErrorKind::Internal);
+                }
+                cx.fail(self.command, error);
+            }
         }
     }
 }
 
-/// Cursor paging and its completion share the same owner. Stalls record missing
+/// Stages rows until a response is validated. A later failed page can return
+/// only previously accepted rows; rejected response bodies never enter coverage.
+#[must_use = "history rows must finish through their owner"]
+pub struct HistoryRows<T> {
+    completion: Completion,
+    accepted: Vec<T>,
+    pending: Vec<T>,
+    encode: fn(&[T]) -> Result<String, VenueError>,
+}
+
+impl<T> HistoryRows<T> {
+    pub fn new(completion: Completion, encode: fn(&[T]) -> Result<String, VenueError>) -> Self {
+        Self {
+            completion,
+            accepted: Vec::new(),
+            pending: Vec::new(),
+            encode,
+        }
+    }
+
+    pub fn command(&self) -> CommandId {
+        self.completion.command()
+    }
+
+    /// Rows may be streamed before the final HTTP/envelope verdict is known.
+    pub fn stage(&mut self, row: T) {
+        self.pending.push(row);
+    }
+
+    /// Call only after the page's HTTP, envelope and row validation succeeds.
+    pub fn accept_page(&mut self) {
+        self.accepted.append(&mut self.pending);
+    }
+
+    pub fn finish<P>(mut self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+        if let Err(error) = result {
+            if self.accepted.is_empty() {
+                return self.completion.finish(cx, Err(error));
+            }
+            self.completion
+                .incomplete(format!("history is INCOMPLETE: {}", error.message));
+        } else if !self.pending.is_empty() {
+            return self.completion.finish(
+                cx,
+                Err(
+                    VenueError::new("history completed with an unvalidated page")
+                        .kind(ErrorKind::Internal),
+                ),
+            );
+        }
+        // Encoding failure still rejects; it cannot publish malformed partial rows.
+        self.completion.finish(cx, (self.encode)(&self.accepted));
+    }
+}
+
+/// Cursor paging and accepted rows share one owner. Stalls record missing
 /// coverage here; a venue never constructs marker fields or a replacement owner.
 #[must_use = "cursor history must finish or fail through its owner"]
-pub struct CursorHistory {
-    completion: Completion,
+pub struct CursorHistory<T> {
+    rows: HistoryRows<T>,
     walk: CursorWalk,
     stall_message: fn(Stall) -> String,
     finished: bool,
 }
 
-impl CursorHistory {
+impl<T> CursorHistory<T> {
     pub fn new(
         completion: Completion,
         walk: CursorWalk,
         stall_message: fn(Stall) -> String,
+        encode: fn(&[T]) -> Result<String, VenueError>,
     ) -> Self {
         Self {
-            completion,
+            rows: HistoryRows::new(completion, encode),
             walk,
             stall_message,
             finished: false,
@@ -78,7 +141,7 @@ impl CursorHistory {
     }
 
     pub fn command(&self) -> CommandId {
-        self.completion.command()
+        self.rows.command()
     }
 
     pub fn cursor(&self) -> Option<&str> {
@@ -89,29 +152,35 @@ impl CursorHistory {
         self.walk.fresh(identity)
     }
 
+    pub fn stage(&mut self, row: T) {
+        self.rows.stage(row);
+    }
+
     pub fn advance(&mut self, page: CursorPage) -> CursorStep {
         if self.finished {
             return CursorStep::Done;
         }
+        self.rows.accept_page();
         let step = self.walk.advance(page);
         self.finished = !matches!(step, CursorStep::More(_));
         if let CursorStep::Stalled(reason) = step {
-            self.completion.incomplete((self.stall_message)(reason));
+            self.rows
+                .completion
+                .incomplete((self.stall_message)(reason));
         }
         step
     }
 
-    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<String, VenueError>) {
-        let result = result.and_then(|rows| {
-            if self.finished {
-                Ok(rows)
-            } else {
+    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+        if result.is_ok() && !self.finished {
+            return self.rows.completion.finish(
+                cx,
                 Err(
                     VenueError::new("history cursor completed with a page still pending")
                         .kind(ErrorKind::Internal),
-                )
-            }
-        });
-        self.completion.finish(cx, result);
+                ),
+            );
+        }
+        self.rows.finish(cx, result);
     }
 }
