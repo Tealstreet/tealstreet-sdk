@@ -423,6 +423,15 @@ lookup, independent unbounded mode, borrowed lookup and host-filtered health.
 Grouped/deferred reporting and the remaining persistent consumer fan-out stay
 explicit follow-ups; see [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
 
+Hyperliquid perp histories now adopt the existing engine CursorHistory owner for
+staged admission, page budget, stage restart, retention gaps and terminal marker
+ownership. No history-local HISTORY_INCOMPLETE emitter remains. Actual first or
+zero-eligible failure rejects typed; later actual loss excludes failed prefixes
+and retains only accepted output. Inclusive timestamp/native-identity progress
+and final order-transition folding preserve native behavior; mixed income keeps
+its first gap through funding. Spot and lookup remain separate legacy paths;
+other families, managed completion and B11/deployment proof remain open.
+
 Kraken futures histories now adopt existing CursorHistory for staged admission,
 identity/cursor progress, fifty-page bounds and query-owned completion/coverage.
 No venue-local HISTORY_INCOMPLETE emitter or accepted-row owner remains. Actual
