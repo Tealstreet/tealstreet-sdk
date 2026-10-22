@@ -1,7 +1,7 @@
 mod support;
 
-use safe_cex_venue_bybit::Options;
 use support::Harness;
+use support::Options;
 
 #[test]
 fn live_startup_10003_diagnoses_demo_before_reporting_the_key_failure() {

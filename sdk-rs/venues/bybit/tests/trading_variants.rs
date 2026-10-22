@@ -3,8 +3,9 @@
 mod support;
 use safe_cex_engine::model::{BybitBbo, OrderSide, OrderType, PlaceOrderOpts};
 use safe_cex_engine::{Command, Event, HttpRequest, Query};
-use safe_cex_venue_bybit::{Endpoints, Options, Variant};
+use safe_cex_venue_bybit::{Endpoints, Variant};
 use support::Harness;
+use support::Options;
 
 const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
 const WALLET: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"accountType":"UNIFIED","totalEquity":"1000","totalWalletBalance":"1000","totalMarginBalance":"1000","totalAvailableBalance":"1000","totalInitialMargin":"0","totalMaintenanceMargin":"0","totalPerpUPL":"0","coin":[{"coin":"USDT","walletBalance":"1000","usdValue":"1000","equity":"1000","totalPositionIM":"0","totalOrderIM":"0","locked":"0"}]}]}}"#;

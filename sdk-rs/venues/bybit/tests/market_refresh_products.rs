@@ -1,8 +1,8 @@
 //! Refresh completes every enabled native category before publishing any change.
 mod support;
 use safe_cex_engine::{Command, Event, VenueAction};
-use safe_cex_venue_bybit::Options;
 use support::Harness;
+use support::Options;
 const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
 const OPTION: &str = "BTC-25DEC26-100000-C-USDT";
 const OPTIONS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTC-25DEC26-100000-C-USDT","status":"Trading","baseCoin":"BTC","quoteCoin":"USDT","settleCoin":"USDT","optionsType":"Call","deliveryTime":"1798185600000","lotSizeFilter":{"qtyStep":"0.01","minOrderQty":"0.01","maxOrderQty":"100"},"priceFilter":{"tickSize":"5","minPrice":"5"}},{"symbol":"ETH-25DEC26-3000-P-USDT","status":"Trading","baseCoin":"ETH","quoteCoin":"USDT","settleCoin":"USDT","optionsType":"Put","deliveryTime":"1798185600000","lotSizeFilter":{"qtyStep":"0.1","minOrderQty":"0.1","maxOrderQty":"100"},"priceFilter":{"tickSize":"0.5","minPrice":"0.5"}}],"nextPageCursor":""}}"#;
