@@ -1517,13 +1517,18 @@ typed Internal even if the background WS cache contains matching executions.
 That cache was not fetched by this command and must not be presented as complete
 history. Keep the same alias/fallback attempts and bounded upsert. On validated
 successful empty/nonempty paths, preserve the existing cache/authoritative
-selection, including nonempty primary data being authoritative even if its rows
-filter out. Callers may still read the live cache separately after rejection.
+selection, including nonempty primary data stopping further REST attempts even if every
+row filters out. Existing finish_history still selects matching WS cache when
+that validated nonempty response has no eligible normalized rows; preserve that
+distinction. Only eligible nonempty REST output excludes cache merging. Callers may still read the live cache separately after rejection.
 Track whether any actual REST response validated, across candidate resets, so
 mixed valid-empty/failure alternatives retain the expressly preserved successful
-path while all-actual-failure exhaustion rejects. Setup/signing refusal remains
-separate and strict with its existing typed details; preserve admission's empty/
-unsupported behavior. Numeric Completion remains explicit legacy authority,
+path while all-actual-failure exhaustion rejects. Initial consuming signed() refusal remains the existing separate strict
+String-to-cx.fail path, without claiming unavailable typed details. The wrapper
+already flattens retry/resend preparation failures to error.message before
+history_failed; preserve that alias-exploration behavior and leave typed
+preparation provenance to the shared request/signing lane. Preserve admission's
+empty/unsupported behavior. Numeric Completion remains explicit legacy authority,
 never managed Context fallback. No first-page actual failure may become complete
 empty/cache output when all alternatives failed; no invented later-page partial
 or history.incomplete marker is needed for this bounded selection.
@@ -1551,9 +1556,10 @@ Before production edits commit original-RED controls superseding the old
 all-failed-REST cache-success assertion: all-native failures with and without
 cache reject typed, exhausted transport/decode/missing-list alternatives reject,
 and failed streamed prefixes never enter successful or error output. Pin exact
-four candidate requests and no early terminal/marker/extra HTTP. Compatibility
+four candidate requests when native/display symbols differ (two when identical) and no early terminal/marker/extra HTTP. Compatibility
 controls cover valid empty aliases and cache selection, mixed valid/failed
-alternatives, first authoritative nonempty filtered rows, bounded duplicate
+alternatives, first nonempty all-filtered response with cache and no further REST attempts,
+bounded duplicate
 replacement/eviction, signature reset and transport prefix rollback, concurrent
 query owners, large identities/raw-millisecond sorting and Store isolation.
 The cache remains independently available in the live account path after an
