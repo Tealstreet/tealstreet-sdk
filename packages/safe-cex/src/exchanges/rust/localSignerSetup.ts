@@ -27,7 +27,7 @@ const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => 
   if (trimCredential !== undefined && typeof trimCredential !== 'boolean') return invalidMetadata();
   return { stableId, secretEncoding, trimCredential } as LocalIdentityMetadata;
 };
-const signerMetadata = (input: unknown): LocalSignerMetadata => {
+export const parseLocalSignerMetadata = (input: unknown): LocalSignerMetadata => {
   if (input === undefined) return {};
   const value = record(input, ['primary', 'secondary']);
   return { primary: identityMetadata(value.primary), secondary: identityMetadata(value.secondary) };
@@ -73,7 +73,7 @@ export class LocalSignerSetup {
   readonly credentialPresence: CredentialPresence;
 
   constructor(options: ExchangeOptions, policy: CredentialSetupPolicy = {}) {
-    const setupMetadata = signerMetadata(options.localSigner);
+    const setupMetadata = parseLocalSignerMetadata(options.localSigner);
     const primaryMetadata = effectiveMetadata(setupMetadata.primary, policy.primary);
     const secondaryMetadata = effectiveMetadata(setupMetadata.secondary, policy.secondary);
     const secondary =

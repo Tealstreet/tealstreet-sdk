@@ -1,5 +1,6 @@
 //! Synchronous SDK and native construction share these declarative conditions.
 use safe_cex_engine::signing::{CredentialSetupPolicy, IdentitySetupPolicy, SetupFieldPolicy};
+use safe_cex_engine::signing_policy::RemoteSigningPolicy;
 use serde::{Deserialize, Serialize};
 
 use crate::EngineOptions;
@@ -27,6 +28,7 @@ struct Rule {
     explicit_private_error: Option<&'static str>,
     bridge: BridgeRule,
     signer_setup: CredentialSetupPolicy,
+    remote_signing: RemoteSigningPolicy,
 }
 
 struct BridgeRule {
@@ -94,6 +96,10 @@ include!(concat!(env!("OUT_DIR"), "/construction_rules.rs"));
 /// Family declarations are compiled from the shared construction table.
 pub fn signer_setup_policy(venue: &str) -> CredentialSetupPolicy {
     venue_rule(venue).unwrap_or(&DEFAULT_RULE).signer_setup
+}
+
+pub fn remote_signing_policy(venue: &str) -> RemoteSigningPolicy {
+    venue_rule(venue).unwrap_or(&DEFAULT_RULE).remote_signing
 }
 
 /// Trusted setup uses explicit caller intent before keys are stripped/resolved.
