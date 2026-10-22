@@ -32,6 +32,10 @@ impl EvidenceBudget {
                 let (error, overflow) = self.normalize_error(error);
                 (WriteResult::Rejected(error), overflow)
             }
+            WriteResult::KnownPartial(error) => {
+                let (error, overflow) = self.normalize_error(error);
+                (WriteResult::KnownPartial(error), overflow)
+            }
             WriteResult::Failed(error) => {
                 let (error, overflow) = self.normalize_error(error);
                 (WriteResult::Failed(error), overflow)

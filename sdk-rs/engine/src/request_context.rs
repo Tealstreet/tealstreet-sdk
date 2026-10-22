@@ -760,8 +760,13 @@ impl SendPacing {
 /// deliberately absent from this contract.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WriteResult {
-    Accepted { order_ids: Vec<String> },
+    Accepted {
+        order_ids: Vec<String>,
+    },
     Rejected(VenueError),
+    /// Native ACK proves both effects and a definitive refusal, even when it
+    /// creates no order IDs (for example, a partially cancelled batch).
+    KnownPartial(VenueError),
     Failed(VenueError),
 }
 
@@ -769,7 +774,7 @@ impl WriteResult {
     fn order_ids(&self) -> &[String] {
         match self {
             Self::Accepted { order_ids } => order_ids,
-            Self::Rejected(error) | Self::Failed(error) => error
+            Self::Rejected(error) | Self::KnownPartial(error) | Self::Failed(error) => error
                 .partial
                 .as_ref()
                 .map_or(&[], |partial| partial.order_ids.as_slice()),
@@ -941,7 +946,7 @@ impl CommandWrites {
     }
     pub fn result(&mut self, id: RequestId, result: WriteResult) -> Result<(), Error> {
         let reports = match &result {
-            WriteResult::Rejected(error) => {
+            WriteResult::Rejected(error) | WriteResult::KnownPartial(error) => {
                 RejectionReports::new(vec![evidence::default_report(&error.message)])?
             }
             _ => RejectionReports::default(),
@@ -1052,7 +1057,11 @@ impl CommandWrites {
                             .any(|later| later.leg == a.leg && !later.released)
                 });
         let error = |a: &WriteAttempt| match &a.result {
-            Some(WriteResult::Rejected(error) | WriteResult::Failed(error)) => Some(error.clone()),
+            Some(
+                WriteResult::Rejected(error)
+                | WriteResult::KnownPartial(error)
+                | WriteResult::Failed(error),
+            ) => Some(error.clone()),
             _ => None,
         };
         // Choose the terminal physical attempt of the earliest logical leg,
@@ -1147,7 +1156,9 @@ impl CommandWrites {
                     .any(|later| later.leg == attempt.leg)
             })
             .filter_map(|(_, attempt)| match &attempt.result {
-                Some(WriteResult::Rejected(error)) => Some((attempt.id, error)),
+                Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                    Some((attempt.id, error))
+                }
                 _ => None,
             })
     }

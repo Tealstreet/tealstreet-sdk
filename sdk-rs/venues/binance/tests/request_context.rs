@@ -646,11 +646,79 @@ fn mixed_native_cancel_batch_with_proven_effects_is_known_partial_not_rejected()
     second.id = "13".into();
     second.client_order_id = Some("client13".into());
     h.engine.store_mut().upsert_order(second);
-    h.event(Event::Command(Command::CancelOrders { command: 715, ids: vec!["12".into(), "13".into()] }));
+    h.event(Event::Command(Command::CancelOrders {
+        command: 715,
+        ids: vec!["12".into(), "13".into()],
+    }));
     let request = h.take("/fapi/v1/batchOrders");
     h.reply(request.id, 200, "", r#"[{"symbol":"BTCUSDT","orderId":12,"status":"CANCELED","origQty":"1","executedQty":"0"},{"code":-2011,"msg":"unknown order"}]"#);
-    assert_eq!(h.engine.store().order("12").unwrap().status, OrderStatus::Canceled);
-    assert_eq!(h.engine.store().order("13").unwrap().status, OrderStatus::Open);
+    assert_eq!(
+        h.engine.store().order("12").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        h.engine.store().order("13").unwrap().status,
+        OrderStatus::Open
+    );
     let error = &h.failures.iter().find(|(id, _)| *id == 715).unwrap().1;
-    assert_eq!(error.outcome, None, "proven cancellation effects forbid whole-command rejection");
+    assert_eq!(
+        error.outcome, None,
+        "proven cancellation effects forbid whole-command rejection"
+    );
+}
+
+#[test]
+fn a_native_cancel_refusal_cannot_hide_uncertainty_in_a_later_batch_row() {
+    use safe_cex_engine::model::OrderStatus;
+    let accepted =
+        r#"{"symbol":"BTCUSDT","orderId":12,"status":"CANCELED","origQty":"1","executedQty":"0"}"#;
+    let refused = r#"{"code":-2011,"msg":"unknown order"}"#;
+    for uncertain in [
+        r#"{"code":-1007,"msg":"native timeout"}"#,
+        r#"{"symbol":"BTCUSDT","orderId":999,"status":"CANCELED","origQty":"1","executedQty":"0"}"#,
+        accepted,
+    ] {
+        for reverse in [false, true] {
+            let mut h = ready();
+            put_order(&mut h);
+            for id in ["13", "14"] {
+                let mut order = h.engine.store().order("12").unwrap().clone();
+                order.id = id.into();
+                order.client_order_id = Some(format!("client{id}"));
+                h.engine.store_mut().upsert_order(order);
+            }
+            h.event(Event::Command(Command::CancelOrders {
+                command: 716,
+                ids: vec!["12".into(), "13".into(), "14".into()],
+            }));
+            let request = h.take("/fapi/v1/batchOrders");
+            let (second, third) = if reverse {
+                (uncertain, refused)
+            } else {
+                (refused, uncertain)
+            };
+            h.reply(
+                request.id,
+                200,
+                "",
+                &format!("[{accepted},{second},{third}]"),
+            );
+            assert_eq!(
+                h.engine.store().order("12").unwrap().status,
+                OrderStatus::Canceled
+            );
+            for id in ["13", "14"] {
+                assert_eq!(
+                    h.engine.store().order(id).unwrap().status,
+                    OrderStatus::Open
+                );
+            }
+            let error = &h.failures.iter().find(|(id, _)| *id == 716).unwrap().1;
+            assert_eq!(
+                error.outcome,
+                Some(Outcome::Unknown),
+                "a definitive refusal cannot erase an unresolved sibling"
+            );
+        }
+    }
 }

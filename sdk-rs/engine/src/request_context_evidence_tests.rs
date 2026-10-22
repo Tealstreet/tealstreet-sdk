@@ -321,3 +321,32 @@ fn historical_refusal_retries_share_text_budget_with_terminal_attempt() {
     assert_eq!(error.venue_message.as_deref(), Some("[truncated]"));
     assert_eq!(writes.rejections().count(), 1);
 }
+
+#[test]
+fn known_partial_effects_share_text_and_exact_identity_overflow_bounds() {
+    let mut writes = CommandWrites::new(3).unwrap();
+    released(&mut writes, 1);
+    writes
+        .result(RequestId(1), accepted(vec!["prior".into()]))
+        .unwrap();
+    released(&mut writes, 2);
+    writes
+        .result(
+            RequestId(2),
+            WriteResult::KnownPartial(VenueError::new("native ".repeat(1000)).partial_ids(&[
+                "next".into(),
+                "x".repeat(1_025),
+                "unretained".into(),
+            ])),
+        )
+        .unwrap();
+    assert_eq!(
+        writes.retry(RequestId(2), RequestId(3)),
+        Err(Error::RetryForbidden)
+    );
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(error.message.len() <= 4_096);
+    assert!(error.message.contains("truncated"));
+    assert_eq!(error.partial.unwrap().order_ids, ["next", "prior"]);
+}

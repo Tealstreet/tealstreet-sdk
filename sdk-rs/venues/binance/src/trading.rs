@@ -635,6 +635,7 @@ impl BinanceFutures {
         // Native IDs on an ambiguous batch are reconciliation evidence only;
         // never feed them into accepted placement planning or caller bindings.
         let mut evidence_ids = Vec::new();
+        let mut known_cancel_effects = false;
         let error = match (call, outcome) {
             (
                 Call::PlaceOne {
@@ -740,7 +741,9 @@ impl BinanceFutures {
                 },
                 Ok(body),
             ) => match proof {
-                Some(proof) => self.confirm_cancel(cx, proof, body),
+                Some(proof) => {
+                    self.confirm_cancel(cx, proof, body, &mut known_cancel_effects, &mut unproven)
+                }
                 None => {
                     self.mark_canceled(cx, &canceled);
                     None
@@ -840,6 +843,8 @@ impl BinanceFutures {
                     }
                     if unproven || error.outcome == Some(Outcome::Unknown) {
                         WriteResult::Failed(error)
+                    } else if known_cancel_effects {
+                        WriteResult::KnownPartial(error)
                     } else {
                         WriteResult::Rejected(error)
                     }
@@ -2148,6 +2153,8 @@ impl BinanceFutures {
         cx: &mut Cx<'_, Pending>,
         proof: CancelProof,
         body: &str,
+        known_effects: &mut bool,
+        unproven: &mut bool,
     ) -> Option<(i64, String)> {
         let invalid = || {
             Some((
@@ -2218,7 +2225,9 @@ impl BinanceFutures {
                 let Ok(rows) = serde_json::from_str::<Vec<CancelRow>>(body) else {
                     return invalid();
                 };
-                let mut error = (rows.len() != targets.len()).then(|| {
+                let mismatched = rows.len() != targets.len();
+                *unproven |= mismatched;
+                let mut error = mismatched.then(|| {
                     (
                         0,
                         "Binance batch cancellation response count does not match request"
@@ -2233,18 +2242,25 @@ impl BinanceFutures {
                                 .iter()
                                 .find(|target| target.native == Some(ack.order_id))
                             else {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                                 continue;
                             };
                             if !seen.insert(ack.order_id) || !self.valid_cancel_ack(target, &ack) {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                                 continue;
                             }
-                            if !self.apply_cancel_ack(cx, target, &ack) {
+                            if self.apply_cancel_ack(cx, target, &ack) {
+                                *known_effects = true;
+                            } else {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                             }
                         }
                         CancelRow::Error { code, msg } => {
+                            *unproven |=
+                                failure(code, String::new()).outcome == Some(Outcome::Unknown);
                             error.get_or_insert((code, msg));
                         }
                     }

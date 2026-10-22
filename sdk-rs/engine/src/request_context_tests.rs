@@ -1193,3 +1193,57 @@ fn known_partial_writes_cannot_be_sealed_as_success_or_lose_their_partial_projec
         [RequestId(2)]
     );
 }
+
+#[test]
+fn known_partial_effects_without_ids_forbid_retry_and_whole_success_or_rejection() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    let fact = WriteResult::KnownPartial(
+        VenueError::new("cancelled one, refused another")
+            .kind(crate::ErrorKind::Rejected)
+            .venue_code("-2011"),
+    );
+    assert_eq!(writes.result(RequestId(1), fact.clone()), Err(Error::State));
+    writes.released(RequestId(1)).unwrap();
+    writes.result(RequestId(1), fact).unwrap();
+    assert_eq!(
+        writes.retry(RequestId(1), RequestId(2)),
+        Err(Error::RetryForbidden)
+    );
+    assert_eq!(writes.succeed(), Err(Error::State));
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.kind, Some(crate::ErrorKind::Rejected));
+    assert_eq!(error.venue_code.as_deref(), Some("-2011"));
+    assert!(
+        error.partial.is_none(),
+        "no invented IDs to encode known effects"
+    );
+    assert_eq!(
+        writes.rejections().map(|(id, _)| id).collect::<Vec<_>>(),
+        [RequestId(1)]
+    );
+    assert_eq!(
+        writes.reports().collect::<Vec<_>>(),
+        ["cancelled one, refused another"]
+    );
+}
+
+#[test]
+fn known_partial_effects_do_not_hide_an_unresolved_sent_sibling() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    for id in [1, 2] {
+        writes.register(RequestId(id), u64::from(id)).unwrap();
+        writes.released(RequestId(id)).unwrap();
+    }
+    writes
+        .result(
+            RequestId(1),
+            WriteResult::KnownPartial(VenueError::new("known effects")),
+        )
+        .unwrap();
+    assert_eq!(
+        writes.fail(VenueError::new("unresolved")).unwrap().outcome,
+        Some(Outcome::Unknown)
+    );
+}

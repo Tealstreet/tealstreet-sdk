@@ -1062,3 +1062,18 @@ text and known effects, then submit Failed/Unknown ahead of KnownPartial when
 ANY sibling remains unresolved. Retain valid cancellation effects; do not undo
 proven native ACKs or infer missing caller-leg success. Test both row-order
 permutations of definitive refusal plus unknown/mismatched/duplicate siblings.
+
+KnownPartial checkpoint: the original mixed native cancel regression failed with
+whole Rejected after applying order12 cancellation; it now preserves both Store
+assertions and seals known partial (outcome=None) without inventing IDs. Six
+row-order/unknown/unmatched/duplicate controls exposed and now preserve every
+independent uncertainty fact, sealing Unknown while retaining validated native
+effects. Shared engine controls cover released authority, retry/success refusal,
+unknown siblings and the existing text/exact-ID budgets. A compiled negative
+control that normalizes KnownPartial to Rejected fails the retry assertion; the
+exact original source was restored before the final gates. All 456 engine tests
+with order locks and 284 Binance tests pass, alongside strict Clippy, formatting
+and bans (11 inventory adversarial controls). Independent implementation review
+CLEAN; architecture No: shared aggregation policy with a native codec fact, not
+a venue-owned command finalizer. This is local reference verification, not final
+CI, complete raw replay equivalence or whole-PR readiness.
