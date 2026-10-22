@@ -4,6 +4,7 @@ use crate::{AsterDex, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::num::parse_decimal;
@@ -69,19 +70,17 @@ enum ModeLoad {
 }
 
 impl AccountState {
-    fn execution_progress(&mut self, id: &str, filled: f64) -> f64 {
-        let previous = self.execution_fills.get(id).copied().unwrap_or(0.0);
+    fn commit_execution_progress(&mut self, id: &str, progress: ObservedProgress) {
         if !self.execution_fills.contains_key(id) {
             self.execution_fill_order.push_back(id.to_owned());
         }
         self.execution_fills
-            .insert(id.to_owned(), filled.max(previous));
+            .insert(id.to_owned(), progress.quantity());
         while self.execution_fill_order.len() > 10_000 {
             if let Some(old) = self.execution_fill_order.pop_front() {
                 self.execution_fills.remove(&old);
             }
         }
-        previous
     }
 }
 
@@ -893,7 +892,17 @@ impl AsterDex {
                             .retain(|id, _| rows.iter().any(|o| &o.id == id));
                         if !self.account.orders_seeded {
                             for order in &rows {
-                                self.account.execution_progress(&order.id, order.filled);
+                                let previous = self
+                                    .account
+                                    .execution_fills
+                                    .get(&order.id)
+                                    .copied()
+                                    .unwrap_or(0.0);
+                                if let Ok(progress) =
+                                    ObservedProgress::new(previous, Some(order.filled))
+                                {
+                                    self.account.commit_execution_progress(&order.id, progress);
+                                }
                             }
                             self.account.orders_seeded = true;
                         }
@@ -1123,16 +1132,32 @@ impl AsterDex {
         }
         // REST progress describes order state, not executions already delivered to the caller.
         if let (Some((price, qty)), Some(filled)) = (fill, parse_decimal(&o.z)) {
-            let execution_previous = self.account.execution_progress(&id, filled);
-            if execution.is_none() && filled > execution_previous {
-                cx.fill(Fill {
-                    id: None,
-                    order_id: id.clone(),
-                    symbol: o.s.to_string(),
-                    side: order_side(&o.side),
-                    price,
-                    amount: qty.min(filled - execution_previous),
-                });
+            let previous = self
+                .account
+                .execution_fills
+                .get(&id)
+                .copied()
+                .unwrap_or(0.0);
+            if let Ok(progress) = ObservedProgress::new(previous, Some(filled)) {
+                let delivery = if execution.is_none() {
+                    progress.prepare_capped(Some(qty), price)
+                } else {
+                    Ok(None)
+                };
+                if let Ok(delivery) = delivery {
+                    self.account.commit_execution_progress(&id, progress);
+                    if let Some(prepared) = delivery {
+                        let prepared = prepared.delivery();
+                        cx.fill(Fill {
+                            id: None,
+                            order_id: id.clone(),
+                            symbol: o.s.to_string(),
+                            side: order_side(&o.side),
+                            price: prepared.price(),
+                            amount: prepared.amount(),
+                        });
+                    }
+                }
             }
         }
         // Liquidation/ADL rows have no order model; their executions are delivered above.

@@ -29,6 +29,9 @@ impl H {
         h
     }
     fn pending_mode() -> Self {
+        Self::pending_mode_with_orders("[]")
+    }
+    fn pending_mode_with_orders(open_orders: &str) -> Self {
         let mut h = Self {
             engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(Options {
                 key: Some("documented-key".into()),
@@ -53,11 +56,11 @@ impl H {
         h.reply("/openInterest", "[]");
         h.reply("/account", BALANCE);
         h.reply("/positionRisk", POSITION);
-        h.reply("/openOrders", "[]");
+        h.reply("/openOrders", open_orders);
         h.reply("/listenKey", r#"{"listenKey":"private-contract"}"#);
         let socket = h.socket();
         h.event(Event::WsOpened { socket });
-        h.reply("/openOrders", "[]");
+        h.reply("/openOrders", open_orders);
         h
     }
     fn socket(&self) -> SocketId {
@@ -453,6 +456,36 @@ fn cumulative_adoption_caps_last_and_preserves_full_blind_gap_observations() {
         fill_rows(&mut h),
         vec![(102.0, 0.25), (102.0, 0.125), (102.0, 0.25)]
     );
+}
+
+#[test]
+fn cumulative_adoption_initial_rest_seed_suppresses_fallback_but_not_native_ids() {
+    let mut h = H::pending_mode_with_orders(
+        r#"[{"symbol":"BTCUSDT","orderId":123,"price":"100","origQty":"2","executedQty":"0.75","status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","time":1}]"#,
+    );
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
+    let _ = fill_rows(&mut h);
+    h.ws(cumulative_adoption_event(10.0, "0.75", "0.5"));
+    assert!(fill_rows(&mut h).is_empty());
+    h.ws(order(11.0, "PARTIALLY_FILLED", "0.75", 7));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    h.ws(cumulative_adoption_event(12.0, "1", "0.5"));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.25)]);
+}
+
+#[test]
+fn cumulative_adoption_later_rest_read_does_not_replace_live_observation() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    h.ws(cumulative_adoption_event(10.0, "0.5", "0.5"));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    h.fire_after(10_000.0);
+    h.reply(
+        "/openOrders",
+        r#"[{"symbol":"BTCUSDT","orderId":123,"price":"100","origQty":"2","executedQty":"1.5","status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","time":20}]"#,
+    );
+    h.ws(cumulative_adoption_event(11.0, "1", "1"));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
 }
 
 #[test]

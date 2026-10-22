@@ -955,3 +955,15 @@ continue native order-state handling, so no unrelated lifecycle change.
 No new engine API, quote policy, retention scheme, logging implementation or
 absent-cumulative fallback is introduced. Re-run original RED as GREEN and all
 original compatibility controls before broader focused checks/review.
+
+Implementation checkpoint: existing engine preparation and typed bounded
+observation commit now serve Aster no-ID delivery and initial REST seeding.
+The direct-ID block and native order-state continuation remain unchanged.
+Final11-fixture suite was run against the exact original account source under
+finally/restore: one duplicate-Fill assertion RED and ten compatibility GREEN,
+then all11 GREEN through the shared path. The two additional controls prove
+initial REST suppression without hiding direct IDs and later REST reads not
+replacing live observations. 799 focused engine/Aster/Binance native tests
+and strict all-target Clippy pass. Both independent source/adversarial/caller
+reviews are CLEAN; root typecheck44/44 and lint28/28 pass fully cached. Fresh
+dependency integration/CI/replay evidence remain pending.
