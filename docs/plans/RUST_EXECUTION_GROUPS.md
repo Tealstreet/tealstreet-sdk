@@ -151,6 +151,19 @@ late-join progress, all-detach followed by same-key/new-generation execution, an
 the old ACK arriving after that replacement. Financial snapshot admission and
 command/group liveness remain separate checks.
 
+Metadata join equivalence explicitly includes normalized symbol, setting/read
+kind, publication permission and fallback policy, plus credential subject and
+routing intent. A shared endpoint is insufficient. Use trusted semantic scope,
+not caller-provided advisory signing labels; matching policy also cannot bypass
+the current freshness token. Add different-symbol, different-fallback/publication
+policy and different-subject/intent controls that reject joining atomically.
+
+For an already-sent read after the last observer detaches, retire the reply
+without Store/native-cache publication or caller completion, even if its snapshot
+token is otherwise current. Freshness does not restore a detached observer's
+authority. The initial group has no implicit background cache-warming observer;
+that would require a separate explicit policy/authority, not reuse of this reply.
+
 ## Committable sequence and ownership
 
 1. Independently audit this plan and the concrete authority/deadline/API choices
