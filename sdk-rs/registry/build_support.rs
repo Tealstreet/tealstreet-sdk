@@ -41,6 +41,16 @@ struct RemoteSigningPolicy {
     payload_rest_only: bool,
     protected_headers: Option<Vec<String>>,
     wire: Option<RemoteSigningWire>,
+    signature_encoding: SignatureEncoding,
+    passphrase_header: Option<String>,
+}
+
+#[derive(Default, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SignatureEncoding {
+    #[default]
+    Hex,
+    Base64,
 }
 
 #[derive(Deserialize)]
@@ -174,10 +184,16 @@ fn rule(value: &Rule) -> String {
         },
     );
     let remote_signing = format!(
-        "RemoteSigningPolicy {{ enabled: {}, payload_supported: {}, payload_rest_only: {}, protected_headers: {protected} }}",
+        "RemoteSigningPolicy {{ enabled: {}, payload_supported: {}, payload_rest_only: {}, protected_headers: {protected}, signature_encoding: SignatureEncoding::{:?}, passphrase_header: {} }}",
         value.remote_signing.enabled,
         value.remote_signing.payload_supported,
-        value.remote_signing.payload_rest_only
+        value.remote_signing.payload_rest_only,
+        value.remote_signing.signature_encoding,
+        value
+            .remote_signing
+            .passphrase_header
+            .as_ref()
+            .map_or_else(|| "None".into(), |header| format!("Some({header:?})")),
     );
     format!(
         "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing} }}",
@@ -192,6 +208,20 @@ pub fn generate(json: &str) -> Result<String, String> {
         return Err("default signing and private conditions are required".into());
     }
     for policy in std::iter::once(&rules.default).chain(rules.venues.values()) {
+        if policy
+            .remote_signing
+            .passphrase_header
+            .as_ref()
+            .is_some_and(|name| {
+                name.is_empty()
+                    || name.len() > 256
+                    || !name.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
+                    })
+            })
+        {
+            return Err("invalid passphrase presentation header declaration".into());
+        }
         if policy.remote_signing.enabled
             && (!policy.bridge.dispatch_signing
                 || policy.remote_signing.protected_headers.is_none()
