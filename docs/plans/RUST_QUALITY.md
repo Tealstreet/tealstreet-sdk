@@ -408,3 +408,17 @@ field presence, overflow, REST non-seeding, late identity and bounded eviction.
 Whole-growth inference is Binary-only and best-effort, with supplied evidence
 validated before effects. Shared row-reporting policy/fan-out remains separate;
 this does not claim new live captures or universal financial contract coverage.
+
+
+## Persistent row-reporting compatibility
+
+`coverage::RowReports` centralizes persistent repeat/re-arm memory for the first
+Coinbase, Crypto.com and WOO consumers. The engine API returns whether repeat
+suppression admitted `row_skipped`, independently of host filtering; it does not
+mean a row or snapshot was admitted. Native event level/code/text/order, Error
+upgrade policy, namespace boundaries and early decoded-key re-arm remain.
+Original account controls are compatibility GREEN, not defect RED evidence.
+New engine controls cover all three policies, capacity reset before duplicate
+lookup, independent unbounded mode, borrowed lookup and host-filtered health.
+Grouped/deferred reporting and the remaining persistent consumer fan-out stay
+explicit follow-ups; see [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).

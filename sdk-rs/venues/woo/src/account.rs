@@ -3,6 +3,7 @@ use crate::wire::{Envelope, Str, id, number, optional_number};
 use crate::{Connection, Pending, Woo, compact, native};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::coverage::{RowRepeat, RowReports};
 use safe_cex_engine::execution::{Cursor, ObservedProgress};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
@@ -176,7 +177,7 @@ pub struct Account {
     refresh: Option<TimerId>,
     refresh_attempt: u32,
     pub(crate) algos: HashMap<String, AlgoMeta>,
-    skip_logged: HashMap<&'static str, String>,
+    skip_logged: RowReports<&'static str>,
     hidden: std::collections::HashSet<String>,
     isolated_warned: std::collections::HashSet<String>,
 }
@@ -405,6 +406,7 @@ fn leaf_reduce_only(r: &OrderRow<'_>, parent: Option<&OrderRow<'_>>) -> Option<b
 impl Account {
     pub(crate) fn new() -> Self {
         Self {
+            skip_logged: RowReports::unbounded(RowRepeat::ChangedMessage),
             supervisor: Supervisor::new(Config {
                 auth_timeout_ms: Some(10_000.0),
                 idle_timeout_ms: 20_000.0,
@@ -419,13 +421,11 @@ impl Account {
 impl Woo {
     fn account_skipped(&mut self, cx: &mut Cx<'_, Pending>, kind: &'static str, s: &Skipped) {
         match s.summary(kind) {
-            Some(text) if self.account.skip_logged.get(kind) != Some(&text) => {
-                cx.notice(Level::Warn, code::ROW_SKIPPED, text.clone());
-                self.account.skip_logged.insert(kind, text);
+            Some(text) => {
+                self.account.skip_logged.report(cx, kind, Level::Warn, text);
             }
-            Some(_) => (),
             None => {
-                self.account.skip_logged.remove(kind);
+                self.account.skip_logged.forget(kind);
             }
         }
     }
