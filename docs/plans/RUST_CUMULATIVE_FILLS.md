@@ -837,3 +837,27 @@ restored against the fix (all six GREEN). Both independent source reviews are
 CLEAN; caller wording explicitly limits invalid-price rejection to positive
 live delivery, preserving accepted quiet bookkeeping. Fresh exact-head CI and
 full BingX/Binance raw evidence remain pending; no merge claim.
+
+#### BingX final dependency integration and proof plan
+
+Actual hosted bridge #1745 `5743c485d44` and measured profile #1746
+`3f0e3e450b2` are genuinely integrated. Under the overseer's explicit
+exact-head-stack authorization, frozen reviewed Bybit #1728
+`31035f3f09a71e5fb29d1083c217512972e5f9ec` is also genuinely integrated
+for parallel CI. Preservation review is CLEAN: all six original BingX-owned
+blobs remained unchanged before this documentation checkpoint, and every
+other blob exactly matches that frozen Bybit tree. Architecture gate remains
+YES: this is shared engine financial preparation with one bounded adopter.
+
+Fresh final evidence compares the complete 32-suite/110-workload roster
+against that exact frozen Bybit PR run, with both synthetic CI checkout trees
+and parents explicitly bound to their respective tested heads and the actual
+profile landing. All 976 raw outputs, including every full ID and request,
+remain compared with only top-level metrics excluded; ordered gate/fixer
+arrays and all package hashes/fingerprints remain mandatory. Earlier initial
+BingX evidence is historical and is not relabeled. No TS-reference difference
+is silently accepted. Merge remains blocked until #1728 actually lands with
+the unchanged frozen head as ancestor, full exact-head checks and independent
+evidence reviews pass, and a fresh separate guard confirms only these six
+owned files against actual landing. Any predecessor head change requires
+real integration and fresh CI/proof.
