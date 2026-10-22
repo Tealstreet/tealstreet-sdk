@@ -298,3 +298,35 @@ intended change needs exact reviewed fix evidence, never wider allowances.
 Independent plan/code/adversarial/final evidence reviews answer the architecture
 gate. Full green exact head, fresh guard and separate merge, actual merge audit
 and Aimux report. No live capture or local release/replay/load/timing sweep.
+
+
+Phase-3 independent plan review CLEAN at `be4228c19c6` before tests/code.
+Owner approved the demonstrated Orderly financial validation in this phase:
+validate supplied quantities/prices before root/total/dedup effects, then engine
+admission. Native original-source control loses a0.25 cumulative-only corrected
+fill after an invalid price consumed its watermark. Ten new admission tests run
+on actual #1711 source compile and yield nine assertion failures and one passing
+structural control; the reviewed implementation passes all35 account tests.
+Two adversarial follow-ups separately proved wrong-symbol root-only cascades and
+inherited foreign-parent rebinding RED before repair. Lower-sequence valid roots
+and absent-symbol/root-before-children controls remain accepted.
+
+Architecture follow-on decision: independent read-only inventory found twelve
+Rust venue crates deriving incremental quantity from cumulative deltas, including
+Orderly (eleven others: Bitunix, Bybit/Hyro, Bitget, Coinbase, WOO, BloFin, BingX,
+Bitrue, ApeX, AsterDEX and Kraken Spot). KuCoin Spot also has an unsubtracted
+cumulative-size fallback; Binance uses cumulative progress for dedup but emits
+direct last quantity; OKX emits direct fill size. Therefore validated cumulative
+preparation/commit is cross-cutting and belongs in one engine helper folded into
+the later snapshot commit/freshness-token work. Do not fix those other venues
+individually here. Hyro/ApeX/Bitget validation-order candidates are source-only
+findings, not RED-proven financial defects. This approved Orderly native repair
+does not establish a new shared fill contract or finish that follow-on.
+
+Final local phase-3 readiness:400 Orderly/Binance native tests pass, including
+37 account tests and explicit normal late-unique-fill versus sparse-terminal
+stamp-gate controls. Strict touched-crate all-target Clippy/fmt/bans,44 root
+typecheck and28 lint tasks pass. Independent code/adversarial review CLEAN;
+architecture answer No for this approved shared-boundary adoption. Full exact-
+head CI, current dependency integration and all138 archived outputs remain
+pending; local results do not claim them or complete the other keyed consumers.
