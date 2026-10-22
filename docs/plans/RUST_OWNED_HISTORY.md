@@ -1574,3 +1574,22 @@ WASM/full replay/size/timing sweep. Open a draft after reviews, update the calle
 contract for all-failure rejection/cache access, and require actual queued shared
 inputs plus exact-head green CI and fresh raw/package/ordered-gate proof before
 an announced separate guard and separate merge. B11 and runtime coverage stay open.
+
+ApeX local implementation receipt: refined plan `bc700e3ccf6` was independently
+reviewed CLEAN twice. Regression-only `3a023040ec3` leaves production unchanged:
+18 controls PASS and four assertion groups RED. Existing HistoryRows adoption
+turns those groups GREEN. All 25 final history controls pass, including mixed
+valid/failed alternatives, filtered nonempty primary cache selection, two-route
+same-symbol alternatives, native bounded eviction-before-duplicate replacement,
+signature-prefix reset, sixteen failed transport prefixes, concurrent owners and
+cache availability after rejection. Independent source review is CLEAN; broader
+focused/strict checks and final adversarial/tests-docs review follow before the
+draft PR. The #1769 bounded hold and required actual dependency integration remain.
+
+ApeX final local checks: all 849 focused engine/ApeX/Binance tests PASS. All 25
+history controls PASS again after adding an evicted native identity's later
+reappearance case. Strict all-target Clippy/fmt, banned-pattern and diff checks
+PASS. Both independent source reviews and final adversarial/tests/caller-doc
+reviews are CLEAN, including the unchanged native bounded upsert and legacy
+signing-provenance seam. No local release WASM/full replay/size/timing run. Draft
+CI and actual queued shared dependencies still require fresh source-bound proof.

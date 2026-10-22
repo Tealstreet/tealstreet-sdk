@@ -576,7 +576,7 @@ fn candidate(r: &safe_cex_engine::HttpRequest, index: usize) {
     } else {
         "/v3/history-orders?"
     }));
-    assert!(r.url.contains(if index % 2 == 0 {
+    assert!(r.url.contains(if index.is_multiple_of(2) {
         "symbol=BTC-USDT"
     } else {
         "symbol=BTCUSDT"
@@ -710,4 +710,120 @@ fn identical_native_and_display_symbol_has_only_two_alternatives() {
         response(&mut e, &r, 30.0, r#"{"code":0,"data":[]}"#);
     }
     assert!(owned_rows(&mut e, 7).is_empty());
+}
+
+#[test]
+fn bounded_native_upsert_preserves_eviction_before_later_duplicate_replacement() {
+    let mut e = seeded();
+    query(&mut e, None, None, None, Some(1));
+    let r = owned_request(&mut e);
+    let newest = FILL.replace("1700000000123", "1700000005123");
+    let evicted = FILL
+        .replace("trade1", "trade2")
+        .replace("1700000000123", "1700000004123");
+    let replacement = FILL
+        .replace("1700000000123", "1700000003123")
+        .replace("\"fillSize\":\"2\"", "\"fillSize\":\"7\"");
+    response(
+        &mut e,
+        &r,
+        30.0,
+        &format!(r#"{{"code":0,"data":[{newest},{evicted},{replacement}]}}"#),
+    );
+    let rows = owned_rows(&mut e, 7);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].timestamp, 1700000003.0);
+    assert_eq!(rows[0].qty, 7.0);
+
+    // An identity evicted from the bounded native page may reappear later.
+    query(&mut e, None, None, None, Some(1));
+    let r = owned_request(&mut e);
+    let reappeared = FILL
+        .replace("trade1", "trade2")
+        .replace("1700000000123", "1700000006123")
+        .replace("\"fillSize\":\"2\"", "\"fillSize\":\"9\"");
+    response(
+        &mut e,
+        &r,
+        40.0,
+        &format!(r#"{{"code":0,"data":[{newest},{evicted},{replacement},{reappeared}]}}"#),
+    );
+    let rows = owned_rows(&mut e, 7);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].timestamp, rows[0].qty), (1700000006.0, 9.0));
+}
+#[test]
+fn signature_reset_discards_prefix_but_retains_original_history_owner() {
+    let mut e = seeded();
+    query(&mut e, None, None, None, None);
+    let first = owned_request(&mut e);
+    response(
+        &mut e,
+        &first,
+        30.0,
+        &format!(r#"{{"code":20016,"msg":"signature rejected","data":[{FILL}]}}"#),
+    );
+    let retry = owned_request(&mut e);
+    assert_eq!(first.url, retry.url);
+    let corrected = FILL
+        .replace("\"fillPrice\":\"100\"", "\"fillPrice\":\"101\"")
+        .replace("\"fillSize\":\"2\"", "\"fillSize\":\"3\"");
+    response(
+        &mut e,
+        &retry,
+        40.0,
+        &format!(r#"{{"code":0,"data":[{corrected}]}}"#),
+    );
+    let rows = owned_rows(&mut e, 7);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].price, rows[0].qty), (101.0, 3.0));
+}
+#[test]
+fn history_rejection_does_not_erase_background_cache_or_cross_concurrent_owners() {
+    let mut e = cached();
+    query(&mut e, None, None, None, None);
+    let first = owned_request(&mut e);
+    e.handle(
+        21.0,
+        Event::Command(Command::Query {
+            command: 8,
+            query: Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        }),
+    );
+    let second = owned_request(&mut e);
+    response(
+        &mut e,
+        &second,
+        30.0,
+        &format!(r#"{{"code":0,"data":[{FILL}]}}"#),
+    );
+    assert_eq!(owned_rows(&mut e, 8)[0].order_id.as_deref(), Some("order1"));
+    response(
+        &mut e,
+        &first,
+        31.0,
+        r#"{"code":40001,"msg":"unavailable"}"#,
+    );
+    for _ in 1..4 {
+        let r = owned_request(&mut e);
+        response(&mut e, &r, 32.0, r#"{"code":40001,"msg":"unavailable"}"#);
+    }
+    owned_error(&mut e);
+    query(&mut e, None, None, None, None);
+    for _ in 0..4 {
+        let r = owned_request(&mut e);
+        response(&mut e, &r, 40.0, r#"{"code":0,"data":[]}"#);
+    }
+    assert_eq!(
+        owned_rows(&mut e, 7)[0].order_id.as_deref(),
+        Some("cached-order")
+    );
+    assert!(e.store().orders().is_empty());
+    assert!(e.store().positions().is_empty());
 }

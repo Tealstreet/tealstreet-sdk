@@ -408,3 +408,15 @@ field presence, overflow, REST non-seeding, late identity and bounded eviction.
 Whole-growth inference is Binary-only and best-effort, with supplied evidence
 validated before effects. Shared row-reporting policy/fan-out remains separate;
 this does not claim new live captures or universal financial contract coverage.
+
+## ApeX bounded history owner adoption
+
+ApeX bounded execution reads use existing engine HistoryRows/Completion for the
+selected terminal result. Four original-source assertion-RED groups prove that
+all-native, missing-list/malformed and exhausted transport failures must reject
+rather than return background-cache/empty success. Controls preserve successful
+cache selection (including mixed alternatives and filtered nonempty primary),
+bounded duplicate replacement after eviction, two/four candidate requests,
+signature reset, concurrent owners and persistent live cache. Native endpoint
+selection/upsert facts remain local; no new owner/pager/marker policy or shared
+signing-provenance implementation is copied into the venue.
