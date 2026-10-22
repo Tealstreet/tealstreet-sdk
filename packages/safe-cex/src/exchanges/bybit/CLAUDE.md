@@ -83,7 +83,7 @@ Authentication uses HMAC-SHA256 with the following process:
    - `X-BAPI-TIMESTAMP`: the timestamp
    - `X-BAPI-RECV-WINDOW`: configurable, defaults to `20000` ms (via `options.extra.recvWindow` or `RECV_WINDOW` constant)
    - `X-Referer`: `Tealstreet` (broker ID)
-   - `Content-Type`: `application/json, charset=utf-8`
+   - `Content-Type`: `application/json`
    - `x-site-id`: `BRA_BTL` only when `options.bybitSiteId === 'BRA_BTL'`
 
 Each request gets a unique `requestId` param via `nanoid()`.
