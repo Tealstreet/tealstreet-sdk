@@ -20,9 +20,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             primary: (!public_data_only).then(|| safe_cex_crypto::signer::LocalIdentity {
                 key: safe_cex_crypto::signer::Secret::new(api_key),
                 secret: safe_cex_crypto::signer::Secret::new(api_secret),
+                ..Default::default()
             }),
             secondary: None,
-        });
+        })
+        .map_err(|_| "Invalid local signer setup")?;
     let mut engine = Engine::new(
         BinanceFutures::new(Options {
             credentials: identities.primary,
