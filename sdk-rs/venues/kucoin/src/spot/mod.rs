@@ -6,6 +6,7 @@ use crate::{Options, encoded_path, interval, sign, success};
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Rejection, Report};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -23,6 +24,7 @@ use wire::*;
 const REST: &str = "https://api.kucoin.com";
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 const SKIP_LOG_LIMIT: usize = 4_096;
+const EXECUTION_PROGRESS_LIMIT: usize = 20_000;
 
 pub enum Pending {
     Markets {
@@ -57,6 +59,8 @@ pub struct ReadOrders {
     symbol: String,
     page: u32,
     rows: SnapshotBuilder<String, Order>,
+    /// Raw validated REST prefixes, never cached display replacements.
+    seeds: Vec<(String, Cursor)>,
     lookup: Option<(CommandId, String)>,
 }
 struct Socket {
@@ -120,6 +124,8 @@ pub struct KucoinSpot {
     terminal_order: VecDeque<String>,
     fills: HashSet<String>,
     fill_order: VecDeque<String>,
+    execution_progress: BTreeMap<String, Cursor>,
+    execution_order: VecDeque<String>,
 }
 impl KucoinSpot {
     pub fn new(options: Options) -> Self {
@@ -164,6 +170,8 @@ impl KucoinSpot {
             terminal_order: Default::default(),
             fills: Default::default(),
             fill_order: Default::default(),
+            execution_progress: Default::default(),
+            execution_order: Default::default(),
         }
     }
     fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
@@ -586,6 +594,18 @@ impl KucoinSpot {
             rows.reject(Some(id.to_owned()));
         }
     }
+    /// Native retention only; validation and monotonic progress come from the engine.
+    fn remember_execution(&mut self, id: String, cursor: Cursor) {
+        if !self.execution_progress.contains_key(&id) {
+            self.execution_order.push_back(id.clone());
+            if self.execution_order.len() > EXECUTION_PROGRESS_LIMIT
+                && let Some(old) = self.execution_order.pop_front()
+            {
+                self.execution_progress.remove(&old);
+            }
+        }
+        self.execution_progress.insert(id, cursor);
+    }
     fn private_message(&mut self, cx: &mut Cx<'_, Pending>, m: Message<'_>) {
         if m.topic.starts_with("/account/balance") {
             self.balance_revision += 1;
@@ -647,7 +667,44 @@ impl KucoinSpot {
                     row.ts.map_or(order.last_update, |n| n.0)
                 )
             };
-            if amount > 0.0 && self.fills.insert(key.clone()) {
+            let cursor = self
+                .execution_progress
+                .get(row.id())
+                .copied()
+                .unwrap_or_default();
+            let (cursor, report) = if row.match_size.is_some() {
+                // No native endpoint: validate the authoritative last independently
+                // of retained progress, and never install its synthetic next value.
+                let cursor = if row.cumulative().is_some() {
+                    cursor
+                } else {
+                    Cursor::default()
+                };
+                (
+                    cursor,
+                    Report::Last {
+                        amount,
+                        cumulative: row.cumulative(),
+                        price,
+                    },
+                )
+            } else {
+                (
+                    cursor,
+                    Report::Cumulative {
+                        quantity: amount,
+                        price: CumulativePrice::Direct(price),
+                    },
+                )
+            };
+            let delivery = match cursor.prepare(report, Arithmetic::Binary) {
+                Ok(delivery) => delivery,
+                Err(Rejection::QuantityRegressed) => None,
+                Err(_) => return,
+            };
+            if let Some(delivery) = delivery
+                && self.fills.insert(key.clone())
+            {
                 self.fill_order.push_back(key);
                 if self.fill_order.len() > 20_000
                     && let Some(k) = self.fill_order.pop_front()
@@ -659,9 +716,12 @@ impl KucoinSpot {
                     order_id: order.id.clone(),
                     symbol: order.symbol.clone(),
                     side: order.side,
-                    price,
-                    amount,
+                    price: delivery.price(),
+                    amount: delivery.amount(),
                 });
+                if row.match_size.is_none() || row.cumulative().is_some() {
+                    self.remember_execution(row.id().to_owned(), delivery.next());
+                }
             }
         }
         let old = cx.store.order(row.id());
@@ -1102,6 +1162,7 @@ impl Venue for KucoinSpot {
                     symbol: String::new(),
                     page: 1,
                     rows: SnapshotBuilder::default(),
+                    seeds: vec![],
                     lookup: None,
                 };
                 if let Some(symbol) = r.symbols.pop_front() {
@@ -1168,6 +1229,7 @@ impl Venue for KucoinSpot {
                         );
                         return;
                     }
+                    let seed = Cursor::seed(o.filled, None).expect("validated REST quantity");
                     if let Some(current) = cx.store.order(&o.id) {
                         if o.last_update < current.last_update || o.amount < current.filled {
                             o = current.clone();
@@ -1177,6 +1239,7 @@ impl Venue for KucoinSpot {
                         }
                     }
                     if !self.terminal.contains(&o.id) && o.status == OrderStatus::Open {
+                        r.seeds.push((o.id.clone(), seed));
                         r.rows.push(o);
                     }
                 }
@@ -1214,6 +1277,11 @@ impl Venue for KucoinSpot {
                     } else {
                         self.orders_loading = false;
                         if r.revision == self.revision {
+                            for (id, seed) in r.seeds {
+                                if !self.execution_progress.contains_key(&id) {
+                                    self.remember_execution(id, seed);
+                                }
+                            }
                             self.rearm_skips("order:", clean, mapped);
                             cx.store.set_orders(rows);
                         } else {
@@ -1573,6 +1641,7 @@ impl KucoinSpot {
                             symbol,
                             page: 1,
                             rows: SnapshotBuilder::default(),
+                            seeds: vec![],
                             lookup: Some((command, client_order_id)),
                         },
                     );
@@ -1632,5 +1701,28 @@ mod security_credentials {
             let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
             assert!(venue.credentials.is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod execution_retention {
+    use super::*;
+
+    #[test]
+    fn retained_execution_prefix_has_an_independent_bounded_fifo() {
+        let mut venue = KucoinSpot::new(Options::default());
+        let cursor = Cursor::seed(0.5, None).unwrap();
+        for index in 0..EXECUTION_PROGRESS_LIMIT {
+            venue.remember_execution(index.to_string(), cursor);
+        }
+        // Updating an admitted endpoint does not allocate/refresh a FIFO slot.
+        venue.remember_execution("0".into(), Cursor::seed(0.7, None).unwrap());
+        assert_eq!(venue.execution_order.len(), EXECUTION_PROGRESS_LIMIT);
+        venue.remember_execution("new".into(), cursor);
+        assert!(!venue.execution_progress.contains_key("0"));
+        assert!(venue.execution_progress.contains_key("1"));
+        assert_eq!(venue.execution_progress.len(), EXECUTION_PROGRESS_LIMIT);
+        // Retention and dedupe remain independent native history domains.
+        assert!(venue.fills.is_empty() && venue.terminal.is_empty());
     }
 }
