@@ -60,7 +60,7 @@ describe('trusted local signer setup', () => {
       expect(() => setup.construct(Engine as never, 'binance', '{}')).toThrow(/consumed|disposed/);
     }
   });
-  it('rejects incomplete secondary setup before a generic exchange can retain it', () => {
+  it('classifies incomplete secondary setup before a generic exchange can retain it', () => {
     for (const read of [
       { secondary_key: 'primary-key' },
       { secondary_secret: 'audit-secret-sentinel' },
@@ -88,3 +88,10 @@ it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot'] as const)(
     } finally { exchange.dispose(); }
   },
 );
+
+
+it('incomplete secondary setup reports typed invalidInput/notSent at construction', () => {
+  let failure: unknown;
+  try { new LocalSignerSetup({ ...options(), secondary_secret: '' }); } catch (error) { failure = error; }
+  expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+});

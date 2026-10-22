@@ -94,7 +94,8 @@ Unmigrated families reject these refs/providers rather than pretending to use th
 
 Binance USD-M/PM/COIN-M/Spot high-level `ExchangeOptions` credential inputs remain
 a trusted setup adapter. `RustEngineExchange` extracts them before `BaseExchange`
-retains options, caches non-secret private/public construction metadata, and uses
+retains options (incomplete secondary input rejects synchronously with typed
+`invalidInput`/`notSent`), caches non-secret private/public construction metadata, and uses
 an opaque one-use `LocalSignerSetup`. The raw WASM constructor accepts optional
 argument 3, `signerSetupJson`, separately from generic engine-options JSON. It
 consumes the setup into a local provider and wipes owned Rust buffers, including
@@ -118,3 +119,11 @@ negative controls cover both ordinary venue source and the migrated sign module.
 This is a migration guard for those patterns, not proof that every possible
 cryptographic primitive or secret spelling is detected. Family migrations remove
 their legacy entries as provider recipes replace eager signing.
+
+
+Clock follow-up contract (not implemented by this core): keep `Cx.now`, staged /
+prepared times, deadlines and freshness durations in raw scheduling time. The
+clock lane's protocol view supplies only absolute signing stamps. A changed
+calibration revision must invalidate an outstanding canonical payload even when
+raw time is unchanged, then reprepare within the original raw deadline;
+observations of the same offset should remain idempotent.

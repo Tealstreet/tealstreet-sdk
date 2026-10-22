@@ -1,4 +1,5 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
 
 type Credentials = { primary?: { key?: string; secret?: string }; secondary?: { key?: string; secret?: string } };
@@ -16,8 +17,10 @@ export class LocalSignerSetup {
       options.secondary_key !== undefined ||
       options.secondary_secret !== undefined ||
       options.secondary_passphrase !== undefined;
-    if (secondary && (!options.secondary_key || !options.secondary_secret))
-      throw new Error('Rust engine secondary signing keys require a nonempty key and secret');
+    if (secondary && (!options.secondary_key || !options.secondary_secret)) {
+      const message = 'Rust engine secondary signing keys require a nonempty key and secret';
+      throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+    }
     this.hasSecondary = secondary;
     this.primaryComplete = Boolean(options.key && options.secret);
     this.#credentials = {

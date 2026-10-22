@@ -1,12 +1,11 @@
 import type { SignRequest, Transport } from '@tealstreet/safe-cex-wasm/host';
 import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import { createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import vector from '../../../../../sdk-rs/crypto/tests/fixtures/hmac/binance.json';
 import { expect, it } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 
 const identities = { primary: { credential: 'primary.credential', signing: 'primary.signing' } };
-const vector = JSON.parse(readFileSync(new URL('../../../../../sdk-rs/crypto/tests/fixtures/hmac/binance.json', import.meta.url), 'utf8')) as { secret: string };
 const makeTransport = (sent: Parameters<Transport['request']>[0][]): Transport => ({
   now: () => 1_700_000_000_000,
   request: async (request) => {
