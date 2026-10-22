@@ -15,6 +15,31 @@ signing, request construction, mutation retries and socket supervision stay outs
 this service. Keep endpoint retry safety, read joins, credential/symbol isolation,
 snapshot revisions and degraded/recovered readiness policy explicit at callers.
 
+## Foundation implementation boundary
+
+The first implementation adds a bounded registry with explicit pause groups,
+opaque attempt tokens and separate `Refresh`/`Invalidate` demand. `take_ready`
+reserves work; the caller must successfully `mark_issued` immediately before I/O.
+A late queued signer result cannot issue an expired or revoked reservation.
+`finish` covers the complete logical read, not an individual response. `progress`
+may renew its response budget only for validated matching page/join progress,
+never for incoming WS updates or repeated demand. The caller drives deadlines
+through existing Cx timer APIs; no dispatch hook is introduced by the foundation.
+
+`startup::Backoff` delegates retry arithmetic/counters to the shared `RetryState`
+while retaining dynamic keys and existing timer/notice ownership. Its trait bounds,
+admission, ban scope, jitter draw order and public readiness behavior stay intact.
+The general scheduler is not yet wired to ordinary venue reads; that migration
+remains open and must retain their existing authority and continuation policies.
+
+Independent correctness/adversarial review found two foundation edge cases:
+non-representable positive leases could expire immediately, and checking an idle
+key's lease could block a healthy peer. Strict future lease validation now applies
+only to due, unpaused candidates before state/entropy changes. Response validation
+also preserves the unsent reservation on error. Three regression groups fail with
+the earlier implementations and pass with those fixes. The foundation has thirteen
+state-machine regression tests; existing startup/poll/financial controls remain.
+
 ## Committable phases
 
 1. Audit current contracts across venues; commit this plan and its index row.
@@ -70,3 +95,25 @@ auth and settings revisions; OKX joins risk and positions atomically; WEEX has
 multi-read cycles; Phemex groups settlement currencies. Inventory and evidence
 will be expanded before each migration, without claiming source-only suspicions
 as reproduced production defects.
+
+## Read-only inventory at the base pin
+
+| Callers | Scheduling contracts to retain during adoption |
+| --- | --- |
+| Bybit | Per-coin joins and read generations; polls coalesce, explicit invalidation requests one follow-up; accepted leverage ACK advances the position fence. |
+| Bitget | First repair timer, shared account REST pause, UTA dirty rerun; regular/protection/trailing walks retain one logical owner through all pages. |
+| Bitunix | Ten-second ordinary-read replacement, matching serial completion, independent regular/TPSL slots; recovery admission precedes serial allocation. Settings/auth/write revisions remain separate. |
+| BingX | Staggered polls and throttled repair; balance/mode bounded stale admission differs from stricter orders/positions. Command metadata remains independent. |
+| Binance / Orderly | Separate Binance depth/background budgets; independent Orderly position/regular/algo reads and every-fourth-tick order poll. |
+| OKX / WEEX / Phemex | Atomic risk/position joins; multi-read cycles and matching page-progress budgets; independent settlement-currency slices. |
+| Aster / Kraken | Repair and snapshot revisions are distinct. Aster's rearmed WS timer merits a regression before alleging starvation; scheduling alone cannot authorize crossed-revision publication. |
+| KuCoin / WOO | Busy-cycle/page ownership and settings fences; WOO regular/algo join and its deliberate REST-only hedged-position admission. |
+| Bitrue / Polymarket | Symbol queues and independent retries; existing dirty follow-up survives periodic Infinity pause. |
+| Hyperliquid / MEXC | DEX/weight isolation; staged order waves retain stronger full-repair intent. |
+| Lighter / ApeX / BloFin | Serialized account or initial snapshot joins; paginated order families remain logical reads. |
+| Coinbase / GRVT / Paradex | Product-specific slots and pause floors; session, builder and JWT prerequisites remain outside ordinary read scheduling. |
+| Backpack / Crypto.com / TxFlow | Chained continuations, final-chain completion, independent history exhaustion and settings pacing. |
+| BreakoutProp | Extract ordinary reads from its prerequisite queue without broadening trade retries. |
+
+Socket reconnect/keepalive stays in `socket`; live periodic polling and Infinity
+pause stay in the engine poll service. The scheduler does not bypass either.
