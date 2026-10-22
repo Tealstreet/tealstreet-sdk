@@ -68,6 +68,11 @@ page's 20s bound to a whole walk would change behavior. Preserve per-page native
 bounds with proper engine-issued read authority; never extend an already-issued
 Context or manufacture a public Context for a private page. Bring a concrete
 unrepresentable lifecycle to the owner before a workaround.
+Record that page authority is minted after native rate deferral, when a
+continuation starts a new bounded page/read, and how the previous Context is
+finished or retired. Test a successful walk lasting over 20s with each page
+within its native bound, a pause found between pages, and an old-cycle reply
+after timeout and replacement. Any enclosing command deadline still applies.
 
 Keep contexts with pending owners and settle all success/refusal/decode/timeout
 paths once. Account refusal settles only its matching cycle, decrementing the
@@ -80,6 +85,15 @@ normal/algo joins and optimistic rollback remain fenced.
 Use RequestContext's per-leg/attempt write evidence and aggregate outcomes,
 including accepted IDs and conservative prior-send uncertainty. Add no venue
 ledger, new evidence flags or first-error outcome classifier.
+Managed mutations must implement `capture_http_reconciliation` with bounded,
+nonsecret native Call correlation and restricted `reconcile_http` ACK codecs;
+their default refusal must never be bypassed. Timely ACKs report native effects
+and refusals through `http_write_result` and the shared rejection/outcome path.
+Retired or late ACKs cannot resurrect a command, replay a write or acquire Store
+authority from advisory fields: use only the actual engine evidence/freshness
+contract. Include real release tests, late ACKs at the original deadline,
+cardinality/correlation mismatch and no-command-resurrection controls. No
+mutation is considered adopted until that release/reconciliation path is proven.
 
 ## Verification and sequencing
 
