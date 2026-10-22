@@ -221,3 +221,80 @@ that evidence is historical. Fresh integrated-head CI/raw comparison is required
 against source-equivalent #1710 CI `39710315859` (head `8dce0521f7e`). The owner
 granted #1711 a source priority window through this refresh; release on actual
 verified merge. This changes sequencing/evidence only, not row behavior.
+
+
+## Phase 2 merged receipt
+
+Actual #1711 `bd1a69072c7edf66ea78107c62bb96bd162c17c8`, frozen green head
+`ce72f589e42f0e8aa7acee440e033dbe6f66119d`, Rust CI `39711922765`.
+All43 applicable checks succeeded; browser PR job intentionally skipped. Fresh
+184/184 complete outputs (92 Rust,29 workloads,72 stable groups) equal the
+source-equivalent actual #1710 baseline CI `39710315859`, excluding only
+top-level metrics. Full identities/requests/receipts/checkpoints and ordered
+diagnostics are unchanged:6 PASS/23 known FAIL. Independent raw/body review
+CLEAN; separate exact-four-file guard preceded separate merge. Actual parents
+[1910baa65a3,ce72f589e42] and whole tree match; incoming files preserved.
+Corepack's initial registry HTTP503 failed before tests; the unchanged-head
+retry succeeded. No gate was waived.
+
+## Phase 3: Orderly keyed WS admission
+
+Base actual #1711 `bd1a69072c7e`; fresh branch
+`feat/rust-row-admission-orderly-ws`. Commit/review this plan before tests/code.
+Finish this and every remaining keyed admission consumer before the snapshot
+freshness token. Use existing engine `RowAdmission`; no local rejection
+collector, copied shared policy, frame-wide conflict rule or new repair loop.
+
+Validate the complete envelope and raw container before financial effects.
+PositionPush will hold borrowed RawValue elements; execution data accepts one
+object or a complete raw array. Broken JSON, wrong list/container types and
+duplicate required wrapper fields stay structural/inert. Decode/map each row
+once, recover native identity if possible, then engine-admit it. A rejected row
+retains its current copy; healthy neighbors continue. Process deltas sequentially
+in native order so accepted earlier updates are visible to later same-ID rows;
+a valid row can heal a rejection, and a later rejection retains the accepted row.
+
+Split execution preparation from mutation. Pure native preparation validates
+all fallible mapping and supplied root/symbol/child identities and returns an
+owned sparse-terminal or borrowed-row mapped decision. Only engine-admitted
+decisions may commit root stamps/tombstones, child states, proofs/revisions or
+execution bookkeeping. Legitimate sparse leaves and empty root-container
+controls remain valid without fabricated working economics. Reject a malformed
+native nested tree as one row, with one coded row.skipped diagnostic.
+
+Preserve normal mapped execution processing before display freshness, so late
+fills survive; sparse terminal executions retain their separate existing stamp
+gate. Preserve root cascades, BRACKET boundaries, source stamps, amend/margin
+proofs, terminal caches and bounded reconciliation. Position mapping stays pure;
+only admitted rows update stamps/revision/store. Unknown identity never grants
+absence; explicit valid zero/terminal semantics remain native. No synthetic
+fills, global rejection revision increments or per-row network repair.
+
+A separate read-only finding at account.rs1393-1430 writes a cumulative execution
+watermark before validating execution price. First demonstrate actual fill loss
+with a native RED control on original source, then report cause/scope and obtain
+the architecture decision before changing that helper. Do not silently widen
+this migration into a new fill contract or per-venue financial policy.
+
+Likely files: Orderly account.rs, wire.rs, tests/account.rs, this existing plan
+and quality/audit ledger. No signer/request/dispatch/host/SDK/clock, fixtures,
+manifest, normalizer, workflow or caller contract changes. If a general staging
+policy proves necessary, stop/report and extend the engine first.
+
+RED controls: malformed first/middle/last position and normal/algo execution
+rows, decode and mapping errors with healthy later peers; malformed terminal
+root with invalid child identity/side must preserve siblings/proofs/tombstones
+and permit a later lower-sequence valid report; same-ID valid/invalid ordering;
+structural-container inertness; no fabricated fills/writes; row.skipped once.
+Retain existing root-before-children/cascade, sparse/BRACKET, late/duplicate-fill
+and stale-order regressions. Old-source failures must be assertions, not compile
+errors. Verify focused Orderly+Binance native tests (engine if changed), strict
+Clippy/fmt/bans and root typecheck/lint with CARGO_BUILD_JOBS=4. CI owns release,
+size, timing and strict full replays. Archived Orderly15+Binance9 =24 cases/138
+outputs/69 Rust, complete IDs/requests/receipts/checkpoints/ordered diagnostics,
+only top metrics excluded. Healthy fixtures should be byte-identical; any
+intended change needs exact reviewed fix evidence, never wider allowances.
+
+Independent plan/code/adversarial/final evidence reviews answer the architecture
+gate. Full green exact head, fresh guard and separate merge, actual merge audit
+and Aimux report. No live capture or local release/replay/load/timing sweep.
