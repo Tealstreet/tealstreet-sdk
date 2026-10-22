@@ -406,3 +406,57 @@ fn suppressed_public_feed_is_not_supervised() {
     assert_eq!(h.timers.len(), 1, "{:?}", h.timers);
     assert_eq!(h.pings(business), 61);
 }
+
+#[test]
+fn managed_duplicate_open_does_not_repeat_login_or_health() {
+    let mut h = Harness::private();
+    let socket = h.open("/private");
+    let sends = h.sent.len();
+    let opened = h.engine.health().ws_opened;
+    h.event(Event::WsOpened { socket });
+    assert_eq!(
+        h.sent.len(),
+        sends,
+        "duplicate open cannot resend auth/ping"
+    );
+    assert_eq!(
+        h.engine.health().ws_opened,
+        opened,
+        "duplicate open is not traffic"
+    );
+}
+
+#[test]
+fn managed_duplicate_login_ack_does_not_replay_subscriptions() {
+    let mut h = Harness::private();
+    let socket = h.open("/private");
+    let sends = h.sent.len();
+    let requests = h.requests.len();
+    h.message(socket, LOGIN_OK);
+    assert_eq!(h.sent.len(), sends, "one subscription replay per epoch");
+    assert_eq!(
+        h.requests.len(),
+        requests,
+        "duplicate ACK cannot restart reconciliation"
+    );
+}
+
+#[test]
+fn managed_expired_auth_cannot_be_rescued_before_watchdog_delivery() {
+    let mut h = Harness::private();
+    let socket = h.socket("/private");
+    h.event(Event::WsOpened { socket });
+    h.sent.clear();
+    // Deliberately do not deliver timers. Ingress must enforce the same bound.
+    h.now = 10_000.;
+    h.message(socket, LOGIN_OK);
+    assert!(
+        h.closed.contains(&socket),
+        "expired epoch must retire before ACK"
+    );
+    assert!(
+        !h.sent
+            .iter()
+            .any(|(s, t)| *s == socket && t.contains("subscribe"))
+    );
+}

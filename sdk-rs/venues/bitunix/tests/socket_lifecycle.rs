@@ -470,3 +470,73 @@ fn shard_retirement_does_not_clear_books_and_reconnect_replays_current_interests
     e.handle(4.0 + delay, Event::WsOpened { socket: fresh });
     assert!(e.drain_actions().next().is_none());
 }
+
+#[test]
+fn managed_retired_close_does_not_count_twice() {
+    let (mut e, sockets) = ready();
+    let socket = sockets.iter().find(|(f, _)| f == "private").unwrap().1;
+    retry(&mut e, socket, 1.);
+    let closed = e.health().ws_closed;
+    e.handle(2., Event::WsClosed { socket, code: 1006 });
+    e.drain_actions().for_each(drop);
+    assert_eq!(
+        e.health().ws_closed,
+        closed,
+        "retired close cannot mutate health"
+    );
+}
+
+#[test]
+fn managed_retired_open_does_not_count_or_replay() {
+    let (mut e, sockets) = ready();
+    let socket = sockets.iter().find(|(f, _)| f == "futures").unwrap().1;
+    retry(&mut e, socket, 1.);
+    let opened = e.health().ws_opened;
+    e.handle(2., Event::WsOpened { socket });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(
+        e.health().ws_opened,
+        opened,
+        "retired open cannot mutate health"
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsSend { socket: s, .. } if *s == socket))
+    );
+}
+
+#[test]
+fn managed_expired_private_idle_cannot_be_rescued_by_late_pong() {
+    let (mut e, sockets) = ready();
+    let socket = sockets.iter().find(|(f, _)| f == "private").unwrap().1;
+    e.handle(
+        1.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"pong"}"#,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    let last = e.health().last_private_message_ms;
+    // First actual pong activated the idle guard. Timer delivery is delayed.
+    e.handle(
+        45_001.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"pong"}"#,
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket)),
+        "late ingress cannot rescue expired epoch"
+    );
+    assert_eq!(
+        e.health().last_private_message_ms,
+        last,
+        "expired traffic is not health"
+    );
+}
