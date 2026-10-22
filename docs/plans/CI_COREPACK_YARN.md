@@ -42,3 +42,34 @@ pinned release with a fetch guard rejecting every non-tarball URL; each made
 only one Yarn tarball request, then version/cache probes succeeded offline.
 Both registry tarballs are byte-identical and match the published SHA-512.
 Full CI is required before merge.
+
+## Immediate dependency-download follow-up
+
+#1713 landed as `04bec2ac52f`; its frozen bootstrap stays unchanged. Actual clock
+CI then failed fetching cosmiconfig8.3.6 with a tarball HTTP503 after preparation
+succeeded. Fresh `fix/ci-yarn-network-retry` starts from that actual infra merge.
+
+Keep the existing exact Yarn-version/OS/architecture/lockfile-keyed cache restore
+before installation; switch to restore-only and expose its key/path/hit to one
+shared install action. Save a missing cache immediately after a successful root
+install so later unrelated replay failures do not discard the warmed cache.
+Replace all five install steps with that action. Use Corepack Yarn with the
+existing frozen lockfile and network timeout, plus prefer-offline and JSON output.
+
+Use at most three attempts with 5/10-second backoff. A shared runner merges
+stdout/stderr into one ordered stream, preserves live logs and original failure
+exit, and requires positive structured network-error evidence while resolving or
+fetching packages. Retry only transient HTTP408/429/5xx or recognized transport
+errors, and only when every fatal error qualifies. No retry after linking, build
+or lifecycle activity, on root preinstall hooks, unknown/unstructured fatal data,
+nonstandard exits/signals, integrity, lockfile, engine or script failures. Never
+delete node_modules/cache or weaken checksum/frozen-lockfile checks on retry.
+
+Review the plan and implementation independently, including architecture gate:
+one shared CI install/cache choke point, no venue-specific policy. Fault-inject
+transient and permanent network errors, recovered and exhausted attempts, fatal
+mixtures, lifecycle/root-preinstall guards and cache ordering/save conditions.
+Prove old single-shot install red and retry path green on the same injected503.
+Run bootstrap/secret regressions, root checks, shell/YAML/whitespace checks and
+full CI. Freeze/share head promptly, then fresh separate guard and separate merge;
+report actual workflow pin before dependent lanes claim fresh CI.
