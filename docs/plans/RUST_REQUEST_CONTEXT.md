@@ -1191,3 +1191,17 @@ Commit adversarial controls before implementing the exact map transition;
 independent newer-pruned baselines must still block regrowth. These remaining
 legacy signing sites still must reach zero and the bridge be deleted before
 landing-to-master; no managed history or whole-Bybit closure claim.
+
+Integrated local verification on actual #1757/#1759: 1,053 engine/Binance/
+Bitunix unit and integration tests pass, plus3 real provider tests,43 native-host
+tests (including parked provider+fast ACK450ms physical handoff),17 isolated
+Binance WASM-host native unit tests,358 SDK transport/helper tests,34 HOW tests,
+25 conformance/feature controls,25 JS primitive/managed-host tests and16 hosted
+signing tests. Strict all-target engine/reference/registry Clippy uses the
+Binance+Bybit feature set required by the existing construction fixture; source
+formatting, SDK/HOW typecheck/lint,12 ratchet adversarial controls and bans pass.
+The native parked Signer fixture adds only headers:vec![] for the new SignResult
+shape; all original clocks, sends, gaps and assertions are unchanged. These are
+local/debug checks, not rebuilt-WASM replay or timing/size evidence. Independent
+integration/factory/ratchet reviews CLEAN, architecture No. Fresh CI, complete
+authenticated raw/gate/package proof and separate guard remain required.

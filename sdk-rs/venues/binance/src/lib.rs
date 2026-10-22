@@ -385,6 +385,11 @@ impl BinanceFutures {
     }
 
     /// A signed request; every parameter travels in the query string.
+    fn signed_recipe(&self, credentials: Credentials, query: Query) -> sign::Http {
+        sign::Http::new(credentials, query, self.options.recv_window, true)
+            .with_header_policy(self.options.signing_policy.header_policy())
+    }
+
     fn signed(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -432,10 +437,7 @@ impl BinanceFutures {
         };
         cx.sign_http(
             request,
-            Box::new(
-                sign::Http::new(credentials.clone(), query, self.options.recv_window, true)
-                    .with_header_policy(self.options.signing_policy.header_policy()),
-            ),
+            Box::new(self.signed_recipe(credentials.clone(), query)),
         );
     }
 

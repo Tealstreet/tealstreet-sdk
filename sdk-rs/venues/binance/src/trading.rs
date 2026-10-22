@@ -558,12 +558,7 @@ impl BinanceFutures {
                     planned.method,
                     format!("{}{}", self.urls.account_rest, planned.path),
                     None,
-                    Box::new(crate::sign::Http::new(
-                        credentials,
-                        planned.query,
-                        self.options.recv_window,
-                        true,
-                    )),
+                    Box::new(self.signed_recipe(credentials, planned.query)),
                     Pending::Trade(Request {
                         command,
                         context,

@@ -392,6 +392,7 @@ impl safe_cex_engine::signing::Signer for ParkedSigner {
             Ok(safe_cex_engine::signing::SignResult {
                 values: vec![b"value".to_vec()],
                 receipt: work.receipt,
+                headers: vec![],
             })
         })
     }
