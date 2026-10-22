@@ -360,3 +360,33 @@ reference financial repairs without claiming other cumulative consumers migrated
 Latest overseer order is #1722 clock calibration, then #1719, then #1721 signer
 prerequisites. Batch the imminent actual clock dependency before final history
 CI; no merge against the prior scheduler-only head despite its green checks.
+
+
+### BloFin general-history local checkpoint
+
+The existing cursor owner now holds all general query completions, staged and
+accepted typed rows, native-ID dedupe, cursor/page state and contextual final
+shaping. Raw received counts/native cursor selection still precede filters;
+fills count accepted plus staged executions, while income expands a deduped
+native trade into distinct PnL/fee rows and retains its final-only output limit.
+Orders and public trades close their one-page cursor stage. No engine source,
+lib, header/sign implementation or financial reducer is edited. Header-preparation
+failure, missing/repeated cursors and page budget remain strict; actual later
+page failure returns only prior accepted rows with owned incompleteness.
+
+Two extra successful request/limit pins were committed and passed before the
+adapter edit (12 total existing/pinned tests). New controls cover nine failure
+forms across all four queries, staged prefix and native-error-after-prefix,
+filtered-only recovery eligibility, PnL/fee identity, concurrent command owners,
+strict header entropy refusal and the actual 100-page budget. The original
+adapter fails the intended typed-first/retained-later/derived-income controls;
+its bytes are restored after the negative run. Corrected 20 history controls
+and 768 engine/BloFin/Binance tests pass, with strict BloFin all-target Clippy,
+fmt and bans. Independent correctness/adversarial source reviews are clean and
+answer the architecture gate: reuse the shared engine owner, no per-venue copy.
+The old later-income-rejection assertion is superseded only for actual page
+failure; strict pagination refusal remains tested.
+
+This remains a local unpublished checkpoint on actual #1721. Integrate actual
+range reference #1724 before final proof, then add the caller/audit/quality catch-up
+on that base to preserve incoming doc sections. No cutover/NX/remote closure.

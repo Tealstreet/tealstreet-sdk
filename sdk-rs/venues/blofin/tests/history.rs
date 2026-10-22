@@ -94,7 +94,7 @@ fn income_filters_the_window_and_reverses_charged_fees() {
     assert_eq!(rows[2]["symbol"], "DELISTED-USDT");
 }
 #[test]
-fn failing_income_page_returns_no_partial_ledger() {
+fn failing_later_income_page_returns_only_prior_accepted_ledger() {
     let mut h = Harness::new();
     h.seed();
     query(
@@ -123,7 +123,14 @@ fn failing_income_page_returns_no_partial_ledger() {
     let r = h.take("fills-history");
     assert!(r.url.ends_with("&after=901"));
     h.respond(r, r#"{"code":"152401","msg":"denied","data":[]}"#);
-    assert!(result(&h).is_err());
+    assert_eq!(result(&h).unwrap().as_array().unwrap().len(), 100);
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a,Action::Notice(Notice::Event(event))
+        if event.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE
+        && event.fields.contains(&("command",safe_cex_engine::Value::Num(7.0)))))
+    );
 }
 #[test]
 fn public_trades_have_base_and_quote_quantities() {

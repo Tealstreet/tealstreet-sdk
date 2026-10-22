@@ -31,6 +31,18 @@ impl Harness {
         broker_attribution: bool,
         now: f64,
     ) -> Self {
+        Self::with_entropy(instruments, broker_attribution, now, None)
+    }
+    #[allow(dead_code)]
+    pub fn with_signing_entropy(fill: safe_cex_engine::entropy::Fill) -> Self {
+        Self::with_entropy(INSTRUMENT, false, 0.0, Some(fill))
+    }
+    fn with_entropy(
+        instruments: &str,
+        broker_attribution: bool,
+        now: f64,
+        fill: Option<safe_cex_engine::entropy::Fill>,
+    ) -> Self {
         let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
             broker_attribution,
             key: Some("key".into()),
@@ -38,6 +50,9 @@ impl Harness {
             passphrase: Some("pass".into()),
             ..Options::default()
         }));
+        if let Some(fill) = fill {
+            e.set_signing_entropy(fill).unwrap();
+        }
         e.start(now);
         let mut h = Self {
             e,
