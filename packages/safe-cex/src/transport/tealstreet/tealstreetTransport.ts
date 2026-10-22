@@ -33,7 +33,8 @@ export const TEALSTREET_REST_HEADERS = {
 
 export const proxyAuthorizationHeader = (exchange: ExchangeName): string =>
   exchange === 'grvt' || exchange === 'mexc' || exchange === 'paradex' || exchange === 'breakoutprop'
-    ? 'Tealstreet-Authorization' : 'Authorization';
+    ? 'Tealstreet-Authorization'
+    : 'Authorization';
 
 const isTealstreetWebSocketUrl = (url: string): boolean => {
   try {
@@ -49,12 +50,15 @@ export const getProxyForAxios = (
   options: ExchangeOptions,
   exchange: ExchangeName,
   routing?: ResolvedRouting,
+  credentialIntent?: 'public' | 'primary' | 'secondary',
 ): string =>
   config.baseURL?.includes('binance') &&
-  (options.publicDataOnly ||
-    !Object.entries(config.headers ?? {}).some(
-      ([name, value]) => name.toLowerCase() === 'x-mbx-apikey' && Boolean(value),
-    ))
+  (credentialIntent !== undefined
+    ? credentialIntent === 'public'
+    : options.publicDataOnly ||
+      !Object.entries(config.headers ?? {}).some(
+        ([name, value]) => name.toLowerCase() === 'x-mbx-apikey' && Boolean(value),
+      ))
     ? getPublicCorsProxy()
     : options.tealstreetProxy
       ? (routing ?? resolveExchangeRouting(exchange, options)).restProxyHost
@@ -64,7 +68,7 @@ export const getProxyForAxios = (
 export const tealstreetTransport: TransportProvider = {
   name: 'tealstreet',
 
-  rest: ({ exchange, options, config, routing, serverHeaders }) => {
+  rest: ({ exchange, options, config, routing, serverHeaders, credentialIntent }) => {
     // GRVT and blofin cannot use the tunnel, so a tunnel request for them means the proxy.
     const effectiveOptions =
       (exchange === 'grvt' || exchange === 'blofin') && options.tealstreetTunnel
@@ -74,7 +78,7 @@ export const tealstreetTransport: TransportProvider = {
     const privateProxyUrl =
       options.tealstreetTunnel && exchange !== 'blofin' && exchange !== 'grvt'
         ? ''
-        : getProxyForAxios(config, effectiveOptions, exchange, routing);
+        : getProxyForAxios(config, effectiveOptions, exchange, routing, credentialIntent);
     const proxied = privateProxyUrl !== '';
     const baseURLWithProxy = proxied ? `${privateProxyUrl}/${config?.baseURL}` : config?.baseURL;
 

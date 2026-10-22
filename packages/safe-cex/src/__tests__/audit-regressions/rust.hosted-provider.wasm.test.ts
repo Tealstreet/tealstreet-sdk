@@ -83,6 +83,10 @@ it.each(ALIASES)('actual WASM %s captures primary HTTP and exact caller WS bytes
   const requestBefore = structuredClone(request);
   const output = await exchange.signHttpRequest(request);
   expect(output.error).toBeUndefined();
+  // These public hosted callbacks use one-shot capture tokens, not dispatch attempts.
+  const engine = (exchange as unknown as { host: { engine: { signingPending(id: number): boolean } } }).host.engine;
+  expect(typeof engine.signingPending).toBe('function');
+  expect(engine.signingPending(91)).toBe(false);
   expect(output.id).toBe(request.id);
   expect(output.config).toMatchObject({
     url: '/private/audit',

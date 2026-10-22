@@ -21,6 +21,7 @@ const tunnels = vi.hoisted(
 // Exercise the real HOW adapter and its RPC envelope; replace only the wire.
 vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
   HOWWebSocket: class {
+    epoch = 0;
     isOpen = true;
     isInitialized = true;
     isTimeSynced = true;
@@ -36,6 +37,9 @@ vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
     }
     off(event: string) {
       this.listeners.delete(event);
+    }
+    sendPrepared(frame: string) {
+      this.send(JSON.parse(frame));
     }
     send(message: Record<string, any>) {
       this.state.sent.push(message);
@@ -185,5 +189,50 @@ describe('engine through the real HOW package', () => {
     });
     expect(raw.request).not.toHaveBeenCalled();
     route.dispose!();
+  });
+});
+
+describe('managed engine through real HOW preparation', () => {
+  it('prepares without rpc.http and synchronously dispatches the final signed bytes exactly once', async () => {
+    const raw = rawTransport();
+    const routed = createEngineTransport(
+      'bybit',
+      { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true },
+      raw,
+    );
+    const state = tunnels.get(SINGAPORE_HOW_EGRESS)!;
+    state.sent.length = 0;
+    state.reply = { status: 200, data_raw: ' {"id":900719925474099312345}\n', headers: {} };
+    const original = {
+      request: 31,
+      method: 'POST',
+      url: 'https://api.bybit.com/v5/order/create',
+      headers: {},
+      intent: 'primary' as const,
+    };
+    const prepared = await routed.prepareHttp!(original);
+    expect(state.sent).toHaveLength(0);
+    const signed = {
+      ...original,
+      url: original.url + '?x=%2B+%20',
+      headers: { 'X-BAPI-SIGN': 'exact' },
+      body: ' {"id":900719925474099312345,"price":1.2300}\n',
+    };
+    const bound = prepared.bind(signed);
+    expect(bound.ready()).toBe(true);
+    expect(state.sent).toHaveLength(0);
+    const pending = bound.dispatch();
+    expect(state.sent).toHaveLength(1);
+    expect(state.sent[0].arg).toEqual({
+      url: signed.url,
+      method: 'POST',
+      params: {},
+      data: signed.body,
+      headers: signed.headers,
+    });
+    expect(new TextDecoder().decode((await pending).body as Uint8Array)).toBe(state.reply.data_raw);
+    expect(raw.request).not.toHaveBeenCalled();
+    expect(() => bound.dispatch()).toThrow();
+    routed.dispose!();
   });
 });

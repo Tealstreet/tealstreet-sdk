@@ -207,12 +207,16 @@ impl<V: Venue> Engine<V> {
         cx.with_socket_driver(f)
     }
     fn socket_native(&mut self, now: f64, event: LifecycleEvent) -> Result<(), SocketError> {
+        // Lifecycle work is independent of the HTTP codec that queued it.
+        let delivery = self.io.http_delivery.take();
         let mut cx = Cx {
             now,
             store: &mut self.store,
             io: &mut self.io,
         };
-        self.venue.on_socket_event(&mut cx, event)
+        let result = self.venue.on_socket_event(&mut cx, event);
+        self.io.http_delivery = delivery;
+        result
     }
     fn socket_enqueue(&mut self, now: f64, effects: Vec<Effect>) {
         let mut cx = Cx {
@@ -620,6 +624,7 @@ mod tests {
         refuse_ready: bool,
         refuse_retirement: bool,
         receipts: usize,
+        borrowed_http_delivery: bool,
     }
     fn policy() -> FeedPolicy {
         FeedPolicy {
@@ -645,6 +650,7 @@ mod tests {
             cx: &mut Cx<'_, ()>,
             event: LifecycleEvent,
         ) -> Result<(), SocketError> {
+            self.borrowed_http_delivery |= cx.io.http_delivery.is_some();
             self.events.push(event.clone());
             match event {
                 LifecycleEvent::Reconnect(feed) => {
@@ -727,6 +733,56 @@ mod tests {
         };
         cx.stop_socket_feed(feed);
     }
+    #[test]
+    fn socket_callback_cannot_borrow_http_delivery_and_restores_outer_scope() {
+        use crate::request_context::{Attempt, Context, Operation, Owner};
+        let (mut e, _) = engine();
+        let epoch =
+            e.io.socket_driver
+                .state
+                .epoch(e.venue.feed.unwrap())
+                .unwrap();
+        let context = Context::new(
+            Owner::Command {
+                id: 7,
+                generation: 19,
+            },
+            3,
+            Operation::Read,
+            None,
+            0.,
+            5_000.,
+            None,
+        )
+        .unwrap();
+        e.io.http_delivery = Some(request_context_registry::Delivery {
+            context,
+            attempt: Attempt {
+                request: RequestId(42),
+                generation: 1,
+            },
+        });
+        e.socket_native(1., LifecycleEvent::Ping(epoch)).unwrap();
+        assert!(
+            !e.venue.borrowed_http_delivery,
+            "socket callback borrowed an HTTP delivery"
+        );
+        assert_eq!(
+            e.io.http_delivery.as_ref().unwrap().attempt.request,
+            RequestId(42)
+        );
+        e.io.socket_effects.push_back(Effect::Ping(epoch));
+        e.finish_event_scope(2.);
+        assert!(
+            !e.venue.borrowed_http_delivery,
+            "socket finalizer borrowed an HTTP delivery"
+        );
+        assert_eq!(
+            e.io.http_delivery.as_ref().unwrap().attempt.request,
+            RequestId(42)
+        );
+    }
+
     #[test]
     fn unexpected_close_counts_once_and_replacement_is_a_reconnect() {
         let (mut e, socket) = engine();

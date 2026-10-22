@@ -64,4 +64,8 @@ if ! python3 scripts/check-signing.test.py || ! python3 scripts/check-signing.py
   status=1
 fi
 
+if ! python3 scripts/check-request-context.test.py || ! python3 scripts/check-request-context.py; then
+  status=1
+fi
+
 exit $status
