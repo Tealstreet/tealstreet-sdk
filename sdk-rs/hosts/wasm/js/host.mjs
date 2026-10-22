@@ -10,11 +10,49 @@ function signingReceipt(value) {
 
 function checkedSigningResult(expected, count, result) {
   const receipt = signingReceipt(result?.receipt);
+  const rawValues = result?.values;
   if (!receipt || !expected || receipt.stampMs !== expected.stampMs || receipt.expiryMs !== expected.expiryMs
-    || !Array.isArray(result?.values) || result.values.length !== count
-    || result.values.some((bytes) => !Array.isArray(bytes) || bytes.length > 1048576
-      || bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))) return undefined;
-  return { values: result.values.map((bytes) => Array.from(bytes)), receipt };
+    || !Array.isArray(rawValues) || rawValues.length !== count) return undefined;
+  const values = [];
+  for (let i = 0; i < count; i++) {
+    const rawBytes = rawValues[i];
+    if (!Array.isArray(rawBytes)) return undefined;
+    const size = rawBytes.length;
+    if (!Number.isSafeInteger(size) || size > 1048576 || size < 0) return undefined;
+    const bytes = [];
+    for (let j = 0; j < size; j++) {
+      const byte = rawBytes[j];
+      if (!Number.isInteger(byte) || byte < 0 || byte > 255) return undefined;
+      bytes.push(byte);
+    }
+    values.push(bytes);
+  }
+  let headers;
+  const rawHeaders = result.headers;
+  if (rawHeaders !== undefined) {
+    if (!Array.isArray(rawHeaders)) return undefined;
+    const count = rawHeaders.length;
+    if (!Number.isSafeInteger(count) || count < 0 || count > 32) return undefined;
+    let total = 0;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+    headers = [];
+    for (let i = 0; i < count; i++) {
+      const pair = rawHeaders[i];
+      if (!Array.isArray(pair) || pair.length !== 2) return undefined;
+      const name = pair[0];
+      const value = pair[1];
+      if (typeof name !== 'string' || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || name.length > 256
+        || typeof value !== 'string' || value.length > 8192 || /[\x00-\x08\x0a-\x1f\x7f]/.test(value)) return undefined;
+      const bytes = encoder.encode(value);
+      if (bytes.length > 8192 || decoder.decode(bytes) !== value) return undefined;
+      total += name.length + bytes.length;
+      if (total > 32768) return undefined;
+      headers.push([name, value]);
+    }
+  }
+  return { values, receipt,
+    ...(headers?.length ? { headers } : {}) };
 }
 
 // Runs a WasmEngine against a transport: executes its actions (sockets, HTTP,

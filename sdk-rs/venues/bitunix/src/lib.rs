@@ -415,8 +415,9 @@ impl Venue for BitunixFutures {
         pending: &Pending,
         response: &Response<'_>,
         _now: f64,
+        store: &safe_cex_engine::Store,
     ) -> Option<safe_cex_engine::AuthOutcome> {
-        self.account_auth(pending, response)
+        self.account_auth(pending, response, store)
     }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -628,7 +629,7 @@ impl Venue for BitunixFutures {
                     && !read.position_rejected.any()
                     && !read.partial_orders()
                     && (!matches!(read.axis, account::Axis::Orders | account::Axis::Tpsl)
-                        || read.order_write_revision == self.account.order_write_revision)
+                        || read.orders_current(cx.store))
                     && self.account.generations[read.axis.index()] == read.generation
                     && self.account.serials[match read.axis {
                         account::Axis::Balance => 0,

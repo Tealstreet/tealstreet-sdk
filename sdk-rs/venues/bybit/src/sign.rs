@@ -29,6 +29,7 @@ pub(crate) struct Http {
     payload: String,
     window: u32,
     stamp: String,
+    header_policy: safe_cex_engine::signing_headers::ResultHeaderPolicy,
 }
 impl Http {
     pub fn new(credentials: Credentials, payload: String, window: Option<u32>) -> Self {
@@ -37,10 +38,23 @@ impl Http {
             payload,
             window: window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS),
             stamp: String::new(),
+            header_policy: Default::default(),
         }
     }
 }
+impl Http {
+    pub fn with_header_policy(
+        mut self,
+        policy: safe_cex_engine::signing_headers::ResultHeaderPolicy,
+    ) -> Self {
+        self.header_policy = policy;
+        self
+    }
+}
 impl SignStep for Http {
+    fn result_header_policy(&self) -> safe_cex_engine::signing_headers::ResultHeaderPolicy {
+        self.header_policy
+    }
     fn prepare(
         &mut self,
         outbound: &mut Action,

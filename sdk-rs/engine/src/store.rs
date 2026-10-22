@@ -1,6 +1,7 @@
 //! Typed exchange state plus change tracking. Once per flush the engine drains
 //! the changes with [`Store::take_pending`] and writes them into the flush
 //! frame with [`Store::write`].
+use crate::fence::{Epoch, Stamp};
 use crate::model::{
     Balance, CoinBalance, CurrencyBalance, Loaded, MarginType, Market, Order, OrderStatus,
     Position, Ticker,
@@ -35,6 +36,7 @@ pub struct Store {
     // Sorted row indexes borrow ticker identity instead of copying every symbol.
     ticker_by_symbol: Vec<u32>,
     orders: Vec<Order>,
+    order_snapshot_epoch: Epoch,
     positions: Vec<Position>,
     position_ids: bool,
     balance: Balance,
@@ -54,6 +56,11 @@ pub struct Store {
     /// Funded base assets awaiting valuation; live data may add their rows after the seed.
     wanted_ticker_bases: HashSet<String>,
 }
+
+/// Linear admission authority for one logical order read, including all pages.
+/// It cannot be cloned or serialized; only its issuing Store can consume it.
+#[derive(Debug)]
+pub struct OrderSnapshotToken(Stamp);
 
 /// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
 /// `packages/safe-cex/src/store/store.base.ts`.
@@ -462,6 +469,52 @@ impl Store {
 
     pub fn order(&self, id: &str) -> Option<&Order> {
         self.orders.iter().find(|order| order.id == id)
+    }
+
+    /// Capture once before issuing a logical order read. Exhaustion is permanent.
+    pub fn begin_orders_snapshot(&mut self) -> Option<OrderSnapshotToken> {
+        self.order_snapshot_epoch.stamp().map(OrderSnapshotToken)
+    }
+
+    /// Read-only checks do not consume authority (for page joins and auth evidence).
+    pub fn orders_snapshot_current(&self, token: &OrderSnapshotToken) -> bool {
+        self.order_snapshot_epoch.current(&token.0)
+    }
+
+    /// Accepted native writes, including absent-row ACKs, invalidate older reads.
+    /// Call explicitly at the venue's write boundaries; WS row admission and
+    /// sibling snapshot publication need not advance this selective fence.
+    pub fn invalidate_order_snapshots(&mut self) {
+        self.order_snapshot_epoch.advance();
+    }
+
+    /// Validate all authority before native-cache application AND row publication.
+    /// The callback receives current rows read-only and returns owned final rows.
+    /// It must be infallible and synchronous: no I/O, command callbacks
+    /// or reborrowing this Store. This is not a panic-recovery transaction.
+    pub fn commit_orders_snapshot<I, F>(&mut self, tokens: I, publish: F) -> bool
+    where
+        I: IntoIterator<Item = OrderSnapshotToken>,
+        F: FnOnce(&[Order]) -> Vec<Order>,
+    {
+        let mut any = false;
+        for token in tokens {
+            any = true;
+            if !self.orders_snapshot_current(&token) {
+                return false;
+            }
+        }
+        if !any {
+            return false;
+        }
+        let orders = publish(&self.orders);
+        self.set_orders(orders);
+        true
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn exhaust_order_snapshots_for_test(&mut self) {
+        self.order_snapshot_epoch.exhaust_for_test();
     }
 
     /// Replace every order with a venue snapshot.
@@ -1235,6 +1288,108 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn snapshot_order(id: &str) -> Order {
+        Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTC/USDT".into(),
+            kind: crate::model::OrderType::Limit,
+            side: crate::model::OrderSide::Buy,
+            price: 10.0,
+            amount: 2.0,
+            filled: 0.0,
+            remaining: 2.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+
+    #[test]
+    fn order_snapshot_admission_rejects_before_native_rows_readiness_and_dirty_state() {
+        use std::cell::Cell;
+        let mut store = Store::default();
+        let stale = store.begin_orders_snapshot().unwrap();
+        store.invalidate_order_snapshots();
+        let native = Cell::new(7);
+        assert!(!store.commit_orders_snapshot([stale], |_| {
+            native.set(0);
+            vec![]
+        }));
+        assert_eq!(native.get(), 7);
+        assert!(!store.loaded().orders);
+        assert!(!store.changes.orders && !store.changes.status);
+        let token = store.begin_orders_snapshot().unwrap();
+        let mut moved = Box::new(store);
+        assert!(moved.orders_snapshot_current(&token));
+        let mut foreign = Store::default();
+        let other = foreign.begin_orders_snapshot().unwrap();
+        assert!(!moved.commit_orders_snapshot([token, other], |_| {
+            native.set(0);
+            vec![]
+        }));
+        assert_eq!(native.get(), 7);
+        assert!(!moved.loaded().orders);
+        assert!(!moved.changes.orders && !moved.changes.status);
+        assert!(!moved.commit_orders_snapshot([], |_| {
+            native.set(0);
+            vec![]
+        }));
+        let fresh = moved.begin_orders_snapshot().unwrap();
+        moved.exhaust_order_snapshots_for_test();
+        assert!(!moved.commit_orders_snapshot([fresh], |_| {
+            native.set(0);
+            vec![]
+        }));
+        moved.invalidate_order_snapshots();
+        assert!(moved.begin_orders_snapshot().is_none());
+        assert_eq!(native.get(), 7);
+        // Accepted writes remain possible after exhaustion.
+        moved.set_orders(vec![snapshot_order("accepted")]);
+        assert!(moved.order("accepted").is_some());
+    }
+
+    #[test]
+    fn sibling_snapshots_remain_current_and_fresh_empty_snapshots_clear_rows() {
+        let mut store = Store::default();
+        let native_commits = std::cell::Cell::new(0);
+        let first = store.begin_orders_snapshot().unwrap();
+        let sibling = store.begin_orders_snapshot().unwrap();
+        let joint_a = store.begin_orders_snapshot().unwrap();
+        let joint_b = store.begin_orders_snapshot().unwrap();
+        assert!(store.commit_orders_snapshot([first], |current| {
+            assert!(current.is_empty());
+            native_commits.set(native_commits.get() + 1);
+            vec![snapshot_order("seed")]
+        }));
+        assert_eq!(native_commits.get(), 1);
+        assert!(store.order("seed").is_some());
+        assert!(store.orders_snapshot_current(&sibling));
+        assert!(store.commit_orders_snapshot([sibling], |current| {
+            assert_eq!(current[0].id, "seed");
+            vec![]
+        }));
+        assert!(store.orders().is_empty());
+        assert!(store.loaded().orders);
+        store.take_pending();
+        assert!(store.commit_orders_snapshot([joint_a, joint_b], |_| vec![]));
+        assert!(store.changes.orders);
+        let stale = store.begin_orders_snapshot().unwrap();
+        store.invalidate_order_snapshots();
+        store.set_orders(vec![snapshot_order("newer")]);
+        store.take_pending();
+        assert!(!store.commit_orders_snapshot([stale], |_| panic!("stale native effect")));
+        assert!(store.order("newer").is_some());
+        assert!(!store.changes.orders && !store.changes.status);
+    }
 
     fn word(payload: &[u8], at: usize) -> u32 {
         u32::from_le_bytes(payload[at..at + 4].try_into().unwrap())

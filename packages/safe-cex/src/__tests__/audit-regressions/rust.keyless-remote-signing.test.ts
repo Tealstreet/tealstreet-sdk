@@ -3,6 +3,7 @@ import type { ExchangeName, ExchangeOptions, RemoteSigner } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { exchangeRegistry } from '../../exchanges/registry';
+import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import {
   runsOnRustEngine,
   RUST_VENUES,
@@ -35,16 +36,16 @@ const engineSigned = new Set<ExchangeName>(['lighter', 'lighter-robinhood', 'par
 describe('keyless remote-signed accounts never start on an engine that cannot sign', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('routes every Rust venue family to TS except those that sign with key or none', () => {
+  it('routes hosted accounts to Rust only with native signing or a declared provider', () => {
     for (const name of RUST_VENUES) {
-      expect(runsOnRustEngine(name, hosted()), name).toBe(engineSigned.has(name));
+      expect(runsOnRustEngine(name, hosted()), name).toBe(engineSigned.has(name) || deriveRemoteSigningPolicy(name)?.enabled === true);
     }
     // A local secret or an AsterDEX V3 wallet key signs on the engine as before.
     expect(runsOnRustEngine('bybit', hosted({ secret: 'local-secret' }))).toBe(true);
     expect(runsOnRustEngine('asterdex', hosted({ auth: { privateKey: '0xabc' } }))).toBe(true);
     expect(runsOnRustEngine('hyperliquid', { engine: 'rust', secret: '' })).toBe(true);
     // The wallet-key exemption is AsterDEX's own field, not a pass for other venues.
-    expect(runsOnRustEngine('bybit', hosted({ auth: { privateKey: '0xabc' } }))).toBe(false);
+    expect(runsOnRustEngine('okx', hosted({ auth: { privateKey: '0xabc' } }))).toBe(false);
     // Hosted Paradex sends its signing key in `key` with both addresses, as exchange-server does.
     const paradex = hosted({ key: '0x' + '1'.repeat(64), paradexAddress: '0xabc', subkeyAddress: '0xdef' });
     expect(runsOnRustEngine('paradex', paradex)).toBe(true);
@@ -53,7 +54,7 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
     expect(runsOnRustEngine('hyperliquid', hosted({ enableSpotMarkets: true }))).toBe(false);
   });
 
-  it('createExchange builds the TS venue for a hosted account in each opt-in family', async () => {
+  it('createExchange admits declared providers and retains TS fallback for unadopted hosted families', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     const families: ExchangeName[] = [
       'binance',
@@ -85,7 +86,7 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
       // Venue construction checks the hosted fields the account form already requires.
       const exchange = await createExchange(name, hosted({ passphrase: 'hosted-passphrase' }));
       try {
-        expect(exchange, name).not.toBeInstanceOf(RustEngineExchange);
+        expect(exchange instanceof RustEngineExchange, name).toBe(deriveRemoteSigningPolicy(name)?.enabled === true);
       } finally {
         exchange.dispose();
       }
@@ -94,7 +95,7 @@ describe('keyless remote-signed accounts never start on an engine that cannot si
   }, 60_000);
 
   it('a directly built engine refuses a hosted account at startup with the reason', async () => {
-    for (const name of ['hyperliquid', 'bybit', 'tealstreet-dex', 'coinbase'] as ExchangeName[]) {
+    for (const name of ['hyperliquid', 'okx', 'tealstreet-dex', 'coinbase'] as ExchangeName[]) {
       const exchange = new RustEngineExchange(name, hosted(), new DefaultStore());
       await expect(exchange.start(), name).rejects.toThrow('keyless remote-signed accounts run on the TS venue');
       exchange.dispose();

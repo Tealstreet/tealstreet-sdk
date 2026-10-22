@@ -195,3 +195,291 @@ and cfg(test) fixtures, with no new runtime secret holders or crypto execution.
 The actual-WASM HTTP/WS fixture requires rebuilt CI artifacts; no local release
 build or replay was run. Fresh CI, replay preservation and final separate guard
 remain gates, and half 2 is unimplemented.
+
+
+## Half 2 implementation slices (Binance first)
+
+Plan, 2026-10-22. Fresh branch from actual signing-side bridge #1745
+`5743c485d44e348e3d29039c4ebe83f6a78f0186`. Implementation remains local during
+#1746's build-policy window; switch back to finish Bybit #1728 when it lands.
+
+1. Add a shared account-local remote-provider adapter and declarative alias
+   policy. Preserve exact primitive preimages, owned ref checks, existing
+   ws-auth request/response envelope and primary-only RemoteSigner authority;
+   reject required-secondary work. PayloadSigner keeps its explicit public-key
+   selector and existing precedence. Declare the nine-alias REST-only private
+   feed rule centrally, enabling runtime adoption for Binance first.
+2. Extend bounded optional callback headers through the existing SignResult
+   validation and dispatch custody, coordinated with RequestContext ownership
+   before touching its files. Declare venue precedence as data: Binance callback
+   overrides, Bybit fixed SIGN/APIKEY/TIMESTAMP with callback RECV-WINDOW allowed.
+   Never keep an independent header map or mutate after transport bind.
+3. Wire Binance trusted setup/SDK/factory/worker routing to the shared provider;
+   admit keyless construction only with its owned configured provider. Suppress
+   private subscription/listen-key work for PayloadSigner at its policy boundary.
+   Add real-WASM plus SDK paired hosted/provider tests, preserving public bypass,
+   ref/account/id/shape validation, abort/disposal/availability, deadlines and
+   native retry/unknown outcomes. Bybit runtime adoption follows actual #1728.
+4. Integrate actual build/RequestContext dependencies before final exact-head CI,
+   full authenticated replay proof, independent review and separate merge guard.
+
+Architecture gate: this extends shared signer/setup/provider policies. No venue
+crypto, credential fallback, socket lifecycle service or pacing policy is added.
+The unchanged external wire gains no required field or acknowledgement. Focused
+local unit/type/lint/native gates use existing scripts; CI owns WASM/replays.
+
+
+Half-2 local foundation checkpoint (not wired): the engine has a pure shared
+`signing_headers` validator/merge policy, default-deny, with trusted HTTP protected
+names. Bounds are 32 callback headers, 256 bytes/name, 8192 bytes/value and 32768
+aggregate UTF-8 bytes; names are ASCII tokens and values reject controls except
+HTAB. All metadata validates before outbound mutation. Case-insensitive callback
+last-wins collapses all touched native aliases, preserving unrelated native data
+and leaving empty callbacks inert. Five focused native tests pass, including a
+compiled RED/green duplicate-native regression and exact aggregate boundaries.
+Independent adversarial review and strict engine Clippy pass; no dispatch/capture,
+SignResult, routing, feed or live provider path uses this policy yet.
+
+RequestContext's owner agreed this lane owns signing result/header regions.
+Headers must apply before ManagedHttp Bind, with existing same-attempt custody;
+Pending managed/route-ready and prepare raw/protocol/revision/entropy contracts
+must survive actual integration. Active http_lifecycle.rs test literals remain
+with that owner until the reviewed API/head is shared.
+
+
+Half-2 standalone provider checkpoint (not installed): `remoteSignerProvider.ts`
+accepts captured account-owned public credential/ref bindings, with RemoteSigner
+precedence over PayloadSigner and no fallback. It validates the complete bounded
+primitive batch before callbacks, presents only owned public credentials, and
+supports exact HMAC-SHA256 UTF-8 Bytes/Credential preimages. RemoteSigner uses the
+unchanged ws-auth/hex envelope with accountName and fresh response-bound id, and
+refuses required-secondary signatures. PayloadSigner receives its selected
+public key and exact preimage. Optional headers are bounded attempt-local result
+metadata, never a transport side map; multiple-signature header results refuse.
+Abort/disconnect cleanup, malformed results, reference/receipt bounds, legacy
+empty error compatibility, UTF-8/BOM and sparse arrays have focused regressions.
+All 38 SDK provider tests, package typecheck/lint and independent adversarial
+review pass. Construction, routing and private-feed admission remain unchanged;
+this standalone checkpoint does not yet make keyless accounts run on Rust.
+
+
+Half-2 shared result checkpoint: optional callback headers now cross the same
+SignResult through Rust and the JS host, with unchanged empty-result serialization.
+Trusted SignStep policy is copied into Pending; only HTTP/single-sign recipes may
+opt in. Full metadata validates before recipe application and is merged into the
+same fresh action afterward, including removal of dynamic protected aliases even
+for empty callbacks. Unsigned recipes never retain callback values. Existing raw
+operation deadlines, calibration revision/freshness and final release fences
+remain in force; capture work defaults to denying headers. Dense bounded JS
+snapshots reject sparse/provider-overridden arrays and mutable getter swaps.
+All 383 native engine tests, 178 JS host tests and strict Clippy pass; two
+independent reviews are clean after the protected-shadow and snapshot corrections.
+No family recipe opts in yet; the standalone SDK adapter is still not installed.
+
+
+Paused local work after actual #1746 landed: shared construction declarations now
+cover all nine Binance/Bybit aliases (one JSON source for SDK/native generation),
+with REST-only PayloadSigner intent separate from public/account eligibility and
+explicit protected-header data. Engine policy/config accessors use the regions
+agreed with RequestContext's owner. Initial Binance producer guards and signed
+HTTP header-policy adoption are implemented locally. Registry cargo check passes;
+this policy/adoption slice still needs final native regressions, independent
+review, TS checks and runtime setup/provider wiring. Bybit runtime adoption is
+not implemented; its current policy test intentionally pins the pre-#1728 admission.
+The delegated setup capsule passed 60 focused SDK tests (38 provider +22 setup);
+its native-readCredentials scrub finding is fixed with hostile-input coverage.
+Final independent delta review and integration checks remain required.
+No half-2 source is pushed or merge-ready. Finish #1728 first on actual #1746,
+then resume this branch and integrate the actual predecessors before final proof.
+
+
+### Half-2 runtime integration plan after the actual Bybit landing
+
+Actual Bybit #1728 `3b20e602258` and KuCoin Spot profile #1753 `35949503f7f`
+are now integrated by porcelain merges. Independent integration review retained
+all incoming and existing source; the only conflict combined Bybit dispatch
+flags with the existing remote policy declarations. Seventy focused SDK tests
+and seven shared registry code-generation tests pass. This is not runtime
+remote-signing verification.
+
+Next committable phase, Binance first:
+
+- Extend the existing shared construction declaration with closed delegated
+  admission, consumed by native construction and the central SDK factory
+  predicate. Declaring headers/feed behavior alone never enables a family.
+- Select `DelegatedSignerSetup` before generic options are retained; capture
+  public-mode and callback intent, remove callback functions as well as raw
+  credentials, and install its owned provider into the existing `EngineHost`.
+  RemoteSigner has authority precedence with no local fallback; configured
+  PayloadSigner intent still selects REST-only feeds if both callbacks exist.
+- Narrow native payload rejection only for the admitted provider-owned path.
+  Preserve all public bypass, secondary read-routing metadata and unsupported
+  family behavior. Close the capsule on construction/host initialization failure
+  and disposal; do not add a provider queue or another signing timeout.
+- Prove all four Binance private-feed guards, owned canonical signing/headers
+  and genuine REST account readiness. Add factory/SDK tests and actual-WASM
+  browser-half1-to-keyless-half2 round trips with independent MAC expectations.
+  Keep callback provisioning worker-local; functions are never serialized in
+  ordinary worker init messages. Review/narrow the existing MCP caller guard.
+- Include the actual contract, callers, remaining deployment/worker limitations
+  and mapping requirements in `RUST_CUTOVER_CALLERS.md` in this same PR.
+
+Bybit follows on this branch only after its native header/feed adoption and
+regressions. Hyro's WS-owned readiness makes PayloadSigner REST-only admission a
+separate explicit protocol boundary: the TS subclass also inherits a payload
+connection guard that prevents its handshake. This was reported to the overseer;
+no fake readiness, weakened snapshot invariant or new recovery policy is planned.
+RemoteSigner streaming and the four ordinary Bybit aliases remain independent.
+
+Architecture gate: one trusted setup/provider/host admission path plus declared
+codec policy, not a per-venue signing, scheduling, auth or session service. The
+RequestContext lane retains HTTP release/managed lifecycle ownership; this lane
+owns result headers before bind and construction/feed configuration only.
+
+
+Half-2 declaration/feed verification checkpoint (still no SDK runtime admission):
+`remoteSigning.enabled` now separates adoption from future codec declarations;
+Binance's four aliases are declared enabled, while Bybit stays disabled until
+its native adoption. `payloadSupported` is false for Hyro, true for the other
+eight aliases; the overseer approved typed Unsupported/notSent for private Hyro
+PayloadSigner setup because TS never completes that handshake today. Hyro
+RemoteSigner remains in scope. One generator validates the shared dispatch,
+header and REST-only prerequisites before enabling a declaration. Nine SDK
+admission assertions were observed RED before adding these fields, then GREEN.
+
+A native four-alias regression completes actual account REST reads and asserts
+loaded balance/orders/positions, then fires queued timers through 24 seconds and
+requires continued REST reconciliation with no listen-key/session/subscription
+work. Disabling only the four private-feed guards produces a compiled RED leak;
+both source files were restored byte-for-byte and GREEN reverified. The policy
+remains immutable after startup. Existing fixtures keep default streaming/deny
+policy; no existing assertions were removed.
+
+Local gates pass: 79 focused SDK tests, eight registry code-generation tests, the
+four-alias native feed regression, package typecheck/lint, strict all-target
+Clippy for engine/registry/Binance, format and the signing ratchet. Independent
+reviews clear the declaration-only slice, fixture/test and optional-provider
+type narrowing. These checks do not yet prove keyless SDK setup, actual-WASM
+provider round trips, Bybit feed/header adoption or worker caller migration.
+Those runtime gates and the same-PR caller-contract section remain required.
+
+
+Half-2 runtime admission checkpoint: Binance's four enabled aliases now select a
+private DelegatedSignerSetup before generic options are retained. The captured
+callback/public/feed intent overrides forged native JSON; RemoteSigner wins,
+configured malformed callbacks reject, and no raw local material can become a
+fallback. Host initialization failure and disposal retire even retained signer
+wrappers. Registry admission independently requires enabled policy, supported
+PayloadSigner lifecycle, injected provider and valid primary refs; a bare flag
+is rejected before legacy local credentials are consumed. Native four-alias
+startup verifies callback-header precedence and no private socket/listen-key work.
+
+Owner-approved receiver contract: PayloadSigner is bound to a frozen private
+snapshot containing the selected public key and declared non-secret metadata.
+Secret/passphrase fields and nested signing/callback/transport objects are
+excluded. Callbacks reading this.secret must hold their own material. The new
+receiver regression was observed RED on the unbound call and GREEN after the
+shared snapshot projection; caller documentation is included in this PR.
+
+Verification: 77 focused SDK tests, package typecheck/lint, native construction
+and delegated-provider tests and strict registry all-target Clippy pass. Two
+independent reviews clear shared admission/lifetime and receiver authority.
+Architecture gate: one setup/provider/registry path plus per-venue declarations;
+no new crypto, retry, socket state or timing mechanism. These checks are native
+and mocked SDK boundaries, not actual-WASM proof. Actual-WASM paired hosted
+round trips, MCP guard adoption, Bybit feed/header adoption, current landing
+integration and complete CI/replay proof remain required before readiness.
+
+
+Next codec-adoption phase (Bybit): pass the already declared shared header policy
+through Bybit Options into its existing HTTP SignStep, retaining default deny in
+independent native fixtures. Apply that policy to normal and environment-probe
+HTTP work; WS work stays default deny. Gate private connection creation with the
+engine private-feed policy, preserving ordinary REST startup/polling and Hyro's
+existing WS readiness. Enable the five aliases only after native regressions:
+four REST-only account aliases plus all-five RemoteSigner/hosted pairing. Private
+Hyro PayloadSigner remains setup Unsupported/notSent per the owner decision.
+Test protected signature/key/timestamp versus overridable recvWindow header
+precedence, private-feed suppression/reconciliation, and hosted provider wire.
+No WS auth state/reconnect or outcome policy is added in this codec phase.
+
+
+Hosted callback-header closure: signing-only captures currently deny all result
+headers, which would reject a keyless PayloadSigner HTTP callback that supplies
+headers. Add a trusted-policy capture entry point while preserving default deny
+for all existing primitive/WS/credential captures. Store the declared HTTP policy
+beside the same work/metadata/fences; validate receipt, lengths and all headers
+before output. Registry HTTP formatting applies the shared protected-name policy
+and returns optional bounded headers; the standalone SDK interceptor receives
+these as its existing PayloadSigner result, retaining its original precedence.
+No new external sign-request/response field, host map or unsigned recipe state.
+Add RED/GREEN capture tests, codec policy tests and actual-WASM callback-header
+round trips. Coordinate additive API with RequestContext before final integration.
+
+
+Owner wire refinement: preserve legacy WS envelopes byte-for-byte, including
+Bybit's shared `bybit` label for all five aliases and `{expires}`, and Binance
+Spot's alias, fixed subscription request id and `{apiKey, recvWindow, timestamp}`.
+Declare label/extra-data codec/fixed WS id in the same construction policy.
+A shared codec derives metadata only from the owned public credential, captured
+receipt and exact prepared preimage; it never reads time independently or grants
+key authority from advisory Context. Ordinary HTTP primitive envelopes keep
+unique correlation ids and no synthetic WS metadata. Regression tests invoke the
+legacy TS WS methods with fixed clock/id and compare complete serialized
+requests for each alias; production code imports no TS venue classes.
+
+
+Codec/capture implementation checkpoint: four ordinary Bybit aliases load and
+continue REST account polling under the shared immutable RestOnly policy; no
+private auth/socket/supervision work is created. Disabling only the private
+connect guard produces compiled RED, then exact source restoration is GREEN.
+Normal/probe HTTP work adopts the same declared header policy, with native auth
+fields protected and callback recvWindow precedence retained. Hyro RemoteSigner
+keeps streaming; private PayloadSigner rejects typed at setup.
+
+The shared hosted capture now retains trusted HTTP policy beside its exact work
+and existing single-use/raw-deadline/protocol-expiry/revision fences. WS and
+credential captures stay default deny. The typed output carries only bounded,
+validated, policy-filtered attempt headers into the standalone interceptor.
+Native capture/codec tests cover accepted HTTP, denied WS/credential headers,
+malformed headers and unchanged lifetime fences.
+
+Legacy WS wire tests compare complete serialized requests to the actual TS WS
+methods for all five Bybit aliases and Binance Spot. Pure HTTP controls preserve
+original aliases and unique correlation even for a Binance Spot query with the
+same bytes as WS auth. The trusted canonical builders distinguish that collision:
+HTTP uses opaque Bytes plus a validated stamp; native Spot WS delimits an owned
+Credential part, while hosted WS has no HTTP stamp. These invariants are part of
+the codec contract and must be kept when adding builders. Full admission maps
+validate codec/receipt facts before any callback; a malformed later operation
+cannot cause an earlier signing call. Independent review caught and cleared both
+the original HTTP label/grammar collision and late-batch validation issues.
+
+Local gates: 113 focused SDK tests, 178 host JS tests, 35 MCP tests, SDK/MCP
+typecheck and lint, strict engine/registry/Binance/Bybit all-target Clippy and a
+WASM debug target check pass. Native touched-package gates pass after updating
+the intentional Bybit enablement assertion. Independent reviews clear Bybit
+codec adoption, shared capture policy, exact WS envelope and actual-WASM test
+oracles. CI run 39782904871 at ccde934c4da passed all 18 new actual-WASM
+Binance/Bybit browser-to-keyless HTTP/WS, callback-header and Hyro refusal tests.
+That run is not final proof: six older WASM tests and five unit expectations
+still asserted the superseded TS routing/refusal behavior. Replace those with
+positive declared-provider construction and actual Binance account startup:
+RemoteSigner retains streaming; PayloadSigner signs REST with same-attempt
+headers and creates no private session. Independent HMAC checks require actual
+signed requests, and capability-only construction counts zero transport calls.
+Keep native bare-constructor/no-provider and unadopted-family typed refusals.
+The updated legacy unit tests, package typecheck and lint pass locally; CI must
+run the updated actual-WASM tests before readiness. Owner queue places this PR
+after the AsterDEX financial-fix window (#1756). Final replay proof uses that
+actual landing, followed by independent evidence review and a separate guard.
+
+The updated run 39786263884 at 50fcacdaf2b passed all 603 SDK actual-WASM
+tests, 11 server, 9 MCP and 2 CLI tests. It then exposed a real mobile import
+regression: delegated-provider module initialization constructed UTF-8 codecs
+before native-registry startup installed them. Initialize codecs lazily at
+provider work, keeping strict UTF-8, BOM and size validation unchanged. A new
+focused regression reproduces the original import failure, then signs exact
+Unicode bytes after host installation. Keep the existing real native-registry
+WASM fixture unchanged as the end-to-end acceptance gate. This failed workflow
+is historical evidence, not final replay proof.

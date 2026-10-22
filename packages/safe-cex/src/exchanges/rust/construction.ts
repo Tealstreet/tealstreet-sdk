@@ -8,16 +8,27 @@ export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'require
 export type IdentitySetupPolicy = { trimCredential?: boolean; passphrase?: PassphraseSetupPolicy };
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
+export type RemoteSigningPolicy = Readonly<{
+  enabled?: boolean;
+  payloadSupported?: boolean;
+  payloadRestOnly?: boolean;
+  protectedHeaders?: readonly string[];
+  wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot'; requestId?: string }>;
+}>;
 
 type Rule = {
   canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string;
   signerSetup?: CredentialSetupPolicy;
+  remoteSigning?: RemoteSigningPolicy;
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 
 /** Trusted setup policy; unspecified fields retain explicit caller metadata. */
 export const deriveSignerSetupPolicy = (name: ExchangeName): CredentialSetupPolicy =>
   (rules.venues as Record<string, Rule>)[name]?.signerSetup ?? {};
+
+export const deriveRemoteSigningPolicy = (name: ExchangeName): RemoteSigningPolicy | undefined =>
+  (rules.venues as Record<string, Rule>)[name]?.remoteSigning;
 
 /** Construction-time policy from the same declarations the native registry reports. */
 export const deriveBridgeConstruction = (name: ExchangeName, options: ExchangeOptions): EngineBridgeConstruction => {
