@@ -134,6 +134,7 @@ export class HyrotraderExchange extends BybitExchange {
         }
         const numericFields = [
           'avgPrice',
+          'entryPrice',
           'markPrice',
           'unrealisedPnl',
           'leverage',
@@ -151,9 +152,13 @@ export class HyrotraderExchange extends BybitExchange {
         }
       }
       if (endpoint === ENDPOINTS.POSITIONS && Number(row.size) > 0) {
+        const hasEntryPrice =
+          (row.avgPrice !== undefined && row.avgPrice !== '' && this.isFiniteNumeric(row.avgPrice)) ||
+          (row.entryPrice !== undefined && row.entryPrice !== '' && this.isFiniteNumeric(row.entryPrice));
         if (
           !['Buy', 'Sell'].includes(row.side) ||
-          ['avgPrice', 'markPrice', 'unrealisedPnl'].some(
+          !hasEntryPrice ||
+          ['markPrice', 'unrealisedPnl'].some(
             (field) => row[field] === undefined || row[field] === '' || !this.isFiniteNumeric(row[field]),
           )
         )
@@ -402,7 +407,7 @@ export class HyrotraderExchange extends BybitExchange {
           orderId: order.id,
         });
         const status = getBybitResponseMeta(data);
-        const gone = /order not exists|too late to cancel/i.test(status.retMsg || '');
+        const gone = /order (?:not|does not) exist|no longer open|too late to cancel/i.test(status.retMsg || '');
         if (!status.isSuccess && !gone) this.fail(status.retMsg || 'HyroTrader cancellation failed');
         this.retireCancelledOrders([
           order,

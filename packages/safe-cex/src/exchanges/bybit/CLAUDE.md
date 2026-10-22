@@ -1213,9 +1213,10 @@ or incomplete responses preserve prior state and leave recovery unhealthy. Posit
 rows require valid leverage for open size, and mapped numeric fields must be finite
 before publication. Zero-size clear rows may omit leverage; map them with the
 existing symbol leverage (or `1`) so close events clear state without publishing
-`NaN`. Frames arriving during recovery invalidate the in-flight snapshot and trigger
-a bounded re-read. A failed handshake or unsettled snapshot reconnects with visible
-errors. Creates are refused while an established private session is recovering.
+`NaN`. Open position rows may use either `avgPrice` or `entryPrice` for the entry
+price alias. Frames arriving during recovery invalidate the in-flight snapshot and
+trigger a bounded re-read. A failed handshake or unsettled snapshot reconnects with
+visible errors. Creates are refused while an established private session is recovering.
 
 Public streams carry periodic snapshots. Hyro candles use authoritative kline volume
 and never accumulate publicTrade snapshots; seconds candles are unavailable. Bybit's
