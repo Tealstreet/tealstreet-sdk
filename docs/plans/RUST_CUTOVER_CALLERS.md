@@ -3765,3 +3765,19 @@ values come from exact prepared work, owned public identity and its receipt;
 HTTP does not inherit WS metadata or fixed ids even when query bytes coincide.
 Production routing never imports a TS venue class. Wire-comparison tests retain
 the legacy WS methods only as independent test references.
+
+## Shared hosted signature presentation (family admission remains gated)
+
+Construction policy now describes signature encoding and an optional passphrase
+presentation header separately from runtime admission. The shared HTTP capture
+uses setup-owned credential/signing/passphrase refs and validates the complete
+atomic result before returning its existing signature/header shape. Passphrases
+are Present-only results, never canonical HMAC payload parts or generic exchange
+options. The existing case-insensitive callback-header policy decides precedence;
+combined native and callback headers must fit the shared bounds.
+
+No external sign-request/sign-response field is added. WS keeps its existing
+outputFormat and signature-only response. OKX/Bitget metadata alone does not
+admit a Rust signer account or complete their hosted migration: those family
+adapters still require their native SignStep and actual WASM/SDK HTTP/WS proofs.
+The landed Binance/Bybit callback wire and output defaults remain unchanged.

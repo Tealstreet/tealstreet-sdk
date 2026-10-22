@@ -80,3 +80,13 @@ Before final CI/proof, integrate the actual #1759 freshness core and any newer
 shared inputs under the normal lane rules. Keep its readonly Store/auth trait
 changes intact. Every implementation checkpoint receives independent correctness
 and adversarial architecture review before commit/readiness.
+
+Phase 1 uses one `RemoteSigningPolicy` snapshot for signature encoding,
+passphrase-header naming and the existing callback-header precedence. HTTP work
+retains key/MAC at result slots 0/1 and appends a Present-only passphrase at slot
+2 when declared. It requires the setup-resolved ref before provider execution;
+it does not resolve absent fallback or invent material. The formatter enforces
+exact slot counts, nonempty UTF-8/header-safe presentation and the final combined
+header budget. WS keeps its existing two-result signature-only contract. The
+OKX and Bitget declarations remain unenabled/default-deny; tests exercise their
+common pure work/formatter without opening the hosted/runtime admission gates.
