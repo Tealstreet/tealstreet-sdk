@@ -11,7 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
-| HMAC signer migrations | Planned; waiting for shared signer prerequisites | Before migrating the eleven assigned HMAC families, credential slots, WS auth or dispatch timestamps. | [RUST_SIGNER_HMAC_MIGRATIONS.md](RUST_SIGNER_HMAC_MIGRATIONS.md) |
+| HMAC signer migrations | Active family adoption plan; shared prerequisites landed | Before migrating the eleven assigned HMAC families, credential slots, WS auth or dispatch timestamps. | [RUST_SIGNER_HMAC_MIGRATIONS.md](RUST_SIGNER_HMAC_MIGRATIONS.md) |
 | Integer protocol wire stamps | Active shared clock correction | Before formatting outbound timestamps or adopting dispatch signing recipes. | [RUST_PROTOCOL_WIRE_STAMP.md](RUST_PROTOCOL_WIRE_STAMP.md) |
 | Shared signer prerequisites | Active engine/provider plan | Before family signing migrations, credential decoding, nonce entropy, WS upgrades or signing receipts. | [RUST_SIGNER_PREREQUISITES.md](RUST_SIGNER_PREREQUISITES.md) |
 | Read scheduling | Active engine standardization plan | Before changing read coalescing, starvation bounds, shared pauses or startup retry policy. | [RUST_READ_SCHEDULER.md](RUST_READ_SCHEDULER.md) |

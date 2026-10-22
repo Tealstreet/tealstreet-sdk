@@ -1,74 +1,82 @@
 # HMAC family signer migrations
 
-Planning snapshot: signer PR #1714 at
-`0343e497e0cea91d9b1cfaa4e7fe412f0776a714`; venue source checked against that
-pin and landing `084af54692420e95fb1f43837c3d6e589c682c4e`. Owner:
-codex-5c57jl. This document changes no implementation or migration status.
-Core #1714 subsequently merged at `ad0e6fa1e42df883b8fe947e6b4c04eda0da2f7d`;
-the shared prerequisites PR remains an implementation gate.
+Owner: codex-5c57jl. Venue inventories below retain snapshot locations from
+#1714; re-verify changed paths on each fresh branch. This document is planning,
+not evidence of family migration completion.
 
 ## Entry gate and shared contract
 
-**No family source edits until both #1714 and codex-uufub4's shared prerequisites
-PR actually merge.** Re-read their actual APIs/pins before implementation.
-The pinned [signer specification](https://github.com/Tealstreet/tealstreet-sdk/blob/0343e497e0cea91d9b1cfaa4e7fe412f0776a714/docs/plans/RUST_SIGNER.md)
-and Binance `src/sign.rs::{Http, SpotSubscribe}` are the reference, not a claim
-that future APIs already exist.
+Signer #1714 is landed at `ad0e6fa1e42df883b8fe947e6b4c04eda0da2f7d`,
+prerequisites #1721 at `802e9c8c6e947aa36864aabb7254aa6e50c92b4e`,
+and protocol clock #1722 at `d3e34e6e10523bd3bb465be362e4cc7fc75671b2`.
+Shared wire-stamp #1726 is landed at
+`e09e34486259f4efb44cc04c84a9eec6f37c5974`; provider feature seam #1731 at
+`06b321192a65562db61489b2cbcdcfe4fce5d055`. Family implementation consumes
+these actual contracts.
+Bybit #1728 merges actual landing after #1731; other families start from the
+landed seam and do not stack on Bybit.
 
-At the pin, `engine::signing` supplies opaque `Identity { credential, signing }`,
-`Present`, `Sign`, `Sha256`, private `PayloadPart::Credential` interpolation and
-earlier-result chaining. HMAC operations return raw bytes; recipes encode the
-final hex/base64 headers exactly. `SignStep::{prepare, apply, freshness_ms}` and
-`Cx::{sign_http, send_signed}` use the shared bounded dispatch service. Stage
-unsigned inputs; materialize credentials and signatures atomically into outbound
-actions, never venue options/state or logs. Unsigned public I/O bypasses signing;
-preserve explicitly authenticated public/token routes described below.
+The landed signing contract supplies opaque identities containing credential,
+signing and optional passphrase references plus trusted stable identity IDs.
+Primitive batches support Present, Sign, SHA256 and private credential
+interpolation/earlier-result chaining. Canonical recipes encode raw signature
+results exactly; venues never retain key, secret or passphrase material.
 
-Shared prerequisites, owned/coordinated with codex-uufub4:
+`SignStep::prepare(outbound, &DispatchContext)` receives protocol UTC
+`now_ms`, shared integer `stamp_ms()`, and only injected
+`signing_bytes(out)` entropy. `Cx::sign_http`, `send_signed`, and
+`connect_signed` stage unsigned work through the bounded dispatcher.
+Raw host `Cx.now` controls scheduling, leases and deadlines; protocol time
+controls only venue wire fields. Clock revisions invalidate stale preparation
+without extending raw operation deadlines. Do not restore venue-local offsets.
 
-1. Opaque passphrase references, fallback rules and trusted setup; the pinned
-   Binance adapter currently has only key/secret and erases secondary passphrase.
-   Include KuCoin's additional broker-signing reference in the same custody path.
-2. Trusted provider key decoding for Kraken; no decoded secret in a venue.
-3. Public signed-WS-upgrade staging. Owner sequencing puts transient session-token
-   custody/retirement in the later WS-auth core: implement HTTP first; token-bearing
-   listen/bullet URLs and subscription-frame migrations wait for that shared core.
-4. Engine-injected signing entropy in `SignStep` for BloFin nonces. Preserve the
-   21-byte nanoid-style draw and filtering, not a new UUID/randomness source.
-5. Trusted caller-assigned stable identity IDs, never key-derived fingerprints.
-   Kraken nonce coordination must survive engine recreation/clock regression and
-   preserve equal-primary/secondary-key aliasing without exposing either key.
-6. Actual dispatch timestamp/expiry receipts: Phemex uncertain-write repair and
-   Bitrue timestamp-increment retries need the stamp that was really sent, not a
-   staging-time guess. Coordinate with the shared RequestContext/WS-auth work;
-   do not add family queues, metadata caches or credential workarounds.
+Trusted setup owns raw fields, decoding, trimming, passphrase and stable-ID
+metadata. SignResult echoes an exact SignReceipt; stamp/expiry fields remain
+safe-integer protocol-UTC milliseconds. No-Cx on_signing_receipt runs only
+on the final fresh release and cannot become an alternative dispatch/admission
+path. Actual request-release scheduling and outcome aggregation belong to the
+shared RequestContext workstream.
 
-All families also need registry/construction, trusted SDK/native/WASM/Workers
-setup and host admission enabled together, as Binance does. One integration owner
-edits those shared paths and the signing-site ratchet; family workers own disjoint
-venue directories. Remove each migrated family's legacy signing-site entries and
-scan its sign module too; do not widen exceptions. Keep required NX trusted
-bootstrap/provider adoption explicit in the caller ledger.
+Shared prerequisites and sequencing:
 
-Use engine time at dispatch. Clock PR2 supplies calibrated protocol time only to
-canonical stamping; host scheduling/deadlines remain raw. Reconcile its actual API
-before Bybit adoption: never apply both the old venue offset and calibrated time.
-Preserve current offset/resend semantics until that shared change lands.
+1. #1721 provides opaque passphrase refs, trusted key decoding, signed upgrade
+   staging, signing entropy and setup-assigned stable IDs. Preserve absent
+   versus explicitly empty passphrase fallback. No key hashes as identity.
+2. Transient listen/bullet/session token custody waits for the WS-auth boundary.
+   Static long-lived-key WS HMAC login migrates with HTTP so no raw credentials
+   remain in a venue. MEXC uses direct login, not a session-token escape hatch.
+3. MEXC requires the separate shared normalization policy PR #1738 (unmerged):
+   primary credential trim=true, secondary=false, applied in trusted setup
+   consistently across SDK/native/WASM. No trimming inside venue recipes.
+4. MEXC physical 450ms pacing starts at actual HTTP release, not when a
+   provider is queued. MEXC migration waits for RequestContext; no local
+   apply/receipt workaround.
+5. Phemex expiry-based repair compares raw scheduling time; protocol-UTC
+   signing expiry needs the shared release-deadline projection in RequestContext.
+   Phemex waits for it; never mirror clock offsets locally.
+6. KuCoin broker refs and Kraken process-wide nonce identity/aliasing must be
+   verified against the actual shared provider contracts before adoption.
+   A missing shared contract is reported before source edits.
 
-Client IDs remain immutable unsigned recipe inputs across re-preparation. Keep
-`fill_entropy` identity draws separate from BloFin's `fill_signing_entropy`
-protocol nonces; no reminting IDs or extra identity draws when signatures refresh.
-MEXC alone has the owner-directed public identity transition below. Bybit retains
-venue `userID/inviterID` from `/v5/user/query-api`; Bitget retains venue
-`userId/parentId/inviterId` from `/api/v2/spot/account/info`. Native OKX/BloFin keep
-`AccountLookup::Unsupported`; do not invent an identity endpoint during migration.
+One owner serializes registry/construction, SDK/bootstrap, host and signing
+ratchet edits. Families change canonicalization and semantic pending mappings
+only; no venue-owned custody, dispatch, retries or lifecycle mechanism. Remove
+legacy production signing sites and scan migrated sign modules, retaining only
+independent test oracles. Caller docs record actual landed behavior, including
+MEXC persisted identity mapping at cutover.
+
+Client IDs remain immutable across re-preparation. Keep identity entropy draws
+separate from signing entropy. Bybit retains venue userID/inviterID; Bitget
+retains venue userId/parentId/inviterId. OKX/BloFin identity remains unsupported.
 
 ## Per-family plans
 
 Paths below are relative to `sdk-rs/venues/`; line numbers describe the snapshot.
 Every family includes unsigned public controls, primary/secondary validation,
 delayed/refused/malformed/timed-out providers, stale re-preparation, retired-socket
-completion fencing and no mutation replay after uncertain transmission.
+completion fencing and no new/provider-induced mutation retries. Preserve
+existing eligible retry policy and conservatively retain Unknown when a prior
+attempt reached the venue but its retry cannot be signed.
 
 ### Bybit, inverse, spot, demo and HyroTrader
 
@@ -83,7 +91,8 @@ completion fencing and no mutation replay after uncertain transmission.
   single eligible clock/signature resend and current calibration behavior.
 - **Proof:** suite `bybit` has public/private cases for all five names. Add delayed
   REST/probe/WS stamps, escaped-key interpolation, configured windows, Hyro auth
-  correlation and no write retry after ambiguous transport; retain account fences.
+  correlation, no new/provider-induced retries, and conservative Unknown after
+  the existing eligible retry cannot sign; retain account fences.
 
 ### OKX, EU, demo and EU-demo
 
@@ -132,7 +141,9 @@ completion fencing and no mutation replay after uncertain transmission.
 
 - **Sites/primitive:** `mexc/src/sign.rs:12–56`, REST `account.rs:126–185`,
   WS `328–355`, separate history path `history.rs:322–345`. HMAC-SHA256/hex of
-  `API-key + num::format(now) + payload`; **do not floor fractional time**. GET
+  `API-key + integer protocol stamp + payload`; use shared `stamp_ms()`
+  (not a local floor). The old fractional wire value is a port artifact; owner
+  requires the intended integer-ms wire contract. GET
   sorts/encodes parameters; POST signs exact body. Receive-window header is outside
   the preimage, default/clamp 1–20000.
 - **Slots:** ordinary GET uses secondary; private history deliberately uses primary
@@ -146,7 +157,11 @@ completion fencing and no mutation replay after uncertain transmission.
   [official asset-response fields](https://www.mexc.com/api-docs/futures/account-and-trading-endpoints/get-all-account-assets)
   likewise contain no account UID (checked 2026-10-22). No generic futures UID read
   was verified; use the fallback, not an invented endpoint or extra permission.
-  List persisted-ID mapping/cutover impact for codex-cxxyqr. Suite `mexc` is
+  Without a verified UID source or explicit `localSigner.primary.stableId`,
+  legacy flat construction
+  remains usable but fetchIdentity returns typed identity-unavailable. Never
+  invent an ID or hash a key. List persisted-ID mapping/cutover impact for
+  codex-cxxyqr. Suite `mexc` is
   public/private; test fractional stamps, whitespace-key signing, assigned-ID
   stability, primary history versus secondary account, and owned NotSent failures.
 
@@ -174,9 +189,9 @@ completion fencing and no mutation replay after uncertain transmission.
   `floor(ms) + METHOD + pathWithQuery + exactBody`, preserving parameter order.
 - **Slots:** private GET secondary; writes/WS primary. `/public/` GET bypasses
   signing. WS URL suffix is non-secret `application_id`, **not API key**.
-- **WS/time:** auth signs `| + num::format(now)` and sends that same non-floored
-  numeric timestamp plus provider-presented primary key. Keep REST/WS rounding
-  distinct; preserve subscription/auth deadline ordering.
+- **WS/time:** auth signs `| + integer stamp` and sends that same integer
+  numeric timestamp plus provider-presented primary key. Use the shared integer wire stamp after #1726, preserving the intended
+  integer-ms TS behavior and subscription/auth deadline ordering.
 - **Proof:** public/private `woo`; v1/v3 vectors, secondary and auth-deadline tests.
   Add delayed/fractional WS signing, exact v1 sorting/body, typed signer failure
   without false venue-auth evidence and closed-socket exclusion.
@@ -254,7 +269,7 @@ completion fencing and no mutation replay after uncertain transmission.
 
 ## Parallel batches and acceptance
 
-After both actual entry pins, re-audit changed APIs and settle shared receipts and
+After the actual entry pins, re-audit changed APIs and settle shared receipts and
 nonce aliasing before affected HTTP adapters. Implement HTTP first, then WS auth;
 the WS inventory above remains required follow-on scope. A partial HTTP stage is
 not a completed family migration. Before enabling a family's migrated construction
@@ -264,8 +279,8 @@ venue files in parallel batches; one owner serializes registry/SDK/host/ban edit
 
 | Batch | Parallel HTTP family adapters | Additional HTTP readiness |
 | --- | --- | --- |
-| A | Bybit, MEXC, Phemex | Protocol-clock handoff, stable IDs and actual-stamp/expiry receipt. |
-| B | OKX, Bitget, BloFin | Passphrase fallback and injected nonce entropy. |
+| A | Bybit, OKX, Bitget | Actual wire stamp and shared provider feature seam. |
+| B | MEXC, Phemex, BloFin | MEXC normalization/pacing and Phemex release projection first; BloFin financial/history overlap resolved. |
 | C | WOO, Bitrue, BingX | Retry stamps; WS token lifecycle remains a separate shared dependency. |
 | D | KuCoin, Kraken | Broker refs, trusted decoding and shared nonce aliasing. |
 
@@ -281,7 +296,8 @@ for these families at the pin. Keep literal books/tape/alias coverage; private b
 is empty. Under immediate local providers/tape clocks require byte-identical MACs,
 headers, bodies, WS messages, entropy ordering and full nonmetric outputs; inspect
 asynchronous freshness with dedicated regressions. MEXC's owner-directed identity
-transition is an explicit caller-visible delta, not a normalization exception.
+transition and shared integer-stamp correction are explicit behavior deltas, not
+normalization exceptions; declare exact replay keys/tape SHA/reasons if needed.
 Do not modify tapes, comparators, budgets or broad known-failure allowances.
 
 Run focused native family + Binance/engine/host checks with four Cargo jobs; CI owns
@@ -291,3 +307,10 @@ classifying any independent TS-reference variation. No partial/failing proof is
 called equality. Green CI, independent review, fresh separate revert guard and a
 separate exact-head merge precede reporting each actual pin to the overseer and
 caller lane. No live capture, production flip or deployment is part of this plan.
+
+Ownership coordination: WOO/Bitrue financial #1725 and BloFin financial #1736
+(actual `288155e8d5be4e63ebcc77f4916514dd14e01df5`) have landed.
+Kraken Spot, then BingX/KuCoin Spot remain held for cumulative-fill slices before
+our whole-family signer migrations; keep disjoint account/signing regions
+coordinated and integrate actual pins. Bitunix balance scheduler adoption
+remains separate and waits for the actual-release scheduler hook.
