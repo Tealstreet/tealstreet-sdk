@@ -39,7 +39,7 @@ fn client_ids(entropy: Entropy) -> Result<Vec<String>, String> {
                 orders: vec![order],
             }),
         );
-        for action in engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.) {
             match action {
                 Action::Http(request) => {
                     let query = request.url.split_once('?').unwrap().1;

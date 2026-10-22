@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadEngine } from './engine.mjs';
+import { prepareFetch } from '../hosts/wasm/js/managed-http.mjs';
 import { runLiveSmoke, fencedTransport } from './live-smoke.mjs';
 import { liveSmokeProfile } from './live-smoke-venues.mjs';
 import { venueOf } from './venues.mjs';
@@ -35,6 +36,12 @@ function fakeBinance({ startupOrders = [], losePlacement = false, failAmend = fa
       { filterType: 'MARKET_LOT_SIZE', minQty: '0.001', maxQty: '1000', stepSize: '0.001' },
       { filterType: 'MIN_NOTIONAL', notional: String(minimumNotional) }] };
   const transport = {
+    prepareHttp(request) {
+      return prepareFetch(request, (url, init) => {
+        const response = this.request({ ...request, ...init, url });
+        return Promise.resolve(response).then((value) => new Response(value.body, { status: value.status }));
+      });
+    },
     now: () => Date.now(), webSocketHeaders: true,
     setTimeout, clearTimeout,
     connect(url, handlers) {

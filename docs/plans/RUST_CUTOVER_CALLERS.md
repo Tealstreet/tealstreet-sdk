@@ -3919,6 +3919,18 @@ RemoteSigner remains primary-only and never falls back to a local/PayloadSigner
 after refusal. The provider requests the declared format and rejects noncanonical
 or incorrectly sized base64 MACs before any attempt can be published.
 
+
+## Persistent row-reporting engine path
+
+Coinbase, Crypto.com and WOO skipped-row notices now use engine-owned repeat and
+re-arm memory. The observable notice levels, `row.skipped` code, message text and
+reporting time remain native-compatible, including Coinbase's single Error
+upgrade and WOO's changed-summary repeats. Host log filtering still suppresses
+delivery without suppressing health accounting or resetting report memory.
+No SDK arguments/results, order/position/FILLS publication or caller migration
+is added. This slice does not complete grouped/deferred reporting or the other
+consumer migrations; those remain in [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
+
 ### Hyperliquid perp histories: shared inclusive-page ownership
 
 Perp fills, orders, income and public trades now use the engine CursorHistory

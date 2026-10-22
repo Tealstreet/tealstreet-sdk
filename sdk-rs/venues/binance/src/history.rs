@@ -508,12 +508,7 @@ impl BinanceFutures {
         );
         cx.sign_http(
             request,
-            Box::new(crate::sign::Http::new(
-                credentials.clone(),
-                query,
-                self.options.recv_window,
-                true,
-            )),
+            Box::new(self.signed_recipe(credentials.clone(), query)),
         );
         cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
     }
