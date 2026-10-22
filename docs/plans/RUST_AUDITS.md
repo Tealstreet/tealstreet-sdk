@@ -1796,3 +1796,11 @@ failures stay strict. Native request/codec/ledger behavior is pinned; no account
 or signing implementation changes. This closes Paradex's local completion/
 paging ownership copy, not all-family fan-out or B11 downstream coverage.
 [Implementation and limits](RUST_OWNED_HISTORY.md).
+
+Phemex income owned-history follow-up: ~~later page/currency errors discard all
+accepted ledger rows and saturation rejects before the next currency~~. The
+shared range owner now retains eligible admitted rows and one command-owned gap;
+first actual page failures reject typed and failed-page prefixes stay excluded.
+Shared filtered admission and checked range-stage/native-bound transitions retain
+coverage before output filtering. The strict output cap and single-page Phemex
+history/lookup policies remain; other venue adoption is still open.

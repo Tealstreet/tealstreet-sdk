@@ -680,7 +680,7 @@ fn income_keeps_distinct_equal_time_postings_and_filters_after_coverage() {
     assert_ne!(rows[0].tran_id, rows[1].tran_id);
 }
 #[test]
-fn income_failed_currency_or_saturated_timestamp_never_returns_partial_success() {
+fn income_failed_currency_and_saturated_timestamp_return_owned_accepted_rows() {
     let mut e = engine(true);
     let a = query(&mut e, income(1000., 2000., None));
     let x = ledger(1100, "1", "100", "REALIZED_PNL", "USDT");
@@ -689,7 +689,7 @@ fn income_failed_currency_or_saturated_timestamp_never_returns_partial_success()
     respond(&mut e, &a, &format!("[{x}]"), false);
     let a = next_http(&mut e);
     respond(&mut e, &a, r#"{"code":10001,"msg":"denied"}"#, false);
-    assert!(result(&mut e).is_err());
+    owned_income::assert_partial(&actions(&mut e), 10, 1);
 
     let mut e = engine(true);
     let mut a = query(&mut e, income(1000., 2000., None));
@@ -697,22 +697,31 @@ fn income_failed_currency_or_saturated_timestamp_never_returns_partial_success()
     respond(&mut e, &a, &body, true);
     a = next_http(&mut e);
     respond(&mut e, &a, &body, true);
-    // A full duplicate-only timestamp is ambiguous. The shared pager marks
-    // incomplete and probes the remaining span, then completion must fail.
-    for _ in 0..60 {
+    // Saturation remains incomplete, but the shared owner preserves accepted
+    // rows and continues the other currency before completing once.
+    let mut reached_usdc = false;
+    for _ in 0..100 {
         let output = actions(&mut e);
         if let Some(failed) = output.iter().find_map(|a| match a {
             Action::Notice(Notice::CommandDone { .. }) => Some(false),
             Action::Notice(Notice::CommandFailed { .. }) => Some(true),
             _ => None,
         }) {
-            assert!(failed);
+            assert!(!failed);
+            assert!(
+                reached_usdc,
+                "incomplete USDT stage does not discard USDC coverage"
+            );
+            owned_income::assert_partial(&output, 10, 200);
             return;
         }
         let a = output
             .into_iter()
             .find(|a| matches!(a, Action::Http(_)))
             .expect("coverage probe");
+        if let Action::Http(request) = &a {
+            reached_usdc |= request.url.contains("currency=USDC");
+        }
         respond(&mut e, &a, "[]", true);
     }
     panic!("must terminate visibly incomplete");
@@ -858,4 +867,239 @@ fn ledger_identity_preserves_money_digits_beyond_binary_float_precision() {
     let rows: Vec<Income> = serde_json::from_str(&result).unwrap();
     assert_eq!(rows.len(), 2);
     assert_ne!(rows[0].tran_id, rows[1].tran_id);
+}
+
+mod owned_income {
+    use super::*;
+    use safe_cex_engine::{ErrorKind, Level, Value, log::code};
+
+    fn markers(output: &[Action]) -> Vec<&safe_cex_engine::log::LogEvent> {
+        output
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn fail_page(e: &mut Engine<PhemexPerpetuals>, page: &Action, failure: u8, streamed: bool) {
+        let Action::Http(request) = page else {
+            panic!("HTTP page")
+        };
+        match failure {
+            0 => e.handle(
+                3.,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "connection lost",
+                },
+            ),
+            1 => {
+                // The valid prefix belongs to a page that never passes admission.
+                let prefix = ledger(1500, "99", "199", "REALIZED_PNL", "USDT");
+                respond(e, page, &format!("[{prefix},{{}}]"), streamed);
+            }
+            2 => e.handle(
+                3.,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 503,
+                        headers: "",
+                        body: "unavailable",
+                    },
+                },
+            ),
+            _ => unreachable!(),
+        }
+    }
+
+    pub(super) fn assert_partial(output: &[Action], owner: u32, count: usize) {
+        let notices = markers(output);
+        assert_eq!(notices.len(), 1, "exactly one owned marker: {output:?}");
+        assert_eq!(notices[0].level, Level::Warn);
+        assert_eq!(notices[0].fields.len(), 1);
+        assert!(
+            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id))] if *id == f64::from(owner))
+        );
+        let index = output
+            .iter()
+            .position(|action| {
+                matches!(action,
+                    Action::Notice(Notice::CommandDone { command, .. }) if *command == owner
+                )
+            })
+            .expect("retained rows complete successfully");
+        let marker = output
+            .iter()
+            .position(|action| {
+                matches!(action,
+                    Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE
+                )
+            })
+            .unwrap();
+        assert!(marker < index, "coverage arrives before result");
+        let Action::Notice(Notice::CommandDone { result, .. }) = &output[index] else {
+            unreachable!()
+        };
+        let rows: Vec<serde_json::Value> = serde_json::from_str(result).unwrap();
+        assert_eq!(rows.len(), count);
+        assert!(
+            rows.iter().all(|row| row["income"] != 99.),
+            "failed-page prefix excluded"
+        );
+        assert!(
+            !output
+                .iter()
+                .any(|action| matches!(action, Action::Notice(Notice::CommandFailed { .. })))
+        );
+    }
+
+    #[test]
+    fn first_page_failure_is_typed_without_success_or_marker() {
+        for failure in 0..3 {
+            for streamed in [false, true] {
+                let mut e = engine(true);
+                let page = query(&mut e, income(1000., 2000., None));
+                fail_page(&mut e, &page, failure, streamed);
+                let output = actions(&mut e);
+                assert!(markers(&output).is_empty());
+                assert!(
+                    !output
+                        .iter()
+                        .any(|action| matches!(action, Action::Notice(Notice::CommandDone { .. })))
+                );
+                let error = output
+                    .iter()
+                    .find_map(|action| match action {
+                        Action::Notice(Notice::CommandFailed { command: 10, error }) => Some(error),
+                        _ => None,
+                    })
+                    .expect("first failure rejects");
+                assert_eq!(
+                    error.kind,
+                    Some(ErrorKind::Internal),
+                    "callback combines transport and decode failures"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn later_page_failure_retains_only_accepted_rows_at_error_log_level() {
+        for failure in 0..3 {
+            for streamed in [false, true] {
+                let mut e = engine(true);
+                e.set_log_level(Level::Error);
+                let first = query(&mut e, income(1000., 2000., None));
+                let row = ledger(1100, "1", "101", "REALIZED_PNL", "USDT");
+                respond(&mut e, &first, &format!("[{row}]"), streamed);
+                let second = next_http(&mut e);
+                fail_page(&mut e, &second, failure, streamed);
+                assert_partial(&actions(&mut e), 10, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn second_currency_failure_retains_the_first_currency() {
+        for streamed in [false, true] {
+            let mut e = engine(true);
+            let first = query(&mut e, income(1000., 2000., None));
+            let row = ledger(1100, "1", "101", "REALIZED_PNL", "USDT");
+            respond(&mut e, &first, &format!("[{row}]"), streamed);
+            let mut failed_currency = false;
+            for _ in 0..100 {
+                let page = next_http(&mut e);
+                let Action::Http(request) = &page else {
+                    unreachable!()
+                };
+                if request.url.contains("currency=USDC") {
+                    fail_page(&mut e, &page, 0, streamed);
+                    assert_partial(&actions(&mut e), 10, 1);
+                    failed_currency = true;
+                    break;
+                }
+                respond(&mut e, &page, "[]", streamed);
+            }
+            assert!(
+                failed_currency,
+                "second currency is reached within the bounded query"
+            );
+        }
+    }
+
+    #[test]
+    fn filtered_pages_do_not_authorize_an_empty_partial_success() {
+        let mut e = engine(true);
+        let first = query(&mut e, income(1000., 2000., Some("REALIZED_PNL")));
+        let excluded = ledger(1100, "1", "101", "TRANSFER", "USDT");
+        respond(&mut e, &first, &format!("[{excluded}]"), true);
+        let second = next_http(&mut e);
+        fail_page(&mut e, &second, 0, true);
+        let output = actions(&mut e);
+        assert!(markers(&output).is_empty());
+        assert!(
+            !output
+                .iter()
+                .any(|action| matches!(action, Action::Notice(Notice::CommandDone { .. })))
+        );
+        assert!(output.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed { command: 10, error }) if error.kind == Some(ErrorKind::Internal)
+        )), "no eligible output was accepted; failure must stay typed");
+    }
+
+    #[test]
+    fn concurrent_query_failures_keep_their_own_coverage() {
+        let mut e = engine(true);
+        e.set_log_level(Level::Error);
+        let first = query(&mut e, income(1000., 2000., None));
+        let row = ledger(1100, "1", "101", "REALIZED_PNL", "USDT");
+        respond(&mut e, &first, &format!("[{row}]"), true);
+        let later_page = next_http(&mut e);
+        e.handle(
+            3.,
+            Event::Command(Command::Query {
+                command: 42,
+                query: income(1000., 2000., None),
+            }),
+        );
+        let other_first = next_http(&mut e);
+        fail_page(&mut e, &later_page, 0, true);
+        assert_partial(&actions(&mut e), 10, 1);
+        fail_page(&mut e, &other_first, 0, true);
+        let output = actions(&mut e);
+        assert!(markers(&output).is_empty(), "owner 42 has no accepted rows");
+        assert!(output.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed { command: 42, error }) if error.kind == Some(ErrorKind::Internal)
+        )));
+        assert!(
+            !output
+                .iter()
+                .any(|action| matches!(action, Action::Notice(Notice::CommandDone { .. })))
+        );
+    }
+
+    #[test]
+    fn equal_bound_coverage_uses_the_effective_native_request_range() {
+        for streamed in [false, true] {
+            let mut e = engine(true);
+            let first = query(&mut e, income(1000., 1000., None));
+            let outside = ledger(1001, "1", "101", "REALIZED_PNL", "USDT");
+            respond(&mut e, &first, &format!("[{outside}]"), streamed);
+            let next = next_http(&mut e);
+            let Action::Http(request) = &next else {
+                unreachable!()
+            };
+            assert!(
+                request.url.contains("currency=USDC&start=1000&end=1000"),
+                "outside row cannot generate an inverted or out-of-window native request"
+            );
+            respond(&mut e, &next, "[]", streamed);
+            assert_partial(&actions(&mut e), 10, 0);
+        }
+    }
 }
