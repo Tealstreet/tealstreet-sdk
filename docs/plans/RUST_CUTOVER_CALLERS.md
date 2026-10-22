@@ -3268,6 +3268,43 @@ adapter is transitional: remove it before TS venue/reference deletion after
 trusted bootstrap adoption. [Current core contract](RUST_SIGNER.md).
 
 
+## Bybit send-time signer adoption (#1728)
+
+Actual merge `3b20e602258` extends the shared dispatch signer to all five Bybit
+aliases: `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo` and `hyrotrader`.
+Their shared construction rules now set `bridge.dispatchSigning: true`.
+The trusted SDK adapter extracts primary/secondary signing credentials before
+`BaseExchange`; retained generic `exchange.options` and engine-options JSON
+therefore no longer contain those credentials. The default factory still accepts
+ordinary `ExchangeOptions` setup without an added caller constructor argument.
+
+**REQUIRED NX trusted bootstrap migration now includes Bybit:** the #1714
+worker/hosted/signingHost changes above apply to these aliases too. Supply
+provider setup separately in the engine-owning realm, including reload, rotation
+and disposal; copying sanitized `exchange.options` to the worker or hosted
+signing account cannot reconstruct the credentials. Keep public/private checks
+on construction/signing-state metadata rather than `options.key` or
+`options.secret`. Pinned NX file/line evidence and the static-versus-deployed
+boundary remain the #1714 evidence above; this merge does not implement NX work.
+
+Raw WASM constructor argument 3, optional `signerSetupJson`, carries the one-use
+trusted setup separately. Custom WASM loaders must forward it; ordinary managed
+SDK factories already do. Valid `ExchangeOptions.localSigner` metadata is now
+accepted for Bybit through the shared validation/setup path, where unmigrated
+venues still reject it as `unsupported`/`notSent`. Standard UTF-8 setup needs no
+new metadata. Native GET secondary selection and POST/private-WS primary
+selection remain; Bybit venue user/inviter identities are preserved, so this
+migration requires no new persisted stable-ID mapping.
+
+Hosted `signHttpRequest`/`signWsAuth` for migrated Bybit use #1745's shared
+provider-backed signing path. This is signing-side adoption, not completion of
+the keyless remote HTTP/WS sign-request/sign-response wire or a deployed
+server-held-key/bootstrap claim. Provider receipts remain release evidence, not
+venue ACKs or permission to replay an unknown write.
+[Shared signer contract](RUST_SIGNER.md),
+[Bybit adoption and evidence](RUST_BYBIT_DISPATCH_SIGNER.md).
+
+
 ## Cumulative-fill reference correctness (#1720)
 
 Actual merge `9fc2a7c174ad` introduces shared engine financial preparation for
@@ -3441,6 +3478,30 @@ not change. B11's request-scoped incomplete-query ingestion/coverage and typed
 rejection handling remain required; this slice adds no mandatory NX handler and
 does not close the remaining history fan-out.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+### BingX validated cumulative execution suffix
+
+BingX now rejects a live trade that would deliver positive quantity with a
+selected zero/negative price before consuming its native trade ID or cumulative
+quantity, advancing stored orders, or publishing a Fill. Corrected evidence with the same ID and cumulative
+quantity can therefore deliver the valid fill; healthy peer orders continue.
+Native last/average/order-price precedence remains, so an unused invalid last
+price does not reject a valid native fallback. Zero-growth observations still
+retain native identity bookkeeping. A terminal trade with positive delivery quantity and an
+invalid selected price preserves the previous stored partial rather than closing
+it; separate lifecycle and quiet-terminal policy remains native.
+
+The shared engine helper caps last quantity to observed cumulative growth and
+keeps full native observation for blind intervals. Explicit trade IDs, heuristic
+growth escape, covered-history suppression, late unique executions and retention
+limits remain native policy. SDK arguments, FILLS revision/row shape and IDs are
+unchanged. Existing consumers should not rely on invalid prices or a rejected
+row advancing order state. No NX API migration, live-capture claim or universal
+cumulative-fill completion claim is introduced; remaining consumers are tracked
+in [the fan-out plan](RUST_CUMULATIVE_FILLS.md).
+
+
 
 
 ### WEEX income: shared range coverage and accepted-page completion

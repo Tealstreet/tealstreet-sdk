@@ -409,6 +409,27 @@ impl ObservedProgress {
         })
     }
 
+    /// A native last quantity prices only the newly observed suffix. Unlike
+    /// authoritative last evidence, it cannot replay quantity already observed.
+    /// Accepted None still permits the caller's quiet identity bookkeeping.
+    pub fn prepare_capped(
+        self,
+        last: Option<f64>,
+        price: f64,
+    ) -> Result<Option<PreparedObserved>, Rejection> {
+        if let Some(amount) = last {
+            nonnegative(amount, Rejection::InvalidQuantity)?;
+        }
+        let amount = match self.cumulative {
+            Some(quantity) => {
+                let growth = (quantity - self.previous).max(0.0);
+                last.map_or(growth, |amount| amount.min(growth))
+            }
+            None => last.unwrap_or(0.0),
+        };
+        self.prepare(Cursor::seed(self.previous, None)?, Some(amount), price)
+    }
+
     /// Native identity admission decides whether last quantity is authoritative.
     /// Missing last quantity uses only the proven observed/delivered suffix.
     pub fn prepare(
@@ -715,6 +736,78 @@ mod tests {
             .unwrap()
             .commit()
             .map(|delivery| (delivery.price(), delivery.amount()))
+    }
+
+    #[test]
+    fn capped_last_preserves_full_observation_and_native_suffix() {
+        for (last, amount) in [(Some(0.25), 0.25), (Some(4.0), 1.0), (None, 1.0)] {
+            let prepared = ObservedProgress::new(2.0, Some(3.0))
+                .unwrap()
+                .prepare_capped(last, 100.0)
+                .unwrap()
+                .unwrap();
+            assert_eq!(prepared.delivery().amount(), amount);
+            assert_eq!(prepared.delivery().price(), 100.0);
+            assert_eq!(prepared.observed(), 3.0);
+            assert_eq!(prepared.delivery().next().quantity(), 3.0);
+        }
+        let gap = ObservedProgress::new(0.0, Some(10.0))
+            .unwrap()
+            .prepare_capped(Some(0.5), 100.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(gap.delivery().amount(), 0.5);
+        assert_eq!(gap.observed(), 10.0);
+    }
+
+    #[test]
+    fn capped_last_quiet_observations_do_not_require_unused_price() {
+        for (previous, cumulative, last) in [
+            (2.0, Some(2.0), Some(0.5)),
+            (2.0, Some(1.0), Some(0.5)),
+            (2.0, Some(3.0), Some(0.0)),
+            (2.0, None, None),
+        ] {
+            let progress = ObservedProgress::new(previous, cumulative).unwrap();
+            assert_eq!(progress.prepare_capped(last, 0.0), Ok(None));
+            assert_eq!(
+                progress.quantity(),
+                previous.max(cumulative.unwrap_or(previous))
+            );
+        }
+        assert_eq!(
+            ObservedProgress::new(2.0, Some(2.0))
+                .unwrap()
+                .prepare_capped(Some(-1.0), 100.0),
+            Err(Rejection::InvalidQuantity)
+        );
+    }
+
+    #[test]
+    fn capped_last_validates_before_progress_and_checks_unanchored_addition() {
+        let progress = ObservedProgress::new(0.25, Some(0.75)).unwrap();
+        for price in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert_eq!(
+                progress.prepare_capped(Some(0.5), price),
+                Err(Rejection::Unpriced)
+            );
+        }
+        let corrected = progress.prepare_capped(Some(0.5), 100.0).unwrap().unwrap();
+        assert_eq!(corrected.delivery().amount(), 0.5);
+        assert_eq!(corrected.observed(), 0.75);
+        assert_eq!(
+            ObservedProgress::new(f64::MAX, None)
+                .unwrap()
+                .prepare_capped(Some(f64::MAX), 100.0),
+            Err(Rejection::NonFiniteArithmetic)
+        );
+        let unanchored = ObservedProgress::new(2.0, None)
+            .unwrap()
+            .prepare_capped(Some(0.5), 100.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unanchored.observed(), 2.5);
+        assert_eq!(unanchored.delivery().amount(), 0.5);
     }
 
     #[test]
