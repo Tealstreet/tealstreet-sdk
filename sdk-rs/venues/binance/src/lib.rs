@@ -1314,6 +1314,21 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        if !matches!(pending, Pending::Trade(_)) {
+            return Err(safe_cex_engine::request_context::Error::Invalid);
+        }
+        // Initial native late codec intentionally has no mutation authority.
+        // Unknown effects reconcile through ordinary fenced account reads.
+        safe_cex_engine::request_context::ReconciliationData::new(String::new())
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }

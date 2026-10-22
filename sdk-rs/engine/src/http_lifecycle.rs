@@ -1547,13 +1547,22 @@ mod tests {
             ..Probe::default()
         });
         let (attempt, input) = work(&route(&mut engine, tokens[0], 10.));
-        engine.handle(
-            11.,
-            Event::Command(Command::FetchLeverage {
-                command: 7,
-                symbol: "X".into(),
-            }),
-        );
+        // Completion is an existing authority's operation, not a duplicate
+        // wire command borrowing its numeric ID.
+        let context = engine
+            .io
+            .managed_http
+            .get(&tokens[0].attempt().request)
+            .unwrap()
+            .delivery()
+            .context;
+        Cx {
+            now: 11.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .done_context(&context, "null".into())
+        .unwrap();
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { signing: Some(id), .. } if *id == attempt))));
         assert!(engine.io.managed_http.is_empty());
@@ -2436,6 +2445,31 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_venue_command_preserves_the_live_managed_owner() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            command: Some(7),
+            ..Probe::default()
+        });
+        engine.handle(
+            1.,
+            Event::Command(Command::Venue {
+                command: 7,
+                action: crate::VenueAction::FetchBalanceInfo,
+            }),
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == crate::log::code::COMMAND_DUPLICATE)));
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+        )));
+        assert!(engine.http_preparation_pending(tokens[0]));
+        assert_eq!(engine.io.pending.len(), 1);
+    }
+
+    #[test]
     fn command_completion_cancels_unreleased_children_without_a_second_result() {
         let (mut engine, tokens) = start(Probe {
             count: 2,
@@ -2443,13 +2477,22 @@ mod tests {
             ..Probe::default()
         });
         let permit = bind(&mut engine, tokens[0], 1.);
-        engine.handle(
-            2.,
-            Event::Command(Command::FetchLeverage {
-                command: 7,
-                symbol: "BTC".into(),
-            }),
-        );
+        // Completion is an existing authority's operation, not a duplicate
+        // wire command borrowing its numeric ID.
+        let context = engine
+            .io
+            .managed_http
+            .get(&tokens[0].attempt().request)
+            .unwrap()
+            .delivery()
+            .context;
+        Cx {
+            now: 2.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .done_context(&context, "null".into())
+        .unwrap();
         assert_eq!(engine.claim_http(3., permit), Err(Error::Revoked));
         assert!(!engine.http_preparation_pending(tokens[1]));
         assert!(engine.io.pending.is_empty());

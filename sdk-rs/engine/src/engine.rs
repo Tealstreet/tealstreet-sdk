@@ -660,7 +660,6 @@ pub enum Command {
     },
 }
 
-#[cfg(feature = "order-locks")]
 impl Command {
     pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
@@ -683,7 +682,8 @@ impl Command {
             | Self::FetchCandles { command, .. }
             | Self::FetchOptionChain { command, .. }
             | Self::FetchOptionExpiries { command, .. }
-            | Self::FetchAccountGreeks { command } => Some(*command),
+            | Self::FetchAccountGreeks { command }
+            | Self::Venue { command, .. } => Some(*command),
             _ => None,
         }
     }
@@ -2547,7 +2547,30 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    fn duplicate_command(&mut self) {
+        push_event(
+            &mut self.io.actions,
+            &mut self.io.health,
+            self.io.min_level,
+            LogEvent {
+                level: Level::Error,
+                code: log_code::COMMAND_DUPLICATE,
+                message: "Command ID is already in flight".into(),
+                fields: Vec::new(),
+            },
+        );
+    }
+
     fn handle_event_scoped(&mut self, now: f64, event: Event<'_>) {
+        // A new event cannot borrow an in-flight managed command's generation.
+        // Sibling legs originate under Cx authority, not a repeated wire command.
+        if let Event::Command(command) = &event
+            && let Some(id) = command.completion_id()
+            && self.io.request_contexts.command_live(id, now)
+        {
+            self.duplicate_command();
+            return;
+        }
         if self.venue.cancel_needs_stored_order()
             && !self.releasing
             && let Event::Command(command) = &event
@@ -2575,17 +2598,7 @@ impl<V: Venue> Engine<V> {
             && let Some(id) = command.completion_id()
             && !self.io.active_commands.insert(id)
         {
-            push_event(
-                &mut self.io.actions,
-                &mut self.io.health,
-                self.io.min_level,
-                LogEvent {
-                    level: Level::Error,
-                    code: log_code::COMMAND_DUPLICATE,
-                    message: "Command ID is already in flight".into(),
-                    fields: Vec::new(),
-                },
-            );
+            self.duplicate_command();
             return;
         }
         self.begin_event_scope();

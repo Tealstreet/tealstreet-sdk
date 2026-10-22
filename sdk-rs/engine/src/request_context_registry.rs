@@ -41,6 +41,15 @@ pub(super) struct ContextRegistry {
 }
 
 impl ContextRegistry {
+    pub(super) fn command_live(&self, id: CommandId, now: f64) -> bool {
+        self.commands.get(&id).is_some_and(|owner| {
+            now < owner.last_deadline
+                || owner.writes.is_some()
+                || owner.pending > 0
+                || owner.deliveries > 0
+        })
+    }
+
     fn issue(
         &mut self,
         identity: u32,

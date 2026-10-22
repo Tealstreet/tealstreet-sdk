@@ -405,9 +405,14 @@ fn batches_five_orders_per_request() {
     h.reply(batch.id, 200, "", r#"[{"orderId":1},{"orderId":2},{"code":-2019,"msg":"Margin is insufficient."},{"orderId":4},{"orderId":5}]"#);
     let single = h.take("/fapi/v1/order");
     h.reply(single.id, 200, "", r#"{"orderId":6}"#);
+    // Both lots still run, but the failed item cannot become whole-command
+    // success. The engine retains every accepted native ID in the partial.
+    assert_eq!(h.result(9), Some(&Err(r#"{"message":"Margin is insufficient.","partialOrderIds":["1","2","4","5","6"],"partialOrderCount":5}"#.to_owned())));
+    let failure = &h.failures.iter().find(|(id, _)| *id == 9).unwrap().1;
+    assert_eq!(failure.outcome, None);
     assert_eq!(
-        h.result(9),
-        Some(&Ok(r#"["1","2","4","5","6"]"#.to_owned()))
+        failure.partial.as_ref().unwrap().order_ids,
+        ["1", "2", "4", "5", "6"]
     );
 }
 
