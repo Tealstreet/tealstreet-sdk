@@ -52,7 +52,9 @@ scope, identity checks and definitive -2013/HTTP conditions stay unchanged;
 partial histories must never manufacture a definitive lookup miss. The
 existing Binance best-effort-empty test encodes the superseded contract: replace
 its empty-success/CommandError expectations with typed failure and exactly-once
-command delivery, while retaining its background-log isolation assertions.
+command delivery, while retaining its background-log isolation assertions. The
+account test for later fills-window loss is superseded too: keep prior rows with
+owned incompleteness instead of CommandError plus empty success.
 
 Engine tests pin fresh-index selection, duplicate/out-of-range rows, successful
 range order, pending/terminal lifecycle failures, first/later page failures,
@@ -391,3 +393,34 @@ reference financial repairs without claiming other cumulative consumers migrated
 Latest overseer order is #1722 clock calibration, then #1719, then #1721 signer
 prerequisites. Batch the imminent actual clock dependency before final history
 CI; no merge against the prior scheduler-only head despite its green checks.
+
+
+### Range reference implementation checkpoint
+
+The Binance adapter now uses typed HistoryRows for fills/orders/public trades
+and single income, and RangeHistory for ranged income. IncomeHistory is only
+transparent native-shape delegation; there is no venue completeness emitter,
+range page-admission call, independent accepted vector or walk.failed recovery.
+All streamed root-array results are checked before admission. The private
+Request.window field is removed because the engine range owner holds the active
+bounds. Client-order lookup is unchanged; typed signer failures strictly reject
+through each owner and retire pending income pacing.
+
+Four original adapter controls fail at their intended assertions: first-page
+failure, later fill-window loss, later ranged-income failure and accepted-empty/
+excluded-row recovery eligibility. The corrected adapter passes those and
+successful native ordering/per-window limits, income compound identity/chunk
+pacing, keyless/public-only behavior and strict signing refusal. Actual dependency
+integration, final independent reviews, focused gates and CI still precede
+publication/merge; no NX or remote-signing closure is claimed.
+
+
+Final local reference gates: 1,308 engine/Binance/Bybit/BloFin/OKX native
+tests, strict all-target engine/Binance Clippy, fmt, bans and 93 relative links
+pass. Correctness and adversarial reviews are clean, explicitly confirming
+shared core ownership and unchanged successful lookup/request contracts. The
+range owner is boxed in the adapter enum to avoid inflating every single-income
+read. The legacy account test for discarded earlier fill windows now asserts
+retained rows and marker ordering; no comparator/fixture/budget is weakened.
+Both Refused and TimedOut supplied signing errors preserve strict typed notSent
+rejection after accepted rows. Actual #1719 is still required before publication.

@@ -3312,3 +3312,28 @@ providers must sign the supplied canonical bytes rather than substitute their
 own wall-clock stamp. This calibration complements #1709's shared SDK ingress;
 it does not restore the retired hostClock capability.
 [Clock domains and regressions](RUST_ENGINE_CLOCK.md).
+
+
+### Binance general histories: shared range admission and completion
+
+The Binance reference adapts fills, orders, income and public trades to the
+engine's accepted-page owner; ranged income uses `RangeHistory` for bounds,
+identity selection and missing-coverage decisions. An HTTP/native/transport or
+whole-array parse failure before selected rows are accepted rejects typed.
+Previously fills/orders/single income could report an error then return `[]`,
+public trades could silently return empty or a malformed prefix, and ranged
+income could continue past a failed chunk. Those paths no longer prove complete
+empty coverage. After accepted rows, an actual page failure finishes only prior
+accepted rows with one command-owned Warn `history.incomplete` before the result,
+including at Error-only logging. A failed page's valid-looking prefix is excluded.
+Signing refusal/timeout remains a strict typed rejection (`notSent`) rather than
+partial success, even after accepted rows.
+
+Successful request limits, fill-window order/output duplicates, ranged-income
+compound identity and sorting, two-second chunk pacing, single-income/native
+trade order, missing-symbol/keyless no-I/O and unsupported profile boundaries
+remain. Client-order lookup stays separate, retaining primary credential routing,
+identity validation and definitive-miss proof. No SDK method argument or mandatory
+NX handler migration is added; B11's incomplete-query coverage and typed rejection
+handling remain required. Other histories and background notices still need
+fan-out; this reference does not claim universal enforcement.
