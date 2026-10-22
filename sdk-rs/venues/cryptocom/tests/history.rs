@@ -1,5 +1,6 @@
 mod support;
-use safe_cex_engine::{Action, Command, Event, Notice, Query};
+use safe_cex_engine::{Action, Command, ErrorKind, Event, HttpRequest, Level, Notice, Query, Value};
+use safe_cex_engine::log::code;
 use support::*;
 fn done(h: &Harness, command: u32) -> Result<&str, &str> {
     h.actions
@@ -399,4 +400,122 @@ fn null_optional_fill_fields_do_not_fail_history() {
         &format!(r#"{{"code":0,"result":{{"data":[{row}]}}}}"#),
     );
     assert!(done(&h, 1).unwrap().contains(r#""id":"1""#));
+}
+
+fn owned_notices(h: &Harness, command: u32) -> Vec<&Notice> {
+    h.actions.iter().filter_map(|action| match action {
+        Action::Notice(notice) => match notice {
+            Notice::Event(event) if event.code == code::HISTORY_INCOMPLETE
+                && event.fields == vec![("command", Value::Num(f64::from(command)))] => Some(notice),
+            Notice::CommandDone { command: id, .. } | Notice::CommandFailed { command: id, .. }
+                if *id == command => Some(notice),
+            _ => None,
+        },
+        _ => None,
+    }).collect()
+}
+
+fn accept_one_page(h: &mut Harness, command: u32, query: Query) -> HttpRequest {
+    h.event(Event::Command(Command::Query { command, query }));
+    h.reply("private/get-trades", &format!(r#"{{"code":0,"result":{{"data":[{}]}}}}"#, fill(1, 1610000000000000001)));
+    page_timer(h);
+    h.http("private/get-trades")
+}
+
+#[test]
+fn first_native_history_failure_rejects_typed_without_incomplete_success() {
+    let mut h = Harness::new();
+    h.load();
+    h.engine.set_log_level(Level::Error);
+    query(&mut h, fills(2));
+    h.reply("private/get-trades", r#"{"code":999,"message":"fixture unavailable","result":{"data":[]}}"#);
+    let notices = owned_notices(&h, 1);
+    assert_eq!(notices.len(), 1);
+    assert!(matches!(notices[0], Notice::CommandFailed { error, .. } if error.kind == Some(ErrorKind::Internal)));
+}
+
+#[test]
+fn later_native_or_malformed_page_returns_only_previously_accepted_rows() {
+    for malformed in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.engine.set_log_level(Level::Error);
+        let orders = h.engine.store().orders().to_vec();
+        let request = accept_one_page(&mut h, 1, fills(3));
+        if malformed {
+            h.respond(&request, &format!(r#"{{"code":0,"result":{{"data":[{},{{"invalid":true}}]}}}}"#, fill(2, 1610000000000000000)));
+        } else {
+            h.respond(&request, r#"{"code":999,"message":"fixture unavailable","result":{"data":[]}}"#);
+        }
+        let notices = owned_notices(&h, 1);
+        assert_eq!(notices.len(), 2);
+        assert!(matches!(notices[0], Notice::Event(event) if event.level == Level::Warn));
+        let Notice::CommandDone { result, .. } = notices[1] else { panic!("accepted rows resolve") };
+        let rows: Vec<serde_json::Value> = serde_json::from_str(result).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], "1");
+        assert_eq!(h.engine.store().orders(), orders);
+    }
+}
+
+#[test]
+fn filtered_native_rows_cannot_enable_empty_partial_success() {
+    let mut h = Harness::new();
+    h.load();
+    h.engine.set_log_level(Level::Error);
+    let mut q = fills(3);
+    if let Query::Fills { order_id, .. } = &mut q { *order_id = Some("other-order".into()); }
+    let request = accept_one_page(&mut h, 1, q);
+    h.respond(&request, r#"{"code":999,"message":"fixture unavailable","result":{"data":[]}}"#);
+    let notices = owned_notices(&h, 1);
+    assert_eq!(notices.len(), 1);
+    assert!(matches!(notices[0], Notice::CommandFailed { error, .. } if error.kind == Some(ErrorKind::Internal)));
+}
+
+#[test]
+fn exhausted_transport_retries_drop_each_failed_prefix_but_keep_accepted_output() {
+    let mut h = Harness::new();
+    h.load();
+    h.engine.set_log_level(Level::Error);
+    let mut request = accept_one_page(&mut h, 1, fills(3));
+    let params = serde_json::from_str::<serde_json::Value>(request.body.as_deref().unwrap()).unwrap()["params"].clone();
+    for attempt in 0..4 {
+        assert_eq!(serde_json::from_str::<serde_json::Value>(request.body.as_deref().unwrap()).unwrap()["params"], params);
+        h.event(Event::HttpStart { request: request.id, status: 200, headers: "" });
+        let prefix = format!(r#"{{"code":0,"result":{{"data":[{},"#, fill(2, 1610000000000000000));
+        h.event(Event::HttpChunk { request: request.id, data: prefix.as_bytes() });
+        h.event(Event::HttpFailed { request: request.id, error: "fixture network failure" });
+        if attempt < 3 {
+            assert!(owned_notices(&h, 1).is_empty());
+            page_timer(&mut h);
+            request = h.http("private/get-trades");
+        }
+    }
+    let notices = owned_notices(&h, 1);
+    assert_eq!(notices.len(), 2);
+    assert!(matches!(notices[0], Notice::Event(_)));
+    let Notice::CommandDone { result, .. } = notices[1] else { panic!("earlier accepted output survives") };
+    let rows: Vec<serde_json::Value> = serde_json::from_str(result).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "1");
+}
+
+#[test]
+fn concurrent_query_failure_markers_remain_owned_and_precede_their_results() {
+    let mut h = Harness::new();
+    h.load();
+    h.engine.set_log_level(Level::Error);
+    let first = accept_one_page(&mut h, 1, fills(3));
+    h.event(Event::Command(Command::Query { command: 2, query: fills(3) }));
+    page_timer(&mut h);
+    h.reply("private/get-trades", &format!(r#"{{"code":0,"result":{{"data":[{}]}}}}"#, fill(11, 1610000000000000001)));
+    page_timer(&mut h);
+    let second = h.http("private/get-trades");
+    for (command, request) in [(2, second), (1, first)] {
+        h.respond(&request, r#"{"code":999,"message":"fixture unavailable","result":{"data":[]}}"#);
+        let notices = owned_notices(&h, command);
+        assert_eq!(notices.len(), 2);
+        assert!(matches!(notices[0], Notice::Event(_)));
+        assert!(matches!(notices[1], Notice::CommandDone { .. }));
+    }
 }
