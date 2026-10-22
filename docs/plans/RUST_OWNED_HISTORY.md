@@ -3,6 +3,65 @@
 Owner: codex-cxxyqr. Planned from landing `556906286997` (2026-10-22).
 Reference merged in #1710 at `1910baa65a3`; fan-out remains active.
 
+## Next local phase: owned range paging / Binance reference
+
+Fresh `feat/rust-owned-history-range` starts from actual scheduler landing
+`faf799268857` while #1720 owns the source merge window. Commit this plan first,
+then locally integrate the reviewed frozen #1719 foundation `35ee0ea84af` to
+exercise its contextual finalization. This is an unmerged local dependency,
+not a landed API claim. Do not publish/merge this phase before #1719 lands;
+real-integrate actual #1720/#1719 and other shared-engine dependencies before
+final proof. No dispatch/request/signing/host, clock, lib.rs, row/account reducer
+or financial helper edits. Engine source stays in history.rs (and paging.rs only
+if the shared range primitive demonstrably needs an additive API).
+
+Add engine `RangeHistory<T>` around `HistoryRows` and `RangeWalk`. It owns active
+Fetch bounds, pending typed rows with matching PageRow facts, fresh-index
+selection and terminal/lifecycle state. Do not let the adapter call RangeWalk.page
+or mutate dedupe state before the whole response is valid. Pair row/fact staging
+atomically, validate any selection invariant, then retain only selected accepted
+rows. Asking for another step with an unadmitted Fetch, or completing success
+before Finished, poisons strict completion even if rows were accepted. Shared
+contextual finalization receives accepted rows only. Reuse existing first/later
+failure and strict-rejection policy; do not copy it into this adapter. Range
+budget/stall coverage is recorded by the owner, preserving prior range omissions
+when a subsequent actual-page failure ends the query.
+
+Binance general histories are the reference: ranged income uses this owner and
+its existing successful RangeWalk span splitting, fresh-index order, compound
+identity and 2-second chunk cadence. Keep request limit distinct from the range
+pager's native page size; income has no new global output cap. Fills retain
+oldest-first seven-day requests/per-request limits and existing output order,
+without new sort/dedupe/global truncation. Orders remain one request plus final
+descending sort; public trades stay unsigned and preserve response order. Use
+HistoryRows/Completion for the non-range cases too, check every whole-array parse
+result, stage failed prefixes without admitting them, and remove unwrap-or-empty
+serialization. Preserve missing-symbol/keyless no-I/O and unsupported profiles.
+
+Before accepted rows, actual page failure rejects typed, never empty complete;
+after accepted rows, it finishes those rows plus one command-owned incomplete
+marker. The old ranged-income walk.failed continuation is superseded by that
+owner policy. Signing refusal/timeout remains STRICT with its supplied typed
+VenueError and timer cleanup; do not stringify it into recoverable HTTP-page
+failure. Keep client-order lookup separate: primary credential routing, cache
+scope, identity checks and definitive -2013/HTTP conditions stay unchanged;
+partial histories must never manufacture a definitive lookup miss.
+
+Engine tests pin fresh-index selection, duplicate/out-of-range rows, successful
+range order, pending/terminal lifecycle failures, first/later page failures,
+failed-prefix exclusion, known range omissions and encoder refusal. Binance
+regressions pin successful windows/pacing/output and first/later native/HTTP/
+transport/malformed failures, accepted-empty behavior, strict typed signing
+failure/timer cleanup, unsigned trades and unchanged lookup proof. Prove changed
+behavior original RED/core GREEN. Update caller/AUDITS/QUALITY scope without
+claiming other histories, background notices, remote signing or B11 closed.
+
+Independent written-plan, correctness and adversarial reviews must answer the
+architecture gate: shared engine range admission/completion plus a reference
+adapter, not a second venue marker helper. Focused engine/Binance and shared-owner
+reference crates, strict Clippy/fmt/bans/links locally; full family/replay/WASM CI,
+then a separate fresh guard, separate exact merge and actual tree/parent proof.
+
 ## Contract and sequence
 
 1. Reference PR: engine-owned history completion and cursor paging, exercised by
