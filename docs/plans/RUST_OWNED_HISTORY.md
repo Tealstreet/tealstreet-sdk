@@ -22,7 +22,11 @@ or mutate dedupe state before the whole response is valid. Pair row/fact staging
 atomically, validate any selection invariant, then retain only selected accepted
 rows. Asking for another step with an unadmitted Fetch, or completing success
 before Finished, poisons strict completion even if rows were accepted. Shared
-contextual finalization receives accepted rows only. Reuse existing first/later
+contextual finalization receives accepted rows only. Preserve a known omission
+inside the active chunk too: RangeWalk only latches truncated/exhausted counts
+at rollover, so add a small read-only coverage snapshot if necessary. Test a
+full duplicate/no-progress page followed by failure before ChunkDone; count
+selected accepted rows, never excluded/staged rows, for recovery eligibility. Reuse existing first/later
 failure and strict-rejection policy; do not copy it into this adapter. Range
 budget/stall coverage is recorded by the owner, preserving prior range omissions
 when a subsequent actual-page failure ends the query.
@@ -45,7 +49,10 @@ owner policy. Signing refusal/timeout remains STRICT with its supplied typed
 VenueError and timer cleanup; do not stringify it into recoverable HTTP-page
 failure. Keep client-order lookup separate: primary credential routing, cache
 scope, identity checks and definitive -2013/HTTP conditions stay unchanged;
-partial histories must never manufacture a definitive lookup miss.
+partial histories must never manufacture a definitive lookup miss. The
+existing Binance best-effort-empty test encodes the superseded contract: replace
+its empty-success/CommandError expectations with typed failure and exactly-once
+command delivery, while retaining its background-log isolation assertions.
 
 Engine tests pin fresh-index selection, duplicate/out-of-range rows, successful
 range order, pending/terminal lifecycle failures, first/later page failures,
