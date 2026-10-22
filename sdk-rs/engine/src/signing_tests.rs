@@ -32,6 +32,9 @@ impl crate::SignStep for Step {
 #[derive(Default)]
 struct TestVenue {
     failed: usize,
+    repair_on_failure: bool,
+    invalid_prepare: bool,
+    repair_request: Option<RequestId>,
 }
 impl Venue for TestVenue {
     type Pending = ();
@@ -43,7 +46,14 @@ impl Venue for TestVenue {
             None,
             (),
         );
-        cx.sign_http(request, Box::new(Step));
+        cx.sign_http(
+            request,
+            if self.invalid_prepare {
+                Box::new(InvalidStep)
+            } else {
+                Box::new(Step)
+            },
+        );
         cx.route_request(request, RequestRoute::Primary);
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
@@ -53,8 +63,19 @@ impl Venue for TestVenue {
     fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {
         panic!("not a network failure");
     }
-    fn on_sign_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {
+    fn on_sign_failed(&mut self, cx: &mut Cx<'_, ()>, _: (), _: &str) {
         self.failed += 1;
+        if self.repair_on_failure && self.failed == 1 {
+            let request = cx.request(
+                Method::Post,
+                "https://venue.test/repair".into(),
+                vec![],
+                None,
+                (),
+            );
+            self.repair_request = Some(request);
+            cx.sign_http(request, Box::new(Step));
+        }
     }
     fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {
         panic!("signing timeout leaked to venue timer");
@@ -538,4 +559,145 @@ fn socket_close_revokes_pending_auth_completion() {
             .drain_actions()
             .any(|a| matches!(a, Action::WsSend { .. }))
     );
+}
+
+struct InvalidStep;
+impl crate::SignStep for InvalidStep {
+    fn prepare(&mut self, _: &mut Action, _: f64) -> Result<SignRequest, SignError> {
+        Err(SignError::InvalidRequest)
+    }
+    fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
+        unreachable!("invalid preparation never completes")
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
+fn complete_callback_retry(engine: &mut Engine<TestVenue>, now: f64) {
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let attempts: Vec<_> = actions
+        .iter()
+        .filter_map(|action| {
+            if let Action::Sign {
+                attempt,
+                work,
+                timeout_ms,
+            } = action
+            {
+                assert!(
+                    !work.operations.is_empty(),
+                    "internal marker escaped dispatch"
+                );
+                assert!(*timeout_ms > 0);
+                Some(*attempt)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(attempts.len(), 1, "exactly one real repair batch");
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now,
+        Event::Signed {
+            attempt: attempts[0],
+            result: result(),
+        },
+    );
+    let requests: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| {
+            if let Action::Http(http) = a {
+                Some(http.id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(requests, [engine.venue.repair_request.unwrap()]);
+    assert_eq!(engine.venue.failed, 1);
+}
+
+#[test]
+fn preparation_failure_callback_retry_emits_only_real_signing_work() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue {
+        repair_on_failure: true,
+        invalid_prepare: true,
+        ..Default::default()
+    });
+    engine.start(1000.);
+    complete_callback_retry(&mut engine, 1001.);
+}
+
+#[test]
+fn expired_outbound_callback_retry_emits_only_real_signing_work() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue {
+        repair_on_failure: true,
+        ..Default::default()
+    });
+    engine.start(1000.);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let attempt = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::Sign { attempt, .. } = a {
+                Some(*attempt)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    engine.handle(
+        1001.,
+        Event::Signed {
+            attempt,
+            result: result(),
+        },
+    );
+    engine.prepare_dispatch(21000.);
+    complete_callback_retry(&mut engine, 21001.);
+}
+
+struct ReadyAfterRefusal(std::sync::atomic::AtomicUsize);
+impl crate::signing::Signer for ReadyAfterRefusal {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign(&self, _: SignRequest) -> crate::signing::SignFuture {
+        unreachable!("an immediate provider is never polled")
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        (self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0).then(result)
+    }
+}
+#[test]
+fn unavailable_immediate_provider_callback_retry_dispatches_once() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue {
+        repair_on_failure: true,
+        ..Default::default()
+    });
+    engine
+        .set_signer(Some(std::sync::Arc::new(ReadyAfterRefusal(
+            std::sync::atomic::AtomicUsize::new(0),
+        ))))
+        .unwrap();
+    engine.start(1000.);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Sign { .. })),
+        "internal marker escaped inline completion"
+    );
+    let requests: Vec<_> = actions
+        .iter()
+        .filter_map(|a| {
+            if let Action::Http(http) = a {
+                Some(http.id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(requests, [engine.venue.repair_request.unwrap()]);
+    assert_eq!(engine.venue.failed, 1);
 }

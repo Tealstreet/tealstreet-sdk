@@ -80,6 +80,8 @@ provider supports HMAC-SHA256/512, SHA256 and SHA256(secret-suffix); the remaini
 primitive vocabulary refuses explicitly until its concrete provider is added.
 Local immediate batches preserve replay action/timer ordering. Async batches have
 independent deadlines, ordered completion, freshness rechecks and late-reply fences.
+Actions emitted by failure callbacks reenter that same dispatch queue; internal
+preparation markers never reach a host or compete with a real provider batch.
 
 Native callers supply `Engine::set_signer`, `Host::with_signer`, or the trusted
 `FrameServer::add_venue_with_signer` registration. Raw JS hosts use

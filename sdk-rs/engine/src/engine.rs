@@ -2842,6 +2842,18 @@ impl<V: Venue> Engine<V> {
         self.io.dispatch_now = now;
     }
 
+    /// Callback actions must traverse the same queue as the original event.
+    /// In particular, an empty signing marker is internal preparation work.
+    fn queue_dispatch_callback_actions(
+        &mut self,
+        queued: &mut std::collections::VecDeque<Action>,
+        emitted: usize,
+    ) {
+        for action in self.io.actions.split_off(emitted).into_iter().rev() {
+            queued.push_front(action);
+        }
+    }
+
     fn dispatch_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
         for (outbound, error) in std::mem::take(&mut self.io.signing_admission) {
@@ -2860,7 +2872,9 @@ impl<V: Venue> Engine<V> {
                                 self.io.signing.retry(next, pending);
                             }
                             Some(Completion::Failed(pending, error)) => {
-                                self.sign_failed(now, pending.outbound, error)
+                                let emitted = self.io.actions.len();
+                                self.sign_failed(now, pending.outbound, error);
+                                self.queue_dispatch_callback_actions(&mut queued, emitted);
                             }
                             None => {}
                         }
@@ -2884,7 +2898,9 @@ impl<V: Venue> Engine<V> {
                         let work = match self.io.signing.prepare(attempt, now) {
                             Ok(work) => work,
                             Err(error) => {
+                                let emitted = self.io.actions.len();
                                 self.sign_completed(now, attempt, Err(error));
+                                self.queue_dispatch_callback_actions(&mut queued, emitted);
                                 continue;
                             }
                         };
@@ -2894,16 +2910,16 @@ impl<V: Venue> Engine<V> {
                             let emitted = self.io.actions.len();
                             self.sign_completed(now, attempt, result);
                             // Inline local completion retains original mixed action order.
-                            for action in self.io.actions.split_off(emitted).into_iter().rev() {
-                                queued.push_front(action);
-                            }
+                            self.queue_dispatch_callback_actions(&mut queued, emitted);
                         } else {
                             if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
+                                let emitted = self.io.actions.len();
                                 self.sign_completed(
                                     now,
                                     attempt,
                                     Err(crate::signing::SignError::Unavailable),
                                 );
+                                self.queue_dispatch_callback_actions(&mut queued, emitted);
                                 continue;
                             }
                             if self.io.signing.timer(attempt).is_some_and(|t| t.0 == 0) {
