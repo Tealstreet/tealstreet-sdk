@@ -270,13 +270,18 @@ export interface LocalIdentityMetadata {
 export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondary?: LocalIdentityMetadata }
 /** Canonical facts in protocol UTC milliseconds; neither field is fabricated. */
 export interface SignReceipt { stampMs?: number; expiryMs?: number }
-export interface SignResult { values: number[][]; receipt: SignReceipt }
+export interface SignResult {
+  values: number[][];
+  receipt: SignReceipt;
+  /** Bounded same-attempt callback metadata; trusted native HTTP policy owns precedence. */
+  headers?: [string, string][];
+}
 
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
   | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' };
-export interface HostedSigningOutput { credential?: string; signature?: string }
+export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
   operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];

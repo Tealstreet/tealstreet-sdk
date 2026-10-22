@@ -27,6 +27,8 @@ pub mod request_context;
 pub mod signing;
 pub mod signing_capture;
 mod signing_dispatch;
+pub mod signing_headers;
+pub mod signing_policy;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub mod socket;
 pub mod startup;

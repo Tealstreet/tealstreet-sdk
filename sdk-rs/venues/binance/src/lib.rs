@@ -50,6 +50,7 @@ pub enum Variant {
 
 #[derive(Clone, Default)]
 pub struct Options {
+    pub signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     pub read_credentials: Option<Credentials>,
     pub testnet: bool,
     pub variant: Variant,
@@ -431,16 +432,17 @@ impl BinanceFutures {
         };
         cx.sign_http(
             request,
-            Box::new(sign::Http::new(
-                credentials.clone(),
-                query,
-                self.options.recv_window,
-                true,
-            )),
+            Box::new(
+                sign::Http::new(credentials.clone(), query, self.options.recv_window, true)
+                    .with_header_policy(self.options.signing_policy.header_policy()),
+            ),
         );
     }
 
     fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
+        if channel == Channel::Private && !cx.private_feed_policy().streaming() {
+            return;
+        }
         let role = if matches!(channel, Channel::Private) {
             safe_cex_engine::SocketChannel::Private
         } else {

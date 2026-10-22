@@ -657,7 +657,14 @@ impl WasmEngine {
             .map_err(hosted_error)?;
         let prepared = self
             .hosted_captures
-            .prepare(work, kind, now, protocol_now, revision, timeout)
+            .prepare_with_policy(
+                (work, kind.header_policy()),
+                kind,
+                now,
+                protocol_now,
+                revision,
+                timeout,
+            )
             .map_err(hosted_error)?;
         Ok(serde_json::json!({"id": prepared.id.get(), "work": prepared.work, "deadlineMs": prepared.deadline_ms}).to_string())
     }

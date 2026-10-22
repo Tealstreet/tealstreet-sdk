@@ -364,6 +364,9 @@ impl BinanceFutures {
     }
 
     pub(crate) fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !cx.private_feed_policy().streaming() {
+            return;
+        }
         if self.is_spot() {
             self.reset_spot_subscription(cx);
             self.connect_url(cx, Channel::Private, self.urls.private_ws);
@@ -374,6 +377,9 @@ impl BinanceFutures {
 
     /// Livenet listenKey requests carry only the API key; testnet signs them.
     fn listen_key_request(&mut self, cx: &mut Cx<'_, Pending>, method: Method, request: Request) {
+        if !cx.private_feed_policy().streaming() {
+            return;
+        }
         let Some(credentials) = &self.credentials else {
             return;
         };
@@ -2512,6 +2518,9 @@ impl BinanceFutures {
         format!("{prefix}-{id}")
     }
     fn subscribe_spot_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !cx.private_feed_policy().streaming() {
+            return;
+        }
         let Some(socket) = self.private.socket else {
             return;
         };
