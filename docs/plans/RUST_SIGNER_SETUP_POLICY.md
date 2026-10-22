@@ -86,10 +86,17 @@ refs can prove presence, not nonempty provider bytes, so recipe Present insertio
 still validates material atomically. Local fallback aliases the installed primary
 ref rather than copying passphrase material into a venue. Pass explicit setup
 public/private context through the JSON/WASM path; do not infer it from stripped
-options. Errors remain sanitized invalidInput/notSent; caller objects unchanged
+options. Errors remain sanitized with existing layer-specific contracts (native
+construction InvalidInput has no command outcome); caller objects unchanged
 and owned buffers are wiped on rejection.
 
-RED/GREEN tests cover missing/empty/own/inherited passphrases, primary public
+Retain passphrase-only primary input so a complete secondary slot can inherit
+its existing material without inventing key/signing refs. Setup mode uses
+explicit public intent (including publicMode.requested precedence), never
+pre-setup canSign inferred from stripped keys.
+
+RED/GREEN tests cover missing/empty/own/inherited and passphrase-only-primary
+passphrases, primary public
 bypass versus unconditional secondary enforcement, both trusted entry paths,
 opaque fallback, incomplete/absent slots and Unicode/byte preservation. Existing
 MEXC trim/default/custody controls remain. Retitle PR #1738 for the shared field
