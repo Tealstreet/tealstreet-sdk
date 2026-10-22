@@ -5,6 +5,7 @@ use crate::{BitunixFutures, Feed, Pending, REST};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
 use safe_cex_engine::execution::{Arithmetic, Cursor, ExecutionRounding};
+use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
@@ -1750,11 +1751,8 @@ impl BitunixFutures {
                                     .entry(raw.to_owned())
                                     .and_modify(|pending| *pending = pending.max(cumulative))
                                     .or_insert(cumulative);
-                                cx.notice(
-                                    Level::Warn,
-                                    code::HISTORY_INCOMPLETE,
-                                    "Bitunix fill metadata is not reconciled",
-                                );
+                                BackgroundCoverage::Incomplete
+                                    .report(cx, "Bitunix fill metadata is not reconciled");
                             }
                         }
                     }

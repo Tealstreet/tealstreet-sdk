@@ -2,8 +2,9 @@
 mod support;
 
 use safe_cex_engine::{Command, Event, PublicFeedPolicy, SocketId, TimerId};
-use safe_cex_venue_bybit::{BybitLinear, Options};
+use safe_cex_venue_bybit::BybitLinear;
 use support::Harness;
+use support::Options;
 
 const PUBLIC: &str = "/v5/public/linear";
 const PRIVATE: &str = "/v5/private";
@@ -210,10 +211,12 @@ fn stable_public_traffic_resets_backoff() {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BybitLinear::new(Options {
-        public_data_only: true,
-        ..Options::default()
-    }));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BybitLinear::new(
+        safe_cex_venue_bybit::Options {
+            public_data_only: true,
+            ..safe_cex_venue_bybit::Options::default()
+        },
+    ));
     engine
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();

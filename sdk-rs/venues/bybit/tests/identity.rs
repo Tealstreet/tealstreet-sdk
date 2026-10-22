@@ -1,11 +1,13 @@
 //! Actual native identity requests: exact routes/signers, failure ownership, no Store commits.
+mod support;
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_bybit::{BybitLinear, Options, Variant};
+use safe_cex_venue_bybit::{BybitLinear, Variant};
+use support::Options;
 const NOW: f64 = 1000.;
 type TestEngine = Engine<BybitLinear>;
 fn seeded(options: Options) -> TestEngine {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BybitLinear::new(options));
+    let mut engine = support::engine(options);
     engine
         .store_mut()
         .set_balance(safe_cex_engine::model::Balance {

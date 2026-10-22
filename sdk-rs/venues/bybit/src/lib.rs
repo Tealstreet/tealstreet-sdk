@@ -59,7 +59,7 @@ const ENVIRONMENT_PROBE_TIMEOUT_MS: u32 = 2_000;
 pub struct Options {
     /// Optional tighter signing receive window in milliseconds.
     pub recv_window: Option<u32>,
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub read_credentials: Option<safe_cex_engine::signing::Identity>,
     pub variant: Variant,
     pub endpoints: Option<Endpoints>,
     pub testnet: bool,
@@ -71,20 +71,9 @@ pub struct Options {
     pub enable_option_markets: bool,
     /// Markets, tickers, books and candles only; no account.
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
-}
-
 /// One REST request as sent, kept so a rejected signature can be resent.
 pub struct Rest {
     method: Method,
@@ -275,7 +264,7 @@ pub struct BybitLinear {
     paths: Paths,
     config_error: Option<String>,
     credentials: Option<Credentials>,
-    read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    read_credentials: Option<safe_cex_engine::signing::Identity>,
     /// Set once a startup read proved the key unusable; startup never retries it.
     credentials_rejected: bool,
     environment_probe_origin: Option<&'static str>,
@@ -432,7 +421,7 @@ fn resendable(text: &str) -> Option<Option<f64>> {
 
 impl BybitLinear {
     pub fn new(options: Options) -> Self {
-        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
+        let mut options = options;
         let category = match options.variant {
             Variant::Inverse => Category::Inverse,
             Variant::Spot => Category::Spot,
@@ -473,15 +462,10 @@ impl BybitLinear {
         } else {
             None
         };
-        let credentials = match (&options.key, &options.secret) {
-            (Some(key), Some(secret)) if !options.public_data_only && !key.is_empty() => {
-                Some(Credentials {
-                    key: key.clone(),
-                    secret: secret.clone(),
-                })
-            }
-            _ => None,
-        };
+        let credentials = (!options.public_data_only)
+            .then(|| options.credentials.take())
+            .flatten()
+            .filter(|identity| identity.validate().is_ok());
         Self {
             category,
             primary_category: category,
@@ -648,22 +632,24 @@ impl BybitLinear {
             url.push('?');
             url.push_str(&rest.payload);
         }
-        let read_credentials = self
+        let credentials = self
             .read_credentials
             .as_ref()
             .filter(|_| rest.method == Method::Get)
-            .map(|read| Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-            });
-        let credentials = read_credentials.as_ref().or(self.credentials.as_ref());
-        let headers = match (credentials, rest.signed) {
-            (Some(credentials), true) => {
-                credentials.headers_window(cx.protocol_stamp_ms(), &rest.payload, self.recv_window)
-            }
-            (None, true) => return,
-            _ => vec![("X-Referer", sign::BROKER_ID.into())],
+            .or(self.credentials.as_ref());
+        let signing = if rest.signed {
+            let Some(credentials) = credentials else {
+                return;
+            };
+            Some(sign::Http::new(
+                credentials.clone(),
+                rest.payload.clone(),
+                self.recv_window,
+            ))
+        } else {
+            None
         };
+        let headers = vec![("X-Referer", sign::BROKER_ID.into())];
         let body = (rest.method != Method::Get).then(|| rest.payload.clone());
         let (method, stream) = (rest.method, rest.stream);
         let pending = Pending {
@@ -671,10 +657,13 @@ impl BybitLinear {
             rest,
             then,
         };
-        if stream {
-            cx.request_streamed(method, url, headers, ArrayAt::Path(MARKETS_PATH), pending);
+        let request = if stream {
+            cx.request_streamed(method, url, headers, ArrayAt::Path(MARKETS_PATH), pending)
         } else {
-            cx.request(method, url, headers, body, pending);
+            cx.request(method, url, headers, body, pending)
+        };
+        if let Some(signing) = signing {
+            cx.sign_http(request, Box::new(signing));
         }
     }
 
@@ -940,17 +929,13 @@ impl BybitLinear {
         let Some(origin) = self.environment_probe_origin else {
             return false;
         };
-        let read = self.read_credentials.as_ref().map(|read| Credentials {
-            key: read.key.clone(),
-            secret: read.secret.clone(),
-        });
-        let Some(credentials) = read.as_ref().or(self.credentials.as_ref()) else {
+        let Some(credentials) = self.read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return false;
         };
-        if credentials.key.is_empty() || credentials.secret.is_empty() {
+        if credentials.validate().is_err() {
             return false;
         }
-        let headers = credentials.headers_window(cx.protocol_stamp_ms(), "", self.recv_window);
+        let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window);
         self.environment_probe_attempted = true;
         let timer = cx.set_timer(f64::from(ENVIRONMENT_PROBE_TIMEOUT_MS));
         self.environment_probe = Some(EnvironmentProbe {
@@ -961,7 +946,7 @@ impl BybitLinear {
         let request = cx.request(
             Method::Get,
             format!("{origin}/v5/user/query-api"),
-            headers,
+            vec![],
             None,
             Pending {
                 category: self.category,
@@ -969,6 +954,7 @@ impl BybitLinear {
                 then: Then::EnvironmentProbe,
             },
         );
+        cx.sign_http(request, Box::new(signing));
         cx.request_timeout(request, ENVIRONMENT_PROBE_TIMEOUT_MS);
         true
     }
@@ -2176,8 +2162,11 @@ impl Venue for BybitLinear {
     }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.read_credentials
-            && let Err(error) = read.validate()
+        if let Some(error) = self
+            .credentials
+            .iter()
+            .chain(self.read_credentials.iter())
+            .find_map(|identity| identity.validate().err())
         {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
@@ -2355,6 +2344,30 @@ impl Venue for BybitLinear {
                 }
                 on_item_public(cx, then, item, self.variant, self.category)
             }
+        }
+    }
+
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if pending.rest.resent {
+            // This refusal concerns only the retry. The earlier dispatched
+            // attempt keeps the existing conservative failure/recovery path.
+            self.on_request_failed(cx, pending, "Bybit retry signing failed before dispatch");
+            return;
+        }
+        self.select_category(pending.category);
+        match pending.then {
+            Then::Trade(request) => self.on_trade_sign_failed(cx, request, error),
+            Then::Identity(command) => {
+                cx.command_error(command, error.message.clone());
+                cx.fail(command, error);
+            }
+            Then::History(request) => self.on_history_sign_failed(cx, request, error),
+            Then::Closed(request) => self.on_closed_sign_failed(cx, request, error),
+            Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
+            Then::Options(
+                options::Request::Chain { command, .. } | options::Request::Greeks { command, .. },
+            ) => cx.fail(command, error),
+            then => self.on_public_response(cx, then, Err(&error.message)),
         }
     }
 
@@ -2672,14 +2685,6 @@ mod public_decoder_tests {
 
 #[cfg(test)]
 mod secondary_tests;
-
-impl Drop for BybitLinear {
-    fn drop(&mut self) {
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
-}
 
 #[cfg(test)]
 mod candle_start_tests {
