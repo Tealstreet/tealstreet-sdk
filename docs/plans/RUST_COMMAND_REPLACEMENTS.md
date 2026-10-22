@@ -399,3 +399,23 @@ expectation was corrected: this recipe declares no absolute signature expiry,
 so None is correct; the Context bound is separately asserted. Independent final
 review CLEAN, architecture No. Full registry atomicity and ordinary Bybit
 adoption remain open, with its original gateway RED retained. Local/unpublished.
+
+Local integration checkpoint953ffd1: genuinely merge current frozen core8368,
+including actual1767/1760/1761 and the native fixture correction. All seven owned
+and22 incoming paths are disjoint; every5303 combined tree entry is preserved.
+No PR/push;1741 exact-head/full-data/package watches remain active.
+
+Next test-only atomicity slice: exercise the public Context replacement bridge
+with a second-child identity collision after its first prospective child was
+constructed, while an unrelated expired context is still retained. Denial must
+preserve every original context/owner bound, pending count and parent journal
+fact, create neither child authority nor HTTP/action, and leave expiry cleanup
+until successful admission. Monotonic checked allocation may burn the denied
+range; a subsequent valid group must use fresh IDs and preserve the original
+raw deadline. Add registry-level controls for accepted/KnownPartial/failed and
+unresolved parent facts reaching the final journal rejection, plus an old
+command generation after finish/reissue. No source change or new bug claim is
+planned: these cover rollback/composition boundaries before ordinary Bybit
+adoption. Retain all existing23 replacement controls and native/parser assertions.
+Independent plan review precedes edits, then focused engine tests/strict checks
+and review before the local checkpoint. Return to1741 for any landed dependency.
