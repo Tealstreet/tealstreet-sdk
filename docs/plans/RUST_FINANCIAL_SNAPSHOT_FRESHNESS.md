@@ -93,6 +93,31 @@ settle command-owned preparation through existing typed failure handling.
 Accepted native writes still apply if the fence is exhausted; future snapshots
 remain inadmissible. Pin these lifecycle choices with controls before adapters.
 
+## Plan audit: auth context and staged compatibility
+
+The Bitunix authentication observer calls read-current admission before account
+mutation, but the existing Venue observer has no Store argument. Owner and
+RequestContext owner approved one shared extension: pass read-only `&Store` into
+`Venue::account_auth_outcome` and its existing `observe_account_auth` forwarding.
+Update all four real overrides and engine/native test fixtures; only Bitunix
+uses the context. Preserve managed admission-before-auth ordering. No live
+mutable token state, extra observer or venue revision counter is introduced.
+These narrow engine auth regions are clear with RequestContext's owner.
+
+Binance retention of rejected rows currently reads native terminal state AFTER
+new binding proposals. Candidate rows must use the equivalent prospective view;
+only the admitted closure applies native caches. Bitunix's initial regular then
+TP-SL commits are sequential: validate both tokens before either publication,
+then preserve the second half's view of the first Store/native result. Combining
+the two requires an explicitly equivalent staged sequential result.
+
+An old stamp retains its issuer allocation after Epoch destruction, so allocation
+address reuse cannot authenticate a new issuer. Exhaustion controls include
+background reads, staged initial halves and command-owned preparation, with no
+new immediate retry loop or stranded readiness/timer state. Mechanical adoption
+is not an original-RED production fix. Baseline focused engine/Binance/Bitunix
+native suite passed before source changes.
+
 ## Two reference consumers and compatibility
 
 1. **Binance (all existing variants).** Replace AccountState.order_version
