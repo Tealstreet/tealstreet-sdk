@@ -3919,7 +3919,7 @@ RemoteSigner remains primary-only and never falls back to a local/PayloadSigner
 after refusal. The provider requests the declared format and rejects noncanonical
 or incorrectly sized base64 MACs before any attempt can be published.
 
-## OKX dispatch signer adoption (draft; hosted prerequisite outstanding)
+## OKX dispatch signer adoption (draft; CI evidence pending)
 
 This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
 Native HTTP and private/business WS stage canonical work through the shared
@@ -3939,13 +3939,25 @@ Typed signer refusal before the first write is `notSent`; earlier accepted
 bracket effects retain the existing aggregate outcome. Provider refusal cannot
 mean lookup absence or an empty completed financial snapshot.
 
-**Not yet a landed capability:** hosted HTTP/WS and keyless `remoteSigner`/
-`PayloadSigner` require the separately reviewed shared encoding/passphrase
-presentation extension after #1757. This draft must not merge before consuming
-that actual extension and passing positive actual-WASM hosted tests per alias.
-Passphrase custody stays with the trusted provider; the existing external wire
-must not gain a required field, and secondary requests must refuse rather than
-silently use primary where that wire cannot select a secondary identity.
-[Family plan](RUST_OKX_DISPATCH_SIGNER.md),
-shared presentation plan `RUST_HOSTED_SIGNER_PRESENTATION.md` (on its separate
-prerequisite branch).
+The draft now consumes actual #1757 and #1763. Browser `signHttpRequest` and
+`signWsAuth` use the shared owned provider without constructing a TS OKX venue;
+only the standalone request serializer survives deletion of TS venue classes.
+Keyless `remoteSigner` is declared for all four aliases. Its existing external
+wire is unchanged: each alias keeps its own label, Base64 MACs and WS
+`extraData.timestamp` as integer seconds derived from prepared work. The
+primary-only external wire cannot select a secondary identity: a native read
+requiring that identity refuses before callback/I/O, never silently uses primary.
+Hosted capture itself signs with primary even when secondary is configured.
+
+Private `PayloadSigner` remains typed `unsupported` / `notSent` at setup,
+including when a local secret is also supplied. The TS OKX interceptor never
+invokes that callback, so this does not remove a working combination. RemoteSigner
+wins when both callbacks are supplied, with no local or payload fallback.
+Passphrase material is separately provisioned into trusted Present-only provider
+custody; neither generic options, the external wire nor callback receiver retains
+it. Browser/worker providers must be provisioned in their executing realm.
+
+Native and SDK controls are passing; actual-WASM hosted/native-login tests and
+full CI/replay proof are pending. This section describes the proposed contract,
+not a landed or live-capture claim. [Family plan](RUST_OKX_DISPATCH_SIGNER.md),
+[landed shared presentation](RUST_HOSTED_SIGNER_PRESENTATION.md).

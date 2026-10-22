@@ -1237,7 +1237,15 @@ ordered writes and both WS login channels stay primary. Public requests remain
 unsigned. Setup validation may report sanitized `Invalid local signer setup`
 before startup rather than the TS client error text.
 
-This draft is not a hosted admission claim. Its merge requires the separate
-shared encoding/passphrase presentation extension and positive actual-WASM
-hosted HTTP/WS tests for all four aliases. No caller may restore raw secrets to
-sanitized options or use a venue-local signing fallback.
+The draft integrates the landed shared encoding/passphrase presentation core.
+Hosted HTTP reuses `okx.signing.ts`, a standalone request serializer also used by
+the TS API interceptor; no TS venue is constructed. Four-alias browser and
+keyless RemoteSigner captures use owned primary refs and Base64 output.
+Native private/business WS work has three typed byte parts (seconds, GET,
+/users/self/verify), whose concatenation and MAC are unchanged. That shape lets
+the shared bridge preserve numeric legacy `extraData.timestamp` from the exact
+prepared receipt without confusing an HTTP preimage with WS work. Native login
+JSON keeps its existing string timestamp. Private PayloadSigner remains typed
+unsupported/notSent; RemoteSigner wins and cannot fall back. Hosted admission
+still requires positive actual-WASM tests and final CI/replay proof before merge.
+No caller may restore raw secrets to sanitized options or use a local fallback.

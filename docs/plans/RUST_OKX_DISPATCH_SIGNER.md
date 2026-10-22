@@ -144,3 +144,19 @@ Architecture gate: this adopts the landed provider, capture, setup and codec
 policy seams. It introduces no credential custody, retry ledger, clock,
 socket policy or request admission mechanism. The socket core is a separate
 draft and is not an input to this branch. Landing is held for #1769.
+
+## Hosted implementation checkpoint (CI pending)
+
+The standalone codec, four-alias registry admission and exact legacy WS metadata
+are implemented. Eight original HTTP assertion failures now pass. Correctness
+and adversarial reviews found and cleared a generic UTF-8 part-boundary
+regression and a missing actual-native-WASM login oracle. The latter now starts
+the SDK/engine and drives both private/business login and real signed HTTP; it
+is authored for CI, not locally executed against an older binary.
+
+Local verification: 485 full OKX/Binance native tests, 40 focused recipe/registry
+controls, one independent fixed-vector hosted-capture test spanning all four
+aliases, 23 full-registry construction controls and 146 focused SDK tests pass;
+SDK typecheck and lint pass. The exact legacy ratchet is 516 actual / 516 allowed
+(517 before the native port), with every non-OKX declaration retained. Strict all-target registry/OKX/Binance Clippy passes. Actual landing
+integration, actual-WASM CI and replay proof remain readiness gates. The socket draft and allocator are separate workstreams.

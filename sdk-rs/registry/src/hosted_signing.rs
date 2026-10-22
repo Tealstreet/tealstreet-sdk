@@ -115,7 +115,8 @@ pub fn prepare(
             venue,
             "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
         );
-    if !binance && !bybit {
+    let okx = cfg!(feature = "okx") && matches!(venue, "okx" | "okxeu" | "okxdemo" | "okxeudemo");
+    if !binance && !bybit && !okx {
         return Err(SignError::Unsupported);
     }
     match input {
@@ -279,11 +280,11 @@ mod presentation_tests {
     }
 
     #[test]
-    fn two_future_families_use_one_owned_atomic_work_and_formatter_without_admission() {
+    fn two_families_use_one_owned_atomic_work_and_formatter_with_explicit_admission() {
         let (identity, signer) = fixture();
         for (venue, names) in families() {
             let policy = crate::remote_signing_policy(venue);
-            assert!(!policy.enabled);
+            assert_eq!(policy.enabled, venue == "okx");
             assert_eq!(policy.signature_encoding, SignatureEncoding::Base64);
             assert_eq!(policy.passphrase_header, Some(names[0]));
             let (work, kind) = prepared(&identity, policy);
@@ -301,17 +302,19 @@ mod presentation_tests {
                 output.headers.unwrap(),
                 vec![(names[0].into(), "fixture-presentation".into())]
             );
-            assert!(matches!(
-                prepare(
-                    venue,
-                    &Identities {
-                        primary: Some(identity.clone()),
-                        secondary: None
-                    },
-                    Input::Credential {}
-                ),
-                Err(SignError::Unsupported)
-            ));
+            let capture = prepare(
+                venue,
+                &Identities {
+                    primary: Some(identity.clone()),
+                    secondary: None,
+                },
+                Input::Credential {},
+            );
+            if venue == "okx" && cfg!(feature = "okx") {
+                assert!(capture.is_ok());
+            } else {
+                assert!(matches!(capture, Err(SignError::Unsupported)));
+            }
         }
     }
 
@@ -431,7 +434,13 @@ mod presentation_tests {
                 vec![(protected[0].into(), "callback".into())]
             );
             assert!(matches!(
-                finish(OutputKind::Http(base), &result),
+                finish(
+                    OutputKind::Http(RemoteSigningPolicy {
+                        protected_headers: None,
+                        ..base
+                    }),
+                    &result
+                ),
                 Err(SignError::InvalidResult)
             ));
             result.headers = (0..32)

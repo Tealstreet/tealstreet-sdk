@@ -7,7 +7,7 @@ use safe_cex_engine::{Action, DispatchContext, SignStep, num};
 
 fn work(
     identity: &Identity,
-    payload: String,
+    payload: Vec<PayloadPart>,
     context: Context,
     stamp_ms: f64,
 ) -> Result<SignRequest, SignError> {
@@ -18,9 +18,7 @@ fn work(
         .ok_or(SignError::InvalidRequest)?;
     let mut work = hmac_sha256_work(
         identity,
-        vec![PayloadPart::Bytes {
-            bytes: payload.into_bytes(),
-        }],
+        payload,
         context,
         SignReceipt {
             stamp_ms: Some(stamp_ms),
@@ -102,13 +100,16 @@ impl SignStep for Http {
         self.stamp = safe_cex_engine::time::iso_millis(stamp_ms as i64);
         work(
             self.identity.as_ref().ok_or(SignError::Unavailable)?,
-            format!(
-                "{}{}{}{}",
-                self.stamp,
-                http.method.as_str(),
-                self.path,
-                http.body.as_deref().unwrap_or_default()
-            ),
+            vec![PayloadPart::Bytes {
+                bytes: format!(
+                    "{}{}{}{}",
+                    self.stamp,
+                    http.method.as_str(),
+                    self.path,
+                    http.body.as_deref().unwrap_or_default()
+                )
+                .into_bytes(),
+            }],
             context(&http.url, http.method.as_str(), &self.path),
             stamp_ms,
         )
@@ -162,7 +163,19 @@ impl SignStep for WsLogin {
         self.stamp = num::format(seconds);
         work(
             &self.identity,
-            format!("{}GET/users/self/verify", self.stamp),
+            // Typed WS grammar distinguishes this prepared work from a hosted
+            // HTTP capture of an otherwise identical opaque string.
+            vec![
+                PayloadPart::Bytes {
+                    bytes: self.stamp.as_bytes().to_vec(),
+                },
+                PayloadPart::Bytes {
+                    bytes: b"GET".to_vec(),
+                },
+                PayloadPart::Bytes {
+                    bytes: b"/users/self/verify".to_vec(),
+                },
+            ],
             context(&self.origin, "WS", "/users/self/verify"),
             seconds * 1000.,
         )

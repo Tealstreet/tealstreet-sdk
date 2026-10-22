@@ -1,10 +1,8 @@
 import type { ExchangeOptions } from '../../types';
 import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
-import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
 import createHmac from 'create-hmac';
-import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
@@ -14,11 +12,12 @@ import { resendOnSignatureRejection, signatureRejectedResponse } from '../../uti
 import { BaseExchange } from '../base';
 import type { OKXExchange } from './okx.exchange';
 import { BASE_URLS, RECV_WINDOW } from './okx.types';
+import { finishOkxRequest, isOkxPublicSigningRequest, isOkxUnsignedSigningRequest, prepareOkxRequest } from './okx.signing';
 
 // Broader than the signing check below, which matches only `/api/v5/public/`
 // and so misses tickers and both candle endpoints under `/api/v5/market/`.
 // Used only to skip the hosted signing round trip, never to decide signing.
-const isPublicEndpoint = (url?: string) => Boolean(url && (url.includes('/public/') || url.includes('/market/')));
+const isPublicEndpoint = isOkxPublicSigningRequest;
 
 export const isOkxSignatureRejection: IsSignatureRejection = (data) =>
   String(data?.code) === '50113' || /invalid sign/i.test(String(data?.msg ?? ''));
@@ -90,7 +89,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     // by the branches below, exactly as before.
     if (isPublicEndpoint(config.url)) markSkipRemoteSigning(config);
 
-    if (config?.url?.includes('public')) {
+    if (isOkxUnsignedSigningRequest(config.url)) {
       return config;
     }
 
@@ -105,26 +104,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       return nextConfig;
     }
 
-    const method = config.method?.toUpperCase?.() || 'GET';
-    const params = config.params ? decodeURIComponent(qs.stringify(config.params)) : null;
-    const url = `${config.url}${params ? `?${params}` : ''}`;
-    const hasBody = config.data !== undefined && config.data !== null;
-    const data = hasBody ? (typeof config.data === 'string' ? config.data : JSON.stringify(config.data) || '') : '';
-
-    const timestamp = virtualClock.getCurrentTime().toISOString();
-    const toSign = [timestamp, method, url, data];
-
-    const signature = createHmac('sha256', options.secret).update(toSign.join('')).digest('base64');
-
-    const headers = new AxiosHeaders({
-      ...nextConfig.headers,
-      'OK-ACCESS-KEY': options.key,
-      'OK-ACCESS-SIGN': signature,
-      'OK-ACCESS-TIMESTAMP': timestamp,
-      'OK-ACCESS-PASSPHRASE': passphrase || '',
-    });
-
-    return { ...nextConfig, ...(hasBody ? { data } : {}), headers };
+    const prepared = prepareOkxRequest(nextConfig, virtualClock.getCurrentTime().toISOString());
+    const signature = createHmac('sha256', options.secret).update(prepared.payload).digest('base64');
+    return finishOkxRequest(prepared, options.key, signature, passphrase || '');
   });
 
   if (options.tealstreetTunnel) {
