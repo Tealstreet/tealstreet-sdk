@@ -927,3 +927,31 @@ receipts/checkpoints and ordered gates intact except top-level metrics.
 The current history sequence #1748/#1750/#1754/#1751/#1752 has merge priority;
 this slice does not jump it. Fresh separate guard and separate match-head
 merge, actual parents/tree/preservation audit and overseer report are required.
+
+#### Aster original evidence and concrete adoption API
+
+Unmodified actual c189 account source SHA256
+`80b79f5d772f5832f60c53e3bcd2694a5ba8b4706cc1714e34a26eb4f14f5711`
+reproduces one native assertion RED: after a delivered0.5 fill,10,000 distinct
+negative cumulative observations evict its healthy ledger anchor and replay
+delivers another `(102.0,0.5)` instead of no Fill. Eight original compatibility
+controls pass, including10,000 valid quiet observations still applying native
+retention, direct IDs with unusable cumulative evidence, duplicate-ID full
+observations, blind gaps, legacy messages and native selected-price retry.
+This is a proven helper-contract financial defect under standing owner scope.
+
+Concrete implementation to review before source edits: replace private
+`execution_progress(&mut self,id,filled)->f64` with
+`commit_execution_progress(&mut self,id,progress:ObservedProgress)`. Its bounded
+map stores `progress.quantity()` directly; the engine owns validation and the
+monotonic maximum. Read previous observation without mutation in on_order,
+then call `ObservedProgress::new(previous,Some(filled))`. Only the no-ID branch
+prepares `Some(last)` with the selected positive native price; only an accepted
+preparation commits observation and optional delivery. Accepted None still
+commits valid quiet observations. Explicit-ID delivery stays before and
+independent of this observation path; valid cumulative evidence from its
+duplicates still commits. Rejected observations skip only that ledger effect;
+continue native order-state handling, so no unrelated lifecycle change.
+No new engine API, quote policy, retention scheme, logging implementation or
+absent-cumulative fallback is introduced. Re-run original RED as GREEN and all
+original compatibility controls before broader focused checks/review.
