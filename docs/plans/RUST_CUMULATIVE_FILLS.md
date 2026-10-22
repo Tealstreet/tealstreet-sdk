@@ -1098,3 +1098,73 @@ The corrected78-test Spot suite and bounded FIFO unit control pass; the broader
 focused engine/KuCoin/Binance run passed919 tests, including the final78 Spot
 controls. Strict all-target Clippy/fmt and root44 typecheck/28 lint pass.
 Full current-head CI and authenticated post-sort replay evidence remain pending.
+
+### Orderly observed-average adoption — 2026-10-23 plan
+
+KuCoin Spot slice #1764 is merged as actual `49470a1188b` with the separate guard,
+match-head merge and complete tree/preservation audit. Start this next slice on
+fresh `feat/rust-cumulative-orderly-adoption` from that actual landing. The owner
+explicitly approved an additive shared `prepare_observed_average` operation:
+preserve Orderly's native arbitrary-last quotient unless an original native RED
+proves a wrong Fill. Keep `Report::Last` strict. This is a shared financial choke
+point extension, not a venue arithmetic copy. Other lanes' queued history,
+RequestContext and signer prerequisite merges keep their existing order.
+
+Source scope is engine `execution.rs`, Orderly `account.rs`, focused native/helper
+tests and existing plan/audit/quality/caller ledgers. No signing, requests,
+transport, Store freshness, row-reporting, tape, normalization or manifest edits.
+The planned API is:
+
+`Cursor::prepare_observed_average(self, quantity: f64, last: Option<f64>,
+average: Option<f64>, direct: Option<f64>, arithmetic: Arithmetic)
+-> Result<PreparedObservation, Rejection>`.
+
+The result exposes optional `observation() -> Option<Cursor>` separately from
+optional `delivery() -> Option<Prepared>`. Use the existing native totals map as
+`HashMap<String, Cursor>`; add no second persisted ledger. Native cumulative
+field precedence and absent cumulative resolving to literal zero stay in the
+adapter. Present last quantity/direct price win by presence, including zero.
+Keep binary arithmetic, direct-price precedence and the legacy quote-delta
+quotient over the selected amount. Quiet positive cumulative observations may
+commit without a Fill. Equal/regressed cumulative never replaces its quote.
+All supplied financial fields still validate before any root, stamp, total,
+terminal or dedupe effect. Keep exact native error text.
+
+Missing/zero average must remain distinguishable from a trusted quote in the
+Cursor, while legacy quotient pricing explicitly uses its existing zero fallback
+when quote evidence is unavailable. That representation alone must not change
+observable native behavior. A candidate quote-poisoning bug needs native proof:
+from zero, cumulative1/last1/direct100 without average emits1@100 but stores zero
+quote; next cumulative2/average100 without last/direct emits1@200 rather than100.
+Prove this against original production before claiming or fixing it, including a
+zero-average variant. A blind gap (cumulative10/last1/direct100) cannot establish
+quote1000 and must not be extrapolated as a whole prefix.
+
+If proven, use existing engine `direct_suffix` only for a validated whole-growth
+direct execution with a known preceding quote (or the empty prefix). Inferred
+quote may install only after native identity/dedup admits the unique Fill; it
+must not be consumed by duplicate/quiet/invalid reports. Preserve native
+observation-before-dedup order: install the optional observed endpoint first,
+then only an admitted delivery may enrich its same-endpoint missing quote using
+existing `Cursor::enrich_quote` and `Prepared::next`. This prevents a duplicate
+higher-cumulative direct report from inventing quote coverage. Stage all results
+before effects; native root/tree all-or-none behavior remains.
+
+First add compatibility fixtures and original-RED financial controls without
+calling a nonexistent engine API. Cover explicit last/direct zero precedence,
+quiet forward observations, equal/regressed and missing cumulative, duplicate ID
+with a higher endpoint, unused regressing average with direct price, sparse older
+terminal rows, REST non-seeding, outer healthy peers/root rollback, late unique
+fills before display gates, exact binary0.3-0.2, native identity precedence and
+4096 retention. Explicit native quotes/averages and gap controls must stay
+separate. Review the concrete API/preparation and quote-enrichment policies
+independently before implementation; no per-venue financial workaround.
+
+Run engine/Orderly/Binance focused native tests with four Cargo jobs, strict
+Clippy/fmt/bans and root checks. Independent correctness/adversarial/caller
+reviews answer the architecture gate. Final full green CI and authenticated
+all-suite raw proof use a post-#1762 baseline, integrate new shared dependencies
+as required, retain strict differences and freshly certify only standing TS
+reference classes. No local release WASM build/replay/size/timing sweep. Fresh
+separate guard, separate merge, actual tree/parents/preservation audit and
+immediate overseer/peer report finish the slice; shared row-reporting follows.
