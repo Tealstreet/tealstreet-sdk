@@ -218,6 +218,7 @@ class RequestContextBan(unittest.TestCase):
             with self.subTest(path=path):
                 old, landed = {path: old_map}, {path: new_map}
                 self.assertFalse(ban.check(landed, landed, [('original', old)]))
+                self.assertTrue(ban.check(old, old, [('already-landed', landed)]))
                 digest = next(iter(new_map))
                 pruned_map = dict(new_map)
                 del pruned_map[digest]

@@ -1414,3 +1414,13 @@ of the old ones. Existing adversarial tests iterate every history pair, testing
 forged fingerprints/counts/paths/old maps and independently pruned newer bounds;
 they therefore cover these additions without weakening any original assertion.
 No checker, manifest or venue source change is included in this regression step.
+
+Independent pinned-source audit CLEAN: incoming venue-source delta is exactly
+GRVT history/lib plus Crypto history. All151 other maps remain exact. GRVT
+re-expresses the same done/fail calls using history.command(); Crypto removes
+six direct done/fail calls and adds one conservative scanner false positive
+for a negated request.page_seen expression (the existing macro heuristic sees
+the variable token request). That is not new physical HTTP/completion work;
+freeze it exactly and leave the conservative parser unchanged. Net scanner
+counts still shrink1271->1264. Explicit reverse-transition rejection was added
+to every history-pair adversarial control before checker edits. Architecture No.
