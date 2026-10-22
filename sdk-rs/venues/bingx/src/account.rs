@@ -3,6 +3,7 @@ use crate::Pending;
 use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
 use safe_cex_engine::Level;
+use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -1361,7 +1362,6 @@ impl Account {
             return;
         }
         let symbol = native.symbol.replace('-', "");
-        self.bump_orders();
         let filled = native.filled.unwrap_or(0.0);
         let previous = self
             .cumulative_fills
@@ -1377,8 +1377,8 @@ impl Account {
         let mut emitted = 0.0;
         if trade_status {
             // Both event names can carry one execution with or without z.
-            let fresh = if native.last_quantity > 0.0 {
-                let identity = if !native.trade_id.is_empty() {
+            let identity = (native.last_quantity > 0.0).then(|| {
+                if !native.trade_id.is_empty() {
                     format!("{id}:trade:{}", native.trade_id)
                 } else {
                     format!(
@@ -1391,54 +1391,59 @@ impl Account {
                         native.last_quantity,
                         native.last_price
                     )
-                };
-                self.first_execution(identity)
-            } else {
-                true
-            };
+                }
+            });
+            let fresh = identity
+                .as_ref()
+                .is_none_or(|key| !self.seen_executions.contains(key));
             // Cumulative growth proves a new fill when heuristic same-ms keys collide.
             let duplicate = !fresh && (!native.trade_id.is_empty() || native.filled.is_none());
-            let delta = if duplicate {
-                0.0
-            } else if native.filled.is_some() {
-                let increase = (filled - previous).max(0.0);
-                // Only l belongs at this execution's price after a blind interval.
-                if native.last_quantity > 0.0 {
-                    increase.min(native.last_quantity)
-                } else {
-                    increase
-                }
-            } else if self.terminal_orders.contains_key(id)
-                && (native.trade_id.is_empty() || self.covered_history.contains(id))
-            {
-                0.0
+            let suppressed = duplicate
+                || (native.filled.is_none()
+                    && self.terminal_orders.contains_key(id)
+                    && (native.trade_id.is_empty() || self.covered_history.contains(id)));
+            let last = if suppressed {
+                Some(0.0)
             } else {
-                native.last_quantity.max(0.0)
+                (native.last_quantity > 0.0).then_some(native.last_quantity)
             };
-            emitted = delta;
-            if native.filled.is_none() {
-                effective_filled = previous + delta;
+            let price = if native.last_price > 0.0 {
+                native.last_price
+            } else if native.avg_price > 0.0 {
+                native.avg_price
+            } else {
+                native.price
+            };
+            let Ok(progress) = ObservedProgress::new(previous, native.filled) else {
+                return;
+            };
+            let Ok(prepared) = progress.prepare_capped(last, price) else {
+                return;
+            };
+            // Financial preparation is pure: invalid evidence consumes no ID,
+            // revision, quantity, terminal state or repair scheduling.
+            self.bump_orders();
+            if let Some(identity) = identity {
+                self.first_execution(identity);
             }
-            if delta > 0.0 {
-                let price = if native.last_price > 0.0 {
-                    native.last_price
-                } else if native.avg_price > 0.0 {
-                    native.avg_price
-                } else {
-                    native.price
-                };
+            effective_filled = prepared.map_or(progress.quantity(), |p| p.observed());
+            if let Some(prepared) = prepared {
+                let delivery = prepared.delivery();
+                emitted = delivery.amount();
                 cx.fill(Fill {
                     id: None,
                     order_id: id.to_owned(),
                     symbol: symbol.clone(),
                     side: order_side(&native.side),
-                    price,
-                    amount: delta,
+                    price: delivery.price(),
+                    amount: delivery.amount(),
                 });
                 self.bump_positions();
                 self.schedule_repair(cx);
             }
             self.record_cumulative(id, effective_filled);
+        } else {
+            self.bump_orders();
         }
         if matches!(
             native.status.as_deref(),
@@ -1818,15 +1823,10 @@ mod tests {
         price: f64,
         status: &str,
     ) -> String {
-        let mut row = serde_json::json!({
-            "i": id, "t": trade, "s": "BTC-USDT", "o": "LIMIT", "S": "BUY",
-            "X": status, "q": "2", "l": last.to_string(), "L": "0", "ap": "0",
-            "p": price.to_string()
-        });
-        if let Some(cumulative) = cumulative {
-            row["z"] = serde_json::Value::String(cumulative.to_string());
-        }
-        serde_json::json!({"e": "ORDER_TRADE_UPDATE", "o": row}).to_string()
+        let cumulative = cumulative.map_or(String::new(), |n| format!(r#","z":"{n}""#));
+        format!(
+            r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"i":"{id}","t":"{trade}","s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"{status}","q":"2","l":"{last}","L":"0","ap":"0","p":"{price}"{cumulative}}}}}"#
+        )
     }
 
     fn deliver_execution(
@@ -1909,18 +1909,10 @@ mod tests {
     #[test]
     fn cumulative_unused_bad_last_price_keeps_selected_fallback() {
         let mut engine = cumulative_engine();
-        let mut event: serde_json::Value = serde_json::from_str(&execution_event(
-            "123",
-            "fallback",
-            Some(0.5),
-            0.5,
-            100.0,
-            "PARTIALLY_FILLED",
-        ))
-        .unwrap();
-        event["o"]["L"] = serde_json::json!("-1");
+        let event = execution_event("123", "fallback", Some(0.5), 0.5, 100.0, "PARTIALLY_FILLED")
+            .replace(r#""L":"0""#, r#""L":"-1""#);
         assert_eq!(
-            deliver_execution(&mut engine, 2.0, &event.to_string()),
+            deliver_execution(&mut engine, 2.0, &event),
             Some((100.0, 0.5))
         );
     }

@@ -826,3 +826,14 @@ coverage, terminal suppression, retained identities and liquidation/future-kind
 execution handling remain in the adapter. Generic tests cover growth caps,
 blind gaps, quiet observations, absent cumulative overflow and invalid price;
 independent API review is CLEAN (architecture YES, engine extension first).
+
+
+Implementation checkpoint: the distinct engine capped-suffix method and BingX
+adapter passed 811 focused engine/BingX/Binance native tests, strict all-target
+Clippy, formatting and bans. Root typecheck 44/44 and lint 28/28 passed entirely
+from cache. Final native-string regression fixtures were rerun against the exact
+original production prefix (four assertion RED, two compatibility GREEN), then
+restored against the fix (all six GREEN). Both independent source reviews are
+CLEAN; caller wording explicitly limits invalid-price rejection to positive
+live delivery, preserving accepted quiet bookkeeping. Fresh exact-head CI and
+full BingX/Binance raw evidence remain pending; no merge claim.

@@ -3441,3 +3441,25 @@ not change. B11's request-scoped incomplete-query ingestion/coverage and typed
 rejection handling remain required; this slice adds no mandatory NX handler and
 does not close the remaining history fan-out.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+### BingX validated cumulative execution suffix
+
+BingX now rejects a live trade that would deliver positive quantity with a
+selected zero/negative price before consuming its native trade ID or cumulative
+quantity, advancing stored orders, or publishing a Fill. Corrected evidence with the same ID and cumulative
+quantity can therefore deliver the valid fill; healthy peer orders continue.
+Native last/average/order-price precedence remains, so an unused invalid last
+price does not reject a valid native fallback. Zero-growth observations still
+retain native identity bookkeeping. A terminal trade with positive delivery quantity and an
+invalid selected price preserves the previous stored partial rather than closing
+it; separate lifecycle and quiet-terminal policy remains native.
+
+The shared engine helper caps last quantity to observed cumulative growth and
+keeps full native observation for blind intervals. Explicit trade IDs, heuristic
+growth escape, covered-history suppression, late unique executions and retention
+limits remain native policy. SDK arguments, FILLS revision/row shape and IDs are
+unchanged. Existing consumers should not rely on invalid prices or a rejected
+row advancing order state. No NX API migration, live-capture claim or universal
+cumulative-fill completion claim is introduced; remaining consumers are tracked
+in [the fan-out plan](RUST_CUMULATIVE_FILLS.md).
