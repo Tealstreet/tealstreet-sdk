@@ -4,6 +4,8 @@ Planning snapshot: signer PR #1714 at
 `0343e497e0cea91d9b1cfaa4e7fe412f0776a714`; venue source checked against that
 pin and landing `084af54692420e95fb1f43837c3d6e589c682c4e`. Owner:
 codex-5c57jl. This document changes no implementation or migration status.
+Core #1714 subsequently merged at `ad0e6fa1e42df883b8fe947e6b4c04eda0da2f7d`;
+the shared prerequisites PR remains an implementation gate.
 
 ## Entry gate and shared contract
 
@@ -28,8 +30,9 @@ Shared prerequisites, owned/coordinated with codex-uufub4:
    Binance adapter currently has only key/secret and erases secondary passphrase.
    Include KuCoin's additional broker-signing reference in the same custody path.
 2. Trusted provider key decoding for Kraken; no decoded secret in a venue.
-3. Public signed-WS-upgrade staging, plus explicit session-token custody and
-   retirement for listen keys, bullet URLs and token-bearing subscription frames.
+3. Public signed-WS-upgrade staging. Owner sequencing puts transient session-token
+   custody/retirement in the later WS-auth core: implement HTTP first; token-bearing
+   listen/bullet URLs and subscription-frame migrations wait for that shared core.
 4. Engine-injected signing entropy in `SignStep` for BloFin nonces. Preserve the
    21-byte nanoid-style draw and filtering, not a new UUID/randomness source.
 5. Trusted caller-assigned stable identity IDs, never key-derived fingerprints.
@@ -251,16 +254,20 @@ completion fencing and no mutation replay after uncertain transmission.
 
 ## Parallel batches and acceptance
 
-After both actual entry pins, re-audit changed APIs and settle shared receipts,
-session custody and nonce aliasing before affected adapters. Implement disjoint
+After both actual entry pins, re-audit changed APIs and settle shared receipts and
+nonce aliasing before affected HTTP adapters. Implement HTTP first, then WS auth;
+the WS inventory above remains required follow-on scope. A partial HTTP stage is
+not a completed family migration. Before enabling a family's migrated construction
+path, all its credential-bearing paths must support opaque custody; do not add a
+legacy credential fallback to bridge the WS-auth dependency. Implement disjoint
 venue files in parallel batches; one owner serializes registry/SDK/host/ban edits:
 
-| Batch | Parallel family adapters | Additional readiness |
+| Batch | Parallel HTTP family adapters | Additional HTTP readiness |
 | --- | --- | --- |
 | A | Bybit, MEXC, Phemex | Protocol-clock handoff, stable IDs and actual-stamp/expiry receipt. |
 | B | OKX, Bitget, BloFin | Passphrase fallback and injected nonce entropy. |
-| C | WOO, Bitrue, BingX | Shared listen-token/upgrade lifecycle and retry stamps. |
-| D | KuCoin, Kraken | Broker refs, trusted decoding, session custody and shared nonce aliasing. |
+| C | WOO, Bitrue, BingX | Retry stamps; WS token lifecycle remains a separate shared dependency. |
+| D | KuCoin, Kraken | Broker refs, trusted decoding and shared nonce aliasing. |
 
 Use fresh branches from actual landing, independent per-family correctness and
 adversarial review, and explicit ownership coordination with cumulative-fill work
