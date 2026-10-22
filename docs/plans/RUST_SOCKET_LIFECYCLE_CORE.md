@@ -583,3 +583,27 @@ encoder receives the same values. Four-crate native unit checks, strict
 all-target Clippy, formatting and bans pass on the corrected source. Fresh CI
 will measure memory and replay the full Binance dependency; no result from the
 previous socket head is relabeled. Safe-ID widening remains a separate PR.
+
+## Compiled ownership boundary after fresh gate findings
+
+Correction head `4382c6fc326` still fails OKX EEA retained memory (Rust 7,547,104
+versus TS 7,202,960), Bitunix steady CPU (108.156 versus 114.042 ms), and Aster
+module size (1,370,122 versus 1,343,488 bytes). The ledger error follows the size
+refusal; it is not an independent replay failure. No rerun or waiver is taken.
+
+Read-only audit confirms the managed socket Driver, storage/drop glue and generic
+Engine hooks are compiled into unadopted standalone families. Introduce one engine
+`managed-sockets` feature, enabled by the two adopted OKX/Bitunix dependencies.
+Gate component modules, Io storage/default, managed Cx API and Venue extensions,
+and engine routing/signing/queue/timer hooks together. The feature-off engine keeps
+its exact legacy path, with no managed driver/storage/drop code. Existing HTTP
+RequestContext, signing and native legacy socket policies remain unchanged.
+The combined registry naturally unifies the feature when both reference venues
+are present. This follows existing shared engine feature boundaries rather than
+adding per-venue runtime lifecycle policy.
+
+Verify focused engine checks with the feature off and on, both adopted venues
+and Binance, all-target strict Clippy, then fresh CI for standalone Aster size,
+combined host fixtures and the full replay. Retained-memory representation and
+hot-path work remain separate measured failures to address; the feature boundary
+alone makes no claim to repair either.
