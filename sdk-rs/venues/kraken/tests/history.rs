@@ -583,3 +583,225 @@ fn rejected_zero_size_attempt_is_a_canceled_historical_order_without_executions(
     assert_eq!(rows[0]["amount"], 0.0);
     assert_eq!(rows[0]["filled"], 0.0);
 }
+
+fn owned_actions(e: &mut Engine<Kraken>, command: u32) -> Vec<Action> {
+    e.drain_actions()
+        .filter(|a| match a {
+            Action::Notice(Notice::CommandDone { command: id, .. })
+            | Action::Notice(Notice::CommandFailed { command: id, .. }) => *id == command,
+            Action::Notice(Notice::Event(event)) => {
+                event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+            }
+            _ => false,
+        })
+        .collect()
+}
+fn owned_partial(actions: &[Action], command: u32) -> Value {
+    let markers: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                assert_eq!(event.level, safe_cex_engine::Level::Warn);
+                assert!(event.fields.iter().any(|(k, v)| *k == "command"
+                    && matches!(v,safe_cex_engine::Value::Num(n) if *n == f64::from(command))));
+                Some(i)
+            }
+            _ => None,
+        })
+        .collect();
+    let done: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| match a {
+            Action::Notice(Notice::CommandDone {
+                command: id,
+                result,
+            }) if *id == command => Some((i, result)),
+            Action::Notice(Notice::CommandFailed { .. }) => {
+                panic!("accepted history must recover with owned incompleteness")
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(markers.len(), 1);
+    assert_eq!(done.len(), 1);
+    assert!(markers[0] < done[0].0);
+    serde_json::from_str(done[0].1).unwrap()
+}
+fn owned_continuation(e: &mut Engine<Kraken>, mode: usize) -> HttpRequest {
+    let q = match mode {
+        0 => fills(),
+        1 => income(),
+        2 => orders(),
+        _ => Query::PublicTrades {
+            symbol: "PF_XBTUSD".into(),
+            limit: Some(200),
+        },
+    };
+    let r = query(e, q);
+    match mode {
+        0=>answer(e,&r,"fills",(0..100).map(|i| fill(&format!("accepted-{i}"),"2023-11-14T22:13:19.999Z")).collect()),
+        1=>answer(e,&r,"logs",(0..500).map(|i| ledger(&format!("accepted-{i}"),if i==0 {"2023-11-14T22:13:19.000Z"}else{"2023-11-14T22:13:19.999Z"})).collect()),
+        2=>reply(e,&r,200,&json!({"len":1,"continuationToken":"next","elements":[event("accepted-event","native","OrderCancelled",NOW-10.0)]}).to_string()),
+        _=>answer(e,&r,"history",(0..100).map(|i|json!({"trade_id":format!("accepted-{i}"),"time":"2023-11-14T22:13:19.999Z","price":100,"size":"0.5","side":"sell"})).collect()),
+    }
+    requests(e)
+        .pop()
+        .expect("admitted first page must continue")
+}
+#[test]
+fn owned_first_actual_failures_are_typed_and_never_empty_success() {
+    for q in [
+        fills(),
+        income(),
+        orders(),
+        Query::PublicTrades {
+            symbol: "PF_XBTUSD".into(),
+            limit: Some(200),
+        },
+    ] {
+        let (mut e, _) = ready();
+        let r = query(&mut e, q);
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: r.id,
+                error: "lost before acceptance",
+            },
+        );
+        let a = owned_actions(&mut e, 91);
+        assert_eq!(a.len(), 1);
+        assert!(
+            matches!(&a[0],Action::Notice(Notice::CommandFailed{command:91,error}) if error.kind==Some(safe_cex_engine::ErrorKind::Internal))
+        );
+    }
+}
+#[test]
+fn owned_later_native_transport_and_malformed_failures_retain_only_accepted_pages() {
+    for mode in 0..4 {
+        for failure in 0..3 {
+            let (mut e, _) = ready();
+            e.set_log_level(safe_cex_engine::Level::Error);
+            let next = owned_continuation(&mut e, mode);
+            match failure {
+                0 => reply(
+                    &mut e,
+                    &next,
+                    503,
+                    r#"{"result":"error","error":"temporarily unavailable"}"#,
+                ),
+                1 => e.handle(
+                    NOW,
+                    Event::HttpFailed {
+                        request: next.id,
+                        error: "later connection reset",
+                    },
+                ),
+                _ => {
+                    let (field, prefix) = match mode {
+                        0 => ("fills", fill("failed-prefix", "2023-11-14T22:13:19.000Z")),
+                        1 => ("logs", ledger("failed-prefix", "2023-11-14T22:13:19.000Z")),
+                        2 => (
+                            "elements",
+                            event("failed-event", "native", "OrderCancelled", NOW - 1.0),
+                        ),
+                        _ => (
+                            "history",
+                            json!({"trade_id":"failed-prefix","time":"2023-11-14T22:13:19.000Z","price":101,"size":"0.5","side":"buy"}),
+                        ),
+                    };
+                    reply(
+                        &mut e,
+                        &next,
+                        200,
+                        &json!({"result":"success",field:[prefix,{}]}).to_string(),
+                    );
+                }
+            }
+            let rows = owned_partial(&owned_actions(&mut e, 91), 91);
+            assert_eq!(rows.as_array().unwrap().len(), [100, 2000, 1, 100][mode]);
+            assert!(!rows.to_string().contains("failed-prefix"));
+            if mode == 2 {
+                assert_eq!(rows[0]["updatedTime"], NOW - 10.0);
+            }
+            assert!(requests(&mut e).is_empty());
+            assert!(e.store().orders().is_empty());
+        }
+    }
+}
+#[test]
+fn owned_filtered_pages_cannot_authorize_failure_recovery() {
+    let (mut e, _) = ready();
+    let mut q = fills();
+    if let Query::Fills { symbol, .. } = &mut q {
+        *symbol = Some("PF_ETHUSD".into());
+    }
+    let r = query(&mut e, q);
+    answer(
+        &mut e,
+        &r,
+        "fills",
+        (0..100)
+            .map(|i| fill(&i.to_string(), "2023-11-14T22:13:19.999Z"))
+            .collect(),
+    );
+    let next = requests(&mut e)
+        .pop()
+        .expect("raw facts, not output filters, drive progress");
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: next.id,
+            error: "no eligible accepted output",
+        },
+    );
+    let a = owned_actions(&mut e, 91);
+    assert_eq!(a.len(), 1);
+    assert!(
+        matches!(&a[0],Action::Notice(Notice::CommandFailed{error,..}) if error.kind==Some(safe_cex_engine::ErrorKind::Internal))
+    );
+}
+#[test]
+fn owned_order_length_mismatch_cannot_admit_a_newer_terminal_prefix() {
+    let (mut e, _) = ready();
+    let next = owned_continuation(&mut e, 2);
+    reply(
+        &mut e,
+        &next,
+        200,
+        &json!({"len":2,"elements":[event("failed-newer","native","OrderCancelled",NOW-1.0)]})
+            .to_string(),
+    );
+    let rows = owned_partial(&owned_actions(&mut e, 91), 91);
+    assert_eq!(rows[0]["updatedTime"], NOW - 10.0);
+}
+#[test]
+fn owned_order_continuation_proof_refusals_remain_strict() {
+    for conflict in [false, true] {
+        let (mut e, _) = ready();
+        let next = owned_continuation(&mut e, 2);
+        let body=if conflict {json!({"len":1,"continuationToken":"body","elements":[event("new","native","OrderCancelled",NOW-1.0)]})}else{json!({"len":0,"continuationToken":"next-again","elements":[]})}.to_string();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: next.id,
+                response: Response {
+                    status: 200,
+                    headers: if conflict {
+                        "Next-Continuation-Token: other"
+                    } else {
+                        ""
+                    },
+                    body: &body,
+                },
+            },
+        );
+        let a = owned_actions(&mut e, 91);
+        assert_eq!(a.len(), 1);
+        assert!(matches!(a[0], Action::Notice(Notice::CommandFailed { .. })));
+        assert!(requests(&mut e).is_empty());
+    }
+}
