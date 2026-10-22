@@ -1379,6 +1379,14 @@ Normal inputs send the same requests as TS; the risk is resilience.
 
 ### WEEX
 
+Owned-list follow-on: ~~a later fill-window/algo failure discards already valid
+history~~ now returns accepted rows with shared command-owned incompleteness.
+Missing fill identities and explicit algo hasMore facts are admitted only after
+whole-response validation; the engine publishes coverage once before success.
+First/zero-accepted failure rejects typed, preparation remains strict notSent,
+and native mapping, sequencing, pause and dedupe are preserved. This completes
+WEEX general-history owner adoption, not all-family or B11/deployment closure.
+
 - ~~WEEX's five query-associated omissions~~ now flow through the shared income
   owner. First/zero-accepted failures reject typed without a coverage marker;
   later failures immediately retain only accepted pages with one command-owned
@@ -1508,7 +1516,16 @@ signing arithmetic and the remaining cross-family history fan-out are unchanged.
   a reliable reference. Readback confirmation remains required.
 
 ### AsterDEX
-No confirmed highs.
+No open confirmed highs.
+- High: ~~negative cumulative execution observations consumed bounded ledger
+  slots as zero-valued entries, evicting a valid fill anchor and allowing its
+  identical replay to deliver the fill again after10,000 distinct malformed
+  observations.~~ Existing engine `ObservedProgress` now validates and caps
+  before observation admission; typed native commit keeps the10,000-entry
+  bound and accepted quiet observations. One original native assertion RED
+  proves the duplicate `(102,0.5)`; ten original compatibility controls and
+  all11 fixed controls pass, including initial REST seed, later-read isolation
+  and authoritative direct-ID independence. No new engine policy or raw-ID change.
 - Medium: ~~failed position-mode read silently leaves one-way, never retried, and
   orders can go before it lands (`asterdex/src/account.rs:566`); order events
   with unmapped types (e.g. `LIQUIDATION`) dropped with their fills

@@ -83,6 +83,17 @@ independent deadlines, ordered completion, freshness rechecks and late-reply fen
 Actions emitted by failure callbacks reenter that same dispatch queue; internal
 preparation markers never reach a host or compete with a real provider batch.
 
+Primitive results may include optional bounded `headers` alongside values and
+receipt. Empty headers serialize identically to the earlier result shape. The
+shared validator checks all metadata before applying signatures; only a trusted
+HTTP `SignStep::result_header_policy` (default deny), captured by that attempt,
+may admit callback headers. Default signing-only captures and credential/WS work
+reject them. Declared protected names retain native precedence; other callback
+names override case-insensitively after recipe application. Values remain in the
+fresh outbound action and share its deadline/revision/cancel/retry retirement;
+no transport side map or post-bind mutation is permitted. Current family recipes
+remain default-deny until their explicit bridge adoption.
+
 Native callers supply `Engine::set_signer`, `Host::with_signer`, or the trusted
 `FrameServer::add_venue_with_signer` registration. Raw JS hosts use
 `EngineHost(..., options: { signer })`; managed SDK/Workers hosts also transfer

@@ -29,6 +29,9 @@ impl H {
         h
     }
     fn pending_mode() -> Self {
+        Self::pending_mode_with_orders("[]")
+    }
+    fn pending_mode_with_orders(open_orders: &str) -> Self {
         let mut h = Self {
             engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(Options {
                 key: Some("documented-key".into()),
@@ -53,11 +56,11 @@ impl H {
         h.reply("/openInterest", "[]");
         h.reply("/account", BALANCE);
         h.reply("/positionRisk", POSITION);
-        h.reply("/openOrders", "[]");
+        h.reply("/openOrders", open_orders);
         h.reply("/listenKey", r#"{"listenKey":"private-contract"}"#);
         let socket = h.socket();
         h.event(Event::WsOpened { socket });
-        h.reply("/openOrders", "[]");
+        h.reply("/openOrders", open_orders);
         h
     }
     fn socket(&self) -> SocketId {
@@ -426,6 +429,193 @@ fn fill_without_execution_id_uses_cumulative_progress() {
     a["o"].as_object_mut().unwrap().remove("t");
     h.ws(a.clone());
     h.ws(a);
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+}
+
+fn cumulative_adoption_event(time: f64, cumulative: &str, last: &str) -> Value {
+    let mut event = order(time, "PARTIALLY_FILLED", cumulative, 1);
+    event["o"].as_object_mut().unwrap().remove("t");
+    event["o"]["l"] = json!(last);
+    event
+}
+
+#[test]
+fn cumulative_adoption_caps_last_and_preserves_full_blind_gap_observations() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    for (time, cumulative, last) in [
+        (10.0, "0.25", "1"),
+        (11.0, "1.25", "0.125"),
+        (12.0, "1.25", "1"),
+        (13.0, "0.5", "1"),
+        (14.0, "1.5", "1"),
+    ] {
+        h.ws(cumulative_adoption_event(time, cumulative, last));
+    }
+    assert_eq!(
+        fill_rows(&mut h),
+        vec![(102.0, 0.25), (102.0, 0.125), (102.0, 0.25)]
+    );
+}
+
+#[test]
+fn cumulative_adoption_initial_rest_seed_suppresses_fallback_but_not_native_ids() {
+    let mut h = H::pending_mode_with_orders(
+        r#"[{"symbol":"BTCUSDT","orderId":123,"price":"100","origQty":"2","executedQty":"0.75","status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","time":1}]"#,
+    );
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
+    let _ = fill_rows(&mut h);
+    h.ws(cumulative_adoption_event(10.0, "0.75", "0.5"));
+    assert!(fill_rows(&mut h).is_empty());
+    h.ws(order(11.0, "PARTIALLY_FILLED", "0.75", 7));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    h.ws(cumulative_adoption_event(12.0, "1", "0.5"));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.25)]);
+}
+
+#[test]
+fn cumulative_adoption_later_rest_read_does_not_replace_live_observation() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    h.ws(cumulative_adoption_event(10.0, "0.5", "0.5"));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    h.fire_after(10_000.0);
+    h.reply(
+        "/openOrders",
+        r#"[{"symbol":"BTCUSDT","orderId":123,"price":"100","origQty":"2","executedQty":"1.5","status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","time":20}]"#,
+    );
+    h.ws(cumulative_adoption_event(11.0, "1", "1"));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+}
+
+#[test]
+fn cumulative_adoption_direct_ids_and_duplicates_advance_only_observed_progress() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    h.ws(order(10.0, "PARTIALLY_FILLED", "0.25", 7));
+    h.ws(order(11.0, "PARTIALLY_FILLED", "1.25", 7));
+    h.ws(cumulative_adoption_event(12.0, "1.5", "1"));
+    let mut late = order(9.0, "PARTIALLY_FILLED", "0.5", 8);
+    late["o"]["l"] = json!("1");
+    h.ws(late);
+    h.ws(cumulative_adoption_event(13.0, "1.75", "1"));
+    assert_eq!(
+        fill_rows(&mut h),
+        vec![(102.0, 0.5), (102.0, 0.25), (102.0, 1.0), (102.0, 0.25)]
+    );
+}
+
+#[test]
+fn cumulative_adoption_unusable_cumulative_does_not_gate_authoritative_direct_ids() {
+    for cumulative in ["invalid", "-1"] {
+        let mut h = H::new();
+        let _ = fill_rows(&mut h);
+        h.ws(cumulative_adoption_event(10.0, cumulative, "0.5"));
+        assert!(fill_rows(&mut h).is_empty());
+        h.ws(order(11.0, "PARTIALLY_FILLED", cumulative, 7));
+        assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+        h.ws(cumulative_adoption_event(12.0, "0.5", "0.5"));
+        assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    }
+}
+
+#[test]
+fn cumulative_adoption_missing_native_last_or_cumulative_cannot_synthesize_a_fill() {
+    for missing in ["l", "z"] {
+        let mut h = H::new();
+        let _ = fill_rows(&mut h);
+        let mut event = cumulative_adoption_event(10.0, "0.5", "0.5");
+        event["o"].as_object_mut().unwrap().remove(missing);
+        h.ws(event);
+        assert!(fill_rows(&mut h).is_empty());
+        h.ws(cumulative_adoption_event(11.0, "0.5", "0.5"));
+        assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    }
+}
+
+#[test]
+fn cumulative_adoption_invalid_selected_price_can_retry_without_consuming_progress() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    let mut fallback = cumulative_adoption_event(10.0, "0.5", "0.5");
+    fallback["o"]["L"] = json!("-1");
+    h.ws(fallback);
+    assert_eq!(fill_rows(&mut h), vec![(101.0, 0.5)]);
+    let mut invalid = cumulative_adoption_event(11.0, "1", "0.5");
+    invalid["o"]["L"] = json!("0");
+    invalid["o"]["ap"] = json!("0");
+    h.ws(invalid);
+    assert!(fill_rows(&mut h).is_empty());
+    h.ws(cumulative_adoption_event(11.0, "1", "0.5"));
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+}
+
+#[test]
+fn cumulative_adoption_legacy_flat_execution_keeps_native_last_requirement() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    for (time, cumulative, last) in [
+        (10.0, "0.75", "0.5"),
+        (11.0, "0.75", "0.5"),
+        (12.0, "1.5", "0.25"),
+    ] {
+        h.ws(json!({"e":"executionReport","E":time,"i":900,"s":"BTCUSDT","S":"BUY","o":"LIMIT","X":"PARTIALLY_FILLED","p":"100","q":"2","z":cumulative,"l":last,"L":"102","f":"GTC"}));
+    }
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5), (102.0, 0.25)]);
+}
+
+#[test]
+fn cumulative_adoption_unknown_order_kind_does_not_hide_native_executions() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    for (time, cumulative) in [(10.0, "0.5"), (11.0, "0.5"), (12.0, "1")] {
+        let mut event = cumulative_adoption_event(time, cumulative, "0.5");
+        event["o"]["i"] = json!(900);
+        event["o"]["ot"] = json!("UNKNOWN");
+        h.ws(event);
+    }
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5), (102.0, 0.5)]);
+    assert!(h.engine.store().order("900").is_none());
+}
+
+#[test]
+fn cumulative_adoption_negative_observations_do_not_evict_a_valid_fill_anchor() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    let anchor = cumulative_adoption_event(10.0, "0.5", "0.5");
+    h.ws(anchor.clone());
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    // Exercise the real native ledger bound, not a timing/load measurement.
+    for id in 100_000..110_000 {
+        let mut invalid = cumulative_adoption_event(11.0, "-1", "0.5");
+        invalid["o"]["i"] = json!(id);
+        invalid["o"]["ot"] = json!("UNKNOWN");
+        h.ws(invalid);
+    }
+    assert!(fill_rows(&mut h).is_empty());
+    h.ws(anchor);
+    assert_eq!(
+        fill_rows(&mut h),
+        vec![],
+        "invalid cumulative rows must not make an already delivered fill eligible again"
+    );
+}
+
+#[test]
+fn cumulative_adoption_accepted_quiet_observations_still_apply_native_retention() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    let anchor = cumulative_adoption_event(10.0, "0.5", "0.5");
+    h.ws(anchor.clone());
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    for id in 100_000..110_000 {
+        let mut quiet = cumulative_adoption_event(11.0, "0", "0.5");
+        quiet["o"]["i"] = json!(id);
+        quiet["o"]["ot"] = json!("UNKNOWN");
+        h.ws(quiet);
+    }
+    assert!(fill_rows(&mut h).is_empty());
+    h.ws(anchor);
     assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
 }
 

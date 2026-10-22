@@ -8,10 +8,10 @@ use safe_cex_engine::history::{Completion, CursorHistory, RangeHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
-use safe_cex_engine::paging::{CursorPage, CursorWalk, PageRow, RangeWalk, Step};
+use safe_cex_engine::paging::{CursorPage, CursorWalk, PageRow, RangeWalk, Step, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 const DAY: f64 = 86_400_000.0;
 const INCOME_WINDOW: f64 = 100.0 * DAY;
@@ -25,8 +25,8 @@ pub struct State {
 enum Read {
     List {
         pending: VecDeque<Fetch>,
-        rows: Rows,
-        seen: HashSet<String>,
+        owner: Box<CursorHistory<ListRow>>,
+        kind: Kind,
         missing_fill_id: bool,
         order_id: Option<String>,
         symbol: Option<String>,
@@ -67,7 +67,9 @@ pub struct Request {
     order_id: Option<String>,
     symbol: Option<String>,
     rows: Rows,
+    raw_rows: usize,
     invalid: bool,
+    missing_fill_id: bool,
 }
 enum Rows {
     Fills(Vec<Execution>),
@@ -84,34 +86,31 @@ impl Rows {
             Kind::Income => Self::Income(vec![]),
         }
     }
-    fn json(&mut self) -> String {
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ListRow {
+    Fill(Execution),
+    Order(HistoricalOrder),
+    Trade(Trade),
+}
+impl ListRow {
+    fn time(&self) -> f64 {
         match self {
-            Self::Fills(rows) => {
-                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                serde_json::to_string(rows).expect("finite executions")
-            }
-            Self::Orders(rows) => {
-                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                serde_json::to_string(rows).expect("finite orders")
-            }
-            Self::Trades(rows) => serde_json::to_string(rows).expect("finite trades"),
-            Self::Income(rows) => income_json(rows),
+            Self::Fill(row) => row.timestamp,
+            Self::Order(row) => row.created_time,
+            Self::Trade(row) => row.timestamp,
         }
     }
-    fn append(&mut self, other: Self, seen: &mut HashSet<String>) {
-        match (self, other) {
-            (Self::Fills(rows), Self::Fills(page)) => rows.extend(
-                page.into_iter()
-                    .filter(|r| seen.insert(format!("{}|{}", r.symbol, r.id))),
-            ),
-            (Self::Orders(rows), Self::Orders(page)) => rows.extend(
-                page.into_iter()
-                    .filter(|r| seen.insert(format!("{}|{}", r.symbol, r.id))),
-            ),
-            (Self::Trades(rows), Self::Trades(page)) => rows.extend(page),
-            _ => unreachable!("one result kind per query"),
-        }
-    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AlgoMetadata<'a> {
+    #[serde(borrow)]
+    orders: &'a serde_json::value::RawValue,
+    #[serde(default)]
+    has_more: bool,
 }
 
 #[derive(Serialize)]
@@ -302,10 +301,6 @@ fn category(value: &str) -> &'static str {
         _ => "other",
     }
 }
-fn income_json(rows: &mut [Income]) -> String {
-    rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-    serde_json::to_string(rows).expect("finite income")
-}
 fn income_identity(row: &Income) -> String {
     if row.tran_id.is_empty() {
         format!(
@@ -346,19 +341,15 @@ fn valid_range(from: Option<f64>, to: Option<f64>) -> bool {
         && !matches!((from,to),(Some(a),Some(b)) if a>b)
 }
 fn windows(from: Option<f64>, to: Option<f64>, span: f64) -> Vec<(Option<f64>, Option<f64>)> {
-    if let (Some(mut from), Some(to)) = (from, to) {
+    if let (Some(from), Some(to)) = (from, to) {
         if (to - from) / span > 1_000.0 {
             return vec![];
         }
-        let mut rows = vec![];
-        loop {
-            let end = (from + span).min(to);
-            rows.push((Some(from), Some(end)));
-            if end >= to {
-                return rows;
-            }
-            from = end + 1.0;
-        }
+        return safe_cex_engine::paging::windows(from, to, span, WindowOrder::OldestFirst, 1000)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(a, b)| (Some(a), Some(b)))
+            .collect();
     }
     vec![(from, to)]
 }
@@ -535,8 +526,16 @@ impl WeexFutures {
             command,
             Read::List {
                 pending: requests,
-                rows: Rows::new(kind),
-                seen: HashSet::new(),
+                owner: Box::new(CursorHistory::new(
+                    Completion::new(command),
+                    CursorWalk::new(1),
+                    |_| "WEEX history stage page budget exhausted".into(),
+                    |rows| {
+                        serde_json::to_string(rows)
+                            .map_err(|error| VenueError::new(error.to_string()))
+                    },
+                )),
+                kind,
                 missing_fill_id: false,
                 order_id,
                 symbol,
@@ -548,7 +547,6 @@ impl WeexFutures {
     fn history_next_list(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
         let Some(Read::List {
             pending,
-            rows,
             order_id,
             symbol,
             delay,
@@ -562,9 +560,7 @@ impl WeexFutures {
             return;
         }
         let Some(fetch) = pending.pop_front() else {
-            let result = rows.json();
-            self.history.reads.remove(&command);
-            cx.done(command, result);
+            self.finish_list(cx, command, Ok(()), false);
             return;
         };
         let stream = Some(if matches!(fetch.kind, Kind::Algo) {
@@ -579,7 +575,9 @@ impl WeexFutures {
             order_id: order_id.clone(),
             symbol: symbol.clone(),
             rows: Rows::new(fetch.kind),
+            raw_rows: 0,
             invalid: false,
+            missing_fill_id: false,
         };
         if matches!(fetch.kind, Kind::Trades) {
             self.get(cx, fetch.path, &fetch.query, Task::History(request), stream);
@@ -592,8 +590,12 @@ impl WeexFutures {
             Task::History(request),
             stream,
         ) {
-            self.history.reads.remove(&command);
-            cx.fail(command, "WEEX history signing unavailable");
+            self.finish_list(
+                cx,
+                command,
+                Err(VenueError::new("WEEX history signing unavailable").outcome(Outcome::NotSent)),
+                true,
+            );
         }
     }
     fn history_income_request(
@@ -648,7 +650,9 @@ impl WeexFutures {
             order_id: None,
             symbol: None,
             rows: Rows::Income(vec![]),
+            raw_rows: 0,
             invalid: false,
+            missing_fill_id: false,
         };
         if !self.signed_request(
             cx,
@@ -710,6 +714,27 @@ impl WeexFutures {
             }
         }
     }
+    fn finish_list(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        result: Result<(), VenueError>,
+        strict: bool,
+    ) {
+        let Some(Read::List {
+            owner, kind, delay, ..
+        }) = self.history.reads.remove(&command)
+        else {
+            return;
+        };
+        if let Some(timer) = delay {
+            cx.clear_timer(timer);
+        }
+        match (strict, result) {
+            (true, Err(error)) => owner.reject(cx, error),
+            (_, result) => owner.finish_with(cx, result, |rows| encode_list(kind, rows)),
+        }
+    }
     fn missing_fill_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
         let Some(Read::List {
             missing_fill_id, ..
@@ -730,19 +755,14 @@ impl WeexFutures {
                 ("field", safe_cex_engine::Value::Str("id".into())),
             ],
         );
-        cx.event(
-            Level::Warn,
-            code::HISTORY_INCOMPLETE,
-            "WEEX fill history is INCOMPLETE: row missing native fill id",
-            vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
-        );
     }
     pub(crate) fn history_item(
         &mut self,
-        cx: &mut Cx<'_, Pending>,
+        _cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) -> bool {
+        request.raw_rows += 1;
         let ok = match &mut request.rows {
             Rows::Fills(rows) => serde_json::from_str::<FillRow<'_>>(item)
                 .map(|r| {
@@ -755,7 +775,7 @@ impl WeexFutures {
                         return;
                     }
                     if r.id.is_empty() {
-                        self.missing_fill_identity(cx, request.command);
+                        request.missing_fill_id = true;
                         return;
                     }
                     if let Some(side) = side(&r.side)
@@ -883,7 +903,23 @@ impl WeexFutures {
                     return;
                 }
             }
+        } else if matches!(request.kind, Kind::Algo) {
+            match serde_json::from_str::<AlgoMetadata<'_>>(response.body) {
+                Ok(metadata) if metadata.orders.get().trim_start().starts_with('[') => {
+                    metadata.has_more
+                }
+                _ => {
+                    self.history_failed(cx, request, "malformed WEEX algo history response");
+                    return;
+                }
+            }
         } else {
+            if !serde_json::from_str::<&serde_json::value::RawValue>(response.body)
+                .is_ok_and(|raw| raw.get().trim_start().starts_with('['))
+            {
+                self.history_failed(cx, request, "malformed WEEX history row list");
+                return;
+            }
             false
         };
         let command = request.command;
@@ -891,8 +927,61 @@ impl WeexFutures {
             return;
         };
         match read {
-            Read::List { rows, seen, .. } => {
-                rows.append(request.rows, seen);
+            Read::List { owner, pending, .. } => {
+                match request.rows {
+                    Rows::Fills(page) => {
+                        for row in page {
+                            if owner.fresh(format!("{}|{}", row.symbol, row.id)) {
+                                owner.stage(ListRow::Fill(row));
+                            }
+                        }
+                    }
+                    Rows::Orders(page) => {
+                        for row in page {
+                            if owner.fresh(format!("{}|{}", row.symbol, row.id)) {
+                                owner.stage(ListRow::Order(row));
+                            }
+                        }
+                    }
+                    Rows::Trades(page) => {
+                        for row in page {
+                            owner.stage(ListRow::Trade(row));
+                        }
+                    }
+                    Rows::Income(_) => unreachable!("list response"),
+                }
+                let count = owner.staged_len();
+                let gap = if request.missing_fill_id {
+                    Some("WEEX fill history is INCOMPLETE: row missing native fill id".into())
+                } else if has_more {
+                    Some(
+                        "WEEX order history is INCOMPLETE: venue advertises additional algo orders"
+                            .into(),
+                    )
+                } else {
+                    None
+                };
+                owner.advance_with_coverage(
+                    CursorPage {
+                        next: None,
+                        rows: request.raw_rows,
+                        fresh: count,
+                        want_more: false,
+                    },
+                    gap,
+                );
+                if !pending.is_empty() && !owner.restart_stage() {
+                    self.finish_list(
+                        cx,
+                        command,
+                        Err(VenueError::new("WEEX history stage did not complete")),
+                        true,
+                    );
+                    return;
+                }
+                if request.missing_fill_id {
+                    self.missing_fill_identity(cx, command);
+                }
                 self.history_next_list(cx, command);
             }
             Read::Income { owner, delay, .. } => {
@@ -944,8 +1033,8 @@ impl WeexFutures {
         let command = request.command;
         if matches!(self.history.reads.get(&command), Some(Read::Income { .. })) {
             self.finish_income(cx, command, Err(VenueError::new(error)), false);
-        } else if self.history.reads.remove(&command).is_some() {
-            cx.fail(command, error);
+        } else if matches!(self.history.reads.get(&command), Some(Read::List { .. })) {
+            self.finish_list(cx, command, Err(VenueError::new(error)), false);
         }
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -983,3 +1072,14 @@ fn encode_income(mut rows: Vec<Income>) -> Result<String, VenueError> {
     rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
     serde_json::to_string(&rows).map_err(|error| VenueError::new(error.to_string()))
 }
+
+fn encode_list(kind: Kind, mut rows: Vec<ListRow>) -> Result<String, VenueError> {
+    if !matches!(kind, Kind::Trades) {
+        rows.sort_by(|a, b| b.time().total_cmp(&a.time()));
+    }
+    serde_json::to_string(&rows).map_err(|error| VenueError::new(error.to_string()))
+}
+
+#[cfg(test)]
+#[path = "../tests/support/history_preparation.rs"]
+mod preparation_tests;

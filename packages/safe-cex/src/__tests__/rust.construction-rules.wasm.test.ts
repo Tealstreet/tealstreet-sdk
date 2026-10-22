@@ -68,13 +68,34 @@ it('Polymarket private accounts need a wallet private key', () =>
 it('Orderly private accounts need an application id', () =>
   startRejects('tealstreet-dex', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
-// The registry rejects payload signers; keyless remote routing stays in the host.
-it('locally signing venues refuse a payload signer before any I/O', () =>
+// Unadopted native families still refuse payload callbacks before I/O.
+it('unadopted private venues refuse a payload signer before any I/O', () =>
   startRejects(
-    'binance',
+    'coinbase',
     { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
-    'Rust binance does not support payloadSigner',
+    'Rust coinbase does not support payloadSigner',
   ));
+
+it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo'] as const)(
+  'compiled %s admits owned PayloadSigner setup before startup without local credentials or I/O', async (name) => {
+    setWasmEngineLoader(loadNodeEngine);
+    let calls = 0;
+    let ioCalls = 0;
+    const io = () => { ioCalls++; throw new Error('Capability construction must not issue transport work'); };
+    setRustEngineTransport(() => ({ now: () => 1700000000123, request: io, connect: io,
+      setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) }));
+    for (const secret of ['', 'unused-local']) {
+      const exchange = new RustEngineExchange(name, { key: 'owned-public', secret,
+        payloadSigner: () => { calls++; return { signature: 'ab'.repeat(32) }; } }, new DefaultStore());
+      running.push(exchange);
+      await expect(exchange.loadCapabilities()).resolves.toBeDefined();
+      expect(exchange.isPublicDataOnly).toBe(false);
+      for (const field of ['key', 'secret', 'payloadSigner']) expect(exchange.options).not.toHaveProperty(field);
+    }
+    expect(calls).toBe(0);
+    expect(ioCalls).toBe(0);
+  },
+);
 
 it.each([
   [undefined, 'v3'],
@@ -140,7 +161,7 @@ it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
     }, 'Rust Paradex private accounts require a key, Paradex address and subkey address'),
 );
 
-it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood', 'binance', 'bybit'] as const)(
+it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
   'compiled native payload refusal on %s keeps startup and validation classification before I/O', async (name) => {
     setWasmEngineLoader(loadNodeEngine);
     const requests: string[] = [];
@@ -189,7 +210,7 @@ it('compiled constructor exposes structured native failure detail', async () => 
   }
   expect(failure).toBeInstanceOf(Error);
   expect(JSON.parse((failure as { venueError: string }).venueError)).toMatchObject({
-    message: expect.stringContaining('remove payloadSigner and configure local signing credentials'),
+    message: expect.stringContaining('payloadSigner requires a configured injected signing provider'),
     kind: 'unsupported', outcome: 'notSent',
   });
 });

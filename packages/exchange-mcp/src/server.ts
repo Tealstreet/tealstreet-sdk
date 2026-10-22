@@ -5,13 +5,15 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createExchange } from '@tealstreet/safe-cex/src/index';
 import { historyCompletenessOf } from '@tealstreet/safe-cex/src/historyCompleteness';
 import { RustEngineExchange } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
+import { deriveRemoteSigningPolicy } from '@tealstreet/safe-cex/src/exchanges/rust/construction';
 
 import { supportedTools } from './tools';
 
 export const createServer = async ({ exchange: name, options }: ServerConfig, version: string) => {
   const instantiate = async (): Promise<Exchange> => {
     const next = await createExchange(name, options);
-    if (next instanceof RustEngineExchange && options.payloadSigner) {
+    const delegated = deriveRemoteSigningPolicy(name);
+    if (next instanceof RustEngineExchange && options.payloadSigner && !(delegated?.enabled && delegated.payloadSupported)) {
       next.dispose();
       throw new Error('Rust MCP accounts require local credentials; EXCHANGE_SIGNER_HEADER is unsupported');
     }
