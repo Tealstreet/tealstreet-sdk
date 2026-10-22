@@ -3475,3 +3475,37 @@ remain required. Native-backed host/worker tests now use the reachable later-pag
 partial-success event instead of the superseded first-failure marker. This is
 source/fixture evidence, not deployed runtime proof or cross-family closure.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+### WEEX remaining histories: one owner across windows and order endpoints
+
+WEEX fills, historical orders and public trades now use the existing engine
+CursorHistory owner. Each whole native response validates before shared dedupe
+and admission; a failed page's prefix is excluded. A first/zero-accepted actual
+HTTP/transport/native-response/list/row failure rejects typed with the engine's
+`internal` fallback. A later failure now returns only accepted earlier windows
+or endpoints with one command-owned Warn `history.incomplete` before success,
+including Error-only logging, and stops the queue. In particular, failed algo
+orders retain previously admitted normal orders instead of discarding the query.
+Synchronous signing preparation refusal remains strict after acceptance and now
+reports `internal`/`notSent`; it never becomes a partial success.
+
+Missing fill IDs are still skipped after symbol/order/time filters, with no
+invented identity. The once-per-query native `row.skipped(field id)` diagnostic
+now publishes only after a valid whole page is admitted. Its coverage fact is
+retained by the engine until one final incomplete success; a rejected page cannot
+publish a marker or consume the valid-page diagnostic latch. Valid all-omitted
+pages may succeed incomplete []; an actual later failure with zero admitted rows
+still rejects. Native-backed empty-fill host/worker fixture text stays unchanged.
+A valid allAlgoOrders.hasMore:true likewise records an owned coverage gap without
+adding pagination; absent/false keeps the previous result, while malformed
+explicit continuation metadata rejects or recovers only prior accepted pages.
+
+Native financial mapping/units/large IDs, filters, first-wins symbol|id dedupe,
+stable fill/order sorting and public-trade order/duplicates remain. Shared engine
+window generation preserves seven-/90-day bounds, the existing ratio budget,
+request limits/page0 and endpoint order. List continuation remains immediate;
+shared pauses defer the same next native stage. Income retains #1751's behavior.
+No SDK arguments or row shapes change. B11 request-scoped incomplete-query
+handling/coverage and typed rejection handling remain required; no new NX handler
+or deployed-runtime proof is claimed. [Scope](RUST_OWNED_HISTORY.md).

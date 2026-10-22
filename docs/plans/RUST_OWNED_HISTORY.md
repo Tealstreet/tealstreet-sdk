@@ -872,3 +872,24 @@ with an owned gap while keeping the endpoint queue unchanged; absent/false is
 complete and explicitly malformed metadata rejects whole-page admission. No
 new pagination or retries. Cover empty advertised-more responses, malformed
 metadata, public duplicates, immediate/pause continuation and budget boundaries.
+
+
+WEEX list implementation receipt: original31 controls pass and seven new behavior
+groups fail by assertion before source edits (regression-only f5d529491f8).
+Corrected38 history controls pass, and final39 add the legacy ratio boundary and
+complete paused normal/algo resumption. The native private preparation control
+revokes test setup between accepted normal rows and preparing algo orders;
+original source rejects without kind/outcome, corrected source rejects strictly
+Internal/notSent with no marker/partial/second request. The fixture lives in
+native test support, not a production setup holder, and adds no signer allowlist
+exception. Exact original-source RED/current restored-source GREEN are retained.
+Two unchanged native-backed empty-fill host/worker fixture tests pass.
+
+Independent plan/correctness/adversarial reviews are CLEAN. Focused engine/WEEX/
+Binance831 tests and strict Clippy pass before final test refinements; final
+WEEX tests/strict Clippy/fmt/bans/links run before freeze. Source needs no engine
+API and preserves income. The explicit owner authorization now permits exact
+preintegration of reviewed Bybit #1728 head31035f3f09a71e5fb29d1083c217512972e5f9ec,
+which includes actual #1746 build policy3f0e3e450b2, for parallel CI. Actual
+Bybit ancestry, all actual shared predecessors, final exact-head CI/replay and
+separate guard/merge remain required; no landing/deployment claim.

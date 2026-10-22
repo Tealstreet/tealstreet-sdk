@@ -571,7 +571,7 @@ fn normal_and_algo_history_commit_together_in_binance_result_shape() {
     assert_eq!(rows[1].average_price, Some(64999.5));
 }
 #[test]
-fn failed_half_of_order_history_never_returns_partial_success() {
+fn failed_algo_history_retains_valid_normal_rows_with_owned_incompleteness() {
     let mut e = engine();
     let actions = command(
         &mut e,
@@ -592,7 +592,7 @@ fn failed_half_of_order_history_never_returns_partial_success() {
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert_eq!(result(&actions).unwrap_err(), "connection reset");
+    owned_income_partial(&actions, 1);
 }
 #[test]
 fn income_post_preserves_ts_omission_and_explicit_null_contract() {
@@ -819,7 +819,14 @@ fn order_history_continuation_waits_for_a_ban_from_another_query() {
     let mut now = NOW;
     let actions = advance(&mut e, &mut now, actions);
     assert_eq!(now, NOW + 10_000.0);
-    request(&actions, "/allAlgoOrders");
+    let req = request(&actions, "/allAlgoOrders");
+    let actions = response(&mut e, now, req.id, ALGO);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&result(&actions).unwrap())
+            .unwrap()
+            .len(),
+        2
+    );
 }
 #[test]
 fn income_without_bill_ids_uses_time_in_the_deduplication_identity() {
@@ -1269,6 +1276,30 @@ fn public_list_keeps_duplicate_ids_and_native_order() {
             .collect::<Vec<_>>(),
         ["same", "other", "same"]
     );
+}
+
+#[test]
+fn native_list_windows_preserve_the_legacy_ratio_admission_boundary() {
+    let span = 7.0 * DAY;
+    for over in [false, true] {
+        let mut e = engine();
+        let actions = command(
+            &mut e,
+            identity_fills(
+                Some(NOW),
+                Some(NOW + 1000.0 * span + if over { 0.5 } else { 0.0 }),
+            ),
+        );
+        if over {
+            assert!(result(&actions).unwrap_err().contains("budget"));
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        } else {
+            let req = request(&actions, "userTrades");
+            assert!(req.url.contains(&format!("startTime={NOW:.0}")));
+            assert!(req.url.contains(&format!("endTime={:.0}", NOW + span)));
+            no_completion(&actions);
+        }
+    }
 }
 #[test]
 fn empty_fill_identity_aliases_keep_valid_financial_peers_and_mark_owned_incomplete_once() {
