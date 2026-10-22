@@ -2,7 +2,7 @@ use crate::sign::Params;
 use crate::wire::{Envelope, Message};
 use crate::{Cryptocom, Pending, Skipped, quoted};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -11,26 +11,9 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
-const SKIP_LOG_LIMIT: usize = 4_096;
-
 /// A skipped row is an error only when the store has no copy for it to keep.
 fn skip_level(stored: bool) -> Level {
     if stored { Level::Warn } else { Level::Error }
-}
-/// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
-fn log_skip(
-    cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
-    key: &str,
-    level: Level,
-    message: impl Into<String>,
-) {
-    if logged.len() >= SKIP_LOG_LIMIT {
-        logged.clear();
-    }
-    if logged.insert(key.to_owned()) {
-        cx.notice(level, code::ROW_SKIPPED, message);
-    }
 }
 /// Commits a builder and splits off the stored copies its rejections kept.
 fn commit_split(
@@ -95,9 +78,9 @@ pub struct Account {
     executions: HashSet<String>,
     execution_queue: VecDeque<String>,
     /// Instruments (empty when unidentified) whose skipped position row was already logged.
-    position_skips: HashSet<String>,
+    position_skips: RowReports<String>,
     /// Order ids (empty when unidentified) whose skipped row was already logged.
-    order_skips: HashSet<String>,
+    order_skips: RowReports<String>,
     /// Stored order ids last seen in the advanced list or channel; the rest are regular.
     advanced_orders: HashSet<String>,
 }
@@ -517,7 +500,7 @@ impl Cryptocom {
     ) {
         let result = match &mut request.rows {
             Rows::Positions(rows) => serde_json::from_str::<PositionRow>(item).map(|row| {
-                self.account.position_skips.remove(row.instrument_name);
+                self.account.position_skips.forget(row.instrument_name);
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.position(cx.now));
                 } else if num::parse(row.quantity) != 0.0 {
@@ -532,7 +515,7 @@ impl Cryptocom {
                 }
             }),
             Rows::Orders(rows) => serde_json::from_str::<OrderRow>(item).map(|row| {
-                self.account.order_skips.remove(&id(row.order_id));
+                self.account.order_skips.forget(&id(row.order_id));
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.order(cx.now, cx.store.order(&id(row.order_id))));
                 } else if status(row.status.or(row.order_status).unwrap_or("ACTIVE")) == OrderStatus::Open {
@@ -567,14 +550,14 @@ impl Cryptocom {
                     let level = skip_level(!cx.store.positions().is_empty());
                     let message =
                         "Crypto.com skipped unmappable position row without an instrument";
-                    log_skip(cx, skips, "", level, message);
+                    skips.report(cx, String::new(), level, message);
                     rows.reject(None);
                     return;
                 };
                 let ids = ["long", "short"].map(|side| format!("{symbol}:{side}"));
                 let level = skip_level(ids.iter().any(|id| cx.store.position(id).is_some()));
                 let message = format!("Crypto.com skipped unmappable position row {symbol}");
-                log_skip(cx, skips, symbol, level, message);
+                skips.report(cx, symbol.to_owned(), level, message);
                 for id in ids {
                     rows.reject(Some(id));
                 }
@@ -584,13 +567,13 @@ impl Cryptocom {
                 let Some(order_id) = key.and_then(|k| k.order_id.map(id)) else {
                     let level = skip_level(!cx.store.orders().is_empty());
                     let message = "Crypto.com skipped unmappable order row without an id";
-                    log_skip(cx, skips, "", level, message);
+                    skips.report(cx, String::new(), level, message);
                     rows.reject(None);
                     return;
                 };
                 let level = skip_level(cx.store.order(&order_id).is_some());
                 let message = format!("Crypto.com skipped unmappable order row {order_id}");
-                log_skip(cx, skips, &order_id, level, message);
+                skips.report(cx, order_id.clone(), level, message);
                 rows.reject(Some(order_id));
             }
             Rows::Balance(Some(_)) => request.skipped.add(None),
