@@ -114,3 +114,12 @@ cancellation and scrubbed custody. Existing Binance/Bybit wire/receiver/import
 controls remain unchanged. This phase changes neither native dispatch/release
 ownership nor runtime family admission. Keep actual hosted SDK acceptance as a
 mandatory family gate, with no claim from these lower-level probes.
+
+Phase 2 checkpoint evidence: both families originally failed four provider/setup
+assertions before the implementation. The corrected shared path passes 217
+focused tests across ten SDK suites, including unchanged Binance/Bybit wire,
+receiver/import/runtime and refusal controls. Package typecheck/lint pass.
+Independent correctness and adversarial reviews are clear. Runtime admission
+remains disabled, and no actual-WASM or deployed-family claim follows from these
+lower-level tests. The next gate is fresh full CI/replay provenance on the final
+integrated head before this shared extension is ready to merge.

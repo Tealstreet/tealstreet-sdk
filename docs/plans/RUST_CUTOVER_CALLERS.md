@@ -3781,3 +3781,15 @@ outputFormat and signature-only response. OKX/Bitget metadata alone does not
 admit a Rust signer account or complete their hosted migration: those family
 adapters still require their native SignStep and actual WASM/SDK HTTP/WS proofs.
 The landed Binance/Bybit callback wire and output defaults remain unchanged.
+
+For a family that declares passphrase presentation, callback setup must receive
+the existing required passphrase material through trusted setup even when a
+RemoteSigner holds the HMAC secret elsewhere. The unchanged remote response
+returns a MAC, not a missing passphrase. Secondary absent/null passphrases use
+the setup-authorized primary ref; explicit empty never inherits, and public mode
+does not waive secondary requirements. Provider custody is separate from public
+key interpolation: passphrases can be presented only with signing work owned by
+that identity, not included in HMAC preimages or callback receiver metadata.
+RemoteSigner remains primary-only and never falls back to a local/PayloadSigner
+after refusal. The provider requests the declared format and rejects noncanonical
+or incorrectly sized base64 MACs before any attempt can be published.

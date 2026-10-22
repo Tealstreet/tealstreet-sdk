@@ -81,6 +81,14 @@ ref; they never interpolate it into the HMAC payload. Formatting validates the
 entire result and combined header bounds before publication. Callback precedence
 uses the existing declared, case-insensitive header policy. These codec metadata
 fields do not enable runtime family admission or replace actual hosted tests.
+Callback setup reuses the same required-field/absent-only fallback resolver,
+consuming passphrase material into a separate provider Present map and exposing
+only opaque refs to the engine. Presenting one requires admitted signing work
+for its owning identity; it cannot be used in a Credential payload part. Missing
+required material rejects synchronously. The unchanged remote wire supplies only
+the MAC, in the declared hex or canonical padded base64 encoding of 32 raw bytes;
+it cannot supply a missing passphrase. Generic options and callback receiver
+snapshots retain no passphrase, and disposal revokes the setup wrapper.
 
 Callers must provision worker/hosted providers separately rather than copy
 `exchange.options` as credentials, and use readiness/public-mode metadata instead
