@@ -364,3 +364,17 @@ not native-host SignFuture execution. Protocol/route reprepare fencing and full
 registry atomicity acceptance remain pending, as does ordinary Bybit adoption;
 its original gateway regression intentionally remains RED. No push/PR until
 actual1741; its maina0 CI and authenticated evidence watches remain active.
+
+Next local test-only slice: drive one signed replacement child through a bound
+but unreleased permit, then separately invalidate it by protocol calibration or
+route Stale before100ms. Require an emitted Cancel plus fresh Prepare retaining
+that child's exact Context/deadline and reduced raw timeout. Old live permit and
+provider result must never bind/send or seal; prepare/sign/claim the new attempt
+and accept its native ID, then accept the unaffected sibling and require success
+with both exact IDs and one original diagnostic. New provider attempts are
+distinct, physical release remains parent+2, duplicate old cleanup cannot retire
+the current resource, and all physical work retires. Use existing production
+Engine APIs and test-only protocol observation, no allocator/source change.
+This composes existing core reprepare fences with the replacement relation; it
+is not a new bug claim or native-host provider execution proof. Strict scoped
+checks and independent review precede checkpoint; core CI remains priority.
