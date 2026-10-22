@@ -1301,7 +1301,7 @@ Plan first on fresh `feat/rust-owned-history-cryptocom` from actual capability
 landing `4c4df7c99dc` (2026-10-22), outside OKX/Bitget/BingX signer work. Replace
 Crypto.com's local accepted rows/completion with one boxed CursorHistory owner
 for fills, closed orders, income and public trades. Preserve unsupported lookup,
-initial credential/range admission and zero-limit/equal-bound no-I/O. No account,
+initial credential/range admission and effective-zero-limit/equal-bound no-I/O. No account,
 signing, dispatch, RequestContext, metadata, Store or host edits.
 
 Keep native exact u64 nanosecond bounds and oldest+1 exclusive-end translation,
@@ -1363,3 +1363,26 @@ on reviewed #1760 `ba960f9b7e8`; genuine integration `73b500095be` preserves all
 unowned blobs and the original regression blob. The sole independent-section
 plan-doc conflict preserves incoming GRVT then Crypto.com verbatim, with block
 hashes/base subsequence and no conflict markers. Actual #1760 remains required.
+
+
+Crypto.com local implementation receipt: original regression-only
+`a45c3c6ce5d` has 12 existing controls GREEN and five new assertion-RED groups.
+Shared CursorHistory adoption makes those groups GREEN. Native short-duplicate
+stop precedence, full-duplicate older-bound progress, strict later cursor proof,
+public duplicate/unsigned retry, both mixed retry orders, accepted/new-ID rollback
+and explicitly bounded income with more than the requested output limit are
+pinned. The effective-limit qualifier matters: explicitly ranged income already
+ignores caller output limits, including zero, while other zero-limit queries
+return without I/O. The source uses no new core API and preserves the approved
+#1760 exact stack; no account/signing/Completion edits. Independent correctness
+and adversarial source reviews are CLEAN; final controls/docs review, CI and
+actual queued dependency integration remain before final guard/merge.
+
+
+Crypto.com final local checks: 756 full focused engine/Crypto.com/Binance tests
+passed before the final three controls; all 26 final Crypto.com history tests
+pass, including accepted/new-ID retry rollback, both mixed retry orders and
+unsigned public retry. Final strict all-target Clippy, fmt, banned patterns and
+diff checks pass. Independent source and final tests/docs correctness/adversarial
+reviews are CLEAN. No new core source is added beyond the approved #1760 stack;
+actual predecessor ancestry, final CI/proof and separate guard/merge remain.
