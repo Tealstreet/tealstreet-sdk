@@ -16,6 +16,7 @@ or trade. SDK fixes/green CI do not establish NX adoption or live evidence.
 | **Rollback — #1699** | Approve resolver/policy, TS reachability, observation windows and tested recovery. No forced-TS switch exists; unsetting Rust restores defaults, and TxFlow has no production TS fallback. Retain TS/helpers/signing delegates/executable references through cutover. [Recommendation, costs and soak plan](RUST_ROLLBACK.md). |
 | **Bybit split preflight** | Accept whole-batch rejection before writes when one split lot cannot format, or authorize another policy; TS skips that order. Partial TP/SL semantics are already decided. [Bybit retained findings](RUST_AUDITS.md#bybit-family). |
 | **Coinbase CFM accounting** | Verify CFM/spot accounting and downstream equity consumers before choosing summary PnL/equity treatment. Native reports PnL while TS uses zero; hiding or double-counting it is unacceptable. [Accounting decision](RUST_AUDITS.md#coinbase-already-defaults-to-rust). |
+| **Request lifecycle legacy bridge — hard gate** | The staged bridge is authorized only during family migration. Its exact legacy call-site allowlist may only shrink; new legacy callers fail CI. Before landing → master, finish fan-out and delete both the empty allowlist and bridge. Legacy work has no inferred semantics, generic replay or outcome-sealing claim. [Lifecycle and removal contract](RUST_REQUEST_CONTEXT.md). |
 
 ## 2. Required NX caller changes and integration proof
 
