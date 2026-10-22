@@ -1072,3 +1072,16 @@ fill without cumulative evidence cannot identify the interval of a later
 cumulative fallback; this migration does not claim to reconcile that ambiguity.
 First-insertion FIFO can evict even a still-active order at the documented bound.
 Both limits remain explicit; no unbounded history or fabricated prefix is added.
+
+Original native evidence: nine focused fixtures on unchanged production source
+produce six assertion REDs (raw cumulative prefix emitted instead of suffix)
+and three compatibility GREENs. The RED scenarios cover successive endpoints,
+terminal/REST removal, partial-snapshot healthy peers, later REST non-reseeding
+and non-match display updates. Original log is retained separately.
+
+Further seed-provenance refinement: a paged read stages raw validated seed
+candidates alongside mapped rows, before mapping may substitute newer cached
+Store rows. At final current, non-lookup commit, only candidates whose identities
+are admitted by the SnapshotBuilder may seed previously unseen IDs. A failed
+later page or revision mismatch discards all staged seeds. This keeps display
+observations and retained rejected copies out of execution authority.
