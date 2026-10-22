@@ -967,3 +967,30 @@ replacing live observations. 799 focused engine/Aster/Binance native tests
 and strict all-target Clippy pass. Both independent source/adversarial/caller
 reviews are CLEAN; root typecheck44/44 and lint28/28 pass fully cached. Fresh
 dependency integration/CI/replay evidence remain pending.
+
+
+#### Aster final history-stack integration checkpoint
+
+The overseer authorized exact-head preintegration of reviewed frozen history
+stack `b1333485b086281a0c9cb23a464c34e06c931d90` for overlapping CI/proof.
+Porcelain merge `09c19daa676` preserves all incoming source/test files and the
+reviewed Aster account source/tests byte-for-byte. Two documentation conflicts
+were resolved exactly as separately approved in #1756 comment6341814528;
+marker and per-section checks passed before committing. All incoming history
+sections and the Aster financial-admission section remain.
+
+Final merge still requires actual #1754/#1751/#1752 with the frozen ancestry
+and reviewed source/tree preserved, full green current-head CI and authenticated
+replay proof, independent artifact/control review, and a fresh separate guard.
+Any predecessor head change requires genuine integration and fresh checks.
+The overseer reserved this final proof window after the history queue lands.
+Initial700 evidence remains historical, including its retained strict-false WOO
+TS checkpoint-0 variation with both complete pre-change variants independently
+authenticated and all488 Rust outputs equal under the standing reference rule.
+No exclusions, local WASM builds or local replays were introduced.
+
+The owner reprioritized the shared financial snapshot freshness-token core
+immediately after this Aster slice, before remaining KuCoin Spot/Orderly
+cumulative adoption and reporting. It needs two different family consumers and
+API coordination with RequestContext late reconciliation and the pending
+metadata epoch core; no token implementation is included here.
