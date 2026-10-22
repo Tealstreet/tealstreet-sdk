@@ -21,13 +21,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: yarn
-      - run: yarn install --frozen-lockfile --network-timeout 600000
-      - run: corepack yarn -s node --test .github/tests/secret-scan.test.cjs
-      - run: yarn check:licenses
-      - run: yarn typecheck
-      - run: yarn lint
-      - run: yarn test
+      - uses: ./.github/actions/prepare-yarn
+      - run: corepack yarn install --frozen-lockfile --network-timeout 600000
+      - run: corepack yarn -s node --test .github/tests/*.test.cjs
+      - run: corepack yarn check:licenses
+      - run: corepack yarn typecheck
+      - run: corepack yarn lint
+      - run: corepack yarn test
 
 
   # Open source (MIT): scan every new commit for secrets. Known test fixtures
