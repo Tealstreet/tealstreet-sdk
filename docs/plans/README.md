@@ -46,6 +46,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Browser module readiness | Merged measurement contract | Chrome worker measurements and provenance; threshold proposal requires landing baselines. | [RUST_BROWSER_COLD_START.md](RUST_BROWSER_COLD_START.md) |
 | Bybit linear port checkpoint | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [BYBIT_PORT.md](BYBIT_PORT.md) |
 | Bybit variants port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [BYBIT_VARIANTS_PORT.md](BYBIT_VARIANTS_PORT.md) |
+| Clock synchronization | Active standardisation | Changing engine event time, synchronized production clocks or injected replay clocks. | [RUST_ENGINE_CLOCK.md](RUST_ENGINE_CLOCK.md) |
 | Coinbase Rust venue port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Construction and capabilities | Retained plan/evidence | Changing engine construction, option validation or capability-driven runtime behavior. | [RUST_BRIDGE_CAPABILITY_TAIL.md](RUST_BRIDGE_CAPABILITY_TAIL.md) |
 | Construction and capabilities | Retained plan/evidence | Changing engine construction, option validation or capability-driven runtime behavior. | [RUST_CAPABILITIES.md](RUST_CAPABILITIES.md) |
