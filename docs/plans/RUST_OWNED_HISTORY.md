@@ -649,3 +649,13 @@ plan/correctness/adversarial reviews, full CI and the separate guard/merge in th
 owner queue. Architecture gate: reuse one engine history choke point rather
 than introducing a venue-specific completeness/paging policy. Integrate actual
 shared dependencies before final proof; #1737 conformance stays separate.
+
+
+Plan review is clean with preservation constraints: seed orders via
+CursorWalk::starting_at so invalid first-page bounds repeat a registered token;
+do not use end_on_unchanged_cursor. Keep raw added counts separate from staged
+mapped rows, no early order-limit completion, and income skip 100..9900. A truly
+empty page ends natively, so the zero-accepted-rows/later-failure control uses a
+full raw page whose rows are all mapper-filtered but retain native ID/time
+progress. Separately prove genuine empty-page termination. RequestContext lane
+confirmed no Bitunix edits; the one fail_private arm remains disjoint.

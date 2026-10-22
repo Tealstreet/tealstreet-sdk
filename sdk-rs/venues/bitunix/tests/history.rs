@@ -356,14 +356,26 @@ fn fail_history(
             request,
             &format!(r#"{{"code":0,"data":{{"{key}":[null]}}}}"#),
         ),
-        _ => reply(
+        4 => reply(
             e,
             request,
             &format!(r#"{{"code":0,"data":{{"{key}":[],"broken":"#),
         ),
+        _ => reply(e, request, r#"{"code":0,"data":{}}"#),
     }
 }
 fn owned_partial(actions: &[Action], expected_rows: usize) {
+    assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)).count(), 1);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 41, .. })
+            ))
+            .count(),
+        1
+    );
     let (index, marker) = actions
         .iter()
         .enumerate()
@@ -416,15 +428,18 @@ fn first_page_failures_never_complete_as_empty_history() {
     }
 }
 #[test]
-fn later_page_failures_never_complete_as_clean_partial_history() {
+fn later_page_failures_resolve_only_accepted_rows_with_owned_incomplete_evidence() {
     for kind in 1..3 {
-        for failure in 0..5 {
+        for failure in 0..6 {
             let (mut e, _) = startup();
             let request = start_history(&mut e, kind);
             reply(&mut e, request.id, &history_page(kind, 0));
             let request = requests(&mut e).remove(0);
             fail_history(&mut e, request.id, failure, kind);
-            assert!(done(&mut e).is_err(), "kind={kind}, failure={failure}");
+            owned_partial(
+                &e.drain_actions().collect::<Vec<_>>(),
+                if kind == 1 { 100 } else { 200 },
+            );
         }
     }
 }
@@ -577,4 +592,147 @@ fn order_rows_before_the_requested_start_prove_the_walk_is_complete() {
             .iter()
             .any(|a| matches!(a, Action::Http(_) | Action::Notice(Notice::Event(_))))
     );
+}
+
+fn typed_rejection(actions: &[Action], command: u32, not_sent: bool) {
+    let failures = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: owner,
+                error,
+            }) if *owner == command => Some(error),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(failures.len(), 1, "one typed rejection");
+    assert_eq!(failures[0].kind, Some(safe_cex_engine::ErrorKind::Internal));
+    if not_sent {
+        assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
+    }
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { .. }) | Action::Http(_)
+    )));
+    assert!(!actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+    )));
+}
+
+#[test]
+fn first_page_failure_has_a_typed_owner_and_never_an_empty_success() {
+    for kind in 0..3 {
+        for failure in 0..6 {
+            let (mut e, _) = startup();
+            let request = start_history(&mut e, kind);
+            fail_history(&mut e, request.id, failure, kind);
+            typed_rejection(&e.drain_actions().collect::<Vec<_>>(), 41, false);
+        }
+    }
+}
+
+#[test]
+fn failed_later_page_cannot_publish_its_valid_prefix() {
+    for kind in 1..3 {
+        let (mut e, _) = startup();
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let request = start_history(&mut e, kind);
+        reply(&mut e, request.id, &history_page(kind, 0));
+        let request = requests(&mut e).remove(0);
+        let page = history_page(kind, 1);
+        let mut value: serde_json::Value = serde_json::from_str(&page).unwrap();
+        let key = if kind == 1 { "orderList" } else { "tradeList" };
+        value["data"][key].as_array_mut().unwrap().truncate(1);
+        value["data"][key]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::Value::Null);
+        reply(&mut e, request.id, &value.to_string());
+        owned_partial(
+            &e.drain_actions().collect::<Vec<_>>(),
+            if kind == 1 { 100 } else { 200 },
+        );
+    }
+}
+
+#[test]
+fn raw_progress_without_accepted_rows_still_rejects_a_later_failure() {
+    for kind in 1..3 {
+        let (mut e, _) = startup();
+        let request = start_history(&mut e, kind);
+        let page = if kind == 1 {
+            history_page(kind, 0).replace("\"side\":\"BUY\"", "\"side\":\"UNRECOGNIZED\"")
+        } else {
+            history_page(kind, 0).replace("\"symbol\":\"BTCUSDT\"", "\"symbol\":\"\"")
+        };
+        reply(&mut e, request.id, &page);
+        let request = requests(&mut e).remove(0);
+        fail_history(&mut e, request.id, 0, kind);
+        typed_rejection(&e.drain_actions().collect::<Vec<_>>(), 41, false);
+    }
+}
+
+#[test]
+fn partial_query_cannot_mark_or_complete_its_pending_neighbour() {
+    let (mut e, _) = startup();
+    e.set_log_level(safe_cex_engine::Level::Error);
+    let first = start_history(&mut e, 1);
+    reply(&mut e, first.id, &history_page(1, 0));
+    let next = requests(&mut e).remove(0);
+    e.handle(
+        1.0,
+        Event::Command(Command::Query {
+            command: 42,
+            query: history_query(2),
+        }),
+    );
+    let neighbour = requests(&mut e).remove(0);
+    fail_history(&mut e, next.id, 0, 1);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    owned_partial(&actions, 100);
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(
+            Notice::CommandDone { command: 42, .. } | Notice::CommandFailed { command: 42, .. }
+        )
+    )));
+    reply(
+        &mut e,
+        neighbour.id,
+        r#"{"code":0,"data":{"tradeList":[]}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 42, result }) if result == "[]")));
+    assert!(!actions.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+}
+
+#[test]
+fn signing_preparation_refusal_stays_strict_after_accepted_rows() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let refused = Arc::new(AtomicBool::new(false));
+    let control = refused.clone();
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Default::default()
+        }),
+    );
+    e.set_signing_entropy(Box::new(move |bytes| {
+        if control.load(Ordering::SeqCst) {
+            Err("signing source unavailable".into())
+        } else {
+            bytes.fill(7);
+            Ok(())
+        }
+    }))
+    .unwrap();
+    let (mut e, _) = startup_with_engine(e);
+    let request = start_history(&mut e, 1);
+    refused.store(true, Ordering::SeqCst);
+    reply(&mut e, request.id, &history_page(1, 0));
+    typed_rejection(&e.drain_actions().collect::<Vec<_>>(), 41, true);
 }
