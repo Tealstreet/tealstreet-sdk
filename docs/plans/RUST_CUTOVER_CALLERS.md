@@ -3930,3 +3930,17 @@ delivery without suppressing health accounting or resetting report memory.
 No SDK arguments/results, order/position/FILLS publication or caller migration
 is added. This slice does not complete grouped/deferred reporting or the other
 consumer migrations; those remain in [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
+
+
+## Grouped and deferred row-reporting compatibility
+
+Crypto.com and WOO skipped-row groups use shared engine collectors while keeping
+native summary level/code/text/order, first-label/count rules and cached-state
+retention. WOO clean groups re-arm only that summary kind. Bybit unsupported-order
+diagnostics retain unbounded per-product Once memory at accepted joined reads;
+a failed/noncurrent/incomplete whole join cannot consume it, an admitted partial
+join still reports, and clean/mapped rows never re-arm it. Known unsupported
+orders are restored independently of whether their diagnostic was suppressed.
+No SDK argument/result, remote/header/signing contract, order/position/FILLS wire
+shape, caller migration or financial/snapshot authority changes. Remaining
+persistent reporter consumers stay open in RUST_ROW_ADMISSION.md.

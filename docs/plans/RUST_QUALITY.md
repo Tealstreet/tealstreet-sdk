@@ -422,3 +422,20 @@ New engine controls cover all three policies, capacity reset before duplicate
 lookup, independent unbounded mode, borrowed lookup and host-filtered health.
 Grouped/deferred reporting and the remaining persistent consumer fan-out stay
 explicit follow-ups; see [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
+
+
+## Grouped and deferred row-reporting compatibility
+
+Shared `RowCount` and `RowKeys` keep the two native grouping contracts explicit.
+Crypto.com counts every rejection; WOO preserves ordered unique known IDs and
+every anonymous rejection, including its move-based order-pagination progress.
+An emitted summary increments health exactly once at the original site,
+regardless of group size or host filtering; absent or repeat-suppressed summaries
+do not. The shared optional-summary reporter
+forgets only its key on None; Some(empty text) remains an observable report.
+Bybit deferred Once memory is unbounded, separate per product, never re-armed by
+clean rows, and flushed only at accepted joined-read publication after native
+cached-row restoration. Partial admitted joins still report unsupported rows.
+Original native compatibility controls cover failed/incomplete/stale joins,
+terminal-ACK invalidation, retained exposure and account swapping; no defect RED
+or complete persistent-reporter fan-out claim. See RUST_ROW_ADMISSION.md.

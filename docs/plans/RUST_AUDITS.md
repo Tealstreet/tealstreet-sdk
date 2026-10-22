@@ -1890,3 +1890,25 @@ unchanged. Grouped collectors (Crypto.com every rejection, WOO unique known IDs
 plus anonymous rows), Bybit deferred reporting, and remaining persistent copies
 remain open in [the reporting plan](RUST_ROW_ADMISSION.md). No all-venue closure
 or new live capture/parity claim is made by this first slice.
+
+
+## Grouped and deferred row-reporting engine path
+
+Phase2 moves duplicate-inclusive counts/first labels and ordered unique-ID plus
+anonymous counts into explicit engine `RowCount`/`RowKeys` collectors. Crypto.com
+keeps its exact summary formatting, including anonymous versus empty first labels;
+WOO keeps unique known IDs, each anonymous row, original retention/page progress
+and ChangedMessage/empty-group re-arm. Bybit keeps deferred unbounded Once memory
+at the accepted joined-order boundary, including admitted partial joins. Failed,
+noncurrent or incomplete whole joins do not consume it; clean/mapped rows do not
+re-arm it, and cached-row restoration remains outside report suppression. Both
+real Bybit constructors select that explicit policy and product swaps preserve it.
+
+Architecture gate YES: these are cross-cutting grouping/repeat policies behind
+engine coverage, with native identity/formatting/admission timing retained. The
+233 selected original native tests pass before migration; these are compatibility
+controls, not defect RED evidence. New core controls cover exact first labels,
+summary health/filtering, empty text versus absent summary and key-only re-arm
+at capacity. Financial reducers, signing, clocks and snapshot fences stay native.
+Seventeen bounded persistent source files remain for subsequent fan-out; no
+all-venue closure, live capture or stronger replay parity claim is made here.

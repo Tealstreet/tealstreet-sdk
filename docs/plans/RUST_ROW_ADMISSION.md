@@ -595,3 +595,16 @@ move semantics. Early extra-product fixture cadence and an intermediate WOO
 fixture edit were corrected before this exact original-GREEN run; neither is a
 product defect/RED. Native source/test/log hashes are sealed in the local receipt
 `/tmp/codex-row-grouped-original-receipt.json`; CI proof remains pending.
+
+Phase2 implementation checkpoint: the explicit collectors and optional summary
+paths now serve Crypto.com/WOO; Bybit unsupported-order memory uses unbounded
+Once at its unchanged accepted-join boundary. Both real construction paths and
+product-state swaps preserve the policy. All1345 focused five-crate tests pass;
+strict all-target Clippy, scoped fmt, bans, root44 typecheck/28 lint pass (root
+tasks cached). A Clippy-only test assertion expression was corrected; exactfinal
+233 original controls were rerun with all five original production blobs and
+byte-exact restoration of the migrated source, with receipt
+`/tmp/codex-row-grouped-original-exact-receipt.json`. Both independent source/API/
+caller reviews are CLEAN; repeat-suppressed summary health wording was tightened.
+Actual #1741 integration, current-head full CI and authenticated all-suite raw/
+ordered-gate proof remain required. No merge, live or all-venue closure claim.
