@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::Event;
-use safe_cex_venue_bybit::Options;
+use support::Options;
 use support::*;
 
 #[test]

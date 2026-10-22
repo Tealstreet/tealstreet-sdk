@@ -488,6 +488,38 @@ impl BybitLinear {
         self.advance_hyro(cx, key);
     }
 
+    pub(crate) fn on_hyro_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let (key, lookup) = match request {
+            Request::Stop { key, .. } | Request::Create { key, .. } => (key, false),
+            Request::Lookup { key, .. } => (key, true),
+        };
+        let Some(group) = self.trading.hyro.groups.get_mut(&key) else {
+            return;
+        };
+        let create = &mut group.creates[group.index];
+        // A refused reconciliation read cannot disprove an earlier dispatched write.
+        if lookup || create.uncertain || create.accepted.is_some() || create.observed {
+            self.pause_hyro(cx, &key, &error.message, false);
+            return;
+        }
+        create.attempts = create.attempts.saturating_sub(1);
+        let mut error = error;
+        if group.index > 0 || !group.ids.is_empty() {
+            error.outcome = None;
+        }
+        for command in group.waiters.drain(..) {
+            cx.command_error(command, error.message.clone());
+            cx.fail(command, error.clone());
+        }
+        // Keep the immutable planned identity for an explicit caller retry, never replay here.
+        group.running = false;
+    }
+
     pub(crate) fn on_hyro_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,

@@ -5,7 +5,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketChannel,
     SocketId, TimerId, VenueError,
 };
-use safe_cex_venue_bybit::{BybitLinear, Options};
+use safe_cex_venue_bybit::BybitLinear;
+mod config;
+pub use config::{Options, engine};
 
 /// "Get Instruments Info", the USDT perpetual example, plus ETHUSDT.
 pub const INSTRUMENTS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"symbol":"BTCUSDT","symbolId":5,"contractType":"LinearPerpetual","status":"Trading","baseCoin":"BTC","quoteCoin":"USDT","launchTime":"1585526400000","deliveryTime":"0","deliveryFeeRate":"","priceScale":"2","leverageFilter":{"minLeverage":"1","maxLeverage":"100.00","leverageStep":"0.01"},"priceFilter":{"minPrice":"0.10","maxPrice":"1999999.80","tickSize":"0.10"},"lotSizeFilter":{"maxOrderQty":"1190.000","minOrderQty":"0.001","qtyStep":"0.001","postOnlyMaxOrderQty":"1190.000","maxMktOrderQty":"500.000","minNotionalValue":"5"},"unifiedMarginTrade":true,"fundingInterval":480,"settleCoin":"USDT","copyTrading":"both","upperFundingRate":"0.00375","lowerFundingRate":"-0.00375","isPreListing":false,"preListingInfo":null,"riskParameters":{"priceLimitRatioX":"0.01","priceLimitRatioY":"0.02"},"symbolType":"","tags":[]},{"symbol":"ETHUSDT","contractType":"LinearPerpetual","status":"Trading","baseCoin":"ETH","quoteCoin":"USDT","deliveryTime":"0","leverageFilter":{"minLeverage":"1","maxLeverage":"100.00","leverageStep":"0.01"},"priceFilter":{"minPrice":"0.01","maxPrice":"199999.98","tickSize":"0.01"},"lotSizeFilter":{"maxOrderQty":"7240.00","minOrderQty":"0.01","qtyStep":"0.01"},"settleCoin":"USDT"}],"nextPageCursor":""},"retExtInfo":{},"time":1735809771618}"#;
@@ -51,8 +53,12 @@ impl Harness {
     }
 
     pub fn started(options: Options) -> Self {
+        Self::started_engine(engine(options))
+    }
+
+    pub fn started_engine(engine: Engine<BybitLinear>) -> Self {
         let mut harness = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(BybitLinear::new(options)),
+            engine,
             now: 1_000.0,
             requests: Vec::new(),
             sockets: Vec::new(),
@@ -105,7 +111,7 @@ impl Harness {
                 Action::Sign { .. }
                 | Action::SignedOutbound { .. }
                 | Action::SignPayload { .. } => {
-                    panic!("Bybit signs requests locally")
+                    panic!("immediate fixture provider must materialize signing")
                 }
                 Action::WsConnect { headers, .. } if !headers.is_empty() => {
                     panic!("Bybit authenticates sockets with an auth message")

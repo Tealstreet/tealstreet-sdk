@@ -3,7 +3,9 @@ use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, Event, HttpRequest, Response, SocketId, TimerId,
     Venue, book::Book,
 };
-use safe_cex_venue_bybit::{BybitLinear, Options, Pending};
+use safe_cex_venue_bybit::{BybitLinear, Pending};
+mod support;
+use support::Options;
 
 struct Probe {
     inner: BybitLinear,
@@ -57,14 +59,17 @@ impl Venue for Probe {
 }
 
 fn started() -> (Engine<Probe>, HttpRequest) {
+    let (inner, signer) = Options {
+        key: Some("clock-probe-key".into()),
+        secret: Some("clock-probe-secret".into()),
+        ..Options::default()
+    }
+    .build();
     let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
-        inner: BybitLinear::new(Options {
-            key: Some("clock-probe-key".into()),
-            secret: Some("clock-probe-secret".into()),
-            ..Options::default()
-        }),
+        inner,
         samples: Vec::new(),
     });
+    engine.set_signer(Some(signer)).unwrap();
     engine.start(1_000.0);
     let request = engine
         .drain_actions()

@@ -440,9 +440,9 @@ fn setup_policy_does_not_adopt_unmigrated_mexc() {
     }
 }
 
-#[cfg(feature = "bybit")]
+#[cfg(feature = "bitunix")]
 #[test]
-fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_bybit() {
+fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_bitunix() {
     struct NeverConstruct;
     impl safe_cex_venues::Visit for NeverConstruct {
         type Output = ();
@@ -454,13 +454,7 @@ fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_bybit() {
         r#"{"primary":{"key":"primary-key","secret":"primary-secret"}}"#.into(),
     )
     .unwrap();
-    for venue in [
-        "bybit",
-        "bybitinverse",
-        "bybitspot",
-        "bybitdemo",
-        "hyrotrader",
-    ] {
+    for venue in ["bitunix"] {
         for (refs, supplied_provider) in [(true, false), (false, true), (true, true)] {
             let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
             options.signing = refs.then(|| identities.clone());

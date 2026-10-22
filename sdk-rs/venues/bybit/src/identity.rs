@@ -96,7 +96,7 @@ impl BybitLinear {
         if self
             .credentials
             .as_ref()
-            .is_none_or(|c| c.key.is_empty() || c.secret.is_empty())
+            .is_none_or(|c| c.validate().is_err())
         {
             finish(
                 cx,
