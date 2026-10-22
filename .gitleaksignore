@@ -65,3 +65,9 @@ b7b8856406fbe53c71fdd298c3aa40f6e80b2c69:sdk-rs/venues/coinbase/tests/trading.rs
 # Restored master coinbase.utils.ts (B2 hosted signing): PEM header strings in a
 # doc comment and regex, not a key. Exact fingerprint only.
 a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts:private-key:159
+
+# Hosted-signing strict-schema rejection tests use literal opaque provider refs,
+# not API credentials. Current values were renamed to ref:owned-primary.
+# Exact historical fingerprints only; all future source/credential changes scan.
+11455d16800a4927fc06f0c8577152072531c1ec:sdk-rs/registry/tests/hosted_signing.rs:generic-api-key:220
+11455d16800a4927fc06f0c8577152072531c1ec:sdk-rs/registry/tests/hosted_signing.rs:generic-api-key:221

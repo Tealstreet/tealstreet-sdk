@@ -80,6 +80,20 @@ of checking `options.key`. Raw legacy native/WASM input is a trusted compatibili
 adapter until those cutover callers migrate; it converges on the same provider
 path and must be removed before TS venue/reference deletion.
 
+For dispatch-signing families, browser-facing `signHttpRequest` and `signWsAuth`
+use the same owned provider through bounded signing-only captures, without
+starting account discovery or venue transport work. The default synchronized
+clock can still initialize its existing time-source calibration. The original HTTP config/WS response
+wire stays intact. Shared standalone Binance/Bybit request-shape interceptors,
+their codec/site tables and the capture utility are the TS retained for remote
+signing after TS venue classes are deleted; no TS venue/API factory is created.
+They retain real qs/Axios serialization and caller-owned WS preimages. Capture
+tokens are single use and fenced by raw deadlines, protocol expiry and clock
+revision; provider text and partial results are not returned on failure.
+This signing-side bridge does not itself enable keyless `remoteSigner` or
+`PayloadSigner` routing to Rust. That separate companion must preserve REST-only
+PayloadSigner feeds, result headers and explicit account/secondary selection.
+
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and
 `ExchangeWorker`. Registry defaults remain independent of that opt-in.
