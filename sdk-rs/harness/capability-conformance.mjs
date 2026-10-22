@@ -115,7 +115,10 @@ export function probeCapabilityCommand(instance, command, label) {
       }
       case 'commandError': valid = integer(action.command) && typeof action.message === 'string'; break;
       case 'commandProgress': valid = integer(action.command) && Array.isArray(action.receipts); break;
-      case 'accountAuth': valid = Object.hasOwn(action, 'credential') && Object.hasOwn(action, 'scope') && Object.hasOwn(action, 'outcome'); break;
+      case 'accountAuth': valid = ['primary', 'secondary'].includes(action.credential)
+        && ['account', 'balance', 'orders', 'positions', 'settings'].includes(action.scope)
+        && ['accepted', 'rejected'].includes(action.outcome)
+        && Object.keys(action).every((key) => ['op', 'credential', 'scope', 'outcome'].includes(key)); break;
       case 'startupFailed': valid = object(action.detail); break;
       case 'deactivate': valid = true; break;
       default: valid = false;

@@ -162,3 +162,19 @@ test('after-load identities and every cancel-all mode retain their underlying co
     assert.equal(probe.command.symbol === '', mode === 'native');
   }
 });
+
+
+test('account authentication actions use the closed host wire contract', () => {
+  const valid = { op: 'accountAuth', credential: 'primary', scope: 'account', outcome: 'accepted' };
+  for (const bad of [
+    { credential: 0 }, { credential: 'other' }, { scope: null }, { scope: 'history' },
+    { outcome: {} }, { outcome: 'unknown' }, { unexpected: true },
+  ]) assert.throws(() => probeCapabilityCommand(engine([{ ...valid, ...bad }]), command, 'invalid account auth'), /invalid account auth/);
+  for (const credential of ['primary', 'secondary']) {
+    for (const scope of ['account', 'balance', 'orders', 'positions', 'settings']) {
+      for (const outcome of ['accepted', 'rejected']) {
+        assert.equal(probeCapabilityCommand(engine([{ op: 'accountAuth', credential, scope, outcome }]), command, 'account auth').evidence, 'deferred');
+      }
+    }
+  }
+});

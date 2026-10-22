@@ -138,3 +138,11 @@ feature mutant; current source-bound replay/package proof is required before
 merge. Earlier CI and artifact evidence is historical. No production command,
 capability or caller contract changes; other commands' valid-state positive
 handler coverage remains an explicit follow-on.
+
+
+Current adversarial review found that presence-only accountAuth validation could
+accept malformed wire enums as deferred evidence. An original-red assertion
+reproduces this; the shared verifier now applies the same closed credential,
+scope, outcome and field contract as EngineHost. The corrected control covers
+malformed values plus every valid combination. Production host behavior is
+unchanged.
