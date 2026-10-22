@@ -722,3 +722,154 @@ fn a_native_cancel_refusal_cannot_hide_uncertainty_in_a_later_batch_row() {
         }
     }
 }
+
+#[test]
+fn unproven_placement_ids_are_evidence_only_and_match_the_native_endpoint() {
+    let mut observations = Vec::new();
+    for (algo, body, expected) in [
+        (false, r#"{"orderId":12}"#, vec!["12"]),
+        (false, r#"{"algoId":13}"#, vec![]),
+        (true, r#"{"algoId":13}"#, vec!["13"]),
+        (true, r#"{"orderId":12}"#, vec![]),
+        (false, r#"{"orderId":0}"#, vec![]),
+        (false, r#"{"orderId":-1}"#, vec![]),
+        (false, r#"{"orderId":1.5}"#, vec![]),
+        (false, r#"{"orderId":18446744073709551616}"#, vec![]),
+        (false, r#"{"orderId":"12"}"#, vec![]),
+        (false, r#"{"orderId":12,"orderId":13}"#, vec![]),
+        (
+            false,
+            r#"{"orderId":12,"code":-2015,"msg":"auth refused"}"#,
+            vec![],
+        ),
+    ] {
+        let mut h = ready();
+        put_order(&mut h);
+        let before = h.engine.store().orders().to_vec();
+        let kind = if algo { "stop_market" } else { "limit" };
+        let order = serde_json::from_str(&format!(
+            r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"buy","amount":1,"price":100}}"#,
+        ))
+        .unwrap();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 720,
+            orders: vec![order],
+        }));
+        let request = h.take(if algo {
+            "/fapi/v1/algoOrder"
+        } else {
+            "/fapi/v1/order"
+        });
+        h.reply(request.id, 503, "", body);
+        let failure = &h.failures.iter().find(|(id, _)| *id == 720).unwrap().1;
+        assert_eq!(failure.outcome, Some(Outcome::Unknown));
+        assert_eq!(
+            failure.kind,
+            Some(safe_cex_engine::ErrorKind::VenueUnavailable)
+        );
+        assert_eq!(h.engine.store().orders(), before);
+        let ids = failure
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.clone())
+            .unwrap_or_default();
+        observations.push((algo, body, ids, expected));
+    }
+    for (algo, body, ids, expected) in observations {
+        assert_eq!(ids, expected, "algo={algo} body={body}");
+    }
+}
+
+#[test]
+fn unproven_batch_ids_validate_the_whole_envelope_without_caller_attribution() {
+    let mut observations = Vec::new();
+    for (body, expected) in [
+        (r#"[{"orderId":12},{"orderId":13}]"#, vec!["12", "13"]),
+        (
+            r#"[{"orderId":12},{"code":-2015,"msg":"auth refused"}]"#,
+            vec!["12"],
+        ),
+        (r#"[{"orderId":12},{"orderId":13}] trailing"#, vec![]),
+        (r#"[{"orderId":12},{"orderId":}]"#, vec![]),
+        (
+            r#"[{"orderId":0},{"orderId":18446744073709551615}]"#,
+            vec!["18446744073709551615"],
+        ),
+        (
+            r#"[{"orderId":12,"code":-2015},{"orderId":13}]"#,
+            vec!["13"],
+        ),
+    ] {
+        let mut h = ready();
+        let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+        )
+        .unwrap();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 721,
+            orders: vec![order; 6],
+        }));
+        let request = h.take("/fapi/v1/batchOrders");
+        h.reply(request.id, 503, "", body);
+        let failure = &h.failures.iter().find(|(id, _)| *id == 721).unwrap().1;
+        assert_eq!(failure.outcome, Some(Outcome::Unknown));
+        assert!(!h.has_request("/fapi/v1/order"));
+        assert!(h.engine.store().orders().is_empty());
+        if let Some(partial) = failure.partial.as_ref() {
+            assert_eq!(partial.total, None);
+            assert_eq!(partial.failed_index, None);
+        }
+        let ids = failure
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.clone())
+            .unwrap_or_default();
+        observations.push((body, ids, expected));
+    }
+    for (body, ids, expected) in observations {
+        assert_eq!(ids, expected, "body={body}");
+    }
+}
+
+#[test]
+fn unproven_cancellation_and_settings_do_not_invent_placement_ids() {
+    for cancel in [false, true] {
+        let mut h = ready();
+        put_order(&mut h);
+        let before = h.engine.store().orders().to_vec();
+        h.requests.clear();
+        h.event(Event::Command(if cancel {
+            Command::CancelOrders {
+                command: 723,
+                ids: vec!["12".into()],
+            }
+        } else {
+            Command::SetPositionMode {
+                command: 723,
+                hedged: true,
+                symbol: None,
+            }
+        }));
+        let request = h.take(if cancel {
+            "/fapi/v1/order"
+        } else {
+            "/fapi/v1/positionSide/dual"
+        });
+        h.reply(
+            request.id,
+            503,
+            "",
+            r#"{"orderId":12,"algoId":13,"clientOrderId":"client12"}"#,
+        );
+        let failure = &h.failures.iter().find(|(id, _)| *id == 723).unwrap().1;
+        assert_eq!(failure.outcome, Some(Outcome::Unknown));
+        assert!(
+            failure
+                .partial
+                .as_ref()
+                .is_none_or(|partial| partial.order_ids.is_empty())
+        );
+        assert_eq!(h.engine.store().orders(), before);
+        assert!(!h.engine.store().hedged());
+    }
+}

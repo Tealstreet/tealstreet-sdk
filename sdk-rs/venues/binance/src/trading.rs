@@ -2806,6 +2806,73 @@ mod audit_tests {
     }
 
     #[test]
+    fn unproven_native_job_discard_matches_only_the_sealed_owner_generation() {
+        use safe_cex_engine::{Response, Venue};
+        let mut engine = engine(Variant::UsdM, usize::MAX);
+        engine.handle(
+            1000.,
+            Event::Command(Command::PlaceOrders {
+                command: 98,
+                orders: vec![limit(); 6],
+            }),
+        );
+        let old = engine.venue().trading.jobs[&98].context.clone().unwrap();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1001.);
+        let request = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Http(http) => Some(http.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            1002.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 503,
+                    headers: "",
+                    body: "unproven",
+                },
+            },
+        );
+        let dropped = engine.venue().trading.jobs.is_empty();
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1003.,
+            Event::Command(Command::PlaceOrders {
+                command: 98,
+                orders: vec![limit()],
+            }),
+        );
+        let current = engine.venue().trading.jobs[&98].context.clone().unwrap();
+        assert_ne!(old.owner(), current.owner());
+        let (mut native, _) = crate::test_config::Options::default().build();
+        native.trading.jobs.insert(
+            98,
+            super::Job {
+                context: Some(current.clone()),
+                ..Default::default()
+            },
+        );
+        native.discard_unproven_http_command(old.owner());
+        assert!(
+            native.trading.jobs.contains_key(&98),
+            "old owner cannot drop current native plan"
+        );
+        native.discard_unproven_http_command(current.owner());
+        let current_dropped = native.trading.jobs.is_empty();
+        assert!(
+            dropped,
+            "central unproven seal must discard queued native work"
+        );
+        assert!(
+            current_dropped,
+            "matching generation must discard its native plan"
+        );
+    }
+
+    #[test]
     fn entropy_failure_never_falls_back_to_the_shared_broker_prefix() {
         let result = generated_id_with(|| {
             safe_cex_crypto::uuid::uuid_with_entropy(|_| Err("entropy unavailable".into()))

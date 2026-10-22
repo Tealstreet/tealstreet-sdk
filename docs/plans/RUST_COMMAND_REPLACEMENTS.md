@@ -727,3 +727,23 @@ or arbitrary error-body retention is permitted.
   production edits, then focused engine/Binance gates and adversarial audit.
 Architecture gate: No. The family implements only its native codec facts and
 matching native-plan discard on the shared proof/retirement path.
+
+Native test-only checkpoint before decoder source: five assertion-RED groups
+confirm missing scalar futures, batch, Spot/COIN-M and PM identity evidence plus
+native Job retention after a real central unproven seal. Negative cancel/settings
+controls already pass. Every matrix gathers its request/Store/outcome observations
+before the ID-table assertion. No production native path changed.
+
+Two initial fixture failures are retained but NOT counted as RED evidence:
+request_context used unsupported stop_loss wire spelling (corrected to
+stop_market), and PM algo incorrectly supplied a caller client ID (unsupported
+for conditional orders; now unset, expected generated strategy ID read from the
+actual request). Corrected reruns fail at exact missing-ID assertions after all
+matrix cases execute. COIN-M likewise has no caller ID; its conditional uses the
+regular /dapi order endpoint. No original native assertion was changed.
+Logs: /tmp/codex-binance-unproven-red-*.log and corrected-receipt.json. Compiled
+runtime tests complete in0.00-0.02s after loader startup within30s process bounds.
+Independent plan/source/RED audit confirms valid namespace choices and native
+cleanup gap. The decoder must validate the complete array before publishing any
+row evidence; native Cow string decoding may allocate transient body-bounded
+memory before the retained writer quota, so make no zero-copy claim.
