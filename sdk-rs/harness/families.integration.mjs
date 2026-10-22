@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import { venueFamilies, venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { wasmBudgetError } from './wasm-budget.mjs';
+import { probeCapabilityCommand, requireCapabilityEngine } from './capability-conformance.mjs';
 
 const pkg = new URL('../hosts/wasm/pkg/', import.meta.url);
 const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.url), 'utf8')
@@ -37,19 +38,19 @@ for (const family of venueFamilies) {
       }
       try {
         if (venueFamily(venue) === family) {
-          assert.doesNotMatch(String(error?.message ?? ''), /unsupported venue/, `${venue} is missing from ${family}`);
+          requireCapabilityEngine(() => { if (error) throw error; return instance; }, `${venue} is missing from ${family}`);
           if (instance && JSON.parse(instance.capabilities()).orderBookQuery) {
             // All-feature native tests can hide a missing standalone JSON decoder.
             // This is sans-I/O: returned requests are never dispatched.
-            assert.doesNotThrow(() => instance.command(JSON.stringify({
+            probeCapabilityCommand(instance, {
               op: 'fetchOrderBook', command: 1, symbol: '__rest_book_ingress_probe__', limit: 1,
-            }), 0), `${venue} advertises a REST book query but its family decoder rejects it`);
+            }, `${venue} advertises a REST book query but its family decoder rejects it`);
           }
           if (instance && JSON.parse(instance.capabilities()).scheduleCancel) {
             // Public-only construction refuses signing after decoding; no transport runs.
-            assert.doesNotThrow(() => instance.command(JSON.stringify({
+            probeCapabilityCommand(instance, {
               op: 'scheduleCancel', command: 2, time: 5_000,
-            }), 0), `${venue} advertises scheduleCancel but its family decoder rejects it`);
+            }, `${venue} advertises scheduleCancel but its family decoder rejects it`);
           }
         } else assert.match(String(error?.message), /unsupported venue/, `${family} also contains ${venue}`);
       } finally {
