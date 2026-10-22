@@ -1,5 +1,6 @@
 """Adversarial controls for the shrinking provenance inventory; no Rust build."""
 import importlib.util
+import hashlib
 import json
 import os
 import pathlib
@@ -121,6 +122,42 @@ class RequestContextBan(unittest.TestCase):
         for text in ['{"x":{},"x":{}}', '{"venues/a/src/b.rs":{"' + digest + '":1,"' + digest + '":2}}']:
             with self.assertRaises(ValueError):
                 ban.manifest(text)
+
+    def test_pinned_history_bootstraps_are_net_shrinking_and_exact_landing_maps(self):
+        expected = {
+            'venues/coinbase/src/history.rs': (7, 3, '7f923fa1fa91b9f81e47a240cadedad920dcad577279ab675d23b2f4a84ffb54', 'd6fe784f25ab245b2860a9f6d46c3617cbc1c4545197e29a140dadeca7e91372'),
+            'venues/weex/src/history.rs': (17, 10, '28fb5096b49ad5e340d77654b9b7b0bc4b5922b4dc58af5cff5fcfdff2161327', '477c91d6c2d026dea59a81d4dc539b56985dadf3606bdb7eae5b4ed505936163'),
+        }
+        self.assertEqual(set(expected), set(ban.HISTORY_BOOTSTRAPS))
+        for path, (before, after, old_hash, landed_hash) in expected.items():
+            with self.subTest(path=path):
+                old, landed = ban.HISTORY_BOOTSTRAPS[path]
+                self.assertEqual((sum(old.values()), sum(landed.values())), (before, after))
+                self.assertLess(after, before)
+                for value, digest in [(old, old_hash), (landed, landed_hash)]:
+                    self.assertEqual(hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest(), digest)
+                source = ban.git('show', '5f6488c7664b68cf8b866d2f7f914a3fc99e5fc6:sdk-rs/' + path)
+                self.assertEqual(dict(ban.fingerprints(source)), landed)
+
+    def test_history_bootstraps_cannot_expand_or_override_any_newer_pruned_constraint(self):
+        for path, (old_map, new_map) in ban.HISTORY_BOOTSTRAPS.items():
+            with self.subTest(path=path):
+                old, landed = {path: old_map}, {path: new_map}
+                self.assertFalse(ban.check(landed, landed, [('original', old)]))
+                digest = next(iter(new_map))
+                pruned_map = dict(new_map)
+                del pruned_map[digest]
+                pruned = {path: pruned_map}
+                self.assertFalse(ban.check(pruned, pruned, [('original', old), ('landed', landed)]))
+                self.assertTrue(ban.check(landed, landed, [('original', old), ('pruned', pruned)]))
+                for altered in [dict(new_map, **{'f' * 64: 1}), {**new_map, digest: new_map[digest] + 1}]:
+                    extra = {path: altered}
+                    self.assertTrue(ban.check(extra, extra, [('original', old)]))
+                altered_old = {**old_map, 'e' * 64: 1}
+                self.assertTrue(ban.check(landed, landed, [('altered baseline', {path: altered_old})]))
+                wrong_path = {'venues/other/src/history.rs': new_map}
+                self.assertTrue(ban.check(wrong_path, wrong_path, [('original', old)]))
+                self.assertTrue(ban.check(wrong_path, landed, [('original', old)]))
 
     def test_base_ref_and_exact_event_commit_are_required(self):
         sha = '1' * 40

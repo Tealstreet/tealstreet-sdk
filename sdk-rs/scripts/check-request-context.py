@@ -226,6 +226,38 @@ BOOTSTRAP_LANDED = {'156d12f0af1aa73d997695a9ee5ae2f0b10efdaf05fbf3c5a44b49c0b8c
  'a876e5300951dc42d8c9828d78f0d32d52e42b439cbaf763cc6cdd6b63174865': 1}
 
 
+# Owner-approved bootstrap maps from actual #1754/#1751/#1752 at
+# 5f6488c7664b68cf8b866d2f7f914a3fc99e5fc6. Exact old maps only;
+# newer/pruned constraints independently forbid restoring removed sites.
+HISTORY_BOOTSTRAPS = {'venues/coinbase/src/history.rs': ({'0451c29993291234cad6e42a586a776c0df200276aac899eaf08c1753d2e83fb': 3,
+                                     '644e2a010e2b9cab142812db572645a6eb8617345439cbdb5564ec66bf354645': 2,
+                                     '8479aab65a3ff3e83282a3c83d7480252f2d58a32b4a1b3c5434c1d3866caa11': 1,
+                                     '8d68e5006e46478875c218af609bebb612700aee1c8a46238c3a7d90ecf9f20d': 1},
+                                    {'0451c29993291234cad6e42a586a776c0df200276aac899eaf08c1753d2e83fb': 1,
+                                     '76998fe42e6c09630ff50ba44385ed309566a7c45e0b90d584ccbf7534cc0d6e': 1,
+                                     '8479aab65a3ff3e83282a3c83d7480252f2d58a32b4a1b3c5434c1d3866caa11': 1}),
+ 'venues/weex/src/history.rs': ({'2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 1,
+                                 '57e9ef562b19c29667a0398bc3f7852967c59c395f72ddf62163007a6d41b0ed': 1,
+                                 '5d609353fd1b58bf8e3fe5a6394312bb4a2fd94bfacec1fba9dbcd044854b8e6': 1,
+                                 '6d43c66aaf7abcd460dbf1de393805b744df14fbe16199b207541204dfdb892a': 2,
+                                 'a71f8e454d2b13bf32e7e5f0480e52dec36d8826551ab16e583fab196fd8a695': 1,
+                                 'bbe154e63f6392afb4e62ef9d8cd214a20497c58bcffd3f4811ae22309ede175': 1,
+                                 'c179c90dfd7d9612dfa0c8e53858b908acc0a2a21823d27ae3e49397adbbff29': 2,
+                                 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1,
+                                 'df3c1d81952c8a455f966081ae19fcca364d48093c5893e69a82108cac16906d': 4,
+                                 'e1915deeaaaaf8a9e3750ca925ab6babf3d80d0e98872e4fa1e3605b0157faf0': 1,
+                                 'eedb1e386409cb0cf603aec0da2556ed50ae27b991a5d95dd7803bdcd031fefa': 1,
+                                 'fad37049b9b5fba400c6c5026df2ac50477f39d4e606f6edbbf92e51eddb9f7a': 1},
+                                {'2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 1,
+                                 '57e9ef562b19c29667a0398bc3f7852967c59c395f72ddf62163007a6d41b0ed': 1,
+                                 '5d609353fd1b58bf8e3fe5a6394312bb4a2fd94bfacec1fba9dbcd044854b8e6': 1,
+                                 '6d43c66aaf7abcd460dbf1de393805b744df14fbe16199b207541204dfdb892a': 1,
+                                 'a71f8e454d2b13bf32e7e5f0480e52dec36d8826551ab16e583fab196fd8a695': 1,
+                                 'bbe154e63f6392afb4e62ef9d8cd214a20497c58bcffd3f4811ae22309ede175': 2,
+                                 'e1915deeaaaaf8a9e3750ca925ab6babf3d80d0e98872e4fa1e3605b0157faf0': 1,
+                                 'eedb1e386409cb0cf603aec0da2556ed50ae27b991a5d95dd7803bdcd031fefa': 1,
+                                 'fad37049b9b5fba400c6c5026df2ac50477f39d4e606f6edbbf92e51eddb9f7a': 1})}
+
 def subset(counts, baseline):
     return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
 
@@ -239,6 +271,8 @@ def check(current, allowed, previous):
             bound = baseline.get(path, {})
             if path == BOOTSTRAP_PATH and bound == BOOTSTRAP_OLD:
                 bound = BOOTSTRAP_LANDED
+            if path in HISTORY_BOOTSTRAPS and bound == HISTORY_BOOTSTRAPS[path][0]:
+                bound = HISTORY_BOOTSTRAPS[path][1]
             if not subset(counts, bound):
                 failures.append(f'{path}: inventory grew against {label}')
     return failures

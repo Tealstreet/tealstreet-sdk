@@ -877,3 +877,21 @@ cancel/stream race and worker/main forwarding assertions. Test the adapter's
 no-send-before-release, override selection and once/cancellation properties;
 production transports must still fail closed when prepare support is missing.
 The provisional native/WASM failures are required fixes, not timing exceptions.
+
+Actual #1756 landing integration `9995073dc39`: all 23 incoming file blobs match
+`5f6488c7664b68cf8b866d2f7f914a3fc99e5fc6` exactly. Owner-approved initial
+history inventory refresh follows: Coinbase #1754 path 7 to 3 (five removals,
+one same cx.fail re-expressed with typed metadata), WEEX #1751/#1752 path 17 to
+10 (eight removals, one conservative macro-reference fingerprint changed), and
+Lighter #1750 path 19 to 10 (nine removals only). Total 1,300 to 1,280; no new
+legacy call kind. All other path maps stay identical. Pin exact old/new maps and
+adversarial controls before updating the manifest; every newer/pruned baseline
+continues to forbid regrowth. This implements the owner's standing pre-#1741
+rule only through committed, exact maps; no automatic baseline expansion.
+
+Canonical sorted-JSON SHA256 of the Coinbase old/new maps:
+`7f923fa1fa91b9f81e47a240cadedad920dcad577279ab675d23b2f4a84ffb54` /
+`d6fe784f25ab245b2860a9f6d46c3617cbc1c4545197e29a140dadeca7e91372`.
+WEEX old/new:
+`28fb5096b49ad5e340d77654b9b7b0bc4b5922b4dc58af5cff5fcfdff2161327` /
+`477c91d6c2d026dea59a81d4dc539b56985dadf3606bdb7eae5b4ed505936163`.
