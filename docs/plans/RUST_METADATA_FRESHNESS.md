@@ -23,6 +23,10 @@ in this change.
 These are different response/continuation shapes, not two copies of one adapter.
 Keep endpoint arguments, credential slots, parsing, native error/code tables,
 fees/financial rows, ordinary account reconciliation and existing rate floors.
+Inventory every settings mutation, not only explicit query responses: BingX
+account config events/position-derived settings and trading ACKs, plus WEEX
+config/position reads and trading ACKs. Their settings proposals must use the
+shared ownership boundary without replacing native financial admission.
 The current SDK `updateSymbolMetadata` skips absent capability/public-only
 contexts and uses the runtime policy for cached/flat private symbols. Preserve
 that behavior and pending-start waiting; cached markets alone are not readiness.
@@ -62,6 +66,10 @@ state and joined command waiters bounded and fail closed on exhaustion.
    an older account read must not overwrite newer metadata or accepted writes.
    Preserve initial/partial readiness rules and newer-position fences. This
    authority covers settings only, not financial row admission or execution.
+   Specifically, WEEX invalidate_settings also bumps its position revision;
+   BingX approved metadata commit bumps positions before settings publication.
+   Keep these native financial fences at their current lifecycle boundaries;
+   a new settings token is not a replacement for them.
 6. Successful or failed completion fans out exactly once to its joined command
    owners. Preserve typed errors/outcomes; do not broadcast results, invent
    success for an empty/partial proposal, auto-retry writes or start mirror engines.
