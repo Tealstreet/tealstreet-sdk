@@ -1223,3 +1223,24 @@ helper3 tests pass; MCP typecheck/lint pass. Independent review confirms only
 the shared hook wiring changed and the real ticker test's assertions, timeout,
 clock/socket/polling logic remain exact. Architecture gate No (reuse of the
 shared test transport seam). Fresh rebuilt-WASM CI still owns recovery proof.
+
+Next integrated CI diagnosis/plan (d4e): consumer WASM gates now all pass
+(603 SDK, 11 server, 9 MCP, 2 CLI, 2 RN). The scripted lifecycle fails all ten
+connect stages before replay because its fake transport has no prepareHttp.
+Recorder/fence wrappers spread the underlying transport, so merely adding a
+fake hook would also expose a real wrapper bug: an inherited native preparation
+can bypass the wrapper's request validation/recording. Extend those existing
+shared wrappers, never add a production request-only fallback. Fence validation
+runs on the final signed packet at bind, before claim; preparation/cancel/ready
+forward to the original resource. Recorder redacts/snapshots request data at
+bind, forwards physical dispatch first, then captures the response through the
+same existing redaction/streaming/failure-latch path as legacy request(). No
+writer/profile/provider callback may run between claim and underlying dispatch.
+Scripted fake preparation reuses existing prepareFetch with an explicit fake
+fetch adapter; no network fallback or copied preparation state machine. Add
+original-RED unit controls for final-packet fence enforcement and exact redacted
+recording/single dispatch, retain all ten actual lifecycle assertions/clocks and
+timeouts, run focused harness controls locally and fresh actual-WASM CI. Review
+this shared seam before implementation. Actual Phemex1758 is integrated at953f;
+its entire shared history/adapter delta must remain exact. Owner1764 merge hold
+is respected; no landing merge while its proof window is active.
