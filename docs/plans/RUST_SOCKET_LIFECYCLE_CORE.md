@@ -185,8 +185,8 @@ non-secret types. Names are proposed; semantics below are the review contract.
   sibling epochs inactive before delivering any callback. A no-state feed declares
   that explicitly; effect success cannot be inferred from a void callback.
 - `Interest { key, wire_args }` contains bounded non-secret native codec data.
-  `Venue::encode_socket_interests(store,feed,subscribe,interests)` produces native
-  bounded `EncodedBatch { text, covered_keys }` values; coverage must be exact,
+  `Venue::encode_socket_interests(store,feed,subscribe,interests,emit)` produces
+  native `EncodedBatch { text, covered_keys }` values through a bounded emitter; coverage must be exact,
   unique and contained in the requested operation. No signer invocation or wall
   clock is allowed. Engine tracks desired interests separately from queued and
   dispatch-released interests. A superseding revision recomputes from actual
@@ -296,3 +296,27 @@ Logs: `/tmp/codex-socket-okx-original-red.log` and
 `/tmp/codex-socket-bitunix-original-red.log`. Both suites compile and each runs
 three failing assertions; no compile failure is counted as a RED. These are
 local test-only controls until the shared core and adoptions make them GREEN.
+
+## Independent state component checkpoint
+
+`engine/src/socket_lifecycle.rs` now contains engine-private state authority for
+epoch admission, typed auth transitions, terminal group stop, retirement ACK
+quarantine, and desired/queued/released subscription transactions. It is compiled
+through `engine/tests/socket_lifecycle_state.rs` only at this intermediate stage;
+there is no runtime export/driver or venue adoption yet. It neither duplicates
+Supervisor timing/backoff nor supplies a venue-side lifecycle helper.
+
+Both source reviews are CLEAR after runtime reproductions and fixes for three
+review findings: terminal group stops had left inactive siblings retryable;
+aggregate interest bounds had been checked after encoding; repeated positive
+auth after a failure had been hidden from retry cleanup. The corrected component
+passes 22 focused controls, strict Clippy and fmt/bans. Existing engine/Binance
+library suites pass. The emitter checks queue bytes/count incrementally and
+keeps a sticky refusal even if a codec ignores its returned error. Retained-byte
+reservation includes future released copies across all feeds before encoding.
+
+The six OKX/Bitunix original-production tests remain intentionally RED until the
+engine driver and adapters are wired; this checkpoint does not claim otherwise.
+Next: driver effects/timer/signing/health admission using the existing ID types,
+then both adoptions. No allocator source is changed here; actual #1741 and the
+separate shared widening PR remain required before production merge.
