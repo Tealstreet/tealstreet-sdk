@@ -33,30 +33,30 @@ export const BASE_URLS: Record<OkxRegion, OkxRestUrls> = {
 export const BASE_WS_URLS: Record<OkxRegion, OkxWsUrls> = {
   okx: {
     public: {
-      livenet: 'wss://ws.okx.com:8443/ws/v5/public',
-      testnet: 'wss://wspap.okx.com:8443/ws/v5/public',
+      livenet: 'wss://ws.okx.com/ws/v5/public',
+      testnet: 'wss://wspap.okx.com/ws/v5/public',
     },
     private: {
-      livenet: 'wss://ws.okx.com:8443/ws/v5/private',
-      testnet: 'wss://wspap.okx.com:8443/ws/v5/private',
+      livenet: 'wss://ws.okx.com/ws/v5/private',
+      testnet: 'wss://wspap.okx.com/ws/v5/private',
     },
     business: {
-      livenet: 'wss://ws.okx.com:8443/ws/v5/business',
-      testnet: 'wss://wspap.okx.com:8443/ws/v5/business',
+      livenet: 'wss://ws.okx.com/ws/v5/business',
+      testnet: 'wss://wspap.okx.com/ws/v5/business',
     },
   },
   okxeu: {
     public: {
-      livenet: 'wss://wseea.okx.com:8443/ws/v5/public',
-      testnet: 'wss://wseeapap.okx.com:8443/ws/v5/public',
+      livenet: 'wss://wseea.okx.com/ws/v5/public',
+      testnet: 'wss://wseeapap.okx.com/ws/v5/public',
     },
     private: {
-      livenet: 'wss://wseea.okx.com:8443/ws/v5/private',
-      testnet: 'wss://wseeapap.okx.com:8443/ws/v5/private',
+      livenet: 'wss://wseea.okx.com/ws/v5/private',
+      testnet: 'wss://wseeapap.okx.com/ws/v5/private',
     },
     business: {
-      livenet: 'wss://wseea.okx.com:8443/ws/v5/business',
-      testnet: 'wss://wseeapap.okx.com:8443/ws/v5/business',
+      livenet: 'wss://wseea.okx.com/ws/v5/business',
+      testnet: 'wss://wseeapap.okx.com/ws/v5/business',
     },
   },
 };

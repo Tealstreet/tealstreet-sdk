@@ -12260,12 +12260,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12278,12 +12278,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12296,12 +12296,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12314,12 +12314,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12332,12 +12332,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12350,12 +12350,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12368,12 +12368,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12386,12 +12386,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12404,12 +12404,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12422,12 +12422,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12440,12 +12440,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
@@ -12458,12 +12458,12 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       "restProxyHost": "",
       "wsBusiness": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness",
         "tunnelled": false,
       },
       "wsPrivate": {
         "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate",
+        "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate",
         "tunnelled": false,
       },
       "wsPublic": {
