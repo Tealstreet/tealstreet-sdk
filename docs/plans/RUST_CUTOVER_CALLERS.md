@@ -3124,3 +3124,17 @@ until callers and any remaining venue classifications are migrated together.
 Deployment ordering: **safe-cex-server must be deployed before Info+ venue events
 matter to native clients**. Old NativeFrameSession rejects the native `event`
 notice. Deployment is Sam's call; neither logging PR deploys anything.
+
+
+## Owned history completion core: BloFin reference
+
+BloFin closed positions now finish through the shared engine history owner and
+cursor pager. The successful partial-result contract stays the same: an owned
+Warn `history.incomplete` precedes retained rows, including at Error-only log
+level. Failed pages still reject without publishing partial success. A repeated
+non-adjacent continuation now stops with an owned incomplete result instead of
+cycling to the page cap; short pages, repeated identities and immediate unchanged
+cursors keep the existing termination behavior. No SDK method arguments, worker
+completeness envelope or NX ingestion requirement changes. B11 remains open for
+NX query association and coverage; other venue histories have not migrated to
+this core yet. [Implementation scope](RUST_OWNED_HISTORY.md).

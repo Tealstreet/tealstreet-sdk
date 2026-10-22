@@ -54,7 +54,8 @@ Implementation pending; this plan does not claim migrations have landed.
 
 Signer lane (codex-uufub4) owns engine dispatch/action/signing sections and host
 adapters. History completion/paging is disjoint, and final reference integration
-must include its actual signer-core merge before final CI/merge. Clock lane
+stays outside signer dispatch files. The overseer explicitly permits this disjoint
+reference PR to merge on green before signer core; signer integrates it later. Clock lane
 (codex-5c57jl) owns time/provider/calibration. Row lane (codex-mxb4mq) currently
 owns coverage.rs and Bybit/Bitunix account.rs; later snapshot freshness is its
 scope. Coordinate before touching those files or selecting those consumers.
@@ -64,3 +65,40 @@ green CI and a separate exact-path revert guard before a separate merge call.
 Caller docs stay current against actual merge pins. No source merge during an
 exclusive window without overseer release. Signing remains the signing lane's
 scope; no request retry/outcome rewrite is mixed into history work.
+
+## Plan audit (before implementation)
+
+Independent read-only audit: reference design is cross-cutting core work, not a
+per-venue fix. Preserve duplicate/short/missing/unchanged-cursor termination,
+untrimmed dedupe versus trimmed numeric continuation, and caller-limit versus
+safety-budget completion. Shared cursor policy will explicitly represent legacy
+end-on-duplicate/unchanged behavior. Failed later pages and failed serialization
+reject without publishing a completeness marker. A consuming token prevents its
+own reuse, not arbitrary reconstruction or bypass through legacy Cx APIs; final
+fan-out must include the venue-emission prohibition. Multi-stage query owners must
+survive pager restarts without clearing incompleteness.
+
+## Reference implementation checkpoint
+
+The shared `history::Completion` retains the owner and first missing-coverage
+cause until final success/failure. `CursorHistory` owns the cursor walk, dedupe,
+stall recording and terminal-state check; construction consumes the same owner
+used for no-I/O early returns. BloFin supplies numeric cursor selection and page
+facts. All its completion/error paths use that owner, with no raw semantic marker.
+Short pages, missing IDs, repeated identities and immediate unchanged cursors
+retain their existing endpoint termination. Non-adjacent cursor cycles now stop
+early with retained rows and owned incompleteness instead of spending the remaining
+budget on a cycle; a dedicated regression pins this intentional improvement.
+
+Independent correctness and adversarial reviews found no blocking issues and
+answered the architecture gate: shared engine choke point with BloFin as reference,
+not a separate venue implementation. Both asked for the non-adjacent-cycle
+regression; it is now included. Remaining emitters are not claimed converted.
+
+Verification so far: the BloFin request-sequence/termination pins passed against
+pre-migration source, the new cursor-cycle regression failed at its intended
+assertion against original source and passed after restoration, and three core
+integration tests plus six closed-position tests pass. Touched engine/BloFin
+strict all-target Clippy, fmt, bans and touched relative doc links pass. Full
+engine/BloFin/Binance tests and CI remain final merge gates; no local WASM build
+or full replay/performance sweep is being run on the shared machine.

@@ -205,3 +205,11 @@ a `SocketSpec`; one `Action::WsConnect` carries headers).
 Bitget, MEXC, KuCoin, TxFlow, Backpack, BloFin and Binance fills; OKX, Kraken,
 Crypto.com, Hyperliquid, Orderly and WOO stay hand-rolled with reasons in
 [RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md).
+
+
+Owned history completion follow-up: the first reference now uses
+`engine::history::{Completion, CursorHistory}` for BloFin closed positions.
+Command ownership, marker-before-result ordering and retained-rows completion
+live together in the engine. Shared cursor policy owns its budget/dedupe/end
+checks. Other history consumers remain to migrate; this does not close the
+cross-venue enforcement work. See [the plan](RUST_OWNED_HISTORY.md).
