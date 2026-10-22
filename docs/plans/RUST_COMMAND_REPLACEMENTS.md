@@ -575,3 +575,47 @@ Independent source/RED review CLEAN, architecture No. Logs/receipts:
 /tmp/codex-response-proof-original-{red,existing-green}.log and matching.json,
 /tmp/codex-replacement-gateway-57582-runtime-red.log. These prove the shared
 boundary gap, not completion of auth/sibling/reuse or native cleanup acceptance.
+
+Actual-core integration and cleanup audit before response-proof implementation:
+local4bd81686caf226f2daefb090c2057cfc2e841c75 genuinely integrates actual#1741
+b2fe97324763e1e2702c69ac5b839da37102928b; all5305 tracked entries, eight own
+and eleven incoming paths are preserved exactly (zero overlap). The caller
+backfill is a separate docs-only PR#1777, ahead of publishing this follow-on.
+
+- The discard-only hook receives the validated command owner/generation, never
+  the current physical leg as a substitute root. Invoke it only after a
+  successful central seal/retirement, before finishing the event scope and
+  publishing queued actions. Never invoke it for stale authority, retained late
+  replies or a failed seal. It has no Cx, Store, Response or terminal authority.
+- Binance removes only the Job whose stored root Context matches that owner.
+  This drops its queued steps and dynamic amendment plan, preserving account,
+  order ownership and accepted native facts. Ordinary Bybit first gains original
+  root ownership carried through ResolveMode, recursive replan and delayed or
+  fallback steps. Its matching Job is dropped; mode_version, account position
+  modes, sockets and Hyro remain untouched. Owner-wide engine retirement drops
+  Pending/Rest/LocalWrite/fallback payloads and provider/route resources; removing
+  a Job makes its remaining native delay timer inert. No venue timer list or
+  callback into the ordinary failure reducer is introduced.
+- Bypassing observe_account_auth alone is insufficient: finish_command also
+  counts classified authentication errors. The shared guard owns a fixed
+  uncertainty classification; native evidence may supply bounded venue code,
+  message and exact IDs, never kind/outcome/retry policy. Add an auth-looking
+  unproven-body regression showing no accepted/rejected auth observation or new
+  auth counter evidence from that response, in addition to no Store mutation.
+- Bybit's lib.rs resend/dispatch remains explicitly legacy until its managed
+  root/leg adoption routes these writes through the shared custody first. No
+  claim that a helper inside the later native reducer protects legacy sends.
+
+Independent read-only cleanup/authority review identified these concrete fields
+and terminal-auth counter trap; architecture No. Preserve all positive native
+amendment, mode/fallback and timer controls when implementing this shared seam.
+
+Evidence writer audit: expose no accepted/rejected/outcome/kind/retryAfter/
+failedIndex/total setters. Feed native rows directly into the existing
+CommandWrites EvidenceBudget, then commit Failed exactly once through a shared
+already-charged result seam; never normalize and charge those same IDs again.
+No per-response replacement budget or Vec<BatchItem> intermediary. Retain the
+current delivery/latest-attempt hold until Failed plus central seal commits.
+Tests must prove prior Accepted/KnownPartial IDs survive sibling cancellation,
+late auth-looking bodies cannot observe/count/clean up, and repeated sibling
+unproven callbacks produce one terminal result and one native discard hook.
