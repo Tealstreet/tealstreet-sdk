@@ -14,7 +14,9 @@ Binance remains the reference; no additional venue migration in this PR.
    Binance inputs may omit it; identity/nonce-dependent migrations must require
    it rather than invent a fingerprint. MEXC should prefer a verified venue uid,
    otherwise this stable id; persisted old MEXC ids need cutover mapping. Kraken
-   nonce scoping uses the same opaque setup id.
+   nonce scoping uses the same opaque setup id. Reused credentials across engines
+   or slots need a consistently assigned id; account consumers use the intended
+   account mapping. A slot name or key reference is never an identity fallback.
 2. **Trusted key decoding.** Decode explicit UTF-8/base64/hex/PEM formats inside
    the local provider, with bounded input, strict validation, fixed errors and
    zeroizing owned buffers. Preserve UTF-8 defaults and existing Binance bytes.
@@ -29,7 +31,8 @@ Binance remains the reference; no additional venue migration in this PR.
    no ambient venue randomness or retained nonce cache. Provider errors remain
    closed typed pre-dispatch failures.
 5. **Signing receipts.** Canonical preparation declares the actual protocol stamp
-   and optional expiry used. The Signer returns that receipt with its result;
+   and optional expiry used, expressed as protocol UTC milliseconds. The Signer
+   returns that receipt with its result;
    the engine validates it against the current attempt, then notifies the venue's
    pending request only when fresh outbound work is released. No provider clock,
    deadline extension or stale/failed receipt publication. Phemex expiry repair
