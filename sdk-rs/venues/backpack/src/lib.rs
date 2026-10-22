@@ -541,7 +541,6 @@ impl Venue for Backpack {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
             order_book_query: true,
-            host_clock: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

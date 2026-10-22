@@ -1100,16 +1100,6 @@ mod tests {
                     venue,
                 ),
                 schedule_cancel: venue == "hyperliquid",
-                host_clock: any(
-                    &[
-                        "backpack",
-                        "bitunix",
-                        "coinbase",
-                        "coinbasespot",
-                        "hyperliquid",
-                    ],
-                    venue,
-                ) || any(&ORDERLY, venue),
                 position_history: match venue {
                     "kraken" | "bitget" | "bitgetusdc" | "bitgetinverse" => {
                         safe_cex_engine::PositionHistory::FillsAccount

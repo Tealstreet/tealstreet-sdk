@@ -1,0 +1,16 @@
+name: Prepare pinned Yarn
+description: Retry Corepack preparation before any Yarn cache probe or install
+runs:
+  using: composite
+  steps:
+    - name: Prepare Yarn through Corepack with bounded retries
+      id: yarn
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+      run: bash "$GITHUB_ACTION_PATH/prepare.sh"
+    - name: Restore Yarn dependency cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.yarn.outputs.cache-dir }}
+        key: yarn-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ steps.yarn.outputs.version }}-${{ hashFiles('yarn.lock') }}

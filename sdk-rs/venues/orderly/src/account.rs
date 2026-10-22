@@ -1,6 +1,6 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::{SnapshotBuilder, SnapshotCoverage};
+use safe_cex_engine::coverage::{RowAdmission, SnapshotBuilder};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
@@ -31,7 +31,7 @@ pub enum Request {
         revision: u64,
         issued: u64,
         stamps: HashMap<String, (Option<u64>, u64)>,
-        coverage: SnapshotCoverage<String>,
+        coverage: RowAdmission<String>,
         /// Each skipped row's symbol and PnL, as far as they parsed.
         skipped: Vec<(Option<String>, Option<f64>)>,
     },
@@ -45,7 +45,7 @@ pub enum Request {
         seen: HashSet<String>,
         page_count: u32,
         stamps: HashMap<String, (Option<u64>, u64)>,
-        coverage: SnapshotCoverage<String>,
+        coverage: RowAdmission<String>,
     },
 }
 #[derive(Clone)]
@@ -406,7 +406,7 @@ impl Orderly {
                     revision: self.account.positions_revision,
                     issued: self.account.positions_issued,
                     stamps: HashMap::new(),
-                    coverage: SnapshotCoverage::default(),
+                    coverage: RowAdmission::default(),
                     skipped: Vec::new(),
                 },
             );
@@ -428,7 +428,7 @@ impl Orderly {
                             seen: HashSet::new(),
                             page_count: 0,
                             stamps: HashMap::new(),
-                            coverage: SnapshotCoverage::default(),
+                            coverage: RowAdmission::default(),
                         },
                     );
                 }
@@ -875,10 +875,10 @@ impl Orderly {
                         let key = serde_json::from_str::<Identity<'_>>(item)
                             .ok()
                             .and_then(|r| r.symbol.as_deref().and_then(symbol));
-                        rows.reject(key);
-                        cx.notice(
+                        rows.skip(
+                            cx,
+                            key,
                             Level::Warn,
-                            code::ROW_SKIPPED,
                             "Orderly skipped malformed margin-mode row",
                         );
                     }
@@ -936,15 +936,11 @@ impl Orderly {
                         }
                     };
                     skipped.push((symbol.clone(), pnl));
-                    cx.notice(
-                        Level::Warn,
-                        code::ROW_SKIPPED,
-                        match &symbol {
-                            Some(symbol) => format!("Orderly skipped unmappable position {symbol}"),
-                            None => "Orderly skipped unmappable position without a symbol".into(),
-                        },
-                    );
-                    coverage.reject(symbol);
+                    let message = match &symbol {
+                        Some(symbol) => format!("Orderly skipped unmappable position {symbol}"),
+                        None => "Orderly skipped unmappable position without a symbol".into(),
+                    };
+                    coverage.skip(cx, symbol, Level::Warn, message);
                 }
                 Request::Orders {
                     algo,
@@ -976,28 +972,21 @@ impl Orderly {
                         .ok()
                         .and_then(|r| self.orders(cx, r, *algo, &mut unknown).ok());
                     let Some(mapped) = mapped else {
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            match &key {
-                                Some(key) => format!("Orderly skipped unmappable order {key}"),
-                                None => "Orderly skipped unmappable order without an id".into(),
-                            },
-                        );
-                        if key.is_none() {
+                        let message = match &key {
+                            Some(key) => format!("Orderly skipped unmappable order {key}"),
+                            None => "Orderly skipped unmappable order without an id".into(),
+                        };
+                        let unidentified = key.is_none();
+                        coverage.skip(cx, key, Level::Warn, message);
+                        if unidentified {
                             // Numeric ids cannot collide with this page-position census key.
                             seen.insert(format!("row:{page}:{page_count}"));
                         }
-                        coverage.reject(key);
                         return Ok(());
                     };
                     for id in unknown {
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            format!("Orderly skipped order {id} on an unknown market"),
-                        );
-                        coverage.reject(Some(id));
+                        let message = format!("Orderly skipped order {id} on an unknown market");
+                        coverage.skip(cx, Some(id), Level::Warn, message);
                     }
                     if let Some((id, proof)) = self.proof(cx, item).filter(|_| !*algo) {
                         proofs.insert(id, proof);

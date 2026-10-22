@@ -161,15 +161,18 @@ Medium:
    silent page/stream merge and coded reporting; `SnapshotCoverage` remains its
    compatibility alias. Bybit and Bitunix use the shared collector without
    changing their scoped freshness/lineage rules. Existing helpers' presence
-   does not prove every keyed REST/WS call site is migrated: Bitget/Orderly and
-   the remaining inventory are follow-up phases. Snapshot commits retain the
+   does not prove every keyed REST/WS call site is migrated: Bitget existing
+   REST/WS and Orderly REST now use shared admission/reporting; Orderly typed WS
+   arrays and the remaining inventory are follow-up phases. Snapshot commits
+   retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);
    route `tickInterval` to every venue.~~ Done: `sdk-rs/registry` builds every
    venue for the wasm and native hosts and owns the credential rules (#1467,
    #1469, #1476); TS sends one uniform options blob (#1519); the virtual-clock
-   venue list is the `hostClock` capability (#1520); polling is the runtime
+   venue list became the `hostClock` capability (#1520), now retired by the
+   [shared engine clock ingress](RUST_ENGINE_CLOCK.md); polling is the runtime
    policy (#1392). AsterDEX version inference is shared by native construction
    and registry metadata; the bridge forwards only explicit overrides and reads
    the native version after WASM loads. Its synchronous pre-host fallback stays
