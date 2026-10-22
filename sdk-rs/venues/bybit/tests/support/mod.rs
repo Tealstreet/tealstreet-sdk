@@ -102,7 +102,9 @@ impl Harness {
                         .push((request.id, self.progress.len()));
                     self.requests.push(request);
                 }
-                Action::SignPayload { .. } => {
+                Action::Sign { .. }
+                | Action::SignedOutbound { .. }
+                | Action::SignPayload { .. } => {
                     panic!("Bybit signs requests locally")
                 }
                 Action::WsConnect { headers, .. } if !headers.is_empty() => {

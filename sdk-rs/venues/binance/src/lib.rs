@@ -18,7 +18,7 @@ use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
-use sign::{Credentials, Query, Signed};
+use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
 
@@ -47,27 +47,17 @@ pub enum Variant {
 
 #[derive(Clone, Default)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub read_credentials: Option<Credentials>,
     pub testnet: bool,
     pub variant: Variant,
     /// Markets, tickers, books and candles only; no account.
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
+    pub credentials: Option<Credentials>,
     pub recv_window: Option<f64>,
     /// A portfolio margin account (`papi`) rather than USD-M futures.
     pub portfolio_margin: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
-}
 
 struct Urls {
     rest: &'static str,
@@ -221,7 +211,7 @@ mod source {
 }
 
 pub struct BinanceFutures {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     urls: Urls,
     paths: &'static paths::Paths,
     credentials: Option<Credentials>,
@@ -256,7 +246,7 @@ impl BinanceFutures {
     }
 
     pub fn new(options: Options) -> Self {
-        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
+        let mut options = options;
         if options.variant == Variant::UsdM && options.portfolio_margin {
             options.variant = Variant::PortfolioMargin;
         }
@@ -269,15 +259,10 @@ impl BinanceFutures {
         };
         let urls = Urls::for_options(&options, paths);
         let spot = options.variant == Variant::Spot;
-        let credentials = match (&options.key, &options.secret) {
-            (Some(key), Some(secret)) if !options.public_data_only && !key.is_empty() => {
-                Some(Credentials {
-                    key: key.clone(),
-                    secret: secret.clone(),
-                })
-            }
-            _ => None,
-        };
+        let credentials = options
+            .credentials
+            .clone()
+            .filter(|id| !options.public_data_only && id.validate().is_ok());
         Self {
             options,
             urls,
@@ -412,25 +397,40 @@ impl BinanceFutures {
         stream: Option<ArrayAt>,
         pending: Pending,
     ) {
-        let read_credentials = self
+        let credentials = self
             .options
             .read_credentials
             .as_ref()
             .filter(|_| method == Method::Get)
-            .map(|read| Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-            });
-        let Some(credentials) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
+            .or(self.credentials.as_ref());
+        let Some(credentials) = credentials else {
             return;
         };
-        let query = query.signed(credentials, cx.now, self.options.recv_window);
-        let url = format!("{}{path}?{query}", self.urls.account_rest);
-        let headers = vec![("X-MBX-APIKEY", credentials.key.clone())];
-        match stream {
-            Some(at) => cx.request_streamed(method, url, headers, at, pending),
-            None => cx.request(method, url, headers, None, pending),
+        let request = match stream {
+            Some(at) => cx.request_streamed(
+                method,
+                format!("{}{path}", self.urls.account_rest),
+                vec![],
+                at,
+                pending,
+            ),
+            None => cx.request(
+                method,
+                format!("{}{path}", self.urls.account_rest),
+                vec![],
+                None,
+                pending,
+            ),
         };
+        cx.sign_http(
+            request,
+            Box::new(sign::Http::new(
+                credentials.clone(),
+                query,
+                self.options.recv_window,
+                true,
+            )),
+        );
     }
 
     fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
@@ -1573,6 +1573,20 @@ impl Venue for BinanceFutures {
         }
     }
 
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Trade(request) => self.on_trade_sign_failed(cx, request, error),
+            Pending::Identity(command) => cx.fail(command, error),
+            Pending::History(request) => self.on_history_sign_failed(cx, request, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Identity(command) = pending {
             self.identity_failed(cx, command, error);
@@ -1748,3 +1762,9 @@ impl Venue for BinanceFutures {
 
 #[cfg(test)]
 mod secondary_tests;
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_binance;
+#[cfg(test)]
+#[path = "../tests/support/config.rs"]
+mod test_config;

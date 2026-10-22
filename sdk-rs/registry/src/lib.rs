@@ -417,6 +417,21 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
     if options.public_data_only || !options.remote_signing || DELEGATED.contains(&venue) {
         return Ok(());
     }
+    if construction::bridge(venue, options).dispatch_signing
+        && let Some(refs) = &options.signing
+    {
+        return if refs
+            .primary
+            .as_ref()
+            .is_some_and(|id| id.validate().is_ok())
+        {
+            Ok(())
+        } else {
+            Err(invalid(
+                "Rust engine private accounts require a local API key and secret; remote signing is unsupported",
+            ))
+        };
+    }
     let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
     // AsterDEX V3 signs with its wallet private key, which TS resolves from auth or the secret.
     #[cfg(feature = "asterdex")]
@@ -437,15 +452,99 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
     Ok(())
 }
 
+/// Trusted native/legacy setup. Consume fields once; never pass them to a venue.
+#[cfg(feature = "binance")]
+pub fn prepare_local_signer(
+    options: &mut EngineOptions,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let primary = if options.key.is_some() || options.secret.is_some() {
+        Some(LocalIdentity {
+            key: Secret::new(options.key.take().unwrap_or_default()),
+            secret: Secret::new(options.secret.take().unwrap_or_default()),
+        })
+    } else {
+        None
+    };
+    let secondary = options.read_credentials.take().map(|mut read| {
+        use zeroize::Zeroize;
+        read.passphrase.zeroize();
+        LocalIdentity {
+            key: Secret::new(std::mem::take(&mut read.key)),
+            secret: Secret::new(std::mem::take(&mut read.secret)),
+        }
+    });
+    let (signer, identities) = LocalSigner::from_setup(LocalSetup { primary, secondary });
+    Ok((std::sync::Arc::new(signer), identities))
+}
+/// Separate trusted JS/native provider setup, with fixed parse failures.
+#[cfg(feature = "binance")]
+pub fn local_signer_from_json(
+    input: String,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    let (signer, identities) = safe_cex_crypto::signer::LocalSigner::from_json(input)
+        .map_err(|_| invalid("Invalid local signer setup"))?;
+    Ok((std::sync::Arc::new(signer), identities))
+}
+
 /// Constructs `venue`'s engine from `options`, enforcing its construction rules.
 pub fn build<T: Visit>(
     venue: &str,
-    mut options: EngineOptions,
+    options: EngineOptions,
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
+    // Trusted compatibility setup consumes legacy input before venue construction.
+    // All migrated execution still uses precisely one injected-provider path.
+    #[cfg(feature = "binance")]
+    let (options, signer) = {
+        let mut options = options;
+        let signer = if construction::bridge(venue, &options).dispatch_signing
+            && options.signing.is_none()
+        {
+            let (provider, identities) = prepare_local_signer(&mut options)?;
+            options.signing = Some(identities);
+            Some(provider)
+        } else {
+            None
+        };
+        (options, signer)
+    };
+    #[cfg(not(feature = "binance"))]
+    let signer = None;
+    build_with_signer(venue, options, entropy, signer, visitor)
+}
+
+/// Generic options contain opaque references; provider owns all credentials.
+pub fn build_with_signer<T: Visit>(
+    venue: &str,
+    mut options: EngineOptions,
+    entropy: Option<safe_cex_engine::entropy::Entropy>,
+    signer: Option<safe_cex_engine::signing::Provider>,
+    visitor: T,
+) -> Result<T::Output, VenueError> {
+    let _ = &signer;
     if !supported(venue) {
         return Err(invalid(format!("unsupported venue: {venue}")));
+    }
+    if (options.signing.is_some() || signer.is_some())
+        && !construction::bridge(venue, &options).dispatch_signing
+    {
+        return Err(invalid(
+            "Injected signing is not supported for this venue yet",
+        ));
     }
     if let Some(mode) = construction::resolve(venue, &options) {
         if let Some(error) = mode.explicit_private_error {
@@ -892,18 +991,30 @@ pub fn build<T: Visit>(
             )?,
         ),
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
+            if options.key.as_ref().is_some_and(|s| !s.is_empty())
+                || options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Binance credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 BinanceFutures::new(BinanceOptions {
                     recv_window: options.recv_window,
-                    read_credentials: options.read_credentials.take(),
+                    read_credentials: identities.secondary,
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
+                    credentials: identities.primary,
                     portfolio_margin: venue == "binancepm",
                     variant: match venue {
                         "binancepm" => BinanceVariant::PortfolioMargin,
@@ -913,8 +1024,10 @@ pub fn build<T: Visit>(
                     },
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "kucoinspot")]
         "kucoinspot" => finish(
             visitor,
@@ -1198,6 +1311,8 @@ pub struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineOptions {
+    #[serde(default)]
+    pub signing: Option<safe_cex_engine::signing::Identities>,
     #[serde(default)]
     pub private_only: bool,
     /// The SDK sets this when the account can sign (not public-data-only).

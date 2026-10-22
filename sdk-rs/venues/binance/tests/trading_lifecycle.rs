@@ -1,8 +1,9 @@
 //! Adversarial cancel/replace cases with documented full cancellation replies.
+use support::Options;
 mod support;
 use safe_cex_engine::model::OrderStatus;
 use safe_cex_engine::{Command, Event, Method};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn ready(variant: Variant) -> Harness {

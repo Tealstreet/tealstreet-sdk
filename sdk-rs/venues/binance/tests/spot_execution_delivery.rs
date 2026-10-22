@@ -1,9 +1,10 @@
 //! Spot executionReport delivery is independent of quantified cancellation proof.
 //! https://developers.binance.com/en/docs/products/spot/user-data-stream
+use support::Options;
 mod support;
 use safe_cex_engine::model::OrderStatus;
 use safe_cex_engine::{Command, Event, Method};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn orders(filled: &str) -> String {

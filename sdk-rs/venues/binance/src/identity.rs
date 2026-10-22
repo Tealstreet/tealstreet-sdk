@@ -76,7 +76,7 @@ impl BinanceFutures {
             || self
                 .credentials
                 .as_ref()
-                .is_none_or(|c| c.key.is_empty() || c.secret.is_empty())
+                .is_none_or(|c| c.credential.0.is_empty() || c.signing.0.is_empty())
         {
             finish(
                 cx,

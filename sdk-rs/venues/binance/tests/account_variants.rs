@@ -1,8 +1,9 @@
 //! Private variants use documented Spot WS API and COIN-M account payloads.
+use support::Options;
 mod support;
 use safe_cex_engine::model::{Balance, CurrencyBalance, MarginType, OrderStatus};
 use safe_cex_engine::{Event, Method};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 const SPOT_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","baseAssetPrecision":8,"quoteAssetPrecision":8,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.01"},{"filterType":"LOT_SIZE","stepSize":"0.00001","minQty":"0.00001","maxQty":"9000"}]}]}"#;

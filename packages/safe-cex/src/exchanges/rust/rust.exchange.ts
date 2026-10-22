@@ -82,6 +82,7 @@ import {
 import type { BaseWebSocket } from '../base.ws';
 import { deriveBridgeConstruction, derivePublicMode } from './construction';
 import { RustSocketHandle } from './rustSockets';
+import { LocalSignerSetup, withoutSigningCredentials } from './localSignerSetup';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
@@ -297,13 +298,13 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
 
 export type WasmEngineModule = {
   resolveConstruction?: (venue: string, optionsJson: string) => string;
-  WasmEngine: new (venue: string, optionsJson: string) => WasmEngineLike;
+  WasmEngine: new (venue: string, optionsJson: string, signerSetupJson?:string) => WasmEngineLike;
 };
 
 /** Preserve native constructor classification at the same boundary as command failures. */
-const constructEngine = (Constructor: WasmEngineModule['WasmEngine'], venue: string, options: string): WasmEngineLike => {
+const constructEngine = (Constructor: WasmEngineModule['WasmEngine'], venue: string, options: string, setup?:LocalSignerSetup): WasmEngineLike => {
   try {
-    return new Constructor(venue, options);
+    return setup ? setup.construct(Constructor,venue,options) : new Constructor(venue, options);
   } catch (error) {
     const encoded = (error as { venueError?: unknown } | null)?.venueError;
     let detail: VenueErrorDetail | undefined;
@@ -593,6 +594,9 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
+    const signingMode=bridgeConstruction.dispatchSigning ? derivePublicMode(exchangeName,options) : undefined;
+    const signerSetup=bridgeConstruction.dispatchSigning ? new LocalSignerSetup(options) : undefined;
+    if (signerSetup) options=withoutSigningCredentials(options);
     const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
       ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
       : [];
@@ -614,6 +618,8 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
     super(exchangeName, options, store);
     this.bridgeConstruction = bridgeConstruction;
+    this.signerSetup=signerSetup;
+    if (signingMode) this.constructionRecord={bridge:bridgeConstruction,...signingMode};
     this.warnIgnoredCoinbaseReadOptions = ignoredCoinbaseReadOptions;
     this.commandTimeoutMs = commandTimeoutMs;
     // Handles satisfy the BaseWebSocket members callers read; venues own the sockets.
@@ -663,6 +669,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private constructionRecord?: EngineConstruction;
+  private signerSetup?:LocalSignerSetup;
 
   private get asterApiVersion() {
     // Construction/getters are synchronous; WASM loads asynchronously on first use.
@@ -772,7 +779,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
     }
     assertEngineAccountRouting(this.options, this.name);
-    if (!this.isPublicDataOnly && isKeylessRemoteSigned(this.name, this.options)) {
+    if (!this.isPublicDataOnly && !this.signerSetup?.primaryComplete && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
     const transportFactory = engineTransport;
@@ -812,7 +819,7 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    let transport = createEngineTransport(this.name, this.options, (transportFactory ?? synchronizedEngineTransport)());
+    let transport = createEngineTransport(this.name, this.options, (transportFactory ?? synchronizedEngineTransport)(), this.signerSetup);
     if (this.bridgeConstruction.payloadSigning) {
       transport = paradexSigningTransport(this.options, transport);
       if (this.options.payloadSigner) transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
@@ -894,33 +901,41 @@ export class RustEngineExchange extends BaseExchange {
         accountStartup: !this.isPublicDataOnly,
         privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
+      this.signerSetup,
     );
-    if (engine.construction) this.constructionRecord = JSON.parse(engine.construction()) as EngineConstruction;
-    const host = new EngineHost(
-      engine,
-      transport,
-      {
-        onFrame: this.receiveFrame,
-        onLog: this.receiveLog,
-        onEvent: this.receiveEvent,
-        onSocketChange: this.syncSocketHealthToStore,
-        onDead: this.receiveEngineFailure,
-        onCommandProgress: this.receiveCommandProgress,
-        onAccountAuth: this.receiveAccountAuth,
-        onDeactivate: () => {
-          this.noteAuthFailure();
-          this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
-          for (const wake of this.startupWaiters) wake();
-          this.emitter.emit('deactivate');
+    // Construction transfers allocation ownership only when EngineHost succeeds.
+    let host: EngineHost;
+    try {
+      if (engine.construction) this.constructionRecord = JSON.parse(engine.construction()) as EngineConstruction;
+      host = new EngineHost(
+        engine,
+        transport,
+        {
+          onFrame: this.receiveFrame,
+          onLog: this.receiveLog,
+          onEvent: this.receiveEvent,
+          onSocketChange: this.syncSocketHealthToStore,
+          onDead: this.receiveEngineFailure,
+          onCommandProgress: this.receiveCommandProgress,
+          onAccountAuth: this.receiveAccountAuth,
+          onDeactivate: () => {
+            this.noteAuthFailure();
+            this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
+            for (const wake of this.startupWaiters) wake();
+            this.emitter.emit('deactivate');
+          },
+          onStartupFailed: (detail) => {
+            // Keeps kind/venueCode so start() and validateAccount can branch on them.
+            this.startupFailure ??= new ExchangeError(detail.message, detail);
+            for (const wake of this.startupWaiters) wake();
+          },
         },
-        onStartupFailed: (detail) => {
-          // Keeps kind/venueCode so start() and validateAccount can branch on them.
-          this.startupFailure ??= new ExchangeError(detail.message, detail);
-          for (const wake of this.startupWaiters) wake();
-        },
-      },
-      { commandTimeoutMs: this.commandTimeoutMs },
-    );
+        { commandTimeoutMs: this.commandTimeoutMs, ownsEngine: true },
+      );
+    } catch (error) {
+      try { engine.free?.(); } catch { /* Keep the original construction error. */ }
+      throw error;
+    }
     try {
       const capabilities = host.capabilities();
       this.adoptEngineCapabilities(capabilities);
@@ -2241,6 +2256,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.signerSetup?.dispose();
     void this.hostedSigningVenue?.then(
       (venue) => venue.dispose(),
       () => undefined,

@@ -385,12 +385,21 @@ impl BinanceFutures {
                 Pending::Account(request),
             );
         } else {
-            cx.request(
+            let request = cx.request(
                 method,
                 format!("{}{}", self.urls.account_rest, self.paths.listen_key),
-                vec![("X-MBX-APIKEY", credentials.key.clone())],
+                vec![],
                 None,
                 Pending::Account(request),
+            );
+            cx.sign_http(
+                request,
+                Box::new(crate::sign::Http::new(
+                    credentials.clone(),
+                    Query::new(),
+                    self.options.recv_window,
+                    false,
+                )),
             );
         }
     }
@@ -2507,47 +2516,15 @@ impl BinanceFutures {
         let Some(credentials) = &self.credentials else {
             return;
         };
-        let timestamp = cx.now.floor();
-        let payload = format!(
-            "apiKey={}&recvWindow=5000&timestamp={}",
-            credentials.key,
-            num::format(timestamp)
-        );
-        let signature = safe_cex_crypto::hmac_sha256(
-            credentials.secret.as_bytes(),
-            payload.as_bytes(),
-            safe_cex_crypto::Encoding::Hex,
-        );
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Params<'a> {
-            api_key: &'a str,
-            recv_window: u32,
-            timestamp: f64,
-            signature: &'a str,
-        }
-        #[derive(serde::Serialize)]
-        struct Subscription<'a> {
-            id: &'a str,
-            method: &'a str,
-            params: Params<'a>,
-        }
-        let message = serde_json::to_string(&Subscription {
-            id: &id,
-            method: "userDataStream.subscribe.signature",
-            params: Params {
-                api_key: &credentials.key,
-                recv_window: 5000,
-                timestamp,
-                signature: &signature,
-            },
-        })
-        .expect("finite timestamp");
         self.account.spot_subscription = None;
         self.account.spot_heartbeat_id = None;
-        self.account.spot_subscribe_id = Some(id);
+        self.account.spot_subscribe_id = Some(id.clone());
         self.account.spot_subscribe_at = Some(cx.now);
-        cx.send(socket, message);
+        cx.send_signed(
+            socket,
+            String::new(),
+            Box::new(crate::sign::SpotSubscribe::new(credentials.clone(), id)),
+        );
     }
     pub(crate) fn ping_spot_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self
