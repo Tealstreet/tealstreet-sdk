@@ -178,8 +178,8 @@ artifact evidence remain required; no old all-size guard is valid for this head.
 
 Owner trigger on actual #1746 `3f0e3e450b2`: landing Rust run
 39769642794 reports KuCoin Spot public steady CPU TS 342.9 ms versus Rust
-311.4 ms, approximately 1.101x against the 1.10x objective, and the gate
-missed. The earlier two passing samples do not override this observed loss
+311.4 ms, approximately 1.101x. The unchanged 10% CPU-saving objective
+requires Rust <= 0.9 * TS (ratio >= 1.111...), so the gate missed. The earlier two passing samples do not override this observed loss
 of safe margin. This follow-up implements the existing measured exception
 rule; no gate, budget, threshold, comparator or JSON parsing change.
 
@@ -206,3 +206,10 @@ real-integrates the new build fingerprint and refreshes its final proof.
 Any overlapping landing dependency change requires genuine integration and
 fresh CI; guard and merge remain separate calls, followed by actual merge
 parents/tree/preservation verification and overseer notification.
+
+Owner also authorizes pre-integrating frozen reviewed Bybit
+`31035f3f09a71e5fb29d1083c217512972e5f9ec` for parallel CI; actual
+unchanged Bybit landing remains mandatory before the fresh separate guard.
+If those new covered source inputs move KCS bytes away from the pre-#1746
+baseline, report that explicitly and block for evidence/disposition; never
+substitute a different baseline or claim byte identity from arguments alone.
