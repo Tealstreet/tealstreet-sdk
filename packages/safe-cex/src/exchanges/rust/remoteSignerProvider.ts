@@ -1,0 +1,228 @@
+import type { Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeName, PayloadSigner, RemoteSigner } from '../../types';
+
+import { nanoid } from 'nanoid';
+
+export interface RemoteSignerIdentity {
+  credential: string;
+  signing: string;
+  publicCredential: string;
+}
+
+export interface RemoteSignerProviderOptions {
+  exchangeName: ExchangeName;
+  identities: { primary?: RemoteSignerIdentity; secondary?: RemoteSignerIdentity };
+  remoteSigner?: RemoteSigner;
+  payloadSigner?: PayloadSigner;
+}
+
+/** Attempt-owned metadata, pending the shared native header admission policy.
+ * This standalone provider is deliberately not installed by runtime construction.
+ */
+export type RemoteSignerResult = SignResult & { headers?: [string, string][] };
+
+const MAX_PAYLOAD = 1_048_576;
+const MAX_OPERATIONS = 32;
+const MAX_PARTS = 256;
+const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+const refused = () => new Error('Remote signing request refused');
+const canceled = () => new Error('Remote signing canceled');
+const unavailable = () => new Error('Remote signer unavailable');
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function utf8(value: string): Uint8Array {
+  if (value.length > MAX_PAYLOAD) throw refused();
+  const bytes = encoder.encode(value);
+  if (bytes.length > MAX_PAYLOAD || decoder.decode(bytes) !== value) throw refused();
+  return bytes;
+}
+
+function validRef(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 256
+    && utf8(value).length <= 256;
+}
+
+function mac(value: unknown): number[] {
+  if (typeof value !== 'string' || !/^[0-9a-fA-F]{64}$/.test(value)) throw refused();
+  return Array.from({ length: 32 }, (_, i) => Number.parseInt(value.slice(i * 2, i * 2 + 2), 16));
+}
+
+function headers(value: unknown): [string, string][] | undefined {
+  if (value === undefined) return undefined;
+  if (!record(value)) throw refused();
+  const entries = Object.entries(value);
+  if (entries.length > 32) throw refused();
+  let total = 0;
+  const normalized = new Map<string, [string, string]>();
+  for (const [name, item] of entries) {
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name) || name.length > 256
+      || typeof item !== 'string' || /[\x00-\x08\x0a-\x1f\x7f]/.test(item)) throw refused();
+    const size = utf8(item).length;
+    total += name.length + size;
+    if (size > 8192 || total > 32768) throw refused();
+    // Axios treats aliases case-insensitively. Keep the last value and spelling.
+    normalized.set(name.toLowerCase(), [name, item]);
+  }
+  return Array.from(normalized.values());
+}
+
+/** Cancel waiting without requiring either legacy callback to support AbortSignal.
+ * Every subscription/listener belongs to this one attempt, including synchronous
+ * availability changes during subscription and late callback completion.
+ */
+function guarded<T>(signal: AbortSignal, remote: RemoteSigner | undefined, invoke: () => T | Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let unsubscribe: (() => void) | undefined;
+    const cleanup = () => {
+      signal.removeEventListener('abort', abort);
+      const release = unsubscribe;
+      unsubscribe = undefined;
+      try { release?.(); } catch { /* Cleanup cannot expose callback errors. */ }
+    };
+    const finish = (error: Error | undefined, value?: T) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve(value as T);
+    };
+    const abort = () => finish(canceled());
+    try {
+      if (signal.aborted) return finish(canceled());
+      signal.addEventListener('abort', abort, { once: true });
+      if (remote) {
+        if (!remote.isAvailable()) return finish(unavailable());
+        unsubscribe = remote.onAvailabilityChange((available) => {
+          if (!available) finish(unavailable());
+        });
+        if (typeof unsubscribe !== 'function') return finish(refused());
+        // A synchronous notification may have settled before release was assigned.
+        if (settled) { cleanup(); return; }
+        if (!remote.isAvailable()) return finish(unavailable());
+      }
+      if (signal.aborted) return finish(canceled());
+      Promise.resolve(invoke()).then(
+        (value) => finish(signal.aborted ? canceled() : undefined, value),
+        () => finish(refused()),
+      );
+    } catch {
+      finish(refused());
+    }
+  });
+}
+
+/** Bridge only trusted account-owned public identities to legacy HMAC callbacks.
+ * Advisory SignRequest.context never establishes key or account authority.
+ */
+export function createRemoteSignerProvider(options: RemoteSignerProviderOptions): Signer {
+  const { exchangeName, remoteSigner, payloadSigner } = options;
+  let accountName: string | undefined;
+  const owned = new Map<string, { identity: RemoteSignerIdentity; primary: boolean }>();
+  const credentials = new Map<string, { bytes: number[]; identity: RemoteSignerIdentity }>();
+  try {
+    accountName = remoteSigner?.accountName;
+    if (accountName !== undefined && (typeof accountName !== 'string' || accountName.length > 4096)) throw refused();
+    for (const [slot, source] of Object.entries(options.identities)) {
+      if (!source) continue;
+      if (slot !== 'primary' && slot !== 'secondary') throw refused();
+      const identity = { ...source };
+      if (!validRef(identity.credential) || !validRef(identity.signing)
+        || identity.signing === identity.credential || owned.has(identity.signing) || owned.has(identity.credential)
+        || typeof identity.publicCredential !== 'string' || !identity.publicCredential
+        || /[\r\n\x00]/.test(identity.publicCredential)) throw refused();
+      const bytes = Array.from(utf8(identity.publicCredential));
+      const entry = { identity, primary: slot === 'primary' };
+      owned.set(identity.signing, entry);
+      owned.set(identity.credential, entry);
+      credentials.set(identity.credential, { bytes, identity });
+    }
+    if (!remoteSigner && !payloadSigner) throw refused();
+  } catch { throw refused(); }
+
+  return async (request, { signal }): Promise<RemoteSignerResult> => {
+    try {
+      if (signal.aborted) throw canceled();
+      const receipt: SignReceipt = { ...request.receipt };
+      if (!record(request.receipt) || Object.entries(receipt).some(([key, value]) =>
+        !['stampMs', 'expiryMs'].includes(key) || (value !== undefined && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)))) throw refused();
+      if (receipt.stampMs !== undefined && receipt.expiryMs !== undefined && receipt.expiryMs <= receipt.stampMs) throw refused();
+      if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
+      let total = 0;
+      // Validate the complete batch before invoking any callback.
+      const work = Array.from(request.operations, (operation) => {
+        if (operation.kind === 'present') {
+          const item = credentials.get(operation.key);
+          if (!item) throw refused();
+          total += item.bytes.length;
+          if (total > MAX_PAYLOAD) throw refused();
+          return { kind: 'present' as const, bytes: item.bytes.slice() };
+        }
+        if (operation.kind !== 'sign' || operation.algorithm !== 'hmacSha256') throw refused();
+        const entry = owned.get(operation.key);
+        if (!entry || entry.identity.signing !== operation.key || (remoteSigner && !entry.primary)
+          || !Array.isArray(operation.payload) || operation.payload.length > MAX_PARTS) throw refused();
+        const parts = Array.from(operation.payload, (part) => {
+          let bytes: number[];
+          if (part.kind === 'credential') {
+            const item = credentials.get(part.key);
+            if (!item || item.identity !== entry.identity) throw refused();
+            bytes = item.bytes;
+          } else if (part.kind === 'bytes' && Array.isArray(part.bytes) && part.bytes.length <= MAX_PAYLOAD) {
+            for (const byte of part.bytes) {
+              if (!Number.isInteger(byte) || byte < 0 || byte > 255) throw refused();
+            }
+            bytes = part.bytes;
+          } else throw refused();
+          total += bytes.length;
+          if (total > MAX_PAYLOAD) throw refused();
+          return bytes;
+        });
+        const payload = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
+        let offset = 0;
+        for (const part of parts) { payload.set(part, offset); offset += part.length; }
+        return { kind: 'sign' as const, entry, payload: decoder.decode(payload) };
+      });
+      const signatures = work.filter((item) => item.kind === 'sign').length;
+      const values: number[][] = [];
+      let metadata: [string, string][] | undefined;
+      for (const item of work) {
+        if (signal.aborted) throw canceled();
+        if (item.kind === 'present') { values.push(item.bytes); continue; }
+        if (remoteSigner) {
+          const id = nanoid();
+          const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({
+            id,
+            type: 'ws-auth',
+            exchangeName,
+            ...(accountName === undefined ? {} : { accountName }),
+            wsAuth: { toSign: item.payload, outputFormat: 'hex' },
+          }));
+          if (!record(response) || response.id !== id
+            || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
+          values.push(mac(response.wsAuthSignature));
+        } else {
+          const response = await guarded(signal, undefined, () => payloadSigner!({
+            exchangeName, key: item.entry.identity.publicCredential, payload: item.payload,
+            scheme: 'hmac-sha256', encoding: 'hex',
+          }));
+          if (!record(response)) throw refused();
+          const extra = headers(response.headers);
+          if (extra !== undefined && signatures !== 1) throw refused();
+          metadata = extra;
+          values.push(mac(response.signature));
+        }
+      }
+      if (signal.aborted) throw canceled();
+      return { values, receipt, ...(metadata === undefined ? {} : { headers: metadata }) };
+    } catch (error) {
+      // Never forward provider exceptions, response errors, preimages or key refs.
+      if (error instanceof Error && [canceled().message, unavailable().message].includes(error.message)) {
+        throw new Error(error.message);
+      }
+      throw refused();
+    }
+  };
+}

@@ -245,3 +245,19 @@ Headers must apply before ManagedHttp Bind, with existing same-attempt custody;
 Pending managed/route-ready and prepare raw/protocol/revision/entropy contracts
 must survive actual integration. Active http_lifecycle.rs test literals remain
 with that owner until the reviewed API/head is shared.
+
+
+Half-2 standalone provider checkpoint (not installed): `remoteSignerProvider.ts`
+accepts captured account-owned public credential/ref bindings, with RemoteSigner
+precedence over PayloadSigner and no fallback. It validates the complete bounded
+primitive batch before callbacks, presents only owned public credentials, and
+supports exact HMAC-SHA256 UTF-8 Bytes/Credential preimages. RemoteSigner uses the
+unchanged ws-auth/hex envelope with accountName and fresh response-bound id, and
+refuses required-secondary signatures. PayloadSigner receives its selected
+public key and exact preimage. Optional headers are bounded attempt-local result
+metadata, never a transport side map; multiple-signature header results refuse.
+Abort/disconnect cleanup, malformed results, reference/receipt bounds, legacy
+empty error compatibility, UTF-8/BOM and sparse arrays have focused regressions.
+All 38 SDK provider tests, package typecheck/lint and independent adversarial
+review pass. Construction, routing and private-feed admission remain unchanged;
+this standalone checkpoint does not yet make keyless accounts run on Rust.
