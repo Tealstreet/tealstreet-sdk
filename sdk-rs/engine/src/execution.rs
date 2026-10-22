@@ -72,6 +72,24 @@ pub struct Prepared {
     next: Cursor,
 }
 
+/// A native observation may precede identity admission; inferred quote evidence
+/// belongs only to the separately admitted delivery's `next` cursor.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PreparedObservation {
+    observation: Option<Cursor>,
+    delivery: Option<Prepared>,
+}
+
+impl PreparedObservation {
+    pub fn observation(self) -> Option<Cursor> {
+        self.observation
+    }
+
+    pub fn delivery(self) -> Option<Prepared> {
+        self.delivery
+    }
+}
+
 impl Prepared {
     /// Scale only the public amount; cumulative anchors remain in native units.
     pub fn scaled(self, scale: f64, rounding: ExecutionRounding) -> Result<Self, Rejection> {
@@ -119,6 +137,73 @@ impl Prepared {
 }
 
 impl Cursor {
+    /// Native observed-average policy: last quantity wins by presence, and a
+    /// missing direct price uses the legacy quote-delta/selected-amount quotient.
+    /// This is deliberately separate from the strict direct-price `Report::Last`.
+    /// Whole-interval quote inference currently requires Binary arithmetic.
+    /// Commit the observation before native dedup. After a unique Fill, only
+    /// enrich a still-live same-endpoint cursor from `delivery.next()`.
+    pub fn prepare_observed_average(
+        self,
+        quantity: f64,
+        last: Option<f64>,
+        average: Option<f64>,
+        direct: Option<f64>,
+        arithmetic: Arithmetic,
+    ) -> Result<PreparedObservation, Rejection> {
+        nonnegative(quantity, Rejection::InvalidQuantity)?;
+        if let Some(last) = last {
+            nonnegative(last, Rejection::InvalidQuantity)?;
+        }
+        if let Some(average) = average {
+            nonnegative(average, Rejection::InvalidValue)?;
+        }
+        if let Some(direct) = direct {
+            nonnegative(direct, Rejection::InvalidValue)?;
+        }
+        // Validate supplied product even for quiet/regressed/direct-priced
+        // reports. An absent or zero average is not trusted historical quote.
+        let value = finite(average.unwrap_or(0.0) * quantity)?;
+        let growth = arithmetic.subtract(quantity, self.quantity)?.max(0.0);
+        let amount = last.unwrap_or(growth);
+        let observation = (quantity > self.quantity)
+            .then(|| Self::seed(quantity, average.filter(|n| *n > 0.0).map(|_| value)))
+            .transpose()?;
+        if amount == 0.0 {
+            return Ok(PreparedObservation {
+                observation,
+                delivery: None,
+            });
+        }
+        let price = match direct {
+            Some(price) => price,
+            None => finite(arithmetic.subtract(value, self.value.unwrap_or(0.0))? / amount)?,
+        };
+        positive_price(price)?;
+        let mut next = observation.unwrap_or(self);
+        if observation.is_some()
+            && next.value.is_none()
+            && direct.is_some()
+            && matches!(arithmetic, Arithmetic::Binary)
+            && amount == growth
+        {
+            // A priced last event proves the whole new interval only when it
+            // exactly covers growth. Overflow/unavailable prefix must not turn
+            // a valid direct execution into a rejected execution.
+            if let Ok(inferred) = self.direct_suffix(quantity, price) {
+                next = inferred;
+            }
+        }
+        Ok(PreparedObservation {
+            observation,
+            delivery: Some(Prepared {
+                amount,
+                price,
+                next,
+            }),
+        })
+    }
+
     /// Admit an observation without deciding whether it represents a live Fill.
     /// Missing historical quote and native lifecycle decisions remain explicit.
     pub fn prepare_prefix(
@@ -407,6 +492,27 @@ impl ObservedProgress {
         } else {
             delivered
         })
+    }
+
+    /// A native last quantity prices only the newly observed suffix. Unlike
+    /// authoritative last evidence, it cannot replay quantity already observed.
+    /// Accepted None still permits the caller's quiet identity bookkeeping.
+    pub fn prepare_capped(
+        self,
+        last: Option<f64>,
+        price: f64,
+    ) -> Result<Option<PreparedObserved>, Rejection> {
+        if let Some(amount) = last {
+            nonnegative(amount, Rejection::InvalidQuantity)?;
+        }
+        let amount = match self.cumulative {
+            Some(quantity) => {
+                let growth = (quantity - self.previous).max(0.0);
+                last.map_or(growth, |amount| amount.min(growth))
+            }
+            None => last.unwrap_or(0.0),
+        };
+        self.prepare(Cursor::seed(self.previous, None)?, Some(amount), price)
     }
 
     /// Native identity admission decides whether last quantity is authoritative.
@@ -700,6 +806,204 @@ fn positive_price(price: f64) -> Result<(), Rejection> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn observed_average_separates_observation_from_unique_delivery_quote() {
+        for average in [None, Some(0.0)] {
+            let prepared = Cursor::default()
+                .prepare_observed_average(1.0, Some(1.0), average, Some(100.0), Arithmetic::Binary)
+                .unwrap();
+            let observed = prepared.observation().unwrap();
+            assert_eq!(observed, Cursor::seed(1.0, None).unwrap());
+            let fill = prepared.delivery().unwrap();
+            assert_eq!((fill.price(), fill.amount()), (100.0, 1.0));
+            let unique = observed.enrich_quote(fill.next()).unwrap();
+            assert_eq!(unique.value(), Some(100.0));
+            let follow = unique
+                .prepare_observed_average(2.0, None, Some(100.0), None, Arithmetic::Binary)
+                .unwrap()
+                .delivery()
+                .unwrap();
+            assert_eq!((follow.price(), follow.amount()), (100.0, 1.0));
+            // A duplicate may install the observation but cannot install next.
+            let duplicate_follow = observed
+                .prepare_observed_average(2.0, None, Some(100.0), None, Arithmetic::Binary)
+                .unwrap()
+                .delivery()
+                .unwrap();
+            assert_eq!(duplicate_follow.price(), 200.0);
+        }
+    }
+
+    #[test]
+    fn observed_average_requires_whole_growth_and_known_prefix_for_inference() {
+        for (cursor, quantity, last) in [
+            (Cursor::default(), 10.0, 1.0),
+            (Cursor::seed(1.0, None).unwrap(), 2.0, 1.0),
+            (Cursor::seed(0.2, Some(20.0)).unwrap(), 0.3, 0.1),
+        ] {
+            let result = cursor
+                .prepare_observed_average(
+                    quantity,
+                    Some(last),
+                    None,
+                    Some(100.0),
+                    Arithmetic::Binary,
+                )
+                .unwrap();
+            assert_eq!(result.observation().unwrap().value(), None);
+            assert_eq!(result.delivery().unwrap().next().value(), None);
+        }
+        let quiet = Cursor::default()
+            .prepare_observed_average(1.0, Some(0.0), None, Some(100.0), Arithmetic::Binary)
+            .unwrap();
+        assert!(quiet.delivery().is_none());
+        assert_eq!(quiet.observation().unwrap().value(), None);
+    }
+
+    #[test]
+    fn observed_average_does_not_rewrite_existing_or_regressed_quote() {
+        let previous = Cursor::seed(2.0, Some(200.0)).unwrap();
+        for quantity in [0.0, 1.0, 2.0] {
+            let result = previous
+                .prepare_observed_average(
+                    quantity,
+                    Some(0.25),
+                    Some(1.0),
+                    Some(90.0),
+                    Arithmetic::Binary,
+                )
+                .unwrap();
+            assert!(result.observation().is_none());
+            let fill = result.delivery().unwrap();
+            assert_eq!(
+                (fill.price(), fill.amount(), fill.next()),
+                (90.0, 0.25, previous)
+            );
+        }
+        let average = previous
+            .prepare_observed_average(3.0, Some(1.0), Some(1.0), Some(90.0), Arithmetic::Binary)
+            .unwrap();
+        // Direct price wins even when an unused average quote regresses.
+        assert_eq!(average.observation().unwrap().value(), Some(3.0));
+        assert_eq!(average.delivery().unwrap().next().value(), Some(3.0));
+        assert!(
+            previous
+                .enrich_quote(Cursor::seed(2.0, Some(999.0)).unwrap())
+                .is_none()
+        );
+        assert!(
+            Cursor::seed(2.0, None)
+                .unwrap()
+                .enrich_quote(Cursor::seed(3.0, Some(300.0)).unwrap())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn observed_average_preserves_arbitrary_last_and_zero_presence_policies() {
+        let previous = Cursor::seed(1.0, Some(100.0)).unwrap();
+        let fill = previous
+            .prepare_observed_average(2.0, Some(0.25), Some(110.0), None, Arithmetic::Binary)
+            .unwrap()
+            .delivery()
+            .unwrap();
+        assert_eq!((fill.amount(), fill.price()), (0.25, 480.0));
+        let quiet = previous
+            .prepare_observed_average(2.0, Some(0.0), Some(110.0), Some(0.0), Arithmetic::Binary)
+            .unwrap();
+        assert!(quiet.delivery().is_none());
+        assert_eq!(quiet.observation().unwrap().value(), Some(220.0));
+        assert!(
+            previous
+                .prepare_observed_average(
+                    2.0,
+                    Some(1.0),
+                    Some(110.0),
+                    Some(0.0),
+                    Arithmetic::Binary
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn observed_average_rejects_supplied_invalid_values_even_when_unused() {
+        for quantity in [2.0, 3.0, 4.0] {
+            for last in [0.0, 1.0] {
+                assert!(
+                    Cursor::seed(3.0, Some(300.0))
+                        .unwrap()
+                        .prepare_observed_average(
+                            quantity,
+                            Some(last),
+                            Some(f64::MAX),
+                            Some(100.0),
+                            Arithmetic::Binary
+                        )
+                        .is_err()
+                );
+            }
+        }
+        for bad in [-1.0, f64::NAN, f64::INFINITY] {
+            for (quantity, last, average, direct) in [
+                (bad, Some(0.0), None, None),
+                (1.0, Some(bad), None, Some(100.0)),
+                (1.0, Some(0.0), Some(bad), Some(100.0)),
+                (1.0, Some(0.0), None, Some(bad)),
+            ] {
+                assert!(
+                    Cursor::default()
+                        .prepare_observed_average(
+                            quantity,
+                            last,
+                            average,
+                            direct,
+                            Arithmetic::Binary
+                        )
+                        .is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn observed_average_inferred_overflow_is_best_effort_only() {
+        let previous = Cursor::seed(1.0, Some(f64::MAX)).unwrap();
+        let result = previous
+            .prepare_observed_average(2.0, Some(1.0), None, Some(f64::MAX), Arithmetic::Binary)
+            .unwrap();
+        let fill = result.delivery().unwrap();
+        assert_eq!(
+            (fill.amount(), fill.price(), fill.next().value()),
+            (1.0, f64::MAX, None)
+        );
+        assert!(
+            previous
+                .prepare_observed_average(
+                    2.0,
+                    Some(0.0),
+                    Some(f64::MAX),
+                    Some(100.0),
+                    Arithmetic::Binary
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn observed_average_nonbinary_delivery_does_not_infer_binary_quote() {
+        for arithmetic in [Arithmetic::DecimalRounded, Arithmetic::DecimalCapped20] {
+            let previous = Cursor::seed(0.2, Some(20.0)).unwrap();
+            let result = previous
+                .prepare_observed_average(0.3, None, None, Some(100.0), arithmetic)
+                .unwrap();
+            let fill = result.delivery().unwrap();
+            assert_eq!(fill.amount(), arithmetic.subtract(0.3, 0.2).unwrap());
+            assert_eq!(fill.price(), 100.0);
+            assert_eq!(fill.next().value(), None);
+        }
+    }
+
     fn uniform(start: f64, end: f64, price: f64) -> PricedInterval {
         PricedInterval::uniform(
             QuantityInterval::new(start, end).unwrap(),
@@ -715,6 +1019,78 @@ mod tests {
             .unwrap()
             .commit()
             .map(|delivery| (delivery.price(), delivery.amount()))
+    }
+
+    #[test]
+    fn capped_last_preserves_full_observation_and_native_suffix() {
+        for (last, amount) in [(Some(0.25), 0.25), (Some(4.0), 1.0), (None, 1.0)] {
+            let prepared = ObservedProgress::new(2.0, Some(3.0))
+                .unwrap()
+                .prepare_capped(last, 100.0)
+                .unwrap()
+                .unwrap();
+            assert_eq!(prepared.delivery().amount(), amount);
+            assert_eq!(prepared.delivery().price(), 100.0);
+            assert_eq!(prepared.observed(), 3.0);
+            assert_eq!(prepared.delivery().next().quantity(), 3.0);
+        }
+        let gap = ObservedProgress::new(0.0, Some(10.0))
+            .unwrap()
+            .prepare_capped(Some(0.5), 100.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(gap.delivery().amount(), 0.5);
+        assert_eq!(gap.observed(), 10.0);
+    }
+
+    #[test]
+    fn capped_last_quiet_observations_do_not_require_unused_price() {
+        for (previous, cumulative, last) in [
+            (2.0, Some(2.0), Some(0.5)),
+            (2.0, Some(1.0), Some(0.5)),
+            (2.0, Some(3.0), Some(0.0)),
+            (2.0, None, None),
+        ] {
+            let progress = ObservedProgress::new(previous, cumulative).unwrap();
+            assert_eq!(progress.prepare_capped(last, 0.0), Ok(None));
+            assert_eq!(
+                progress.quantity(),
+                previous.max(cumulative.unwrap_or(previous))
+            );
+        }
+        assert_eq!(
+            ObservedProgress::new(2.0, Some(2.0))
+                .unwrap()
+                .prepare_capped(Some(-1.0), 100.0),
+            Err(Rejection::InvalidQuantity)
+        );
+    }
+
+    #[test]
+    fn capped_last_validates_before_progress_and_checks_unanchored_addition() {
+        let progress = ObservedProgress::new(0.25, Some(0.75)).unwrap();
+        for price in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert_eq!(
+                progress.prepare_capped(Some(0.5), price),
+                Err(Rejection::Unpriced)
+            );
+        }
+        let corrected = progress.prepare_capped(Some(0.5), 100.0).unwrap().unwrap();
+        assert_eq!(corrected.delivery().amount(), 0.5);
+        assert_eq!(corrected.observed(), 0.75);
+        assert_eq!(
+            ObservedProgress::new(f64::MAX, None)
+                .unwrap()
+                .prepare_capped(Some(f64::MAX), 100.0),
+            Err(Rejection::NonFiniteArithmetic)
+        );
+        let unanchored = ObservedProgress::new(2.0, None)
+            .unwrap()
+            .prepare_capped(Some(0.5), 100.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unanchored.observed(), 2.5);
+        assert_eq!(unanchored.delivery().amount(), 0.5);
     }
 
     #[test]

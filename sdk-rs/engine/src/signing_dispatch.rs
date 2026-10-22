@@ -1,5 +1,6 @@
 //! Shared bounded park/resume state for HTTP, WS messages and WS upgrades.
-use crate::signing::{Algorithm, Operation, SignError, SignReceipt, SignRequest, SignResult};
+use crate::signing::{SignError, SignReceipt, SignRequest, SignResult, validate_result_shape};
+use crate::signing_headers::ResultHeaderPolicy;
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
 use std::collections::HashMap;
 
@@ -42,6 +43,10 @@ pub trait SignStep: Send {
     ) -> Result<SignRequest, SignError>;
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError>;
     fn freshness_ms(&self) -> f64;
+    /// Only trusted HTTP recipes may declare callback header precedence.
+    fn result_header_policy(&self) -> ResultHeaderPolicy {
+        ResultHeaderPolicy::Deny
+    }
 }
 
 pub(crate) struct Pending {
@@ -51,6 +56,8 @@ pub(crate) struct Pending {
     step: Box<dyn SignStep>,
     sequence: u32,
     plain: bool,
+    pub managed: bool,
+    route_ready: bool,
     pub timer: TimerId,
     pub deadline: f64,
     staged_at: f64,
@@ -59,6 +66,7 @@ pub(crate) struct Pending {
     expected: Vec<Option<usize>>,
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
+    header_policy: ResultHeaderPolicy,
 }
 impl Pending {
     fn receipt_expired(&self, raw_now: f64) -> bool {
@@ -67,6 +75,12 @@ impl Pending {
                 + (raw_now - self.prepared_at.unwrap_or(f64::NAN));
             !protocol_now.is_finite() || protocol_now >= expiry
         })
+    }
+    pub fn managed_freshness(&self) -> Option<(u64, f64)> {
+        Some((
+            self.prepared_revision?,
+            (self.prepared_at? + self.step.freshness_ms()).min(self.deadline),
+        ))
     }
     pub fn request_id(&self) -> Option<RequestId> {
         match &self.outbound {
@@ -102,15 +116,35 @@ impl Dispatch {
         RequestId(self.next)
     }
     fn head(&self) -> Option<(RequestId, &Pending)> {
-        self.pending
-            .iter()
-            .chain(self.outbound.iter())
-            .min_by_key(|(_, p)| p.sequence)
-            .map(|(id, p)| (*id, p))
+        let entries = || self.pending.iter().chain(self.outbound.iter());
+        let first = entries().min_by_key(|(_, p)| p.sequence)?;
+        if first.1.managed {
+            // Independent managed HTTP can finish route/provider preparation in
+            // either order. Keep the existing non-HTTP/legacy sequence barrier.
+            let barrier = entries()
+                .filter(|(_, p)| !p.managed)
+                .map(|(_, p)| p.sequence)
+                .min();
+            if let Some(ready) = self
+                .pending
+                .iter()
+                .filter(|(_, p)| {
+                    p.managed
+                        && p.route_ready
+                        && p.prepared_at.is_none()
+                        && barrier.is_none_or(|sequence| p.sequence < sequence)
+                })
+                .min_by_key(|(_, p)| p.sequence)
+            {
+                return Some((*ready.0, ready.1));
+            }
+        }
+        Some((*first.0, first.1))
     }
     pub fn next_work(&self) -> Option<RequestId> {
         self.head().and_then(|(id, p)| {
-            (!p.plain && p.prepared_at.is_none() && self.pending.contains_key(&id)).then_some(id)
+            (!p.plain && p.route_ready && p.prepared_at.is_none() && self.pending.contains_key(&id))
+                .then_some(id)
         })
     }
     pub fn can_prepare(&self, id: RequestId) -> bool {
@@ -200,6 +234,12 @@ impl Dispatch {
             return Err(SignError::InvalidRequest);
         }
         let deadline = now + f64::from(timeout);
+        let header_policy = step.result_header_policy();
+        if !matches!(header_policy, ResultHeaderPolicy::Deny)
+            && !matches!(outbound, Action::Http(_))
+        {
+            return Err(SignError::InvalidRequest);
+        }
         self.pending.insert(
             id,
             Pending {
@@ -208,6 +248,8 @@ impl Dispatch {
                 step,
                 sequence: id.0,
                 plain: false,
+                managed: false,
+                route_ready: true,
                 timer,
                 deadline,
                 staged_at: now,
@@ -216,9 +258,41 @@ impl Dispatch {
                 expected: vec![],
                 receipt: Default::default(),
                 prepared_protocol_at: None,
+                header_policy,
             },
         );
         Ok(deadline)
+    }
+    pub fn stage_managed(
+        &mut self,
+        id: RequestId,
+        outbound: Action,
+        step: Box<dyn SignStep>,
+        now: f64,
+        deadline: f64,
+    ) -> Result<(), SignError> {
+        self.stage(id, outbound, step, TimerId(0), now)?;
+        let p = self.pending.get_mut(&id).expect("staged recipe");
+        p.managed = true;
+        p.route_ready = false;
+        p.deadline = deadline;
+        Ok(())
+    }
+    pub fn activate_managed(&mut self, id: RequestId) -> Result<(), SignError> {
+        let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
+        if !p.managed || p.route_ready {
+            return Err(SignError::InvalidRequest);
+        }
+        p.route_ready = true;
+        Ok(())
+    }
+    pub fn signature_pending(&self, id: RequestId) -> bool {
+        self.pending
+            .get(&id)
+            .is_some_and(|p| p.prepared_at.is_some())
+    }
+    pub fn is_managed(&self, id: RequestId) -> bool {
+        self.pending.get(&id).is_some_and(|p| p.managed)
     }
     pub fn request_mut(&mut self, request: RequestId) -> Option<&mut HttpRequest> {
         let p = self
@@ -261,6 +335,21 @@ impl Dispatch {
         }
         p.outbound = p.unsigned.clone();
         let work = p.step.prepare(&mut p.outbound, context)?;
+        if !matches!(p.header_policy, ResultHeaderPolicy::Deny)
+            && !matches!(p.outbound, Action::Http(_))
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        if !matches!(p.header_policy, ResultHeaderPolicy::Deny)
+            && work
+                .operations
+                .iter()
+                .filter(|operation| matches!(operation, crate::signing::Operation::Sign { .. }))
+                .count()
+                != 1
+        {
+            return Err(SignError::InvalidRequest);
+        }
         work.validate()?;
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
@@ -273,23 +362,7 @@ impl Dispatch {
         }
         p.receipt = work.receipt;
         p.prepared_protocol_at = Some(context.now_ms);
-        p.expected = work
-            .operations
-            .iter()
-            .map(|op| match op {
-                Operation::Sha256 { .. } => Some(32),
-                Operation::Present { .. } => None,
-                Operation::Sign { algorithm, .. } => Some(match algorithm {
-                    Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => 32,
-                    Algorithm::HmacSha512
-                    | Algorithm::Ed25519
-                    | Algorithm::Es256
-                    | Algorithm::StarkDigest
-                    | Algorithm::SchnorrDigest => 64,
-                    Algorithm::Secp256k1Digest => 65,
-                }),
-            })
-            .collect();
+        p.expected = work.expected_result_lengths();
         p.prepared_at = Some(now);
         p.prepared_revision = Some(clock_revision);
         Ok(work)
@@ -328,14 +401,9 @@ impl Dispatch {
             Ok(result) => result,
             Err(error) => return Some(Completion::Failed(p, error)),
         };
-        if result.receipt.validate().is_err()
-            || result.receipt != p.receipt
-            || p.prepared_at.is_none()
-            || result.values.len() != p.expected.len()
-            || p.expected
-                .iter()
-                .zip(&result.values)
-                .any(|(n, b)| b.len() > 1024 * 1024 || n.is_some_and(|n| b.len() != n))
+        if p.prepared_at.is_none()
+            || validate_result_shape(&p.expected, p.receipt, &result).is_err()
+            || p.header_policy.validate(&result.headers).is_err()
         {
             return Some(Completion::Failed(p, SignError::InvalidResult));
         }
@@ -347,6 +415,18 @@ impl Dispatch {
             p.outbound = p.unsigned.clone();
             return Some(Completion::Failed(p, error));
         }
+        if !result.headers.is_empty() || matches!(p.header_policy, ResultHeaderPolicy::Http { .. })
+        {
+            let merged = match &mut p.outbound {
+                Action::Http(http) => p.header_policy.apply_http(http, &result.headers),
+                _ => Err(SignError::InvalidResult),
+            };
+            if let Err(error) = merged {
+                wipe(&mut p.outbound);
+                p.outbound = p.unsigned.clone();
+                return Some(Completion::Failed(p, error));
+            }
+        }
         let action = std::mem::replace(&mut p.outbound, p.unsigned.clone());
         Some(Completion::Ready(p, action))
     }
@@ -355,6 +435,7 @@ impl Dispatch {
         pending.prepared_revision = None;
         pending.prepared_protocol_at = None;
         pending.receipt = Default::default();
+        pending.route_ready = !pending.managed;
         self.pending.insert(id, pending);
     }
     pub fn expire(&mut self, timer: TimerId) -> Option<(RequestId, Pending)> {
@@ -386,7 +467,7 @@ impl Dispatch {
         timers
     }
 }
-fn wipe(action: &mut Action) {
+pub(crate) fn wipe(action: &mut Action) {
     use zeroize::Zeroize;
     match action {
         Action::Http(http) => {
@@ -425,5 +506,202 @@ impl SignStep for Plain {
     }
     fn freshness_ms(&self) -> f64 {
         f64::MAX
+    }
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::*;
+    use crate::signing::{Algorithm, Context, KeyRef, Operation};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    struct Step {
+        policy: ResultHeaderPolicy,
+        calls: Arc<AtomicUsize>,
+    }
+    impl SignStep for Step {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &DispatchContext<'_>,
+        ) -> Result<SignRequest, SignError> {
+            Ok(SignRequest {
+                receipt: SignReceipt {
+                    stamp_ms: Some(1000.),
+                    expiry_ms: None,
+                },
+                operations: vec![Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key: KeyRef("ref:owned".into()),
+                    payload: vec![],
+                }],
+                context: Context::default(),
+            })
+        }
+        fn apply(&mut self, action: &mut Action, _: &SignResult) -> Result<(), SignError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            let Action::Http(http) = action else {
+                return Err(SignError::InvalidRequest);
+            };
+            http.headers.push(("X-MBX-APIKEY", "native".into()));
+            http.signer_headers
+                .push(("x-mbx-apikey".into(), "stale".into()));
+            Ok(())
+        }
+        fn freshness_ms(&self) -> f64 {
+            5000.
+        }
+        fn result_header_policy(&self) -> ResultHeaderPolicy {
+            self.policy
+        }
+    }
+    fn action() -> Action {
+        Action::Http(HttpRequest {
+            id: RequestId(1),
+            method: crate::Method::Get,
+            route: None,
+            timeout_ms: Some(1000),
+            url: "https://fixture.invalid/private".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        })
+    }
+    fn prepared(policy: ResultHeaderPolicy) -> (Dispatch, SignResult, Arc<AtomicUsize>) {
+        let mut dispatch = Dispatch::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        dispatch
+            .stage(
+                RequestId(10),
+                action(),
+                Box::new(Step {
+                    policy,
+                    calls: calls.clone(),
+                }),
+                TimerId(5),
+                1000.,
+            )
+            .unwrap();
+        let work = dispatch
+            .prepare(RequestId(10), 1000., &DispatchContext::new(1000., None), 3)
+            .unwrap();
+        let mut result = SignResult::new(vec![vec![7; 32]], work.receipt);
+        result.headers = vec![("x-mbx-apikey".into(), "callback".into())];
+        (dispatch, result, calls)
+    }
+    #[test]
+    fn fresh_http_headers_follow_recipe_apply_and_never_enter_unsigned_state() {
+        let (mut dispatch, result, calls) = prepared(ResultHeaderPolicy::Http { protected: &[] });
+        let Some(Completion::Ready(pending, Action::Http(http))) =
+            dispatch.finish(RequestId(10), 1010., 3, Ok(result))
+        else {
+            panic!("expected fresh HTTP")
+        };
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert!(http.headers.is_empty());
+        assert_eq!(
+            http.signer_headers,
+            vec![("x-mbx-apikey".into(), "callback".into())]
+        );
+        for stored in [&pending.outbound, &pending.unsigned] {
+            let Action::Http(stored) = stored else {
+                panic!("expected HTTP")
+            };
+            assert!(stored.headers.is_empty() && stored.signer_headers.is_empty());
+        }
+    }
+    #[test]
+    fn forbidden_or_invalid_callback_metadata_fails_before_recipe_mutation() {
+        for policy in [
+            ResultHeaderPolicy::Deny,
+            ResultHeaderPolicy::Http { protected: &[] },
+        ] {
+            let (mut dispatch, mut result, calls) = prepared(policy);
+            if matches!(policy, ResultHeaderPolicy::Http { .. }) {
+                result.headers[0].1.push('\n');
+            }
+            assert!(matches!(
+                dispatch.finish(RequestId(10), 1010., 3, Ok(result)),
+                Some(Completion::Failed(_, SignError::InvalidResult))
+            ));
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+        }
+    }
+    #[test]
+    fn protected_policy_is_applied_even_when_callback_headers_are_empty() {
+        let (mut dispatch, mut result, calls) = prepared(ResultHeaderPolicy::Http {
+            protected: &["X-MBX-APIKEY"],
+        });
+        result.headers.clear();
+        let Some(Completion::Ready(_, Action::Http(http))) =
+            dispatch.finish(RequestId(10), 1010., 3, Ok(result))
+        else {
+            panic!("expected fresh HTTP")
+        };
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(http.headers, vec![("X-MBX-APIKEY", "native".into())]);
+        assert!(http.signer_headers.is_empty());
+    }
+    #[test]
+    fn stale_timeout_cancel_and_final_release_never_emit_old_headers() {
+        for (now, revision, timed_out) in [(1010., 4, false), (2000., 3, true)] {
+            let (mut dispatch, result, calls) =
+                prepared(ResultHeaderPolicy::Http { protected: &[] });
+            let completion = dispatch.finish(RequestId(10), now, revision, Ok(result));
+            if timed_out {
+                assert!(matches!(
+                    completion,
+                    Some(Completion::Failed(_, SignError::TimedOut))
+                ));
+            } else {
+                assert!(matches!(completion, Some(Completion::Stale(_))));
+            }
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+        }
+        let (mut dispatch, result, calls) = prepared(ResultHeaderPolicy::Http { protected: &[] });
+        assert!(dispatch.remove_request(RequestId(1)).is_some());
+        assert!(
+            dispatch
+                .finish(RequestId(10), 1010., 3, Ok(result))
+                .is_none()
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+        let (mut dispatch, result, _) = prepared(ResultHeaderPolicy::Http { protected: &[] });
+        let Some(Completion::Ready(pending, action)) =
+            dispatch.finish(RequestId(10), 1010., 3, Ok(result))
+        else {
+            panic!("expected completed signing")
+        };
+        dispatch.ready(RequestId(10), pending);
+        assert!(matches!(
+            dispatch.release(RequestId(10), action, 1020., 4),
+            Some(Completion::Stale(_))
+        ));
+    }
+    #[test]
+    fn optional_empty_headers_keep_the_existing_wire_shape_and_capture_is_default_deny() {
+        let (mut dispatch, mut result, _) = prepared(ResultHeaderPolicy::Http { protected: &[] });
+        let work = dispatch.pending.remove(&RequestId(10)).unwrap();
+        let request = SignRequest {
+            receipt: result.receipt,
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: KeyRef("ref:owned".into()),
+                payload: vec![],
+            }],
+            context: Context::default(),
+        };
+        assert!(request.validate_result(&result).is_err());
+        result.headers.clear();
+        assert!(request.validate_result(&result).is_ok());
+        let encoded = serde_json::to_value(&result).unwrap();
+        assert!(encoded.get("headers").is_none());
+        let decoded: SignResult = serde_json::from_value(encoded).unwrap();
+        assert!(decoded.headers.is_empty());
+        drop(work);
     }
 }

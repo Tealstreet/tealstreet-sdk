@@ -4,10 +4,12 @@ import { createHmac } from 'node:crypto';
 import vector from '../../../../../sdk-rs/crypto/tests/fixtures/hmac/binance.json';
 import { expect, it } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 const identities = { primary: { credential: 'primary.credential', signing: 'primary.signing' } };
 const makeTransport = (sent: Parameters<Transport['request']>[0][]): Transport => ({
   now: () => 1_700_000_000_000,
+  prepareHttp: prepareRecordedHttp,
   request: async (request) => {
     sent.push(request);
     return { status: 200, headers: '', body: new TextEncoder().encode('[{"accountAlias":"account"}]') };
@@ -78,7 +80,7 @@ it('actual WASM consumes separate local setup and rejects malformed or unsupport
   const setup = JSON.stringify({ primary: { key: 'public-key-only', secret: vector.secret } });
   for (const [venue, options, credentials] of [
     ['binance', '{', setup],
-    ['bybit', '{}', setup],
+    ['bitunix', '{}', setup],
     ['binance', '{}', '{"primary":{"secret":"audit-secret-sentinel"'],
   ]) {
     let failure: unknown;
@@ -102,8 +104,68 @@ it('actual WASM consumes separate local setup and rejects malformed or unsupport
 
 it('actual WASM refuses external-provider override on an unmigrated family', async () => {
   const { WasmEngine } = await loadNodeEngine();
-  const engine = new WasmEngine('bybit', JSON.stringify({ publicDataOnly: true }));
+  const engine = new WasmEngine('bitunix', JSON.stringify({ publicDataOnly: true }));
   try {
     expect(() => new EngineHost(engine, makeTransport([]), {}, { signer: (request) => ({ values: [], receipt: request.receipt }) })).toThrow(/not supported/);
   } finally { engine.free?.(); }
+});
+
+it('actual Bybit WASM local setup signs its identity read with the selected credential and maps native user IDs', async () => {
+  const { WasmEngine } = await loadNodeEngine();
+  const now = 1_700_000_000_000;
+  const window = 500;
+  const primary = { key: 'bybit-primary-key', secret: vector.secret };
+  const secondary = { key: 'bybit-read-key', secret: 'bybit-read-secret' };
+  for (const readOnly of [false, true]) {
+    const sent: Parameters<Transport['request']>[0][] = [];
+    const saneTransport: Transport = {
+      ...makeTransport(sent),
+      now: () => now,
+      request: async (request) => {
+        sent.push(request);
+        return {
+          status: 200,
+          headers: '',
+          body: new TextEncoder().encode(JSON.stringify({
+            retCode: 0,
+            retMsg: 'OK',
+            result: { userID: 'bybit-user-id', inviterID: 12345 },
+          })),
+        };
+      },
+    };
+    const setup = JSON.stringify({ primary, ...(readOnly ? { secondary } : {}) });
+    const engine = new WasmEngine('bybit', JSON.stringify({ publicMode: { requested: false }, recvWindow: window }), setup);
+    expect(JSON.parse(engine.construction!())).toMatchObject({
+      canSign: true,
+      publicDataOnly: false,
+      bridge: { dispatchSigning: true },
+    });
+    expect(engine.requiresExternalSigner!()).toBe(false);
+    const host = new EngineHost(engine, saneTransport, {}, { ownsEngine: true });
+    try {
+      await expect(host.command({ op: 'fetchAccount' })).resolves.toEqual({
+        userId: 'bybit-user-id',
+        affiliateId: '12345',
+      });
+      expect(sent).toHaveLength(1);
+      const [request] = sent;
+      expect(request.method).toBe('GET');
+      expect(request.url).toBe('https://api.bybit.com/v5/user/query-api');
+      expect(request.route).toBeUndefined();
+      expect(request.body).toBeUndefined();
+      const selected = readOnly ? secondary : primary;
+      const signature = createHmac('sha256', selected.secret)
+        .update(`${now}${selected.key}${window}`)
+        .digest('hex');
+      expect(request.headers).toEqual({
+        'X-BAPI-API-KEY': selected.key,
+        'X-BAPI-TIMESTAMP': `${now}`,
+        'X-BAPI-RECV-WINDOW': `${window}`,
+        'X-BAPI-SIGN': signature,
+        'X-Referer': 'Tealstreet',
+        'Content-Type': 'application/json',
+      });
+    } finally { host.dispose(); }
+  }
 });

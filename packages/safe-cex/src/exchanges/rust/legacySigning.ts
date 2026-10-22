@@ -1,0 +1,84 @@
+import type { EngineHost, HostedSigningClock } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeName, ExchangeOptions, RemoteSignerRequest, RemoteSignerResponse } from '../../types';
+
+import axios from 'axios';
+import qs from 'qs';
+
+import { signHttpCapture } from '../../utils/signHttpCapture';
+import { createBinanceRequestInterceptor, isBinancePublicSigningRequest } from '../binance/binance.signing';
+import { createBybitRequestInterceptor, isBybitUnsignedSigningRequest } from '../bybit/bybit.signing';
+import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site';
+import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';
+
+const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse', 'binancespot']);
+
+/** The surviving hosted wire adapter uses standalone codecs, never a TS venue.
+ * It cannot fall back to options.secret: the callback always uses owned refs.
+ */
+export const signHostedHttp = async (
+  name: ExchangeName,
+  options: ExchangeOptions,
+  primaryComplete: boolean,
+  host: EngineHost,
+  request: RemoteSignerRequest,
+): Promise<RemoteSignerResponse> => {
+  if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
+  const binance = BINANCE.has(name);
+  const unsigned = binance ? isBinancePublicSigningRequest(name, request.config.url)
+    : isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
+  const needsCredential = primaryComplete && !unsigned;
+  const credential = needsCredential ? (await host.hostedSigning({ kind: 'credential' })).credential : undefined;
+  if (needsCredential && !credential) throw new Error('Signing credential is unavailable');
+  let clock: HostedSigningClock | undefined;
+  const now = () => {
+    clock = host.hostedSigningClock();
+    return clock.stampMs;
+  };
+  const signingOptions: ExchangeOptions = {
+    ...options,
+    key: credential ?? '',
+    secret: '',
+    remoteSigner: undefined,
+    payloadSigner: async ({ payload }) => {
+      if (!clock) throw new Error('Signing clock is unavailable');
+      const output = await host.hostedSigning({ kind: 'http', payload, ...clock });
+      // The exact preimage already contains this API key for Bybit. Never
+      // return a MAC under changed provider material with an unrelated header.
+      if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+      return { signature: output.signature, ...(output.headers === undefined ? {} : { headers: Object.fromEntries(output.headers) }) };
+    },
+  };
+  const siteHeaders = isBybitSiteIdExchange(name) ? getBybitSiteHeaders(options) : {};
+  const xhr = axios.create({
+    timeout: 20_000,
+    paramsSerializer: {
+      serialize: (params) => binance ? qs.stringify(params, { arrayFormat: 'repeat' }) : qs.stringify(params),
+    },
+    headers: binance ? {
+      'X-MBX-APIKEY': credential,
+      'Content-Type': 'application/json, charset=utf-8',
+    } : {
+      'X-Referer': BROKER_ID,
+      'X-BAPI-RECV-WINDOW': options.extra?.recvWindow ?? RECV_WINDOW,
+      'Content-Type': 'application/json, charset=utf-8',
+      ...siteHeaders,
+    },
+  });
+  xhr.interceptors.request.use(binance
+    ? createBinanceRequestInterceptor(signingOptions, name, now)
+    : createBybitRequestInterceptor(signingOptions, name, now, siteHeaders));
+  return signHttpCapture(xhr, request);
+};
+
+export const signHostedWsAuth = async (
+  host: EngineHost,
+  request: RemoteSignerRequest,
+): Promise<RemoteSignerResponse> => {
+  const { toSign, outputFormat } = request.wsAuth ?? {};
+  if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
+  if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64')
+    return { id: request.id, error: 'Unsupported WS auth output format' };
+  const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
+  if (!output.signature) throw new Error('Signing result is unavailable');
+  return { id: request.id, wsAuthSignature: output.signature };
+};

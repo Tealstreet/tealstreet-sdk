@@ -1,60 +1,223 @@
-//! Signed REST and private socket auth. Bybit HMACs
-//! `timestamp + key + recvWindow + payload`, where the payload is the query
-//! string of a GET and the JSON body of a POST, and sends the result in headers.
-use safe_cex_crypto::{Encoding, hmac_sha256};
-use safe_cex_engine::num;
-
+//! Canonical Bybit recipes. The shared dispatch signer owns credentials and HMACs.
+pub use safe_cex_engine::signing::Identity as Credentials;
+use safe_cex_engine::signing::{Context, SignError, SignReceipt, SignRequest, SignResult};
+use safe_cex_engine::{Action, DispatchContext, SignStep, num};
 pub const RECV_WINDOW_MS: u32 = 20_000;
 pub const BROKER_ID: &str = "Tealstreet";
-/// A socket auth signature stays valid this long.
 const WS_AUTH_EXPIRY_MS: f64 = 10_000.0;
-
-#[derive(Clone)]
-pub struct Credentials {
-    pub key: String,
-    pub secret: String,
+fn credential(value: &[u8]) -> Result<&str, SignError> {
+    let value = std::str::from_utf8(value).map_err(|_| SignError::InvalidResult)?;
+    if value.is_empty() || value.contains(['\r', '\n']) {
+        return Err(SignError::InvalidResult);
+    }
+    Ok(value)
+}
+fn context(url: &str, method: &str) -> Context {
+    let (host, path) = url
+        .split_once("://")
+        .map(|(_, rest)| rest.split_once('/').unwrap_or((rest, "")))
+        .unwrap_or(("", ""));
+    Context {
+        venue: "bybit".into(),
+        method: method.into(),
+        host: host.into(),
+        path: format!("/{path}"),
+    }
+}
+pub(crate) struct Http {
+    credentials: Credentials,
+    payload: String,
+    window: u32,
+    stamp: String,
+    header_policy: safe_cex_engine::signing_headers::ResultHeaderPolicy,
+}
+impl Http {
+    pub fn new(credentials: Credentials, payload: String, window: Option<u32>) -> Self {
+        Self {
+            credentials,
+            payload,
+            window: window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS),
+            stamp: String::new(),
+            header_policy: Default::default(),
+        }
+    }
+}
+impl Http {
+    pub fn with_header_policy(
+        mut self,
+        policy: safe_cex_engine::signing_headers::ResultHeaderPolicy,
+    ) -> Self {
+        self.header_policy = policy;
+        self
+    }
+}
+impl SignStep for Http {
+    fn result_header_policy(&self) -> safe_cex_engine::signing_headers::ResultHeaderPolicy {
+        self.header_policy
+    }
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let stamp = dispatch.stamp_ms();
+        self.stamp = num::format(stamp);
+        Ok(crate::hosted_signing::http_work(
+            &self.credentials,
+            self.payload.clone(),
+            stamp,
+            self.window.to_string(),
+            context(&http.url, http.method.as_str()),
+        ))
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let key = credential(result.values.first().ok_or(SignError::InvalidResult)?)?;
+        let mac = result
+            .values
+            .get(1)
+            .filter(|mac| mac.len() == 32)
+            .ok_or(SignError::InvalidResult)?;
+        http.headers = vec![
+            ("X-BAPI-API-KEY", key.into()),
+            ("X-BAPI-TIMESTAMP", self.stamp.clone()),
+            ("X-BAPI-RECV-WINDOW", self.window.to_string()),
+            ("X-BAPI-SIGN", safe_cex_crypto::hex(mac)),
+            ("X-Referer", BROKER_ID.into()),
+            ("Content-Type", "application/json".into()),
+        ];
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        f64::from(self.window).min(5000.)
+    }
+}
+pub(crate) struct WsAuth {
+    credentials: Credentials,
+    request_id: Option<String>,
+    origin: String,
+    expires: String,
+}
+impl WsAuth {
+    pub fn new(credentials: Credentials, request_id: Option<String>, origin: String) -> Self {
+        Self {
+            credentials,
+            request_id,
+            origin,
+            expires: String::new(),
+        }
+    }
+}
+impl SignStep for WsAuth {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        if !matches!(outbound, Action::WsSend { .. }) {
+            return Err(SignError::InvalidRequest);
+        }
+        let expiry = dispatch.stamp_ms() + WS_AUTH_EXPIRY_MS;
+        self.expires = num::format(expiry);
+        let mut work = crate::hosted_signing::ws_work(
+            &self.credentials,
+            format!("GET/realtime{}", self.expires),
+            context(&self.origin, "WS"),
+        );
+        // Native auth generates this expiry; hosted auth preserves caller bytes.
+        work.receipt = SignReceipt {
+            stamp_ms: None,
+            expiry_ms: Some(expiry),
+        };
+        Ok(work)
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let Action::WsSend { text, .. } = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let key = credential(result.values.first().ok_or(SignError::InvalidResult)?)?;
+        let mac = result
+            .values
+            .get(1)
+            .filter(|mac| mac.len() == 32)
+            .ok_or(SignError::InvalidResult)?;
+        #[derive(serde::Serialize)]
+        struct Auth<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            req_id: Option<&'a str>,
+            op: &'a str,
+            args: [&'a str; 3],
+        }
+        let signature = safe_cex_crypto::hex(mac);
+        *text = serde_json::to_string(&Auth {
+            req_id: self.request_id.as_deref(),
+            op: "auth",
+            args: [key, &self.expires, &signature],
+        })
+        .map_err(|_| SignError::InvalidResult)?;
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
 }
 
-impl Credentials {
-    /// The auth headers for one request at `timestamp_ms`.
-    #[cfg(test)]
-    pub fn headers(&self, timestamp_ms: f64, payload: &str) -> Vec<(&'static str, String)> {
-        self.headers_window(timestamp_ms, payload, None)
+#[cfg(test)]
+pub(crate) mod oracle {
+    use super::{BROKER_ID, RECV_WINDOW_MS, WS_AUTH_EXPIRY_MS};
+    use safe_cex_crypto::{Encoding, hmac_sha256};
+    use safe_cex_engine::num;
+    #[derive(Clone)]
+    pub struct Credentials {
+        pub key: String,
+        pub secret: String,
     }
 
-    pub fn headers_window(
-        &self,
-        timestamp_ms: f64,
-        payload: &str,
-        window: Option<u32>,
-    ) -> Vec<(&'static str, String)> {
-        let window = window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS);
-        let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(timestamp_ms));
-        let signed = format!("{timestamp}{}{window}{payload}", self.key);
-        let signature = hmac_sha256(self.secret.as_bytes(), signed.as_bytes(), Encoding::Hex);
-        vec![
-            ("X-BAPI-API-KEY", self.key.clone()),
-            ("X-BAPI-TIMESTAMP", timestamp),
-            ("X-BAPI-RECV-WINDOW", window.to_string()),
-            ("X-BAPI-SIGN", signature),
-            ("X-Referer", BROKER_ID.to_owned()),
-            ("Content-Type", "application/json".to_owned()),
-        ]
+    impl Credentials {
+        /// The auth headers for one request at `timestamp_ms`.
+        pub fn headers(&self, timestamp_ms: f64, payload: &str) -> Vec<(&'static str, String)> {
+            self.headers_window(timestamp_ms, payload, None)
+        }
+
+        pub fn headers_window(
+            &self,
+            timestamp_ms: f64,
+            payload: &str,
+            window: Option<u32>,
+        ) -> Vec<(&'static str, String)> {
+            let window = window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS);
+            let timestamp = num::format(timestamp_ms.floor());
+            let signed = format!("{timestamp}{}{window}{payload}", self.key);
+            let signature = hmac_sha256(self.secret.as_bytes(), signed.as_bytes(), Encoding::Hex);
+            vec![
+                ("X-BAPI-API-KEY", self.key.clone()),
+                ("X-BAPI-TIMESTAMP", timestamp),
+                ("X-BAPI-RECV-WINDOW", window.to_string()),
+                ("X-BAPI-SIGN", signature),
+                ("X-Referer", BROKER_ID.to_owned()),
+                ("Content-Type", "application/json".to_owned()),
+            ]
+        }
+
+        /// `{"op":"auth","args":[key, expires, HMAC("GET/realtime" + expires)]}`.
+        pub fn ws_auth(&self, now_ms: f64) -> String {
+            let expires = num::format((now_ms + WS_AUTH_EXPIRY_MS).floor());
+            let signature = hmac_sha256(
+                self.secret.as_bytes(),
+                format!("GET/realtime{expires}").as_bytes(),
+                Encoding::Hex,
+            );
+            let key = serde_json::to_string(&self.key).unwrap_or_default();
+            format!(r#"{{"op":"auth","args":[{key},"{expires}","{signature}"]}}"#)
+        }
     }
 
-    /// `{"op":"auth","args":[key, expires, HMAC("GET/realtime" + expires)]}`.
-    pub fn ws_auth(&self, now_ms: f64) -> String {
-        let expires = num::format(safe_cex_engine::time::wire_stamp_ms(
-            now_ms + WS_AUTH_EXPIRY_MS,
-        ));
-        let signature = hmac_sha256(
-            self.secret.as_bytes(),
-            format!("GET/realtime{expires}").as_bytes(),
-            Encoding::Hex,
-        );
-        let key = serde_json::to_string(&self.key).unwrap_or_default();
-        format!(r#"{{"op":"auth","args":[{key},"{expires}","{signature}"]}}"#)
-    }
+    safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
 }
 
 pub use safe_cex_engine::url::Query;
@@ -119,6 +282,7 @@ impl Body {
 
 #[cfg(test)]
 mod tests {
+    use super::oracle::Credentials;
     use super::*;
 
     #[test]
@@ -167,11 +331,10 @@ mod tests {
     }
 }
 
-safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
-
 #[cfg(test)]
 mod security_receive_window {
-    use super::*;
+    use super::oracle::Credentials;
+    use safe_cex_crypto::{Encoding, hmac_sha256};
 
     #[test]
     fn smaller_receive_window_is_in_both_signed_preimage_and_header() {

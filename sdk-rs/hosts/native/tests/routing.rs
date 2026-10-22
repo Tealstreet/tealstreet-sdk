@@ -2,6 +2,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 // Tungstenite fixes the server callback error type to an owned HTTP response.
 #![allow(clippy::result_large_err)]
+#[path = "support/prepared.rs"]
+mod prepared;
 
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{Command, HttpRequest, Method, Notice, RequestId, SocketId};
@@ -537,6 +539,83 @@ async fn relay_hides_auth_and_delays_open_until_the_upstream_is_ready() {
         matches!(next(&mut events).await, HostEvent::WsMessage(_, text) if text == "venue-auth-response")
     );
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn prepared_how_binds_after_auth_and_dropping_a_bound_packet_sends_no_http() {
+    use safe_cex_engine::request_context::RoutingIntent;
+    for cancel in [false, true] {
+        let (listener, origin) = listener().await;
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            ws.send(Message::text(r#"{"type":"rpc.auth","status":"success"}"#))
+                .await
+                .unwrap();
+            if cancel {
+                assert!(
+                    !matches!(ws.next().await, Some(Ok(Message::Text(_)))),
+                    "cancelling a prepared packet must not send an HTTP frame"
+                );
+            } else {
+                let packet = rpc(&mut ws).await;
+                assert_eq!(packet.kind, "rpc.http");
+                let arg = packet.arg.unwrap();
+                assert_eq!(
+                    arg.url,
+                    "https://venue.invalid/order?timestamp=123&signature=wire-sentinel"
+                );
+                assert_eq!(arg.headers["X-Signature"], "signature-sentinel");
+                assert_eq!(
+                    serde_json::from_str::<String>(arg.data.get()).unwrap(),
+                    r#"{ "id": 18446744073709551615, "n": 1.000 }"#
+                );
+                ws.send(Message::text(format!(r#"{{"type":"rpc.http","nonce":"{}","data":{{"status":200,"data_raw":"{{}}"}}}}"#, packet.nonce.unwrap()))).await.unwrap();
+                let _ = ws.next().await;
+            }
+        });
+        let plan = RoutingPlan {
+            http: HttpRoute {
+                mode: HttpRouteMode::How,
+                tunnel_url: Some(origin.replacen("http:", "ws:", 1) + "/tunnel"),
+                ..HttpRoute::default()
+            },
+            ..RoutingPlan::default()
+        };
+        let transport = NetworkTransport::with_routing(
+            plan,
+            Arc::new(|| {
+                Box::pin(async { panic!("IP-authenticated preparation must not request a token") })
+            }),
+        );
+        let mut packet = http_request(71, "https://venue.invalid/order".into());
+        packet.headers.clear();
+        packet.body = None;
+        let prepared = transport
+            .prepare_http(packet.clone(), RoutingIntent::Primary)
+            .await
+            .unwrap();
+        packet
+            .url
+            .push_str("?timestamp=123&signature=wire-sentinel");
+        packet
+            .headers
+            .push(("X-Signature", "signature-sentinel".into()));
+        packet.body = Some(r#"{ "id": 18446744073709551615, "n": 1.000 }"#.into());
+        let bound = prepared.bind(packet).unwrap();
+        assert!(bound.ready());
+        if cancel {
+            drop(bound);
+        } else {
+            let (events, mut inbox) = mpsc::unbounded_channel();
+            let _request_task = bound.dispatch(events);
+            assert_eq!(http_body(&mut inbox).await, b"{}");
+        }
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -1633,7 +1712,45 @@ struct NoticeNetwork {
     signed_url: String,
     account_route: bool,
 }
+impl NoticeNetwork {
+    fn mapped(mut request: HttpRequest, signed_url: &str, account_route: bool) -> HttpRequest {
+        request.url = signed_url.into();
+        if account_route {
+            request.route = None;
+        }
+        request
+            .headers
+            .push(("X-MBX-APIKEY", NOTICE_API_KEY.into()));
+        request
+    }
+}
 impl Transport for NoticeNetwork {
+    fn prepare_http(
+        &self,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+    ) -> safe_cex_native::HttpPrepareFuture {
+        let boundary = prepared::Boundary::new(&request);
+        let network = self.network.clone();
+        let signed_url = self.signed_url.clone();
+        let account_route = self.account_route;
+        // These cases explicitly exercise account proxy authorization even
+        // though the test venue's source request is public startup/candles.
+        let intent = if account_route {
+            safe_cex_engine::request_context::RoutingIntent::Primary
+        } else {
+            intent
+        };
+        let resource =
+            network.prepare_http(Self::mapped(request, &signed_url, account_route), intent);
+        Box::pin(async move {
+            let boundary = boundary?;
+            let resource = resource.await?;
+            Ok(boundary.bind_with(move |packet| {
+                resource.bind(Self::mapped(packet, &signed_url, account_route))
+            }))
+        })
+    }
     fn connect(
         &self,
         _: SocketId,
@@ -1643,15 +1760,11 @@ impl Transport for NoticeNetwork {
         // This test exercises real HTTP failures without opening exchange sockets.
         mpsc::unbounded_channel().0
     }
-    fn request(&self, mut request: HttpRequest, events: safe_cex_native::Events) {
-        request.url.clone_from(&self.signed_url);
-        if self.account_route {
-            request.route = None;
-        }
-        request
-            .headers
-            .push(("X-MBX-APIKEY", NOTICE_API_KEY.into()));
-        self.network.request(request, events);
+    fn request(&self, request: HttpRequest, events: safe_cex_native::Events) {
+        self.network.request(
+            Self::mapped(request, &self.signed_url, self.account_route),
+            events,
+        );
     }
 }
 

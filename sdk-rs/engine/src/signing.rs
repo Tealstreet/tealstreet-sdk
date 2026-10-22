@@ -261,7 +261,68 @@ pub struct SignRequest {
     pub context: Context,
 }
 
+/// One credential presentation and exact HMAC preimage. Native recipes and
+/// signing-only compatibility adapters use the same atomic primitive shape;
+/// only the trusted recipe chooses the identity and canonical payload parts.
+pub fn hmac_sha256_work(
+    identity: &Identity,
+    payload: Vec<PayloadPart>,
+    context: Context,
+    receipt: SignReceipt,
+) -> SignRequest {
+    SignRequest {
+        receipt,
+        operations: vec![
+            Operation::Present {
+                key: identity.credential.clone(),
+            },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: identity.signing.clone(),
+                payload,
+            },
+        ],
+        context,
+    }
+}
+
 impl SignRequest {
+    /// Validate provider output against this exact atomic request. Dispatch and
+    /// signing-only capture share receipt, result-count and byte-shape policy.
+    pub fn validate_result(&self, result: &SignResult) -> Result<(), SignError> {
+        self.validate_result_with_policy(result, crate::signing_headers::ResultHeaderPolicy::Deny)
+    }
+
+    /// Only a trusted capture/recipe may supply HTTP callback-header authority.
+    /// Advisory request context and provider output never choose this policy.
+    pub fn validate_result_with_policy(
+        &self,
+        result: &SignResult,
+        policy: crate::signing_headers::ResultHeaderPolicy,
+    ) -> Result<(), SignError> {
+        validate_result_shape(&self.expected_result_lengths(), self.receipt, result)?;
+        policy.validate(&result.headers)
+    }
+
+    pub(crate) fn expected_result_lengths(&self) -> Vec<Option<usize>> {
+        self.operations
+            .iter()
+            .map(|operation| match operation {
+                Operation::Present { .. } => None,
+                Operation::Sha256 { .. } => Some(32),
+                Operation::Sign { algorithm, .. } => Some(match algorithm {
+                    Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => 32,
+                    Algorithm::HmacSha512
+                    | Algorithm::Ed25519
+                    | Algorithm::Es256
+                    | Algorithm::StarkDigest
+                    | Algorithm::SchnorrDigest => 64,
+                    Algorithm::Secp256k1Digest => 65,
+                }),
+            })
+            .collect()
+    }
+
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.
     pub fn validate(&self) -> Result<(), SignError> {
@@ -317,6 +378,24 @@ impl SignRequest {
     }
 }
 
+pub(crate) fn validate_result_shape(
+    expected: &[Option<usize>],
+    receipt: SignReceipt,
+    result: &SignResult,
+) -> Result<(), SignError> {
+    crate::signing_headers::validate(&result.headers)?;
+    if result.receipt.validate().is_err()
+        || result.receipt != receipt
+        || result.values.len() != expected.len()
+        || expected.iter().zip(&result.values).any(|(length, bytes)| {
+            bytes.len() > 1024 * 1024 || length.is_some_and(|length| bytes.len() != length)
+        })
+    {
+        return Err(SignError::InvalidResult);
+    }
+    Ok(())
+}
+
 /// Raw operation results in request order. May contain outbound credentials.
 /// Never serialize this as a notice or include provider values in an error.
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -324,10 +403,18 @@ impl SignRequest {
 pub struct SignResult {
     pub values: Vec<Vec<u8>>,
     pub receipt: SignReceipt,
+    /// Optional callback metadata for this atomic attempt. Trusted dispatch
+    /// policy decides whether it may modify the fresh HTTP action.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<(String, String)>,
 }
 impl SignResult {
     pub fn new(values: Vec<Vec<u8>>, receipt: SignReceipt) -> Self {
-        Self { values, receipt }
+        Self {
+            values,
+            receipt,
+            headers: vec![],
+        }
     }
 }
 
@@ -336,6 +423,9 @@ impl Drop for SignResult {
         use zeroize::Zeroize;
         for bytes in &mut self.values {
             bytes.zeroize();
+        }
+        for (_, value) in &mut self.headers {
+            value.zeroize();
         }
     }
 }

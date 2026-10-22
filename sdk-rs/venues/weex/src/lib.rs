@@ -737,6 +737,7 @@ impl Venue for WeexFutures {
         pending: &Self::Pending,
         response: &Response<'_>,
         _now: f64,
+        _store: &safe_cex_engine::Store,
     ) -> Option<safe_cex_engine::AuthOutcome> {
         self.account_auth(pending, response)
     }

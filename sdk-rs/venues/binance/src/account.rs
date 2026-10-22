@@ -82,7 +82,7 @@ struct PositionsJoin {
 
 struct OrdersJoin {
     generation: u32,
-    version: u32,
+    token: safe_cex_engine::OrderSnapshotToken,
     native_orders: Vec<(String, String, u64, f64)>,
     native_strategies: Vec<(String, String, u64)>,
     regular: Option<Vec<Order>>,
@@ -154,7 +154,6 @@ pub struct AccountState {
     spot_subscription: Option<u64>,
     spot_heartbeat_id: Option<String>,
     spot_heartbeat_at: Option<f64>,
-    order_version: u32,
     last_risk_at: f64,
     position_version: u32,
     pending_position_events: bool,
@@ -326,14 +325,15 @@ pub fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
 }
 
 impl BinanceFutures {
-    pub(crate) fn request_leverage_brackets(&self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn request_leverage_brackets(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.is_spot() {
             return;
         }
-        self.signed_streamed(
+        self.background_signed_read(
             cx,
             self.paths.leverage_bracket,
             Query::new(),
+            Some(safe_cex_engine::json::ArrayAt::Root),
             Pending::Account(Request::LeverageBrackets(HashMap::new())),
         );
     }
@@ -346,11 +346,11 @@ impl BinanceFutures {
         self.account.listen_key_failures = 0;
         self.request_listen_key(cx);
         if !self.is_spot() {
-            self.signed(
+            self.background_signed_read(
                 cx,
-                Method::Get,
                 self.paths.position_mode,
                 Query::new(),
+                None,
                 Pending::Account(Request::PositionMode),
             );
         }
@@ -363,6 +363,9 @@ impl BinanceFutures {
     }
 
     pub(crate) fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !cx.private_feed_policy().streaming() {
+            return;
+        }
         if self.is_spot() {
             self.reset_spot_subscription(cx);
             self.connect_url(cx, Channel::Private, self.urls.private_ws);
@@ -373,6 +376,9 @@ impl BinanceFutures {
 
     /// Livenet listenKey requests carry only the API key; testnet signs them.
     fn listen_key_request(&mut self, cx: &mut Cx<'_, Pending>, method: Method, request: Request) {
+        if !cx.private_feed_policy().streaming() {
+            return;
+        }
         let Some(credentials) = &self.credentials else {
             return;
         };
@@ -425,10 +431,11 @@ impl BinanceFutures {
             failed: false,
         });
         self.account.pending_position_events = false;
-        self.signed_streamed(
+        self.background_signed_read(
             cx,
             self.paths.position_risk,
             Query::new(),
+            Some(safe_cex_engine::json::ArrayAt::Root),
             Pending::Account(Request::PositionRisk {
                 generation,
                 rows: Vec::new(),
@@ -437,10 +444,11 @@ impl BinanceFutures {
             }),
         );
         if let Some(path) = symbol_config {
-            self.signed_streamed(
+            self.background_signed_read(
                 cx,
                 path,
                 Query::new(),
+                Some(safe_cex_engine::json::ArrayAt::Root),
                 Pending::Account(Request::SymbolConfig {
                     generation,
                     configs: Vec::new(),
@@ -454,11 +462,11 @@ impl BinanceFutures {
             return;
         }
         self.account.account_read_predates_event = false;
-        self.signed(
+        self.background_signed_read(
             cx,
-            Method::Get,
             self.paths.balance,
             Query::new(),
+            None,
             Pending::Account(Request::Account {
                 version: self.account.account_version,
             }),
@@ -469,11 +477,20 @@ impl BinanceFutures {
         if self.account.orders.is_some() {
             return;
         }
+        let Some(token) = cx.store.begin_orders_snapshot() else {
+            self.account.orders_stale = true;
+            cx.notice(
+                Level::Error,
+                code::SNAPSHOT_DISCARDED,
+                "Binance order snapshot admission exhausted",
+            );
+            return;
+        };
         self.account.orders_generation += 1;
         let generation = self.account.orders_generation;
         self.account.orders = Some(OrdersJoin {
             generation,
-            version: self.account.order_version,
+            token,
             native_orders: Vec::new(),
             native_strategies: Vec::new(),
             regular: None,
@@ -482,11 +499,11 @@ impl BinanceFutures {
             rejected_symbols: HashMap::new(),
             failed: false,
         });
-        self.signed(
+        self.background_signed_read(
             cx,
-            Method::Get,
             self.paths.open_orders,
             Query::new(),
+            None,
             Pending::Account(Request::OpenOrders { generation }),
         );
         if self.is_spot() || self.is_inverse() {
@@ -497,11 +514,11 @@ impl BinanceFutures {
         } else {
             Query::new().str("algoType", "CONDITIONAL")
         };
-        self.signed(
+        self.background_signed_read(
             cx,
-            Method::Get,
             self.paths.open_conditional_orders,
             conditional,
+            None,
             Pending::Account(Request::OpenAlgoOrders { generation }),
         );
     }
@@ -1347,7 +1364,7 @@ impl BinanceFutures {
             self.account.orders_stale = true;
             return;
         }
-        if join.version != self.account.order_version {
+        if !cx.store.orders_snapshot_current(&join.token) {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
             return;
@@ -1416,63 +1433,71 @@ impl BinanceFutures {
                 return;
             }
         }
-        self.account.orders_stale = false;
-        let mut orders = join.regular.unwrap_or_default();
-        orders.extend(join.algo.unwrap_or_default());
-        // A clean snapshot re-arms every skip log; otherwise only the ids it mapped.
-        if join.skipped.rejected() == 0 {
-            self.account.order_skip_logged.clear();
-        } else {
-            for order in &orders {
-                self.account.order_skip_logged.remove(&order.id);
-            }
+        if !cx
+            .store
+            .commit_orders_snapshot([join.token], |current_rows| {
+                self.account.orders_stale = false;
+                let mut orders = join.regular.unwrap_or_default();
+                orders.extend(join.algo.unwrap_or_default());
+                // A clean snapshot re-arms every skip log; otherwise only the ids it mapped.
+                if join.skipped.rejected() == 0 {
+                    self.account.order_skip_logged.clear();
+                } else {
+                    for order in &orders {
+                        self.account.order_skip_logged.remove(&order.id);
+                    }
+                }
+                for (symbol, client, native, filled) in join.native_orders {
+                    if self.is_spot() {
+                        // Only the first accepted REST observation establishes history.
+                        // Live events create a zero floor; ACKs never touch delivery.
+                        self.account
+                            .spot_delivery
+                            .entry((symbol.clone(), native))
+                            .or_insert(SpotDelivery {
+                                bootstrap_floor: filled,
+                                delivered_cumulative: filled,
+                            });
+                    }
+                    let entry = self
+                        .account
+                        .native_executed
+                        .entry((symbol.clone(), native))
+                        .or_default();
+                    entry.0 = entry.0.max(filled);
+                    if self.is_spot() || self.options.portfolio_margin {
+                        self.bind_regular_native(&symbol, &client, native);
+                    }
+                }
+                for (symbol, client, native) in join.native_strategies {
+                    self.bind_strategy_native(&symbol, &client, native);
+                }
+                for current in current_rows {
+                    let terminal = self.account.order_terminal(current);
+                    // A rejected row on another symbol is a different order reusing the id.
+                    let same_order = join
+                        .rejected_symbols
+                        .get(&current.id)
+                        .is_none_or(|symbols| {
+                            symbols
+                                .iter()
+                                .any(|symbol| symbol.is_empty() || *symbol == current.symbol)
+                        });
+                    if current.status == OrderStatus::Open
+                        && !terminal
+                        && !join.skipped.allows_absence(&current.id)
+                        && same_order
+                        && !orders.iter().any(|o| o.id == current.id)
+                    {
+                        orders.push(current.clone());
+                    }
+                }
+                orders
+            })
+        {
+            self.account.orders_stale = true;
+            self.schedule_orders_refresh(cx);
         }
-        for (symbol, client, native, filled) in join.native_orders {
-            if self.is_spot() {
-                // Only the first accepted REST observation establishes history.
-                // Live events create a zero floor; ACKs never touch delivery.
-                self.account
-                    .spot_delivery
-                    .entry((symbol.clone(), native))
-                    .or_insert(SpotDelivery {
-                        bootstrap_floor: filled,
-                        delivered_cumulative: filled,
-                    });
-            }
-            let entry = self
-                .account
-                .native_executed
-                .entry((symbol.clone(), native))
-                .or_default();
-            entry.0 = entry.0.max(filled);
-            if self.is_spot() || self.options.portfolio_margin {
-                self.bind_regular_native(&symbol, &client, native);
-            }
-        }
-        for (symbol, client, native) in join.native_strategies {
-            self.bind_strategy_native(&symbol, &client, native);
-        }
-        for current in cx.store.orders() {
-            let terminal = self.account.order_terminal(current);
-            // A rejected row on another symbol is a different order reusing the id.
-            let same_order = join
-                .rejected_symbols
-                .get(&current.id)
-                .is_none_or(|symbols| {
-                    symbols
-                        .iter()
-                        .any(|symbol| symbol.is_empty() || *symbol == current.symbol)
-                });
-            if current.status == OrderStatus::Open
-                && !terminal
-                && !join.skipped.allows_absence(&current.id)
-                && same_order
-                && !orders.iter().any(|o| o.id == current.id)
-            {
-                orders.push(current.clone());
-            }
-        }
-        cx.store.set_orders(orders);
     }
 
     /// Keeps the last known state of listed orders that could not be mapped.
@@ -1722,7 +1747,7 @@ impl BinanceFutures {
     }
 
     fn on_order_update(&mut self, cx: &mut Cx<'_, Pending>, o: OrderUpdate<'_>) {
-        self.account.order_version += 1;
+        cx.store.invalidate_order_snapshots();
         // Portfolio margin identifies orders by client order id.
         let id = match (&o.c, self.options.portfolio_margin) {
             (Some(client), true) => client.to_string(),
@@ -1933,7 +1958,7 @@ impl BinanceFutures {
     /// Portfolio margin's stop, take-profit and trailing orders.
     fn on_conditional_update(&mut self, cx: &mut Cx<'_, Pending>, o: ConditionalUpdate<'_>) {
         let id = o.c.to_string();
-        self.account.order_version += 1;
+        cx.store.invalidate_order_snapshots();
         if o.os == "NEW"
             && (order_type(&o.st).is_none()
                 || !matches!(o.side.as_ref(), "BUY" | "SELL")
@@ -1975,7 +2000,7 @@ impl BinanceFutures {
                 return;
             }
             if is_terminal {
-                self.observe_strategy_terminal(&o.s, &id);
+                self.observe_strategy_terminal(cx, &o.s, &id);
             }
         }
         match o.os.as_ref() {
@@ -2020,7 +2045,7 @@ impl BinanceFutures {
 
     fn on_algo_update(&mut self, cx: &mut Cx<'_, Pending>, o: AlgoUpdate<'_>) {
         let id = o.aid.to_string();
-        self.account.order_version += 1;
+        cx.store.invalidate_order_snapshots();
         if matches!(
             o.status.as_ref(),
             "TRIGGERED"
@@ -2491,7 +2516,7 @@ impl BinanceFutures {
         }
         0.0
     }
-    pub(crate) fn reset_spot_subscription(&mut self, _cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn reset_spot_subscription(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.is_spot() {
             return;
         }
@@ -2501,7 +2526,7 @@ impl BinanceFutures {
         self.account.spot_subscription = None;
         self.account.spot_heartbeat_id = None;
         self.account.account_version += 1;
-        self.account.order_version += 1;
+        cx.store.invalidate_order_snapshots();
     }
     fn next_spot_request_id(&mut self, prefix: &str) -> String {
         let id = self.private.next_request_id;
@@ -2509,6 +2534,9 @@ impl BinanceFutures {
         format!("{prefix}-{id}")
     }
     fn subscribe_spot_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !cx.private_feed_policy().streaming() {
+            return;
+        }
         let Some(socket) = self.private.socket else {
             return;
         };
@@ -2583,7 +2611,7 @@ impl BinanceFutures {
                 self.account.spot_subscription = Some(subscription.subscription_id);
                 self.private_ready(cx);
                 self.account.account_version += 1;
-                self.account.order_version += 1;
+                cx.store.invalidate_order_snapshots();
                 self.account.orders_stale = true;
                 if !self.account.account_in_flight {
                     self.fetch_account(cx);
@@ -2759,7 +2787,7 @@ impl BinanceFutures {
         if event.c.is_empty() || event.s.is_empty() {
             return;
         }
-        self.account.order_version += 1;
+        cx.store.invalidate_order_snapshots();
         let Some(native) = event.i else {
             return;
         };
@@ -2994,19 +3022,29 @@ impl BinanceFutures {
         }
     }
 
-    pub(crate) fn observe_native_strategy_terminal(&mut self, symbol: &str, native: u64) {
+    pub(crate) fn observe_native_strategy_terminal(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        native: u64,
+    ) {
         self.account
             .terminal_strategies
             .insert((symbol.to_owned(), native));
-        self.account.order_version += 1;
+        cx.store.invalidate_order_snapshots();
     }
 
-    pub(crate) fn observe_strategy_terminal(&mut self, symbol: &str, client: &str) {
+    pub(crate) fn observe_strategy_terminal(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        client: &str,
+    ) {
         if let Some(native) = self.pm_strategy_native_order_id(symbol, client) {
-            self.observe_native_strategy_terminal(symbol, native);
+            self.observe_native_strategy_terminal(cx, symbol, native);
         } else if !self.options.portfolio_margin {
             self.account.terminal_algo_ids.insert(client.to_owned());
-            self.account.order_version += 1;
+            cx.store.invalidate_order_snapshots();
         }
     }
 
@@ -3024,15 +3062,21 @@ impl BinanceFutures {
             .copied()
     }
 
-    pub(crate) fn observe_unquantified_cancel(&mut self, symbol: &str, native: u64, filled: f64) {
-        self.observe_native_terminal(symbol, native, filled);
+    pub(crate) fn observe_unquantified_cancel(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        native: u64,
+        filled: f64,
+    ) {
+        self.observe_native_terminal(cx, symbol, native, filled);
         self.account
             .unquantified_cancels
             .insert((symbol.to_owned(), native));
     }
 
-    pub(crate) fn fence_order_snapshots(&mut self) {
-        self.account.order_version += 1;
+    pub(crate) fn fence_order_snapshots(&mut self, cx: &mut Cx<'_, Pending>) {
+        cx.store.invalidate_order_snapshots();
     }
 
     pub(crate) fn known_native_filled(&self, symbol: &str, native: u64) -> f64 {
@@ -3042,7 +3086,13 @@ impl BinanceFutures {
             .map_or(0.0, |(filled, _)| *filled)
     }
 
-    pub(crate) fn observe_native_terminal(&mut self, symbol: &str, native: u64, filled: f64) {
+    pub(crate) fn observe_native_terminal(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        native: u64,
+        filled: f64,
+    ) {
         let execution = self
             .account
             .native_executed
@@ -3050,7 +3100,7 @@ impl BinanceFutures {
             .or_default();
         execution.0 = execution.0.max(filled);
         execution.1 = true;
-        self.account.order_version += 1;
+        cx.store.invalidate_order_snapshots();
     }
 }
 

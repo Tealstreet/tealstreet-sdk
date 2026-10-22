@@ -1,3 +1,6 @@
+import { ManagedHttp, prepareFetch } from './managed-http.mjs';
+export { HttpPreparationError } from './managed-http.mjs';
+
 // Return only the closed numeric record; never serialize arbitrary provider data.
 function signingReceipt(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -6,6 +9,53 @@ function signingReceipt(value) {
   if ([stampMs, expiryMs].some((time) => time !== undefined && (!Number.isSafeInteger(time) || time < 0))
     || (stampMs !== undefined && expiryMs !== undefined && expiryMs <= stampMs)) return undefined;
   return { ...(stampMs === undefined ? {} : { stampMs }), ...(expiryMs === undefined ? {} : { expiryMs }) };
+}
+
+function checkedSigningResult(expected, count, result) {
+  const receipt = signingReceipt(result?.receipt);
+  const rawValues = result?.values;
+  if (!receipt || !expected || receipt.stampMs !== expected.stampMs || receipt.expiryMs !== expected.expiryMs
+    || !Array.isArray(rawValues) || rawValues.length !== count) return undefined;
+  const values = [];
+  for (let i = 0; i < count; i++) {
+    const rawBytes = rawValues[i];
+    if (!Array.isArray(rawBytes)) return undefined;
+    const size = rawBytes.length;
+    if (!Number.isSafeInteger(size) || size > 1048576 || size < 0) return undefined;
+    const bytes = [];
+    for (let j = 0; j < size; j++) {
+      const byte = rawBytes[j];
+      if (!Number.isInteger(byte) || byte < 0 || byte > 255) return undefined;
+      bytes.push(byte);
+    }
+    values.push(bytes);
+  }
+  let headers;
+  const rawHeaders = result.headers;
+  if (rawHeaders !== undefined) {
+    if (!Array.isArray(rawHeaders)) return undefined;
+    const count = rawHeaders.length;
+    if (!Number.isSafeInteger(count) || count < 0 || count > 32) return undefined;
+    let total = 0;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+    headers = [];
+    for (let i = 0; i < count; i++) {
+      const pair = rawHeaders[i];
+      if (!Array.isArray(pair) || pair.length !== 2) return undefined;
+      const name = pair[0];
+      const value = pair[1];
+      if (typeof name !== 'string' || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || name.length > 256
+        || typeof value !== 'string' || value.length > 8192 || /[\x00-\x08\x0a-\x1f\x7f]/.test(value)) return undefined;
+      const bytes = encoder.encode(value);
+      if (bytes.length > 8192 || decoder.decode(bytes) !== value) return undefined;
+      total += name.length + bytes.length;
+      if (total > 32768) return undefined;
+      headers.push([name, value]);
+    }
+  }
+  return { values, receipt,
+    ...(headers?.length ? { headers } : {}) };
 }
 
 // Runs a WasmEngine against a transport: executes its actions (sockets, HTTP,
@@ -249,6 +299,7 @@ export class EngineHost {
     }
     this.signer = options.signer;
     this.primitiveSignings = new Map();
+    this.hostedSignings = new Map();
     this.entropy = identity;
     this.engine = engine;
     this.ownsEngine = options.ownsEngine === true;
@@ -260,6 +311,7 @@ export class EngineHost {
     this.timers = new Map();
     this.commands = new Map();
     this.requests = new Map();
+    this.managedHttp = new ManagedHttp(this);
     this.signings = new Map();
     this.socketFailures = new Map();
     this.nextCommand = 1;
@@ -507,16 +559,16 @@ export class EngineHost {
     for (const id of this.socketFailures.keys()) attempt(() => this.clearSocketFailure(id));
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
+    attempt(() => this.managedHttp.dispose());
     for (const pending of this.signings.values()) {
       attempt(() => pending.controller.abort());
       attempt(() => this.transport.clearTimeout(pending.timer));
     }
     this.signings.clear();
-    for (const pending of this.primitiveSignings.values()) {
-      attempt(() => pending.controller.abort());
-      attempt(() => this.transport.clearTimeout(pending.timer));
-    }
+    for (const pending of this.primitiveSignings.values()) attempt(() => pending.cancel());
     this.primitiveSignings.clear();
+    for (const pending of this.hostedSignings.values()) attempt(() => pending.cancel());
+    this.hostedSignings.clear();
     for (const socket of this.sockets.values()) attempt(() => socket.close());
     for (const handle of this.timers.values()) attempt(() => this.transport.clearTimeout(handle));
     this.sockets.clear();
@@ -533,32 +585,34 @@ export class EngineHost {
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
-  async receive(id, { status, headers = '', body }) {
-    if (this.disposed) return;
+  async receive(id, { status, headers = '', body }, active = () => true) {
+    if (this.disposed || !active()) return;
     const { engine, transport } = this;
     this.run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
-    if (this.disposed) return;
+    if (this.disposed || !active()) return;
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
-          if (this.disposed) return;
+          if (this.disposed || !active()) return;
           this.run(this.invoke(engine.httpChunk, id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
+          if (this.disposed || !active()) return;
         }
       } else {
         for await (const chunk of body) {
-          if (this.disposed) return;
+          if (this.disposed || !active()) return;
           for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
-            if (this.disposed) return;
+            if (this.disposed || !active()) return;
             this.run(this.invoke(engine.httpChunk, id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+            if (this.disposed || !active()) return;
           }
         }
       }
     } catch {
-      if (this.disposed) return;
+      if (this.disposed || !active()) return;
       this.run(this.invoke(engine.httpFailed, id, 'HTTP response body failed', transport.now()));
       return;
     }
-    if (this.disposed) return;
+    if (this.disposed || !active()) return;
     this.run(this.invoke(engine.httpEnd, id, transport.now()));
   }
 
@@ -584,41 +638,118 @@ export class EngineHost {
     }
   }
 
-  sign(action) {
-    const expectedReceipt = signingReceipt(action.work.receipt);
-    const id = action.attempt;
+  // Provider calls from dispatch and signing-only capture share cancellation,
+  // bounds, receipt validation and sanitized closed errors.
+  primitiveSigning(work, timeoutMs, execute, complete) {
+    const expectedReceipt = signingReceipt(work?.receipt);
+    const expectedCount = work?.operations?.length;
     const controller = new AbortController();
-    const finish = (result, code) => {
-      const pending = this.primitiveSignings.get(id);
-      if (!pending || pending.controller !== controller || this.disposed) return;
-      this.primitiveSignings.delete(id);
-      this.transport.clearTimeout(pending.timer);
-      if (code) {
-        controller.abort();
-        this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));
-      } else {
-        this.run(this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
+    let settled = false;
+    const clearTimer = () => {
+      if (pending.timer !== undefined) {
+        try { this.transport.clearTimeout(pending.timer); } catch { /* Completion must still settle. */ }
       }
     };
-    const timer = this.transport.setTimeout(() => finish(undefined, 'timedOut'), action.timeoutMs);
-    this.primitiveSignings.set(id, { controller, timer });
-    Promise.resolve().then(() => {
-      if (controller.signal.aborted || this.disposed) return;
-      if (!this.signer) { finish(undefined, 'unavailable'); return; }
-      return this.signer(action.work, { signal: controller.signal });
-    }).then((result) => {
-      if (controller.signal.aborted || this.disposed) return;
-      const receipt = signingReceipt(result?.receipt);
-      if (!receipt || !expectedReceipt || receipt.stampMs !== expectedReceipt.stampMs
-        || receipt.expiryMs !== expectedReceipt.expiryMs
-        || !Array.isArray(result?.values) || result.values.length !== action.work.operations.length
-        || result.values.some((bytes) => !Array.isArray(bytes) || bytes.length > 1048576
-          || bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))) {
-        finish(undefined, 'invalidResult');
-        return;
+    const finish = (result, code) => {
+      if (settled) return;
+      settled = true;
+      clearTimer();
+      if (code) {
+        try { controller.abort(); } catch { /* Provider listeners cannot strand completion. */ }
       }
-      finish({ values: result.values.map((bytes) => Array.from(bytes)), receipt });
-    }).catch(() => finish(undefined, 'refused'));
+      complete(result, code);
+    };
+    // Register correlation before arming: injected timers may fire inline or
+    // throw. Both paths must retire the native capture and settle the caller.
+    const pending = {
+      controller,
+      timer: undefined,
+      cancel: () => finish(undefined, 'unavailable'),
+      start: () => {
+        try { pending.timer = this.transport.setTimeout(() => finish(undefined, 'timedOut'), timeoutMs); }
+        catch { finish(undefined, 'unavailable'); return; }
+        if (settled) { clearTimer(); return; }
+        Promise.resolve().then(() => {
+          if (controller.signal.aborted || this.disposed) return;
+          if (!execute) { finish(undefined, 'unavailable'); return; }
+          return execute({ signal: controller.signal });
+        }).then((result) => {
+          if (controller.signal.aborted || this.disposed) return;
+          const checked = checkedSigningResult(expectedReceipt, expectedCount, result);
+          if (!checked) { finish(undefined, 'invalidResult'); return; }
+          finish(checked);
+        }).catch(() => finish(undefined, 'refused'));
+      },
+    };
+    return pending;
+  }
+
+  sign(action) {
+    if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
+    const id = action.attempt;
+    const pending = this.primitiveSigning(action.work, action.timeoutMs,
+      this.signer && ((context) => this.signer(action.work, context)), (result, code) => {
+        if (this.primitiveSignings.get(id) !== pending || this.disposed) return;
+        this.primitiveSignings.delete(id);
+        if (code) this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));
+        else this.run(this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
+      });
+    this.primitiveSignings.set(id, pending);
+    pending.start();
+  }
+
+  hostedSigningClock() {
+    if (this.disposed) throw new EngineDisposedError();
+    if (typeof this.engine.hostedSigningClock !== 'function')
+      throw new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' });
+    return JSON.parse(this.invokeHosted(this.engine.hostedSigningClock, this.transport.now()));
+  }
+
+  invokeHosted(fn, ...args) {
+    const output = this.invoke(fn, ...args);
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    return output;
+  }
+
+  hostedSigning(input) {
+    if (this.disposed) return Promise.reject(new EngineDisposedError());
+    if (typeof this.engine.prepareHostedSigning !== 'function')
+      return Promise.reject(new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' }));
+    let prepared;
+    try { prepared = JSON.parse(this.invokeHosted(this.engine.prepareHostedSigning, JSON.stringify(input), this.transport.now())); }
+    catch (error) { return Promise.reject(error); }
+    const { id, work, deadlineMs } = prepared;
+    const duration = deadlineMs - this.transport.now();
+    if (!Number.isInteger(id) || id <= 0 || id > 0xffff_ffff || this.hostedSignings.has(id)
+      || !Number.isFinite(duration) || duration <= 0 || duration > 5000) {
+      this.engine.cancelHostedSigning?.(id);
+      return Promise.reject(new ExchangeError('Invalid hosted signing request', { kind: 'invalidInput', outcome: 'notSent' }));
+    }
+    if (!this.signer) {
+      try {
+        return Promise.resolve(JSON.parse(this.invokeHosted(this.engine.localHostedSigning, id, this.transport.now())));
+      } catch (error) {
+        try { this.engine.cancelHostedSigning(id); } catch { /* Preserve the closed native error. */ }
+        return Promise.reject(error);
+      }
+    }
+    return new Promise((resolve, reject) => {
+      const execute = (context) => this.signer(work, context);
+      const pending = this.primitiveSigning(work, duration, execute, (result, code) => {
+        this.hostedSignings.delete(id);
+        if (code || this.disposed) {
+          try { this.engine.cancelHostedSigning(id); } catch { /* Keep a closed signing error. */ }
+          reject(new ExchangeError(code === 'timedOut' ? 'Hosted signing timed out' : 'Hosted signing failed', {
+            kind: code === 'timedOut' ? 'timeout' : code === 'refused' ? 'invalidInput' : 'internal', outcome: 'notSent',
+          }));
+          return;
+        }
+        try { resolve(JSON.parse(this.invokeHosted(this.engine.finishHostedSigning, id, JSON.stringify(result), this.transport.now()))); }
+        catch (error) { reject(error); }
+      });
+      this.hostedSignings.set(id, pending);
+      pending.start();
+    });
   }
 
   signPayload(action) {
@@ -854,6 +985,9 @@ export class EngineHost {
         this.sockets.delete(action.socket);
         this.socketClosed(action.socket, 1000);
         break;
+      case 'managedHttp':
+        this.managedHttp.execute(action);
+        break;
       case 'http': {
         void this.request(action);
         break;
@@ -993,23 +1127,6 @@ export class EngineHost {
   }
 }
 
-/** A fetch body's chunks; an empty body yields nothing. */
-async function* chunks(stream) {
-  if (!stream) return;
-  const reader = stream.getReader();
-  let complete = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) { complete = true; return; }
-      yield value;
-    }
-  } finally {
-    if (!complete) await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-}
-
 /** Decode binary feeds in arrival order while leaving text feeds synchronous. */
 export const socketMessages = (onMessage, onError, binary = false) => {
   let pending;
@@ -1081,14 +1198,8 @@ export const nativeTransport = () => {
     ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
-  async request({ method, url, headers, body, signal, route, timeoutMs }) {
-    if (route === 'publicCors') throw new Error('Public CORS request routing is not configured');
-    const deadline = AbortSignal.timeout(Math.max(1,timeoutMs ?? 20_000));
-    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline, redirect: 'error' });
-    const lines = [];
-    response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
-    return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
-  },
+  prepareHttp(request) { return prepareFetch(request); },
+  async request(request) { return prepareFetch(request).bind(request).dispatch(); },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),
 };

@@ -121,6 +121,74 @@ impl Venue for Fixture {
             Read::Cursor(mut history) => {
                 if matches!(
                     response.body,
+                    "discard-page" | "discard-after-finished" | "discard-after-poison"
+                ) {
+                    assert!(history.fresh("accepted".into()));
+                    history.stage("1".into());
+                    assert!(matches!(
+                        history.advance_with_coverage(
+                            CursorPage {
+                                next: Some("next".into()),
+                                rows: 1,
+                                fresh: 1,
+                                want_more: true,
+                            },
+                            Some("first known gap".into())
+                        ),
+                        CursorStep::More(_)
+                    ));
+                    history.stage("999".into());
+                    if response.body == "discard-after-poison" {
+                        assert!(!history.restart_stage());
+                        assert!(!history.discard_staged_page());
+                        history.finish(cx, Err("later failure cannot erase poisoning".into()));
+                        return;
+                    }
+                    assert!(history.discard_staged_page());
+                    assert_eq!(history.accepted_len(), 1);
+                    assert_eq!(history.staged_len(), 0);
+                    assert_eq!(history.pages(), 1);
+                    assert_eq!(history.cursor(), Some("next"));
+                    assert!(!history.fresh("accepted".into()));
+                    history.stage("2".into());
+                    assert_eq!(
+                        history.advance(CursorPage {
+                            next: None,
+                            rows: 1,
+                            fresh: 1,
+                            want_more: false,
+                        }),
+                        CursorStep::Done
+                    );
+                    if response.body == "discard-after-finished" {
+                        assert!(!history.discard_staged_page());
+                    }
+                    history.finish(cx, Ok(()));
+                    return;
+                }
+                if matches!(response.body, "probe-staged" | "probe-admitted") {
+                    history.stage("1".into());
+                    if response.body == "probe-admitted" {
+                        history.advance(CursorPage {
+                            next: Some("a".into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        });
+                    }
+                    for next in ["b", "c"] {
+                        history.advance_probe(CursorPage {
+                            next: Some(next.into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        });
+                    }
+                    history.finish(cx, Ok(()));
+                    return;
+                }
+                if matches!(
+                    response.body,
                     "finalizer-policy" | "finalizer-poison" | "finalizer-active"
                 ) {
                     history.stage("1".into());
@@ -630,6 +698,31 @@ fn contextual_finalization_sees_only_accepted_rows_and_encoding_errors_stay_stri
 }
 
 #[test]
+fn discarding_a_retry_page_preserves_prior_rows_coverage_cursor_and_identity() {
+    let notices = finalizer_case("discard-page", true);
+    assert_eq!(notices.len(), 2);
+    assert!(matches!(&notices[0], Notice::Event(event)
+        if event.code == code::HISTORY_INCOMPLETE && event.message == "first known gap"));
+    assert!(matches!(&notices[1], Notice::CommandDone { result, .. } if result == "[1,2]"));
+}
+
+#[test]
+fn discarding_after_stage_completion_poisoned_the_owner_instead_of_reopening_it() {
+    let notices = finalizer_case("discard-after-finished", true);
+    assert_eq!(notices.len(), 1);
+    assert!(matches!(&notices[0], Notice::CommandFailed { error, .. }
+        if error.kind == Some(ErrorKind::Internal) && error.message.contains("discarded after completion")));
+}
+
+#[test]
+fn discarding_an_already_poisoned_page_cannot_recover_rows_or_a_marker() {
+    let notices = finalizer_case("discard-after-poison", true);
+    assert_eq!(notices.len(), 1);
+    assert!(matches!(&notices[0], Notice::CommandFailed { error, .. }
+        if error.kind == Some(ErrorKind::Internal) && error.message.contains("restarted before completion")));
+}
+
+#[test]
 fn strict_pagination_rejection_drops_accepted_rows_and_stored_marker() {
     let notices = finalizer_case("finalizer-policy", true);
     assert_eq!(notices.len(), 1);
@@ -647,6 +740,18 @@ fn contextual_cursor_finalization_never_runs_after_lifecycle_failure() {
         assert!(
             matches!(&notices[0], Notice::CommandFailed { command: 44, error }
             if error.kind == Some(ErrorKind::Internal))
+        );
+    }
+}
+
+#[test]
+fn probe_misuse_cannot_return_unmarked_partial_query_rows() {
+    for body in ["probe-staged", "probe-admitted"] {
+        let notices = finalizer_case(body, true);
+        assert_eq!(notices.len(), 1);
+        assert!(
+            matches!(&notices[0],Notice::CommandFailed {command:44,error}
+            if error.kind==Some(ErrorKind::Internal) && error.message=="history probe cannot admit result rows")
         );
     }
 }

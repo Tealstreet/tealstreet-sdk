@@ -3,6 +3,7 @@ use crate::Pending;
 use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
 use safe_cex_engine::Level;
+use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
 use safe_cex_engine::metadata::{
@@ -1392,7 +1393,6 @@ impl Account {
             return;
         }
         let symbol = native.symbol.replace('-', "");
-        self.bump_orders();
         let filled = native.filled.unwrap_or(0.0);
         let previous = self
             .cumulative_fills
@@ -1408,8 +1408,8 @@ impl Account {
         let mut emitted = 0.0;
         if trade_status {
             // Both event names can carry one execution with or without z.
-            let fresh = if native.last_quantity > 0.0 {
-                let identity = if !native.trade_id.is_empty() {
+            let identity = (native.last_quantity > 0.0).then(|| {
+                if !native.trade_id.is_empty() {
                     format!("{id}:trade:{}", native.trade_id)
                 } else {
                     format!(
@@ -1422,54 +1422,59 @@ impl Account {
                         native.last_quantity,
                         native.last_price
                     )
-                };
-                self.first_execution(identity)
-            } else {
-                true
-            };
+                }
+            });
+            let fresh = identity
+                .as_ref()
+                .is_none_or(|key| !self.seen_executions.contains(key));
             // Cumulative growth proves a new fill when heuristic same-ms keys collide.
             let duplicate = !fresh && (!native.trade_id.is_empty() || native.filled.is_none());
-            let delta = if duplicate {
-                0.0
-            } else if native.filled.is_some() {
-                let increase = (filled - previous).max(0.0);
-                // Only l belongs at this execution's price after a blind interval.
-                if native.last_quantity > 0.0 {
-                    increase.min(native.last_quantity)
-                } else {
-                    increase
-                }
-            } else if self.terminal_orders.contains_key(id)
-                && (native.trade_id.is_empty() || self.covered_history.contains(id))
-            {
-                0.0
+            let suppressed = duplicate
+                || (native.filled.is_none()
+                    && self.terminal_orders.contains_key(id)
+                    && (native.trade_id.is_empty() || self.covered_history.contains(id)));
+            let last = if suppressed {
+                Some(0.0)
             } else {
-                native.last_quantity.max(0.0)
+                (native.last_quantity > 0.0).then_some(native.last_quantity)
             };
-            emitted = delta;
-            if native.filled.is_none() {
-                effective_filled = previous + delta;
+            let price = if native.last_price > 0.0 {
+                native.last_price
+            } else if native.avg_price > 0.0 {
+                native.avg_price
+            } else {
+                native.price
+            };
+            let Ok(progress) = ObservedProgress::new(previous, native.filled) else {
+                return;
+            };
+            let Ok(prepared) = progress.prepare_capped(last, price) else {
+                return;
+            };
+            // Financial preparation is pure: invalid evidence consumes no ID,
+            // revision, quantity, terminal state or repair scheduling.
+            self.bump_orders();
+            if let Some(identity) = identity {
+                self.first_execution(identity);
             }
-            if delta > 0.0 {
-                let price = if native.last_price > 0.0 {
-                    native.last_price
-                } else if native.avg_price > 0.0 {
-                    native.avg_price
-                } else {
-                    native.price
-                };
+            effective_filled = prepared.map_or(progress.quantity(), |p| p.observed());
+            if let Some(prepared) = prepared {
+                let delivery = prepared.delivery();
+                emitted = delivery.amount();
                 cx.fill(Fill {
                     id: None,
                     order_id: id.to_owned(),
                     symbol: symbol.clone(),
                     side: order_side(&native.side),
-                    price,
-                    amount: delta,
+                    price: delivery.price(),
+                    amount: delivery.amount(),
                 });
                 self.bump_positions();
                 self.schedule_repair(cx);
             }
             self.record_cumulative(id, effective_filled);
+        } else {
+            self.bump_orders();
         }
         if matches!(
             native.status.as_deref(),
@@ -1811,6 +1816,127 @@ mod tests {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+
+    fn cumulative_engine() -> safe_cex_engine::Engine<PlacementVenue> {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(PlacementVenue::default());
+        engine.start(0.0);
+        engine.drain_actions().for_each(drop);
+        engine.take_market_frame(0.0);
+        let event = execution_event("123", "seed", Some(0.0), 0.0, 100.0, "NEW");
+        deliver_execution(&mut engine, 1.0, &event);
+        engine
+    }
+
+    fn execution_event(
+        id: &str,
+        trade: &str,
+        cumulative: Option<f64>,
+        last: f64,
+        price: f64,
+        status: &str,
+    ) -> String {
+        let cumulative = cumulative.map_or(String::new(), |n| format!(r#","z":"{n}""#));
+        format!(
+            r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"i":"{id}","t":"{trade}","s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"{status}","q":"2","l":"{last}","L":"0","ap":"0","p":"{price}"{cumulative}}}}}"#
+        )
+    }
+
+    fn deliver_execution(
+        engine: &mut safe_cex_engine::Engine<PlacementVenue>,
+        now: f64,
+        event: &str,
+    ) -> Option<(f64, f64)> {
+        engine.handle(
+            now,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: event,
+            },
+        );
+        let frame = engine.take_market_frame(now)?;
+        let (_, fills) = wire::sections(frame).find(|(kind, _)| *kind == wire::section::FILLS)?;
+        assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 1);
+        Some((
+            f64::from_le_bytes(fills[16..24].try_into().unwrap()),
+            f64::from_le_bytes(fills[24..32].try_into().unwrap()),
+        ))
+    }
+
+    #[test]
+    fn cumulative_zero_selected_price_does_not_emit_fill() {
+        let mut engine = cumulative_engine();
+        let event = execution_event("123", "bad", Some(0.5), 0.5, 0.0, "PARTIALLY_FILLED");
+        assert_eq!(deliver_execution(&mut engine, 2.0, &event), None);
+    }
+
+    #[test]
+    fn cumulative_negative_selected_price_does_not_emit_fill() {
+        let mut engine = cumulative_engine();
+        let event = execution_event("123", "bad", Some(0.5), 0.5, -1.0, "PARTIALLY_FILLED");
+        assert_eq!(deliver_execution(&mut engine, 2.0, &event), None);
+    }
+
+    #[test]
+    fn cumulative_invalid_price_retains_corrected_trade_and_healthy_peer() {
+        let mut engine = cumulative_engine();
+        let invalid = execution_event("123", "retry", Some(0.5), 0.5, 0.0, "PARTIALLY_FILLED");
+        // Deliberately drain without asserting, so original source reaches the recovery check.
+        deliver_execution(&mut engine, 2.0, &invalid);
+        let peer = execution_event("124", "peer", Some(0.25), 0.25, 60.0, "PARTIALLY_FILLED");
+        assert_eq!(
+            deliver_execution(&mut engine, 3.0, &peer),
+            Some((60.0, 0.25))
+        );
+        let corrected = execution_event("123", "retry", Some(0.5), 0.5, 100.0, "PARTIALLY_FILLED");
+        assert_eq!(
+            deliver_execution(&mut engine, 4.0, &corrected),
+            Some((100.0, 0.5))
+        );
+    }
+
+    #[test]
+    fn cumulative_invalid_terminal_price_retains_stored_partial() {
+        let mut engine = cumulative_engine();
+        let partial = execution_event(
+            "123",
+            "partial",
+            Some(0.25),
+            0.25,
+            100.0,
+            "PARTIALLY_FILLED",
+        );
+        assert_eq!(
+            deliver_execution(&mut engine, 2.0, &partial),
+            Some((100.0, 0.25))
+        );
+        let before = engine.store().order("123").unwrap().clone();
+        let invalid = execution_event("123", "terminal", Some(2.0), 1.75, 0.0, "FILLED");
+        deliver_execution(&mut engine, 3.0, &invalid);
+        let after = engine.store().order("123").unwrap();
+        assert_eq!(after.filled, before.filled);
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.last_update, before.last_update);
+    }
+
+    #[test]
+    fn cumulative_unused_bad_last_price_keeps_selected_fallback() {
+        let mut engine = cumulative_engine();
+        let event = execution_event("123", "fallback", Some(0.5), 0.5, 100.0, "PARTIALLY_FILLED")
+            .replace(r#""L":"0""#, r#""L":"-1""#);
+        assert_eq!(
+            deliver_execution(&mut engine, 2.0, &event),
+            Some((100.0, 0.5))
+        );
+    }
+
+    #[test]
+    fn cumulative_valid_zero_growth_still_remembers_trade_identity() {
+        let mut engine = cumulative_engine();
+        let zero = execution_event("123", "quiet", Some(0.0), 0.5, 0.0, "PARTIALLY_FILLED");
+        assert_eq!(deliver_execution(&mut engine, 2.0, &zero), None);
+        let repeated = execution_event("123", "quiet", None, 0.5, 100.0, "PARTIALLY_FILLED");
+        assert_eq!(deliver_execution(&mut engine, 3.0, &repeated), None);
     }
 
     #[test]

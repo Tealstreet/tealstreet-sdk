@@ -36,8 +36,11 @@ compile_error!(
 );
 
 mod construction;
+#[cfg(feature = "dispatch-signing")]
+pub mod hosted_signing;
 pub use construction::{
-    BridgeConstruction, PublicMode, signer_setup_policy, signer_setup_public_data_only,
+    BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
+    signer_setup_public_data_only,
 };
 #[cfg(feature = "bybit")]
 mod hyro;
@@ -184,6 +187,7 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
 struct Startup {
     account: bool,
     log_level: Level,
+    private_feed: safe_cex_engine::signing_policy::PrivateFeedPolicy,
 }
 
 fn finish<T: Visit, V: Venue + 'static>(
@@ -193,6 +197,7 @@ fn finish<T: Visit, V: Venue + 'static>(
     mut engine: Engine<V>,
 ) -> Result<T::Output, VenueError> {
     engine.set_public_feed_policy(policy).map_err(invalid)?;
+    engine.set_private_feed_policy(startup.private_feed)?;
     engine.set_account_startup(startup.account);
     engine.set_log_level(startup.log_level);
     Ok(visitor.visit(engine))
@@ -600,6 +605,44 @@ fn local_signer_from_json_with_policy(
     Ok((std::sync::Arc::new(signer), identities))
 }
 
+/// A boolean cannot substitute for an injected provider. Validate the same
+/// declaration before legacy setup consumes raw options and at the owned path.
+fn payload_signing_rules(
+    venue: &str,
+    options: &EngineOptions,
+    provider_ready: bool,
+) -> Result<(), VenueError> {
+    let public = construction::resolve(venue, options)
+        .map_or(options.public_data_only, |mode| mode.public_data_only);
+    if !options.payload_signer || public || venue == "paradex" || !supported(venue) {
+        return Ok(());
+    }
+    let policy = remote_signing_policy(venue);
+    let identity_ready = options
+        .signing
+        .as_ref()
+        .and_then(|refs| refs.primary.as_ref())
+        .is_some_and(|identity| identity.validate().is_ok());
+    if policy.enabled && policy.payload_supported && provider_ready && identity_ready {
+        return Ok(());
+    }
+    let message = if !policy.payload_supported
+        && construction::bridge(venue, options).dispatch_signing
+        && policy.protected_headers.is_some()
+    {
+        format!("Rust {venue} has no REST-only PayloadSigner lifecycle")
+    } else if policy.enabled {
+        format!("Rust {venue} payloadSigner requires a configured injected signing provider")
+    } else {
+        format!(
+            "Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."
+        )
+    };
+    Err(VenueError::new(message)
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent))
+}
+
 /// Constructs `venue`'s engine from `options`, enforcing its construction rules.
 pub fn build<T: Visit>(
     venue: &str,
@@ -607,6 +650,7 @@ pub fn build<T: Visit>(
     entropy: Option<safe_cex_engine::entropy::Entropy>,
     visitor: T,
 ) -> Result<T::Output, VenueError> {
+    payload_signing_rules(venue, &options, false)?;
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
     #[cfg(feature = "dispatch-signing")]
@@ -662,11 +706,7 @@ pub fn build_with_signer<T: Visit>(
         options.public_data_only = mode.public_data_only;
         options.account_startup = !mode.public_data_only;
     }
-    if options.payload_signer && venue != "paradex" && !options.public_data_only {
-        return Err(VenueError::new(format!("Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."))
-            .kind(ErrorKind::Unsupported)
-            .outcome(safe_cex_engine::Outcome::NotSent));
-    }
+    payload_signing_rules(venue, &options, signer.is_some())?;
     #[cfg(feature = "bybit")]
     if venue == "hyrotrader"
         && let Some(config) = options.hyrotrader.take()
@@ -736,6 +776,7 @@ pub fn build_with_signer<T: Visit>(
     }
     let startup = Startup {
         account: options.account_startup,
+        private_feed: remote_signing_policy(venue).private_feed(options.payload_signer),
         log_level: match options.log_level.as_deref() {
             None => Level::Info,
             Some(text) => Level::parse(text)
@@ -1119,6 +1160,7 @@ pub fn build_with_signer<T: Visit>(
             }
             let mut engine = Engine::new(
                 BinanceFutures::new(BinanceOptions {
+                    signing_policy: remote_signing_policy(venue),
                     recv_window: options.recv_window,
                     read_credentials: identities.secondary,
                     testnet: options.testnet,
@@ -1224,9 +1266,26 @@ pub fn build_with_signer<T: Visit>(
         ),
         #[cfg(feature = "bybit")]
         "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
-            let mut options = BybitOptions {
+            if options.key.as_ref().is_some_and(|s| !s.is_empty())
+                || options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Bybit credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(identity) = &identities.secondary {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let options = BybitOptions {
+                signing_policy: remote_signing_policy(venue),
                 recv_window: tighter_recv_window(options.recv_window),
-                read_credentials: options.read_credentials.take(),
+                read_credentials: identities.secondary,
                 bybit_site_id: options.bybit_site_id.take(),
                 remote_signing: options.remote_signing,
                 enable_inverse_markets: options.enable_inverse_markets,
@@ -1240,29 +1299,17 @@ pub fn build_with_signer<T: Visit>(
                 },
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
+                credentials: identities.primary,
                 endpoints: options.endpoints.take().map(|e| BybitEndpoints {
                     rest: e.rest,
                     public_ws: e.public_ws,
                     private_ws: e.private_ws,
                 }),
             };
-            options.validate().map_err(|error| {
-                use zeroize::Zeroize;
-                options.key.zeroize();
-                options.secret.zeroize();
-                if let Some(read) = &mut options.read_credentials {
-                    read.erase_secrets();
-                }
-                invalid(&error)
-            })?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(BybitLinear::new(options), entropy)?,
-            )
+            options.validate().map_err(|error| invalid(&error))?;
+            let mut engine = Engine::new(BybitLinear::new(options), entropy)?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "bitget")]
         "bitget" | "bitgetusdc" | "bitgetinverse" => {

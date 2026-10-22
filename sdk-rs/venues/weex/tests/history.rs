@@ -102,6 +102,312 @@ fn income(from: Option<f64>, to: Option<f64>) -> Query {
         limit: Some(1),
     }
 }
+
+fn owned_income_failure(actions: &[Action], command: u32) {
+    let errors: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1, "first failure must terminate exactly once");
+    assert_eq!(errors[0].kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert!(
+        !actions.iter().any(
+            |a| matches!(a,Action::Notice(Notice::CommandDone{command:id,..}) if *id==command)
+        )
+    );
+    assert!(!actions.iter().any(|a| matches!(a,Action::Notice(Notice::Event(e)) if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+    );
+}
+fn owned_income_partial(actions: &[Action], count: usize) {
+    let markers: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| match a {
+            Action::Notice(Notice::Event(e))
+                if e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, e))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(markers.len(), 1, "one final command-owned coverage marker");
+    assert_eq!(
+        markers[0].1.fields,
+        vec![("command", safe_cex_engine::Value::Num(7.0))]
+    );
+    assert_eq!(markers[0].1.level, safe_cex_engine::Level::Warn);
+    let done = actions
+        .iter()
+        .position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+        .expect("partial success");
+    assert!(markers[0].0 < done);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&result(actions).unwrap())
+            .unwrap()
+            .len(),
+        count
+    );
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 7, .. })
+            | Action::Http(_)
+            | Action::SetTimer { .. }
+    )));
+}
+fn failed_income_page(e: &mut Engine<WeexFutures>, req: HttpRequest, mode: u8) -> Vec<Action> {
+    match mode {
+        0 => e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: req.id,
+                error: "page reset",
+            },
+        ),
+        1 => e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: req.id,
+                response: Response {
+                    status: 503,
+                    headers: "",
+                    body: "unavailable",
+                },
+            },
+        ),
+        2 => {
+            return response(
+                e,
+                NOW,
+                req.id,
+                &format!(
+                    r#"{{"items":[{},{{"income":"bad"}}]}}"#,
+                    bill(999, NOW + 999.0)
+                ),
+            );
+        }
+        3 => return response(e, NOW, req.id, r#"{"items":null}"#),
+        4 => return response(e, NOW, req.id, r#"{"code":40014,"msg":"native refusal"}"#),
+        5 => return response(e, NOW, req.id, r#"{"items":{}}"#),
+        6 => {
+            return response(
+                e,
+                NOW,
+                req.id,
+                &format!(r#"{{"items":[{},"#, bill(999, NOW + 999.0)),
+            );
+        }
+        _ => unreachable!(),
+    }
+    e.drain_actions().collect()
+}
+fn full_income_page() -> String {
+    format!(
+        r#"{{"items":[{}]}}"#,
+        (0..100)
+            .map(|i| bill(i + 1, NOW + i as f64))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+#[test]
+fn owned_income_first_failure_rejects_without_marker_or_continuation() {
+    for ranged in [false, true] {
+        for mode in 0..7 {
+            let mut e = engine();
+            e.set_log_level(safe_cex_engine::Level::Error);
+            let actions = command(
+                &mut e,
+                if ranged {
+                    income(Some(NOW), Some(NOW + 1000.0))
+                } else {
+                    income(None, None)
+                },
+            );
+            let req = request(&actions, "/account/income");
+            owned_income_failure(&failed_income_page(&mut e, req, mode), 7);
+        }
+    }
+}
+#[test]
+fn owned_income_later_failure_returns_accepted_page_without_failed_prefix() {
+    for mode in 0..7 {
+        let mut e = engine();
+        let mut now = NOW;
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let actions = command(&mut e, income(Some(NOW), Some(NOW + 1000.0)));
+        let req = request(&actions, "/account/income");
+        let actions = response(&mut e, now, req.id, &full_income_page());
+        let actions = advance(&mut e, &mut now, actions);
+        let req = request(&actions, "/account/income");
+        let actions = failed_income_page(&mut e, req, mode);
+        owned_income_partial(&actions, 100);
+        assert!(
+            !serde_json::from_str::<Vec<serde_json::Value>>(&result(&actions).unwrap())
+                .unwrap()
+                .iter()
+                .any(|row| row["tranId"] == "999")
+        );
+    }
+}
+#[test]
+fn owned_income_empty_prior_chunk_does_not_authorize_partial_success() {
+    let mut e = engine();
+    let mut now = NOW;
+    let actions = command(&mut e, income(Some(NOW), Some(NOW + 200.0 * DAY)));
+    let req = request(&actions, "/account/income");
+    let actions = response(&mut e, now, req.id, r#"{"items":[]}"#);
+    let actions = advance(&mut e, &mut now, actions);
+    let actions = advance(&mut e, &mut now, actions);
+    let req = request(&actions, "/account/income");
+    owned_income_failure(&failed_income_page(&mut e, req, 0), 7);
+}
+#[test]
+fn owned_income_cursor_gap_is_emitted_once_at_success_only() {
+    for empty in [false, true] {
+        let mut e = engine();
+        let mut now = NOW;
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let actions = command(&mut e, income(Some(NOW), Some(NOW + 1000.0)));
+        let req = request(&actions, "/account/income");
+        let body = format!(
+            r#"{{"items":[{}],"hasNextPage":true}}"#,
+            if empty {
+                String::new()
+            } else {
+                bill(1, NOW + 1.0)
+            }
+        );
+        let mut actions = response(&mut e, now, req.id, &body);
+        assert!(!actions.iter().any(|a|matches!(a,Action::Notice(Notice::Event(v)) if v.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)),"coverage publishes with completion only");
+        for _ in 0..8 {
+            if actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+            {
+                break;
+            }
+            actions = if let Some(req) = actions.iter().find_map(|a| match a {
+                Action::Http(r) => Some(r.clone()),
+                _ => None,
+            }) {
+                response(&mut e, now, req.id, r#"{"items":[]}"#)
+            } else {
+                advance(&mut e, &mut now, actions)
+            };
+        }
+        owned_income_partial(&actions, usize::from(!empty));
+    }
+}
+
+#[test]
+fn owned_income_partial_cannot_mark_or_complete_a_pending_neighbour() {
+    let mut e = engine();
+    let mut now = NOW;
+    e.set_log_level(safe_cex_engine::Level::Error);
+    let actions = command(&mut e, income(Some(NOW), Some(NOW + 1000.0)));
+    let req = request(&actions, "/account/income");
+    let actions = response(&mut e, now, req.id, &full_income_page());
+    let actions = advance(&mut e, &mut now, actions);
+    let req = request(&actions, "/account/income");
+    e.handle(
+        now,
+        Event::Command(Command::Query {
+            command: 8,
+            query: income(None, None),
+        }),
+    );
+    let neighbour = request(&e.drain_actions().collect::<Vec<_>>(), "/account/income");
+    let actions = failed_income_page(&mut e, req, 0);
+    owned_income_partial(&actions, 100);
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(
+            Notice::CommandDone { command: 8, .. } | Notice::CommandFailed { command: 8, .. }
+        )
+    )));
+    let actions = response(&mut e, now, neighbour.id, r#"{"items":[]}"#);
+    assert!(actions.iter().any(
+        |a| matches!(a,Action::Notice(Notice::CommandDone{command:8,result}) if result=="[]")
+    ));
+    assert!(!actions.iter().any(|a|matches!(a,Action::Notice(Notice::Event(v)) if v.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+}
+
+#[test]
+fn owned_single_page_empty_cursor_gap_and_equal_bounds_keep_native_rows() {
+    for equal in [false, true] {
+        let mut e = engine();
+        let actions = command(
+            &mut e,
+            if equal {
+                income(Some(NOW), Some(NOW))
+            } else {
+                income(None, None)
+            },
+        );
+        let req = request(&actions, "/account/income");
+        let actions = response(
+            &mut e,
+            NOW,
+            req.id,
+            r#"{"items":[],"nextKey":"unconsumed"}"#,
+        );
+        owned_income_partial(&actions, 0);
+    }
+    let mut e = engine();
+    let actions = command(&mut e, income(Some(NOW), Some(NOW)));
+    let req = request(&actions, "/account/income");
+    let row = bill(1, NOW + 1000.0);
+    let actions = response(
+        &mut e,
+        NOW,
+        req.id,
+        &format!(r#"{{"items":[{row},{row}]}}"#),
+    );
+    assert_eq!(
+        serde_json::from_str::<Vec<IncomeResult>>(&result(&actions).unwrap())
+            .unwrap()
+            .len(),
+        2,
+        "single-page mode adds neither range filtering nor dedupe"
+    );
+}
+
+#[test]
+fn owned_income_range_resume_keeps_the_selected_bound_after_a_shared_pause() {
+    let mut e = engine();
+    let mut now = NOW;
+    let actions = command(&mut e, income(Some(NOW), Some(NOW + 1000.0)));
+    let req = request(&actions, "/account/income");
+    ban(&mut e);
+    let actions = response(&mut e, now, req.id, &full_income_page());
+    let actions = advance(&mut e, &mut now, actions);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let actions = advance(&mut e, &mut now, actions);
+    assert_eq!(now, NOW + 10_000.0);
+    let req = request(&actions, "/account/income");
+    let body: IncomeBody = serde_json::from_str(req.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body.start_time, Some((NOW + 99.0) as u64));
+    let actions = response(&mut e, now, req.id, r#"{"items":[]}"#);
+    let actions = advance(&mut e, &mut now, actions);
+    assert_eq!(
+        serde_json::from_str::<Vec<IncomeResult>>(&result(&actions).unwrap())
+            .unwrap()
+            .len(),
+        100
+    );
+    assert!(!actions.iter().any(|a|matches!(a,Action::Notice(Notice::Event(v)) if v.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Execution {
@@ -265,7 +571,7 @@ fn normal_and_algo_history_commit_together_in_binance_result_shape() {
     assert_eq!(rows[1].average_price, Some(64999.5));
 }
 #[test]
-fn failed_half_of_order_history_never_returns_partial_success() {
+fn failed_algo_history_retains_valid_normal_rows_with_owned_incompleteness() {
     let mut e = engine();
     let actions = command(
         &mut e,
@@ -286,7 +592,7 @@ fn failed_half_of_order_history_never_returns_partial_success() {
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert_eq!(result(&actions).unwrap_err(), "connection reset");
+    owned_income_partial(&actions, 1);
 }
 #[test]
 fn income_post_preserves_ts_omission_and_explicit_null_contract() {
@@ -370,34 +676,15 @@ fn income_walks_beyond_short_pages_paces_and_deduplicates_large_ids() {
     assert_eq!(rows[0].category, "other");
 }
 #[test]
-fn failed_income_chunk_continues_next_hundred_day_chunk_with_incomplete_warning() {
+fn failed_income_first_chunk_rejects_and_stops_the_range() {
     let mut e = engine();
-    let mut now = NOW;
     let actions = command(&mut e, income(Some(NOW), Some(NOW + 200.0 * DAY)));
     let req = request(&actions, "/account/income");
     let body: IncomeBody = serde_json::from_str(req.body.as_ref().unwrap()).unwrap();
     assert_eq!(body.end_time, Some((NOW + 100.0 * DAY) as u64));
-    e.handle(
-        now,
-        Event::HttpFailed {
-            request: req.id,
-            error: "page reset",
-        },
-    );
-    let actions: Vec<_> = e.drain_actions().collect();
-    owned_incomplete(&actions, 7);
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("INCOMPLETE"))));
-    let actions = advance(&mut e, &mut now, actions);
-    let actions = advance(&mut e, &mut now, actions);
-    let req = request(&actions, "/account/income");
-    let body: IncomeBody = serde_json::from_str(req.body.as_ref().unwrap()).unwrap();
-    assert_eq!(body.start_time, Some((NOW + 100.0 * DAY) as u64));
-    let actions = response(&mut e, now, req.id, r#"{"items":[]}"#);
-    let actions = advance(&mut e, &mut now, actions);
-    assert_eq!(result(&actions).unwrap(), "[]");
-    owned_incomplete(&actions, 7);
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Warn, message, .. })) if message.contains("INCOMPLETE")&&message.contains("1 chunk"))));
+    owned_income_failure(&failed_income_page(&mut e, req, 0), 7);
 }
+
 #[test]
 fn malformed_streamed_fill_rows_fail_the_whole_query() {
     let mut e = engine();
@@ -532,7 +819,14 @@ fn order_history_continuation_waits_for_a_ban_from_another_query() {
     let mut now = NOW;
     let actions = advance(&mut e, &mut now, actions);
     assert_eq!(now, NOW + 10_000.0);
-    request(&actions, "/allAlgoOrders");
+    let req = request(&actions, "/allAlgoOrders");
+    let actions = response(&mut e, now, req.id, ALGO);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&result(&actions).unwrap())
+            .unwrap()
+            .len(),
+        2
+    );
 }
 #[test]
 fn income_without_bill_ids_uses_time_in_the_deduplication_identity() {
@@ -616,22 +910,26 @@ fn non_null_income_cursor_warns_even_when_has_next_page_is_false() {
 }
 
 #[test]
-fn failed_nonrange_income_emits_native_owned_fixture_before_failure_at_error_only_level() {
+fn later_income_failure_emits_native_owned_fixture_before_partial_success_at_error_only_level() {
     let mut e = engine();
     e.set_log_level(safe_cex_engine::Level::Error);
     e.handle(
         NOW,
         Event::Command(Command::Query {
             command: 1,
-            query: income(None, None),
+            query: income(Some(NOW), Some(NOW + 1000.0)),
         }),
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    let request = request(&actions, "/account/income");
+    let req = request(&actions, "/account/income");
+    let actions = response(&mut e, NOW, req.id, &full_income_page());
+    let mut now = NOW;
+    let actions = advance(&mut e, &mut now, actions);
+    let req = request(&actions, "/account/income");
     e.handle(
         NOW,
         Event::HttpFailed {
-            request: request.id,
+            request: req.id,
             error: "page reset",
         },
     );
@@ -658,7 +956,12 @@ fn failed_nonrange_income_emits_native_owned_fixture_before_failure_at_error_onl
         actual, fixture,
         "host/worker fixture must match the real venue event"
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:1,error}) if error.legacy_text().contains("page reset"))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {command:1,result}) if serde_json::from_str::<Vec<serde_json::Value>>(result).unwrap().len()==100)));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+    );
 }
 #[test]
 fn lifetime_income_budget_marker_is_owned_before_retained_rows_finish() {
@@ -717,6 +1020,286 @@ fn identity_marker_count(actions: &[Action], code: &str) -> usize {
         .iter()
         .filter(|a| matches!(a,Action::Notice(Notice::Event(event))if event.code==code))
         .count()
+}
+
+fn list_query(kind: u8) -> Query {
+    match kind {
+        0 => identity_fills(Some(NOW), Some(NOW + 8.0 * DAY)),
+        1 => Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        _ => Query::PublicTrades {
+            symbol: "BTCUSDT".into(),
+            limit: None,
+        },
+    }
+}
+fn list_failure(e: &mut Engine<WeexFutures>, r: HttpRequest, mode: u8) -> Vec<Action> {
+    if mode == 0 {
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: r.id,
+                error: "list reset",
+            },
+        );
+        return e.drain_actions().collect();
+    }
+    if mode == 1 {
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status: 503,
+                    headers: "",
+                    body: "unavailable",
+                },
+            },
+        );
+        return e.drain_actions().collect();
+    }
+    let (prefix, algo) = if r.url.contains("allAlgoOrders") {
+        (
+            serde_json::from_str::<serde_json::Value>(ALGO).unwrap()["orders"][0].to_string(),
+            true,
+        )
+    } else if r.url.contains("market/trades") {
+        (
+            format!(
+                r#"{{"id":"failed-prefix","price":"69000","qty":"1","quoteQty":"69000","time":{NOW},"isBuyerMaker":true}}"#
+            ),
+            false,
+        )
+    } else if r.url.contains("order/history") {
+        (
+            serde_json::from_str::<serde_json::Value>(NORMAL).unwrap()[0].to_string(),
+            false,
+        )
+    } else {
+        (
+            fill_identity_row("id", "failed-prefix", "BTCUSDT", NOW + 8.0 * DAY),
+            false,
+        )
+    };
+    let body = match mode {
+        2 if algo => format!(r#"{{"orders":[{prefix},null]}}"#),
+        2 => format!("[{prefix},null]"),
+        3 => r#"{"code":40014,"msg":"native refusal"}"#.to_owned(),
+        4 if algo => r#"{"orders":null}"#.to_owned(),
+        4 => "{}".to_owned(),
+        5 if algo => format!(r#"{{"orders":[{prefix},"#),
+        5 => format!("[{prefix},"),
+        _ => unreachable!(),
+    };
+    response(e, NOW, r.id, &body)
+}
+#[test]
+fn owned_lists_first_failure_is_typed_without_false_complete_history() {
+    for kind in 0..3 {
+        for mode in 0..6 {
+            let mut e = engine();
+            e.set_log_level(safe_cex_engine::Level::Error);
+            let actions = command(&mut e, list_query(kind));
+            let r = request(
+                &actions,
+                if kind == 0 {
+                    "userTrades"
+                } else if kind == 1 {
+                    "order/history"
+                } else {
+                    "market/trades"
+                },
+            );
+            owned_income_failure(&list_failure(&mut e, r, mode), 7);
+        }
+    }
+}
+#[test]
+fn owned_lists_later_window_or_algo_failure_returns_only_accepted_rows() {
+    for kind in 0..2 {
+        for mode in 0..6 {
+            let mut e = engine();
+            e.set_log_level(safe_cex_engine::Level::Error);
+            let actions = command(&mut e, list_query(kind));
+            let r = request(
+                &actions,
+                if kind == 0 {
+                    "userTrades"
+                } else {
+                    "order/history"
+                },
+            );
+            let body = if kind == 0 {
+                format!("[{}]", fill_identity_row("id", "kept", "BTCUSDT", NOW))
+            } else {
+                NORMAL.into()
+            };
+            let actions = response(&mut e, NOW, r.id, &body);
+            no_completion(&actions);
+            let r = request(
+                &actions,
+                if kind == 0 {
+                    "userTrades"
+                } else {
+                    "allAlgoOrders"
+                },
+            );
+            let actions = list_failure(&mut e, r, mode);
+            owned_income_partial(&actions, 1);
+            assert!(!result(&actions).unwrap().contains("failed-prefix"));
+        }
+    }
+}
+#[test]
+fn owned_lists_empty_or_filtered_prior_window_cannot_authorize_partial_success() {
+    for filtered in [false, true] {
+        let mut e = engine();
+        let actions = command(&mut e, list_query(0));
+        let r = request(&actions, "userTrades");
+        let body = if filtered {
+            format!("[{}]", fill_identity_row("id", "other", "ETHUSDT", NOW))
+        } else {
+            "[]".into()
+        };
+        let actions = response(&mut e, NOW, r.id, &body);
+        let r = request(&actions, "userTrades");
+        owned_income_failure(&list_failure(&mut e, r, 0), 7);
+    }
+}
+#[test]
+fn owned_missing_fill_fact_waits_for_valid_page_and_final_success() {
+    let mut e = engine();
+    let actions = command(&mut e, list_query(0));
+    let r = request(&actions, "userTrades");
+    let body = format!(
+        "[{},{}]",
+        fill_identity_row("id", "kept", "BTCUSDT", NOW),
+        fill_identity_row("id", "", "BTCUSDT", NOW)
+    );
+    let actions = response(&mut e, NOW, r.id, &body);
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::HISTORY_INCOMPLETE),
+        0,
+        "no coverage publication before final success"
+    );
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+        1
+    );
+    let r = request(&actions, "userTrades");
+    let actions = response(&mut e, NOW, r.id, "[]");
+    owned_income_partial(&actions, 1);
+}
+#[test]
+fn owned_failed_fill_page_cannot_publish_or_consume_a_missing_id_fact() {
+    let mut e = engine();
+    let actions = command(&mut e, identity_fills(None, None));
+    let r = request(&actions, "userTrades");
+    let body = format!("[{},null]", fill_identity_row("id", "", "BTCUSDT", NOW));
+    let actions = response(&mut e, NOW, r.id, &body);
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+        0
+    );
+    owned_income_failure(&actions, 7);
+    let actions = command(&mut e, identity_fills(None, None));
+    let r = request(&actions, "userTrades");
+    let actions = response(
+        &mut e,
+        NOW,
+        r.id,
+        &format!("[{}]", fill_identity_row("id", "", "BTCUSDT", NOW)),
+    );
+    owned_income_partial(&actions, 0);
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+        1
+    );
+}
+#[test]
+fn owned_algo_advertised_more_is_a_validated_gap_even_without_rows() {
+    for normal in [false, true] {
+        let mut e = engine();
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let actions = command(&mut e, list_query(1));
+        let r = request(&actions, "order/history");
+        let actions = response(&mut e, NOW, r.id, if normal { NORMAL } else { "[]" });
+        let r = request(&actions, "allAlgoOrders");
+        let actions = response(&mut e, NOW, r.id, r#"{"orders":[],"hasMore":true}"#);
+        owned_income_partial(&actions, usize::from(normal));
+    }
+}
+#[test]
+fn owned_algo_malformed_continuation_metadata_excludes_the_whole_page() {
+    for metadata in ["null", "\"yes\"", "[]", "1"] {
+        let mut e = engine();
+        let actions = command(&mut e, list_query(1));
+        let r = request(&actions, "order/history");
+        let actions = response(&mut e, NOW, r.id, NORMAL);
+        let r = request(&actions, "allAlgoOrders");
+        let body = ALGO.replace("\"hasMore\":false", &format!("\"hasMore\":{metadata}"));
+        let actions = response(&mut e, NOW, r.id, &body);
+        owned_income_partial(&actions, 1);
+    }
+}
+#[test]
+fn public_list_keeps_duplicate_ids_and_native_order() {
+    let mut e = engine();
+    let actions = command(&mut e, list_query(2));
+    let r = request(&actions, "market/trades");
+    let row = |id: &str, time: f64| {
+        format!(
+            r#"{{"id":"{id}","price":"10","qty":"1","quoteQty":"10","time":{time},"isBuyerMaker":false}}"#
+        )
+    };
+    let actions = response(
+        &mut e,
+        NOW,
+        r.id,
+        &format!(
+            "[{},{},{}]",
+            row("same", NOW),
+            row("other", NOW + 1.0),
+            row("same", NOW)
+        ),
+    );
+    let rows: serde_json::Value = serde_json::from_str(&result(&actions).unwrap()).unwrap();
+    assert_eq!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["same", "other", "same"]
+    );
+}
+
+#[test]
+fn native_list_windows_preserve_the_legacy_ratio_admission_boundary() {
+    let span = 7.0 * DAY;
+    for over in [false, true] {
+        let mut e = engine();
+        let actions = command(
+            &mut e,
+            identity_fills(
+                Some(NOW),
+                Some(NOW + 1000.0 * span + if over { 0.5 } else { 0.0 }),
+            ),
+        );
+        if over {
+            assert!(result(&actions).unwrap_err().contains("budget"));
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        } else {
+            let req = request(&actions, "userTrades");
+            assert!(req.url.contains(&format!("startTime={NOW:.0}")));
+            assert!(req.url.contains(&format!("endTime={:.0}", NOW + span)));
+            no_completion(&actions);
+        }
+    }
 }
 #[test]
 fn empty_fill_identity_aliases_keep_valid_financial_peers_and_mark_owned_incomplete_once() {

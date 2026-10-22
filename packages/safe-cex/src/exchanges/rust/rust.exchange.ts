@@ -1,4 +1,5 @@
 import { copyHistoryCompleteness } from '../../historyCompleteness';
+import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   AccountAuthResult,
@@ -80,9 +81,10 @@ import {
   workerCallClientOrderIds,
 } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from './construction';
+import { deriveBridgeConstruction, derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { LocalSignerSetup, withoutSigningCredentials } from './localSignerSetup';
+import { DelegatedSignerSetup, withoutDelegatedSigning } from './delegatedSignerSetup';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
@@ -194,9 +196,8 @@ const needsTsPayloadSigner = (
 ) => Boolean(options.payloadSigner) && TS_PAYLOAD_SIGNER_VENUES.has(name) && options.publicDataOnly !== true;
 
 /**
- * Whether `engine: 'rust'` runs this account on the engine. A keyless remote-signed
- * account stays on the TS venue, which signs through the browser, as does a
- * payload-signed account outside Paradex.
+ * One factory/worker choice. Reviewed delegated families use their owned provider;
+ * other keyless/payload families retain their existing TS compatibility path.
  */
 export const runsOnRustEngine = (
   name: ExchangeName,
@@ -209,8 +210,8 @@ export const runsOnRustEngine = (
 ) =>
   options.engine === 'rust' &&
   isRustVenue(name) &&
-  !isKeylessRemoteSigned(name, options) &&
-  !needsTsPayloadSigner(name, options);
+  (deriveRemoteSigningPolicy(name)?.enabled === true ||
+    (!isKeylessRemoteSigned(name, options) && !needsTsPayloadSigner(name, options)));
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -302,7 +303,8 @@ export type WasmEngineModule = {
 };
 
 /** Preserve native constructor classification at the same boundary as command failures. */
-const constructEngine = (Constructor: WasmEngineModule['WasmEngine'], venue: string, options: string, setup?:LocalSignerSetup): WasmEngineLike => {
+type SignerSetup = LocalSignerSetup | DelegatedSignerSetup;
+const constructEngine = (Constructor: WasmEngineModule['WasmEngine'], venue: string, options: string, setup?:SignerSetup): WasmEngineLike => {
   try {
     return setup ? setup.construct(Constructor,venue,options) : new Constructor(venue, options);
   } catch (error) {
@@ -412,12 +414,28 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    if (this.bridgeConstruction.dispatchSigning) {
+      try {
+        await this.ensureHost();
+        return await signHostedHttp(this.name, this.options, Boolean(this.signerSetup?.primaryComplete), this.host!, request);
+      } catch {
+        return { id: request.id, error: 'Hosted HTTP signing failed' };
+      }
+    }
     const signer = this.hostedSigner();
     if (!signer) return { id: request.id, error: 'Exchange does not have xhr for signing' };
     return (await signer).signHttpRequest(request);
   };
 
   override signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    if (this.bridgeConstruction.dispatchSigning) {
+      try {
+        await this.ensureHost();
+        return await signHostedWsAuth(this.host!, request);
+      } catch {
+        return { id: request.id, error: 'Hosted WS auth signing failed' };
+      }
+    }
     const signer = this.hostedSigner();
     return signer ? (await signer).signWsAuth(request) : this.localSignWsAuth(request);
   };
@@ -598,9 +616,19 @@ export class RustEngineExchange extends BaseExchange {
       const message = 'Local signer setup is not supported for this Rust venue yet';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const signerSetup=bridgeConstruction.dispatchSigning ? new LocalSignerSetup(options,deriveSignerSetupPolicy(exchangeName)) : undefined;
+    const delegatedPolicy = deriveRemoteSigningPolicy(exchangeName);
+    const delegated = delegatedPolicy?.enabled === true && (options.remoteSigner !== undefined || options.payloadSigner !== undefined);
+    const signerSetup = bridgeConstruction.dispatchSigning
+      ? delegated ? new DelegatedSignerSetup(exchangeName, options) : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
+      : undefined;
     const signingMode=signerSetup ? derivePublicMode(exchangeName,options,undefined,signerSetup.credentialPresence) : undefined;
-    if (signerSetup) options=withoutSigningCredentials(options);
+    if (signingMode && !signingMode.publicDataOnly && options.payloadSigner !== undefined
+      && delegatedPolicy && !delegatedPolicy.payloadSupported) {
+      signerSetup?.dispose();
+      const message = 'This Rust account has no REST-only PayloadSigner lifecycle';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
+    if (signerSetup) options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
     const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
       ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
       : [];
@@ -618,11 +646,14 @@ export class RustEngineExchange extends BaseExchange {
       options = effectiveOptions;
     }
     const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
-    if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647)
+    if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647) {
+      signerSetup?.dispose();
       throw new Error('rustCommandTimeoutMs must be a positive integer no greater than 2147482647');
+    }
     super(exchangeName, options, store);
     this.bridgeConstruction = bridgeConstruction;
     this.signerSetup=signerSetup;
+    if (signerSetup instanceof DelegatedSignerSetup) this.delegatedIntent = signerSetup.intent;
     if (signingMode) this.constructionRecord={bridge:bridgeConstruction,...signingMode};
     this.warnIgnoredCoinbaseReadOptions = ignoredCoinbaseReadOptions;
     this.commandTimeoutMs = commandTimeoutMs;
@@ -673,7 +704,8 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private constructionRecord?: EngineConstruction;
-  private signerSetup?:LocalSignerSetup;
+  private signerSetup?:SignerSetup;
+  private delegatedIntent?:Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
 
   private get asterApiVersion() {
     // Construction/getters are synchronous; WASM loads asynchronously on first use.
@@ -763,7 +795,10 @@ export class RustEngineExchange extends BaseExchange {
 
   private ensureHost = (): Promise<void> => {
     if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
-    return (this.hostInitialization ??= this.createHost());
+    return (this.hostInitialization ??= this.createHost().catch((error: unknown) => {
+      this.signerSetup?.dispose();
+      throw error;
+    }));
   };
 
   private createHost = async () => {
@@ -848,11 +883,11 @@ export class RustEngineExchange extends BaseExchange {
         publicDataOnly: Boolean(publicDataOnly),
         publicMode: {
           requested: this.options.publicDataOnly ?? null,
-          remoteSigner: Boolean(this.options.remoteSigner),
-          payloadSigner: Boolean(this.options.payloadSigner),
+          remoteSigner: this.delegatedIntent?.remoteSigner ?? Boolean(this.options.remoteSigner),
+          payloadSigner: this.delegatedIntent?.payloadSigner ?? Boolean(this.options.payloadSigner),
           apiKeyIndexPresent: Boolean(this.options.apiKeyIndex),
         },
-        remoteSigning: Boolean(this.options.remoteSigner || this.options.payloadSigner),
+        remoteSigning: this.delegatedIntent !== undefined || Boolean(this.options.remoteSigner || this.options.payloadSigner),
         extra: { kucoinBroker: this.options.extra?.kucoinBroker },
         hyrotrader: {
           mode: this.options.extra?.hyrotraderMode,
@@ -886,7 +921,7 @@ export class RustEngineExchange extends BaseExchange {
         polymarket: this.options.polymarket,
         paradexAddress,
         subkeyAddress,
-        payloadSigner: Boolean(this.options.payloadSigner),
+        payloadSigner: this.delegatedIntent?.payloadSigner ?? Boolean(this.options.payloadSigner),
         asterdex: {
           apiVersion: ['v1', 'v3'].includes(this.options.extra?.asterdexApiVersion ?? '')
             ? this.options.extra?.asterdexApiVersion : undefined,
@@ -934,7 +969,8 @@ export class RustEngineExchange extends BaseExchange {
             for (const wake of this.startupWaiters) wake();
           },
         },
-        { commandTimeoutMs: this.commandTimeoutMs, ownsEngine: true },
+        { commandTimeoutMs: this.commandTimeoutMs, ownsEngine: true,
+          ...(this.signerSetup instanceof DelegatedSignerSetup ? { signer: this.signerSetup.signer } : {}) },
       );
     } catch (error) {
       try { engine.free?.(); } catch { /* Keep the original construction error. */ }

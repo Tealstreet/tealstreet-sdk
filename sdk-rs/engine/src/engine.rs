@@ -469,6 +469,7 @@ pub enum Action {
         socket: SocketId,
     },
     Http(HttpRequest),
+    ManagedHttp(Box<crate::request_context::HttpAction>),
     /// Internal outbound queue wrapper; always unwrapped/validated by drain.
     SignedOutbound {
         attempt: RequestId,
@@ -659,7 +660,6 @@ pub enum Command {
     },
 }
 
-#[cfg(feature = "order-locks")]
 impl Command {
     pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
@@ -682,7 +682,8 @@ impl Command {
             | Self::FetchCandles { command, .. }
             | Self::FetchOptionChain { command, .. }
             | Self::FetchOptionExpiries { command, .. }
-            | Self::FetchAccountGreeks { command } => Some(*command),
+            | Self::FetchAccountGreeks { command }
+            | Self::Venue { command, .. } => Some(*command),
             _ => None,
         }
     }
@@ -856,16 +857,23 @@ struct PendingHttp<P> {
     auth: Option<ReadAuth>,
 }
 
+#[path = "request_context_registry.rs"]
+mod request_context_registry;
+
+#[path = "http_lifecycle.rs"]
+mod http_lifecycle;
+
 fn observe_account_auth<V: Venue>(
     venue: &V,
     pending: &PendingHttp<V::Pending>,
     response: &Response<'_>,
     expected_list_present: bool,
     now: f64,
+    store: &Store,
     actions: &mut Vec<Action>,
 ) {
     let Some(auth) = pending.auth else { return };
-    let Some(outcome) = venue.account_auth_outcome(&pending.value, response, now) else {
+    let Some(outcome) = venue.account_auth_outcome(&pending.value, response, now, store) else {
         return;
     };
     if outcome == AuthOutcome::Accepted && !expected_list_present {
@@ -1051,6 +1059,12 @@ impl Polls {
 }
 
 struct Io<P> {
+    request_contexts: request_context_registry::ContextRegistry,
+    http_delivery: Option<request_context_registry::Delivery>,
+    managed_http: HashMap<RequestId, http_lifecycle::Managed>,
+    http_pacing: crate::request_context::SendPacing,
+    http_responses: crate::request_context::ReconciliationResponses,
+    http_write_revision: u64,
     entropy: Option<crate::entropy::Entropy>,
     #[cfg(feature = "order-locks")]
     order_locks: crate::order_locks::OrderLocks,
@@ -1063,6 +1077,7 @@ struct Io<P> {
     actions: Vec<Action>,
     placement_acks: crate::placement_acks::PlacementAcks,
     public_feed_policy: PublicFeedPolicy,
+    private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
     signing: crate::signing_dispatch::Dispatch,
@@ -1094,6 +1109,12 @@ struct Io<P> {
 impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
+            request_contexts: Default::default(),
+            http_delivery: None,
+            http_responses: Default::default(),
+            http_write_revision: 0,
+            managed_http: HashMap::new(),
+            http_pacing: Default::default(),
             entropy: None,
             #[cfg(feature = "order-locks")]
             order_locks: crate::order_locks::OrderLocks::default(),
@@ -1106,6 +1127,7 @@ impl<P> Default for Io<P> {
             actions: Vec::new(),
             placement_acks: Default::default(),
             public_feed_policy: PublicFeedPolicy::Direct,
+            private_feed_policy: Default::default(),
             pending: HashMap::new(),
             signatures: Vec::new(),
             signing: Default::default(),
@@ -1176,6 +1198,10 @@ impl<P> Cx<'_, P> {
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
         self.io.public_feed_policy
+    }
+
+    pub fn private_feed_policy(&self) -> crate::signing_policy::PrivateFeedPolicy {
+        self.io.private_feed_policy
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
@@ -1669,16 +1695,9 @@ impl<P> Cx<'_, P> {
         self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
-    /// Completes `command` successfully with its JSON result; failures use [`Cx::fail`].
+    /// Legacy numeric finalization. Managed commands use `done_context`.
     pub fn done(&mut self, command: CommandId, result: String) {
-        #[cfg(feature = "order-locks")]
-        {
-            self.io.order_locks.finish(command, false);
-            self.io.active_commands.remove(&command);
-        }
-        self.io
-            .actions
-            .push(Action::Notice(Notice::CommandDone { command, result }));
+        let _ = self.finish_command(command, Ok(result), None);
     }
 
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
@@ -1711,22 +1730,73 @@ impl<P> Cx<'_, P> {
             .push(Action::Notice(Notice::StartupFailed { error }));
     }
 
+    /// Legacy numeric finalization. Managed commands use `fail_context`.
     pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
-        self.fail_with(command, error.into());
+        let _ = self.finish_command(command, Err(error.into()), None);
     }
 
-    // Out of line so the hundreds of venue call sites share one body (wasm size budget).
+    // One non-generic seal/retire/publish path, including success conversion.
     #[inline(never)]
-    fn fail_with(&mut self, command: CommandId, error: VenueError) {
+    fn finish_command(
+        &mut self,
+        command: CommandId,
+        result: Result<String, VenueError>,
+        authority: Option<&crate::request_context::Context>,
+    ) -> Result<(), crate::request_context::Error> {
+        let (success, error) = match result {
+            Ok(result) => (Some(result), None),
+            Err(error) => (None, Some(error)),
+        };
+        let mut write_sealed = false;
+        let result = match self.io.request_contexts.seal(
+            command,
+            self.io.http_delivery.as_ref(),
+            authority,
+            error,
+        ) {
+            request_context_registry::Seal::Stale => {
+                return Err(crate::request_context::Error::Revoked);
+            }
+            request_context_registry::Seal::Legacy(Some(error)) => Err(error),
+            request_context_registry::Seal::Legacy(None) => Ok(success.unwrap_or_default()),
+            request_context_registry::Seal::Success => {
+                write_sealed = true;
+                Ok(success.unwrap_or_default())
+            }
+            request_context_registry::Seal::Failure(error, rejections) => {
+                write_sealed = true;
+                for message in rejections {
+                    self.command_error(command, message);
+                }
+                Err(error)
+            }
+        };
+        self.io.retire_http_command(command);
+        self.io.request_contexts.finish(command);
         #[cfg(feature = "order-locks")]
         {
-            self.io.order_locks.finish(command, true);
+            if write_sealed
+                && result
+                    .as_ref()
+                    .err()
+                    .is_none_or(|error| error.outcome != Some(crate::Outcome::Unknown))
+            {
+                self.io.order_locks.managed_resolved(command);
+            }
+            self.io.order_locks.finish(command, result.is_err());
             self.io.active_commands.remove(&command);
         }
-        count_auth_failure(self.io, Some(&error));
-        self.io
-            .actions
-            .push(Action::Notice(Notice::CommandFailed { command, error }));
+        #[cfg(not(feature = "order-locks"))]
+        let _ = write_sealed;
+        let notice = match result {
+            Ok(result) => Notice::CommandDone { command, result },
+            Err(error) => {
+                count_auth_failure(self.io, Some(&error));
+                Notice::CommandFailed { command, error }
+            }
+        };
+        self.io.actions.push(Action::Notice(notice));
+        Ok(())
     }
 
     /// Every placement in this response is proven accepted or explicitly rejected.
@@ -1791,6 +1861,55 @@ pub enum SigningTarget<'a, P> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    /// Bounded native correlation metadata only. No credential, outbound packet
+    /// or recipe may be retained here. Managed mutations require this codec.
+    fn capture_http_reconciliation(
+        &self,
+        _pending: &Self::Pending,
+    ) -> Result<crate::request_context::ReconciliationData, crate::request_context::Error> {
+        Err(crate::request_context::Error::Invalid)
+    }
+
+    /// Pure late response codec, separate from ordinary reducers. Immutable
+    /// venue access and the restricted view cannot reopen a command or publish
+    /// authentication/retry/scheduler state or clear an order-lock fence.
+    fn reconcile_http(
+        &self,
+        _cx: &mut crate::request_context::Reconciliation<'_>,
+        _data: &crate::request_context::ReconciliationData,
+        _response: Response<'_>,
+    ) {
+    }
+
+    /// Fixed per-engine send-group floors; individual attempts may only extend
+    /// the gap following their physical transport handoff.
+    fn http_pacing(&self) -> &[crate::request_context::Pacing] {
+        &[]
+    }
+
+    /// Final synchronous admission. This callback cannot queue more work or
+    /// alter the engine's clocks, preparation/signing state or original bound.
+    fn on_http_release(
+        &mut self,
+        _pending: &mut Self::Pending,
+        _release: &crate::request_context::HttpRelease,
+    ) -> Result<crate::request_context::Admission, crate::request_context::Error> {
+        Ok(crate::request_context::Admission::Unscheduled)
+    }
+
+    /// Typed setup/bind/denial failures are pre-send facts, distinct from a
+    /// transport failure after release. Read schedulers can retire denied work
+    /// neutrally rather than count another network/authentication failure.
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        _reason: crate::request_context::Error,
+        error: VenueError,
+    ) {
+        self.on_sign_error(cx, pending, error);
+    }
+
     /// Defer symbol cancellation until placement native identities are known.
     fn guard_pending_placements(&self) -> bool {
         false
@@ -1824,6 +1943,7 @@ pub trait Venue {
         _pending: &Self::Pending,
         _response: &Response<'_>,
         _now: f64,
+        _store: &Store,
     ) -> Option<AuthOutcome> {
         None
     }
@@ -2008,11 +2128,16 @@ impl<V: Venue> Engine<V> {
         })?;
         let mut store = Store::default();
         store.set_quantity_units(venue.capabilities().quantity_units);
+        let http_pacing =
+            crate::request_context::SendPacing::new(venue.http_pacing()).map_err(|_| {
+                VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput)
+            })?;
         Ok(Self {
             venue,
             store,
             io: Io {
                 entropy: Some(entropy),
+                http_pacing,
                 ..Io::default()
             },
             started: false,
@@ -2048,6 +2173,30 @@ impl<V: Venue> Engine<V> {
     }
     pub fn signer(&self) -> Option<crate::signing::Provider> {
         self.io.signer.clone()
+    }
+
+    /// Delegated REST-only intent does not disable account reads or writes.
+    pub fn set_private_feed_policy(
+        &mut self,
+        policy: crate::signing_policy::PrivateFeedPolicy,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(
+                VenueError::new("Private feed policy must be configured before startup")
+                    .kind(ErrorKind::InvalidInput),
+            );
+        }
+        self.io.private_feed_policy = policy;
+        Ok(())
+    }
+
+    /// Read the same calibrated protocol view and revision used by dispatch,
+    /// without starting the venue or changing its raw scheduling clock.
+    pub fn signing_clock(&self, host_now: f64) -> (f64, u64) {
+        (
+            self.io.protocol_clock.at(host_now),
+            self.io.protocol_clock.revision(),
+        )
     }
 
     /// Host configuration is immutable once startup begins.
@@ -2301,8 +2450,33 @@ impl<V: Venue> Engine<V> {
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         self.io.dispatch_now = now;
+        self.io.http_responses.prune(now);
+        if self.expire_http_timer(now, &event) {
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            return;
+        }
+        let admitted = self.admit_http_event(now, &event);
+        if self.collect_write_response(now, &event, admitted) {
+            return;
+        }
+        if !admitted {
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            return;
+        }
+        let completed_http = match &event {
+            Event::HttpResponse { request, .. }
+            | Event::HttpEnd { request }
+            | Event::HttpFailed { request, .. } => Some(*request),
+            _ => None,
+        };
         if let Event::Signed { attempt, result } = event {
-            self.sign_completed(now, attempt, result);
+            if !self.io.signing.is_managed(attempt) || self.signing_pending(attempt) {
+                self.sign_completed(now, attempt, result);
+            }
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
@@ -2326,6 +2500,9 @@ impl<V: Venue> Engine<V> {
         }
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
+        }
+        if let Some(request) = completed_http {
+            self.settle_http_event(request);
         }
     }
 
@@ -2360,6 +2537,63 @@ impl<V: Venue> Engine<V> {
     }
 
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
+        let request = match &event {
+            Event::HttpResponse { request, .. }
+            | Event::HttpStart { request, .. }
+            | Event::HttpChunk { request, .. }
+            | Event::HttpEnd { request }
+            | Event::HttpFailed { request, .. } => Some(*request),
+            _ => None,
+        };
+        let delivery = request
+            .and_then(|request| self.io.managed_http.get(&request))
+            .map(|managed| managed.delivery());
+        if let Event::HttpFailed { error, .. } = &event
+            && let Some(delivery) = delivery.as_ref()
+            && delivery.context.operation() == crate::request_context::Operation::Mutation
+        {
+            let _ = self.io.request_contexts.result(
+                delivery,
+                crate::request_context::WriteResult::Failed(
+                    VenueError::new(*error).kind(ErrorKind::Network),
+                ),
+            );
+        }
+        if let Some(delivery) = delivery.as_ref() {
+            self.io.request_contexts.enter_delivery(delivery);
+        }
+        let previous = std::mem::replace(&mut self.io.http_delivery, delivery.clone());
+        self.handle_event_scoped(now, event);
+        self.io.http_delivery = previous;
+        if let Some(delivery) = delivery.as_ref() {
+            self.io.request_contexts.exit_delivery(delivery);
+        }
+    }
+
+    fn duplicate_command(&mut self) {
+        push_event(
+            &mut self.io.actions,
+            &mut self.io.health,
+            self.io.min_level,
+            LogEvent {
+                level: Level::Error,
+                code: log_code::COMMAND_DUPLICATE,
+                message: "Command ID is already in flight".into(),
+                fields: Vec::new(),
+            },
+        );
+    }
+
+    fn handle_event_scoped(&mut self, now: f64, event: Event<'_>) {
+        // A new event cannot borrow an in-flight managed command's generation.
+        // Sibling legs originate under Cx authority, not a repeated wire command.
+        if let Event::Command(command) = &event
+            && let Some(id) = command.completion_id()
+            && self.io.request_contexts.command_live(id, now)
+        {
+            self.duplicate_command();
+            return;
+        }
         if self.venue.cancel_needs_stored_order()
             && !self.releasing
             && let Event::Command(command) = &event
@@ -2387,24 +2621,10 @@ impl<V: Venue> Engine<V> {
             && let Some(id) = command.completion_id()
             && !self.io.active_commands.insert(id)
         {
-            push_event(
-                &mut self.io.actions,
-                &mut self.io.health,
-                self.io.min_level,
-                LogEvent {
-                    level: Level::Error,
-                    code: log_code::COMMAND_DUPLICATE,
-                    message: "Command ID is already in flight".into(),
-                    fields: Vec::new(),
-                },
-            );
+            self.duplicate_command();
             return;
         }
-        #[cfg(feature = "order-locks")]
-        {
-            self.io.order_response_token = None;
-        }
-        self.io.auth_failure_counted = false;
+        self.begin_event_scope();
         #[cfg(feature = "command-tracking")]
         if matches!(&event, Event::Command(_)) {
             self.commands_received = true;
@@ -2642,6 +2862,30 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_command(&mut cx, command);
             }
         }
+        self.finish_event_scope(now);
+    }
+
+    fn begin_event_scope(&mut self) {
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.order_response_token = None;
+        }
+        self.io.auth_failure_counted = false;
+    }
+
+    fn count_http_status(&mut self, status: u16) {
+        if status == 429 {
+            self.io.health.count(log_code::RATE_LIMITED);
+        } else if status >= 500 {
+            self.io.health.count(log_code::HTTP_FAILED);
+        }
+    }
+
+    fn finish_event_scope(&mut self, now: f64) {
+        // Deferred commands are engine-owned work, not part of the HTTP codec
+        // whose callback just released the lock. Do not lend that codec's
+        // attempt authority to an unrelated internal finalization.
+        let delivery = self.io.http_delivery.take();
         #[cfg(feature = "order-locks")]
         for (command, failed) in self.io.order_locks.ready() {
             if failed && self.venue.fence_uncertain_cancel_all() {
@@ -2664,6 +2908,7 @@ impl<V: Venue> Engine<V> {
                 self.handle(now, Event::Command(command));
             }
         }
+        self.io.http_delivery = delivery;
         self.restore_shared_tickers(false, now);
     }
 
@@ -2687,6 +2932,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn http_chunk(&mut self, now: f64, request: RequestId, data: &[u8]) {
+        let managed = self.io.managed_preparation(request);
         let Some(incoming) = self.io.incoming.get_mut(&request) else {
             return;
         };
@@ -2706,11 +2952,15 @@ impl<V: Venue> Engine<V> {
         };
         let venue = &mut self.venue;
         splitter.feed(data, |item| {
-            venue.on_item(&mut cx, &mut pending.value, item)
+            if managed.is_none_or(|token| cx.io.managed_response_live(request, token, now)) {
+                venue.on_item(&mut cx, &mut pending.value, item)
+            }
         });
-        self.io.pending.insert(request, pending);
-        if let Some(incoming) = self.io.incoming.get_mut(&request) {
-            incoming.splitter = Some(splitter);
+        if managed.is_none_or(|token| self.io.managed_response_live(request, token, now)) {
+            self.io.pending.insert(request, pending);
+            if let Some(incoming) = self.io.incoming.get_mut(&request) {
+                incoming.splitter = Some(splitter);
+            }
         }
     }
 
@@ -2725,17 +2975,12 @@ impl<V: Venue> Engine<V> {
         ) else {
             return;
         };
+        self.count_http_status(incoming.status);
         let mut cx = Cx {
             now,
             store: &mut self.store,
             io: &mut self.io,
         };
-        let status = incoming.status;
-        if status == 429 {
-            cx.io.health.count(log_code::RATE_LIMITED);
-        } else if status >= 500 {
-            cx.io.health.count(log_code::HTTP_FAILED);
-        }
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
@@ -2754,6 +2999,7 @@ impl<V: Venue> Engine<V> {
                         &response,
                         false,
                         now,
+                        cx.store,
                         &mut cx.io.actions,
                     );
                     self.venue.on_stream_error(&mut cx, pending.value, response);
@@ -2794,6 +3040,7 @@ impl<V: Venue> Engine<V> {
                 &response,
                 true,
                 now,
+                cx.store,
                 &mut cx.io.actions,
             );
             self.venue.on_response(&mut cx, pending.value, response);
@@ -2812,6 +3059,7 @@ impl<V: Venue> Engine<V> {
                     &response,
                     true,
                     now,
+                    cx.store,
                     &mut cx.io.actions,
                 );
                 self.venue.on_response(&mut cx, pending.value, response);
@@ -2861,6 +3109,14 @@ impl<V: Venue> Engine<V> {
         else {
             return;
         };
+        if match &completion {
+            Completion::Ready(pending, _)
+            | Completion::Stale(pending)
+            | Completion::Failed(pending, _) => pending.managed,
+        } {
+            self.managed_sign_completed(now, completion);
+            return;
+        }
         match completion {
             Completion::Ready(pending, outbound) => {
                 if pending.timer.0 != 0 {
@@ -2907,6 +3163,12 @@ impl<V: Venue> Engine<V> {
 
     /// Hosts call this with their canonical engine clock immediately before a
     /// delayed drain. Normal event-driven drains use the current event time.
+    /// Provider work may have been drained before its owner was retired.
+    /// Hosts check this before starting any delayed primitive operation.
+    pub fn signing_pending(&self, attempt: RequestId) -> bool {
+        self.io.signing.signature_pending(attempt)
+    }
+
     pub fn prepare_dispatch(&mut self, now: f64) {
         self.io.dispatch_now = now;
     }
@@ -3027,7 +3289,9 @@ impl<V: Venue> Engine<V> {
                                 self.queue_dispatch_callback_actions(&mut queued, emitted);
                                 continue;
                             }
-                            if self.io.signing.timer(attempt).is_some_and(|t| t.0 == 0) {
+                            if !self.io.signing.is_managed(attempt)
+                                && self.io.signing.timer(attempt).is_some_and(|t| t.0 == 0)
+                            {
                                 let timer = TimerId(self.io.next());
                                 if let Some(at_ms) = self.io.signing.arm(attempt, timer) {
                                     self.io.actions.push(Action::SetTimer { timer, at_ms });

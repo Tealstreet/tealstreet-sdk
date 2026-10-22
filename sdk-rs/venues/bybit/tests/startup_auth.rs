@@ -3,8 +3,9 @@
 mod support;
 
 use safe_cex_engine::{ErrorKind, Event, Method};
-use safe_cex_venue_bybit::{Endpoints, Options, Variant};
+use safe_cex_venue_bybit::{Endpoints, Variant};
 use support::Harness;
+use support::Options;
 
 fn private() -> Harness {
     Harness::started(Options {

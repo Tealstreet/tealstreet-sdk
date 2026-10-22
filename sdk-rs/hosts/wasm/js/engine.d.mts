@@ -28,9 +28,19 @@ export class WasmEngine implements WasmEngineLike {
   httpChunk(request: number, data: Uint8Array, now: number): string;
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
+  signingPending(attempt: number): boolean;
+  httpPreparationPending(preparation: string): boolean;
+  httpPrepared(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
+  httpPreparationFailed(preparation: string, code: string, now: number): string;
+  httpClaim(permit: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner(): boolean;
   useExternalSigner(): void;
+  hostedSigningClock(now: number): string;
+  prepareHostedSigning(inputJson: string, now: number): string;
+  localHostedSigning(id: number, now: number): string;
+  finishHostedSigning(id: number, resultJson: string, now: number): string;
+  cancelHostedSigning(id: number): void;
   signed(attempt: number, resultJson: string, now: number): string;
   signFailed(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;
   prepareDispatch(now: number): string;

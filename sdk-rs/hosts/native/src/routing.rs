@@ -185,17 +185,8 @@ impl RoutingState {
     }
 
     pub fn http(&self, request: &HttpRequest) -> Result<HttpRoute, String> {
-        match request.route {
-            Some(safe_cex_engine::RequestRoute::Primary) => return Ok(self.plan.http.clone()),
-            Some(safe_cex_engine::RequestRoute::Direct) => return Ok(HttpRoute::default()),
-            Some(safe_cex_engine::RequestRoute::PublicCors) => {
-                return self
-                    .plan
-                    .public_cors_http
-                    .clone()
-                    .ok_or_else(|| "Public CORS request routing is not configured".into());
-            }
-            None => {}
+        if let Some(route) = self.explicit_http(request.route)? {
+            return Ok(route);
         }
         let public = self.plan.public_header.as_ref().is_some_and(|header| {
             !request
@@ -229,6 +220,61 @@ impl RoutingState {
             }
             .clone(),
         )
+    }
+
+    /// Managed unsigned requests declare their identity before key presentation.
+    /// This path never inspects headers or uses GET as credential policy.
+    pub fn managed_http(
+        &self,
+        request: &HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+    ) -> Result<HttpRoute, String> {
+        use safe_cex_engine::request_context::RoutingIntent;
+        if request.route == Some(safe_cex_engine::RequestRoute::Primary)
+            && intent == RoutingIntent::Secondary
+        {
+            return Err("Secondary credentials conflict with primary HTTP routing".into());
+        }
+        if let Some(route) = self.explicit_http(request.route)? {
+            return Ok(route);
+        }
+        match intent {
+            RoutingIntent::Primary => Ok(self.plan.http.clone()),
+            RoutingIntent::Secondary => self
+                .plan
+                .read_http
+                .clone()
+                .ok_or_else(|| "Secondary HTTP routing is not configured".into()),
+            RoutingIntent::Public => Ok(if self.plan.read_public {
+                self.plan
+                    .read_public_http
+                    .as_ref()
+                    .or(self.plan.read_http.as_ref())
+                    .or(self.plan.public_http.as_ref())
+                    .unwrap_or(&self.plan.http)
+            } else {
+                self.plan.public_http.as_ref().unwrap_or(&self.plan.http)
+            }
+            .clone()),
+        }
+    }
+
+    fn explicit_http(
+        &self,
+        route: Option<safe_cex_engine::RequestRoute>,
+    ) -> Result<Option<HttpRoute>, String> {
+        use safe_cex_engine::RequestRoute;
+        match route {
+            Some(RequestRoute::Primary) => Ok(Some(self.plan.http.clone())),
+            Some(RequestRoute::Direct) => Ok(Some(HttpRoute::default())),
+            Some(RequestRoute::PublicCors) => self
+                .plan
+                .public_cors_http
+                .clone()
+                .map(Some)
+                .ok_or_else(|| "Public CORS request routing is not configured".into()),
+            None => Ok(None),
+        }
     }
 
     pub fn socket(
@@ -658,35 +704,38 @@ fn argument_body(body: Option<&str>) -> Result<Box<RawValue>, String> {
     RawValue::from_string(json).map_err(|error| error.to_string())
 }
 
-pub(crate) async fn request_how(
-    socket: &mut Socket,
+pub(crate) fn http_packet(
     request: &HttpRequest,
     headers: &[(String, String)],
+) -> Result<String, String> {
+    let nonce = format!("native-{}", request.id.0);
+    serde_json::to_string(&HttpRpc {
+        kind: "rpc.http",
+        rpc_version: 4,
+        format: "raw",
+        accept_encoding: ["gzip"],
+        accept_binary: true,
+        nonce: &nonce,
+        arg: HttpArgument {
+            url: &request.url,
+            method: request.method.as_str(),
+            headers: headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str()))
+                .collect(),
+            params: BTreeMap::new(),
+            data: argument_body(request.body.as_deref())?,
+        },
+    })
+    .map_err(|_| "Invalid HTTP tunnel packet".into())
+}
+
+pub(crate) async fn receive_http(
+    socket: &mut Socket,
+    request: RequestId,
     events: &Events,
 ) -> Result<(), String> {
-    let nonce = format!("native-{}", request.id.0);
-    send(
-        socket,
-        &HttpRpc {
-            kind: "rpc.http",
-            rpc_version: 4,
-            format: "raw",
-            accept_encoding: ["gzip"],
-            accept_binary: true,
-            nonce: &nonce,
-            arg: HttpArgument {
-                url: &request.url,
-                method: request.method.as_str(),
-                headers: headers
-                    .iter()
-                    .map(|(name, value)| (name.as_str(), value.as_str()))
-                    .collect(),
-                params: BTreeMap::new(),
-                data: argument_body(request.body.as_deref())?,
-            },
-        },
-    )
-    .await?;
+    let nonce = format!("native-{}", request.0);
     loop {
         let (message, binary) = receive(socket).await?;
         if message.kind == "heartbeat" {
@@ -724,13 +773,7 @@ pub(crate) async fn request_how(
         } else {
             return Err("tunnel response has no raw body".into());
         };
-        report_response(
-            request.id,
-            status,
-            response_headers.join("\n"),
-            &body,
-            events,
-        );
+        report_response(request, status, response_headers.join("\n"), &body, events);
         return Ok(());
     }
 }
@@ -762,6 +805,107 @@ mod tests {
 
     fn state(plan: RoutingPlan) -> RoutingState {
         RoutingState::new(plan, Arc::new(|| Box::pin(async { Ok(String::new()) })))
+    }
+
+    #[test]
+    fn managed_unsigned_routing_uses_explicit_identity_even_for_post_reads() {
+        use safe_cex_engine::request_context::RoutingIntent;
+        let state = state(RoutingPlan {
+            http: HttpRoute {
+                prefix: "primary".into(),
+                ..HttpRoute::default()
+            },
+            public_http: Some(HttpRoute {
+                prefix: "public".into(),
+                ..HttpRoute::default()
+            }),
+            read_http: Some(HttpRoute {
+                prefix: "secondary".into(),
+                ..HttpRoute::default()
+            }),
+            public_header: Some("X-Account-Auth".into()),
+            read_header: Some("X-Read-Auth".into()),
+            ..RoutingPlan::default()
+        });
+        let mut packet = HttpRequest {
+            id: RequestId(1),
+            method: Method::Post,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.invalid/account".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        };
+        assert_eq!(
+            state
+                .managed_http(&packet, RoutingIntent::Public)
+                .unwrap()
+                .prefix,
+            "public"
+        );
+        assert_eq!(
+            state
+                .managed_http(&packet, RoutingIntent::Primary)
+                .unwrap()
+                .prefix,
+            "primary"
+        );
+        assert_eq!(
+            state
+                .managed_http(&packet, RoutingIntent::Secondary)
+                .unwrap()
+                .prefix,
+            "secondary"
+        );
+        packet
+            .headers
+            .push(("X-Account-Auth", "outbound-sentinel".into()));
+        packet
+            .headers
+            .push(("X-Read-Auth", "outbound-sentinel".into()));
+        packet.method = Method::Get;
+        assert_eq!(
+            state
+                .managed_http(&packet, RoutingIntent::Public)
+                .unwrap()
+                .prefix,
+            "public"
+        );
+        assert_eq!(
+            state
+                .managed_http(&packet, RoutingIntent::Primary)
+                .unwrap()
+                .prefix,
+            "primary"
+        );
+        packet.route = Some(safe_cex_engine::RequestRoute::Primary);
+        assert!(
+            state
+                .managed_http(&packet, RoutingIntent::Secondary)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn managed_secondary_route_does_not_silently_fall_back_to_primary() {
+        use safe_cex_engine::request_context::RoutingIntent;
+        let state = state(RoutingPlan::default());
+        let packet = HttpRequest {
+            id: RequestId(1),
+            method: Method::Post,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.invalid/account".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        };
+        assert!(
+            state
+                .managed_http(&packet, RoutingIntent::Secondary)
+                .is_err()
+        );
     }
 
     #[test]

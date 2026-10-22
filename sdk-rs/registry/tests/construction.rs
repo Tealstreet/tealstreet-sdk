@@ -512,6 +512,9 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
     use safe_cex_engine::Outcome;
     for venue in [
         "binance",
+        "binancepm",
+        "binanceinverse",
+        "binancespot",
         "bybit",
         "asterdex",
         "coinbase",
@@ -524,16 +527,27 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             let error = construct(venue, &format!(r#"{{"key":"key","secret":"{local}","remoteSigning":true,"payloadSigner":true}}"#)).unwrap_err();
             assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
-            assert_eq!(
-                error.message,
+            let expected = if safe_cex_venues::remote_signing_policy(venue).enabled {
+                format!(
+                    "Rust {venue} payloadSigner requires a configured injected signing provider"
+                )
+            } else {
                 format!(
                     "Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."
                 )
-            );
+            };
+            assert_eq!(error.message, expected);
         }
     }
     construct("paradex", r#"{"key":"public-subkey","paradexAddress":"0x1","subkeyAddress":"0x2","payloadSigner":true}"#).unwrap();
     construct("binance", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
+    for venue in ["binance", "binancepm", "binanceinverse", "binancespot"] {
+        // Explicit shared intent overrides the legacy boolean in either direction.
+        construct(venue, r#"{"publicDataOnly":false,"payloadSigner":true,"publicMode":{"requested":true,"payloadSigner":true}}"#).unwrap();
+        let error = construct(venue, r#"{"key":"key","secret":"unused","publicDataOnly":true,"payloadSigner":true,"publicMode":{"requested":false,"payloadSigner":true}}"#).unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+    }
     // Aster and Lighter payload-only SDK accounts retain their public fallback.
     for venue in ["asterdex", "lighter"] {
         construct(venue, r#"{"key":"key","payloadSigner":true,"publicMode":{"payloadSigner":true,"apiKeyIndexPresent":true}}"#).unwrap();
@@ -714,7 +728,7 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
 
 #[test]
 fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
-    for venue in ["bybit", "okx", "hyperliquid", "orderly"] {
+    for venue in ["okx", "hyperliquid", "orderly"] {
         assert_eq!(
             rejected(
                 venue,
@@ -726,8 +740,18 @@ fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
 }
 
 #[test]
-fn binance_opaque_refs_require_an_injected_provider_before_construction() {
-    for venue in ["binance", "binancepm", "binanceinverse", "binancespot"] {
+fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
+    for venue in [
+        "binance",
+        "binancepm",
+        "binanceinverse",
+        "binancespot",
+        "bybit",
+        "bybitinverse",
+        "bybitspot",
+        "bybitdemo",
+        "hyrotrader",
+    ] {
         let error = rejected(
             venue,
             r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}}}"#,

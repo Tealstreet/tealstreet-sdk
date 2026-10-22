@@ -4,7 +4,9 @@ mod candles;
 mod history;
 mod identity;
 mod paths;
+mod reads;
 mod sign;
+pub use sign::hosted_signing;
 mod trading;
 pub mod wire;
 
@@ -14,9 +16,10 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::Context;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -47,6 +50,7 @@ pub enum Variant {
 
 #[derive(Clone, Default)]
 pub struct Options {
+    pub signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     pub read_credentials: Option<Credentials>,
     pub testnet: bool,
     pub variant: Variant,
@@ -93,7 +97,8 @@ impl Urls {
 /// Startup lists and klines stream in element by element (see
 /// `Cx::request_streamed`); their continuations collect the decoded rows.
 pub enum Pending {
-    Identity(CommandId),
+    Background(Context, Box<Pending>),
+    Identity(Context),
     ExchangeInfo {
         rows: Vec<Market>,
         rejected: bool,
@@ -106,7 +111,7 @@ pub enum Pending {
         generation: u64,
     },
     Klines {
-        command: CommandId,
+        context: Context,
         candles: Vec<Candle>,
     },
     Account(account::Request),
@@ -345,27 +350,46 @@ impl BinanceFutures {
         }
     }
 
-    fn get(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
-        cx.request(
-            Method::Get,
-            format!("{}{}", self.urls.rest, path),
-            Vec::new(),
+    fn get(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+        self.background_read(
+            cx,
+            reads::Read {
+                url: format!("{}{}", self.urls.rest, path),
+                credentials: None,
+                query: Query::new(),
+                stream: None,
+            },
             None,
             pending,
         );
     }
 
-    fn get_streamed(&self, cx: &mut Cx<'_, Pending>, path: &str, at: ArrayAt, pending: Pending) {
-        cx.request_streamed(
-            Method::Get,
-            format!("{}{}", self.urls.rest, path),
-            Vec::new(),
-            at,
+    fn get_streamed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        at: ArrayAt,
+        pending: Pending,
+    ) {
+        self.background_read(
+            cx,
+            reads::Read {
+                url: format!("{}{}", self.urls.rest, path),
+                credentials: None,
+                query: Query::new(),
+                stream: Some(at),
+            },
+            None,
             pending,
         );
     }
 
     /// A signed request; every parameter travels in the query string.
+    fn signed_recipe(&self, credentials: Credentials, query: Query) -> sign::Http {
+        sign::Http::new(credentials, query, self.options.recv_window, true)
+            .with_header_policy(self.options.signing_policy.header_policy())
+    }
+
     fn signed(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -375,17 +399,6 @@ impl BinanceFutures {
         pending: Pending,
     ) {
         self.signed_request(cx, method, path, query, None, pending);
-    }
-
-    /// A signed GET whose array streams in element by element.
-    fn signed_streamed(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        path: &str,
-        query: Query,
-        pending: Pending,
-    ) {
-        self.signed_request(cx, Method::Get, path, query, Some(ArrayAt::Root), pending);
     }
 
     fn signed_request(
@@ -424,16 +437,14 @@ impl BinanceFutures {
         };
         cx.sign_http(
             request,
-            Box::new(sign::Http::new(
-                credentials.clone(),
-                query,
-                self.options.recv_window,
-                true,
-            )),
+            Box::new(self.signed_recipe(credentials.clone(), query)),
         );
     }
 
     fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
+        if channel == Channel::Private && !cx.private_feed_policy().streaming() {
+            return;
+        }
         let role = if matches!(channel, Channel::Private) {
             safe_cex_engine::SocketChannel::Private
         } else {
@@ -1195,16 +1206,19 @@ impl BinanceFutures {
     fn on_klines(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        context: Context,
         candles: Vec<Candle>,
         response: Response<'_>,
     ) {
         let Response { status, body, .. } = response;
         if status != 200 {
-            cx.fail(command, format!("Binance klines HTTP {status}: {body}"));
+            let _ = cx.fail_context(&context, format!("Binance klines HTTP {status}: {body}"));
             return;
         }
-        cx.done(command, serde_json::to_string(&candles).unwrap_or_default());
+        let _ = cx.done_context(
+            &context,
+            serde_json::to_string(&candles).unwrap_or_default(),
+        );
     }
 }
 
@@ -1313,6 +1327,21 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        if !matches!(pending, Pending::Trade(_)) {
+            return Err(safe_cex_engine::request_context::Error::Invalid);
+        }
+        // Initial native late codec intentionally has no mutation authority.
+        // Unknown effects reconcile through ordinary fenced account reads.
+        safe_cex_engine::request_context::ReconciliationData::new(String::new())
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -1459,13 +1488,19 @@ impl Venue for BinanceFutures {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Background(context, pending) = pending {
+            let _ = cx.finish_http_context(&context);
+            self.on_response(cx, *pending, response);
+            return;
+        }
         self.observe_weight(cx, &response);
-        if let Pending::Identity(command) = pending {
-            self.identity_response(cx, command, response);
+        if let Pending::Identity(context) = pending {
+            self.identity_response(cx, context, response);
             return;
         }
         let Response { status, body, .. } = response;
         match pending {
+            Pending::Background(..) => unreachable!(),
             Pending::Identity(_) => unreachable!(),
             Pending::ExchangeInfo { rows, rejected } => {
                 self.on_markets(cx, rows, response, rejected)
@@ -1476,7 +1511,7 @@ impl Venue for BinanceFutures {
             Pending::DepthSnapshot { symbol, generation } => {
                 self.on_depth_snapshot(cx, symbol, generation, status, body)
             }
-            Pending::Klines { command, candles } => self.on_klines(cx, command, candles, response),
+            Pending::Klines { context, candles } => self.on_klines(cx, context, candles, response),
             Pending::Account(request) => self.on_account_response(cx, request, response),
             Pending::Trade(request) => self.on_trade_response(cx, request, Ok(response)),
             Pending::History(request) => self.on_history_response(cx, request, Ok(response)),
@@ -1485,6 +1520,7 @@ impl Venue for BinanceFutures {
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Background(_, pending) => self.on_item(cx, pending, item),
             Pending::ExchangeInfo {
                 rows: markets,
                 rejected,
@@ -1580,20 +1616,35 @@ impl Venue for BinanceFutures {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Background(context, pending) => {
+                let _ = cx.finish_http_context(&context);
+                self.on_sign_error(cx, *pending, error);
+            }
             Pending::Trade(request) => self.on_trade_sign_failed(cx, request, error),
-            Pending::Identity(command) => cx.fail(command, error),
+            Pending::Identity(context) => self.identity_error(cx, &context, error),
+            Pending::Klines { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::History(request) => self.on_history_sign_failed(cx, request, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Identity(command) = pending {
-            self.identity_failed(cx, command, error);
+        if let Pending::Background(context, pending) = pending {
+            let _ = cx.finish_http_context(&context);
+            self.on_request_failed(cx, *pending, error);
+            return;
+        }
+        if let Pending::Identity(context) = pending {
+            self.identity_error(cx, &context, error.into());
             return;
         }
         match pending {
-            Pending::Klines { command, .. } => cx.fail(command, error.to_owned()),
+            Pending::Background(..) => unreachable!(),
+            Pending::Klines { context, .. } => {
+                let _ = cx.fail_context(&context, error.to_owned());
+            }
             Pending::DepthSnapshot { symbol, generation } => {
                 if let Some(state) = self.books.get_mut(&symbol)
                     && state.generation == generation
@@ -1723,20 +1774,32 @@ impl Venue for BinanceFutures {
                     cx.fail(command, interval.unsupported("Binance"));
                     return;
                 }
-                let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
-                    Ok(query) => query,
+                let planned = candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now)
+                    .map_err(safe_cex_engine::VenueError::from)
+                    .and_then(|query| {
+                        Self::read_context(cx, command, None).map(|context| (query, context))
+                    });
+                let (query, context) = match planned {
+                    Ok(planned) => planned,
                     Err(error) => {
                         cx.fail(command, error);
                         return;
                     }
                 };
                 let path = format!("{}?{}", self.paths.klines, query.into_string());
-                let candles = Vec::new();
-                self.get_streamed(
+                self.managed_read(
                     cx,
-                    &path,
-                    ArrayAt::Root,
-                    Pending::Klines { command, candles },
+                    context.clone(),
+                    reads::Read {
+                        url: format!("{}{}", self.urls.rest, path),
+                        credentials: None,
+                        query: Query::new(),
+                        stream: Some(ArrayAt::Root),
+                    },
+                    Pending::Klines {
+                        context,
+                        candles: Vec::new(),
+                    },
                 );
             }
             Command::Query { command, query } => self.start_query(cx, command, query),

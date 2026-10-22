@@ -6,6 +6,8 @@
 879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103
 # Coinbase test sessions use the literal non-credential organizations/test/apiKeys/test.
 7109423877ec7595c9e7735bf2065f6a31ca494d:sdk-rs/venues/coinbase/tests/history.rs:generic-api-key:52
+# Same literal test-only identity in the private CFM-to-Spot history fixture.
+ca876aa0aacfe9e7fd56a2a985d3a0d067d2f432:sdk-rs/venues/coinbase/tests/support/history_family.rs:generic-api-key:10
 c410bfed862bd1f75962c1a69fb8a0151c4a6a85:sdk-rs/venues/coinbase/tests/account.rs:generic-api-key:27
 c62a5408611859b331a221d25bff85c81e88cbc0:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:30
 # PEM delimiter strings only: parser labels, then intentionally invalid AAAA test input.
@@ -65,3 +67,14 @@ b7b8856406fbe53c71fdd298c3aa40f6e80b2c69:sdk-rs/venues/coinbase/tests/trading.rs
 # Restored master coinbase.utils.ts (B2 hosted signing): PEM header strings in a
 # doc comment and regex, not a key. Exact fingerprint only.
 a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts:private-key:159
+
+# Hosted-signing strict-schema rejection tests use literal opaque provider refs,
+# not API credentials. Current values were renamed to ref:owned-primary.
+# Exact historical fingerprints only; all future source/credential changes scan.
+11455d16800a4927fc06f0c8577152072531c1ec:sdk-rs/registry/tests/hosted_signing.rs:generic-api-key:220
+11455d16800a4927fc06f0c8577152072531c1ec:sdk-rs/registry/tests/hosted_signing.rs:generic-api-key:221
+
+# Public plan prose ("token inventory" followed by slash-separated freshness
+# adjectives), verified not a credential; owner approved this one historical
+# commit/file/rule/line fingerprint. Current prose is reworded; no path/rule bypass.
+1a72d442724332d247511dc58fd81f77e5bd2e19:docs/plans/RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md:generic-api-key:83

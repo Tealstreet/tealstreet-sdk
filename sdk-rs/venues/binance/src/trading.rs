@@ -11,9 +11,13 @@ use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+use safe_cex_engine::request_context::{
+    Context, Credential, Operation, Policy, RejectionReports, RetryPolicy, Scope, WriteResult,
 };
+use safe_cex_engine::{
+    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+};
+use serde_json::value::RawValue;
 use std::collections::{HashMap, VecDeque};
 
 const BROKER_PREFIX: &str = "x-s3vFFRQp";
@@ -25,6 +29,7 @@ const POST_ONLY_REJECTED: i64 = -5022;
 
 pub struct Request {
     command: CommandId,
+    context: Context,
     call: Call,
 }
 
@@ -70,17 +75,16 @@ struct Planned {
 
 #[derive(Default)]
 struct Job {
-    /// Any response/failure of a dispatched leg prevents aggregate notSent.
-    reached_venue: bool,
+    context: Option<Context>,
     steps: VecDeque<Vec<Planned>>,
     outstanding: usize,
     /// Run every step even after a failure (cancel-all's two families).
     continue_on_error: bool,
     ids: Vec<String>,
-    error: Option<VenueError>,
+    /// Native failure controls planning only; execution facts live in the engine.
+    stop: bool,
+    planning_error: Option<VenueError>,
     amendment: Option<Amendment>,
-    /// A step took effect, so a later rejection cannot mean nothing happened.
-    effective: bool,
 }
 
 struct Amendment {
@@ -411,6 +415,42 @@ impl BinanceFutures {
             cx.fail(id, error);
             return;
         }
+        let plan = plan.and_then(|mut job| {
+            // Reserve no partial prefix for a predictably oversized plan. The
+            // root also occupies one of the engine's bounded context slots.
+            let count: usize = job.steps.iter().map(Vec::len).sum();
+            if count >= 256 {
+                return Err("Binance command exceeds the HTTP lifecycle capacity".into());
+            }
+            let operation = if count == 0 && job.amendment.is_none() {
+                Operation::Read
+            } else {
+                Operation::Mutation
+            };
+            let credential = (operation == Operation::Mutation).then(|| Credential {
+                slot: CredentialSlot::Primary,
+                reference: self
+                    .credentials
+                    .as_ref()
+                    .expect("checked above")
+                    .credential
+                    .clone(),
+            });
+            job.context = Some(
+                cx.http_context(
+                    Scope::Command(id),
+                    Policy {
+                        operation,
+                        credential,
+                        timeout_ms: 120_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .map_err(|_| "Binance command lifecycle is unavailable".to_owned())?,
+            );
+            Ok(job)
+        });
         match plan {
             Ok(job) => {
                 self.trading.jobs.insert(id, job);
@@ -428,7 +468,7 @@ impl BinanceFutures {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
-        let stop = job.error.is_some() && !job.continue_on_error;
+        let stop = (job.stop || job.planning_error.is_some()) && !job.continue_on_error;
         let step = if stop { None } else { job.steps.pop_front() };
         if step.is_none()
             && !stop
@@ -436,7 +476,7 @@ impl BinanceFutures {
         {
             let Some(order) = cx.store.order(&amendment.id) else {
                 if let Some(job) = self.trading.jobs.get_mut(&command) {
-                    job.error =
+                    job.planning_error =
                         Some("Order disappeared during cancellation; replacement fenced".into());
                 }
                 self.advance(cx, command);
@@ -460,7 +500,7 @@ impl BinanceFutures {
             if let Some(job) = self.trading.jobs.get_mut(&command) {
                 match plan {
                     Ok(plan) => job.steps.extend(plan.steps),
-                    Err(error) => job.error = Some(error.into()),
+                    Err(error) => job.planning_error = Some(error.into()),
                 }
             }
             self.advance(cx, command);
@@ -468,39 +508,72 @@ impl BinanceFutures {
         }
         let Some(step) = step.filter(|step| !step.is_empty()) else {
             let job = self.trading.jobs.remove(&command).expect("present");
-            let error = job.error.map(|mut error| {
-                if job.reached_venue && error.outcome == Some(Outcome::NotSent) {
-                    error.outcome = Some(Outcome::Unknown);
+            let context = job.context.expect("managed job has an authority");
+            match job.planning_error {
+                Some(error) => {
+                    let _ = cx.fail_context(&context, error);
                 }
-                if (job.effective || !job.ids.is_empty())
-                    && error.outcome == Some(Outcome::Rejected)
-                {
-                    error.outcome = None;
+                None => {
+                    let _ = cx.done_context(
+                        &context,
+                        serde_json::to_string(&job.ids).unwrap_or_default(),
+                    );
                 }
-                error
-            });
-            match error {
-                // An inverse batch stops at its first failure; earlier legs stand.
-                // Its requests (splits, brackets) do not map back to the caller's orders.
-                Some(error) if self.is_inverse() => cx.fail(command, error.partial_ids(&job.ids)),
-                Some(error) => cx.fail(command, error),
-                None => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
             }
             return;
         };
         job.outstanding = step.len();
+        let root = job.context.clone().expect("managed job has an authority");
         for planned in step {
-            cx.command_progress(command, planned.receipts);
-            self.signed(
-                cx,
-                planned.method,
-                planned.path,
-                planned.query,
-                Pending::Trade(Request {
-                    command,
-                    call: planned.call,
-                }),
+            let credentials = self
+                .credentials
+                .as_ref()
+                .expect("checked before planning")
+                .clone();
+            let context = cx.http_leg_context(
+                &root,
+                Policy {
+                    operation: Operation::Mutation,
+                    credential: Some(Credential {
+                        slot: CredentialSlot::Primary,
+                        reference: credentials.credential.clone(),
+                    }),
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
             );
+            let Ok(context) = context else {
+                self.trading.jobs.remove(&command);
+                let _ = cx.fail_context(
+                    &root,
+                    VenueError::new("Binance HTTP lifecycle refused the next leg"),
+                );
+                return;
+            };
+            cx.command_progress(command, planned.receipts);
+            if cx
+                .request_signed_managed(
+                    context.clone(),
+                    planned.method,
+                    format!("{}{}", self.urls.account_rest, planned.path),
+                    None,
+                    Box::new(self.signed_recipe(credentials, planned.query)),
+                    Pending::Trade(Request {
+                        command,
+                        context,
+                        call: planned.call,
+                    }),
+                )
+                .is_err()
+            {
+                self.trading.jobs.remove(&command);
+                let _ = cx.fail_context(
+                    &root,
+                    VenueError::new("Binance HTTP lifecycle refused the next leg"),
+                );
+                return;
+            }
         }
     }
 
@@ -510,9 +583,6 @@ impl BinanceFutures {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        if let Some(job) = self.trading.jobs.get_mut(&request.command) {
-            job.reached_venue = true;
-        }
         self.on_trade_result(cx, request, response, None);
     }
     pub(crate) fn on_trade_sign_failed(
@@ -531,19 +601,36 @@ impl BinanceFutures {
         response: Result<Response<'_>, &str>,
         signing_error: Option<VenueError>,
     ) {
-        let Request { command, call } = request;
+        let Request {
+            command,
+            context,
+            call,
+        } = request;
+        let native_response = response.is_ok();
+
+        let mut reports = Vec::new();
+        let mut batch_reports = false;
+        let mut continue_after_item_refusal = false;
         // A gateway failure is unproven whatever body it carries.
         let mut unproven = response
             .as_ref()
             .is_ok_and(|r| r.status == 408 || r.status >= 500);
         let outcome = match response {
             Ok(response) => match venue_error(&response) {
-                None => Ok(response.body),
                 Some(error) => Err(error),
+                None if unproven => Err((
+                    0,
+                    "Binance HTTP response does not prove the write outcome".into(),
+                )),
+                None => Ok(response.body),
             },
             Err(error) => Err((0, error.to_owned())),
         };
         let mut ids = Vec::new();
+        // Native IDs on an ambiguous batch are reconciliation evidence only;
+        // never feed them into accepted placement planning or caller bindings.
+        let mut evidence_ids = Vec::new();
+        let mut known_cancel_effects = false;
         let error = match (call, outcome) {
             (
                 Call::PlaceOne {
@@ -592,21 +679,30 @@ impl BinanceFutures {
             }
             (Call::PlaceBatch { expected, strict }, Ok(body)) => {
                 let mut rejection = None;
-                if let Ok(items) = serde_json::from_str::<Vec<BatchItem>>(body) {
-                    if strict && items.len() != expected {
+                batch_reports = true;
+                if let Ok(rows) = serde_json::from_str::<Vec<&RawValue>>(body) {
+                    if rows.len() != expected {
+                        unproven = true;
+                        for row in rows {
+                            if let Ok(item) = serde_json::from_str::<BatchItem>(row.get())
+                                && let (Some(id), None) = (item.order_id, item.code)
+                                && id > 0
+                            {
+                                evidence_ids.push(id.to_string());
+                            }
+                        }
                         rejection = Some((
                             0,
                             "Binance batch response count does not match the request".into(),
                         ));
-                    }
-                    for item in items {
-                        match (item.order_id, item.code) {
-                            (Some(id), None) => ids.push(id.to_string()),
-                            (_, code) => {
-                                let code = code.unwrap_or(0);
-                                unproven |=
-                                    failure(code, String::new()).outcome == Some(Outcome::Unknown);
-                                if strict {
+                    } else if let Ok(items) = serde_json::from_str::<Vec<BatchItem>>(body) {
+                        for item in items {
+                            match (item.order_id, item.code) {
+                                (Some(id), None) => ids.push(id.to_string()),
+                                (_, code) => {
+                                    let code = code.unwrap_or(0);
+                                    unproven |= failure(code, String::new()).outcome
+                                        == Some(Outcome::Unknown);
                                     rejection.get_or_insert((
                                         code,
                                         item.msg
@@ -614,15 +710,21 @@ impl BinanceFutures {
                                             .unwrap_or("Binance batch order rejected")
                                             .to_owned(),
                                     ));
-                                }
-                                if code != POST_ONLY_REJECTED {
-                                    let msg = item.msg.as_deref().unwrap_or("batch order rejected");
-                                    cx.command_error(command, msg.to_owned());
+                                    if code != POST_ONLY_REJECTED {
+                                        let msg =
+                                            item.msg.as_deref().unwrap_or("batch order rejected");
+                                        reports.push(msg.to_owned());
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        unproven = true;
+                        rejection = Some((0, "Binance batch response malformed".into()));
                     }
-                } else if strict {
+                    continue_after_item_refusal = !strict && !unproven;
+                } else {
+                    unproven = true;
                     rejection = Some((0, "Binance batch response malformed".into()));
                 }
                 rejection
@@ -634,7 +736,9 @@ impl BinanceFutures {
                 },
                 Ok(body),
             ) => match proof {
-                Some(proof) => self.confirm_cancel(cx, proof, body),
+                Some(proof) => {
+                    self.confirm_cancel(cx, proof, body, &mut known_cancel_effects, &mut unproven)
+                }
                 None => {
                     self.mark_canceled(cx, &canceled);
                     None
@@ -646,7 +750,7 @@ impl BinanceFutures {
                     proof,
                 },
                 Err((UNKNOWN_ORDER, message)),
-            ) => {
+            ) if !unproven => {
                 if self
                     .trading
                     .jobs
@@ -696,34 +800,68 @@ impl BinanceFutures {
                     .update_setting(&symbol, |s| s.margin_type = Some(margin));
                 None
             }
-            (Call::PositionMode { hedged }, Ok(_))
-            | (Call::PositionMode { hedged }, Err((POSITION_MODE_ALREADY_SET, _))) => {
+            (Call::PositionMode { hedged }, Ok(_)) => {
+                cx.store.set_hedged(hedged);
+                None
+            }
+            (Call::PositionMode { hedged }, Err((POSITION_MODE_ALREADY_SET, _))) if !unproven => {
                 cx.store.set_hedged(hedged);
                 None
             }
             (_, Err(error)) => Some(error),
         };
-        let succeeded = error.is_none();
+        let mut native_fact_error = None;
         if let Some((code, message)) = error {
-            if !SILENT_CODES.contains(&code) {
-                cx.command_error(command, message.clone());
+            if !batch_reports && !SILENT_CODES.contains(&code) {
+                reports.push(message.clone());
             }
             if let Some(job) = self.trading.jobs.get_mut(&command) {
-                let mut failed = signing_error.unwrap_or_else(|| failure(code, message));
+                let mut failed = signing_error
+                    .clone()
+                    .unwrap_or_else(|| failure(code, message));
                 if unproven {
                     failed.outcome = Some(Outcome::Unknown);
                 }
-                // The first failure names the error; any unproven one makes it unknown.
-                let error = job.error.get_or_insert_with(|| failed.clone());
-                if failed.outcome == Some(Outcome::Unknown) {
-                    error.outcome = Some(Outcome::Unknown);
+                native_fact_error = Some(failed.clone());
+                if !continue_after_item_refusal {
+                    job.stop = true;
                 }
+            }
+        }
+        if native_response {
+            let fact = match native_fact_error {
+                Some(mut error) => {
+                    if !ids.is_empty() || !evidence_ids.is_empty() {
+                        let partial_ids: Vec<_> =
+                            ids.iter().chain(&evidence_ids).cloned().collect();
+                        error = error.partial_ids(&partial_ids);
+                    }
+                    if unproven || error.outcome == Some(Outcome::Unknown) {
+                        WriteResult::Failed(error)
+                    } else if known_cancel_effects {
+                        WriteResult::KnownPartial(error)
+                    } else {
+                        WriteResult::Rejected(error)
+                    }
+                }
+                None => WriteResult::Accepted {
+                    order_ids: ids.clone(),
+                },
+            };
+            let metadata = RejectionReports::new(reports).unwrap_or_default();
+            let recorded = cx.http_write_result_with_reports(&context, fact.clone(), metadata);
+            let recorded = if recorded == Err(safe_cex_engine::request_context::Error::Capacity) {
+                cx.http_write_result_with_reports(&context, fact, RejectionReports::default())
+            } else {
+                recorded
+            };
+            if recorded.is_err() {
+                return;
             }
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
-        job.effective |= succeeded;
         job.ids.extend(ids);
         job.outstanding = job.outstanding.saturating_sub(1);
         if job.outstanding == 0 {
@@ -1835,7 +1973,7 @@ impl BinanceFutures {
                 let native_regular = self.is_inverse() || !self.order_uses_strategy(order);
                 let closed = order.status == OrderStatus::Closed;
                 if !native_regular {
-                    self.observe_strategy_terminal(&symbol, id);
+                    self.observe_strategy_terminal(cx, &symbol, id);
                 } else {
                     let native = if self.is_spot() || self.options.portfolio_margin {
                         self.spot_native_order_id(&symbol, id)
@@ -1844,16 +1982,16 @@ impl BinanceFutures {
                     };
                     if let Some(native) = native {
                         if closed {
-                            self.observe_native_terminal(&symbol, native, filled);
+                            self.observe_native_terminal(cx, &symbol, native, filled);
                         } else {
-                            self.observe_unquantified_cancel(&symbol, native, filled);
+                            self.observe_unquantified_cancel(cx, &symbol, native, filled);
                         }
                     }
                 }
             }
         }
         mark_canceled_preserving_closed(cx, ids);
-        self.fence_order_snapshots();
+        self.fence_order_snapshots(cx);
     }
 
     fn cancel_target_is_current(
@@ -1895,7 +2033,7 @@ impl BinanceFutures {
 
     fn observe_captured_cancel(
         &mut self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         target: &CancelTarget,
         strategy: bool,
         current: bool,
@@ -1903,9 +2041,9 @@ impl BinanceFutures {
         let Some(native) = target.native else { return };
         if strategy {
             if self.options.portfolio_margin {
-                self.observe_native_strategy_terminal(&target.symbol, native);
+                self.observe_native_strategy_terminal(cx, &target.symbol, native);
             } else {
-                self.observe_strategy_terminal(&target.symbol, &target.id);
+                self.observe_strategy_terminal(cx, &target.symbol, &target.id);
             }
         } else {
             let order = current.then(|| cx.store.order(&target.id)).flatten();
@@ -1913,9 +2051,9 @@ impl BinanceFutures {
                 .known_native_filled(&target.symbol, native)
                 .max(order.map_or(0.0, |order| order.filled));
             if order.is_some_and(|order| order.status == OrderStatus::Closed) {
-                self.observe_native_terminal(&target.symbol, native, filled);
+                self.observe_native_terminal(cx, &target.symbol, native, filled);
             } else {
-                self.observe_unquantified_cancel(&target.symbol, native, filled);
+                self.observe_unquantified_cancel(cx, &target.symbol, native, filled);
             }
         }
     }
@@ -1935,7 +2073,7 @@ impl BinanceFutures {
             }
         }
         mark_canceled_preserving_closed(cx, &unchanged);
-        self.fence_order_snapshots();
+        self.fence_order_snapshots(cx);
     }
 
     fn cancel_target(&self, order: &Order) -> CancelTarget {
@@ -1996,7 +2134,7 @@ impl BinanceFutures {
                 order.last_update = now;
             });
         }
-        self.observe_native_terminal(&ack.symbol, ack.order_id, final_filled);
+        self.observe_native_terminal(cx, &ack.symbol, ack.order_id, final_filled);
         current
     }
 
@@ -2010,6 +2148,8 @@ impl BinanceFutures {
         cx: &mut Cx<'_, Pending>,
         proof: CancelProof,
         body: &str,
+        known_effects: &mut bool,
+        unproven: &mut bool,
     ) -> Option<(i64, String)> {
         let invalid = || {
             Some((
@@ -2080,7 +2220,9 @@ impl BinanceFutures {
                 let Ok(rows) = serde_json::from_str::<Vec<CancelRow>>(body) else {
                     return invalid();
                 };
-                let mut error = (rows.len() != targets.len()).then(|| {
+                let mismatched = rows.len() != targets.len();
+                *unproven |= mismatched;
+                let mut error = mismatched.then(|| {
                     (
                         0,
                         "Binance batch cancellation response count does not match request"
@@ -2095,18 +2237,25 @@ impl BinanceFutures {
                                 .iter()
                                 .find(|target| target.native == Some(ack.order_id))
                             else {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                                 continue;
                             };
                             if !seen.insert(ack.order_id) || !self.valid_cancel_ack(target, &ack) {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                                 continue;
                             }
-                            if !self.apply_cancel_ack(cx, target, &ack) {
+                            if self.apply_cancel_ack(cx, target, &ack) {
+                                *known_effects = true;
+                            } else {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                             }
                         }
                         CancelRow::Error { code, msg } => {
+                            *unproven |=
+                                failure(code, String::new()).outcome == Some(Outcome::Unknown);
                             error.get_or_insert((code, msg));
                         }
                     }
@@ -2156,7 +2305,7 @@ impl BinanceFutures {
                     }
                 }
                 mark_canceled_preserving_closed(cx, &unchanged);
-                self.fence_order_snapshots();
+                self.fence_order_snapshots(cx);
             }
             CancelProof::SymbolAll { targets, strategy } => {
                 #[derive(serde::Deserialize)]
@@ -2378,7 +2527,7 @@ mod audit_tests {
                     orders: vec![limit()],
                 }),
             );
-            let actions: Vec<_> = engine.drain_actions().collect();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.);
             assert!(
                 !actions
                     .iter()
@@ -2458,6 +2607,30 @@ mod audit_tests {
                     let label = format!("{variant:?} hung={hung} {command:?}");
                     engine.handle(1000.0, Event::Command(command));
                     let mut actions: Vec<_> = engine.drain_actions().collect();
+                    let preparations: Vec<_> = actions
+                        .iter()
+                        .filter_map(|action| match action {
+                            Action::ManagedHttp(action) => match action.as_ref() {
+                                safe_cex_engine::request_context::HttpAction::Prepare {
+                                    preparation,
+                                    ..
+                                } => Some(*preparation),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect();
+                    for preparation in preparations {
+                        engine.http_prepared(
+                            1000.,
+                            preparation,
+                            safe_cex_engine::request_context::Prepared {
+                                id: 1,
+                                expires_at: None,
+                            },
+                        );
+                    }
+                    actions.extend(engine.drain_actions());
                     if hung {
                         let timers: Vec<_> = actions
                             .iter()
@@ -2563,13 +2736,14 @@ mod audit_tests {
                         orders: vec![limit(); 6],
                     }),
                 );
-                let first: Vec<_> = engine
-                    .drain_actions()
-                    .filter_map(|a| match a {
-                        Action::Http(r) => Some(r),
-                        _ => None,
-                    })
-                    .collect();
+                let first: Vec<_> =
+                    safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.)
+                        .into_iter()
+                        .filter_map(|a| match a {
+                            Action::Http(r) => Some(r),
+                            _ => None,
+                        })
+                        .collect();
                 assert_eq!(first.len(), 1, "{variant:?}");
                 let request = &first[0];
                 let body = if request.url.contains("batchOrders") {
@@ -2598,7 +2772,7 @@ mod audit_tests {
                         },
                     );
                 }
-                let actions: Vec<_> = engine.drain_actions().collect();
+                let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1001.);
                 assert!(
                     !actions.iter().any(|a| matches!(a, Action::Http(_))),
                     "{variant:?}"
@@ -2617,10 +2791,14 @@ mod audit_tests {
                 );
                 assert_eq!(
                     failures[0].outcome,
-                    Some(safe_cex_engine::Outcome::Unknown),
+                    if accepted {
+                        None
+                    } else {
+                        Some(safe_cex_engine::Outcome::Unknown)
+                    },
                     "{variant:?} accepted={accepted}"
                 );
-                if accepted && variant == Variant::CoinM {
+                if accepted {
                     assert!(!failures[0].partial.as_ref().unwrap().order_ids.is_empty());
                 }
             }

@@ -50,7 +50,7 @@ pub struct Read {
     pub generation: u64,
     pub balance_write_revision: u64,
     pub position_write_revision: u64,
-    pub order_write_revision: u64,
+    pub order_token: Option<safe_cex_engine::OrderSnapshotToken>,
     pub serial: u64,
     pub after: Option<u32>,
     pub positions: Vec<Position>,
@@ -66,6 +66,12 @@ pub struct Read {
     pub baselines: Vec<(String, (f64, f64))>,
 }
 impl Read {
+    pub(crate) fn orders_current(&self, store: &safe_cex_engine::Store) -> bool {
+        self.order_token
+            .as_ref()
+            .is_some_and(|token| store.orders_snapshot_current(token))
+    }
+
     pub(crate) fn partial_orders(&self) -> bool {
         self.order_rejected.any() || self.order_newer.overflowed()
     }
@@ -161,7 +167,6 @@ pub struct AccountState {
     pub serials: [u64; 4],
     pub initial_orders: [Option<Read>; 2],
     pub order_reads: [Option<OrderReadProgress>; 2],
-    pub order_write_revision: u64,
     pub terminal: HashMap<String, f64>,
     pub timers: [Option<TimerId>; 3],
     pub tick: Option<TimerId>,
@@ -365,6 +370,31 @@ impl BitunixFutures {
             }
             return;
         }
+        let order_token = if axis.order_slot().is_some() {
+            let Some(token) = cx.store.begin_orders_snapshot() else {
+                self.account.initial_orders = [None, None];
+                for progress in &mut self.account.order_reads {
+                    if let Some(progress) = progress.take() {
+                        cx.clear_timer(progress.timer);
+                    }
+                }
+                if let Some(timer) = self.account.timers[2].take() {
+                    cx.clear_timer(timer);
+                }
+                cx.notice(
+                    Level::Error,
+                    code::SNAPSHOT_DISCARDED,
+                    "Bitunix order snapshot admission exhausted",
+                );
+                if let Some(command) = after {
+                    self.prepared(cx, command, false);
+                }
+                return;
+            };
+            Some(token)
+        } else {
+            None
+        };
         if axis == Axis::Balance
             && after.is_none()
             && self.account.balance_answered != self.account.serials[0]
@@ -428,7 +458,7 @@ impl BitunixFutures {
             generation: self.account.generations[axis.index()],
             balance_write_revision: self.account.balance_write_revision,
             position_write_revision: self.account.position_write_revision,
-            order_write_revision: self.account.order_write_revision,
+            order_token,
             positions: vec![],
             position_rejected: Default::default(),
             position_admitted: vec![],
@@ -864,7 +894,7 @@ impl BitunixFutures {
             }
         }
     }
-    pub(crate) fn read_current(&self, read: &Read) -> bool {
+    pub(crate) fn read_current(&self, store: &safe_cex_engine::Store, read: &Read) -> bool {
         let slot = match read.axis {
             Axis::Balance => 0,
             Axis::Positions => 1,
@@ -879,7 +909,7 @@ impl BitunixFutures {
         } else if read.axis == Axis::Positions && read.after.is_none() {
             read.position_write_revision == self.account.position_write_revision
         } else if read.axis.order_slot().is_some() {
-            read.order_write_revision == self.account.order_write_revision
+            read.orders_current(store)
                 && (read.after.is_none()
                     || read.generation == self.account.generations[read.axis.index()])
         } else {
@@ -897,7 +927,7 @@ impl BitunixFutures {
         if read.axis == Axis::Balance {
             self.account.balance_answered = self.account.balance_answered.max(read.serial);
         }
-        if self.read_current(&read) {
+        if self.read_current(cx.store, &read) {
             self.account.recovery.failed(
                 cx,
                 crate::recovery::Key::Axis(read.axis),
@@ -935,12 +965,13 @@ impl BitunixFutures {
         &self,
         pending: &Pending,
         response: &Response<'_>,
+        store: &safe_cex_engine::Store,
     ) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
         let rejected = crate::recovery::refused(response);
         let success = crate::recovery::success(response);
         match pending {
-            Pending::Private(read) if self.read_current(read) => {
+            Pending::Private(read) if self.read_current(store, read) => {
                 let outcome = if rejected {
                     Some(Rejected)
                 } else if success {
@@ -989,7 +1020,7 @@ impl BitunixFutures {
         if read.axis == Axis::Balance {
             self.account.balance_answered = self.account.balance_answered.max(read.serial);
         }
-        if !self.read_current(&read) {
+        if !self.read_current(cx.store, &read) {
             self.debounce(cx, read.axis);
             return;
         }
@@ -1024,7 +1055,7 @@ impl BitunixFutures {
             if self.account.initial_orders.iter().all(Option::is_some) {
                 for slot in 0..2 {
                     if self.account.initial_orders[slot].as_ref().is_some_and(|r| {
-                        r.order_write_revision != self.account.order_write_revision
+                        !r.orders_current(cx.store)
                             || r.partial_orders()
                             || (r.after.is_some() && r.generation != self.account.generations[2])
                             || r.serial
@@ -1035,10 +1066,18 @@ impl BitunixFutures {
                         return;
                     }
                 }
-                let regular = self.account.initial_orders[0].take().unwrap();
-                let tpsl = self.account.initial_orders[1].take().unwrap();
-                self.commit_orders(cx, regular);
-                self.commit_orders(cx, tpsl);
+                let mut regular = self.account.initial_orders[0].take().unwrap();
+                let mut tpsl = self.account.initial_orders[1].take().unwrap();
+                let tokens = [
+                    regular.order_token.take().unwrap(),
+                    tpsl.order_token.take().unwrap(),
+                ];
+                if !cx.store.commit_orders_snapshot(tokens, |current| {
+                    let regular_rows = self.apply_orders_snapshot(current, regular);
+                    self.apply_orders_snapshot(&regular_rows, tpsl)
+                }) {
+                    self.debounce(cx, Axis::Orders);
+                }
             }
             return;
         }
@@ -1154,6 +1193,17 @@ impl BitunixFutures {
         }
     }
     fn commit_orders(&mut self, cx: &mut Cx<'_, Pending>, mut read: Read) {
+        let Some(token) = read.order_token.take() else {
+            return;
+        };
+        if !cx
+            .store
+            .commit_orders_snapshot([token], |current| self.apply_orders_snapshot(current, read))
+        {
+            self.debounce(cx, Axis::Orders);
+        }
+    }
+    fn apply_orders_snapshot(&mut self, current: &[Order], mut read: Read) -> Vec<Order> {
         let tpsl = read.axis == Axis::Tpsl;
         read.order_accepted
             .retain(|raw| !read.order_rejected.conflicts(raw) && !read.order_newer.holds(raw));
@@ -1171,9 +1221,7 @@ impl BitunixFutures {
         });
         read.baselines
             .retain(|(raw, _)| read.order_accepted.contains(raw));
-        let optimistic: std::collections::HashSet<_> = cx
-            .store
-            .orders()
+        let optimistic: std::collections::HashSet<_> = current
             .iter()
             .filter(|o| matches!(o.status, OrderStatus::Creating | OrderStatus::Canceling))
             .map(|o| o.id.clone())
@@ -1184,9 +1232,7 @@ impl BitunixFutures {
                 && !read.order_rejected.conflicts(&meta.raw_id)
                 && !read.order_newer.holds(&meta.raw_id)
         });
-        let mut orders: Vec<_> = cx
-            .store
-            .orders()
+        let mut orders: Vec<_> = current
             .iter()
             .filter(|o| {
                 optimistic.contains(&o.id)
@@ -1220,7 +1266,7 @@ impl BitunixFutures {
         }
         orders.extend(read.orders);
         self.account.native.extend(read.native);
-        cx.store.set_orders(orders);
+        orders
     }
     pub(crate) fn map_orders(
         &self,

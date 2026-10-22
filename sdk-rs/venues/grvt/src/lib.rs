@@ -321,7 +321,7 @@ impl Grvt {
             Job::Trade(request) => {
                 self.trade_failed(cx, request, error, safe_cex_engine::Outcome::NotSent)
             }
-            Job::History(request) => self.history_failed(cx, *request, error),
+            Job::History(request) => self.history_rejected(cx, *request, error),
             Job::Markets { .. } => {
                 cx.notice(
                     Level::Warn,
@@ -921,8 +921,11 @@ impl Venue for Grvt {
                 && !matches!(pending.job, Job::Markets { .. } | Job::Candles { .. })
                 && !matches!(&pending.job,Job::History(request) if request.is_public())
             {
-                if let Job::History(request) = &mut pending.job {
-                    request.reset();
+                if let Job::History(request) = &mut pending.job
+                    && !request.reset()
+                {
+                    self.fail_pending(cx, pending, "GRVT history page reset failed");
+                    return;
                 }
                 if let Job::Trade(request) = &mut pending.job {
                     request.reset();
@@ -930,6 +933,8 @@ impl Venue for Grvt {
                 self.account_refresh(cx, pending);
             } else if let Job::Trade(request) = pending.job {
                 self.trade_failed(cx, request, &error, wire::write_outcome(&response));
+            } else if let Job::History(request) = pending.job {
+                self.history_failed(cx, *request, &error);
             } else {
                 self.fail_pending(cx, pending, &error);
             }
@@ -1068,6 +1073,8 @@ impl Venue for Grvt {
     ) {
         if wire::check(&response).is_err() {
             self.on_response(cx, pending, response);
+        } else if let Job::History(request) = pending.job {
+            self.history_failed(cx, *request, "Missing GRVT response array");
         } else {
             self.fail_pending(cx, pending, "Missing GRVT response array");
         }
@@ -1099,7 +1106,12 @@ impl Venue for Grvt {
                 Job::Identity { .. } | Job::BookQuery { .. } => {}
                 Job::Account(request) => request.reset(),
                 Job::Trade(request) => request.reset(),
-                Job::History(request) => request.reset(),
+                Job::History(request) => {
+                    if !request.reset() {
+                        self.fail_pending(cx, pending, "GRVT history page reset failed");
+                        return;
+                    }
+                }
             }
             self.send_request(cx, pending);
             return;
@@ -1109,6 +1121,7 @@ impl Venue for Grvt {
             Job::Trade(request) => {
                 self.trade_failed(cx, request, error, safe_cex_engine::Outcome::Unknown)
             }
+            Job::History(request) => self.history_failed(cx, *request, error),
             _ => self.fail_pending(cx, pending, error),
         }
     }

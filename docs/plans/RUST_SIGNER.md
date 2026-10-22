@@ -83,6 +83,17 @@ independent deadlines, ordered completion, freshness rechecks and late-reply fen
 Actions emitted by failure callbacks reenter that same dispatch queue; internal
 preparation markers never reach a host or compete with a real provider batch.
 
+Primitive results may include optional bounded `headers` alongside values and
+receipt. Empty headers serialize identically to the earlier result shape. The
+shared validator checks all metadata before applying signatures; only a trusted
+HTTP `SignStep::result_header_policy` (default deny), captured by that attempt,
+may admit callback headers. Default signing-only captures and credential/WS work
+reject them. Declared protected names retain native precedence; other callback
+names override case-insensitively after recipe application. Values remain in the
+fresh outbound action and share its deadline/revision/cancel/retry retirement;
+no transport side map or post-bind mutation is permitted. Current family recipes
+remain default-deny until their explicit bridge adoption.
+
 Native callers supply `Engine::set_signer`, `Host::with_signer`, or the trusted
 `FrameServer::add_venue_with_signer` registration. Raw JS hosts use
 `EngineHost(..., options: { signer })`; managed SDK/Workers hosts also transfer
@@ -94,7 +105,8 @@ Workers deployments may supply
 `EngineOptions.signing`; the Workers command wire cannot supply provider callbacks.
 Unmigrated families reject these refs/providers rather than pretending to use them.
 
-Binance USD-M/PM/COIN-M/Spot high-level `ExchangeOptions` credential inputs remain
+Binance USD-M/PM/COIN-M/Spot and Bybit linear/inverse/spot/demo/HyroTrader
+high-level `ExchangeOptions` credential inputs remain
 a trusted setup adapter. `RustEngineExchange` extracts them before `BaseExchange`
 retains options (incomplete secondary input rejects synchronously with typed
 `invalidInput`/`notSent`), caches non-secret private/public construction metadata, and uses
@@ -102,7 +114,15 @@ an opaque one-use `LocalSignerSetup`. The raw WASM constructor accepts optional
 argument 3, `signerSetupJson`, separately from generic engine-options JSON. It
 consumes the setup into a local provider and wipes owned Rust buffers, including
 on parse/refusal paths. JavaScript releases its references but cannot promise
-physical string zeroization. Custom WASM loaders must forward argument 3.
+physical string zeroization. Custom WASM loaders must forward argument 3 for
+all migrated aliases, including Bybit's five variants.
+
+Direct native Bybit callers can no longer put `key`/`secret` or raw secondary
+credentials into `safe_cex_venue_bybit::Options`. Use trusted registry `build`
+compatibility setup, or construct opaque primary/secondary `Identity` values and
+install their provider with `Engine::set_signer`. The direct venue stores only
+references; supplying identities without a provider does not enable signing.
+High-level SDK key/secret input remains accepted through the trusted setup adapter.
 
 **Required NX adoption:** worker/hosted bootstrap currently copies
 `exchange.options`, and signingHost caches keys from it. Provision the worker's
@@ -115,8 +135,8 @@ venue/reference deletion, after all cutover bootstrap callers migrate. This PR
 does not implement remote HTTP/WS signing or claim the pinned NX callers migrated.
 
 The ban in `scripts/check-bans.sh` freezes exact legacy HMAC/ed25519/secret source
-sites outside unmigrated sign modules; Binance's sign module is scanned too, with
-its existing test-only oracle sites frozen. New or duplicated sites fail CI, and
+sites outside unmigrated sign modules; Binance and Bybit sign modules are scanned
+too, with their existing test-only oracle sites frozen. New or duplicated sites fail CI, and
 negative controls cover both ordinary venue source and the migrated sign module.
 This is a migration guard for those patterns, not proof that every possible
 cryptographic primitive or secret spelling is detected. Family migrations remove

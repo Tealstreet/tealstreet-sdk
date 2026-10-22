@@ -405,9 +405,14 @@ fn batches_five_orders_per_request() {
     h.reply(batch.id, 200, "", r#"[{"orderId":1},{"orderId":2},{"code":-2019,"msg":"Margin is insufficient."},{"orderId":4},{"orderId":5}]"#);
     let single = h.take("/fapi/v1/order");
     h.reply(single.id, 200, "", r#"{"orderId":6}"#);
+    // Both lots still run, but the failed item cannot become whole-command
+    // success. The engine retains every accepted native ID in the partial.
+    assert_eq!(h.result(9), Some(&Err(r#"{"message":"Margin is insufficient.","partialOrderIds":["1","2","4","5","6"],"partialOrderCount":5}"#.to_owned())));
+    let failure = &h.failures.iter().find(|(id, _)| *id == 9).unwrap().1;
+    assert_eq!(failure.outcome, None);
     assert_eq!(
-        h.result(9),
-        Some(&Ok(r#"["1","2","4","5","6"]"#.to_owned()))
+        failure.partial.as_ref().unwrap().order_ids,
+        ["1", "2", "4", "5", "6"]
     );
 }
 
@@ -793,8 +798,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -875,8 +880,8 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
                 },
             );
         }
-        reads = engine
-            .drain_actions()
+        reads = safe_cex_engine::test_support::prepared_actions(engine, now)
+            .into_iter()
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,
@@ -1171,8 +1176,20 @@ fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected()
     assert_eq!(error.outcome, None, "the cancel already took effect");
 }
 
+// Keep unrelated balance polls responsive while the position/order fixture
+// advances its original total time; their new engine deadlines are real.
+fn advance_with_account_replies(h: &mut Harness, ms: f64) {
+    let until = h.now + ms;
+    while h.now < until {
+        h.advance((until - h.now).min(1_000.0));
+        while h.has_request("/fapi/v3/account") {
+            h.respond("/fapi/v3/account", 200, ACCOUNT);
+        }
+    }
+}
+
 fn advance_to_position_read(h: &mut Harness, rows: &str) {
-    h.advance(75_000.0);
+    advance_with_account_replies(h, 75_000.0);
     h.respond("/fapi/v3/positionRisk", 200, rows);
     h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
 }
@@ -1315,10 +1332,25 @@ fn a_skipped_position_row_holds_the_startup_snapshot_while_the_catalogue_is_part
     h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
     assert!(!h.engine.store().loaded().positions);
     assert!(h.errors.is_empty());
+    // These siblings are outside the malformed-position assertion, but must
+    // finish before their own engine deadlines while this test waits 75 s.
+    h.respond("/fapi/v3/account", 200, ACCOUNT);
+    h.respond(
+        "/fapi/v1/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/fapi/v1/openOrders", 200, "[]");
+    h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
 
     // Once discovery settles, the row is skipped and, with nothing stored, reported.
     h.advance(1_000.0);
     h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    // Catalogue refresh starts a new ticker seed. Complete those siblings so
+    // discovery remains settled during the original position-refresh wait.
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
     advance_to_position_read(&mut h, &format!("[{malformed}]"));
     assert!(h.engine.store().loaded().positions);
     assert_eq!(
@@ -1454,7 +1486,7 @@ fn a_skipped_order_is_an_error_only_when_no_stored_copy_is_kept() {
     let refresh = |h: &mut Harness, orders: &[String]| {
         let event = r#"{"e":"ORDER_TRADE_UPDATE","E":1568879465651,"T":1568879465650,"o":{"s":"BTCUSDT","c":"poke","S":"BUY","o":"LIMIT","f":"GTC","q":"0.001","p":"1000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":9000,"l":"0","z":"0","L":"0","T":1568879465650,"t":0,"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"rp":"0"}}"#;
         h.message("/private/ws", event);
-        h.advance(10_000.0);
+        advance_with_account_replies(h, 10_000.0);
         h.respond(
             "/fapi/v1/openOrders",
             200,
@@ -1493,4 +1525,22 @@ fn a_skipped_order_is_an_error_only_when_no_stored_copy_is_kept() {
     });
     refresh(&mut h, &bad);
     assert_eq!(h.errors.len(), 3, "mapping re-arms the missing-copy error");
+}
+
+#[test]
+fn exhausted_snapshot_authority_keeps_stream_writes_and_never_issues_an_unfenced_read() {
+    let mut h = ready();
+    safe_cex_engine::test_support::exhaust_order_snapshots(h.engine.store_mut());
+    h.message("/private/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"fresh","i":99,"S":"BUY","o":"LIMIT","f":"GTC","q":"1","p":"90","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#);
+    assert!(
+        h.engine.store().order("99").is_some(),
+        "native writes stay admissible"
+    );
+    assert!(h.engine.store().loaded().orders);
+    for _ in 0..3 {
+        h.advance(POLL_MS);
+        assert!(!h.has_request("/fapi/v1/openOrders"));
+        assert!(!h.has_request("/fapi/v1/openAlgoOrders"));
+        assert!(h.engine.store().order("99").is_some());
+    }
 }
