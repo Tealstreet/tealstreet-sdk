@@ -166,8 +166,12 @@ Medium:
    validates complete containers, prepares each native row without mutation and
    admits it before root/fill/store effects, so bad rows preserve their copy while
    healthy peers commit. Remaining keyed consumers still need inventory/fan-out;
-   validated cumulative-fill preparation/commit is an explicit later engine-helper
-   follow-on, not twelve independent venue repairs. Snapshot commits retain the
+   validated cumulative-fill preparation now starts with `engine::execution`
+   and Hyro/Bitget Classic reference consumers, repairing five original-RED
+   financial defects before progress/dedup commit. See
+   [RUST_CUMULATIVE_FILLS.md](RUST_CUMULATIVE_FILLS.md). Remaining cumulative
+   consumers need engine interval/gap extensions and fan-out, rather than
+   independent venue repairs. Snapshot commits retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);

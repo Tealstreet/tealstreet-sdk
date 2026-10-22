@@ -3266,3 +3266,49 @@ wire and makes no NX migration or server-held-key deployment claim. External
 remote signing and later family migrations remain required. The legacy raw-input
 adapter is transitional: remove it before TS venue/reference deletion after
 trusted bootstrap adoption. [Current core contract](RUST_SIGNER.md).
+
+
+## Cumulative-fill reference correctness (#1720)
+
+Actual merge `9fc2a7c174ad` introduces shared engine financial preparation for
+Hyro's Bybit adapter and Bitget Classic order-derived fills. Quantity, price and
+next delivery progress are validated before native dedupe/progress commits.
+An unpriced Hyro observation no longer consumes a later corrected cumulative
+fill; an invalid/unpriced Classic observation neither emits a negative-price
+fill nor consumes the corrected report's execution eligibility. Late authoritative
+Classic fills retain the cumulative anchor, preventing a subsequent cumulative
+catch-up from re-emitting an already delivered interval. When cumulative quote
+is missing, Hyro's zero average remains unavailable quote evidence, preserving
+its authorized fallback instead of deriving an inflated price from a fabricated
+zero-value seed. An explicitly supplied cumulative quote of zero stays distinct.
+
+These five repairs intentionally change notifications on the demonstrated bad /
+corrected / late report paths; they are not merely internal refactoring. Existing
+FILLS shape, native identity/duplicate rules, bootstrap-versus-live separation
+and direct Bitget UTA delivery remain. No new SDK method argument or mandatory
+NX handler migration is introduced. Other cumulative-fill consumers still need
+adoption of the shared boundary. [Reference scope and regressions](RUST_CUMULATIVE_FILLS.md).
+
+
+## Shared engine protocol-clock calibration (#1722)
+
+Actual merge `d3e34e6e105` replaces Bybit/Aster local clock offsets with one
+calibration service per engine. Bybit server-time rejections and Aster `/time`
+observations replace that engine's correction; they never accumulate it or
+change another engine. Outbound signing timestamps, absolute expiry and
+time-derived nonces consume calibrated protocol time. Host scheduling time
+still owns timers, admission/preparation age, network deadlines and emitted
+market timestamps; explicit replay/host clocks retain their authority.
+
+A changed calibration revision invalidates pending and materialized signed
+output before release, including stale provider errors. The shared signer
+reprepares immutable unsigned input under a new attempt ID while retaining FIFO
+position and the original host-time deadline; timeout wins. Already transmitted
+requests are never replayed because of calibration. Bybit's existing eligible
+once-only resend and Aster's bounded sync/nonce policies remain.
+
+No SDK/NX constructor argument or caller migration is added. Custom signing
+providers must sign the supplied canonical bytes rather than substitute their
+own wall-clock stamp. This calibration complements #1709's shared SDK ingress;
+it does not restore the retired hostClock capability.
+[Clock domains and regressions](RUST_ENGINE_CLOCK.md).

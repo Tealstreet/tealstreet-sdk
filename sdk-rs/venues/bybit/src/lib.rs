@@ -291,8 +291,6 @@ pub struct BybitLinear {
     live_candles: HashMap<(String, Interval), Candle>,
     trade_subscribers: HashMap<String, u32>,
     startup: Startup,
-    /// Server clock minus ours, learned from a `recv_window` rejection.
-    clock_offset_ms: f64,
     /// Discovery retries wait out a rate-limit or IP ban across all products.
     discovery_paused_until: f64,
     account: account::AccountState,
@@ -522,7 +520,6 @@ impl BybitLinear {
                 fees: (options.variant.is_spot() || options.variant.is_hyro()).then(HashMap::new),
                 ..Startup::default()
             },
-            clock_offset_ms: 0.0,
             discovery_paused_until: 0.0,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
@@ -661,11 +658,9 @@ impl BybitLinear {
             });
         let credentials = read_credentials.as_ref().or(self.credentials.as_ref());
         let headers = match (credentials, rest.signed) {
-            (Some(credentials), true) => credentials.headers_window(
-                cx.now + self.clock_offset_ms,
-                &rest.payload,
-                self.recv_window,
-            ),
+            (Some(credentials), true) => {
+                credentials.headers_window(cx.protocol_now(), &rest.payload, self.recv_window)
+            }
             (None, true) => return,
             _ => vec![("X-Referer", sign::BROKER_ID.into())],
         };
@@ -698,7 +693,7 @@ impl BybitLinear {
             return false;
         };
         if let Some(server) = server_time {
-            self.clock_offset_ms = server - cx.now;
+            cx.observe_protocol_time(server);
         }
         cx.notice(
             Level::Warn,
@@ -955,8 +950,7 @@ impl BybitLinear {
         if credentials.key.is_empty() || credentials.secret.is_empty() {
             return false;
         }
-        let headers =
-            credentials.headers_window(cx.now + self.clock_offset_ms, "", self.recv_window);
+        let headers = credentials.headers_window(cx.protocol_now(), "", self.recv_window);
         self.environment_probe_attempted = true;
         let timer = cx.set_timer(f64::from(ENVIRONMENT_PROBE_TIMEOUT_MS));
         self.environment_probe = Some(EnvironmentProbe {

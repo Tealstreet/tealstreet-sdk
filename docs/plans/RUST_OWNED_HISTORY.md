@@ -381,3 +381,13 @@ real-integrated without conflicts. All five incoming paths and six reviewed
 history source/test files are preserved byte-for-byte; no scheduler/history
 source interaction is introduced by this merge. Fresh focused checks and CI run
 from this shared-engine dependency; earlier `e68e7c0d4b5` CI is not merge proof.
+
+
+Actual cumulative-fill #1720 `9fc2a7c174ad` is real-integrated at `ff7a9a9c031`;
+merge is conflict-free and the effective diff is still the ten owned paths.
+Incoming engine/execution/num and Bybit/Bitget account implementations are kept;
+history source/tests are unchanged. Caller catch-up records the five demonstrated
+reference financial repairs without claiming other cumulative consumers migrated.
+Latest overseer order is #1722 clock calibration, then #1719, then #1721 signer
+prerequisites. Batch the imminent actual clock dependency before final history
+CI; no merge against the prior scheduler-only head despite its green checks.

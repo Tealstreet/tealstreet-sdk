@@ -135,6 +135,22 @@ not a deployed-runtime or npm-publication claim.
 ## Trading correctness
 
 High:
+- ~~Cumulative-fill correctness on landing (Hyro and Bitget Classic): an unpriced
+  Hyro report consumes its cursor and loses the corrected fill; a missing quote
+  with bootstrap average0 invents a known zero value and overprices a later delta;
+  Bitget emits negative-price fills, loses cumulative-only corrected delivery
+  after display advances, and rewinds progress on late direct executions so a
+  later cumulative catch-up emits a duplicate.~~ Shared `engine::execution`
+  validates typed quantity/price evidence and derived arithmetic before delivery
+  progress or native dedup commit. Five separate native original-RED/core-GREEN
+  controls cover these real financial defects; a negative-quote compatibility
+  control preserves Hyro recovery. Bootstrap observations remain distinct from
+  delivered progress, zero average means unavailable, explicit quote0 stays
+  distinct, and late direct executions deliver without rewinding their anchor.
+  [Scope, evidence and remaining fan-out](RUST_CUMULATIVE_FILLS.md). This first
+  core has two reference consumers; nine other cumulative public-Fill crates
+  and ApeX synthetic history still need engine adoption, including interval/gap
+  extensions before WOO/Bitrue. No caller API or live capture claim.
 - ~~Binance COIN-M treats `EXPIRED` as terminal, dropping a triggered stop's fill
   (`binance/src/account.rs:1186`).~~ Fixed: late native executions emit independently of lifecycle terminal state.
 - ~~Binance USD-M amend re-places the full original size when the order filled
