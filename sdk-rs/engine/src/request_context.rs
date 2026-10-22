@@ -6,6 +6,8 @@
 use crate::signing::{KeyRef, SignReceipt};
 use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
 
+#[path = "http_evidence.rs"]
+mod evidence;
 #[path = "http_reconciliation.rs"]
 mod reconciliation;
 pub use reconciliation::ReconciliationData;
@@ -763,6 +765,18 @@ pub enum WriteResult {
     Failed(VenueError),
 }
 
+impl WriteResult {
+    fn order_ids(&self) -> &[String] {
+        match self {
+            Self::Accepted { order_ids } => order_ids,
+            Self::Rejected(error) | Self::Failed(error) => error
+                .partial
+                .as_ref()
+                .map_or(&[], |partial| partial.order_ids.as_slice()),
+        }
+    }
+}
+
 const REPORT_MESSAGES: usize = 256;
 const REPORT_MESSAGE_BYTES: usize = 8 * 1024;
 const REPORT_BYTES: usize = 64 * 1024;
@@ -814,6 +828,7 @@ struct WriteAttempt {
     released: bool,
     result: Option<WriteResult>,
     reports: RejectionReports,
+    id_overflow: bool,
 }
 
 /// Bounded evidence retained for the whole command, including prior retries.
@@ -824,10 +839,11 @@ pub struct CommandWrites {
     sealed: bool,
     report_bytes: usize,
     report_messages: usize,
+    evidence: evidence::EvidenceBudget,
 }
 impl CommandWrites {
     pub fn new(capacity: usize) -> Result<Self, Error> {
-        if capacity == 0 {
+        if capacity == 0 || capacity > evidence::MAX_ATTEMPTS {
             return Err(Error::Capacity);
         }
         Ok(Self {
@@ -836,6 +852,7 @@ impl CommandWrites {
             sealed: false,
             report_bytes: 0,
             report_messages: 0,
+            evidence: evidence::EvidenceBudget::default(),
         })
     }
     pub fn register(&mut self, id: RequestId, leg: u64) -> Result<(), Error> {
@@ -854,6 +871,7 @@ impl CommandWrites {
             released: false,
             result: None,
             reports: RejectionReports::default(),
+            id_overflow: false,
         });
         Ok(())
     }
@@ -875,7 +893,8 @@ impl CommandWrites {
             .iter()
             .find(|a| a.id == previous)
             .ok_or(Error::Invalid)?;
-        if !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+        if old.id_overflow
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
             || self.attempts.iter().rposition(|a| a.leg == old.leg)
                 != self.attempts.iter().position(|a| a.id == previous)
         {
@@ -888,6 +907,7 @@ impl CommandWrites {
             released: false,
             result: None,
             reports: RejectionReports::default(),
+            id_overflow: false,
         });
         Ok(())
     }
@@ -921,8 +941,19 @@ impl CommandWrites {
     }
     pub fn result(&mut self, id: RequestId, result: WriteResult) -> Result<(), Error> {
         let reports = match &result {
-            WriteResult::Rejected(error) => RejectionReports::new(vec![error.message.clone()])?,
+            WriteResult::Rejected(error) => {
+                RejectionReports::new(vec![evidence::default_report(&error.message)])?
+            }
             _ => RejectionReports::default(),
+        };
+        // Default presentation must not discard native money facts when its
+        // reporting quota is full. Explicit report admission stays atomic below.
+        let reports = if self.report_bytes + reports.retained_bytes <= REPORT_BYTES
+            && self.report_messages + reports.messages.len() <= REPORT_MESSAGES
+        {
+            reports
+        } else {
+            RejectionReports::default()
         };
         self.result_with_reports(id, result, reports)
     }
@@ -962,8 +993,11 @@ impl CommandWrites {
         {
             return Err(Error::State);
         }
+        let (budget, result, id_overflow) = self.evidence.result(result);
         attempt.result = Some(result);
+        attempt.id_overflow = id_overflow;
         attempt.reports = reports;
+        self.evidence = budget;
         self.report_bytes = report_bytes;
         self.report_messages = report_messages;
         Ok(())
@@ -972,7 +1006,7 @@ impl CommandWrites {
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.
     pub fn succeed(&mut self) -> Result<(), Error> {
-        if self.sealed || self.attempts.is_empty() {
+        if self.sealed || self.attempts.is_empty() || self.attempts.iter().any(|a| a.id_overflow) {
             return Err(Error::State);
         }
         let accepted = self.attempts.iter().enumerate().all(|(index, attempt)| {
@@ -1044,10 +1078,27 @@ impl CommandWrites {
                 .min_by_key(|(leg, _)| *leg)
                 .map(|(_, error)| error)
         };
-        let mut error = select(true).or_else(|| select(false)).unwrap_or(fallback);
+        let selected = select(true).or_else(|| select(false));
+        let mut overflow = self.attempts.iter().any(|attempt| attempt.id_overflow);
+        let mut error = match selected {
+            Some(error) => error, // Already-budgeted facts are never charged again.
+            None => {
+                let known = self
+                    .attempts
+                    .iter()
+                    .filter_map(|attempt| attempt.result.as_ref())
+                    .flat_map(WriteResult::order_ids)
+                    .map(String::as_str)
+                    .collect();
+                let (budget, error, fallback_overflow) = self.evidence.error(fallback, &known);
+                self.evidence = budget;
+                overflow |= fallback_overflow;
+                error
+            }
+        };
         error.outcome = if !any_released {
             Some(Outcome::NotSent)
-        } else if uncertain {
+        } else if uncertain || overflow {
             Some(Outcome::Unknown)
         } else if all_rejected {
             Some(Outcome::Rejected)
@@ -1061,13 +1112,7 @@ impl CommandWrites {
             .as_ref()
             .map_or_else(Vec::new, |p| p.order_ids.clone());
         for attempt in &self.attempts {
-            let order_ids = match &attempt.result {
-                Some(WriteResult::Accepted { order_ids }) => Some(order_ids.as_slice()),
-                Some(WriteResult::Rejected(error) | WriteResult::Failed(error)) => {
-                    error.partial.as_ref().map(|p| p.order_ids.as_slice())
-                }
-                None => None,
-            };
+            let order_ids = attempt.result.as_ref().map(WriteResult::order_ids);
             if let Some(order_ids) = order_ids {
                 for id in order_ids {
                     if !ids.contains(id) {
@@ -1082,6 +1127,9 @@ impl CommandWrites {
             } else {
                 error = error.partial_ids(&ids);
             }
+        }
+        if overflow {
+            evidence::mark_id_overflow(&mut error);
         }
         Ok(error)
     }
@@ -1139,3 +1187,7 @@ mod tests;
 #[cfg(test)]
 #[path = "request_context_reports_tests.rs"]
 mod report_tests;
+
+#[cfg(test)]
+#[path = "request_context_evidence_tests.rs"]
+mod evidence_tests;

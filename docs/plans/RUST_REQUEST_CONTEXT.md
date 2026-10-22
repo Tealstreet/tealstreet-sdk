@@ -853,3 +853,15 @@ Default result() reporting must not reject a money fact merely because its error
 text/report quota is too large: bound its one-message presentation and omit only
 that default report when the report-only budget is exhausted. Explicit
 result_with_reports retains its atomic report-capacity refusal contract.
+
+Evidence normalization checkpoint: terminal fallback indexes the bounded native
+IDs by borrowed reference and copies each already-retained identity at most once,
+without charging it again. New fallback entries consume the remaining budget;
+an overflow preserves all prior exact native IDs and forces Unknown when sent.
+The bounded text overhead is at most three markers for each of 256 attempts plus
+one fallback, and one separate fixed ID-overflow diagnostic. The budget does not
+claim to cap transient input allocation or every engine allocation. Tests cover
+full native quota plus matching fallback IDs, repeated known IDs, one genuinely
+new overflowing fallback ID, report-refusal atomicity, exhausted UTF-8 text, and
+historical retry accounting. Independent evidence review: CLEAN; architecture
+gate No (one engine evidence policy).
