@@ -861,3 +861,18 @@ the unchanged frozen head as ancestor, full exact-head checks and independent
 evidence reviews pass, and a fresh separate guard confirms only these six
 owned files against actual landing. Any predecessor head change requires
 real integration and fresh CI/proof.
+
+Final proof refresh after the KCS landing trigger: actual #1753
+`35949503f7ffab45a942312cfa913da20ce4b71c` is genuinely integrated,
+including actual Bybit #1728. The earlier stacked 46d59 CI is preserved as
+FAILED solely on KCS CPU and is not final evidence. Use fully green exact
+KCS PR run39771903002/head38167 as the authenticated, source-equivalent
+baseline (actual merge tree equals that reviewed head), then fresh BingX
+exact-head CI/full32-suite proof. Bind the baseline PR synthetic checkout
+to [actual1746,38167] and the candidate checkout to [actual1753,new head];
+each tree and hard19-input fingerprint must match its own tested head.
+All976 raw fields, full IDs and ordered gates remain compared as before.
+No source, fixture, allowance or comparator changes accompany this refresh.
+Independent six-file preservation review and fresh normal separate guard
+against actual landing remain required; no predecessor-stack exception is
+needed now that both actual dependency merges are real ancestors.
