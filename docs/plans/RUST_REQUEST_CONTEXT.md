@@ -1450,3 +1450,24 @@ Binance/GRVT/Crypto/Orderly checks run before readiness. Start draft CI in paral
 with those additional checks; no proof/readiness/merge claim until every gate
 passes on the same immutable source. Preservation and inventory receipts are
 /tmp/codex-1741-post1767-{preservation,inventory-receipt}.json.
+
+## Bounded private-path profiling after #1741
+
+Owner request (2026-10-23): after caller backfill #1777, profile the managed
+Binance private request path before growing the follow-on. Use actual #1741's
+retained CI Node WASM package (Rust run39844297596; verify ZIP/build/member
+hashes) on current landing, which differs only by the caller docs. Run exactly
+one sequential pass of the five existing Binance private gate cases: regular,
+Spot, COIN-M, PM and scripted USD-M lifecycle. No local rebuild, public replay,
+repeated benchmark, concurrency or live venue request. Bound each process to
+90 seconds and the full pass to300 seconds.
+
+Collect a sampling CPU profile plus synchronous engine-call timings/counters
+through an out-of-tree diagnostic preload; never count awaited wall time as
+CPU. Keep the replay source, clocks, options, tape bytes and output assertions
+unchanged. Compare every nonmetric Rust result against its exact CI output.
+Report startup/GC versus managed preparation/signing/claim/response work with
+sampling/instrumentation limitations; this is diagnosis, not new gate evidence.
+Only fix demonstrated clear waste that preserves all semantics, with focused
+regressions and independent review. Otherwise report findings without a source
+change. The shared response-proof/ordinary-Bybit work stays local and separate.
