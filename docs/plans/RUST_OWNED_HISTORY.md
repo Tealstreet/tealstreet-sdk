@@ -1284,3 +1284,12 @@ be reapplied after restart to reset authority. Test the exact boundary across
 two stages, inability to reopen an exhausted budget, and invalid early restart
 without mutating pending rows or an existing gap. Keep the existing more-than-
 100,000 retained-output guard a strict policy rejection, never a partial success.
+
+
+Saturated-stage sequencing is an intentional change: the old USDT truncated
+walk rejected before USDC. The shared owner will retain that coverage gap and
+continue the requested USDC stage, then return eligible accepted rows with one
+owned marker. Test that additional stage explicitly. Healthy request sequences
+stay unchanged. Preserve equal-bound padding only inside the walker
+(`end.max(start + 1)`), native-request clipping to actual end, and output filtering
+against the actual caller end rather than the padded synthetic bound.
