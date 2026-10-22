@@ -3,9 +3,37 @@ use crate::signing::{Algorithm, Operation, SignError, SignRequest, SignResult};
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
 use std::collections::HashMap;
 
-/// Canonicalisation and result insertion only; no keys, clocks or I/O.
+/// Narrow send-time view: protocol clock and injected signing entropy only.
+/// Identity replay seeding never supplies nonce bytes to this context.
+pub struct DispatchContext<'a> {
+    pub now_ms: f64,
+    entropy: Option<&'a crate::entropy::Entropy>,
+}
+impl<'a> DispatchContext<'a> {
+    pub(crate) fn new(now_ms: f64, entropy: Option<&'a crate::entropy::Entropy>) -> Self {
+        Self { now_ms, entropy }
+    }
+    /// Draw anew on every preparation. Failure clears even partial output.
+    pub fn signing_bytes(&self, bytes: &mut [u8]) -> Result<(), SignError> {
+        use zeroize::Zeroize;
+        let result = self
+            .entropy
+            .ok_or(SignError::Unavailable)
+            .and_then(|entropy| entropy.signing(bytes).map_err(|_| SignError::Unavailable));
+        if result.is_err() {
+            bytes.zeroize();
+        }
+        result
+    }
+}
+
+/// Canonicalisation and result insertion only; no keys or I/O.
 pub trait SignStep: Send {
-    fn prepare(&mut self, outbound: &mut Action, now: f64) -> Result<SignRequest, SignError>;
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        context: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError>;
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError>;
     fn freshness_ms(&self) -> f64;
 }
@@ -199,14 +227,14 @@ impl Dispatch {
         &mut self,
         id: RequestId,
         now: f64,
-        protocol_now: f64,
+        context: &DispatchContext<'_>,
         clock_revision: u64,
     ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
         if !now.is_finite() || now >= p.deadline {
             return Err(SignError::TimedOut);
         }
-        if !protocol_now.is_finite() {
+        if !context.now_ms.is_finite() {
             return Err(SignError::InvalidRequest);
         }
         if let (Action::Http(original), Action::Http(current)) = (&mut p.unsigned, &p.outbound) {
@@ -214,7 +242,7 @@ impl Dispatch {
             original.timeout_ms = current.timeout_ms;
         }
         p.outbound = p.unsigned.clone();
-        let work = p.step.prepare(&mut p.outbound, protocol_now)?;
+        let work = p.step.prepare(&mut p.outbound, context)?;
         work.validate()?;
         p.expected = work
             .operations
@@ -352,7 +380,11 @@ fn wipe(action: &mut Action) {
 }
 struct Plain;
 impl SignStep for Plain {
-    fn prepare(&mut self, _: &mut Action, _: f64) -> Result<SignRequest, SignError> {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        _: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
         Err(SignError::InvalidRequest)
     }
     fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {

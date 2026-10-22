@@ -245,8 +245,9 @@ impl safe_cex_engine::SignStep for PrimitiveStep {
     fn prepare(
         &mut self,
         action: &mut safe_cex_engine::Action,
-        now: f64,
+        context: &safe_cex_engine::DispatchContext<'_>,
     ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        let now = context.now_ms;
         if let safe_cex_engine::Action::Http(request) = action {
             request.url = format!("https://venue.invalid/orders?timestamp={}", now.floor());
         }

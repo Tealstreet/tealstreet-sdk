@@ -4,7 +4,12 @@ use crate::signing::{
 };
 struct Step;
 impl crate::SignStep for Step {
-    fn prepare(&mut self, action: &mut Action, now: f64) -> Result<SignRequest, SignError> {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        context: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let now = context.now_ms;
         if let Action::Http(http) = action {
             http.url = format!("https://venue.test/private?timestamp={now}");
         }
@@ -565,7 +570,11 @@ fn socket_close_revokes_pending_auth_completion() {
 
 struct InvalidStep;
 impl crate::SignStep for InvalidStep {
-    fn prepare(&mut self, _: &mut Action, _: f64) -> Result<SignRequest, SignError> {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        _: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
         Err(SignError::InvalidRequest)
     }
     fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
@@ -1098,5 +1107,214 @@ fn repeated_protocol_calibration_never_extends_the_original_raw_deadline() {
     assert_eq!(
         engine.venue.last_sign_error.as_deref(),
         Some(SignError::TimedOut.venue_error().message.as_str())
+    );
+}
+
+struct NonceStep;
+impl crate::SignStep for NonceStep {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        context: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let mut nonce = [0; 4];
+        context.signing_bytes(&mut nonce)?;
+        let work = Step.prepare(action, context)?;
+        let suffix = format!("?stamp={}&nonce={nonce:?}", context.now_ms);
+        match action {
+            Action::Http(http) => http.url.push_str(&suffix),
+            Action::WsConnect { url, .. } => url.push_str(&suffix),
+            _ => return Err(SignError::InvalidRequest),
+        }
+        Ok(work)
+    }
+    fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        if let Action::WsConnect { headers, .. } = action {
+            headers.push(("signed", "yes".into()));
+            Ok(())
+        } else {
+            Step.apply(action, result)
+        }
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+fn upgrade(engine: &mut Engine<TestVenue>, public: bool) -> SocketId {
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.connect_signed(
+        SocketSpec::new("wss://venue.test/private")
+            .channel(if public {
+                SocketChannel::Public
+            } else {
+                SocketChannel::Private
+            })
+            .feed("private-recover", true)
+            .binary()
+            .headers(vec![("static", "kept".into())]),
+        Box::new(NonceStep),
+    )
+}
+fn signing_work(actions: &[Action]) -> (RequestId, String) {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Sign { attempt, work, .. } => {
+                let Operation::Sign { payload, .. } = &work.operations[0] else {
+                    panic!("signature operation")
+                };
+                let PayloadPart::Bytes { bytes } = &payload[0] else {
+                    panic!("exact bytes")
+                };
+                Some((*attempt, String::from_utf8(bytes.clone()).unwrap()))
+            }
+            _ => None,
+        })
+        .expect("one sign request")
+}
+#[test]
+fn signing_context_uses_only_signing_stream_and_redraws_after_clock_revision() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    };
+    let calls = Arc::new(AtomicU8::new(0));
+    let capture = calls.clone();
+    let entropy = crate::entropy::Entropy::new(
+        Box::new(|_| panic!("identity stream used for signing")),
+        Box::new(move |out| {
+            let value = capture.fetch_add(1, Ordering::SeqCst) + 1;
+            out.fill(value);
+            Ok(())
+        }),
+    );
+    let mut engine = Engine::new(TestVenue::default(), Some(entropy)).unwrap();
+    let socket = upgrade(&mut engine, false);
+    engine.prepare_dispatch(1000.);
+    let first_actions: Vec<_> = engine.drain_actions().collect();
+    let (first, stamp) = signing_work(&first_actions);
+    assert_eq!(stamp, "1000");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(
+        !first_actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    calibrate_protocol_time(&mut engine, 1000., 61000.);
+    engine.handle(
+        1000.,
+        Event::Signed {
+            attempt: first,
+            result: result(),
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let (second, stamp) = signing_work(&actions);
+    assert_ne!(first, second);
+    assert_eq!(stamp, "61000");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms: 21000., .. }))
+    );
+    engine.handle(
+        1001.,
+        Event::Signed {
+            attempt: second,
+            result: result(),
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let upgrades: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsConnect {
+                socket: id,
+                url,
+                headers,
+                channel,
+                context,
+                binary,
+            } => Some((id, url, headers, channel, context, binary)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(upgrades.len(), 1);
+    let (id, url, headers, channel, context, binary) = upgrades[0];
+    assert_eq!(*id, socket);
+    assert!(url.ends_with("stamp=61000&nonce=[2, 2, 2, 2]"));
+    assert_eq!(
+        headers,
+        &[("static", "kept".into()), ("signed", "yes".into())]
+    );
+    assert_eq!(*channel, Some(SocketChannel::Private));
+    assert_eq!(context.as_ref().unwrap().feed, "private-recover");
+    assert!(context.as_ref().unwrap().recover);
+    assert!(*binary);
+}
+#[test]
+fn signed_upgrade_never_connects_after_timeout_or_close_or_public_suppression() {
+    for mode in ["timeout", "explicit", "host"] {
+        let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+        let socket = upgrade(&mut engine, false);
+        engine.prepare_dispatch(1000.);
+        let (attempt, timer) = staged(&mut engine);
+        match mode {
+            "timeout" => engine.handle(21000., Event::TimerFired { timer }),
+            "host" => engine.handle(1001., Event::WsClosed { socket, code: 1006 }),
+            _ => {
+                let mut cx = Cx {
+                    now: 1001.,
+                    store: &mut engine.store,
+                    io: &mut engine.io,
+                };
+                cx.close(socket);
+            }
+        }
+        engine.handle(
+            21001.,
+            Event::Signed {
+                attempt,
+                result: result(),
+            },
+        );
+        assert!(
+            !engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::WsConnect { .. }))
+        );
+    }
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_public_feed_policy(PublicFeedPolicy::Disabled)
+        .unwrap();
+    assert_eq!(upgrade(&mut engine, true), SocketId(0));
+    assert!(engine.drain_actions().next().is_none());
+}
+#[test]
+fn signing_entropy_failure_clears_partial_nonce_and_never_reaches_provider_or_socket() {
+    let entropy = crate::entropy::Entropy::new(
+        Box::new(|_| panic!("identity")),
+        Box::new(|out| {
+            out.fill(99);
+            Err("private provider detail".into())
+        }),
+    );
+    let context = crate::DispatchContext::new(1000., Some(&entropy));
+    let mut out = [1; 4];
+    assert_eq!(context.signing_bytes(&mut out), Err(SignError::Unavailable));
+    assert_eq!(out, [0; 4]);
+    let mut engine = Engine::new(TestVenue::default(), Some(entropy)).unwrap();
+    upgrade(&mut engine, false);
+    engine.prepare_dispatch(1000.);
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::WsConnect { .. }))
     );
 }

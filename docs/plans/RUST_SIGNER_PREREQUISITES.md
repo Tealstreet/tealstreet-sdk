@@ -89,3 +89,26 @@ capsule consumes both before generic options are retained and forwards them via
 WASM constructor argument 3. Unmigrated Rust families reject the metadata with
 `unsupported` / `notSent`. Worker/hosted callers still need a separate trusted
 bootstrap channel, as required by #1714; this does not implement remote signing.
+
+## Dispatch and receipt API
+
+`SignStep::prepare` takes `&DispatchContext` instead of a bare clock value.
+`now_ms` is the calibrated protocol view; `signing_bytes` draws only from the
+engine's independent signing source. Raw staging/deadline/freshness durations and
+clock-revision checks remain in dispatch. `Cx::connect_signed` preserves ordinary
+socket metadata/suppression and stages the upgrade through that same queue.
+
+The next phase adds `SignReceipt { stampMs?, expiryMs? }` to `SignRequest` and
+structured provider results `{ values, receipt }`. Both fields are independently
+optional: expiry-only and credential-presentation recipes must not invent a signed
+timestamp. Present values must be finite, nonnegative safe integer protocol UTC
+milliseconds; expiry must follow stamp when both exist. The provider echoes the
+exact current attempt's declared record. Missing, different or invalid records
+fail before materialization. Dispatch checks expiry as well as freshness and clock
+revision again at release, without extending its raw deadline.
+
+One no-`Cx` venue callback receives an HTTP pending value or socket identity and
+validated receipt only after final fresh release. It can update pending metadata,
+not emit recursive I/O. This proves engine release/materialization only, never
+transport send or venue acceptance. Native/WASM/Workers and custom JS providers
+must return the structured result together; no old-array fallback is planned.

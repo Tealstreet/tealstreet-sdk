@@ -25,7 +25,7 @@ pub mod public_feed;
 pub mod read_scheduler;
 pub mod signing;
 mod signing_dispatch;
-pub use signing_dispatch::SignStep;
+pub use signing_dispatch::{DispatchContext, SignStep};
 pub mod socket;
 pub mod startup;
 pub mod store;

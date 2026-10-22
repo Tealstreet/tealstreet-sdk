@@ -1203,6 +1203,30 @@ impl<P> Cx<'_, P> {
         socket
     }
 
+    /// Create an unsigned upgrade and stage it through the shared signing queue.
+    /// Public-role suppression and socket metadata are identical to `connect`.
+    pub fn connect_signed(
+        &mut self,
+        spec: impl Into<SocketSpec>,
+        step: Box<dyn crate::SignStep>,
+    ) -> SocketId {
+        let socket = self.connect(spec);
+        if socket.0 == 0 {
+            return socket;
+        }
+        let index = self
+            .io
+            .actions
+            .iter()
+            .position(
+                |action| matches!(action, Action::WsConnect { socket: id, .. } if *id == socket),
+            )
+            .expect("connect queued its upgrade");
+        let outbound = self.io.actions.remove(index);
+        self.stage_signed(index, outbound, step);
+        socket
+    }
+
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
@@ -2921,7 +2945,10 @@ impl<V: Venue> Engine<V> {
                         let work = match self.io.signing.prepare(
                             attempt,
                             now,
-                            self.io.protocol_clock.at(now),
+                            &crate::DispatchContext::new(
+                                self.io.protocol_clock.at(now),
+                                self.io.entropy.as_ref(),
+                            ),
                             self.io.protocol_clock.revision(),
                         ) {
                             Ok(work) => work,

@@ -34,7 +34,7 @@ fn bytes(bytes: impl Into<Vec<u8>>) -> PayloadPart {
         bytes: bytes.into(),
     }
 }
-fn context(url: &str, method: &str) -> Context {
+fn request_context(url: &str, method: &str) -> Context {
     let (host, path) = url
         .split_once("://")
         .map(|(_, rest)| rest.split_once('/').unwrap_or((rest, "")))
@@ -57,11 +57,16 @@ fn hex(bytes: &[u8]) -> String {
     safe_cex_crypto::hex(bytes)
 }
 impl SignStep for Http {
-    fn prepare(&mut self, outbound: &mut Action, now: f64) -> Result<SignRequest, SignError> {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        context: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let now = context.now_ms;
         let Action::Http(http) = outbound else {
             return Err(SignError::InvalidRequest);
         };
-        let context = context(&http.url, http.method.as_str());
+        let context = request_context(&http.url, http.method.as_str());
         let mut operations = vec![Operation::Present {
             key: self.credentials.credential.clone(),
         }];
@@ -125,7 +130,12 @@ impl SpotSubscribe {
     }
 }
 impl SignStep for SpotSubscribe {
-    fn prepare(&mut self, _: &mut Action, now: f64) -> Result<SignRequest, SignError> {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        context: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let now = context.now_ms;
         self.timestamp = now.floor();
         Ok(SignRequest {
             context: Context {
