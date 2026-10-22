@@ -11,7 +11,10 @@ before switching. Real-integrate the actual core before final publication.
 The shared CommandWrites journal can retry one logical leg after a definitive,
 effects-free refusal. It cannot yet express a whole refused batch replaced by N
 single-order legs. Bybit handles native 10001 with fallback steps but retains the
-batch error and venue-owned refused/effective/unknown/resent aggregation. Native
+batch diagnostic and venue-owned refused/effective/unknown/resent aggregation.
+Existing native fallback already returns successful IDs when every single is
+accepted; this is a missing shared journal representation, not a second native
+success bug. Native
 500 with retCode 0 can also reach apply_local_write before uncertainty is sealed.
 Extend the engine journal once; venues declare native facts and replacement
 intent only. No second executor, callback-order finalizer or error-text retry.
@@ -64,7 +67,9 @@ financial freshness tokens, error-classification fan-out and NX edits stay out.
 
 - Preserve current command root through ResolveMode redo and delayed steps;
   create bounded child Contexts when a planned read/write is actually queued.
-  Explicit GET mode preflight is Read, writes are Mutation; never infer from
+  Declare a nonempty command root Mutation before its ResolveMode Read child;
+  empty read-only work must never escalate. Explicit preflight is Read and
+  writes are Mutation; never infer from
   method. Retain original root/leg bounds through timers, signature retries,
   asynchronous providers and returned mode-version changes.
 - Ordinary Request/Rest carries managed authority into actual release, retry,
@@ -79,7 +84,10 @@ financial freshness tokens, error-classification fan-out and NX edits stay out.
 - For native10001 batch fallback, submit definitive refusal then the shared
   replacement declaration before staging singles. A full successful fallback
   returns success and child IDs; its superseded parent does not become a fatal
-  or terminal rejection report. Preserve request bytes, client IDs and existing
+  or terminal rejection report. Preserve the existing one native batch-refusal
+  commandError diagnostic before done using validated command_error_context;
+  historical reporting is separate from terminal projection, with no duplicate
+  journal report. Preserve request bytes, client IDs and existing
   native single/batch semantics; partial/unknown children cannot hide behind a
   recovered sibling. Preserve exact IDs and native refusal text as evidence.
 - Native codec classification precedes any local Store/ownership patch. A 500
@@ -121,3 +129,30 @@ financial freshness tokens, error-classification fan-out and NX edits stay out.
 
 Architecture gate: No. This is an engine journal/lifecycle extension with native
 codec facts and one reference adoption, not a Bybit-specific cross-cutting fix.
+
+## Independent plan audit refinements (before source)
+
+- Supersession revokes the parent's mutation-delivery/result/retry/replacement/
+  release authority, not just its terminal error. Require latest same-leg parent
+  and change the shared authority validator so an old callback cannot seal the
+  command after replacement. Explicit root completion remains generation-bound.
+- Reserved children participate in terminal projection immediately, before a
+  RequestId exists, including expiry/cancellation/queue refusal. They cannot be
+  ignored by succeed or all_rejected; parent release plus failed child
+  preparation is conservative Unknown. Keep reservations until owner sealing.
+- Prepare all child immutable Contexts after checking the entire policy/count/
+  context/journal/relation budget, then one infallible registry+journal commit.
+  Do not loop issue_bound with rollback. Monotonic allocation may leave checked
+  gaps on refusal but is never rewound. A refused replacement leaves the parent's
+  recorded native rejection and existing authority unchanged.
+- Use bounded explicit root planning rank plus child ordinals/path, not packed
+  numeric leg arithmetic. Shared terminal traversal drives errors, reports and
+  partial metadata. Test siblingB issued before children ofA, nestedA groups and
+  opposite callback order, under the same 256-work budget.
+- Preserve the existing fallback success/progress/client-ID/one nonterminal
+  commandError/done assertions. The first native RED is unsafe gateway ACK
+  publication; missing shared supersession gets pure-engine regression and
+  explicit relation tests. No invented existing native fallback failure claim.
+
+Independent architecture audit: No. These refinements belong in the one shared
+registry/journal bridge; no per-venue queue/authority/classification workaround.
