@@ -538,3 +538,11 @@ independent integration/caller reviews precede exact-head CI and separate guard.
 The financial #1725 hold is respected: this fan-out touches no Binance, engine
 execution/num, WOO or Bitrue source; integrate its actual shared-engine dependency
 if it lands before the final proof.
+
+
+Actual scheduler-policy #1723 `08b9c12f4861237f474578928e8ab606da1e1236`
+landed before publication and is real-integrated conflict-free. Its two incoming
+paths are exact; the reviewed BloFin implementation is unchanged. This is policy
+foundation without runtime adoption, so it adds no caller behavior row. Fresh
+focused/strict checks and CI use this shared-engine dependency. The #1725
+financial window remains independent and is observed before any final guard.
