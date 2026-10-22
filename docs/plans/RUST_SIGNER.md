@@ -14,15 +14,26 @@ the Binance family as the reference; other venues follow in separate lanes.
   key reference, exact bytes and cheap optional context (venue/method/host/path).
   The signer may refuse; no mandatory allowlists or integrity subsystem in this PR.
   Supported primitive vocabulary covers HMAC-SHA256/512, ed25519, ES256/JWT,
-  EIP-712, Stark and Schnorr; concrete provider support is explicit.
+  EIP-712, Stark and Schnorr, and composite operations such as Bitunix's
+  SHA256(secret-suffix); exact byte/hash/output contracts and concrete provider
+  support are explicit. Unsupported operations refuse before transport.
 - Signing secrets stay private to the Signer implementation. Engine, venue
   structs, generic hosts, logs and protocol messages carry references/signatures,
-  never signing key material. Venue-required public identifiers remain routing
-  metadata. The default local in-memory Signer owns/clears its keys; hosts receive
-  only its handle. Local provider setup consumes legacy credentials outside venues.
+  never signing key material. Raw credential presentation (API-key/passphrase
+  headers, WS credentials, password/session bodies) is also a signer operation:
+  it fills a named outbound field only at send time. Such values necessarily
+  exist in the in-flight request, but engine/venues never retain or log them.
+  No venue-specific secret exceptions. The default local in-memory Signer
+  owns/clears its keys; hosts receive only its handle. Trusted provider setup
+  consumes legacy credentials before venue construction/options serialization.
 - Generalize the existing sans-I/O pending-signature action/event pattern.
   Correlate replies with request/attempt/generation; bound pending work and include
-  signing in the existing deadline. Timeout/refusal before dispatch is `notSent`;
+  signing in the existing deadline, with an independent timer even if the signer
+  never settles. The send boundary owns timestamp/nonce, attempt and generation;
+  preparation runs after pacing/queues, and stale completions reprepare within the
+  original deadline (including 5 s WS and 120 s JWT windows). Clock input is the
+  agreed synchronized `Cx.now` epoch-ms, never a provider wall clock.
+  Timeout/refusal before dispatch is `notSent`;
   preserve partial/unknown outcomes if earlier steps already wrote. Late/disposed
   replies never send. A signature receipt is not venue acceptance or idempotency.
 - Wasm/JS, native and Workers hosts accept the same injected provider seam and
