@@ -630,6 +630,17 @@ impl BybitLinear {
         self.send(cx, rest, Then::History(Request { command }));
     }
 
+    pub(crate) fn on_history_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        if let Some(walk) = self.history.reads.remove(&request.command) {
+            walk.finish(cx, Err(error));
+        }
+    }
+
     pub(crate) fn on_history_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
