@@ -909,6 +909,28 @@ fn next_engine_id(next_id: &mut u32) -> u32 {
     id
 }
 
+#[cfg(test)]
+mod resource_identity_regressions {
+    use super::*;
+
+    #[test]
+    fn physical_engine_allocation_crosses_u32_without_wrapping() {
+        let mut next = u32::MAX.into();
+        assert_eq!(u64::from(next_engine_id(&mut next)), u64::from(u32::MAX));
+        assert_eq!(u64::from(next_engine_id(&mut next)), 1_u64 << 32);
+        assert_eq!(u64::from(next_engine_id(&mut next)), (1_u64 << 32) + 1);
+    }
+
+    #[test]
+    fn later_allocations_never_reissue_a_retired_socket_identity() {
+        let retired = SocketId(1);
+        let mut next = (u32::MAX - 3).into();
+        let later: Vec<_> = (0..32).map(|_| SocketId(next_engine_id(&mut next))).collect();
+        assert!(!later.contains(&retired), "retired socket identity was reissued");
+        assert!(later.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    }
+}
+
 impl TimerSink<'_> {
     fn clear(&mut self, timer: TimerId) {
         if self.timers.remove(&timer).is_some() {
