@@ -63,6 +63,9 @@ Explicit-clock deadline and both journal-bound controls also failed before fix.
 Final focused checks: 1,344 native tests, 428 SDK/routing/startup tests, the default
 combined-host capability fixture, 76 host/wire/tape controls, typecheck/lint,
 Clippy/fmt/bans. Full replay/signature/build proof belongs to exact-head CI.
+The Backpack WASM integration fixture uses an explicit clock distinct from SDK
+time and checks exact REST and WS signing timestamps; the earlier fixture
+expected the retired capability override and failed in CI after its removal.
 
 Architecture gate: this is not a per-venue fix of a cross-cutting concern. One
 shared production provider and instance accessor replace clock selection;
