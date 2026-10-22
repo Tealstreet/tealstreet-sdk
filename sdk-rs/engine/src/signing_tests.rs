@@ -4,11 +4,17 @@ use crate::signing::{
 };
 struct Step;
 impl crate::SignStep for Step {
-    fn prepare(&mut self, action: &mut Action, now: f64) -> Result<SignRequest, SignError> {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        context: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let now = context.now_ms;
         if let Action::Http(http) = action {
             http.url = format!("https://venue.test/private?timestamp={now}");
         }
         Ok(SignRequest {
+            receipt: Default::default(),
             context: Context::default(),
             operations: vec![Operation::Sign {
                 algorithm: Algorithm::HmacSha256,
@@ -32,6 +38,7 @@ impl crate::SignStep for Step {
 #[derive(Default)]
 struct TestVenue {
     failed: usize,
+    receipts: Vec<(String, crate::signing::SignReceipt)>,
     last_sign_error: Option<String>,
     repair_on_failure: bool,
     invalid_prepare: bool,
@@ -56,6 +63,20 @@ impl Venue for TestVenue {
             },
         );
         cx.route_request(request, RequestRoute::Primary);
+    }
+    fn on_signing_receipt(
+        &mut self,
+        target: SigningTarget<'_, ()>,
+        receipt: crate::signing::SignReceipt,
+    ) {
+        let target = match target {
+            SigningTarget::Http { request, pending } => {
+                *pending = ();
+                format!("http:{}", request.0)
+            }
+            SigningTarget::Socket { socket } => format!("socket:{}", socket.0),
+        };
+        self.receipts.push((target, receipt));
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
@@ -121,7 +142,7 @@ fn staged(engine: &mut Engine<TestVenue>) -> (RequestId, TimerId) {
     (attempt, timer)
 }
 fn result() -> Result<SignResult, SignError> {
-    Ok(SignResult(vec![vec![0; 32]]))
+    Ok(SignResult::new(vec![vec![0; 32]], Default::default()))
 }
 #[test]
 fn delayed_dispatch_stamps_current_time_and_preserves_route() {
@@ -197,7 +218,10 @@ fn stale_batch_reprepares_with_new_attempt_without_extending_deadline() {
 }
 #[test]
 fn malformed_and_refused_results_fail_once_without_dispatch() {
-    for result in [Ok(SignResult(vec![vec![1; 31]])), Err(SignError::Refused)] {
+    for result in [
+        Ok(SignResult::new(vec![vec![1; 31]], Default::default())),
+        Err(SignError::Refused),
+    ] {
         let mut engine = engine();
         let (attempt, _) = staged(&mut engine);
         engine.handle(1001., Event::Signed { attempt, result });
@@ -565,7 +589,11 @@ fn socket_close_revokes_pending_auth_completion() {
 
 struct InvalidStep;
 impl crate::SignStep for InvalidStep {
-    fn prepare(&mut self, _: &mut Action, _: f64) -> Result<SignRequest, SignError> {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        _: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
         Err(SignError::InvalidRequest)
     }
     fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
@@ -1098,5 +1126,531 @@ fn repeated_protocol_calibration_never_extends_the_original_raw_deadline() {
     assert_eq!(
         engine.venue.last_sign_error.as_deref(),
         Some(SignError::TimedOut.venue_error().message.as_str())
+    );
+}
+
+struct NonceStep;
+impl crate::SignStep for NonceStep {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        context: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let mut nonce = [0; 4];
+        context.signing_bytes(&mut nonce)?;
+        let work = Step.prepare(action, context)?;
+        let suffix = format!("?stamp={}&nonce={nonce:?}", context.now_ms);
+        match action {
+            Action::Http(http) => http.url.push_str(&suffix),
+            Action::WsConnect { url, .. } => url.push_str(&suffix),
+            _ => return Err(SignError::InvalidRequest),
+        }
+        Ok(work)
+    }
+    fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        if let Action::WsConnect { headers, .. } = action {
+            headers.push(("signed", "yes".into()));
+            Ok(())
+        } else {
+            Step.apply(action, result)
+        }
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+fn upgrade(engine: &mut Engine<TestVenue>, public: bool) -> SocketId {
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.connect_signed(
+        SocketSpec::new("wss://venue.test/private")
+            .channel(if public {
+                SocketChannel::Public
+            } else {
+                SocketChannel::Private
+            })
+            .feed("private-recover", true)
+            .binary()
+            .headers(vec![("static", "kept".into())]),
+        Box::new(NonceStep),
+    )
+}
+fn signing_work(actions: &[Action]) -> (RequestId, String) {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Sign { attempt, work, .. } => {
+                let Operation::Sign { payload, .. } = &work.operations[0] else {
+                    panic!("signature operation")
+                };
+                let PayloadPart::Bytes { bytes } = &payload[0] else {
+                    panic!("exact bytes")
+                };
+                Some((*attempt, String::from_utf8(bytes.clone()).unwrap()))
+            }
+            _ => None,
+        })
+        .expect("one sign request")
+}
+#[test]
+fn signing_context_uses_only_signing_stream_and_redraws_after_clock_revision() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    };
+    let calls = Arc::new(AtomicU8::new(0));
+    let capture = calls.clone();
+    let entropy = crate::entropy::Entropy::new(
+        Box::new(|_| panic!("identity stream used for signing")),
+        Box::new(move |out| {
+            let value = capture.fetch_add(1, Ordering::SeqCst) + 1;
+            out.fill(value);
+            Ok(())
+        }),
+    );
+    let mut engine = Engine::new(TestVenue::default(), Some(entropy)).unwrap();
+    let socket = upgrade(&mut engine, false);
+    engine.prepare_dispatch(1000.);
+    let first_actions: Vec<_> = engine.drain_actions().collect();
+    let (first, stamp) = signing_work(&first_actions);
+    assert_eq!(stamp, "1000");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(
+        !first_actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    calibrate_protocol_time(&mut engine, 1000., 61000.);
+    engine.handle(
+        1000.,
+        Event::Signed {
+            attempt: first,
+            result: result(),
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let (second, stamp) = signing_work(&actions);
+    assert_ne!(first, second);
+    assert_eq!(stamp, "61000");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms: 21000., .. }))
+    );
+    engine.handle(
+        1001.,
+        Event::Signed {
+            attempt: second,
+            result: result(),
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let upgrades: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsConnect {
+                socket: id,
+                url,
+                headers,
+                channel,
+                context,
+                binary,
+            } => Some((id, url, headers, channel, context, binary)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(upgrades.len(), 1);
+    let (id, url, headers, channel, context, binary) = upgrades[0];
+    assert_eq!(*id, socket);
+    assert!(url.ends_with("stamp=61000&nonce=[2, 2, 2, 2]"));
+    assert_eq!(
+        headers,
+        &[("static", "kept".into()), ("signed", "yes".into())]
+    );
+    assert_eq!(*channel, Some(SocketChannel::Private));
+    assert_eq!(context.as_ref().unwrap().feed, "private-recover");
+    assert!(context.as_ref().unwrap().recover);
+    assert!(*binary);
+}
+#[test]
+fn signed_upgrade_never_connects_after_timeout_or_close_or_public_suppression() {
+    for mode in ["timeout", "explicit", "host"] {
+        let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+        let socket = upgrade(&mut engine, false);
+        engine.prepare_dispatch(1000.);
+        let (attempt, timer) = staged(&mut engine);
+        match mode {
+            "timeout" => engine.handle(21000., Event::TimerFired { timer }),
+            "host" => engine.handle(1001., Event::WsClosed { socket, code: 1006 }),
+            _ => {
+                let mut cx = Cx {
+                    now: 1001.,
+                    store: &mut engine.store,
+                    io: &mut engine.io,
+                };
+                cx.close(socket);
+            }
+        }
+        engine.handle(
+            21001.,
+            Event::Signed {
+                attempt,
+                result: result(),
+            },
+        );
+        assert!(
+            !engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::WsConnect { .. }))
+        );
+    }
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_public_feed_policy(PublicFeedPolicy::Disabled)
+        .unwrap();
+    assert_eq!(upgrade(&mut engine, true), SocketId(0));
+    assert!(engine.drain_actions().next().is_none());
+}
+#[test]
+fn signing_entropy_failure_clears_partial_nonce_and_never_reaches_provider_or_socket() {
+    let entropy = crate::entropy::Entropy::new(
+        Box::new(|_| panic!("identity")),
+        Box::new(|out| {
+            out.fill(99);
+            Err("private provider detail".into())
+        }),
+    );
+    let context = crate::DispatchContext::new(1000., Some(&entropy));
+    let mut out = [1; 4];
+    assert_eq!(context.signing_bytes(&mut out), Err(SignError::Unavailable));
+    assert_eq!(out, [0; 4]);
+    let mut engine = Engine::new(TestVenue::default(), Some(entropy)).unwrap();
+    upgrade(&mut engine, false);
+    engine.prepare_dispatch(1000.);
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::WsConnect { .. }))
+    );
+}
+
+struct ReceiptStep {
+    expiry_only: bool,
+}
+impl crate::SignStep for ReceiptStep {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        context: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let mut request = Step.prepare(action, context)?;
+        request.receipt = crate::signing::SignReceipt {
+            stamp_ms: (!self.expiry_only).then_some(context.now_ms.floor()),
+            expiry_ms: Some(context.now_ms.floor() + 20.),
+        };
+        Ok(request)
+    }
+    fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        Step.apply(action, result)
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+fn receipt_engine(expiry_only: bool) -> Engine<TestVenue> {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/private".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(request, Box::new(ReceiptStep { expiry_only }));
+    engine.prepare_dispatch(1000.);
+    engine
+}
+fn receipt_attempt(actions: &[Action]) -> (RequestId, crate::signing::SignReceipt) {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Sign { attempt, work, .. } => Some((*attempt, work.receipt)),
+            _ => None,
+        })
+        .unwrap()
+}
+fn with_receipt(receipt: crate::signing::SignReceipt) -> Result<SignResult, SignError> {
+    Ok(SignResult::new(vec![vec![0; 32]], receipt))
+}
+#[test]
+fn wrong_missing_or_invalid_receipt_is_refused_before_apply_or_publication() {
+    use crate::signing::SignReceipt;
+    for receipt in [
+        SignReceipt::default(),
+        SignReceipt {
+            stamp_ms: Some(999.),
+            expiry_ms: Some(1020.),
+        },
+        SignReceipt {
+            stamp_ms: Some(1000.),
+            expiry_ms: Some(1021.),
+        },
+        SignReceipt {
+            stamp_ms: Some(f64::NAN),
+            expiry_ms: Some(1020.),
+        },
+    ] {
+        let mut engine = receipt_engine(false);
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let (attempt, _) = receipt_attempt(&actions);
+        engine.handle(
+            1001.,
+            Event::Signed {
+                attempt,
+                result: with_receipt(receipt),
+            },
+        );
+        assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert_eq!(engine.venue.failed, 1);
+        assert!(engine.venue.receipts.is_empty());
+    }
+}
+#[test]
+fn expired_receipts_reprepare_at_completion_and_release_and_publish_only_final_attempt_once() {
+    for materialized in [false, true] {
+        let mut engine = receipt_engine(false);
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let (first, receipt) = receipt_attempt(&actions);
+        if materialized {
+            engine.handle(
+                1001.,
+                Event::Signed {
+                    attempt: first,
+                    result: with_receipt(receipt),
+                },
+            );
+            assert!(
+                engine.venue.receipts.is_empty(),
+                "completion alone is not release"
+            );
+            engine.prepare_dispatch(1020.);
+        } else {
+            engine.handle(
+                1020.,
+                Event::Signed {
+                    attempt: first,
+                    result: with_receipt(receipt),
+                },
+            );
+        }
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(engine.venue.receipts.is_empty());
+        let (second, receipt) = receipt_attempt(&actions);
+        assert_ne!(first, second);
+        assert_eq!(receipt.stamp_ms, Some(1020.));
+        assert_eq!(receipt.expiry_ms, Some(1040.));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { at_ms: 21000., .. }))
+        );
+        engine.handle(
+            1021.,
+            Event::Signed {
+                attempt: second,
+                result: with_receipt(receipt),
+            },
+        );
+        assert!(engine.venue.receipts.is_empty());
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let requests: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(http) => Some(http),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].url.ends_with("timestamp=1020"));
+        assert_eq!(requests[0].timeout_ms, Some(19979));
+        assert_eq!(
+            engine.venue.receipts,
+            [(format!("http:{}", requests[0].id.0), receipt)]
+        );
+        for attempt in [first, second] {
+            engine.handle(
+                1022.,
+                Event::Signed {
+                    attempt,
+                    result: with_receipt(receipt),
+                },
+            );
+        }
+        assert!(engine.drain_actions().next().is_none());
+        assert_eq!(engine.venue.receipts.len(), 1);
+    }
+}
+#[test]
+fn expiry_only_and_untimed_socket_receipts_do_not_invent_stamp_and_never_publish_after_close() {
+    let mut engine = receipt_engine(true);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let (attempt, receipt) = receipt_attempt(&actions);
+    assert_eq!(receipt.stamp_ms, None);
+    assert_eq!(receipt.expiry_ms, Some(1020.));
+    engine.handle(
+        1001.,
+        Event::Signed {
+            attempt,
+            result: with_receipt(receipt),
+        },
+    );
+    engine.drain_actions().for_each(drop);
+    assert_eq!(engine.venue.receipts[0].1, receipt);
+    for close in [false, true] {
+        let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+        let socket = upgrade(&mut engine, false);
+        engine.prepare_dispatch(1000.);
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let (attempt, receipt) = receipt_attempt(&actions);
+        assert_eq!(receipt, Default::default());
+        engine.handle(
+            1001.,
+            Event::Signed {
+                attempt,
+                result: with_receipt(receipt),
+            },
+        );
+        assert!(engine.venue.receipts.is_empty());
+        if close {
+            let mut cx = Cx {
+                now: 1001.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.close(socket);
+        }
+        engine.drain_actions().for_each(drop);
+        assert_eq!(engine.venue.receipts.len(), usize::from(!close));
+        if !close {
+            assert_eq!(
+                engine.venue.receipts[0],
+                (format!("socket:{}", socket.0), receipt)
+            );
+        }
+    }
+}
+#[test]
+fn receipt_bounds_and_provider_json_fail_closed_without_timing_unit_guessing() {
+    use crate::signing::SignReceipt;
+    for receipt in [
+        SignReceipt {
+            stamp_ms: Some(-1.),
+            expiry_ms: None,
+        },
+        SignReceipt {
+            stamp_ms: None,
+            expiry_ms: Some(1.5),
+        },
+        SignReceipt {
+            stamp_ms: None,
+            expiry_ms: Some(f64::INFINITY),
+        },
+        SignReceipt {
+            stamp_ms: Some(9_007_199_254_740_992.),
+            expiry_ms: None,
+        },
+        SignReceipt {
+            stamp_ms: Some(1000.),
+            expiry_ms: Some(1000.),
+        },
+    ] {
+        assert_eq!(receipt.validate(), Err(SignError::InvalidRequest));
+    }
+    assert!(serde_json::from_str::<SignResult>(r#"{"values":[[1]]}"#).is_err());
+    assert!(
+        serde_json::from_str::<SignResult>(r#"{"values":[[1]],"receipt":{"secret":"ignored?"}}"#)
+            .is_err()
+    );
+    assert!(serde_json::from_str::<SignResult>("[[1]]").is_err());
+    assert_eq!(
+        SignReceipt {
+            stamp_ms: None,
+            expiry_ms: Some(1_000_000.)
+        }
+        .validate(),
+        Ok(())
+    );
+}
+
+struct ExpiredStep;
+impl crate::SignStep for ExpiredStep {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        context: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let mut work = Step.prepare(action, context)?;
+        work.receipt.expiry_ms = Some(context.now_ms);
+        Ok(work)
+    }
+    fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
+        panic!("expired work materialized")
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+struct NeverCalled;
+impl crate::signing::Signer for NeverCalled {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        panic!("expired work reached immediate provider")
+    }
+    fn sign(&self, _: SignRequest) -> crate::signing::SignFuture {
+        panic!("expired work reached async provider")
+    }
+}
+#[test]
+fn already_expired_preparation_fails_before_immediate_provider_instead_of_repreparing_forever() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_signer(Some(std::sync::Arc::new(NeverCalled)))
+        .unwrap();
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/private".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(request, Box::new(ExpiredStep));
+    engine.prepare_dispatch(1000.);
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::Http(_)))
+    );
+    assert_eq!(engine.venue.failed, 1);
+    assert!(engine.venue.receipts.is_empty());
+    assert_eq!(
+        engine.venue.last_sign_error.as_deref(),
+        Some(SignError::InvalidRequest.venue_error().message.as_str())
     );
 }

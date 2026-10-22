@@ -468,19 +468,23 @@ pub fn prepare_local_signer(
         Some(LocalIdentity {
             key: Secret::new(options.key.take().unwrap_or_default()),
             secret: Secret::new(options.secret.take().unwrap_or_default()),
+            passphrase: options.passphrase.take().map(Secret::new),
+            ..Default::default()
         })
     } else {
         None
     };
-    let secondary = options.read_credentials.take().map(|mut read| {
-        use zeroize::Zeroize;
-        read.passphrase.zeroize();
-        LocalIdentity {
+    let secondary = options
+        .read_credentials
+        .take()
+        .map(|mut read| LocalIdentity {
             key: Secret::new(std::mem::take(&mut read.key)),
             secret: Secret::new(std::mem::take(&mut read.secret)),
-        }
-    });
-    let (signer, identities) = LocalSigner::from_setup(LocalSetup { primary, secondary });
+            passphrase: read.passphrase.take().map(Secret::new),
+            ..Default::default()
+        });
+    let (signer, identities) = LocalSigner::from_setup(LocalSetup { primary, secondary })
+        .map_err(|_| invalid("Invalid local signer setup"))?;
     Ok((std::sync::Arc::new(signer), identities))
 }
 /// Separate trusted JS/native provider setup, with fixed parse failures.
@@ -1440,6 +1444,7 @@ pub struct EngineOptions {
     #[serde(default)]
     pub recv_window: Option<f64>,
     #[cfg(any(
+        feature = "binance",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "okx",
@@ -1534,6 +1539,7 @@ impl EngineOptions {
         self.key.zeroize();
         self.secret.zeroize();
         #[cfg(any(
+            feature = "binance",
             feature = "kucoin",
             feature = "kucoinspot",
             feature = "okx",
@@ -1691,12 +1697,13 @@ mod tests {
     #[test]
     fn unused_and_rejected_engine_options_have_owned_secret_cleanup() {
         let mut options: EngineOptions = serde_json::from_str(
-            r#"{"key":"primary-key","secret":"primary-secret","readCredentials":{"key":"read-key","secret":"read-secret","passphrase":"read-pass"}}"#,
+            r#"{"key":"primary-key","secret":"primary-secret","passphrase":"primary-pass","readCredentials":{"key":"read-key","secret":"read-secret","passphrase":"read-pass"}}"#,
         ).unwrap();
         assert!(std::mem::needs_drop::<EngineOptions>());
         options.erase_secrets();
         assert!(options.key.as_deref().is_none_or(str::is_empty));
         assert!(options.secret.as_deref().is_none_or(str::is_empty));
+        assert!(options.passphrase.as_deref().is_none_or(str::is_empty));
         let read = options.read_credentials.as_ref().unwrap();
         assert!(read.key.is_empty());
         assert!(read.secret.is_empty());

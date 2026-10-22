@@ -594,6 +594,10 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
+    if (options.localSigner !== undefined && !bridgeConstruction.dispatchSigning) {
+      const message = 'Local signer setup is not supported for this Rust venue yet';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     const signingMode=bridgeConstruction.dispatchSigning ? derivePublicMode(exchangeName,options) : undefined;
     const signerSetup=bridgeConstruction.dispatchSigning ? new LocalSignerSetup(options) : undefined;
     if (signerSetup) options=withoutSigningCredentials(options);

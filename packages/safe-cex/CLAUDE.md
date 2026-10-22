@@ -50,6 +50,13 @@ no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached
 construction metadata preserves `canSign`/public mode; transport receives only
 read-identity presence and uses materialised outbound headers for routing.
+Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
+`base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
+`stableId` per primary/secondary identity. It is consumed with passphrases through
+the private setup channel, never retained in generic exchange options. Unmigrated
+Rust venues reject this metadata. Stable ids never default to key hashes or slot
+names; identity/nonce consumers require the caller's intended stable mapping.
+
 Callers must provision worker/hosted providers separately rather than copy
 `exchange.options` as credentials, and use readiness/public-mode metadata instead
 of checking `options.key`. Raw legacy native/WASM input is a trusted compatibility

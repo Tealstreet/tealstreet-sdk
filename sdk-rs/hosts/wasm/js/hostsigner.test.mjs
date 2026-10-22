@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EngineHost } from './host.mjs';
 
-const work = { context: { venue: 'reference', method: 'POST', host: 'fixture.invalid', path: '/private' }, operations: [{ kind: 'present', key: 'account/primary' }] };
+const work = { receipt: { stampMs: 1000, expiryMs: 2000 }, context: { venue: 'reference', method: 'POST', host: 'fixture.invalid', path: '/private' }, operations: [{ kind: 'present', key: 'account/primary' }] };
 const action = { op: 'sign', attempt: 7, work, timeoutMs: 1000 };
 const tick = async () => { for (let n = 0; n < 8; n++) await Promise.resolve(); };
 function rig(signer) {
@@ -26,11 +26,11 @@ test('injected signer sees opaque refs and context, returns one atomic batch', a
   const r = rig(async (request, { signal }) => {
     assert.deepEqual(request, work);
     assert.equal(signal.aborted, false);
-    return [[1, 2, 3]];
+    return { values: [[1, 2, 3]], receipt: request.receipt };
   });
   r.host.execute(action);
   await tick();
-  assert.deepEqual(r.events, [['installed'], ['signed', 7, '[[1,2,3]]', 1234]]);
+  assert.deepEqual(r.events, [['installed'], ['signed', 7, JSON.stringify({ values: [[1, 2, 3]], receipt: work.receipt }), 1234]]);
   assert.equal(r.timers.size, 0);
   r.host.dispose();
 });
@@ -43,7 +43,7 @@ test('hung signer times out, aborts and ignores a late completion', async () => 
   await tick();
   [...r.timers.values()][0]();
   assert.equal(signal.aborted, true);
-  complete([[7]]);
+  complete({ values: [[7]], receipt: work.receipt });
   await tick();
   assert.deepEqual(r.events, [['installed'], ['failed', 7, 'timedOut', 1234]]);
   r.host.dispose();
@@ -70,7 +70,7 @@ test('disposal aborts provider and forbids later engine calls', async () => {
   await tick();
   r.host.dispose();
   assert.equal(signal.aborted, true);
-  complete([[7]]);
+  complete({ values: [[7]], receipt: work.receipt });
   await tick();
   assert.deepEqual(r.events, [['installed']]);
   assert.equal(r.timers.size, 0);
@@ -109,4 +109,36 @@ test('borrowed engines keep caller ownership and owned trap cleanup frees once',
     host.dispose();
     assert.equal(frees, ownsEngine ? 1 : 0);
   }
+});
+
+test('missing, wrong and malformed receipt cannot replace the declared canonical facts', async () => {
+  for (const receipt of [undefined, {}, { stampMs: 1001, expiryMs: 2000 }, { stampMs: 1000, expiryMs: 2001 },
+    { stampMs: NaN }, { stampMs: 1.5 }, { expiryMs: Infinity }, { stampMs: -1 },
+    { stampMs: Number.MAX_SAFE_INTEGER + 1 }, { stampMs: 1000, expiryMs: 1000 },
+    { ...work.receipt, private: 'provider-text' }]) {
+    const r = rig(() => ({ values: [[1]], receipt }));
+    r.host.execute(action);
+    await tick();
+    assert.deepEqual(r.events, [['installed'], ['failed', 7, 'invalidResult', 1234]]);
+    assert.equal(r.timers.size, 0);
+    r.host.dispose();
+  }
+});
+
+test('expiry-only and untimed receipts survive unchanged without a fabricated stamp', async () => {
+  for (const receipt of [{}, { expiryMs: 2000 }]) {
+    const r = rig((request) => ({ values: [[1]], receipt: request.receipt }));
+    r.host.execute({ ...action, work: { ...work, receipt } });
+    await tick();
+    assert.deepEqual(JSON.parse(r.events[1][2]), { values: [[1]], receipt });
+    r.host.dispose();
+  }
+});
+
+test('provider mutation cannot rewrite the expected receipt snapshot', async () => {
+  const r = rig((request) => { request.receipt.stampMs = 1999; return { values: [[1]], receipt: request.receipt }; });
+  r.host.execute({ ...action, work: structuredClone(work) });
+  await tick();
+  assert.deepEqual(r.events, [['installed'], ['failed', 7, 'invalidResult', 1234]]);
+  r.host.dispose();
 });
