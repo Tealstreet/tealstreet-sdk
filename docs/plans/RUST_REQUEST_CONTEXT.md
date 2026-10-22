@@ -601,3 +601,9 @@ duplicated/qualified/reference calls, harmless literal examples, stale entries
 and attempts to enlarge the manifest alongside new source. No auto-update mode
 is wired into CI. The bridge plus manifest must be empty and deleted before
 landing->master, as the existing blockers row requires.
+
+The Rust bans job currently uses a shallow checkout; set fetch-depth: 0 for that
+one job so committed parent and PR-base manifests are available. Resolve refs
+separately from file presence: missing baseline files allow reviewed bootstrap,
+but missing required refs fail closed. Receiver matching is conservative across
+venue source, with no inferred semantics from a method spelling.
