@@ -273,6 +273,18 @@ incompleteness, excluding staged failed-page prefixes. Signing preparation
 refusal stays strict notSent. No engine API extension or universal fan-out claim.
 
 
+BingX's native observed-cumulative/last-quantity cap now uses the shared
+`ObservedProgress::prepare_capped` path. The engine prepares and validates a
+native-priced suffix before the venue commits execution identity, observations
+or terminal state; its existing authoritative Last policy remains distinct.
+Four original-source RED financial regressions and two original compatibility
+controls cover correction recovery, stored-state isolation, fallback and quiet
+identity admission. AsterDEX, KuCoin Spot fallback and Orderly cumulative paths
+still need fan-out before reporting policy and snapshot-token work.
+
+
+
+
 WEEX income now adopts RangeHistory for bounded reads and CursorHistory for
 single-page/equal-bound reads. The shared core admits validated native coverage
 gaps and enforces an optional lifetime request budget using the existing walker

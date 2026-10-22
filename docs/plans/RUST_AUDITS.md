@@ -1346,6 +1346,16 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.
+- High: ~~a zero/negative selected execution price emits an invalid Fill, consumes
+  the native trade ID and cumulative progress, suppresses corrected evidence,
+  and can close/advance a stored partial order.~~ Four original-source native
+  assertion regressions reproduce these real financial defects. Shared engine
+  `ObservedProgress::prepare_capped` validates the chosen capped suffix before
+  revisions, dedup, cumulative/terminal commits or Fill delivery. The BingX
+  adapter preserves native price fallback, explicit/heuristic identity rules,
+  blind-gap coverage and quiet zero-growth identity bookkeeping. Existing
+  authoritative Last semantics are unchanged. Remaining cumulative consumers
+  still need fan-out; [scope/evidence](RUST_CUMULATIVE_FILLS.md).
 - High: ~~one bad market/ticker row or failed funding read keeps the private side
   from ever starting (`bingx/src/lib.rs:529,639`); one bad position/order row
   freezes that list (`account.rs:491,557`).~~ Bad rows skipped (placeholder
