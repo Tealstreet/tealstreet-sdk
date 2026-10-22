@@ -962,3 +962,29 @@ the revised evidence matrix failed before the correction and now passes. All
 short-ACK ID assertion is unchanged. Caller contract: Unknown PartialIDs are
 exact reconciliation/cancellation evidence only, not proof of accepted caller
 legs or a safe retry. No total/failed-index attribution is invented.
+
+Next read-reference phase: route explicit Binance public discovery/ticker/depth
+and recurring account snapshot reads through the shared managed HTTP API. Native
+adapters declare Background + Read, original 20-second raw bound, Never retry and
+explicit primary/secondary credential refs; no method-based semantic inference.
+Keep listenKey/keepalive session writes and command history on the inventoried
+legacy path until their separately owned migrations. Do not relabel them reads.
+Use one native Background(Context, continuation) wrapper solely to retain logical
+completion authority; ordinary native parsers/retry/join/snapshot rails stay
+unchanged. On response/failure retire that Context through finish_http_context,
+and delegate streamed items to the existing collector. Context/queue refusal
+uses the existing native failure callback, never silent legacy send fallback.
+Public get helpers become managed-only; account call sites explicitly choose a
+background signed read helper. Existing history signed helpers stay untouched,
+so the history lane's approved mutable receivers are not needed in this phase.
+Group query/credential/stream data in one read descriptor reused by command and
+background adapters. Keep expiry, routing, signing and response suppression in
+engine/host choke points. Tests must first fail for unprepared startup/account
+reads and late catalogue/account results, then prove preparation failure unblocks
+native retry/join state, existing endpoints/signature slots, streaming and no
+registry-capacity leak across repeated completed background reads. Adapt only
+canned raw-action fixtures to the existing final-claim driver, retaining every
+original clock/result/Store assertion. Run Binance native tests and strict engine/
+Binance checks, bans/shrink-only inventory, secret scan and independent review.
+Architecture gate: No; these are semantic declarations/native callback adoption
+of the already shared engine lifecycle, not a second venue-owned lifecycle.
