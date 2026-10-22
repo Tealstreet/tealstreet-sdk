@@ -568,3 +568,66 @@ Independent API/code/adversarial review is CLEAN; architecture YES. Focused
 engine/Bitunix/Coinbase/Binance native suite passes 1,020 tests. Root typecheck
 44 tasks and lint28 pass (cached). Full CI and authenticated raw/package proof
 remain required before merge. No local release build or replay sweep was run.
+
+
+## Fan-out phase 3: BloFin validated prefix and output preparation
+
+Fresh branch from actual phase-2 #1729
+`6e10b0e8a23dbb8d34f761e8199a83c6068fadb1`. Architecture gate: YES.
+Move BloFin's cumulative prefix checks, capped-decimal arithmetic and public
+rounding into the same engine execution boundary before migrating its consumer.
+Keep this PR to engine execution.rs/num.rs, BloFin account.rs/native account
+tests, and these existing audit/quality/plan docs. No signing/header, history,
+clock, scheduler, host, harness, fixture or manifest change. Kraken Spot remains
+the next separately planned consumer: its rejected-price/cumulative correction
+needs a native RED and explicit retention/seed design before any new ledger.
+
+Add explicit compatibility policies rather than alter current consumers:
+`Arithmetic::DecimalCapped20` preserves native max-input-decimals capped20,
+round-away-from-zero subtraction; `ExecutionRounding::ScaledSignificant15`
+preserves BloFin's existing decimal-factor/round/divide conversion. Engine owns
+checked factor/intermediate/result finiteness and positive public amount/price.
+Preserve current Binary/DecimalRounded/Significant15 behavior and exact scaling
+order. Checked output preparation scales a validated amount in native contract
+units to public base units, rounds at the same native point, and retains its
+unrounded contract-unit quote/quantity anchor. No market lot-size rounding.
+
+Add a pure shared prefix preparation API (concrete shape reviewed before code)
+that distinguishes no-op/regression, missing-quote enrichment at equal quantity,
+valid forward quote observation, and invalid quantity/quote progress. A positive
+quantity cannot carry zero/negative/nonfinite quote; a missing quote remains
+missing. Strict positive delta-quote checks use the selected arithmetic policy.
+BloFin retains its own explicit historical suppression, quiet unknown-prefix
+seeding, startup buffer/census ordering and 500-entry retention. The engine does
+not infer session status, repair behavior, timestamps or public Fill eligibility.
+
+Adopt checked prefix admission in all execution_prefix consumers, then replace
+BloFin's local delta/quote division and output conversions in emit_execution
+with engine preparation. No delivered progress may commit until price division,
+contract scaling and public rounding all pass. A missing historical quote may
+still refresh the baseline without a Fill exactly as native policy specifies;
+historical unpriceable progress remains a quiet floor and never emits history.
+Equal-quantity corrections only enrich a missing quote, not replace known quote.
+
+Before implementation, add separate assertion-RED controls on unchanged actual
+production source: (1) known q1/value1 then live q1.5/average1e308 has a finite
+cumulative quote but overflowing incremental price, and must emit no invalid
+Fill; (2) after discarding the old invalid output, a corrected same q1.5/average
+100 receipt must still emit the .5-contract suffix at price298 once. Use real
+native FILLS decoding and native contract-size scaling, not just fill counts.
+These are source hypotheses until the assertions reproduce them. Also preserve
+startup/history/missing-quote/repeated/terminal controls and test tiny/huge
+rounding/scale boundaries through the engine. Any demonstrated same-contract
+financial repair is covered by the owner's standing approval and is recorded
+individually in the PR and RUST_AUDITS; outside-contract findings are reported.
+
+Run focused engine/BloFin/Binance native tests and strict all-target Clippy/fmt/
+bans with CARGO_BUILD_JOBS=4, plus root typecheck/lint. CI owns release wasm,
+size/timing and full replays. Before final proof integrate actual provider seam
+and any other shared inputs; fresh freeze the full BloFin/Binance CI inventory,
+archive IDs/digests, tested-head fingerprints, all indexed raw outputs except
+metrics, and all ordered gate failure/fixer arrays. No fallback or allowance
+expansion. Independent plan/API/code/adversarial and final artifact/body reviews,
+full green tested-head CI, separate guard/merge and actual merge audit remain
+mandatory. Continue Kraken Spot and the remaining cumulative consumers before
+row reporting and snapshot freshness.
