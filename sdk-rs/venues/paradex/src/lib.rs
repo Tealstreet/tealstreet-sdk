@@ -196,6 +196,7 @@ impl Venue for Paradex {
                 self.trading
                     .on_sign_failed(cx, &mut self.account, request, error)
             }
+            Pending::History(request) => self.history.on_rejected(cx, request, error),
             other => self.dispatch_failed(cx, other, error),
         }
         self.failures(cx);
@@ -288,6 +289,7 @@ impl Paradex {
                         self.trading
                             .on_unsent(cx, &mut self.account, request, &error)
                     }
+                    Pending::History(request) => self.history.on_rejected(cx, request, &error),
                     other => self.dispatch_failed(cx, other, &error),
                 }
             }

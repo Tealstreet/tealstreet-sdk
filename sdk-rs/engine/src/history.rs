@@ -192,6 +192,7 @@ pub struct CursorHistory<T> {
     walk: CursorWalk,
     stall_message: fn(Stall) -> String,
     finished: bool,
+    stage_has_rows: bool,
     lifecycle_error: Option<&'static str>,
 }
 
@@ -207,6 +208,7 @@ impl<T> CursorHistory<T> {
             walk,
             stall_message,
             finished: false,
+            stage_has_rows: false,
             lifecycle_error: None,
         }
     }
@@ -227,6 +229,10 @@ impl<T> CursorHistory<T> {
         self.walk.cursor()
     }
 
+    pub fn pages(&self) -> u32 {
+        self.walk.pages()
+    }
+
     pub fn fresh(&mut self, identity: String) -> bool {
         self.walk.fresh(identity)
     }
@@ -245,17 +251,37 @@ impl<T> CursorHistory<T> {
         }
         self.walk.restart();
         self.finished = false;
+        self.stage_has_rows = false;
         true
     }
 
     pub fn advance(&mut self, page: CursorPage) -> CursorStep {
+        self.advance_inner(page, true)
+    }
+
+    /// A bounded discovery/proof stage can end without proving complete query
+    /// coverage. Preserve cursor-cycle checks and lifecycle admission, but do
+    /// not label its page budget as missing result rows. Its caller must retain
+    /// the incomplete proof (for example, a nondefinitive lookup miss).
+    pub fn advance_probe(&mut self, page: CursorPage) -> CursorStep {
+        if self.stage_has_rows || self.rows.staged_len() > 0 {
+            self.lifecycle_error = Some("history probe cannot admit result rows");
+            return CursorStep::Done;
+        }
+        self.advance_inner(page, false)
+    }
+
+    fn advance_inner(&mut self, page: CursorPage, budget_is_incomplete: bool) -> CursorStep {
         if self.finished || self.lifecycle_error.is_some() {
             return CursorStep::Done;
         }
+        self.stage_has_rows |= self.rows.staged_len() > 0;
         self.rows.accept_page();
         let step = self.walk.advance(page);
         self.finished = !matches!(step, CursorStep::More(_));
-        if let CursorStep::Stalled(reason) = step {
+        if let CursorStep::Stalled(reason) = step
+            && (budget_is_incomplete || reason != Stall::PageBudget)
+        {
             self.rows
                 .completion
                 .incomplete((self.stall_message)(reason));
@@ -427,5 +453,101 @@ impl<T> RangeHistory<T> {
                 .incomplete((self.incomplete_message)(gaps));
         }
         self.rows.finish_with(cx, result, encode);
+    }
+}
+
+#[cfg(test)]
+mod cursor_probe_tests {
+    use super::*;
+
+    fn owner() -> CursorHistory<String> {
+        CursorHistory::new(
+            Completion::new(1),
+            CursorWalk::new(2),
+            |reason| format!("{reason:?}"),
+            |_| Ok("[]".into()),
+        )
+    }
+    fn page(next: &str) -> CursorPage {
+        CursorPage {
+            next: Some(next.into()),
+            rows: 0,
+            fresh: 0,
+            want_more: true,
+        }
+    }
+    #[test]
+    fn probe_budget_keeps_stage_lifecycle_and_prior_query_omissions() {
+        let mut history = owner();
+        assert_eq!(
+            history.advance_probe(page("a")),
+            CursorStep::More("a".into())
+        );
+        assert_eq!(history.pages(), 1);
+        assert_eq!(
+            history.advance_probe(page("b")),
+            CursorStep::Stalled(Stall::PageBudget)
+        );
+        assert!(history.rows.completion.incomplete.is_none());
+        assert!(history.restart_stage());
+        history.advance(page("a"));
+        history.advance(page("b"));
+        assert_eq!(
+            history.rows.completion.incomplete.as_deref(),
+            Some("PageBudget")
+        );
+        assert!(history.restart_stage());
+        history.advance_probe(page("a"));
+        history.advance_probe(page("b"));
+        assert_eq!(
+            history.rows.completion.incomplete.as_deref(),
+            Some("PageBudget")
+        );
+    }
+    #[test]
+    fn probe_cycle_still_precedes_budget_and_cannot_restart_early() {
+        let mut history = owner();
+        history.advance_probe(page("a"));
+        assert_eq!(
+            history.advance_probe(page("a")),
+            CursorStep::Stalled(Stall::RepeatedCursor)
+        );
+        assert_eq!(
+            history.rows.completion.incomplete.as_deref(),
+            Some("RepeatedCursor")
+        );
+        let mut early = owner();
+        early.stage("pending".into());
+        assert!(!early.restart_stage());
+        assert!(early.lifecycle_error.is_some());
+    }
+    #[test]
+    fn probe_cannot_hide_staged_or_previously_admitted_rows_in_its_stage() {
+        for admitted in [false, true] {
+            let mut history = owner();
+            history.stage("unproven".into());
+            if admitted {
+                history.advance(page("a"));
+            }
+            assert_eq!(history.advance_probe(page("b")), CursorStep::Done);
+            assert_eq!(
+                history.lifecycle_error,
+                Some("history probe cannot admit result rows")
+            );
+            assert!(!history.restart_stage());
+        }
+        let mut history = owner();
+        history.stage("complete prior stage".into());
+        history.advance(CursorPage {
+            next: None,
+            rows: 1,
+            fresh: 1,
+            want_more: false,
+        });
+        assert!(history.restart_stage());
+        history.advance_probe(page("a"));
+        history.advance_probe(page("b"));
+        assert_eq!(history.accepted_len(), 1);
+        assert!(history.lifecycle_error.is_none());
     }
 }

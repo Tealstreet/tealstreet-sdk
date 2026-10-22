@@ -1726,3 +1726,15 @@ App stop payloads accepted; amend stricter than TS.
   order type, multi-leg order) rejects the whole snapshot
   (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`)~~ (such rows are
   skipped and logged; off-catalogue position margin still counts).
+
+
+## Paradex owned-history fan-out
+
+General histories and client-ID lookup now use the shared CursorHistory owner,
+including the native empty-fills fallback. Actual later-page failure recovers
+accepted mapped rows with owned incompleteness; a first failure rejects typed.
+Lookup proof, repeated cursors, unbounded cap refusals and queued preparation
+failures stay strict. Native request/codec/ledger behavior is pinned; no account
+or signing implementation changes. This closes Paradex's local completion/
+paging ownership copy, not all-family fan-out or B11 downstream coverage.
+[Implementation and limits](RUST_OWNED_HISTORY.md).

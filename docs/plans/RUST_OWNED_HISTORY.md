@@ -682,6 +682,124 @@ review confirms unchanged raw progress/filter ordering and seeded request bounds
 Full CI and the current owner merge queue still apply; this is not a landing or
 deployed-runtime claim.
 
+
+## Next fan-out: Paradex cursor histories
+
+Plan from actual `2c5c5f6987f35cafc0e272282e54da37c0a66d4f`. Metadata #1747
+and conformance #1737 remain separate drafts; keep #1747's CI watch running.
+Bybit and Kraken Spot stay outside this slice. Paradex still owns CursorWalk,
+query row vectors and its bounded page-cap marker in history.rs.
+
+Adopt the existing `CursorHistory` for fills (including the native orders-history
+fallback), historical orders, income, public trades and client-ID lookup. Use
+one typed row enum and one completion owner across endpoint stages; schema
+mapping remains native. Stage each page until HTTP/envelope/stream validation
+succeeds. Actual failure before accepted mapped rows rejects typed; later actual
+page failure returns only accepted earlier rows with one command-owned incomplete
+Warn before successful completion, including Error-only logging. No failed prefix
+may enter the finalizer. A valid empty or fully filtered page does not itself
+qualify for partial recovery. Preserve the shared Internal fallback for callbacks
+which multiplex transport and decoding rather than inventing Network evidence.
+
+Keep endpoint selection and query parameters, 5/50/200 page budgets, defaults and
+clamps, raw-row/cursor progress, existing native ID dedupe/filter order, final
+sort/limits and single-page public trades. Preserve empty-page traversal, fills'
+empty-last-page fallback and one-page aggregate fallback. Carry the same owner
+through the fallback; no reset of accepted rows, dedupe or missing-coverage state.
+If needed, expose only CursorHistory's read-only page count delegated to its
+existing walker, to retain the native fallback trigger without a second counter
+or pagination policy. No new pager/completion/scheduler algorithm.
+
+Client-ID lookup remains strict on actual failures, cursor cycles and incomplete
+proof; partial histories must never become a definitive miss. Preserve exhaust-
+open-orders-before-history, early found-order completion, bounded nondefinitive
+miss and complete-miss proof. Strict unbounded budget/cursor-policy refusals also
+remain strict even after accepted rows; bounded page-cap success retains its
+existing marker/message. Auth/preparation admission remains strict: do not
+reinterpret refusal as an HTTP-page failure or add auth/retry behavior. Keep raw
+public-only/keyless/unknown-symbol no-I/O shapes and existing admission messages.
+
+Before implementation, run preservation request-sequence tests and commit new
+original-RED controls for typed first failure and accepted-page recovery after
+later HTTP/native/transport/malformed/missing-list failures. Cover failed-prefix
+exclusion, zero accepted rows, Error-only marker ownership/order, concurrent
+owners, fallback stage ownership and strict lookup/cursor/budget behavior. Existing
+successful codec, request pin, ledger and lookup tests remain. Update caller/
+audit/quality notes for the changed general-history failure contract only; B11,
+all-family enforcement and deployed NX proof remain open.
+
+Coordinate history.rs ownership with signer/clock/row lanes before source edits.
+No financial reducer, row admission, signing/dispatch/request, host, clock,
+metadata, feature/harness/workflow, comparator or budget changes. Focused engine/
+Paradex/Binance plus history reference tests, strict Clippy/fmt and independent
+plan/correctness/adversarial review; architecture gate must state this reuses the
+shared engine owner rather than adding per-venue policy. Integrate actual shared
+dependencies before final CI/proof, then normal queue and separate guard/merge.
+
+
+Paradex plan-audit refinements: permit only narrow `Pending::History` arms in
+lib.rs preparation/JWT-queue failure and signing-failure dispatch to invoke the
+strict owner rejection path; actual HTTP/stream failures keep recoverable-page
+routing. Never classify these by error-message text. Existing `raw_rows` is a
+query-accumulated count, not reset per page: preserve its fills-fallback trigger
+(empty raw traversal, not a final empty page after earlier raw rows). Early found
+lookup and fallback must admit and terminate the validated stage before owner
+finish/restart. Preserve open-lookup stage-budget transition as a nondefinitive
+proof boundary, without introducing a new warning or a second paging counter.
+
+
+The plan review also caught the page-50 cycle edge: suppressing a probe-stage
+budget with want_more=false would bypass the existing cycle-before-budget check.
+Allow a narrow shared `CursorHistory::advance_probe` operation: run the same
+walker/admission/lifecycle path but treat only PageBudget as a probe boundary
+without declaring query-row incompleteness. Repeated cursors still stall before
+the budget; the native lookup still rejects them. Normal advance is unchanged.
+Pin both cases in core/native tests; no native cursor set or replacement pager.
+Preparation rejection gains typed Internal/notSent through the owner, retaining
+its strict no-rows/no-marker behavior. Original source compiles and fails all
+three new typed-first/retained-later/zero-accepted behavioral control groups.
+The existing 22 history/request-sequence controls pass before source changes.
+
+
+Paradex implementation checkpoint: one boxed `CursorHistory<Output>` replaces
+local row buffers, cursor owner and direct bounded-cap marker. Boxing only this
+owner avoids enlarging the existing Pending enum beyond the strict Clippy bound;
+no other continuation or account state is boxed/rewritten. Native raw-row counts
+remain cumulative, with unchanged endpoint request pins and final shaping.
+
+The shared proof-stage extension uses the same walker and lifecycle admission,
+without suppressing repeated-cursor detection. Probe stages cannot stage or
+already have admitted result rows in the current stage: misuse poisons completion
+and returns one strict Internal failure. A valid restart preserves prior-stage
+accepted rows and the first omission cause. Direct core and real-completion
+controls cover both staged/admitted misuse, cycle-before-budget and valid prior
+stage preservation. Removing the guard makes the real-completion assertion RED.
+
+All 30 native Paradex history controls pass, including the 22 pre-existing
+successful request/codec/lookup controls. The three original-RED failure groups
+now pass; later-failure controls cover transport, HTTP, native envelope, malformed
+row, truncated JSON and missing-list failures. Native controls also cover
+strict queued JWT/preparation and delegated-signing failure after acceptance,
+page-50 lookup cycle, a matching lookup row inside a failed envelope, capped
+nondefinitive lookup without a new marker, empty traversal fallback and the
+cumulative raw-row no-fallback boundary. Removing the strict preparation routing
+arm produces assertion RED; source is restored before the final checks.
+
+Correctness/adversarial reviews are clean after hardening probe admission. This
+is shared engine enforcement plus native adapter facts, not a venue-specific
+replacement algorithm. No final replay/WASM/live deployment proof is claimed at
+this checkpoint. Other history families and B11 caller coverage remain open.
+
+
+Final local checks at this checkpoint: 1,007 engine/Paradex/Binance/BloFin native
+tests pass, including 30 Paradex history tests; touched-crate strict all-target
+Clippy, fmt, banned-pattern scan and changed-doc relative targets pass. Final
+independent correctness/adversarial reviews are clean. Full exact-head CI and
+shipped-artifact/replay comparison remain required before merge; no local release
+WASM, timing or full replay sweep was run.
+
+
+
 ## Coinbase Advanced Trade owner adoption (2026-10-22)
 
 Fresh branch from actual1746 `3f0e3e450b2`: move Advanced Trade fills,

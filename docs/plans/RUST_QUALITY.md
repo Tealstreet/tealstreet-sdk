@@ -285,6 +285,19 @@ still need fan-out before reporting policy and snapshot-token work.
 
 
 
+Paradex histories also reuse CursorHistory for staged/accepted rows, command
+ownership and completeness instead of local row vectors, walker ownership and
+marker emission. Native lookup proof, strict cursor/unbounded-budget refusals
+and fills fallback remain. The shared probe-stage operation preserves cycle and
+lifecycle checks while preventing result-row admission from hiding coverage.
+Queued auth/preparation rejection stays distinct from actual-page recovery.
+[Scope and proof](RUST_OWNED_HISTORY.md); other families remain unconverted.
+
+
+
+
+
+
 Coinbase Advanced Trade history owner adoption now routes fills, orders and
 public trades through existing CursorHistory, with one completion across CFM
 and Spot stages. Only complete validated response pages affect shared identity
