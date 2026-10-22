@@ -95,7 +95,7 @@ helpers whose call ordering every migrated venue must remember. Inventory and
 ratchet legacy socket owners during fan-out; no universal closure claim while
 legacy adapters remain.
 
-## Committable implementation sequence (not started)
+## Committable implementation sequence
 
 1. Add engine lifecycle/evidence state and tests around existing Supervisor;
    narrow WS-only `engine.rs`/`lib.rs` integration. Make retirement, admission,
@@ -150,5 +150,149 @@ refresh proof, uncapped but coalesced Bitunix login retry, managed-versus-legacy
 admission before health mutations, queued outbound and signer-release fencing,
 same-epoch interest revisions, uncorrelated native ACK limits, OKX auth-group
 retirement, bounded collections and checked deadline arithmetic. The next gate
-is concrete API review and native original-code controls; no production edits
-are authorized by this plan checkpoint alone.
+is concrete API review and native original-code controls. The owner subsequently
+authorized implementation through the two adoptions, review and a draft PR.
+
+## Concrete API proposal (review before production edits)
+
+New `engine/src/socket_lifecycle.rs` (exported through `lib.rs`) owns the following
+non-secret types. Names are proposed; semantics below are the review contract.
+
+- `FeedId`: opaque engine-allocated bounded logical-feed handle.
+  `Epoch`: opaque `{ feed, generation, physical SocketId }`, with accessors only.
+  An epoch is issued only when the registered feed is permitted to connect.
+  Physical role is derived from immutable policy, never a conflicting SocketSpec.
+- `FeedPolicy`: existing `socket::Config`, required/absent/observe-only auth,
+  auth refusal recovery and group, idle activation/refresh proof, subscription
+  cadence and invalidation declaration. No new backoff implementation.
+  `AuthRecovery::{Reconnect, RetrySameSocket{delay_ms}}` plus declared permanent
+  credential-refusal handling before native startup readiness. Native readiness
+  is a read-only codec fact; lifecycle/group policy is engine-owned.
+- `AuthEvidence::{Accepted, Rejected(VenueError), Malformed}` and
+  `Control::{Other, Pong, Auth(AuthEvidence)}`. `Venue::socket_control(feed,text)`
+  is a pure codec; it cannot update state or perform I/O. A read-only native auth
+  context supplies startup-ready status where OKX's existing terminal decision
+  depends on account bootstrap, without moving retry policy back into the codec.
+- `LifecycleEvent::{Opened, Ready{reopened}, Ping, RetryLogin, Retired,
+  AuthFailure, Reconnect}` with feed/epoch and typed reason as appropriate.
+  `Venue::on_socket_event(cx,event) -> Result<(), SocketError>` handles native
+  payloads, store clearing and
+  native account resync; the engine has already made/committed the transition.
+  A registered feed cannot silently omit its retirement effect: managed callbacks
+  default fail-closed, while unmanaged families retain existing callbacks.
+  Retirement acknowledgment is required: callback failure leaves the feed stopped
+  and quarantined with no retry grant or Ready output. Group retirement marks ALL
+  sibling epochs inactive before delivering any callback. A no-state feed declares
+  that explicitly; effect success cannot be inferred from a void callback.
+- `Interest { key, wire_args }` contains bounded non-secret native codec data.
+  `Venue::encode_socket_interests(store,feed,subscribe,interests)` produces native
+  bounded `EncodedBatch { text, covered_keys }` values; coverage must be exact,
+  unique and contained in the requested operation. No signer invocation or wall
+  clock is allowed. Engine tracks desired interests separately from queued and
+  dispatch-released interests. A superseding revision recomputes from actual
+  released coverage, retaining unchanged-but-unsent interests. Replacement is
+  transactional: validate/encode/budget the complete update before committing or
+  releasing any unsubscribe/subscribe; failure retains the old state. Engine owns
+  diff, ready-once replay, revision, queue and cadence.
+
+Cx facade:
+
+```text
+register_socket_feed(policy) -> Result<FeedId, SocketError>
+connect_socket(feed, spec) -> Result<Epoch, SocketError>
+connect_socket_signed(feed, spec, SignStep) -> Result<Epoch, SocketError>
+socket_epoch(feed) -> Option<Epoch>
+socket_authenticated(feed) -> bool
+set_socket_interests(feed, Vec<Interest>) -> Result<ProposalId, SocketError>
+retire_socket(feed, reason) / stop_socket_group(group, reason)
+```
+
+`set_socket_interests` returns proposal admission only; it does not claim deferred
+codec/encoding success. Engine invokes the encoder after restoring registry and
+Venue borrows, then commits the complete transaction or reports the proposal as
+`InterestsCommitted`/`InterestsRefused`; refusal retains old desired/released
+state. Pure state tests use a synchronous encoded transaction input.
+
+`connect_socket` is permitted initially or after an engine retry grant, never
+from an arbitrary duplicate open callback. Only the engine holds Supervisor,
+auth/open state, login retry timer and paced batch timers. Native connection
+slots retain a FeedId and codec configuration, not a parallel current SocketId,
+epoch/open/auth bool, Supervisor or queue policy. All ordinary `Cx.send/close`
+operations on managed sockets enter the same admission/retirement path.
+
+Engine integration is limited to Io registry/effect queue, Cx facade, WS ingress,
+managed timer dispatch and final WS action admission. Reuse existing physical
+close/signing cancellation; do not alter signing_dispatch Pending/finish/release.
+Before any signing receipt callback or queued WS release, recheck the live
+physical epoch. Drop retired ordinary queued actions too. Subscription frames
+stay in the engine queue until final drain, tagged by epoch/interest revision;
+only then publish plain WsSend actions. Do not emit or mark coverage while an
+existing signed upgrade/auth barrier still holds that socket: keep frames in the
+registry until it clears. Thus no signing-side-map or managed frame loses its
+revision metadata inside a held plain-action queue. Released means final engine
+drain handoff, not venue ACK or proof of physical network delivery. The host wire
+has no new WS action type.
+
+Each event/drain consumes lifecycle effects synchronously before replacement
+output is exposed. Retirement commits first, cancels timers/frames/signing, then
+delivers required invalidation; reconnect callbacks can only consume a retry
+grant. A bounded effect loop rejects codec-driven recursive lifecycle churn.
+Bounds to freeze: at most 512 logical feeds, 8192 interests/feed, 4096 queued
+frames/feed, 64 KiB/frame, 4 MiB total queued WS bytes/engine and 8 MiB total
+retained interest key/argument bytes/engine; duplicate/conflicting
+interest keys and non-finite deadlines are typed refusals. Counters use checked
+add; exhaustion never aliases a live epoch. A feed with suppressed public output
+creates no live epoch, watchdog or replay.
+
+The engine enters managed WS mode when a family registers its feeds. Only those
+registered current sockets are admitted in that engine; families registering no
+managed feeds remain on the unchanged legacy path. Both reference families adopt
+all their socket roles together, so mixed unmanaged escape sockets are refused.
+This avoids an unbounded retired-ID tombstone set and avoids dropping every
+legacy venue's events. Disposal cancels the registry before releasing host work.
+
+Original-code controls planned first: OKX duplicate open/accepted ACK cannot
+repeat login/subscriptions/resync; late auth acceptance after its absolute bound
+cannot rescue the socket. Bitunix stale/duplicate close/open/traffic cannot alter
+engine health, and an expired current feed cannot be rescued by traffic before
+delayed timer delivery. Existing malformed/explicit refusal/epoch isolation and
+first-pong suites remain compatibility controls. RED means a runtime assertion
+on unchanged production, never a compile failure.
+
+### Shared allocation prerequisite (owner-approved refinement)
+
+The current `next_engine_id` wraps u32 across physical sockets, timers and HTTP.
+A local epoch cannot reject a delayed host event once that physical ID is reused.
+Owner approved widening all shared IDs/counter to u64 capped at `2^53 - 1`,
+preserving JS Number precision and retaining checked fail-closed exhaustion as a
+backstop. No per-venue counter or tombstone workaround. Coordinate with the
+RequestContext owner before retyping the shared Io helper; its atomic managed
+reservations and prior-send outcome evidence must survive.
+
+Proposed shared allocator: `try_reserve_engine_ids(&mut next: u64, count: u64)`
+returns a checked non-reused range or typed Capacity, committing the counter only
+on complete success. Existing infallible single-ID allocation calls the same
+primitive and fails closed at the safe-integer boundary; new managed admission
+uses the typed reservation before side effects. No dummy ID on failure. WASM
+ingress remains a JS Number via validated finite safe-integer f64 conversion,
+not wasm-bindgen u64 BigInt; Rust/native/JSON paths retain the full integer. Audit
+all host encoders, timers, signing/request receipts and narrowing casts before
+source changes. Owner sequencing is explicit: audit/plan now; allocator source
+only after actual RequestContext #1741, as its own small shared PR. Socket work
+may continue in the independent state/effect policy; production adoption depends
+on that actual allocator prerequisite, not a local counter workaround. Tests must cross the old u32 limit, preserve distinct socket and
+timer IDs after many allocations, reject stale retired ingress and reject final
+capacity/invalid-number input without reuse or partial reservation.
+
+### Original production RED receipt
+
+Against unchanged production on actual #1764 plus this plan, three OKX runtime
+assertions fail: duplicate open emits a second login/ping; duplicate accepted
+login repeats subscription frames; late accepted login rescues a phase at its
+auth deadline before timer delivery. Three Bitunix runtime assertions fail:
+duplicate retired close increments health, retired open increments health, and
+a late pong rescues the first-pong-activated idle deadline before timer delivery.
+Logs: `/tmp/codex-socket-okx-original-red.log` and
+`/tmp/codex-socket-bitunix-original-red.log`. Both suites compile and each runs
+three failing assertions; no compile failure is counted as a RED. These are
+local test-only controls until the shared core and adoptions make them GREEN.
