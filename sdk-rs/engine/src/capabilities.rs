@@ -39,9 +39,6 @@ pub struct Capabilities {
     pub closed_positions: bool,
     /// The `FetchBalanceInfo` venue action: the raw account payload for `balance.info`.
     pub balance_info: bool,
-    /// Signed timestamps take the host clock as-is; the venue does no clock sync
-    /// of its own, so hosts pass a server-synced clock.
-    pub host_clock: bool,
     /// Explicit public catalogue refresh through VenueAction::RefreshMarkets.
     pub market_refresh: bool,
     /// Host journal adapter and whether fill folding is account- or symbol-scoped.
@@ -173,7 +170,6 @@ impl Capabilities {
         account_tier: false,
         closed_positions: false,
         balance_info: false,
-        host_clock: false,
         market_refresh: false,
         position_history: PositionHistory::Unsupported,
         closed_position_format: ClosedPositionFormat::Unsupported,
@@ -223,7 +219,7 @@ impl Capabilities {
             self.account_tier,
             self.closed_positions,
             self.balance_info,
-            self.host_clock,
+            false, // Bit 14 reserved: retired per-venue host-clock policy.
             self.market_refresh,
             self.stp_controls,
             self.bybit_execution_controls,
@@ -265,7 +261,6 @@ mod tests {
             client_order_lookup: true,
             options: true,
             closed_positions: true,
-            host_clock: true,
             market_refresh: true,
             cancel_all: CancelAll::EachPlacedSymbol,
             leverage_query: LeverageQuery::OnMetadata,
@@ -279,8 +274,10 @@ mod tests {
         let (kind, payload) = sections(&frame).next().unwrap();
         assert_eq!(kind, section::CAPABILITIES);
         let word = |at: usize| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
-        assert_eq!(word(0), 1 | 1 << 10 | 1 << 12 | 1 << 14 | 1 << 15);
+        assert_eq!(word(0), 1 | 1 << 10 | 1 << 12 | 1 << 15);
         assert_eq!(word(4), 2 | 1 << 4 | 2 << 8 | 3 << 12 | 4 << 16);
+        assert_eq!(payload.len(), 8);
+        assert_eq!(word(0) & (1 << 14), 0);
         // Append the combined policy without changing any existing wire discriminant.
         assert_eq!(LeverageQuery::Settings as u32, 0);
         assert_eq!(LeverageQuery::OnRead as u32, 1);

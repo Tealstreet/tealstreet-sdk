@@ -45,3 +45,28 @@ shared capabilities/SDK/host files with codex-uufub4; engine request/dispatch an
 pending-sign logic remain in its core. Ask for a merge window if clock work needs
 engine dispatch changes. No venue signer migration until actual signer core.
 No TS deletion, default engine flip, publishing or NX edits.
+
+## PR1 implementation evidence
+
+The shared SDK clock accessor also supplies local schedule-deadline validation
+and default Bybit/WOO journal bounds. Type/finite validation stays before JSON;
+worker calls let the authoritative worker validate the deadline. Shared clock
+initialization is inside the existing disposal-aware loader wait, so disposal
+settles one account without cancelling synchronization needed by its peers.
+
+Regressions cover all 49 registered names, dynamic forward/backward time,
+commands/frames/WS/timers, streamed HTTP callbacks, concurrent initialization,
+disposal, legacy capability records and divergent explicit tape clocks. The
+old ingress failed 40 of the first 52 controls; fault-disabling the initialization
+barrier and the disposal regression independently reproduced their failures.
+Explicit-clock deadline and both journal-bound controls also failed before fix.
+Final focused checks: 1,344 native tests, 428 SDK/routing/startup tests, the default
+combined-host capability fixture, 76 host/wire/tape controls, typecheck/lint,
+Clippy/fmt/bans. Full replay/signature/build proof belongs to exact-head CI.
+
+Architecture gate: this is not a per-venue fix of a cross-cutting concern. One
+shared production provider and instance accessor replace clock selection;
+venue edits only delete obsolete opt-ins. Native `SystemTime` and explicit
+server/Workers/replay clocks remain host responsibilities. Capability bit14 is
+reserved and ignored by new readers; this field retirement needs paired SDK
+and native artifacts. No signature/canonicalization or replay policy changes.
