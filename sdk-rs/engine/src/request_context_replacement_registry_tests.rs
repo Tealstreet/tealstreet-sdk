@@ -712,3 +712,247 @@ fn replacement_real_handoff_revokes_parent_but_retains_exact_expired_root_comple
     assert_eq!(cx.done_context(&root, "[]".into()), Err(Error::Revoked));
     assert_eq!(cx.validate_completion_context(&next), Ok(()));
 }
+
+#[test]
+fn signed_replacement_children_keep_release_evidence_and_original_deadline() {
+    use crate::request_context::{Claim, HttpAction, Permit, Preparation, Prepared};
+    use crate::signing::{SignError, SignRequest, SignResult};
+    use crate::{Action, Event, Notice};
+
+    fn preparations(actions: &[Action]) -> Vec<Preparation> {
+        actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::ManagedHttp(action) => match action.as_ref() {
+                    HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    }
+    fn route(
+        engine: &mut crate::Engine<PhysicalReplacement>,
+        preparation: Preparation,
+        now: f64,
+    ) -> (RequestId, SignRequest) {
+        engine.http_prepared(
+            now,
+            preparation,
+            Prepared {
+                id: u64::from(preparation.attempt().request.0),
+                expires_at: None,
+            },
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(!actions.iter().any(|a| match a {
+            Action::Http(_) => true,
+            Action::ManagedHttp(a) => matches!(a.as_ref(), HttpAction::Bind { .. }),
+            _ => false,
+        }));
+        let work: Vec<_> = actions
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Sign { attempt, work, .. } => Some((attempt, work)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(work.len(), 1);
+        work.into_iter().next().unwrap()
+    }
+    fn result(work: &SignRequest) -> Result<SignResult, SignError> {
+        Ok(SignResult::new(vec![b"presented".to_vec()], work.receipt))
+    }
+    fn finish(
+        engine: &mut crate::Engine<PhysicalReplacement>,
+        attempt: RequestId,
+        value: Result<SignResult, SignError>,
+        now: f64,
+    ) -> Vec<Action> {
+        engine.handle(
+            now,
+            Event::Signed {
+                attempt,
+                result: value,
+            },
+        );
+        engine.drain_actions().collect()
+    }
+    fn permit(actions: &[Action]) -> Permit {
+        actions
+            .iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match a.as_ref() {
+                    HttpAction::Bind { permit, .. } => Some(*permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("validated signature must bind its child")
+    }
+    fn response(
+        engine: &mut crate::Engine<PhysicalReplacement>,
+        token: Preparation,
+        at: f64,
+        body: &str,
+    ) {
+        engine.handle(
+            at,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: crate::Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+
+    for mode in 0..3 {
+        let mut engine = crate::test_support::seeded_engine(PhysicalReplacement {
+            signed: true,
+            ..Default::default()
+        });
+        engine.start(0.);
+        let root = preparations(&engine.drain_actions().collect::<Vec<_>>())[0];
+        let (parent_attempt, parent_work) = route(&mut engine, root, 1.);
+        let parent_ready = finish(&mut engine, parent_attempt, result(&parent_work), 2.);
+        let parent_permit = permit(&parent_ready);
+        assert!(matches!(
+            engine.claim_http(2., parent_permit),
+            Ok(Claim::Released(_))
+        ));
+        let mut released = 1;
+        response(&mut engine, root, 3., "{}");
+        let mut observed: Vec<_> = engine.drain_actions().collect();
+        let children = preparations(&observed);
+        assert_eq!(children.len(), 2);
+        for child in &engine.venue().children {
+            assert_eq!(child.deadline(), 100.);
+        }
+        let first = route(&mut engine, children[0], 4.);
+        let second = route(&mut engine, children[1], 5.);
+        // No provider completion means no bound packet or physical release.
+        assert_eq!(released, 1);
+        assert!(engine.venue().accepted_ids.is_empty());
+        let mut child_permits = Vec::new();
+        if mode != 2 {
+            let ready = finish(&mut engine, first.0, result(&first.1), 70.);
+            let p = permit(&ready);
+            observed.extend(ready);
+            assert!(matches!(engine.claim_http(71., p), Ok(Claim::Released(_))));
+            assert!(
+                engine.claim_http(71.5, p).is_err(),
+                "live permit is single-use"
+            );
+            assert_eq!(engine.venue().settled_children, 0);
+            released += 1;
+            child_permits.push(p);
+            response(&mut engine, children[0], 72., "\"accepted-child-1\"");
+            observed.extend(engine.drain_actions());
+        } else {
+            observed.extend(finish(
+                &mut engine,
+                first.0,
+                Err(SignError::Unavailable),
+                70.,
+            ));
+        }
+        assert_eq!(engine.venue().settled_children, 1);
+        if mode == 0 {
+            let ready = finish(&mut engine, second.0, result(&second.1), 73.);
+            let p = permit(&ready);
+            observed.extend(ready);
+            assert!(matches!(engine.claim_http(74., p), Ok(Claim::Released(_))));
+            released += 1;
+            child_permits.push(p);
+            response(&mut engine, children[1], 75., "\"accepted-child-2\"");
+            observed.extend(engine.drain_actions());
+        } else if mode == 1 {
+            observed.extend(finish(
+                &mut engine,
+                second.0,
+                Err(SignError::Unavailable),
+                73.,
+            ));
+        } else {
+            // The recipe freshness is1000ms, but the original raw cap is100ms.
+            let late = finish(&mut engine, second.0, result(&second.1), 100.);
+            assert!(!late.iter().any(|a| matches!(a, Action::ManagedHttp(a)
+                if matches!(a.as_ref(), HttpAction::Bind { .. }))));
+            observed.extend(late);
+        }
+        assert_eq!(released, 3 - mode);
+        assert_eq!(engine.venue().settled_children, 2);
+        assert_eq!(engine.venue().callbacks, released);
+        assert!(engine.io.pending.is_empty());
+        assert!(engine.io.managed_http.is_empty());
+        assert!(!engine.signing_pending(parent_attempt));
+        assert!(!engine.signing_pending(first.0));
+        assert!(!engine.signing_pending(second.0));
+        let terminals: Vec<_> = observed
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(n @ (Notice::CommandDone { .. } | Notice::CommandFailed { .. })) => {
+                    Some(n)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(terminals.len(), 1);
+        match terminals[0] {
+            Notice::CommandDone { command: 7, result } if mode == 0 => {
+                assert_eq!(
+                    serde_json::from_str::<Vec<String>>(result).unwrap(),
+                    ["accepted-child-1", "accepted-child-2"]
+                );
+            }
+            Notice::CommandFailed { command: 7, error } if mode != 0 => {
+                assert_eq!(error.outcome, Some(Outcome::Unknown));
+                let ids = error
+                    .partial
+                    .as_ref()
+                    .map(|p| p.order_ids.clone())
+                    .unwrap_or_default();
+                assert_eq!(
+                    ids,
+                    if mode == 1 {
+                        vec!["accepted-child-1"]
+                    } else {
+                        vec![]
+                    }
+                );
+            }
+            other => panic!("wrong replacement seal: {other:?}"),
+        }
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|a| matches!(a,
+                    Action::Notice(Notice::CommandError { command: 7, message })
+                        if message == "native batch refused; replacing with singles"
+                ))
+                .count(),
+            1
+        );
+        assert!(engine.claim_http(101., parent_permit).is_err());
+        for p in child_permits {
+            assert!(engine.claim_http(101., p).is_err());
+        }
+        response(&mut engine, root, 101., "{}");
+        for (attempt, work) in [first, second] {
+            let late = finish(&mut engine, attempt, result(&work), 101.);
+            assert!(!late.iter().any(|a| matches!(
+                a,
+                Action::Notice(
+                    Notice::CommandDone { .. }
+                        | Notice::CommandFailed { .. }
+                        | Notice::CommandError { .. }
+                )
+            )));
+        }
+        assert_eq!(engine.venue().settled_children, 2);
+        assert_eq!(engine.venue().callbacks, released);
+    }
+}

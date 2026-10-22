@@ -351,3 +351,16 @@ child facts retain child Delivery and optimistic root completion stays inside it
 The actual signed acceptance tests have not yet been added, so this is not new
 signed coverage or a completed phase. Return to #1741 as its rebuilt-WASM Binance
 job/lifecycle replay passes; maina0 stays frozen for final CI and evidence.
+
+Local signed acceptance checkpoint: the real Engine matrix now passes for all
+accepted children (exact IDs and success), one accepted child plus refused sibling
+(Unknown retaining its exact ID), and refused child plus provider result at the
+original100ms deadline (Unknown, no child release). All22 replacement-filtered
+engine controls pass. Independent review found two coverage gaps; the test now
+also asserts physical pending/managed maps and signer work retire, and rejects
+a duplicate child claim while its command is still live. Late duplicate results
+cannot emit another seal or diagnostic. This exercises emitted Sign actions,
+not native-host SignFuture execution. Protocol/route reprepare fencing and full
+registry atomicity acceptance remain pending, as does ordinary Bybit adoption;
+its original gateway regression intentionally remains RED. No push/PR until
+actual1741; its maina0 CI and authenticated evidence watches remain active.
