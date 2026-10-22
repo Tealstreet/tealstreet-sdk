@@ -1,7 +1,8 @@
 //! Reported account ledger amounts, never a fold of executions or balances.
 use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::history::{Completion, RangeHistory};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, json::ArrayAt};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -15,18 +16,16 @@ pub struct State {
     deferred: Vec<(TimerId, Request)>,
 }
 pub struct Request {
-    command: CommandId,
+    owner: Box<RangeHistory<Income>>,
     start: f64,
     end: f64,
     currency: usize,
     kind: Option<String>,
     limit: Option<usize>,
-    walk: RangeWalk,
     from: f64,
     to: f64,
-    page: Vec<Income>,
+    page_rows: usize,
     occurrences: HashMap<String, u32>,
-    rows: Vec<Income>,
     invalid: bool,
 }
 #[derive(Deserialize)]
@@ -94,62 +93,68 @@ impl PhemexPerpetuals {
             return;
         }
         let request = Request {
-            command,
+            owner: Box::new(RangeHistory::new(
+                Completion::new(command),
+                RangeWalk::new(start, end.max(start + 1.), 7. * DAY, PAGE),
+                |_| "Phemex income range is incomplete".into(),
+                |rows| {
+                    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
+                },
+            )),
             start,
             end,
             currency: 0,
             kind,
             limit: limit.map(|n| n as usize),
-            walk: RangeWalk::new(start, end.max(start + 1.), 7. * DAY, PAGE),
             from: start,
             to: end,
-            page: Vec::new(),
+            page_rows: 0,
             occurrences: HashMap::new(),
-            rows: Vec::new(),
             invalid: false,
         };
         self.income_next(cx, request);
     }
     fn income_next(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         loop {
-            match request.walk.step() {
+            match request.owner.step() {
                 Step::Fetch { from, to } => {
                     request.from = from;
                     request.to = to.min(request.end);
-                    request.page.clear();
+                    if !request
+                        .owner
+                        .restrict_active_range(request.from, request.to)
+                    {
+                        self.income.active.remove(&request.owner.command());
+                        request
+                            .owner
+                            .reject(cx, VenueError::new("Invalid Phemex income request bounds"));
+                        return;
+                    }
+                    request.page_rows = 0;
                     request.occurrences.clear();
                     self.income_send(cx, request);
                     return;
                 }
                 Step::ChunkDone => {}
                 Step::Finished => {
-                    if request.walk.truncated {
-                        self.income_failed(cx, request, "Phemex income range is incomplete");
-                        return;
-                    }
                     request.currency += 1;
                     if request.currency < CURRENCIES.len() {
-                        request.walk = RangeWalk::new(
+                        if !request.owner.restart_stage(RangeWalk::new(
                             request.start,
                             request.end.max(request.start + 1.),
                             7. * DAY,
                             PAGE,
-                        );
+                        )) {
+                            self.income.active.remove(&request.owner.command());
+                            request.owner.reject(
+                                cx,
+                                VenueError::new("Phemex income stage did not complete"),
+                            );
+                            return;
+                        }
                         continue;
                     }
-                    request.rows.sort_by(|a, b| {
-                        b.timestamp
-                            .total_cmp(&a.timestamp)
-                            .then_with(|| a.tran_id.cmp(&b.tran_id))
-                    });
-                    if let Some(limit) = request.limit {
-                        request.rows.truncate(limit);
-                    }
-                    self.income.active.remove(&request.command);
-                    match serde_json::to_string(&request.rows) {
-                        Ok(data) => cx.done(request.command, data),
-                        Err(error) => cx.fail(request.command, error.to_string()),
-                    }
+                    self.income_finish(cx, request, Ok(()));
                     return;
                 }
             }
@@ -190,7 +195,7 @@ impl PhemexPerpetuals {
         };
         let amount = serde_json::from_str::<crate::wire::N>(row.amount_rv.get()).map(|n| n.0);
         let balance = serde_json::from_str::<crate::wire::N>(row.balance_rv.get());
-        if request.page.len() >= PAGE
+        if request.page_rows >= PAGE
             || row.type_desc.is_empty()
             || row.currency != CURRENCIES[request.currency]
             || row.create_time > 9_007_199_254_740_991
@@ -212,7 +217,8 @@ impl PhemexPerpetuals {
         );
         let occurrence = request.occurrences.entry(identity.clone()).or_default();
         *occurrence += 1;
-        request.page.push(Income {
+        request.page_rows += 1;
+        let row = Income {
             symbol: "",
             income_type: row.type_desc.into(),
             income: amount.unwrap(),
@@ -226,7 +232,12 @@ impl PhemexPerpetuals {
                 "TRANSFER" => "transfer",
                 _ => "other",
             },
-        });
+        };
+        let facts = PageRow {
+            timestamp: row.timestamp,
+            identity: row.tran_id.clone(),
+        };
+        request.owner.stage(row, facts);
     }
     pub(crate) fn income_response(
         &mut self,
@@ -247,35 +258,19 @@ impl PhemexPerpetuals {
             self.income_failed(cx, request, "Malformed or oversized Phemex income response");
             return;
         }
-        let page: Vec<PageRow> = request
-            .page
-            .iter()
-            .map(|row| PageRow {
-                timestamp: row.timestamp,
-                identity: row.tran_id.clone(),
-            })
-            .collect();
-        let fresh = request.walk.page(request.from, request.to, &page);
-        let mut indexes = fresh.into_iter().peekable();
-        for (index, row) in request.page.drain(..).enumerate() {
-            if indexes.peek() == Some(&index) {
-                indexes.next();
-                if row.timestamp >= request.start
-                    && row.timestamp <= request.end
-                    && request
-                        .kind
-                        .as_deref()
-                        .is_none_or(|kind| kind == row.income_type)
-                {
-                    request.rows.push(row);
-                }
-            }
-        }
-        if request.rows.len() > 100_000 {
-            self.income_failed(
+        let start = request.start;
+        let end = request.end;
+        let kind = request.kind.as_deref();
+        request.owner.accept_page_where(|row| {
+            row.timestamp >= start
+                && row.timestamp <= end
+                && kind.is_none_or(|kind| kind == row.income_type)
+        });
+        if request.owner.accepted_len() > 100_000 {
+            self.income.active.remove(&request.owner.command());
+            request.owner.reject(
                 cx,
-                request,
-                "Phemex income result is too large; narrow the range",
+                VenueError::new("Phemex income result is too large; narrow the range"),
             );
             return;
         }
@@ -287,8 +282,27 @@ impl PhemexPerpetuals {
         request: Request,
         error: &str,
     ) {
-        self.income.active.remove(&request.command);
-        cx.fail(request.command, error);
+        self.income_finish(cx, request, Err(VenueError::new(error)));
+    }
+    fn income_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        result: Result<(), VenueError>,
+    ) {
+        self.income.active.remove(&request.owner.command());
+        let limit = request.limit;
+        request.owner.finish_with(cx, result, |mut rows| {
+            rows.sort_by(|a, b| {
+                b.timestamp
+                    .total_cmp(&a.timestamp)
+                    .then_with(|| a.tran_id.cmp(&b.tran_id))
+            });
+            if let Some(limit) = limit {
+                rows.truncate(limit);
+            }
+            serde_json::to_string(&rows).map_err(|error| VenueError::new(error.to_string()))
+        });
     }
     pub(crate) fn income_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         let Some(index) = self.income.deferred.iter().position(|(id, _)| *id == timer) else {

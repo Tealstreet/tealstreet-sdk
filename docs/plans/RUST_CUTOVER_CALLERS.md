@@ -3767,6 +3767,34 @@ Production routing never imports a TS venue class. Wire-comparison tests retain
 the legacy WS methods only as independent test references.
 
 
+### Phemex income: one owner across currency ranges
+
+Phemex income reads now retain one engine RangeHistory/Completion across USDT
+and USDC. An actual transport/HTTP/malformed-row or envelope page failure before
+any eligible output is accepted rejects typed, with the shared `internal`
+fallback because the callback multiplexes transport and decode failures. Earlier
+unclassified failures now carry that kind, including the resulting telemetry
+tags. A later page/currency failure returns only accepted eligible earlier rows
+with one command-owned Warn `history.incomplete` before success, even with
+Error-only logging. Failed-page prefixes and type-filtered rows cannot authorize
+partial recovery; no accepted output means a later actual failure still rejects.
+
+Range saturation retains an owned gap and continues the other currency rather
+than rejecting the entire query before USDC. Valid responses with no eligible
+rows may still complete incomplete []; they do not prove complete coverage.
+The shared owner records coverage from every validated native row before output
+filtering and preserves actual native bounds for internally padded equal-bound
+queries. Running-balance/raw amount identities and occurrence suffixes, native
+units/categories, time/type filters, sorting, optional truncation and pause
+resumption remain. The existing more-than-100,000 retained-output guard remains
+a strict refusal; it cannot become a large partial success. Admission and
+single-page fills/orders/public-trades/client-ID lookup stay unchanged.
+
+No SDK arguments or row shapes change. Existing B11 request-scoped incomplete
+query ingestion/coverage and typed rejection handling remain required. This is
+shared-core/native-test evidence, not deployed runtime proof or universal history
+fan-out closure. [Owner and scope](RUST_OWNED_HISTORY.md).
+
 ### GRVT histories: shared owner with strict order-fill proofs
 
 GRVT fills, closed orders, funding/fill-derived income and public trades now use
