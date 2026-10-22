@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Selected signer mode | Active shared SDK fix; queued after #1741 | Before changing RemoteSigner precedence, PayloadSigner admission or runtime feed selection with both callbacks. | [RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md) |
 | Hosted signer presentation | Planned after #1757 | Extending primitive signature encoding or provider-owned passphrase presentation for OKX/Bitget. | [RUST_HOSTED_SIGNER_PRESENTATION.md](RUST_HOSTED_SIGNER_PRESENTATION.md) |
 | Gate failure ordering | Implemented shared harness fix; CI pending | Before changing gate failure serialization, console truncation or deterministic evidence comparisons. | [HARNESS_GATE_FAILURE_ORDER.md](HARNESS_GATE_FAILURE_ORDER.md) |
 | Request lifecycle and command outcomes | Active shared-core plan | Before HTTP retry/outcome sealing, actual-release admission, expiry projection or send pacing. | [RUST_REQUEST_CONTEXT.md](RUST_REQUEST_CONTEXT.md) |
