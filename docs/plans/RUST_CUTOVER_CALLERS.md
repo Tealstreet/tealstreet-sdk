@@ -3536,6 +3536,79 @@ handling; no additional NX migration is introduced by this slice.
 
 
 
+### Lighter histories: shared cursor owner across trade and funding stages
+
+Lighter fills, historical orders, public trades and income now use the existing
+engine CursorHistory owner. Actual HTTP/native, transport, malformed/foreign-row
+or missing-list failures before accepted mapped rows reject typed with the
+engine's `internal` fallback. After accepted pages, actual page failure instead
+returns only earlier accepted rows with one command-owned Warn
+`history.incomplete` before success, including Error-only logging. Failed page
+prefixes never enter the result. Empty or filtered pages alone do not authorize
+partial recovery. Transport and stream decoding share a callback, so this slice
+does not claim every callback failure is `network`.
+
+All-income keeps the same owner from trade fee/PnL rows through funding; a
+funding failure can retain validated trade income and earlier funding pages.
+Each stage keeps its own output-limit stopping rule, followed by the existing
+global stable time sort and truncation. Native raw row counts, cursor escaping,
+100-row requests, 1000-page stage budget, time/principal filters, trade/order/
+funding dedupe namespaces, financial units and row shapes remain unchanged.
+Repeated cursors/page-budget exhaustion and saturated full pages without a
+continuation remain strict rejections without an incomplete success. Synchronous
+auth-token preparation refusal also stays strict after accepted rows, now typed
+`internal`/`notSent` where it previously had neither kind nor outcome. Existing
+admission and keyless no-I/O behavior remains. SDK arguments do not change and
+no new NX handler is required by this slice; B11's request-scoped ingestion,
+coverage gating and typed rejection handling remain required. Other-family
+history fan-out and deployed caller proof remain open.
+[Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+
+
+### Coinbase Advanced Trade histories: one accepted-page owner
+
+Fills, historical orders and public trades now use the engine CursorHistory
+owner. The same owner spans CFM then Spot family reads. A transport/HTTP or
+whole-response decode/mapping failure before any mapped rows are admitted
+rejects typed; after admitted rows, an actual failed page returns only earlier
+accepted pages with one command-owned Warn history.incomplete before successful
+completion, including at Error-only logging. An empty or entirely filtered
+earlier page cannot authorize partial recovery. A conflicting native identity
+invalidates the entire page before shared dedupe, even when its earlier copy
+was filtered. The failed page's prefix never enters results. Repeated cursors
+and the 50-page per-family cap now return owned incomplete coverage instead of
+discarding accepted history.
+
+Native continuation/proof metadata refusals stay strict: wrong typed fields,
+unusable continuing cursors and proof_token_required reject even after admitted
+rows. Both immediate request preparation refusal and the later queued signing
+refusal are strict internal/notSent; ordinary legacy stream/transport failures
+use the shared internal fallback because the callback also carries parse errors.
+These runtime errors previously had no kind, so caller error-kind telemetry
+becomes explicit. Query admission errors keep their existing classification.
+
+Native endpoints/family order, cursor escaping, immediate requests subject to the
+existing REST pacing, per-family output limits, fingerprint validation before
+UTC filtering, CFM contract units, public maker-side inversion, stable timestamp
+sort and final global truncation remain. No SDK query argument or row shape
+change, no Starbase wiring and no new mandatory NX handler; B11 request-scoped
+incomplete-query ingestion/coverage and typed rejection handling remain required.
+This adoption does not close the remaining history fan-out or prove live/deployed
+completeness. [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+
+
 ### WEEX income: shared range coverage and accepted-page completion
 
 WEEX bounded income now uses engine RangeHistory; unbounded/one-sided/equal-bound

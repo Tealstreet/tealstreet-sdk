@@ -1427,6 +1427,13 @@ WEEX general-history owner adoption, not all-family or B11/deployment closure.
   can mislabel value.
 
 ### Coinbase (already defaults to Rust)
+- Owned-history follow-up: Advanced Trade fills/orders/public trades now share
+  the engine CursorHistory owner, including CFM-to-Spot reads. Later actual
+  page failures retain only admitted pages with command-owned incomplete coverage;
+  zero-admitted failures reject typed, while native continuation/proof and
+  queued signing refusals remain strict. Native mapping, requests and account
+  state are unchanged; Starbase and NX B11 coverage are not closed. See
+  [RUST_OWNED_HISTORY.md](RUST_OWNED_HISTORY.md).
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
   site) rejects every snapshot and blocks all trading incl. cancel
   (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed
@@ -1455,6 +1462,14 @@ WEEX general-history owner adoption, not all-family or B11/deployment closure.
 ### Lighter
 
 Signing, integer scaling, tx encoding and nonces match TS.
+
+Owned-history follow-up: ~~later page failure discards validated earlier history~~
+now retains accepted pages with one command-owned incomplete marker through the
+shared engine owner, including trade-to-funding income. Failed prefixes remain
+excluded; first/zero-accepted failures reject typed. Native cursor/saturation
+proof and synchronous auth preparation stay strict; account reconciliation,
+signing arithmetic and the remaining cross-family history fan-out are unchanged.
+
 
 - High: ~~position `initial_margin_fraction` ("20.00" = 5x) read in basis points
   (`lighter/src/account.rs:424,877`), so leverage reads as the market max and a
