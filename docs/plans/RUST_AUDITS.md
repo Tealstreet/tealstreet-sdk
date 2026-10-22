@@ -1379,11 +1379,13 @@ Normal inputs send the same requests as TS; the risk is resilience.
 
 ### WEEX
 
-- ~~WEEX's five query-associated omissions~~ now carry the actual income query
-  command before retained-row completion or failure, including lifetime/chunk
-  budgets, opaque cursors and read errors. Native ownership/order regressions
-  and a native-verified fixture through host/worker overlapping-client isolation
-  cover the fix; range continuation and failure policy remain intact.
+- ~~WEEX's five query-associated omissions~~ now flow through the shared income
+  owner. First/zero-accepted failures reject typed without a coverage marker;
+  later failures immediately retain only accepted pages with one command-owned
+  marker before success. Valid opaque-cursor gaps and lifetime/chunk budgets
+  retain the first coverage cause until final success. The old failed-chunk
+  continuation policy is superseded. Native-backed host/worker fixture proof now
+  uses accepted-page/later-failure success; fills/orders remain a later slice.
 
 - High: ~~one `null` numeric field in a public row stops the venue, private start
   gated on tickers (`weex/src/wire.rs:73`, `lib.rs:671,727`); one unparsable
@@ -1417,6 +1419,13 @@ Normal inputs send the same requests as TS; the risk is resilience.
   can mislabel value.
 
 ### Coinbase (already defaults to Rust)
+- Owned-history follow-up: Advanced Trade fills/orders/public trades now share
+  the engine CursorHistory owner, including CFM-to-Spot reads. Later actual
+  page failures retain only admitted pages with command-owned incomplete coverage;
+  zero-admitted failures reject typed, while native continuation/proof and
+  queued signing refusals remain strict. Native mapping, requests and account
+  state are unchanged; Starbase and NX B11 coverage are not closed. See
+  [RUST_OWNED_HISTORY.md](RUST_OWNED_HISTORY.md).
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
   site) rejects every snapshot and blocks all trading incl. cancel
   (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed

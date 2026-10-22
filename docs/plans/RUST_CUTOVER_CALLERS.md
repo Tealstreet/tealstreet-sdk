@@ -3563,3 +3563,81 @@ no new NX handler is required by this slice; B11's request-scoped ingestion,
 coverage gating and typed rejection handling remain required. Other-family
 history fan-out and deployed caller proof remain open.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+
+
+### Coinbase Advanced Trade histories: one accepted-page owner
+
+Fills, historical orders and public trades now use the engine CursorHistory
+owner. The same owner spans CFM then Spot family reads. A transport/HTTP or
+whole-response decode/mapping failure before any mapped rows are admitted
+rejects typed; after admitted rows, an actual failed page returns only earlier
+accepted pages with one command-owned Warn history.incomplete before successful
+completion, including at Error-only logging. An empty or entirely filtered
+earlier page cannot authorize partial recovery. A conflicting native identity
+invalidates the entire page before shared dedupe, even when its earlier copy
+was filtered. The failed page's prefix never enters results. Repeated cursors
+and the 50-page per-family cap now return owned incomplete coverage instead of
+discarding accepted history.
+
+Native continuation/proof metadata refusals stay strict: wrong typed fields,
+unusable continuing cursors and proof_token_required reject even after admitted
+rows. Both immediate request preparation refusal and the later queued signing
+refusal are strict internal/notSent; ordinary legacy stream/transport failures
+use the shared internal fallback because the callback also carries parse errors.
+These runtime errors previously had no kind, so caller error-kind telemetry
+becomes explicit. Query admission errors keep their existing classification.
+
+Native endpoints/family order, cursor escaping, immediate requests subject to the
+existing REST pacing, per-family output limits, fingerprint validation before
+UTC filtering, CFM contract units, public maker-side inversion, stable timestamp
+sort and final global truncation remain. No SDK query argument or row shape
+change, no Starbase wiring and no new mandatory NX handler; B11 request-scoped
+incomplete-query ingestion/coverage and typed rejection handling remain required.
+This adoption does not close the remaining history fan-out or prove live/deployed
+completeness. [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+
+
+
+
+
+
+### WEEX income: shared range coverage and accepted-page completion
+
+WEEX bounded income now uses engine RangeHistory; unbounded/one-sided/equal-bound
+income uses CursorHistory for its single page. A failed first page or a failure
+before any admitted mapped rows rejects typed with the engine's `internal`
+fallback and no completeness marker. Actual later HTTP/transport/native-response/
+stream/list/row failure now returns only accepted earlier pages with one Warn
+`history.incomplete` before success, including Error-only logging; it stops the
+walk immediately. This supersedes the previous skip-failed-chunk-and-continue
+behavior. Failed streamed prefixes never enter accepted history. Transport and
+decode share a callback, so these errors do not all claim `network`.
+
+A validated page advertising hasNextPage/nextKey can retain rows, including a
+valid empty result, with an owned coverage gap; span continuation does not prove
+an opaque cursor was consumed. Cursor, chunk and lifetime omissions retain the
+first cause and publish once at final success, rather than one marker per page.
+The 10,000-request lifetime limit is enforced by the shared owner before issuing
+request 10,001. Native 100-day spans, 100-row ranged requests, 100 ms pacing,
+shared-pause resumption, compound/time-fallback dedupe, income mapping and stable
+descending sort remain. Single-page rows retain their old no-range-filter/no-
+dedupe behavior, including equal bounds; no extra final limit is introduced.
+Signing setup unavailability stays strict and now has `internal`/`notSent`;
+keyless/admission no-I/O stays unchanged. Terminal completion removes deferred
+state/timers. Fills, orders, public trades and the fill-ID omission marker are
+unchanged and remain separate follow-ons.
+
+No SDK argument, row shape or new NX handler is introduced by this slice. B11's
+request-scoped incomplete-query ingestion/coverage and typed rejection handling
+remain required. Native-backed host/worker tests now use the reachable later-page
+partial-success event instead of the superseded first-failure marker. This is
+source/fixture evidence, not deployed runtime proof or cross-family closure.
+[Owner contract and scope](RUST_OWNED_HISTORY.md).

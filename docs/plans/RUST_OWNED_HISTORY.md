@@ -880,3 +880,224 @@ bans run before committing. Actual shared/build dependencies must be integrated
 before final proof/merge: the active owner hold is #1746, then #1728, then the
 ready #1748/#1749; this Lighter follow-on has no exception. No CI or deployed
 runtime closure is claimed by local controls.
+
+
+
+
+
+## Coinbase Advanced Trade owner adoption (2026-10-22)
+
+Fresh branch from actual1746 `3f0e3e450b2`: move Advanced Trade fills,
+historical orders and public trades onto existing engine `CursorHistory<Row>`.
+This is existing history-owner fan-out, not another per-venue pagination policy.
+No Starbase integration, account reducer, signing/dispatch, engine source/API,
+metadata, scheduler, host runtime or public query argument changes. Keep the
+current Spot/INTX/CFM endpoints; one owner spans CFM then Spot family reads.
+The queued Bybit/Kraken/Paradex/Lighter/WEEX/Bitunix/BloFin/Binance slices are
+excluded. Coordinate Coinbase signer/account ownership before source edits.
+
+Current Request stores CursorWalk, cumulative rows, fingerprint identity proof
+and per-family accepted count itself. Streamed rows enter that cumulative set
+before final HTTP/envelope validation; later failures discard every accepted
+page through cx.fail. Replace cumulative rows/walk with shared owner, keep a
+response-local mapped candidate buffer, validate full HTTP/native envelope,
+required rows and all row mappings before admitting it. Native fingerprint
+comparison remains a mapping-integrity proof for conflicting IDs; shared owner
+owns dedupe membership and staged/accepted coverage. Preserve filtered identity
+checks and make repeated identical rows non-progress without inventing retries.
+
+First/zero-admitted page transport/decode/row failure rejects typed Internal;
+a later failed page returns only prior admitted rows plus exactly one command-
+owned history.incomplete Warn before successful completion. Page budget or
+repeated native cursor becomes shared-owner incomplete coverage. Invalid native
+cursor shape/length, proof_token_required, request construction and signer
+preparation remain strict rejection even after acceptance; preparation errors
+report notSent without manufacturing a successful ledger. No failed response
+prefix or failed family can publish rows or mutate account state. Terminal
+paths remove active command ownership; concurrent queries remain isolated at
+Error-only logging. Preserve existing admission errors outside started history.
+
+Keep 50-page budget PER family, original family order, product filters, cursor
+escaping, immediate continuation, 1..1000 result limit and per-request native
+limits. Preserve strict identity conflict checks, first-wins identical repeats,
+UTC inclusive filters/RFC3339 rounding, CFM native contract units, public maker-
+side inversion, stable descending timestamp sort and final global truncation.
+Do not claim Starbase parity, live coverage or B11 NX closure.
+
+Commit original-RED regressions before production: typed first failure; accepted-
+only later transport/HTTP/decode/mapping failure with failed-prefix exclusion;
+filtered/empty first pages do not authorize partial success; shared repeated-
+cursor coverage; CFM-to-Spot accepted recovery; concurrent owner/Error-only
+marker binding; strict proof-token/preparation control. Preserve existing native
+request/shaping/unit tests, adjust only their old later-failure contract. Run
+focused engine/Coinbase/Binance tests, strict Clippy/fmt/bans/link checks and
+independent plan/correctness/adversarial architecture reviews, then full exact-
+head CI/replay with actual shared/build predecessors before separate guard/merge.
+Expected own paths: Coinbase history.rs/history tests (native test support only
+if strict preparation needs it), existing OWNED_HISTORY/AUDITS/QUALITY/CALLERS.
+
+Coinbase independent plan review refinement: shared CursorHistory on actual1746
+is sufficient. Per-family output is accepted-length baseline plus validated
+candidates; family completion precedes restart, and CFM reaching its own limit
+still proceeds to Spot. Native fingerprint comparison stays before UTC filters
+and shared freshness; a conflict invalidates the entire page and follows the
+same actual-mapping-failure policy (prior accepted-only partial, typed rejection
+if none). Identical repeats add no output; do not enable a new no-new-rows cursor
+termination policy. Preserve the pre-finalization 2*MAX_OUTPUT safety bound.
+
+One narrow preparation routing addition is necessary: Coinbase rest.rs signs
+queued requests in dispatch(), and fail_unsent currently sends History through
+ordinary response-failure handling. Add only its Pending::History match arm to
+strict owner rejection, preserving all signer/queue/dispatch behavior; otherwise
+later credential/entropy refusal would incorrectly resolve prior rows. Existing
+request() consumes Pending before returning immediate queue/path refusal; keep
+that direct active cleanup and typed Internal/notSent rejection rather than
+cloning or reconstructing the owner. Include rest.rs in owned scope. No shared
+signing/dispatch change is introduced. Native preparation and CFM-family tests
+may use existing cfg(test) private access, never a production mutator. Rows lane
+confirmed no current Coinbase history/request-builder ownership conflict.
+
+Coinbase implementation receipt: original12 history preservation tests pass;
+regression-only ca876aa0aac adds nine assertion-RED integration cases and a
+CFM-to-Spot original-RED control. Expanded controls against exact original native
+source produce10PASS/12 assertionRED; corrected bytes restored by hash in finally.
+The controls cover typed first/zero-row failure, accepted-only failed-prefix
+exclusion, command isolation at Error-only logging, filtered fingerprint conflict,
+native continuation/proof refusal, queued signing refusal, duplicate-only changing
+cursors and the50-page cap. Corrected final22 history controls and native family
+control pass; full final Coinbase187 tests pass. Earlier broad engine/Coinbase/
+Binance833 controls pass; final adapter strict all-target Clippy/fmt/signing bans,
+four touched-plan link checks and diff checks pass. Native owner is boxed to
+preserve bounded Pending layout without changing lib.rs or lint allowances.
+
+Plan/correctness/adversarial reviews CLEAN after one caught mismatch: native Page
+metadata deserialization must reject strictly, whereas malformed whole-response
+stream/decode failure retains ordinary accepted-page recovery. Explicit controls
+now prove that split. Shared default CursorWalk does not enable a new no-fresh
+termination policy; duplicate-only changing cursors reach the existing family cap.
+No engine source/API added. Full exact-head CI/replay/actual build predecessors
+remain pending; queue keeps actual1728 then KCS1753 ahead of this source slice.
+
+Coinbase CI scan follow-up: gitleaks8.30.1 found exactly one generic-api-key
+false positive in original regression commitca876aa0aac, native family fixture
+line10: the same literal organizations/test/apiKeys/test already recorded for
+existing Coinbase history/account/trading fixtures. The native seed is fixed
+[7;32], not an account credential. Add only that exact commit/path/rule/line
+fingerprint to .gitleaksignore; no scanner rule, path pattern or config change.
+Full original-range scan reproduces RED1, exact exception makes GREEN0; independent
+source/report review CLEAN. This adds a ninth owned path, with no runtime change.
+
+
+
+
+
+
+## Next fan-out: WEEX income range and single-page completion
+
+Plan from owner-pinned actual `5743c485d44e348e3d29039c4ebe83f6a78f0186`.
+Paradex #1748 and Lighter #1750 remain separate watched PRs. Landing is held for
+#1746, then #1728, then #1748/#1749 under the owner queue. This slice has no merge
+exception and will integrate actual shared/build/history predecessors before
+final proof. Bybit, Kraken Spot, Paradex and Lighter native sources are excluded.
+
+Scope is WEEX income only: replace Read::Income's RangeWalk and accepted-row
+vector with the engine RangeHistory owner for bounded ranges, and the existing
+CursorHistory owner for one-page/unbounded income. Native Request rows remain
+response-local parse staging so retries/preparation and whole-envelope admission
+cannot poison the owner. State map keys and request command IDs route responses;
+only the retained engine owner may finish the query or emit incompleteness.
+WEEX fills/orders/public-trades list reconciliation, its missing-fill-ID reporter,
+account/settings/metadata, signing, dispatch and scheduler are separate follow-ons.
+
+The five venue-local income completeness emitters disappear. A failed first page
+or any failure before accepted mapped rows rejects typed, never an empty complete
+array or an early marker. An actual later HTTP/native/transport/stream/list/row
+failure immediately resolves accepted earlier pages with one owner Warn before
+success, including Error-only logging, and stops requesting further chunks.
+The failed page's prefix is excluded. This intentionally supersedes WEEX's old
+skip-failed-chunk-and-continue contract. Multiplexed transport/decode callbacks
+retain Internal rather than inventing Network classification. Native signing
+preparation refusal stays strict after acceptance and reports notSent; keyless
+and admission no-I/O behavior stays unchanged.
+
+Preserve native POST body/headers, 100-day span windows, 100-row ranged requests,
+single-page caller-limit clamp, 100 ms pacing and existing host-pause deferral.
+RangeHistory owns inclusive-boundary selection/dedupe, including the existing
+compound income identity and missing-bill-ID timestamp fallback; native mapping,
+units/categories, stable descending sort and no extra final truncation remain.
+Opaque nextKey/hasNextPage is a valid-page coverage omission, never proof that a
+span walk consumed an advertised cursor. A valid page is admitted and its gap is
+retained by the engine; existing span continuation is preserved. A final success
+emits one marker, not one per page. Budget exhaustion retains admitted rows with
+owned missing coverage, preserving the 10,000 physical-query selection cap.
+
+Extend the shared owner only where its current API cannot express these facts:
+a validated incomplete-page admission for RangeHistory, a single-page coverage
+fact for CursorHistory, and an engine-owned optional lifetime request budget for
+RangeHistory (not a venue counter or replacement pager). Reject invalid lifecycle
+use before changing accepted rows/gap state. A pending/unvalidated page must not
+be turned into budget or cursor-gap success. The budget must stop before issuing
+the first over-budget request, retain the first omission, and keep owner-only
+command fields. Exact API is subject to independent plan review before code.
+No changes to RangeWalk algorithms or release/admission time ownership.
+
+First commit original-RED native controls: typed first/zero-accepted failure,
+accepted-only later failure across pages/chunks, valid-prefix exclusion, matching
+command ownership with concurrent reads at Error-only logging, no markers on
+rejection, and exactly one marker on cursor-gap/budget success. Preserve existing
+body/pacing/pause/dedupe/request-sequence controls; deliberately update tests that
+pin continuation after a failed first page. Add small engine controls for budget
+edges, validated-gap admission and strict lifecycle misuse. No local large
+request/timing sweeps; existing full native cases and CI supply those controls.
+
+Expected paths: engine/src/history.rs and engine history tests, WEEX history.rs
+and native history tests, with only a narrow callback seam if a real preparation
+path needs it; existing AUDITS/QUALITY/CUTOVER_CALLERS/OWNED_HISTORY sections.
+Coordinate shared-engine and WEEX ownership first. Plan, correctness and
+adversarial review must answer the architecture gate: reusable engine coverage/
+budget policy plus native fact mapping, not another venue-local history core.
+Focused engine/WEEX/Binance and shared-history references, strict Clippy/fmt/bans/
+links, exact-head CI/replay and actual predecessor proof before the separate
+guard/merge. No NX writes, B11 closure or deployed-runtime claim.
+
+
+Independent WEEX plan review: feasible, with validated atomic coverage-admission
+APIs on the shared owners. Validate active/finished/poisoned state and range
+row/fact alignment before recording a gap or accepting the page; preserve
+RangeWalk.failed() as an admitted native coverage fact. Lifetime cap reuses
+RangeWalk.requests, with no second counter: only request N+1 is stopped, while
+natural Finished after exactly N remains complete and pause resumption cannot
+step/charge twice. Single-page includes equal bounds and preserves its original
+rows without range filtering/dedupe. A valid empty page advertising a cursor may
+succeed incomplete; a failed page with zero accepted rows must reject. Final
+encoding returns Result, replacing the income expect. Terminal completion removes
+read state and clears retained delay/deferred continuation.
+
+The existing native-backed fixtures/incomplete-query-event.json producer currently
+pins a first-failure marker. Replace that producer with accepted-page/later-failure
+command-1 success under the new contract; regenerate only its exact event and
+adjust linked host/worker test message assertions if pinned. No host runtime or
+protocol edit. Small engine tests cover exact/over budget, lifecycle misuse and
+first-cause retention; existing native lifetime cap covers 10,000 selections.
+
+
+WEEX implementation receipt: baseline23 native history controls pass; original
+four added behavior groups fail by assertion (untyped/early-marker first failure,
+continuation after empty prior coverage, discarded accepted rows, early repeated
+cursor-gap publication). Regression-only commit12e0585321e precedes production.
+The corrected final30 history tests pass, including seven failure modes,
+concurrent owner isolation, equal-bound/native-row preservation and resumption of
+the same selected range after a shared IP pause. Existing10,000-selection native
+cap still passes. Three new engine groups cover exact/over/invalid/late budget,
+first-cause retention, valid empty gaps, invalid pending/finished admission and
+encoder failure. An off-by-one budget mutation failed its assertion and exact
+source bytes were restored before corrected GREEN.
+
+Plan/correctness/adversarial source reviews are CLEAN. Focused engine/WEEX/Binance
+820 tests and strict all-target Clippy pass; final touched-history controls and
+Clippy/fmt/bans pass after test refinements. The native-backed fixture is now
+produced by command1's accepted-page/later-failure success, with two focused
+host/worker ownership tests passing through corepack. No host runtime/protocol,
+financial reducer, scheduler/release or signing edits. All remaining actual
+shared/build dependencies, exact-head CI/replay proof and owner hold/queue still
+apply before merge; no deployed caller completion claim.
