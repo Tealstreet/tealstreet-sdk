@@ -2,6 +2,7 @@
 mod account;
 mod closed;
 mod history;
+pub mod hosted_signing;
 mod hyro;
 mod identity;
 mod options;

@@ -1,4 +1,5 @@
 import { copyHistoryCompleteness } from '../../historyCompleteness';
+import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   AccountAuthResult,
@@ -80,7 +81,7 @@ import {
   workerCallClientOrderIds,
 } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import { deriveBridgeConstruction, derivePublicMode } from './construction';
+import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { LocalSignerSetup, withoutSigningCredentials } from './localSignerSetup';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
@@ -412,12 +413,28 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    if (this.bridgeConstruction.dispatchSigning) {
+      try {
+        await this.ensureHost();
+        return await signHostedHttp(this.name, this.options, Boolean(this.signerSetup?.primaryComplete), this.host!, request);
+      } catch {
+        return { id: request.id, error: 'Hosted HTTP signing failed' };
+      }
+    }
     const signer = this.hostedSigner();
     if (!signer) return { id: request.id, error: 'Exchange does not have xhr for signing' };
     return (await signer).signHttpRequest(request);
   };
 
   override signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    if (this.bridgeConstruction.dispatchSigning) {
+      try {
+        await this.ensureHost();
+        return await signHostedWsAuth(this.host!, request);
+      } catch {
+        return { id: request.id, error: 'Hosted WS auth signing failed' };
+      }
+    }
     const signer = this.hostedSigner();
     return signer ? (await signer).signWsAuth(request) : this.localSignWsAuth(request);
   };
@@ -598,8 +615,8 @@ export class RustEngineExchange extends BaseExchange {
       const message = 'Local signer setup is not supported for this Rust venue yet';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const signingMode=bridgeConstruction.dispatchSigning ? derivePublicMode(exchangeName,options) : undefined;
-    const signerSetup=bridgeConstruction.dispatchSigning ? new LocalSignerSetup(options) : undefined;
+    const signerSetup=bridgeConstruction.dispatchSigning ? new LocalSignerSetup(options,deriveSignerSetupPolicy(exchangeName)) : undefined;
+    const signingMode=signerSetup ? derivePublicMode(exchangeName,options,undefined,signerSetup.credentialPresence) : undefined;
     if (signerSetup) options=withoutSigningCredentials(options);
     const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
       ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]

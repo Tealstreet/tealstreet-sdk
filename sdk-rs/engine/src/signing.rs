@@ -7,6 +7,93 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+/// Non-secret rules applied only while trusted setup installs provider material.
+/// An undeclared slot/field preserves the caller's setup metadata.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct CredentialSetupPolicy {
+    pub primary: Option<IdentitySetupPolicy>,
+    pub secondary: Option<IdentitySetupPolicy>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct IdentitySetupPolicy {
+    pub trim_credential: Option<bool>,
+    pub passphrase: Option<SetupFieldPolicy>,
+}
+
+/// Required material is validated by trusted setup; external refs prove presence only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SetupFieldPolicy {
+    #[default]
+    Optional,
+    RequiredForPrivate,
+    RequiredWithPrimaryFallback,
+}
+
+impl CredentialSetupPolicy {
+    /// Resolve only complete existing slots; never invent credential/signing refs.
+    /// Explicit passphrase refs (including invalid empty refs) never fall back.
+    pub fn apply_to_identities(
+        &self,
+        identities: &mut Identities,
+        public_data_only: bool,
+    ) -> Result<(), SignError> {
+        let complete = |identity: &Identity| {
+            !identity.credential.0.is_empty() && !identity.signing.0.is_empty()
+        };
+        let required = |policy: Option<IdentitySetupPolicy>, primary: bool| match policy
+            .and_then(|policy| policy.passphrase)
+            .unwrap_or_default()
+        {
+            SetupFieldPolicy::Optional => false,
+            SetupFieldPolicy::RequiredForPrivate => !(primary && public_data_only),
+            SetupFieldPolicy::RequiredWithPrimaryFallback => true,
+        };
+        if let Some(primary) = identities.primary.as_ref().filter(|id| complete(id))
+            && required(self.primary, true)
+            && (!valid_key_ref(&primary.credential)
+                || !valid_key_ref(&primary.signing)
+                || primary
+                    .passphrase
+                    .as_ref()
+                    .is_none_or(|key| !valid_key_ref(key)))
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        let primary_passphrase = identities
+            .primary
+            .as_ref()
+            .and_then(|id| id.passphrase.as_ref());
+        if let Some(secondary) = identities.secondary.as_ref().filter(|id| complete(id))
+            && required(self.secondary, false)
+        {
+            let passphrase = secondary.passphrase.as_ref().or_else(|| {
+                (self.secondary.and_then(|policy| policy.passphrase)
+                    == Some(SetupFieldPolicy::RequiredWithPrimaryFallback))
+                .then_some(primary_passphrase)
+                .flatten()
+            });
+            if !valid_key_ref(&secondary.credential)
+                || !valid_key_ref(&secondary.signing)
+                || passphrase.is_none_or(|key| !valid_key_ref(key))
+            {
+                return Err(SignError::InvalidRequest);
+            }
+            // Validation precedes mutation, including an invalid primary fallback.
+            let passphrase = passphrase.cloned();
+            identities
+                .secondary
+                .as_mut()
+                .expect("existing secondary")
+                .passphrase = passphrase;
+        }
+        Ok(())
+    }
+}
+
 /// Opaque provider-owned identity. This is not an API key or a private key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
@@ -174,7 +261,57 @@ pub struct SignRequest {
     pub context: Context,
 }
 
+/// One credential presentation and exact HMAC preimage. Native recipes and
+/// signing-only compatibility adapters use the same atomic primitive shape;
+/// only the trusted recipe chooses the identity and canonical payload parts.
+pub fn hmac_sha256_work(
+    identity: &Identity,
+    payload: Vec<PayloadPart>,
+    context: Context,
+    receipt: SignReceipt,
+) -> SignRequest {
+    SignRequest {
+        receipt,
+        operations: vec![
+            Operation::Present {
+                key: identity.credential.clone(),
+            },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: identity.signing.clone(),
+                payload,
+            },
+        ],
+        context,
+    }
+}
+
 impl SignRequest {
+    /// Validate provider output against this exact atomic request. Dispatch and
+    /// signing-only capture share receipt, result-count and byte-shape policy.
+    pub fn validate_result(&self, result: &SignResult) -> Result<(), SignError> {
+        validate_result_shape(&self.expected_result_lengths(), self.receipt, result)
+    }
+
+    pub(crate) fn expected_result_lengths(&self) -> Vec<Option<usize>> {
+        self.operations
+            .iter()
+            .map(|operation| match operation {
+                Operation::Present { .. } => None,
+                Operation::Sha256 { .. } => Some(32),
+                Operation::Sign { algorithm, .. } => Some(match algorithm {
+                    Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => 32,
+                    Algorithm::HmacSha512
+                    | Algorithm::Ed25519
+                    | Algorithm::Es256
+                    | Algorithm::StarkDigest
+                    | Algorithm::SchnorrDigest => 64,
+                    Algorithm::Secp256k1Digest => 65,
+                }),
+            })
+            .collect()
+    }
+
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.
     pub fn validate(&self) -> Result<(), SignError> {
@@ -228,6 +365,23 @@ impl SignRequest {
         }
         Ok(())
     }
+}
+
+pub(crate) fn validate_result_shape(
+    expected: &[Option<usize>],
+    receipt: SignReceipt,
+    result: &SignResult,
+) -> Result<(), SignError> {
+    if result.receipt.validate().is_err()
+        || result.receipt != receipt
+        || result.values.len() != expected.len()
+        || expected.iter().zip(&result.values).any(|(length, bytes)| {
+            bytes.len() > 1024 * 1024 || length.is_some_and(|length| bytes.len() != length)
+        })
+    {
+        return Err(SignError::InvalidResult);
+    }
+    Ok(())
 }
 
 /// Raw operation results in request order. May contain outbound credentials.
@@ -331,3 +485,110 @@ macro_rules! redacted_debug {
     )+};
 }
 redacted_debug!(PayloadPart, Operation, SignRequest, SignResult);
+
+#[cfg(test)]
+mod setup_field_policy_tests {
+    use super::*;
+
+    fn policy() -> CredentialSetupPolicy {
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                passphrase: Some(SetupFieldPolicy::RequiredForPrivate),
+                ..Default::default()
+            }),
+            secondary: Some(IdentitySetupPolicy {
+                passphrase: Some(SetupFieldPolicy::RequiredWithPrimaryFallback),
+                ..Default::default()
+            }),
+        }
+    }
+    fn identity(slot: &str, passphrase: Option<&str>) -> Identity {
+        Identity {
+            credential: KeyRef(format!("{slot}.credential")),
+            signing: KeyRef(format!("{slot}.signing")),
+            passphrase: passphrase.map(|p| KeyRef(p.into())),
+            stable_id: None,
+        }
+    }
+
+    #[test]
+    fn opaque_required_fields_use_explicit_mode_and_absent_only_aliasing() {
+        let primary = identity("primary", Some("primary.passphrase"));
+        let mut ids = Identities {
+            primary: Some(primary.clone()),
+            secondary: Some(identity("secondary", None)),
+        };
+        policy().apply_to_identities(&mut ids, false).unwrap();
+        assert_eq!(ids.secondary.unwrap().passphrase, primary.passphrase);
+        let mut ids = Identities {
+            primary: Some(identity("primary", None)),
+            secondary: None,
+        };
+        let original = ids.clone();
+        assert_eq!(
+            policy().apply_to_identities(&mut ids, false),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(ids, original);
+        policy().apply_to_identities(&mut ids, true).unwrap();
+        ids.secondary = Some(identity("secondary", None));
+        assert_eq!(
+            policy().apply_to_identities(&mut ids, true),
+            Err(SignError::InvalidRequest)
+        );
+    }
+
+    #[test]
+    fn explicit_invalid_refs_do_not_fall_back_and_partial_slots_are_not_created() {
+        for passphrase in ["".into(), "x".repeat(257)] {
+            let mut ids = Identities {
+                primary: Some(identity("primary", Some("primary.passphrase"))),
+                secondary: Some(identity("secondary", Some(&passphrase))),
+            };
+            let original = ids.clone();
+            assert_eq!(
+                policy().apply_to_identities(&mut ids, true),
+                Err(SignError::InvalidRequest)
+            );
+            assert_eq!(ids, original);
+        }
+        let mut ids = Identities {
+            primary: Some(Identity {
+                credential: KeyRef(String::new()),
+                signing: KeyRef(String::new()),
+                passphrase: Some(KeyRef("primary.passphrase".into())),
+                stable_id: None,
+            }),
+            secondary: Some(identity("secondary", None)),
+        };
+        policy().apply_to_identities(&mut ids, false).unwrap();
+        assert_eq!(
+            ids.secondary.unwrap().passphrase,
+            Some(KeyRef("primary.passphrase".into()))
+        );
+        assert!(ids.primary.unwrap().credential.0.is_empty());
+        let mut ids = Identities {
+            primary: None,
+            secondary: Some(Identity {
+                credential: KeyRef("secondary.credential".into()),
+                signing: KeyRef(String::new()),
+                passphrase: None,
+                stable_id: None,
+            }),
+        };
+        let original = ids.clone();
+        policy().apply_to_identities(&mut ids, false).unwrap();
+        assert_eq!(ids, original);
+        assert_eq!(
+            serde_json::from_str::<IdentitySetupPolicy>(
+                r#"{"passphrase":"requiredWithPrimaryFallback"}"#
+            )
+            .unwrap()
+            .passphrase,
+            Some(SetupFieldPolicy::RequiredWithPrimaryFallback)
+        );
+        assert!(
+            serde_json::from_str::<IdentitySetupPolicy>(r#"{"passphrase":"invented"}"#).is_err()
+        );
+    }
+}

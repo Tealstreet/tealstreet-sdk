@@ -154,7 +154,10 @@ High:
   controls preserve historical quotes, equal-endpoint corrections and native
   Spot/INTX/CFM quantity units. BloFin also uses checked prefix admission,
   capped-decimal arithmetic and scaled public-output preparation before live
-  progress commits. BingX, AsterDEX, Kraken Spot, Orderly and the KuCoin Spot
+  progress commits. Kraken Spot now prepares direct/cumulative trade delivery
+  through the same helper before row state commits, preserving native IDs,
+  explicit last quantities and independent lifecycle observations. BingX,
+  AsterDEX, Orderly and the KuCoin Spot
   fallback still need adoption before
   row reporting and snapshot freshness. ApeX cumulative events still never
   emit public fills; synthetic history remains distinct. No live capture claim.
@@ -1132,6 +1135,18 @@ native authoritative state; neither observation alone demonstrates a defect.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.
+- ~~Spot cumulative-only trades with zero/negative prices commit displayed
+  progress without a Fill, losing same-quantity corrections; an invalid final
+  trade can also poison native time, terminal status and order provenance.~~
+  Existing `engine::execution::Cursor::prepare` validates direct/last evidence
+  before any row/fence/dedup effects. Four original-source assertion-RED controls
+  cover zero and negative prices independently, retained final-row state and
+  same-ID correction within a batch; decoded correction delivery is .5@100.
+  Healthy peers and accepted-row ordering remain independent. Zero/no-growth,
+  snapshots and separate lifecycle observations retain native policy; no
+  independent delivery ledger or recovery after a valid terminal lifecycle is
+  promised. Full native engine/Kraken/Binance verification passes (844 tests).
+  [Scope and remaining cumulative fan-out](RUST_CUMULATIVE_FILLS.md).
 - ~~Medium: isolated positions flip to cross when a WS row omits
   `maxFixedLeverage` (`kraken/src/account.rs:1056,1132`; confirm live);
   `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
@@ -1300,8 +1315,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX left partial history
   unflagged and worker owners unwarned.~~ #1627–#1633 attach the actual request
   before completion, preserving Warn semantics and #1593's client isolation.
-  Bitunix additionally rejects failed history reads instead of returning truncated
-  success (actual merge receipts in [the sweep](RUST_PORT_WIRE_SWEEP.md)).
+  Bitunix's #1633 first/later failure rejection replaced silent truncated success
+  (actual merge receipts in [the sweep](RUST_PORT_WIRE_SWEEP.md)); the owned-history
+  adoption below supersedes its later-page policy.
   The owned-history core now binds BloFin closed-position completion and cursor
   paging in `engine::history`; its venue no longer emits this marker directly.
   Bybit and OKX closed-position reads now share its staged/accepted cursor owner,
@@ -1319,9 +1335,14 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   retain only accepted rows with command-owned incompleteness; native paging
   and header-preparation refusals still reject strictly. Successful cursor/row
   mapping and final limits remain.
-  Six background account-coverage markers have no command: the follow-on must
-  route them through one engine-owned account/background notice, never attach a
-  fabricated request ID or broadcast a command-owned marker.
+  Bitunix fills/orders/income now reuse CursorHistory too: first actual-page
+  failures reject typed; later failures retain accepted pages with one owned
+  marker, excluding failed-page prefixes. Signing preparation remains strict
+  notSent even after accepted rows. Native time/offset paging, raw progress,
+  mapping, 50/100 page caps and final limits remain; no engine API extension.
+  Six background account-coverage markers now use the shared BackgroundCoverage
+  reporter (#1735), with account/background scope and no command. They never
+  fabricate request ownership or flag an unrelated query.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.

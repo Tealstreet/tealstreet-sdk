@@ -180,8 +180,12 @@ Medium:
    and Spot/INTX/CFM units. BloFin now shares prefix admission, capped-decimal
    arithmetic and scaled public execution preparation, with two original-RED/
    core-GREEN controls preventing infinite-price delivery and lost correction.
-   Historical observations still bypass unused live-price preparation. Remaining
-   cumulative consumers need fan-out before reporting
+   Historical observations still bypass unused live-price preparation. Kraken
+   Spot now uses the existing direct/cumulative preparation path before row
+   state effects; four original-RED/core-GREEN controls preserve corrected
+   delivery and isolate rejected final rows without a separate ledger.
+   Zero/no-growth, snapshots, lifecycle observations and native ID policies stay
+   explicit. Remaining cumulative consumers need fan-out before reporting
    and snapshot freshness, rather than independent venue repairs. Snapshot commits retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
@@ -259,3 +263,11 @@ failed prefixes; actual later-page failures recover only accepted rows with owne
 incompleteness. Missing/repeated cursor, page budget and header-preparation
 refusal remain strict. Raw paging counts, request pins and native financial
 shaping are retained; no engine extension or universal enforcement claim.
+
+Bitunix fills/orders/income now reuse the same CursorHistory owner instead of
+local row vectors, dedupe, paging budgets and marker emission. Native time/offset
+facts feed the existing shared walker: raw progress before mapping filters,
+single-page fills, 50/100 page caps and final sorting/limits remain. First-page
+failure rejects typed; later failure returns accepted pages with owned
+incompleteness, excluding staged failed-page prefixes. Signing preparation
+refusal stays strict notSent. No engine API extension or universal fan-out claim.
