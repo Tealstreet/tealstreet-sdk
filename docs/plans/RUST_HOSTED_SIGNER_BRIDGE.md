@@ -286,7 +286,8 @@ HTTP header-policy adoption are implemented locally. Registry cargo check passes
 this policy/adoption slice still needs final native regressions, independent
 review, TS checks and runtime setup/provider wiring. Bybit runtime adoption is
 not implemented; its current policy test intentionally pins the pre-#1728 admission.
-The delegated setup capsule is separately under review with focused tests; its
-single native-readCredentials scrub finding must be closed before readiness.
+The delegated setup capsule passed 60 focused SDK tests (38 provider +22 setup);
+its native-readCredentials scrub finding is fixed with hostile-input coverage.
+Final independent delta review and integration checks remain required.
 No half-2 source is pushed or merge-ready. Finish #1728 first on actual #1746,
 then resume this branch and integrate the actual predecessors before final proof.
