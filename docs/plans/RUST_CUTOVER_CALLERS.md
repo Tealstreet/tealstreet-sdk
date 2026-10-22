@@ -3976,11 +3976,11 @@ NX migration tests; this docs-only backfill does not execute or close them.
 The engine/host contract and remaining legacy gate are detailed in
 [RUST_REQUEST_CONTEXT.md](RUST_REQUEST_CONTEXT.md).
 
-## Selected RemoteSigner runtime mode (proposed shared correction)
+## Selected RemoteSigner runtime mode
 
 When both `remoteSigner` and `payloadSigner` are configured on an admitted Rust
-account, RemoteSigner remains the selected provider. The proposed shared setup
-fix also uses that selection for private PayloadSigner admission and the native
+account, RemoteSigner remains the selected provider. Shared setup
+also uses that selection for private PayloadSigner admission and the native
 feed flag. It restores normal private streaming for Binance's four aliases and
 Bybit's five aliases (including Hyro), instead of incorrectly treating the unused
 PayloadSigner as a REST-only account. Hyro accepts the selected RemoteSigner;
@@ -3994,8 +3994,8 @@ explicit callback shapes still reject, including an invalid unused callback.
 Unavailable, refused or malformed RemoteSigner work cannot fall back to the
 PayloadSigner or a local secret. Caller input, callback receiver custody and the
 external sign-request/sign-response wire do not change. No new caller option or
-persisted identity mapping is required. The fix is queued after #1741; actual
-merge and final CI/proof remain pending. See [RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md).
+persisted identity mapping is required. See
+[RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md).
 
 ### Hyperliquid perp histories: shared inclusive-page ownership
 
@@ -4040,6 +4040,25 @@ orders are restored independently of whether their diagnostic was suppressed.
 No SDK argument/result, remote/header/signing contract, order/position/FILLS wire
 shape, caller migration or financial/snapshot authority changes. Remaining
 persistent reporter consumers stay open in RUST_ROW_ADMISSION.md.
+
+
+## BloFin and Kraken row-reporting adoption (2026-10-23)
+
+BloFin, Kraken futures and Kraken Spot use the existing engine reporter instead
+of five account-owned suppression collections. Caller-visible diagnostic text,
+severity, ordering and repeat/re-arm timing remain native. BloFin retains its
+separate position/order bounded Once memories, decode-time per-key forgetting
+and existing accepted-read clear sites. Kraken futures retains bounded
+Warn-to-Error upgrade memory and separate unbounded Once unlisted-symbol memory;
+unlisted mapping still reports before snapshot admission, zero-quantity unknown
+positions stay silent, and reconnect never rearms that memory. Kraken Spot
+retains bounded Once, coin/order namespaces (including empty order identity),
+admitted-versus-rejected stale balance behavior and the different REST/WS mapped
+identity filters. No SDK call/result, order/position/FILLS shape, health policy,
+financial or snapshot authority, signing, HTTP/WS lifecycle or caller migration
+changes. The 126 final native account compatibility tests pass on unchanged
+pre-migration production, including eleven new controls; this is no defect-RED
+claim. Full CI and a fresh current-head raw proof remain the merge gates.
 ## Static public headers during managed HTTP preparation
 
 Trusted Rust `SignStep` implementations can declare static noncredential HTTP
@@ -4052,11 +4071,10 @@ passphrase and signature headers remain provider/apply-owned; this declaration
 does not grant callback-header authority or change the external signing wire.
 
 BingX's public SOURCE/Content-Type declaration is shared with its existing
-legacy renderer, whose signed order remains SOURCE, APIKEY, Content-Type. The
-prerequisite's managed test uses a synthetic recipe; it does not admit BingX or
-WEEX production managed requests, provider construction or hosted signing. Those
-family migrations must consume actual shared APIs, preserve semantic Context
-ownership and carry their own caller acceptance. Existing SDK callers need no
+legacy renderer, whose signed order remains SOURCE, APIKEY, Content-Type.
+The declaration supplies public headers; private signing, provider construction
+and hosted signing still follow the family's separate admission policy. Semantic
+Context ownership is unchanged. Existing SDK callers need no
 new option, credential transfer or persisted identity mapping for this additive
 header seam. [Contract and scope](RUST_UNSIGNED_HTTP_HEADERS.md).
 ### BingX native dispatch signing and refusal ownership
