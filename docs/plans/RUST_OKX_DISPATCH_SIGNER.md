@@ -109,3 +109,38 @@ reprepare. Independent adversarial review recomputed the full ratchet: exact
 516 matches/516 allowances, all non-OKX entries unchanged, no stale allowances.
 Actual-WASM hosted and replay evidence remains pending, not inferred from native
 fixtures or the SDK constructor-only setup tests.
+
+## Hosted completion on landed presentation
+
+Actual #1763 `d05c5ede4b86409e1a8d9798e64b79b1c1c888f4` is integrated at
+`442622ac4f4`. The construction conflict preserves every incoming declaration
+and adds only the four OKX dispatch flags, under the owner's explicit ruling.
+Cargo's existing registry build regenerates its embedded construction table;
+the construction-codegen and OKX signer targets pass all 12 controls.
+
+1. Extract the existing OKX HTTP preimage/body/header construction into a small
+   standalone codec shared by the TS interceptor and Rust hosted capture. Keep
+   decoded qs queries, exact serialized bodies, ISO timestamps, public bypass,
+   testnet headers and native header precedence. The codec never owns secrets.
+2. Admit the four aliases to registry hosted captures and declared keyless
+   RemoteSigner policy. Extend the existing prepared WS metadata codec with
+   OKX's `{timestamp}` envelope, preserving each alias label. Provider-owned
+   passphrase Present operations remain separate from HMAC bytes. Primary-only
+   remote signing and required-secondary refusal remain shared policy.
+3. Keep private PayloadSigner unsupported: the existing OKX TS interceptor
+   requires a local secret and does not implement that combination. Do not
+   invent a REST-only account lifecycle in this signing port. Browser signing
+   and keyless RemoteSigner HTTP/private+business WS remain supported.
+4. Add per-alias actual-WASM/SDK HTTP and WS positives and deterministic codec,
+   setup, error and exact legacy-wire controls. Check passphrase absence/empty,
+   opaque refs, disposal and no-network capture boundaries. Update the caller
+   section and family guidance in this PR; retain all other policy entries and
+   exact ratchet counts.
+5. Run native OKX/registry/Binance tests, focused SDK tests, typecheck/lint and
+   independent correctness/adversarial review. Actual-WASM execution, replay
+   equality and performance remain CI gates, with no local release build.
+
+Architecture gate: this adopts the landed provider, capture, setup and codec
+policy seams. It introduces no credential custody, retry ledger, clock,
+socket policy or request admission mechanism. The socket core is a separate
+draft and is not an input to this branch. Landing is held for #1769.
