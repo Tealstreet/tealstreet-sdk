@@ -1347,3 +1347,19 @@ four Cargo jobs; no release WASM/replay/size/timing sweep. Update caller/AUDITS/
 QUALITY scope, publish draft CI and watches, integrate actual dependencies under
 the owner queue, then exact-head CI/proof, announcement, separate guard and
 separate merge. Keep #1758/#1760 watches; no B11/runtime/cutover closure.
+
+Crypto.com plan review is CLEAN with exact preservation constraints: do not
+enable generic no-new-row/empty stalls, because a full duplicate page may still
+advance its older bound and only a short repeated page proves exhaustion. Run
+strict nanosecond/nonadvance checks only when continuation is needed, after that
+short-page stop rule. Keep the single mixed retry counter (40101 below one,
+other transport below three), and 1000ms continuation/retry timers distinct from
+per-method pacing. Public successful queries remain one page with duplicates,
+while their existing retries stay intact. The representable page ceiling is a
+strict policy refusal, not a new normal 50-page bound. account::signed is a
+synchronous validated-credential helper with no fallible signing callback, so
+no account/signing edits are required. Owner explicitly authorized exact stack
+on reviewed #1760 `ba960f9b7e8`; genuine integration `73b500095be` preserves all
+unowned blobs and the original regression blob. The sole independent-section
+plan-doc conflict preserves incoming GRVT then Crypto.com verbatim, with block
+hashes/base subsequence and no conflict markers. Actual #1760 remains required.
