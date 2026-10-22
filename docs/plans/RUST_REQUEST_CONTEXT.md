@@ -911,3 +911,9 @@ and signer, typed failure, streamed result, duplicate/late callback and same-ID
 reuse, preserving provider slot/signature, query bytes and ordinary result schema.
 Account/background helpers and history follow in separate slices; their current
 legacy sites stay inventoried and receive no managed behavior claim yet.
+
+Identity retains its legacy correlated diagnostic before the terminal failure.
+Expose one additive command_error_context reporter using the existing synchronous
+completion validator; stale/foreign/background authority emits nothing. This
+lets native adapters preserve that ordering without an unchecked numeric report
+or new validation policy. It grants no send permission or deadline extension.
