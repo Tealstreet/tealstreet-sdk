@@ -1,6 +1,10 @@
 //! OKX signs the exact path/query and serialized body it sends.
 use safe_cex_crypto::{Encoding, hmac_sha256};
 
+// Verify the new recipes independently before switching every native builder.
+#[cfg(test)]
+mod dispatch;
+
 pub struct Credentials {
     pub key: String,
     pub secret: String,

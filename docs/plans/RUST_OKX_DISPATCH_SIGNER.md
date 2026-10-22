@@ -63,3 +63,17 @@ ledger or retry implementation. No Phemex-style raw/protocol release-expiry
 projection or MEXC-style physical-send pacing dependency was found in OKX.
 Public/private readiness and caller transport routing remain explicit. No live
 capture is claimed; tape/native/actual-WASM evidence will be reported separately.
+
+
+## Native recipe checkpoint
+
+HTTP and WS SignStep implementations are verified under `cfg(test)` before
+switching the production builders. They stage opaque references, exact
+canonical bytes and atomic key/MAC/passphrase presentation; no local crypto or
+credential state is added. Nine library tests pass, including the fixed WS
+vector, dispatch-time fractional/ISO stamps, complete legacy header order,
+and native path/query mismatch rejection before either provider or I/O.
+Independent review caught and cleared the path-binding and header-order gaps.
+Production credential replacement, owned failure wiring, registry activation,
+caller section, ratchet shrink and hosted alias proofs remain to implement.
+This checkpoint does not claim that OKX dispatch signing is enabled.
