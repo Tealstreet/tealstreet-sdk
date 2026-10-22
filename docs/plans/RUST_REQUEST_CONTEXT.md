@@ -840,3 +840,16 @@ error/accepted-ID contract instead of optimistic whole-command success. Native
 reports and representative error follow logical plan order, not callback arrival.
 No final integrated CI/raw proof, read/Bybit migration or full evidence-memory
 claim is made by this checkpoint.
+
+
+Budget implementation layout: add private http_evidence.rs with a small copied
+EvidenceBudget (retained entry count, ID storage bytes, text-content bytes),
+project_result/project_error and bounded diagnostic helpers. CommandWrites
+commits the projection atomically, retains per-attempt id_overflow, and caps its
+configured attempt count at the existing engine maximum of 256. Keep public
+WriteResult variants and the terminal schema unchanged. The final result merges
+already-budgeted native facts; normalize a fallback only when it is selected.
+Default result() reporting must not reject a money fact merely because its error
+text/report quota is too large: bound its one-message presentation and omit only
+that default report when the report-only budget is exhausted. Explicit
+result_with_reports retains its atomic report-capacity refusal contract.
