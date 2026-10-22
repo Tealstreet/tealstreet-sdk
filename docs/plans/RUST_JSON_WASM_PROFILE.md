@@ -213,3 +213,39 @@ unchanged Bybit landing remains mandatory before the fresh separate guard.
 If those new covered source inputs move KCS bytes away from the pre-#1746
 baseline, report that explicitly and block for evidence/disposition; never
 substitute a different baseline or claim byte identity from arguments alone.
+
+## WOO landing-margin trigger: restore speed defaults (2026-10-23)
+
+Start from actual #1782 `6a7193e86688275e8888e9acec2d4bed3be2eff7`.
+Owner directs restoring WOO's speed-default exclusion after repeated public CPU
+misses on unrelated heads, including #1745 and #1780, and landing ratios near
+0.91–1.06x since #1746. This applies the existing measured-margin rule rather
+than spending another rerun. No objective, budget or threshold changes.
+
+Change only the central family condition in `sdk-rs/harness/build.sh`: WOO joins
+AsterDEX and KuCoin Spot in bypassing `wasm_profile_args`. Keep global serde_json
+level 3, explicit package overrides, other 38 alias argument arrays, combined
+arguments, optimization/bindings and native Cargo profiles unchanged. WOO's
+complete argument array must equal pre-#1746 actual hosted-bridge landing
+`5743c485d44e348e3d29039c4ebe83f6a78f0186`. Any WOO artifact difference from
+that older build must be attributed to intervening shared source inputs, not
+claimed byte-identical merely because arguments match. Compare old/current
+source with the restored policy and inspect authenticated CI package receipts;
+no local release build or replay. Use the #1753 same-source/profile evidence
+standard if shared inputs prevent historical byte identity.
+
+Architecture gate: YES, shared build-profile policy implementing its existing
+measured speed exception, no venue parser or per-venue algorithm. Independent
+plan and implementation/argument reviews; shell syntax and captured 39 aliases
+plus combined without invoking builds, root checks, full current-head green CI,
+WOO public CPU and fixed size budgets, authenticated WOO raw output/ordered-gate
+comparison and package provenance. Other families retain identical arguments;
+compare CI module hashes and report differences explicitly. CALLERS describes
+only the landed timing/profile behavior; proof/status goes in the PR body.
+
+Commit this plan before implementation. Merge only in the owner's queue after
+announcing the guard window; integrate any changed shared build/engine inputs,
+then fresh CI/proof, separate guard and separate exact-head merge. Verify actual
+parents/tree and notify dependent lanes. Reporter AsterDEX/GRVT/TxFlow work is
+saved separately at plan12d54/testaea90 with unchanged production and original
+124/124 native account controls; resume after this priority restore.
