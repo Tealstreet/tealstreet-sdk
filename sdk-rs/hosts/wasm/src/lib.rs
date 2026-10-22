@@ -578,16 +578,20 @@ impl WasmEngine {
                     "Local signer setup is not supported for this venue yet",
                 ));
             }
-            let (signer, identities) =
-                safe_cex_venues::local_signer_from_json(std::mem::take(&mut *input))
-                    .map_err(construction_error)?;
+            let (signer, identities) = safe_cex_venues::local_signer_from_json_for_mode(
+                venue,
+                std::mem::take(&mut *input),
+                safe_cex_venues::signer_setup_public_data_only(&options),
+            )
+            .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
         } else if external_signer {
             Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
         } else if dispatch_signing {
             let (signer, identities) =
-                safe_cex_venues::prepare_local_signer(&mut options).map_err(construction_error)?;
+                safe_cex_venues::prepare_local_signer_for(venue, &mut options)
+                    .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
         } else {
