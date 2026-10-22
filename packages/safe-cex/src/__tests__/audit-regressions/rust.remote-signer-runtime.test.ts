@@ -65,14 +65,14 @@ describe('delegated signer SDK runtime admission', () => {
     }
   });
 
-  it.each(aliases)('%s installs the owned provider and preserves payload intent when RemoteSigner wins', async (name) => {
+  it.each(aliases)('%s installs the owned provider, selects streaming and preserves raw payload intent when RemoteSigner wins', async (name) => {
     const upstream = remote(); const fallback = payload();
     const r = setup(name, { remoteSigner: upstream, payloadSigner: fallback });
     await ensure(r.exchange);
     expect(r.calls).toHaveLength(1);
     expect(r.calls[0]).toHaveLength(2);
     const config = JSON.parse(r.calls[0][1] as string);
-    expect(config).toMatchObject({ remoteSigning: true, payloadSigner: true, publicMode: { remoteSigner: true, payloadSigner: true }, signing: { primary: { credential: expect.any(String), signing: expect.any(String) } } });
+    expect(config).toMatchObject({ remoteSigning: true, payloadSigner: false, publicMode: { remoteSigner: true, payloadSigner: true }, signing: { primary: { credential: expect.any(String), signing: expect.any(String) } } });
     expect(config).not.toHaveProperty('secret');
     expect(r.installed).toHaveBeenCalledOnce();
     const identity = config.signing.primary;
