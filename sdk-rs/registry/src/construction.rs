@@ -1,6 +1,6 @@
 //! Synchronous SDK and native construction share these declarative conditions.
 use safe_cex_engine::signing::{CredentialSetupPolicy, IdentitySetupPolicy, SetupFieldPolicy};
-use safe_cex_engine::signing_policy::RemoteSigningPolicy;
+use safe_cex_engine::signing_policy::{RemoteSigningPolicy, SignatureEncoding};
 use serde::{Deserialize, Serialize};
 
 use crate::EngineOptions;
