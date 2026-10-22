@@ -538,7 +538,7 @@ impl BitunixFutures {
                 };
                 self.trade_error(cx, request, crate::error::not_sent(error, kind));
             }
-            Pending::History(read) => self.history_failed(cx, read, error),
+            Pending::History(read) => self.history_sign_failed(cx, read, error),
             Pending::Private(read) => self.account_failed(cx, read, None),
             Pending::SymbolSettings {
                 symbol,
