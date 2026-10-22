@@ -736,3 +736,98 @@ fn signing_preparation_refusal_stays_strict_after_accepted_rows() {
     reply(&mut e, request.id, &history_page(1, 0));
     typed_rejection(&e.drain_actions().collect::<Vec<_>>(), 41, true);
 }
+
+#[test]
+fn a_genuine_empty_first_page_is_complete_without_a_followup_request() {
+    for kind in 0..3 {
+        let (mut e, _) = startup();
+        let request = start_history(&mut e, kind);
+        reply(
+            &mut e,
+            request.id,
+            if kind == 1 {
+                r#"{"code":0,"data":{"orderList":[]}}"#
+            } else {
+                r#"{"code":0,"data":{"tradeList":[]}}"#
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 41, result }) if result == "[]")));
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+        )));
+        assert!(!actions.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+    }
+}
+
+#[test]
+fn an_unbounded_first_page_with_invalid_time_progress_stalls_without_leaking_a_token() {
+    let (mut e, _) = startup();
+    let request = start_history(&mut e, 1);
+    assert!(!request.url.contains("endTime="));
+    assert!(!request.url.contains("unbounded"));
+    let rows = (0..100)
+        .map(|id| history_order(id, 0.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(
+        &mut e,
+        request.id,
+        &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
+    );
+    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 0);
+}
+
+#[test]
+fn an_explicit_first_end_time_that_does_not_advance_is_incomplete() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::Query {
+            command: 41,
+            query: Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: None,
+                to_ms: Some(1_700_000_000_000.0),
+                limit: None,
+            },
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    let rows = (0..100)
+        .map(|id| history_order(id, 1_700_000_000_000.0))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(
+        &mut e,
+        request.id,
+        &format!(r#"{{"code":0,"data":{{"orderList":[{rows}]}}}}"#),
+    );
+    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 100);
+}
+
+#[test]
+fn a_requested_order_limit_does_not_short_circuit_native_paging() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::Query {
+            command: 41,
+            query: Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: None,
+                to_ms: None,
+                limit: Some(1),
+            },
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    reply(&mut e, request.id, &history_page(1, 0));
+    let request = requests(&mut e).remove(0);
+    assert!(request.url.contains("endTime=1699999999901"));
+    reply(&mut e, request.id, r#"{"code":0,"data":{"orderList":[]}}"#);
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&done(&mut e).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "0");
+}

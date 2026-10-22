@@ -1300,8 +1300,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Bitunix, BloFin, Bybit, Hyperliquid, OKX, Paradex and WEEX left partial history
   unflagged and worker owners unwarned.~~ #1627–#1633 attach the actual request
   before completion, preserving Warn semantics and #1593's client isolation.
-  Bitunix additionally rejects failed history reads instead of returning truncated
-  success (actual merge receipts in [the sweep](RUST_PORT_WIRE_SWEEP.md)).
+  Bitunix's #1633 first/later failure rejection replaced silent truncated success
+  (actual merge receipts in [the sweep](RUST_PORT_WIRE_SWEEP.md)); the owned-history
+  adoption below supersedes its later-page policy.
   The owned-history core now binds BloFin closed-position completion and cursor
   paging in `engine::history`; its venue no longer emits this marker directly.
   Bybit and OKX closed-position reads now share its staged/accepted cursor owner,
@@ -1319,9 +1320,14 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   retain only accepted rows with command-owned incompleteness; native paging
   and header-preparation refusals still reject strictly. Successful cursor/row
   mapping and final limits remain.
-  Six background account-coverage markers have no command: the follow-on must
-  route them through one engine-owned account/background notice, never attach a
-  fabricated request ID or broadcast a command-owned marker.
+  Bitunix fills/orders/income now reuse CursorHistory too: first actual-page
+  failures reject typed; later failures retain accepted pages with one owned
+  marker, excluding failed-page prefixes. Signing preparation remains strict
+  notSent even after accepted rows. Native time/offset paging, raw progress,
+  mapping, 50/100 page caps and final limits remain; no engine API extension.
+  Six background account-coverage markers now use the shared BackgroundCoverage
+  reporter (#1735), with account/background scope and no command. They never
+  fabricate request ownership or flag an unrelated query.
 
 ### BingX
 Normal inputs send the same requests as TS; the risk is resilience.

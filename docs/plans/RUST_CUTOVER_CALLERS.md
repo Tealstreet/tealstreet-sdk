@@ -3415,3 +3415,27 @@ changes. Background coverage does not resolve, reject or flag an unrelated
 query. B11's request-scoped ingestion/coverage work remains required, and other
 unconverted paged histories remain open; this follow-on does not close the full
 history fan-out or prove deployed NX behavior.
+
+
+### Bitunix histories: shared cursor and accepted-page completion
+
+Bitunix fills, orders and income now use the existing engine CursorHistory owner.
+A transport, HTTP/native, malformed-row or missing-list failure before any mapped
+rows are accepted rejects typed. After accepted rows, an actual page failure now
+returns only earlier accepted pages with one command-owned Warn
+`history.incomplete` before completion, including at Error-only logging. This
+supersedes #1633's strict later-page rejection; a failed page's staged prefix is
+excluded. A full raw page with no accepted mapped rows does not qualify for
+partial recovery. The legacy transport/stream-decode callback uses the engine's
+`internal` fallback, rather than claiming every failure is `network`.
+
+Header/signing preparation refusal remains strict with `notSent`, even after
+accepted rows. Native cursor stalls and page caps still finish with incomplete
+coverage. Single-page fills, order time cursors, income offsets, raw progress
+before mapping filters, 50-order/100-income page budgets, native financial
+mapping, final sorting/limits, keyless and unknown-fill-market no-I/O, and
+unsupported admission behavior remain. SDK arguments and result row shapes do
+not change. B11's request-scoped incomplete-query ingestion/coverage and typed
+rejection handling remain required; this slice adds no mandatory NX handler and
+does not close the remaining history fan-out.
+[Owner contract and scope](RUST_OWNED_HISTORY.md).

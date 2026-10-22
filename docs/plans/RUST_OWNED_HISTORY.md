@@ -612,7 +612,7 @@ three history queries still keep local row vectors, a dedupe set, page counters
 and direct history.incomplete emission. A later failed page currently rejects
 its earlier accepted rows; first-page failures reject without a typed kind.
 
-Use the existing shared `CursorHistory` for all three query kinds, with a boxed
+Use the existing shared `CursorHistory` for all three query kinds, with one
 owner and flat serialized native result variants. Stage mapped rows until the
 HTTP/envelope/stream verdict succeeds. Native facts select the time cursor for
 orders and offset token for income; the engine owns dedupe/progression, the
@@ -634,7 +634,7 @@ change credentials, signatures or native account reducers.
 
 Original-RED controls: typed first-page failure, accepted-prefix recovery after
 later transport/HTTP/native/malformed/missing-list failure, failed-page prefix
-exclusion, earlier valid empty pages followed by failure, Error-only single
+exclusion, a full mapper-filtered page followed by failure, Error-only single
 owned marker ordering, concurrent query isolation, and strict signing-entropy
 refusal with notSent. Existing cursor stalls/page caps/valid-empty/filter/time/
 alias/ledger tests remain semantic-preservation controls; update the old strict
@@ -659,3 +659,24 @@ empty page ends natively, so the zero-accepted-rows/later-failure control uses a
 full raw page whose rows are all mapper-filtered but retain native ID/time
 progress. Separately prove genuine empty-page termination. RequestContext lane
 confirmed no Bitunix edits; the one fail_private arm remains disjoint.
+
+
+Implementation keeps the CursorHistory owner inline: boxing it shrank History
+far below the pre-existing Private continuation and triggered large_enum_variant.
+Inlining preserves the existing Pending size balance and avoids a new allocation
+or unrelated account-continuation boxing. No lib.rs or reducer changes needed.
+
+Original-RED checkpoint e2aae0aa398 failed all six new failure-contract groups
+against the old implementation (15 preservation tests passed). The shared-owner
+implementation passes those controls plus four boundary controls: genuine empty
+termination, invalid unbounded first cursor, unchanged explicit endTime, and
+final-only requested order limit. Existing signing preparation remains strict
+notSent; callbacks multiplexing transport and decode retain the shared Internal
+fallback rather than inventing a Network classification. The owner is the sole
+command identity and emits incompleteness only at successful finalization.
+
+Focused engine/Bitunix/Binance gates pass 848 native tests, including all 25
+Bitunix history tests; strict all-target Clippy and formatting pass. Correctness
+review confirms unchanged raw progress/filter ordering and seeded request bounds.
+Full CI and the current owner merge queue still apply; this is not a landing or
+deployed-runtime claim.

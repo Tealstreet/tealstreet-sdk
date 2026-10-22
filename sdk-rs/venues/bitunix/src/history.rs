@@ -4,11 +4,12 @@ use crate::sign::Params;
 use crate::wire::{Num, Str, data, time_ms};
 use crate::{BitunixFutures, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
-use safe_cex_engine::{Cx, Method, Query, Response};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
+use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 const TRADES: &str = "/api/v1/futures/trade/get_history_trades";
 const ORDERS: &str = "/api/v1/futures/trade/get_history_orders";
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -18,24 +19,59 @@ enum Kind {
     Income,
 }
 pub struct Request {
-    pub command: u32,
+    owner: CursorHistory<MappedRow>,
     kind: Kind,
     symbol: Option<String>,
     order_id: Option<String>,
     from: Option<f64>,
     to: Option<f64>,
-    cursor: Option<f64>,
     limit: usize,
-    page: u32,
     count: usize,
     added: usize,
     oldest: f64,
     reached_start: bool,
     invalid: bool,
-    seen: HashSet<String>,
-    fills: Vec<Execution>,
-    orders: Vec<HistoricalOrder>,
-    income: Vec<Income>,
+}
+// The token models an absent first endTime, never a query parameter.
+const UNBOUNDED: &str = "unbounded";
+#[derive(Serialize)]
+#[serde(untagged)]
+enum MappedRow {
+    Fill(Execution),
+    Order(HistoricalOrder),
+    Income(Income),
+}
+impl MappedRow {
+    fn timestamp(&self) -> f64 {
+        match self {
+            Self::Fill(row) => row.timestamp,
+            Self::Order(row) => row.created_time,
+            Self::Income(row) => row.timestamp,
+        }
+    }
+}
+fn encode(rows: &[MappedRow]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
+}
+fn stall_message(reason: Stall) -> String {
+    if reason == Stall::PageBudget {
+        "Bitunix history reached the page cap; older rows were not fetched".into()
+    } else {
+        "Bitunix history paging did not advance; older rows may not have been fetched".into()
+    }
+}
+impl Request {
+    fn order_cursor(&self) -> Option<f64> {
+        self.owner
+            .cursor()
+            .filter(|cursor| *cursor != UNBOUNDED)
+            .map(|cursor| cursor.parse().expect("native finite time cursor"))
+    }
+    fn income_page(&self) -> u32 {
+        self.owner
+            .cursor()
+            .map_or(0, |cursor| cursor.parse().expect("native page index"))
+    }
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -232,25 +268,28 @@ impl BitunixFutures {
             cx.fail(command, "Bitunix history time must be finite");
             return;
         }
+        let walk = match kind {
+            Kind::Orders => CursorWalk::starting_at(
+                50,
+                to.map_or_else(|| UNBOUNDED.into(), |time| time.to_string()),
+            ),
+            Kind::Income => CursorWalk::starting_at(100, "0".into()),
+            Kind::Fills => CursorWalk::new(1),
+        }
+        .stall_on_no_new_rows();
         let read = Request {
-            command,
+            owner: CursorHistory::new(Completion::new(command), walk, stall_message, encode),
             kind,
             symbol,
             order_id,
             from,
             to,
-            cursor: to,
             limit,
-            page: 0,
             count: 0,
             added: 0,
             oldest: f64::INFINITY,
             reached_start: false,
             invalid: false,
-            seen: HashSet::new(),
-            fills: vec![],
-            orders: vec![],
-            income: vec![],
         };
         self.history_page(cx, read);
     }
@@ -261,7 +300,7 @@ impl BitunixFutures {
             .opt_num(
                 "endTime",
                 if read.kind == Kind::Orders {
-                    read.cursor
+                    read.order_cursor()
                 } else {
                     read.to
                 },
@@ -275,8 +314,8 @@ impl BitunixFutures {
         if read.kind == Kind::Fills {
             params = params.opt_str("orderId", read.order_id.as_deref());
         }
-        if read.kind == Kind::Income && read.page > 0 {
-            params = params.num("skip", f64::from(read.page * 100));
+        if read.kind == Kind::Income && read.income_page() > 0 {
+            params = params.num("skip", f64::from(read.income_page() * 100));
         }
         read.count = 0;
         read.added = 0;
@@ -332,7 +371,7 @@ impl BitunixFutures {
             row.trade_id.as_ref()
         };
         // Raw ids, including rows later rejected by a mapper, drive paging progress.
-        if read.kind != Kind::Fills && !id.is_empty() && !read.seen.insert(id.to_owned()) {
+        if read.kind != Kind::Fills && !id.is_empty() && !read.owner.fresh(id.to_owned()) {
             return;
         }
         if read.kind == Kind::Orders && !id.is_empty() {
@@ -401,7 +440,7 @@ impl BitunixFutures {
                 } else {
                     row.trade_id.to_string()
                 };
-                if !read.seen.insert(key) {
+                if !read.owner.fresh(key) {
                     return;
                 }
                 let asset = if !row.fee_currency.is_empty() {
@@ -413,7 +452,7 @@ impl BitunixFutures {
                 } else {
                     cx.store.market(symbol).map_or("USDT", |m| m.quote.as_str())
                 };
-                read.fills.push(Execution {
+                read.owner.stage(MappedRow::Fill(Execution {
                     id: if row.trade_id.is_empty() {
                         None
                     } else {
@@ -431,7 +470,7 @@ impl BitunixFutures {
                     side,
                     commission: row.fee.or(row.exec_fee).unwrap_or_default().0.abs(),
                     commission_asset: asset.to_owned(),
-                });
+                }));
             }
             Kind::Orders => {
                 if row.order_id.is_empty()
@@ -446,7 +485,7 @@ impl BitunixFutures {
                     "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED" => OrderStatus::Canceled,
                     _ => OrderStatus::Closed,
                 };
-                read.orders.push(HistoricalOrder {
+                read.owner.stage(MappedRow::Order(HistoricalOrder {
                     id: row.order_id.to_string(),
                     symbol: row.symbol.to_string(),
                     side: order_side(&row.side),
@@ -467,7 +506,7 @@ impl BitunixFutures {
                         .unwrap_or(false),
                     created_time: created,
                     updated_time: optional(time_ms(&row.mtime)),
-                });
+                }));
             }
             Kind::Income => {
                 if created <= 0.0 || row.symbol.is_empty() {
@@ -501,7 +540,7 @@ impl BitunixFutures {
                     ),
                 ] {
                     if income != 0.0 {
-                        read.income.push(Income {
+                        read.owner.stage(MappedRow::Income(Income {
                             symbol: row.symbol.to_string(),
                             income_type: kind,
                             income,
@@ -510,7 +549,7 @@ impl BitunixFutures {
                             tran_id: format!("{id}:{suffix}"),
                             trade_id: id.clone(),
                             category,
-                        });
+                        }));
                     }
                 }
             }
@@ -526,66 +565,68 @@ impl BitunixFutures {
             self.history_failed(cx, read, "Bitunix history read failed");
             return;
         }
-        let cap = if read.kind == Kind::Orders { 50 } else { 100 };
         let more = read.kind != Kind::Fills && read.count >= 100 && !read.reached_start;
-        let stalled = more
-            && (read.added == 0
-                || read.kind == Kind::Orders
-                    && (!read.oldest.is_finite()
-                        || read.cursor.is_some_and(|cursor| read.oldest >= cursor)
-                        || read.from.is_some_and(|from| read.oldest <= from)));
-        if more && !stalled && read.page + 1 < cap {
-            read.page += 1;
-            if read.kind == Kind::Orders {
-                read.cursor = Some(read.oldest);
-            }
-            self.history_page(cx, read);
-            return;
-        }
-        if more && (stalled || read.page + 1 >= cap) {
-            cx.event(
-                Level::Warn,
-                code::HISTORY_INCOMPLETE,
-                if stalled {
-                    "Bitunix history paging did not advance; older rows may not have been fetched"
+        // Endpoint facts only. A native invalid/nonadvancing time bound repeats
+        // the registered cursor; the shared pager owns the resulting stall.
+        let next = more.then(|| match read.kind {
+            Kind::Orders => {
+                if !read.oldest.is_finite()
+                    || read
+                        .order_cursor()
+                        .is_some_and(|cursor| read.oldest >= cursor)
+                    || read.from.is_some_and(|from| read.oldest <= from)
+                {
+                    read.owner.cursor().expect("seeded order cursor").to_owned()
                 } else {
-                    "Bitunix history reached the page cap; older rows were not fetched"
-                },
-                vec![(
-                    "command",
-                    safe_cex_engine::Value::Num(f64::from(read.command)),
-                )],
-            );
+                    read.oldest.to_string()
+                }
+            }
+            Kind::Income => (read.income_page() + 1).to_string(),
+            Kind::Fills => unreachable!("single-page fills never continue"),
+        });
+        match read.owner.advance(CursorPage {
+            next,
+            rows: read.count,
+            fresh: read.added,
+            want_more: more,
+        }) {
+            CursorStep::More(_) => self.history_page(cx, read),
+            CursorStep::Done | CursorStep::Stalled(_) => self.history_done(cx, read, Ok(())),
         }
-        self.history_done(cx, read);
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, read: Request, error: &str) {
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-        cx.fail(read.command, error);
+        // The shared callback carries both transport and stream-decode errors;
+        // retain Internal fallback rather than misclassifying all as Network.
+        self.history_done(cx, read, Err(VenueError::new(error)));
     }
-    fn history_done(&self, cx: &mut Cx<'_, Pending>, mut read: Request) {
-        let result = match read.kind {
-            Kind::Fills => {
-                read.fills
-                    .sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                read.fills.truncate(read.limit);
-                serde_json::to_string(&read.fills)
-            }
-            Kind::Orders => {
-                read.orders
-                    .sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                read.orders.truncate(read.limit);
-                serde_json::to_string(&read.orders)
-            }
-            Kind::Income => {
-                read.income
-                    .sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                serde_json::to_string(&read.income)
-            }
+    pub(crate) fn history_sign_failed(&self, cx: &mut Cx<'_, Pending>, read: Request, error: &str) {
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        let kind = if self.credentials.is_none() {
+            ErrorKind::AuthInvalid
+        } else {
+            ErrorKind::Internal
         };
-        match result.map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(read.command, data),
-            Err(error) => cx.fail(read.command, error),
-        };
+        read.owner.reject(
+            cx,
+            VenueError::new(error).kind(kind).outcome(Outcome::NotSent),
+        );
+    }
+    fn history_done(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        read: Request,
+        result: Result<(), VenueError>,
+    ) {
+        let Request {
+            owner, kind, limit, ..
+        } = read;
+        owner.finish_with(cx, result, move |mut rows| {
+            rows.sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
+            if kind != Kind::Income {
+                rows.truncate(limit);
+            }
+            encode(&rows)
+        });
     }
 }
