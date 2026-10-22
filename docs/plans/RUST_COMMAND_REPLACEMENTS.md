@@ -378,3 +378,12 @@ Engine APIs and test-only protocol observation, no allocator/source change.
 This composes existing core reprepare fences with the replacement relation; it
 is not a new bug claim or native-host provider execution proof. Strict scoped
 checks and independent review precede checkpoint; core CI remains priority.
+
+Reprepare plan audit: retain the SAME HTTP Attempt/RequestId and Context; change
+only preparation sequence, permit and provider signing ID. Protocol calibration
+is global, so leave the sibling unrouted until after observing it. Stale route
+callbacks use the existing preparation_failed API. Old cleanup must not emit a
+new Prepare or Bind, and the fresh accepted child must prove no stale failure
+fact was recorded. Extract only the existing signed-test helpers into one local
+test module so both acceptance tests drive identical actual Engine APIs.
+Independent plan review CLEAN; architecture No.
