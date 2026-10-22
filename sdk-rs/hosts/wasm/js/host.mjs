@@ -27,7 +27,7 @@ const commandTimeout = (value) => {
 };
 const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
   'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode',
-  'setAccountTier']);
+  'setAccountTier', 'scheduleCancel']);
 class UnknownEngineActionError extends Error {}
 class CommandDiagnosticCallbackError extends Error {
   constructor(cause) { super('Command diagnostic callback failed', { cause }); }
@@ -290,6 +290,11 @@ export class EngineHost {
     let timeoutMs;
     let onEvent;
     try {
+      if (command.op === 'scheduleCancel' && command.time != null
+          && (!Number.isSafeInteger(command.time) || command.time < 0)) {
+        throw new ExchangeError('scheduleCancel time must be a nonnegative safe integer UTC timestamp in milliseconds',
+          { kind: 'invalidInput', outcome: 'notSent' });
+      }
       timeoutMs = commandTimeout(options?.timeoutMs === undefined ? this.commandTimeoutMs : options.timeoutMs);
       onEvent = options?.onEvent;
       if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('Command event observer must be a function');

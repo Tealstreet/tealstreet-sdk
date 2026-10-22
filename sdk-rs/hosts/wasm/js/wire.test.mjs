@@ -1040,6 +1040,7 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     publicCatalogueValidation: false,
     isolatedBookSubscriptions: false,
     inverseClosedPositions: false,
+    scheduleCancel: false,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',
@@ -1050,6 +1051,8 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     fillHistoryTime: 'asProvided',
   });
   assert.equal(capabilities(1 << 15, 0).marketRefresh, true);
+  assert.equal(capabilities(1 << 25, 0).scheduleCancel, true);
+  assert.equal(capabilities(0, 0).scheduleCancel, false);
   assert.equal(capabilities(0, 3 << 8).leverageQuery, 'onReadAndMetadata');
   const bridge = capabilities(0x1ff << 16, (6 << 20) | (3 << 24) | (2 << 28));
   for (const name of ['stpControls', 'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',

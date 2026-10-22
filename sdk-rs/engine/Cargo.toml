@@ -12,6 +12,8 @@ prediction = []
 polling-control = []
 
 command-tracking = []
+# Hyperliquid signed account-wide dead-man switch decoder.
+command-schedule-cancel = []
 book-deltas = []
 command-order-book = []
 command-asterdex = ["command-order-book"]

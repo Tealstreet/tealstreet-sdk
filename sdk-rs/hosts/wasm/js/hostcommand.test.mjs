@@ -590,3 +590,20 @@ test('native WEEX empty-fill fixture flags retained rows incomplete only for its
   assert.deepEqual(observed, [[{ level: event.level, code: event.code, message: event.message, fields: event.fields }], []]);
   assert.equal(r.host.commands.size, 0);
 });
+
+test('direct schedule ingress refuses numbers that JSON would turn into a clear', async () => {
+  const r = rig();
+  for (const time of [NaN, Infinity, -Infinity, 1.5, -1, Number.MAX_SAFE_INTEGER + 1, '123', false]) {
+    const pending = r.host.command({ op: 'scheduleCancel', time });
+    assert.equal(r.calls.length, 0, 'invalid time must not reach JSON/native');
+    await assert.rejects(pending, (error) => error.kind === 'invalidInput' && error.outcome === 'notSent');
+  }
+  assert.deepEqual(r.calls, []);
+  for (const time of [null, undefined, 1_800_000_030_000]) {
+    const pending = r.host.command({ op: 'scheduleCancel', time });
+    const call = r.calls.at(-1);
+    done(r.host, call.command, '[]');
+    await pending;
+    assert.equal(call.time, time);
+  }
+});

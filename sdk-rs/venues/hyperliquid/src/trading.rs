@@ -1,4 +1,6 @@
 //! Sequenced writes. A lost response reconciles account state; writes never retry.
+mod schedule;
+
 use crate::{
     Builder, Hyperliquid, Pending,
     account::{Placement, valid_cloid},
@@ -36,6 +38,9 @@ struct Job {
     effective: bool,
 }
 enum Step {
+    ScheduleCancel {
+        time_ms: Option<u64>,
+    },
     Place(PlaceOrderOpts),
     Cancel(Vec<Order>),
     Leverage {
@@ -49,6 +54,7 @@ pub struct Request {
     effect: Effect,
 }
 enum Effect {
+    ScheduleCancel,
     Place(Vec<Placement>),
     Cancel(Vec<Order>),
     Leverage {
@@ -92,6 +98,11 @@ struct CancelWire {
 #[derive(Serialize)]
 #[serde(tag = "type")]
 enum Action {
+    #[serde(rename = "scheduleCancel")]
+    ScheduleCancel {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        time: Option<u64>,
+    },
     #[serde(rename = "order")]
     Order {
         orders: Vec<OrderWire>,
@@ -729,6 +740,11 @@ impl Hyperliquid {
         step: Step,
     ) -> Result<(Action, Effect), String> {
         match step {
+            Step::ScheduleCancel { time_ms } => {
+                let time = schedule::deadline(time_ms.map(|time| time as f64), cx.now)?;
+                Ok((Action::ScheduleCancel { time }, Effect::ScheduleCancel))
+            }
+
             Step::Place(opts) => {
                 let (wires, grouping) = self.wires(cx, &opts)?;
                 let records = wires
@@ -882,6 +898,11 @@ impl Hyperliquid {
             return;
         }
         self.trading.inflight = false;
+        if matches!(request.effect, Effect::ScheduleCancel) {
+            self.finish_trade(cx, schedule::reply(result));
+            return;
+        }
+
         let idempotent_cancel = self.trading.active.as_ref().unwrap().amend_source.is_none();
         let status = result.as_ref().ok().map(|r| r.status);
         let parsed = result.map_err(ReplyError::uncertain).and_then(|r| {
@@ -935,6 +956,7 @@ impl Hyperliquid {
             }
         };
         let valid_shape = match &request.effect {
+            Effect::ScheduleCancel => unreachable!(),
             Effect::Cancel(orders) => {
                 kind == "cancel"
                     && statuses.len() == orders.len()
@@ -982,6 +1004,7 @@ impl Hyperliquid {
             return;
         }
         match request.effect {
+            Effect::ScheduleCancel => unreachable!(),
             Effect::Place(records) => {
                 self.trading.active.as_mut().unwrap().builder_checked = false;
                 if statuses.is_empty() {
@@ -1265,6 +1288,60 @@ fn unproven(message: impl Into<String>) -> VenueError {
 #[cfg(test)]
 mod signing_tests {
     use super::*;
+    #[test]
+    fn schedule_encoding_hash_and_signature_match_independent_ts_vectors() {
+        #[derive(serde::Deserialize)]
+        struct Vector {
+            mainnet: bool,
+            vault: Option<String>,
+            time: Option<u64>,
+            nonce: u64,
+            msgpack: String,
+            hash: String,
+            signature: SignatureVector,
+        }
+        #[derive(serde::Deserialize)]
+        struct SignatureVector {
+            r: String,
+            s: String,
+            v: u8,
+        }
+        let vectors: Vec<Vector> = serde_json::from_str(include_str!(
+            "../../../../packages/safe-cex/src/__tests__/fixtures/hyperliquidScheduleCancel.json"
+        ))
+        .unwrap();
+        for row in vectors {
+            let action = Action::ScheduleCancel { time: row.time };
+            let nonce = row.nonce;
+            let vault = row.vault.as_deref();
+            assert_eq!(
+                format!(
+                    "0x{}",
+                    safe_cex_crypto::hex(&rmp_serde::to_vec_named(&action).unwrap())
+                ),
+                row.msgpack
+            );
+            assert_eq!(
+                format!(
+                    "0x{}",
+                    safe_cex_crypto::hex(&sign::action_hash(&action, vault, nonce).unwrap())
+                ),
+                row.hash
+            );
+            let signature = sign::sign(
+                &action,
+                vault,
+                nonce,
+                row.mainnet,
+                &format!("0x{}", "11".repeat(32)),
+            )
+            .unwrap();
+            assert_eq!(signature.r, row.signature.r);
+            assert_eq!(signature.s, row.signature.s);
+            assert_eq!(signature.v, row.signature.v);
+        }
+    }
+
     // Official Python SDK test_l1_action_signing_order_with_cloid_matches.
     #[test]
     fn official_order_with_cloid_signature_pins_msgpack_key_order() {
