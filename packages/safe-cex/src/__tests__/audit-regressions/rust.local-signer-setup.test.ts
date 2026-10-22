@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { LocalSignerSetup, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
-import { derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
+import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
 
 const options = () =>
   ({
@@ -217,4 +217,165 @@ describe('shared credential setup policy', () => {
     setup.construct(Engine as never, 'mexc', '{}');
     expect(received).toMatchObject({ secondary: { key: '\u0085', secret: input.secondary_secret, passphrase: input.secondary_passphrase, trimCredential: false } });
   });
+});
+
+
+const passphraseFamilies = ['okx', 'okxeu', 'okxdemo', 'okxeudemo', 'bitget', 'bitgetinverse', 'bitgetusdc'] as const;
+const requiredSetup = (input: Partial<ExchangeOptions>, venue: typeof passphraseFamilies[number] = 'okx') =>
+  new LocalSignerSetup(input as ExchangeOptions, deriveSignerSetupPolicy(venue));
+const setupFailure = (run: () => unknown): unknown => {
+  try { run(); } catch (error) { return error; }
+  throw new Error('expected setup rejection');
+};
+const setupPayload = (setup: LocalSignerSetup, venue = 'okx'): unknown => {
+  let received: unknown;
+  class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+  setup.construct(Engine as never, venue, '{}');
+  return received;
+};
+
+describe('shared required passphrase field policy', () => {
+  it.each(passphraseFamilies)('%s declares both slot rules without adopting dispatch signing', (venue) => {
+    expect(deriveSignerSetupPolicy(venue)).toEqual({
+      primary: { passphrase: 'requiredForPrivate' },
+      secondary: { passphrase: 'requiredWithPrimaryFallback' },
+    });
+    expect(deriveBridgeConstruction(venue, {} as ExchangeOptions).dispatchSigning).toBe(false);
+    expect(() => new RustEngineExchange(venue, { key: 'key', secret: 'secret', passphrase: 'pass', localSigner: {} } as ExchangeOptions, new DefaultStore()))
+      .toThrow(/not supported/);
+  });
+
+  it.each(passphraseFamilies)('%s rejects missing/empty primary passphrase only for complete private material', (venue) => {
+    for (const passphrase of [undefined, '']) {
+      expect(setupFailure(() => requiredSetup({ key: 'key', secret: 'secret', passphrase }, venue)))
+        .toMatchObject({ kind: 'invalidInput', outcome: 'notSent', message: 'Rust engine primary signing credentials require a passphrase' });
+      const setup = requiredSetup({ key: 'key', secret: 'secret', passphrase, publicDataOnly: true }, venue);
+      expect(setup.primaryComplete).toBe(true);
+      expect(setupPayload(setup, venue)).toEqual({ primary: { key: 'key', secret: 'secret', ...(passphrase === undefined ? {} : { passphrase }) } });
+    }
+    for (const input of [{}, { key: 'key' }, { secret: 'secret' }, { passphrase: '' }]) {
+      const setup = requiredSetup(input, venue);
+      expect(setup.primaryComplete).toBe(false);
+      setup.dispose();
+    }
+  });
+
+  it.each(passphraseFamilies)('%s keeps absent secondary passphrase absent while validating its primary fallback', (venue) => {
+    const input = { key: 'key', secret: 'secret', passphrase: ' primary pass ', secondary_key: 'read', secondary_secret: 'read-secret' };
+    const before = JSON.stringify(input);
+    const setup = requiredSetup(input, venue);
+    expect(setup.hasSecondary).toBe(true);
+    const payload = setupPayload(setup, venue) as { secondary: Record<string, unknown> };
+    expect(payload).toEqual({
+      primary: { key: 'key', secret: 'secret', passphrase: ' primary pass ' },
+      secondary: { key: 'read', secret: 'read-secret' },
+    });
+    expect(payload.secondary).not.toHaveProperty('passphrase');
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([false, true])('secondary checks remain active with publicDataOnly=%s and never fall back from explicit empty', (publicDataOnly) => {
+    const complete = { key: 'key', secret: 'secret', passphrase: 'primary-pass', secondary_key: 'read', secondary_secret: 'read-secret', publicDataOnly };
+    expect(setupFailure(() => requiredSetup({ ...complete, secondary_passphrase: '' })))
+      .toMatchObject({ kind: 'invalidInput', outcome: 'notSent', message: 'Rust engine secondary signing credentials require a passphrase' });
+    for (const passphrase of [undefined, '']) {
+      // Partial primary material cannot fail a primary-private requirement first.
+      expect(setupFailure(() => requiredSetup({ key: 'partial', passphrase, secondary_key: 'read', secondary_secret: 'read-secret', publicDataOnly })))
+        .toMatchObject({ kind: 'invalidInput', outcome: 'notSent', message: 'Rust engine secondary signing credentials require a passphrase' });
+    }
+  });
+
+  it('preserves a primary passphrase-only source without inventing primary key/signing material', () => {
+    const input = { passphrase: 'fallback-only', secondary_key: 'read', secondary_secret: 'read-secret' };
+    const setup = requiredSetup(input);
+    expect(setup.primaryComplete).toBe(false);
+    expect(setup.credentialPresence).toEqual({ key: false, secret: false });
+    expect(setupPayload(setup)).toEqual({
+      primary: { passphrase: 'fallback-only' },
+      secondary: { key: 'read', secret: 'read-secret' },
+    });
+    expect(input).not.toHaveProperty('key');
+    expect(input).not.toHaveProperty('secret');
+  });
+
+  it('prefers an own secondary passphrase and preserves whitespace, secret bytes and metadata without mutation', () => {
+    const passphrase = '\u0085 \t\ufeff';
+    const input = Object.freeze({
+      key: ' primary ', secret: ' primary-secret ', passphrase,
+      secondary_key: ' read ', secondary_secret: ' read-secret ', secondary_passphrase: ' own pass ',
+      localSigner: Object.freeze({
+        primary: Object.freeze({ stableId: 'account/7', trimCredential: true }),
+        secondary: Object.freeze({ stableId: 'read/7', trimCredential: false }),
+      }),
+    });
+    const before = JSON.stringify(input);
+    const setup = requiredSetup(input);
+    expect(setup.primaryComplete).toBe(true);
+    expect(setupPayload(setup)).toEqual({
+      primary: { key: ' primary ', secret: ' primary-secret ', passphrase, stableId: 'account/7', trimCredential: true },
+      secondary: { key: ' read ', secret: ' read-secret ', passphrase: ' own pass ', stableId: 'read/7', trimCredential: false },
+    });
+    expect(JSON.stringify(input)).toBe(before);
+    const readOnly = requiredSetup({ secondary_key: 'read', secondary_secret: 'read-secret', secondary_passphrase: 'own' });
+    expect(setupPayload(readOnly)).toEqual({ secondary: { key: 'read', secret: 'read-secret', passphrase: 'own' } });
+  });
+
+  it('rejects malformed required passphrase values without exposing input or constructing an engine', () => {
+    for (const passphrase of [null, 17, {}, ['secret-sentinel']]) {
+      const failure = setupFailure(() => requiredSetup({ key: 'key', secret: 'secret', passphrase } as unknown as ExchangeOptions));
+      expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+      expect(String(failure)).not.toContain('secret-sentinel');
+      if (passphrase === null) continue;
+      const secondaryFailure = setupFailure(() => requiredSetup({
+        passphrase: 'valid-primary-fallback', secondary_key: 'read', secondary_secret: 'read-secret', secondary_passphrase: passphrase, publicDataOnly: true,
+      } as unknown as ExchangeOptions));
+      expect(secondaryFailure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent', message: 'Rust engine secondary signing credentials require a passphrase' });
+    }
+  });
+
+  it('preserves default optional policy and effective credential completeness before applying required rules', () => {
+    for (const passphrase of [undefined, '']) {
+      const setup = new LocalSignerSetup({ key: 'key', secret: 'secret', passphrase } as ExchangeOptions);
+      expect(setup.primaryComplete).toBe(true);
+      setup.dispose();
+    }
+    const explicitOptional = new LocalSignerSetup({
+      key: 'key', secret: 'secret', passphrase: '',
+      secondary_key: 'read', secondary_secret: 'read-secret', secondary_passphrase: '',
+    } as ExchangeOptions, { primary: { passphrase: 'optional' }, secondary: { passphrase: 'optional' } });
+    expect(setupPayload(explicitOptional)).toEqual({
+      primary: { key: 'key', secret: 'secret', passphrase: '' },
+      secondary: { key: 'read', secret: 'read-secret', passphrase: '' },
+    });
+    const input = { key: '\u0085 ', secret: 'secret', localSigner: { primary: { trimCredential: true } } };
+    const setup = requiredSetup(input);
+    expect(setup.primaryComplete).toBe(false);
+    setup.dispose();
+    const absent = requiredSetup({});
+    expect(setupPayload(absent)).toEqual({});
+    const publicAbsent = requiredSetup({ publicDataOnly: true });
+    expect(setupPayload(publicAbsent)).toEqual({});
+    const mexc = new LocalSignerSetup({ key: ' key ', secret: ' secret ' } as ExchangeOptions, deriveSignerSetupPolicy('mexc'));
+    expect(setupPayload(mexc, 'mexc')).toEqual({ primary: { key: ' key ', secret: ' secret ', trimCredential: true } });
+  });
+});
+
+
+it('keeps a secondary requiredForPrivate field required in public mode, matching native slot policy', () => {
+  expect(() => new LocalSignerSetup({
+    publicDataOnly: true, secondary_key: 'read', secondary_secret: 'read-secret',
+  } as ExchangeOptions, { secondary: { passphrase: 'requiredForPrivate' } })).toThrow('secondary signing credentials require a passphrase');
+});
+
+
+it('preserves JSON null-as-None secondary fallback while explicit empty never inherits', () => {
+  const options = {
+    passphrase: 'primary-pass', secondary_key: 'read', secondary_secret: 'read-secret', secondary_passphrase: null,
+  } as unknown as ExchangeOptions;
+  const setup = new LocalSignerSetup(options, deriveSignerSetupPolicy('okx'));
+  expect(setupPayload(setup)).toEqual({
+    primary: { passphrase: 'primary-pass' },
+    secondary: { key: 'read', secret: 'read-secret', passphrase: null },
+  });
+  expect(() => new LocalSignerSetup({ ...options, secondary_passphrase: '' }, deriveSignerSetupPolicy('okx'))).toThrow('secondary signing credentials require a passphrase');
 });

@@ -4,7 +4,8 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import rules from './construction-rules.json';
 import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 
-export type IdentitySetupPolicy = { trimCredential?: boolean };
+export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
+export type IdentitySetupPolicy = { trimCredential?: boolean; passphrase?: PassphraseSetupPolicy };
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
 

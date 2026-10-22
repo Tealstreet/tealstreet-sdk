@@ -42,6 +42,15 @@ struct CredentialSetupPolicy {
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 struct IdentitySetupPolicy {
     trim_credential: Option<bool>,
+    passphrase: Option<SetupFieldPolicy>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SetupFieldPolicy {
+    Optional,
+    RequiredForPrivate,
+    RequiredWithPrimaryFallback,
 }
 
 #[derive(Default, Debug, Deserialize)]
@@ -108,10 +117,16 @@ fn rule(value: &Rule) -> String {
         bridge.dispatch_signing
     );
     let slot = |value: &Option<IdentitySetupPolicy>| match value {
-        Some(value) => format!(
-            "Some(IdentitySetupPolicy {{ trim_credential: {:?} }})",
-            value.trim_credential
-        ),
+        Some(value) => {
+            let passphrase = value.passphrase.as_ref().map_or_else(
+                || "None".into(),
+                |policy| format!("Some(SetupFieldPolicy::{policy:?})"),
+            );
+            format!(
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase} }})",
+                value.trim_credential
+            )
+        }
         None => "None".into(),
     };
     let signer_setup = format!(
@@ -153,9 +168,30 @@ mod tests {
                 "empty":{"signerSetup":{"primary":{}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true) }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false) }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None }), secondary: None }"));
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
+    }
+
+    #[test]
+    fn required_and_fallback_fields_are_compiled_without_runtime_rules() {
+        let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "v":{"signerSetup":{"primary":{"passphrase":"requiredForPrivate"},"secondary":{"passphrase":"requiredWithPrimaryFallback"}}},
+            "optional":{"signerSetup":{"primary":{"passphrase":"optional"}}}
+        }}"#).unwrap();
+        for variant in [
+            "RequiredForPrivate",
+            "RequiredWithPrimaryFallback",
+            "Optional",
+        ] {
+            assert!(output.contains(&format!("Some(SetupFieldPolicy::{variant})")));
+        }
+        for field in [r#"{"passphrase":"invented"}"#, r#"{"passphrase":true}"#] {
+            let rules = format!(
+                r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"signerSetup":{{"primary":{field}}}}}}}}}"#
+            );
+            assert!(generate(&rules).is_err());
+        }
     }
 
     #[test]

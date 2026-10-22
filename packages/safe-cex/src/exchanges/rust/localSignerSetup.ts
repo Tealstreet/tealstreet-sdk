@@ -44,6 +44,26 @@ const effectiveMetadata = (
 ): LocalIdentityMetadata | undefined =>
   policy?.trimCredential === undefined ? metadata : { ...metadata, trimCredential: policy.trimCredential };
 
+/** Required-field checks happen before any generic options retain credentials.
+ * Missing fallback is validation-only here: trusted Rust setup aliases opaque
+ * refs, so the secondary setup must keep its original absent/empty distinction. */
+const validatePassphrase = (
+  slot: 'primary' | 'secondary',
+  complete: boolean,
+  passphrase: string | undefined,
+  primaryPassphrase: string | undefined,
+  policy: IdentitySetupPolicy | undefined,
+  publicDataOnly: boolean,
+): void => {
+  const rule = policy?.passphrase;
+  if (!complete || rule === undefined || rule === 'optional' || (rule === 'requiredForPrivate' && slot === 'primary' && publicDataOnly)) return;
+  const effective = rule === 'requiredWithPrimaryFallback' && (passphrase === undefined || passphrase === null) ? primaryPassphrase : passphrase;
+  if (typeof effective !== 'string' || effective.length === 0) {
+    const message = `Rust engine ${slot} signing credentials require a passphrase`;
+    throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+  }
+};
+
 /** Trusted local-provider setup. Secret strings stay inside this capsule until
  * consumed by the Rust provider; JS cannot promise physical string zeroization. */
 export class LocalSignerSetup {
@@ -71,6 +91,8 @@ export class LocalSignerSetup {
       secret: Boolean(options.secret),
     });
     this.primaryComplete = this.credentialPresence.key && this.credentialPresence.secret;
+    validatePassphrase('primary', this.primaryComplete, options.passphrase, options.passphrase, policy.primary, options.publicDataOnly === true);
+    validatePassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
     this.#credentials = {
       ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
         ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }

@@ -60,7 +60,14 @@ names; identity/nonce consumers require the caller's intended stable mapping.
 Trusted signer setup uses shared declarative per-family/per-slot normalization
 from construction-rules.json. Unspecified fields preserve caller trimCredential
 metadata; MEXC forces primary credential trimming and secondary preservation.
-Normalization occurs before opaque identities are installed, and SDK cached
+The same field policy declares primary required-for-private passphrases and
+required secondary passphrases with primary fallback for OKX and Bitget aliases.
+Missing/JSON-null secondary passphrases inherit an opaque primary reference;
+explicit empty never inherits. Public mode bypasses only the primary requirement,
+while secondary validation stays active. Shared publicMode intent takes precedence
+over legacy publicDataOnly, including null/omitted requested. This declaration does
+not enable signing for an unmigrated family.
+Normalization and required-material validation occur before opaque identities are installed, and SDK cached
 public/private intent uses the same effective presence before raw options are
 stripped. Whitespace follows Rust Unicode White_Space (NEL removed, BOM kept),
 not JavaScript String.trim. Secret/passphrase bytes and stable IDs are unchanged.

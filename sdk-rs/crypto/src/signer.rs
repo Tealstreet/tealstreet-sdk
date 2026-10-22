@@ -2,8 +2,8 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, CredentialSetupPolicy, Encoding, KeyRef, Operation, PayloadPart, SignError,
-    SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, CredentialSetupPolicy, Encoding, Identities, Identity, KeyRef, Operation,
+    PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::HashMap;
@@ -49,6 +49,80 @@ impl<'de> serde::Deserialize<'de> for Secret {
     }
 }
 
+// Decoded buffers stay guarded on every failure, including the second slot.
+struct DecodedIdentity {
+    key: Zeroizing<Vec<u8>>,
+    secret: Zeroizing<Vec<u8>>,
+    passphrase: Option<Zeroizing<Vec<u8>>>,
+    stable_id: Option<String>,
+}
+impl DecodedIdentity {
+    fn decode(identity: LocalIdentity) -> Result<Self, SignError> {
+        if identity
+            .stable_id
+            .as_deref()
+            .is_some_and(|id| !safe_cex_engine::signing::valid_stable_id(id))
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        let mut key = key_material::decode(identity.key, KeyEncoding::Utf8)?;
+        if identity.trim_credential {
+            key = Zeroizing::new(
+                std::str::from_utf8(&key)
+                    .map_err(|_| SignError::InvalidRequest)?
+                    .trim()
+                    .as_bytes()
+                    .to_vec(),
+            );
+        }
+        Ok(Self {
+            key,
+            secret: key_material::decode(identity.secret, identity.secret_encoding)?,
+            passphrase: identity
+                .passphrase
+                .map(|value| key_material::decode(value, KeyEncoding::Utf8))
+                .transpose()?,
+            stable_id: identity.stable_id,
+        })
+    }
+    fn references(&self, slot: &str) -> Identity {
+        Identity {
+            credential: KeyRef(if self.key.is_empty() {
+                String::new()
+            } else {
+                format!("{slot}.credential")
+            }),
+            signing: KeyRef(if self.secret.is_empty() {
+                String::new()
+            } else {
+                format!("{slot}.signing")
+            }),
+            passphrase: self
+                .passphrase
+                .as_ref()
+                .map(|_| KeyRef(format!("{slot}.passphrase"))),
+            stable_id: self.stable_id.clone(),
+        }
+    }
+    fn install(self, signer: &mut LocalSigner, slot: &str) {
+        if !self.key.is_empty() {
+            signer
+                .keys
+                .insert(KeyRef(format!("{slot}.credential")), self.key);
+        }
+        if !self.secret.is_empty() {
+            signer
+                .keys
+                .insert(KeyRef(format!("{slot}.signing")), self.secret);
+        }
+        if let Some(passphrase) = self.passphrase {
+            signer
+                .keys
+                .insert(KeyRef(format!("{slot}.passphrase")), passphrase);
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct LocalSigner {
     keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
@@ -66,11 +140,19 @@ impl LocalSigner {
     ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
         Self::from_setup_with_policy(setup, CredentialSetupPolicy::default())
     }
-    /// Shared family rules override only declared fields before installation.
+    /// Existing policy APIs retain their private-context contract.
     pub fn from_setup_with_policy(
+        setup: LocalSetup,
+        policy: CredentialSetupPolicy,
+    ) -> Result<(Self, Identities), SignError> {
+        Self::from_setup_with_policy_and_mode(setup, policy, false)
+    }
+    /// Decode and validate all required material before installing provider refs.
+    pub fn from_setup_with_policy_and_mode(
         mut setup: LocalSetup,
         policy: CredentialSetupPolicy,
-    ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
+        public_data_only: bool,
+    ) -> Result<(Self, Identities), SignError> {
         for (identity, rule) in [
             (&mut setup.primary, policy.primary),
             (&mut setup.secondary, policy.secondary),
@@ -81,66 +163,38 @@ impl LocalSigner {
                 identity.trim_credential = trim;
             }
         }
+        let primary = setup.primary.map(DecodedIdentity::decode).transpose()?;
+        let secondary = setup.secondary.map(DecodedIdentity::decode).transpose()?;
+        let mut identities = Identities {
+            primary: primary.as_ref().map(|id| id.references("primary")),
+            secondary: secondary.as_ref().map(|id| id.references("secondary")),
+        };
+        // The same policy validates bytes and opaque refs. Empty decoded material
+        // is represented only in temporary validation metadata as an invalid ref.
+        // Optional explicit-empty passphrases retain their existing installed ref.
+        let mut validation = identities.clone();
+        for (material, identity) in [
+            (primary.as_ref(), validation.primary.as_mut()),
+            (secondary.as_ref(), validation.secondary.as_mut()),
+        ] {
+            if let (Some(material), Some(identity)) = (material, identity)
+                && material
+                    .passphrase
+                    .as_ref()
+                    .is_some_and(|bytes| bytes.is_empty())
+            {
+                identity.passphrase = Some(KeyRef(String::new()));
+            }
+        }
+        policy.apply_to_identities(&mut validation, public_data_only)?;
+        policy.apply_to_identities(&mut identities, public_data_only)?;
         let mut signer = Self::new();
-        let mut install = |slot: &str, identity: Option<LocalIdentity>| {
-            identity
-                .map(|identity| {
-                    if identity
-                        .stable_id
-                        .as_deref()
-                        .is_some_and(|id| !safe_cex_engine::signing::valid_stable_id(id))
-                    {
-                        return Err(SignError::InvalidRequest);
-                    }
-                    let mut key = key_material::decode(identity.key, KeyEncoding::Utf8)?;
-                    if identity.trim_credential {
-                        key = Zeroizing::new(
-                            std::str::from_utf8(&key)
-                                .map_err(|_| SignError::InvalidRequest)?
-                                .trim()
-                                .as_bytes()
-                                .to_vec(),
-                        );
-                    }
-                    let secret = key_material::decode(identity.secret, identity.secret_encoding)?;
-                    let passphrase = identity
-                        .passphrase
-                        .map(|value| key_material::decode(value, KeyEncoding::Utf8))
-                        .transpose()?;
-                    let credential = KeyRef(if key.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{slot}.credential")
-                    });
-                    let signing = KeyRef(if secret.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{slot}.signing")
-                    });
-                    if !key.is_empty() {
-                        signer.keys.insert(credential.clone(), key);
-                    }
-                    if !secret.is_empty() {
-                        signer.keys.insert(signing.clone(), secret);
-                    }
-                    let passphrase = passphrase.map(|bytes| {
-                        let reference = KeyRef(format!("{slot}.passphrase"));
-                        signer.keys.insert(reference.clone(), bytes);
-                        reference
-                    });
-                    Ok(safe_cex_engine::signing::Identity {
-                        credential,
-                        signing,
-                        passphrase,
-                        stable_id: identity.stable_id,
-                    })
-                })
-                .transpose()
-        };
-        let identities = safe_cex_engine::signing::Identities {
-            primary: install("primary", setup.primary)?,
-            secondary: install("secondary", setup.secondary)?,
-        };
+        if let Some(primary) = primary {
+            primary.install(&mut signer, "primary");
+        }
+        if let Some(secondary) = secondary {
+            secondary.install(&mut signer, "secondary");
+        }
         Ok((signer, identities))
     }
     /// Own and wipe the setup input on both successful and malformed construction.
@@ -154,13 +208,21 @@ impl LocalSigner {
         input: String,
         policy: CredentialSetupPolicy,
     ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
+        Self::from_json_with_policy_and_mode(input, policy, false)
+    }
+    /// Setup mode is explicit; it is not inferred from stripped credentials.
+    pub fn from_json_with_policy_and_mode(
+        input: String,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+    ) -> Result<(Self, Identities), SignError> {
         let input = Zeroizing::new(input);
         if input.len() > 4 * 1024 * 1024 {
             return Err(SignError::InvalidRequest);
         }
         let setup: LocalSetup =
             serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
-        Self::from_setup_with_policy(setup, policy)
+        Self::from_setup_with_policy_and_mode(setup, policy, public_data_only)
     }
     pub fn remove(&mut self, reference: &KeyRef) {
         self.keys.remove(reference);
@@ -327,9 +389,11 @@ mod tests {
         let policy = CredentialSetupPolicy {
             primary: Some(IdentitySetupPolicy {
                 trim_credential: Some(true),
+                ..Default::default()
             }),
             secondary: Some(IdentitySetupPolicy {
                 trim_credential: Some(false),
+                ..Default::default()
             }),
         };
         let setup = r#"{
@@ -407,6 +471,7 @@ mod tests {
                 primary: Some(IdentitySetupPolicy::default()),
                 secondary: Some(IdentitySetupPolicy {
                     trim_credential: Some(true),
+                    ..Default::default()
                 }),
             },
         )
@@ -450,6 +515,129 @@ mod tests {
                 Err(SignError::InvalidRequest)
             ));
         }
+    }
+
+    fn required_passphrase_policy() -> CredentialSetupPolicy {
+        use safe_cex_engine::signing::{IdentitySetupPolicy, SetupFieldPolicy};
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                passphrase: Some(SetupFieldPolicy::RequiredForPrivate),
+                ..Default::default()
+            }),
+            secondary: Some(IdentitySetupPolicy {
+                passphrase: Some(SetupFieldPolicy::RequiredWithPrimaryFallback),
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn required_material_validates_before_install_and_defaults_remain_optional() {
+        for input in [
+            r#"{"primary":{"key":"key","secret":"secret"}}"#,
+            r#"{"primary":{"key":"key","secret":"secret","passphrase":""}}"#,
+            r#"{"primary":{"passphrase":""},"secondary":{"key":"read","secret":"secret"}}"#,
+            r#"{"secondary":{"key":"read","secret":"secret"}}"#,
+            r#"{"primary":{"passphrase":"usable"},"secondary":{"key":"read","secret":"secret","passphrase":""}}"#,
+        ] {
+            assert!(
+                matches!(
+                    LocalSigner::from_json_with_policy(input.into(), required_passphrase_policy()),
+                    Err(SignError::InvalidRequest)
+                ),
+                "{input}"
+            );
+        }
+        let missing = r#"{"primary":{"key":"key","secret":"secret"}}"#;
+        assert!(LocalSigner::from_json(missing.into()).is_ok());
+        assert!(
+            LocalSigner::from_json_with_policy_and_mode(
+                missing.into(),
+                required_passphrase_policy(),
+                true
+            )
+            .is_ok()
+        );
+        // Public mode relaxes only primary, not an existing complete secondary.
+        assert!(matches!(LocalSigner::from_json_with_policy_and_mode(r#"{"primary":{"key":"key","secret":"secret"},"secondary":{"key":"read","secret":"secret"}}"#.into(), required_passphrase_policy(), true), Err(SignError::InvalidRequest)));
+        // Incomplete slots keep their prior optional-field behavior.
+        assert!(
+            LocalSigner::from_json_with_policy(
+                r#"{"primary":{"key":"key"},"secondary":{"secret":"secret"}}"#.into(),
+                required_passphrase_policy()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn fallback_aliases_primary_without_copying_or_normalizing_passphrase_material() {
+        let passphrase = "\u{0085} \u{feff} exact passphrase ";
+        let setup = serde_json::json!({"primary":{"passphrase":passphrase},"secondary":{"key":"read","secret":"secret","stableId":"account/read"}}).to_string();
+        let (mut signer, ids) =
+            LocalSigner::from_json_with_policy(setup, required_passphrase_policy()).unwrap();
+        let primary = ids.primary.unwrap();
+        let secondary = ids.secondary.unwrap();
+        assert!(primary.credential.0.is_empty() && primary.signing.0.is_empty());
+        assert_eq!(secondary.stable_id.as_deref(), Some("account/read"));
+        assert_eq!(secondary.passphrase, primary.passphrase);
+        assert!(
+            !signer
+                .keys
+                .contains_key(&KeyRef("secondary.passphrase".into()))
+        );
+        let reference = secondary.passphrase.unwrap();
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Present {
+                key: reference.clone(),
+            }],
+        };
+        assert_eq!(
+            signer.sign_now(&request).unwrap().values,
+            [passphrase.as_bytes().to_vec()]
+        );
+        signer.remove(&reference);
+        assert!(matches!(
+            signer.sign_now(&request),
+            Err(SignError::Unavailable)
+        ));
+        let own = serde_json::json!({"primary":{"passphrase":"primary"},"secondary":{"key":"read","secret":"secret","passphrase":"own"}}).to_string();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(own, required_passphrase_policy()).unwrap();
+        let secondary = ids.secondary.unwrap();
+        assert_eq!(
+            secondary.passphrase,
+            Some(KeyRef("secondary.passphrase".into()))
+        );
+        assert_eq!(
+            signer.key(secondary.passphrase.as_ref().unwrap()).unwrap(),
+            b"own"
+        );
+    }
+
+    #[test]
+    fn opaque_policy_checks_presence_while_optional_empty_material_stays_explicit() {
+        let (signer, mut ids) = LocalSigner::from_json(
+            r#"{"primary":{"key":"key","secret":"secret","passphrase":""}}"#.into(),
+        )
+        .unwrap();
+        // An external provider's nonempty ref does not prove nonempty bytes.
+        required_passphrase_policy()
+            .apply_to_identities(&mut ids, false)
+            .unwrap();
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Present {
+                key: ids.primary.unwrap().passphrase.unwrap(),
+            }],
+        };
+        assert_eq!(
+            signer.sign_now(&request).unwrap().values,
+            [Vec::<u8>::new()]
+        );
     }
 
     fn vector() -> serde_json::Value {

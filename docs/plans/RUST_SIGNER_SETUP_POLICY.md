@@ -102,3 +102,18 @@ opaque fallback, incomplete/absent slots and Unicode/byte preservation. Existing
 MEXC trim/default/custody controls remain. Retitle PR #1738 for the shared field
 policy and rerun focused/strict checks, independent correctness/adversarial
 review and fresh CI. Current source queue #1735 -> #1728 retains priority.
+
+Review corrections: a present publicMode with null/omitted requested ignores the
+legacy publicDataOnly flag, matching final construction; only requested:true is
+an explicit bypass. Secondary requirements also remain active in the generic
+SDK policy. Preserve historical JSON null-as-None fallback semantics (including
+secondary passphrase:null), while explicit empty strings never inherit. Non-null
+malformed material still rejects. Each boundary has a targeted regression.
+
+Expanded implementation checkpoint (unmerged): 749 focused native tests and
+14 standalone MEXC+dispatch-signing provider tests pass; SDK52 plus typecheck/lint,
+strict Clippy/fmt/bans pass. Targeted controls reproduced native publicMode
+precedence rejection and both SDK parity failures before correction. Independent
+full correctness and Rust adversarial reviews are clear after fixes. Source/CI
+proof must be refreshed after actual preceding merges. Hosted API compatibility
+bridge now precedes Bybit #1728; this setup core remains separate and held.

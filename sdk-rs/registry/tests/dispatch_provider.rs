@@ -6,8 +6,9 @@ use safe_cex_engine::signing::{
 };
 use safe_cex_engine::{ErrorKind, VenueError};
 use safe_cex_venues::{
-    EngineOptions, local_signer_from_json, local_signer_from_json_for, prepare_local_signer,
-    prepare_local_signer_for, signer_setup_policy,
+    EngineOptions, local_signer_from_json, local_signer_from_json_for,
+    local_signer_from_json_for_mode, prepare_local_signer, prepare_local_signer_for,
+    signer_setup_policy,
 };
 
 // Fixed independently computed HMAC-SHA256 vectors for `fixture:<credential>:body`.
@@ -481,5 +482,276 @@ fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_bybit() {
                 "construction has no command outcome"
             );
         }
+    }
+}
+
+const REQUIRED_ALIASES: [&str; 7] = [
+    "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
+    "bitget",
+    "bitgetusdc",
+    "bitgetinverse",
+];
+
+fn presented_passphrase(provider: &Provider, identity: &Identity) -> Vec<u8> {
+    let request = SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![Operation::Present {
+            key: identity.passphrase.clone().unwrap(),
+        }],
+    };
+    provider.sign_ready(&request).unwrap().unwrap().values[0].clone()
+}
+
+#[test]
+fn required_family_policy_applies_to_raw_json_and_opaque_setup_without_material_changes() {
+    use safe_cex_engine::signing::{Identities, IdentitySetupPolicy, KeyRef, SetupFieldPolicy};
+    for venue in REQUIRED_ALIASES {
+        let policy = signer_setup_policy(venue);
+        assert_eq!(
+            policy.primary.unwrap().passphrase,
+            Some(SetupFieldPolicy::RequiredForPrivate)
+        );
+        assert_eq!(
+            policy.secondary.unwrap().passphrase,
+            Some(SetupFieldPolicy::RequiredWithPrimaryFallback)
+        );
+        let mut raw: EngineOptions = serde_json::from_str(
+            r#"{
+            "key":" primary-key ","secret":"primary-secret","passphrase":" primary-pass ",
+            "readCredentials":{"key":"secondary-key","secret":"secondary-secret"}
+        }"#,
+        )
+        .unwrap();
+        let (provider, ids) = prepare_local_signer_for(venue, &mut raw).unwrap();
+        assert!(
+            raw.key.is_none()
+                && raw.secret.is_none()
+                && raw.passphrase.is_none()
+                && raw.read_credentials.is_none()
+        );
+        assert_owned_identity(
+            &provider,
+            ids.primary.as_ref().unwrap(),
+            "primary",
+            " primary-key ",
+            " primary-pass ",
+            RAW_PRIMARY_MAC,
+        );
+        assert_eq!(
+            ids.secondary.as_ref().unwrap().passphrase,
+            ids.primary.as_ref().unwrap().passphrase
+        );
+        assert_eq!(
+            presented_passphrase(&provider, ids.secondary.as_ref().unwrap()),
+            b" primary-pass "
+        );
+        let setup = r#"{"primary":{"key":" primary-key ","secret":"primary-secret","passphrase":" primary-pass ","stableId":"account/primary"},"secondary":{"key":"secondary-key","secret":"secondary-secret","stableId":"account/secondary"}}"#;
+        let (provider, ids) = local_signer_from_json_for(venue, setup.into()).unwrap();
+        assert_eq!(
+            ids.primary.as_ref().unwrap().require_stable_id(),
+            Ok("account/primary")
+        );
+        assert_eq!(
+            ids.secondary.as_ref().unwrap().require_stable_id(),
+            Ok("account/secondary")
+        );
+        assert_eq!(
+            presented_passphrase(&provider, ids.secondary.as_ref().unwrap()),
+            b" primary-pass "
+        );
+        let mut opaque = Identities {
+            primary: Some(Identity {
+                credential: KeyRef("primary.credential".into()),
+                signing: KeyRef("primary.signing".into()),
+                passphrase: Some(KeyRef("primary.passphrase".into())),
+                stable_id: None,
+            }),
+            secondary: Some(Identity {
+                credential: KeyRef("secondary.credential".into()),
+                signing: KeyRef("secondary.signing".into()),
+                passphrase: None,
+                stable_id: None,
+            }),
+        };
+        policy.apply_to_identities(&mut opaque, false).unwrap();
+        assert_eq!(
+            opaque.secondary.as_ref().unwrap().passphrase,
+            opaque.primary.as_ref().unwrap().passphrase
+        );
+        opaque.secondary.as_mut().unwrap().passphrase = Some(KeyRef(String::new()));
+        assert!(policy.apply_to_identities(&mut opaque, false).is_err());
+        // An undeclared field remains default optional.
+        assert_eq!(IdentitySetupPolicy::default().passphrase, None);
+    }
+}
+
+#[test]
+fn required_material_rejects_missing_empty_and_failed_fallback_but_own_secondary_wins() {
+    for venue in REQUIRED_ALIASES {
+        for setup in [
+            r#"{"primary":{"key":"key","secret":"secret"}}"#,
+            r#"{"primary":{"key":"key","secret":"secret","passphrase":""}}"#,
+            r#"{"secondary":{"key":"read","secret":"secret"}}"#,
+            r#"{"primary":{"passphrase":""},"secondary":{"key":"read","secret":"secret"}}"#,
+            r#"{"primary":{"passphrase":"usable"},"secondary":{"key":"read","secret":"secret","passphrase":""}}"#,
+        ] {
+            assert_sanitized_setup_error(
+                local_signer_from_json_for(venue, setup.into())
+                    .err()
+                    .unwrap(),
+            );
+        }
+        for raw_json in [
+            r#"{"key":"key","secret":"secret"}"#,
+            r#"{"key":"key","secret":"secret","passphrase":""}"#,
+            r#"{"passphrase":"","readCredentials":{"key":"read","secret":"secret"}}"#,
+            r#"{"passphrase":"usable","readCredentials":{"key":"read","secret":"secret","passphrase":""}}"#,
+        ] {
+            let mut raw: EngineOptions = serde_json::from_str(raw_json).unwrap();
+            assert_sanitized_setup_error(prepare_local_signer_for(venue, &mut raw).err().unwrap());
+            assert!(
+                raw.key.is_none()
+                    && raw.secret.is_none()
+                    && raw.passphrase.is_none()
+                    && raw.read_credentials.is_none()
+            );
+        }
+        let (provider, ids) = local_signer_from_json_for(venue, r#"{"primary":{"passphrase":"primary"},"secondary":{"key":"read","secret":"secret","passphrase":"own"}}"#.into()).unwrap();
+        assert_ne!(
+            ids.secondary.as_ref().unwrap().passphrase,
+            ids.primary.as_ref().unwrap().passphrase
+        );
+        assert_eq!(
+            presented_passphrase(&provider, ids.secondary.as_ref().unwrap()),
+            b"own"
+        );
+    }
+}
+
+#[test]
+fn explicit_setup_mode_precedence_bypasses_only_primary_private_requirement() {
+    for venue in REQUIRED_ALIASES {
+        for (intent, public) in [
+            (r#""publicDataOnly":true"#, true),
+            (
+                r#""publicDataOnly":false,"publicMode":{"requested":true}"#,
+                true,
+            ),
+            (
+                r#""publicDataOnly":true,"publicMode":{"requested":false}"#,
+                false,
+            ),
+            (
+                r#""publicDataOnly":true,"publicMode":{"requested":null}"#,
+                false,
+            ),
+            (r#""publicDataOnly":true,"publicMode":{}"#, false),
+            (r#""publicDataOnly":false"#, false),
+        ] {
+            let raw_json = format!(r#"{{{intent},"key":"key","secret":"secret","passphrase":""}}"#);
+            let mut raw: EngineOptions = serde_json::from_str(&raw_json).unwrap();
+            assert_eq!(safe_cex_venues::signer_setup_public_data_only(&raw), public);
+            let result = prepare_local_signer_for(venue, &mut raw);
+            assert_eq!(result.is_ok(), public, "{venue}: {intent}");
+            let missing = r#"{"primary":{"key":"key","secret":"secret","passphrase":""}}"#;
+            assert_eq!(
+                local_signer_from_json_for_mode(venue, missing.into(), public).is_ok(),
+                public
+            );
+            // Even explicit public mode cannot admit incomplete required secondary material.
+            let secondary = r#"{"primary":{"key":"key","secret":"secret"},"secondary":{"key":"read","secret":"secret"}}"#;
+            assert_sanitized_setup_error(
+                local_signer_from_json_for_mode(venue, secondary.into(), true)
+                    .err()
+                    .unwrap(),
+            );
+        }
+    }
+}
+
+#[test]
+fn passphrase_only_primary_survives_raw_setup_as_alias_and_defaults_remain_optional() {
+    for venue in REQUIRED_ALIASES {
+        let mut raw: EngineOptions = serde_json::from_str(r#"{"passphrase":"\u0085 \ufeff exact passphrase ","readCredentials":{"key":"read","secret":"secret"}}"#).unwrap();
+        let (provider, ids) = prepare_local_signer_for(venue, &mut raw).unwrap();
+        assert!(raw.passphrase.is_none());
+        let primary = ids.primary.as_ref().unwrap();
+        let secondary = ids.secondary.as_ref().unwrap();
+        assert!(primary.credential.0.is_empty() && primary.signing.0.is_empty());
+        assert_eq!(secondary.passphrase, primary.passphrase);
+        assert_eq!(
+            presented_passphrase(&provider, secondary),
+            "\u{0085} \u{feff} exact passphrase ".as_bytes()
+        );
+        let (provider, ids) = local_signer_from_json_for(venue, r#"{"primary":{"passphrase":"\u0085 \ufeff exact passphrase "},"secondary":{"key":"read","secret":"secret"}}"#.into()).unwrap();
+        assert_eq!(
+            presented_passphrase(&provider, ids.secondary.as_ref().unwrap()),
+            "\u{0085} \u{feff} exact passphrase ".as_bytes()
+        );
+    }
+    assert!(
+        local_signer_from_json(r#"{"primary":{"key":"key","secret":"secret"}}"#.into()).is_ok()
+    );
+    assert!(
+        local_signer_from_json_for(
+            "binance",
+            r#"{"primary":{"key":"key","secret":"secret"}}"#.into()
+        )
+        .is_ok()
+    );
+}
+
+#[cfg(feature = "okx")]
+#[test]
+fn required_field_declarations_do_not_enable_unmigrated_okx_injection() {
+    struct NeverConstruct;
+    impl safe_cex_venues::Visit for NeverConstruct {
+        type Output = ();
+        fn visit<V: safe_cex_engine::Venue + 'static>(self, _: safe_cex_engine::Engine<V>) {
+            panic!("field policy is not family adoption");
+        }
+    }
+    let (provider, identities) = local_signer_from_json_for(
+        "okx",
+        r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
+    )
+    .unwrap();
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    options.signing = Some(identities);
+    let error = safe_cex_venues::build_with_signer(
+        "okx",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(provider),
+        NeverConstruct,
+    )
+    .expect_err("no adoption by setup policy");
+    assert_eq!(
+        error.message,
+        "Injected signing is not supported for this venue yet"
+    );
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    assert!(error.outcome.is_none());
+}
+
+#[test]
+fn json_null_keeps_legacy_none_fallback_without_accepting_explicit_empty_material() {
+    for venue in REQUIRED_ALIASES {
+        let (provider, ids) = local_signer_from_json_for(venue,
+            r#"{"primary":{"passphrase":"primary-pass"},"secondary":{"key":"read","secret":"read-secret","passphrase":null}}"#.into()).unwrap();
+        assert_eq!(
+            ids.secondary.as_ref().unwrap().passphrase,
+            ids.primary.as_ref().unwrap().passphrase
+        );
+        assert_eq!(
+            presented_passphrase(&provider, ids.secondary.as_ref().unwrap()),
+            b"primary-pass"
+        );
+        assert!(local_signer_from_json_for(venue,
+            r#"{"primary":{"passphrase":"primary-pass"},"secondary":{"key":"read","secret":"read-secret","passphrase":""}}"#.into()).is_err());
     }
 }
