@@ -227,3 +227,21 @@ Architecture gate: this extends shared signer/setup/provider policies. No venue
 crypto, credential fallback, socket lifecycle service or pacing policy is added.
 The unchanged external wire gains no required field or acknowledgement. Focused
 local unit/type/lint/native gates use existing scripts; CI owns WASM/replays.
+
+
+Half-2 local foundation checkpoint (not wired): the engine has a pure shared
+`signing_headers` validator/merge policy, default-deny, with trusted HTTP protected
+names. Bounds are 32 callback headers, 256 bytes/name, 8192 bytes/value and 32768
+aggregate UTF-8 bytes; names are ASCII tokens and values reject controls except
+HTAB. All metadata validates before outbound mutation. Case-insensitive callback
+last-wins collapses all touched native aliases, preserving unrelated native data
+and leaving empty callbacks inert. Five focused native tests pass, including a
+compiled RED/green duplicate-native regression and exact aggregate boundaries.
+Independent adversarial review and strict engine Clippy pass; no dispatch/capture,
+SignResult, routing, feed or live provider path uses this policy yet.
+
+RequestContext's owner agreed this lane owns signing result/header regions.
+Headers must apply before ManagedHttp Bind, with existing same-attempt custody;
+Pending managed/route-ready and prepare raw/protocol/revision/entropy contracts
+must survive actual integration. Active http_lifecycle.rs test literals remain
+with that owner until the reviewed API/head is shared.
