@@ -1865,6 +1865,32 @@ arbitrary-last quote-delta quotient and its zero fallback remain deliberately
 unchanged. `Report::Last` remains strict. Native/root/helper controls are evidence
 for this repair, not live capture, new caller deployment or reporting closure.
 
+
+## Persistent row-reporting core: first consumers
+
+Repeat suppression and re-arm are cross-cutting engine policy. The first
+reporting slice moves Coinbase, Crypto.com and WOO diagnostic memory into
+`coverage::RowReports`: Coinbase preserves one non-Error-to-Error upgrade and
+namespace re-arm; Crypto.com preserves separate bounded Once memories for orders
+and positions, including decoded-key forget before market lookup; WOO preserves
+unbounded last-message comparison for fixed report kinds. Bounded memory still
+clears at4096 before even a duplicate lookup. The limit is independent of
+`RowAdmission` protection. Suppression does not increment health; an admitted
+report passes the existing coded boundary exactly once even if host delivery is
+filtered.
+
+This is a compatibility/architecture change, not a newly proven financial or
+production bug. Original native account controls pass before migration, covering
+Coinbase upgrade/re-arm, Crypto.com Warn-to-missing-copy suppression and decoded
+row re-arm within a partial response, and WOO A→B→A/clean-reset summaries. New
+engine controls pin repeat policies, namespace isolation/empty identities,
+borrowed forget, bounded duplicate-key reset, unbounded retention and filtered
+health. Existing financial reducers, admission coverage and snapshot fences are
+unchanged. Grouped collectors (Crypto.com every rejection, WOO unique known IDs
+plus anonymous rows), Bybit deferred reporting, and remaining persistent copies
+remain open in [the reporting plan](RUST_ROW_ADMISSION.md). No all-venue closure
+or new live capture/parity claim is made by this first slice.
+
 ## Bitrue single-page owned fills
 
 ~~Bitrue fills keep native output storage and terminal completion beside streamed

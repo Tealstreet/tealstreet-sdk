@@ -9,6 +9,7 @@ import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { prepareRecordedHttp } from '../support/managedHttp';
 import { OrderSide, OrderType } from '../../types';
 
 const setup = (spot: boolean, cancelReply?: () => Promise<unknown>, options: Partial<ExchangeOptions> = {}, batchReply?: unknown) => {
@@ -19,6 +20,7 @@ const setup = (spot: boolean, cancelReply?: () => Promise<unknown>, options: Par
   const errors: unknown[] = [];
   const raw = (value: unknown) => ({ status: 200, headers: '', body: new TextEncoder().encode(JSON.stringify(value)) });
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => 1_700_000_000_000,
     connect: (url, handlers) => {
       if (url.includes('/ws-api/')) privateMessage = handlers.onMessage;

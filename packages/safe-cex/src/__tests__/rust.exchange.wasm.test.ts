@@ -9,6 +9,7 @@ import { HYROTRADER_PROD_URL, HYROTRADER_SIMULATOR_URL } from '../exchanges/bybi
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
+import { prepareRecordedHttp } from './support/managedHttp';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { PRIVATE_PROXY_JP } from '../transport/tealstreet/transportResolution';
 import { OrderSide, OrderStatus, OrderType } from '../types';
@@ -56,6 +57,7 @@ const recordedTransport = (overrides: Record<string, { status: number; body: str
   const sockets = new Map<string, (text: string) => void>();
   const requests: string[] = [];
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       sockets.set(new URL(url).pathname, onMessage);

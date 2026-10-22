@@ -336,3 +336,26 @@ test('synchronous deadline callbacks settle after registration without invoking 
   assert.equal(settled.error?.outcome, 'notSent');
   r.host.dispose();
 });
+
+
+test('dispatch liveness guard leaves hosted HTTP and WS captures independently usable', async () => {
+  for (const injected of [false, true]) {
+    let providerCalls = 0, livenessChecks = 0;
+    const r = rig(injected ? () => { providerCalls++; return result(); } : undefined);
+    r.engine.signingPending = () => { livenessChecks++; return false; };
+    r.host.execute({ op: 'sign', attempt: 91, work: structuredClone(work), timeoutMs: 1000 });
+    await tick();
+    assert.equal(providerCalls, 0);
+    assert.equal(livenessChecks, 1);
+    for (const input of [request, { kind: 'wsAuth', toSign: 'GET/realtime1700999999999', outputFormat: 'hex' }]) {
+      assert.deepEqual(await r.host.hostedSigning(input), { credential: 'key', signature: '37'.repeat(32) });
+    }
+    assert.equal(livenessChecks, 1, 'hosted capture tokens must not consult dispatch attempt liveness');
+    assert.equal(providerCalls, injected ? 2 : 0);
+    assert.equal(r.calls.filter(([kind]) => kind === 'finish').length, 2);
+    assert.equal(r.calls.some(([kind]) => kind === 'signed' || kind === 'signFailed'), false);
+    assert.equal(r.captures.size, 0);
+    assert.equal(r.timers.size, 0);
+    r.host.dispose();
+  }
+});
