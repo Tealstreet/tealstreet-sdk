@@ -1469,3 +1469,16 @@ checks, independently review the fixture and frozen assertions, then a small PR
 with CI/background watch. Integrate actual#1775 before the separate final guard
 and merge under owner queue. Architecture gate: No; this only fixes a test clock
 for the existing shared managed transport boundary.
+
+Fixture evidence: a temporary test-scoped clock returning1700000000000 for its
+first read and1700000000001 thereafter reproduced the exact assertion failure:
+expected[20000,5000], actual[19999,5000]. Replacing that temporary clock with one
+scoped constant passes the unchanged test. The committed source change is only
+that constant Date.now mock; TestContext restores it after the test. Independent
+plan/correctness/adversarial review CLEAN, architecture No.
+
+The package Workers unit script and managed-HTTP unit suite pass. An attempted
+full Workers plus managed-HTTP run passed37/39; two earlier real-engine startup
+tests timed out before the changed test. Keep that local failure visible; fresh
+CI with its matching built WASM must verify the complete integration suite.
+No production timing, timeout tolerance, route or response-body assertion changed.
