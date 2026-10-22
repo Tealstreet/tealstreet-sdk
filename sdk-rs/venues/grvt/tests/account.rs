@@ -1674,3 +1674,121 @@ fn ip_whitelist_rejection_keeps_its_actionable_message() {
                 && event.message.starts_with("GRVT IP is not whitelisted")
     )));
 }
+
+fn reporter_summary(h: &mut Harness, coins: &str) {
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms }
+                if *at_ms >= h.now + 50_000. && *at_ms <= h.now + 60_000. =>
+            {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("native summary poll");
+    h.timer(timer, at);
+    h.reply(
+        "aggregated_account_summary",
+        &format!(r#"{{"r":{{"te":"100","sb":{coins}}}}}"#),
+        "",
+    );
+}
+#[test]
+fn reporter_coin_duplicate_rearms_its_key_but_non_array_retains_coins_and_memory() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    reporter_summary(&mut h, r#"[{"c":"ETH","b":"2"}]"#);
+    let mixed = r#"[{"c":"ETH","b":"bad"},{"c":"ETH","b":"9"},{}]"#;
+    reporter_summary(&mut h, mixed);
+    assert_eq!(skip_warnings(&h, "spot balance"), 2);
+    assert_eq!(
+        h.engine.store().currency_balances().unwrap()[0]
+            .balance
+            .total,
+        2.
+    );
+    reporter_summary(&mut h, mixed);
+    // Native coin totals rearm ETH even though rejection retains the stored 2.
+    assert_eq!(skip_warnings(&h, "spot balance"), 3);
+    reporter_summary(&mut h, r#"[{"c":"ETH","b":"bad"},{}]"#);
+    assert_eq!(skip_warnings(&h, "spot balance"), 4);
+    reporter_summary(&mut h, "{}"); // Valid outer JSON, unreadable coin list.
+    assert_eq!(
+        h.engine.store().currency_balances().unwrap()[0]
+            .balance
+            .total,
+        2.
+    );
+    reporter_summary(&mut h, r#"[{"c":"ETH","b":"bad"},{}]"#);
+    assert_eq!(skip_warnings(&h, "spot balance"), 4);
+    reporter_summary(&mut h, "null"); // Native clean-empty namespace rearm.
+    assert!(h.engine.store().currency_balances().unwrap().is_empty());
+    reporter_summary(&mut h, r#"[{"c":"ETH","b":"bad"},{}]"#);
+    assert_eq!(skip_warnings(&h, "spot balance"), 6);
+}
+#[test]
+fn reporter_clean_coin_namespace_does_not_rearm_rejected_duplicate_order_identity() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.reply("open_orders", &format!(r#"{{"r":[{OPEN}]}}"#), "");
+    let bad = OPEN.replace(r#""lp":"100""#, r#""lp":"bad""#);
+    let mixed = format!(r#"{{"r":[{bad},{OPEN},{{}}]}}"#);
+    h.ws(r#"{"s":"v1.order","f":{}}"#);
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("malformed order event schedules reconciliation");
+    h.timer(timer, at);
+    h.reply("open_orders", &mixed, "");
+    assert_eq!(skip_warnings(&h, "order"), 2);
+    assert_eq!(h.engine.store().orders().len(), 1);
+    reporter_summary(&mut h, "[]");
+    h.ws(r#"{"s":"v1.order","f":{}}"#);
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("malformed order event schedules reconciliation");
+    h.timer(timer, at);
+    h.reply("open_orders", &mixed, "");
+    // Unlike coin totals, rejected IDs are filtered out of order rearm.
+    assert_eq!(skip_warnings(&h, "order"), 2);
+    h.ws(r#"{"s":"v1.order","f":{}}"#);
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("malformed order event schedules reconciliation");
+    h.timer(timer, at);
+    h.reply("open_orders", r#"{"r":[]}"#, "");
+    h.ws(r#"{"s":"v1.order","f":{}}"#);
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("malformed order event schedules reconciliation");
+    h.timer(timer, at);
+    h.reply("open_orders", &mixed, "");
+    assert_eq!(skip_warnings(&h, "order"), 4);
+}
