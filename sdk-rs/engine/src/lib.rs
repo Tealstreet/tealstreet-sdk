@@ -19,6 +19,7 @@ pub mod num;
 mod order_locks;
 pub mod paging;
 mod placement_acks;
+mod protocol_clock;
 pub mod public_feed;
 pub mod read_scheduler;
 pub mod signing;

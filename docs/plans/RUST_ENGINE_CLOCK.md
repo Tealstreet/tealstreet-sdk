@@ -124,3 +124,43 @@ network deadlines, timers and emitted market timestamps. Calibrated protocol tim
 owns absolute outbound signing stamps, expiry and time-derived nonces; durations
 such as recvWindow/freshness are not shifted. A changed revision invalidates both
 prepared and queued signed output, never an already-transmitted request.
+
+## PR2 implementation boundary
+
+`Io` now owns one `ProtocolClock`; `Cx::observe_protocol_time` replaces its
+correction and `Cx::protocol_now` reads it. Same-offset observations are accepted
+without advancing the revision. Nonfinite observations, arithmetic overflow and
+revision exhaustion leave the prior correction intact. Separate engines cannot
+calibrate each other.
+
+The shared signer captures the revision alongside raw preparation time and
+passes calibrated UTC only to `SignStep::prepare`. A changed revision retires
+both successful and failed pending results through the existing new-attempt
+path. A completed signed action is checked again at actual release and wiped
+before repreparation when stale. Original unsigned input, FIFO sequence and raw
+deadline survive; raw timeout takes precedence. Already transmitted requests
+are outside this path and are never replayed because of calibration.
+
+Bybit REST, opposite-host probes and private WS auth consume the shared protocol
+view; its existing eligible once-only resend feeds the observation before
+rebuilding the request. Aster feeds validated `/time` responses before draining
+V1/V3 requests and deletes its local offset. Sync cadence/age, four bounded
+attempts, network deadlines, failed-sync retention and nonce namespace remain
+unchanged. A new signed demand after a failed periodic sync still initiates its
+own bounded sync attempt before release; the regression exercises that policy.
+
+Focused verification covers 1,028 engine/Bybit/Aster/Binance native tests, denied
+warning Clippy, formatting and bans. Added controls cover engine isolation,
+replacement/idempotence/invalid observations, revision exhaustion, same-time
+forward/backward calibration with stale success/error, late replies, materialized
+outbound renewal, FIFO, repeated calibration without deadline extension, raw
+frame/timer domains and same-callback venue resend/drain. Exact-head CI and
+complete authenticated replay proof remain merge requirements. Architecture
+review confirms one engine service and shared dispatch fences, with no new
+venue-local timing policy or SDK/NX API change.
+
+Fault controls: disabling common completion/release revision checks makes three
+new signing regressions fail; feeding raw time to canonical preparation makes
+the protocol timestamp regression fail. Restoring the implementation passes all
+25 focused signing tests. The full 1,028-test native run is green without these
+faults. No replay allowance, fixture or comparison policy is changed.

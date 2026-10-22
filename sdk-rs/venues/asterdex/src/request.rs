@@ -15,7 +15,6 @@ const CLOCK_INTERVAL_MS: f64 = 300_000.0;
 
 #[derive(Default)]
 pub struct RequestState {
-    pub offset_ms: f64,
     last_sync_success: Option<f64>,
     clock_running: bool,
     startup_pending: bool,
@@ -210,7 +209,7 @@ impl AsterDex {
             credentials,
             request.method,
             &request.path,
-            cx.now + self.requests.offset_ms,
+            cx.protocol_now(),
             self.options.testnet,
         ) {
             Ok(query) => query,
@@ -397,9 +396,9 @@ impl AsterDex {
             .filter(|r| (200..300).contains(&r.status))
             .and_then(|r| serde_json::from_str::<ServerTime>(r.body).ok())
             .and_then(|r| r.server_time.value())
-            .filter(|time| *time > 0.0);
-        if let Some(time) = time {
-            self.requests.offset_ms = time - cx.now;
+            .filter(|time| *time > 0.0)
+            .filter(|time| cx.observe_protocol_time(*time));
+        if time.is_some() {
             self.requests.last_sync_success = Some(cx.now);
         } else if request.attempt < 3 {
             self.issue_clock(
@@ -458,6 +457,7 @@ mod tests {
         inner: AsterDex,
         method: Method,
         streamed: bool,
+        clock_samples: Vec<(f64, f64)>,
     }
 
     impl Venue for Probe {
@@ -489,7 +489,10 @@ mod tests {
                 Pending::Signed(request) => {
                     self.inner.on_signed_response(cx, request, Ok(response))
                 }
-                Pending::Clock(request) => self.inner.on_clock_response(cx, request, Ok(response)),
+                Pending::Clock(request) => {
+                    self.inner.on_clock_response(cx, request, Ok(response));
+                    self.clock_samples.push((cx.now, cx.protocol_now()));
+                }
                 _ => panic!("unexpected probe response"),
             }
         }
@@ -511,7 +514,10 @@ mod tests {
         fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
             match pending {
                 Pending::Signed(request) => self.inner.on_signed_response(cx, request, Err(error)),
-                Pending::Clock(request) => self.inner.on_clock_response(cx, request, Err(error)),
+                Pending::Clock(request) => {
+                    self.inner.on_clock_response(cx, request, Err(error));
+                    self.clock_samples.push((cx.now, cx.protocol_now()));
+                }
                 _ => panic!("unexpected probe failure"),
             }
         }
@@ -573,6 +579,7 @@ mod tests {
                     inner: AsterDex::new(options),
                     method,
                     streamed: false,
+                    clock_samples: Vec::new(),
                 }),
                 now: 1_700_000_000_000.0,
                 requests: Vec::new(),
@@ -809,6 +816,75 @@ mod tests {
     }
 
     #[test]
+    fn time_response_updates_shared_protocol_clock_before_draining_v1_and_v3() {
+        for v3 in [false, true] {
+            let mut h = Harness::new(Method::Post, v3);
+            let request = h.requests.remove(0);
+            h.reply(request, 400, r#"{"code":-1021,"msg":"Timestamp rejected"}"#);
+            let clock = h.requests.remove(0);
+            assert!(clock.headers.is_empty());
+            assert_eq!(clock.timeout_ms, Some(5_000));
+            h.reply(clock, 200, r#"{"serverTime":1700000015000}"#);
+            assert_eq!(
+                h.engine.venue().clock_samples.last(),
+                Some(&(h.now, 1_700_000_015_000.0)),
+                "calibration must be visible through the shared clock in this callback"
+            );
+            assert_eq!(
+                h.engine.venue().inner.requests.last_sync_success,
+                Some(h.now)
+            );
+            assert_eq!(h.timers.last().unwrap().1, CLOCK_INTERVAL_MS);
+            assert_eq!(
+                h.requests.len(),
+                1,
+                "queued request drains in the same callback"
+            );
+            if v3 {
+                let nonce: u64 = h.requests[0]
+                    .url
+                    .split("nonce=")
+                    .nth(1)
+                    .unwrap()
+                    .split('&')
+                    .next()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                assert!(nonce >= 1_700_000_015_000_000);
+            } else {
+                assert!(h.requests[0].url.contains("timestamp=1700000015000"));
+            }
+        }
+    }
+
+    #[test]
+    fn later_clock_observation_replaces_the_offset_without_moving_raw_sync_age() {
+        let mut h = Harness::new(Method::Post, false);
+        let request = h.requests.remove(0);
+        h.reply(request, 400, r#"{"code":-1021,"msg":"Timestamp rejected"}"#);
+        let clock = h.requests.remove(0);
+        h.reply(clock, 200, r#"{"serverTime":1700000015000}"#);
+        let request = h.requests.remove(0);
+        h.reply(request, 200, "{}");
+        let (timer, delay) = h.timers.remove(0);
+        h.now += delay;
+        h.engine.handle(h.now, Event::TimerFired { timer });
+        h.collect();
+        let clock = h.requests.remove(0);
+        h.reply(clock, 200, r#"{"serverTime":1700000400000}"#);
+        assert_eq!(
+            h.engine.venue().clock_samples.last(),
+            Some(&(h.now, 1_700_000_400_000.0))
+        );
+        assert_eq!(
+            h.engine.venue().inner.requests.last_sync_success,
+            Some(h.now)
+        );
+        assert_eq!(h.timers.last().unwrap().1, CLOCK_INTERVAL_MS);
+    }
+
+    #[test]
     fn failed_periodic_clock_sync_retains_the_last_successful_offset() {
         let mut h = Harness::new(Method::Post, false);
         let request = h.requests.remove(0);
@@ -817,7 +893,8 @@ mod tests {
         h.reply(clock, 200, r#"{"serverTime":1700000015000}"#);
         let request = h.requests.remove(0);
         h.reply(request, 200, "{}");
-        let saved = h.engine.venue().inner.requests.offset_ms;
+        let (raw, protocol) = *h.engine.venue().clock_samples.last().unwrap();
+        let saved = protocol - raw;
         assert_ne!(saved, 0.0);
         let (timer, delay) = h.timers.remove(0);
         assert_eq!(delay, CLOCK_INTERVAL_MS);
@@ -829,7 +906,39 @@ mod tests {
             h.reply(clock, 200, r#"{"serverTime":"not-a-time"}"#);
         }
         assert!(h.requests.is_empty());
-        assert_eq!(h.engine.venue().inner.requests.offset_ms, saved);
+        let (raw, protocol) = *h.engine.venue().clock_samples.last().unwrap();
+        assert_eq!(protocol - raw, saved);
+        h.engine.handle(
+            h.now,
+            Event::Command(Command::FetchCandles {
+                command: 8,
+                symbol: "BTCUSDT".into(),
+                interval: safe_cex_engine::model::Interval::M1,
+                limit: None,
+                from_ms: None,
+                to_ms: None,
+            }),
+        );
+        h.collect();
+        // Failed synchronization leaves the last success stale, so a new signed
+        // request must exhaust its own bounded clock cycle before it drains.
+        for _ in 0..4 {
+            assert_eq!(h.requests.len(), 1);
+            let clock = h.requests.remove(0);
+            assert!(clock.url.ends_with("/time"));
+            assert!(clock.headers.is_empty());
+            assert_eq!(clock.timeout_ms, Some(5_000));
+            h.reply(clock, 200, r#"{"serverTime":"not-a-time"}"#);
+        }
+        assert_eq!(h.requests.len(), 1);
+        assert!(h.requests[0].url.contains("/fapi/v1/probe?"));
+        let (raw, protocol) = *h.engine.venue().clock_samples.last().unwrap();
+        assert_eq!(raw, h.now);
+        assert_eq!(protocol - raw, saved);
+        assert!(h.requests[0].url.contains(&format!(
+            "timestamp={}",
+            safe_cex_engine::num::format(protocol)
+        )));
     }
 
     struct PublicHarness {
