@@ -4060,10 +4060,7 @@ changes. The 126 final native account compatibility tests pass on unchanged
 pre-migration production, including eleven new controls; this is no defect-RED
 claim. Full CI and a fresh current-head raw proof remain the merge gates.
 
-## Shared unproven write-response guard (Binance reference; ordinary Bybit pending)
-
-Status: implemented and verified locally on the unpublished request follow-on;
-not yet landed. Binance reference only; ordinary Bybit remains pending.
+## Shared unproven write-response guard (Binance reference)
 
 The managed send path treats HTTP 408 and statuses >=500 as unproven before a
 native codec can update Store, ownership or command effects. The unproven
