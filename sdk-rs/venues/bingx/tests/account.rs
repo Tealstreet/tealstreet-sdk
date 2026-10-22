@@ -5,7 +5,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Level, Method, Notice, RequestId, Response,
     SocketId, TimerId, wire,
 };
-use safe_cex_venue_bingx::{Bingx, Options};
+use safe_cex_venue_bingx::Bingx;
+mod support;
+use support::Options;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
@@ -46,11 +48,11 @@ impl Harness {
     }
     fn unstarted() -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+            engine: support::engine(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 ..Options::default()
-            })),
+            }),
             now: 1000.0,
             requests: Vec::new(),
             sockets: Vec::new(),

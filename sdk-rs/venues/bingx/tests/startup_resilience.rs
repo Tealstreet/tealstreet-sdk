@@ -1,6 +1,8 @@
 //! Scripted discovery regressions; no network or account credentials.
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
-use safe_cex_venue_bingx::{Bingx, Options};
+use safe_cex_venue_bingx::Bingx;
+mod support;
+use support::Options;
 
 /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
 fn jittered(actual: f64, nominal: f64) -> bool {
@@ -8,10 +10,10 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"code":0,"data":[{"broken":true},{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"###;
 fn public_engine() -> Engine<Bingx> {
-    safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+    support::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }))
+    })
 }
 #[test]
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
@@ -76,11 +78,11 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+    let mut engine = support::engine(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     let catalogue = engine
         .drain_actions()

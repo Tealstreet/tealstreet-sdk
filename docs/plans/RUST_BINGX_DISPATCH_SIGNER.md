@@ -75,3 +75,20 @@ cases without new state flags or ledgers, and identify the BingX finalizer as a
 RequestContext consolidation target in the PR body. Account signer cleanup must
 compare the existing in-flight revision before clearing a latch. The separate
 unmerged metadata core is not inherited, and its publication fences stay intact.
+
+## Native staging checkpoint (draft)
+
+Real issue/resend and independent identity builders now stage the shared recipe;
+venue Options/Credentials contain opaque refs only. Registry and standalone WASM
+feature gates select trusted setup. Existing native tests use provider setup,
+with the old full signing implementation retained exclusively as a test oracle.
+All BingX native tests and the BingX-only registry build pass; strict gates cover
+the touched crate and registry. Independent reviews preserve success bytes,
+secondary GET/primary writes, streamed ownership, resend tags and existing
+metadata fences. Review caught and restored the valid-primary fixture in the
+invalid-secondary/no-fallback test.
+
+This is an intermediate checkpoint, not PR readiness: typed owner failure routing,
+existing-state conservative outcome RED controls, revision-fenced cleanup, caller
+section, exact ratchet shrink and hosted/CI proof remain. Work pauses here for
+the owner's #1757 final integration priority after actual #1737.

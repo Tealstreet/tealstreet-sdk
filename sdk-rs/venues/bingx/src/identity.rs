@@ -91,13 +91,15 @@ impl Bingx {
             );
             return;
         };
-        let (url, headers, body) = crate::sign::Params::new().into_request(
+        crate::sign::stage(
+            cx,
+            Some(credentials),
             Method::Get,
             "/openApi/swap/v3/user/balance",
-            Some(credentials),
-            cx.now,
+            crate::sign::Params::new(),
+            None,
+            Pending::Identity(command),
         );
-        cx.request(Method::Get, url, headers, body, Pending::Identity(command));
     }
     pub(crate) fn identity_response(
         &self,

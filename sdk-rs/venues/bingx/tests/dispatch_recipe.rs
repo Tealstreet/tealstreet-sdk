@@ -5,7 +5,12 @@ use safe_cex_engine::signing::{Identity, Provider};
 use safe_cex_engine::{
     Action, Command, Cx, HttpRequest, Method, Response, SocketId, TimerId, Venue,
 };
-use safe_cex_venue_bingx::sign::{Credentials, Params, dispatch::Http};
+use safe_cex_venue_bingx::paths;
+use safe_cex_venue_bingx::sign::{Params, dispatch::Http};
+#[allow(dead_code)]
+#[path = "support/oracle.rs"]
+mod oracle;
+use oracle::Credentials;
 
 struct Probe {
     identity: Identity,
@@ -110,16 +115,25 @@ fn provider_recipe_preserves_every_native_method_and_typed_body() {
         );
         // The unmigrated construction path is an independent legacy oracle for
         // this additive checkpoint; it becomes test-only at builder adoption.
-        let expected = params().into_request(
-            method,
-            "/openApi/swap/v2/trade/order",
-            Some(&Credentials {
-                read: None,
-                key: "replay-key".into(),
-                secret: "replay-secret".into(),
-            }),
-            1700000000000.875,
-        );
+        let expected = oracle::Params::new()
+            .str("symbol", "BTC-USDT")
+            .str("side", "BUY")
+            .str("type", "LIMIT")
+            .num("quantity", 0.01)
+            .num("price", 30000.)
+            .boolean("reduceOnly", true)
+            .integer("orderId", 9007199254740993)
+            .str("clientOrderID", "a b+/%")
+            .into_request(
+                method,
+                "/openApi/swap/v2/trade/order",
+                Some(&Credentials {
+                    read: None,
+                    key: "replay-key".into(),
+                    secret: "replay-secret".into(),
+                }),
+                1700000000000.875,
+            );
         assert_eq!((http.url, http.headers, http.body.clone()), expected);
         if method == Method::Post {
             let body: serde_json::Value = serde_json::from_str(&http.body.unwrap()).unwrap();

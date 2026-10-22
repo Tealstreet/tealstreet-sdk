@@ -1786,8 +1786,14 @@ mod tests {
                 text,
                 &Credentials {
                     read: None,
-                    key: "fixture".into(),
-                    secret: "fixture".into(),
+                    primary: safe_cex_engine::signing::Identity {
+                        credential: safe_cex_engine::signing::KeyRef(
+                            "ref:fixture-credential".into(),
+                        ),
+                        signing: safe_cex_engine::signing::KeyRef("ref:fixture-signing".into()),
+                        passphrase: None,
+                        stable_id: None,
+                    },
                 },
             );
         }

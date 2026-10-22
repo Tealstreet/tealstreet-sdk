@@ -21,6 +21,7 @@
     "lighter-robinhood": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
     "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
     "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true}},
+    "bingx": {"bridge": {"dispatchSigning": true}},
     "bybit": {"bridge": {"dispatchSigning": true}},
     "bybitinverse": {"bridge": {"dispatchSigning": true}},
     "bybitspot": {"bridge": {"spot": true, "dispatchSigning": true}},

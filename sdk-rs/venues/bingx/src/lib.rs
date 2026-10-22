@@ -23,22 +23,11 @@ use sign::{Credentials, Params};
 use std::collections::HashMap;
 use wire::*;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub read_credentials: Option<safe_cex_engine::signing::Identity>,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
 }
 
 pub enum Pending {
@@ -85,25 +74,19 @@ pub(crate) fn issue(
     at: Option<ArrayAt>,
     pending: Pending,
 ) -> RequestId {
-    let (url, headers, body) = params
-        .clone()
-        .into_request(method, path, credentials, cx.now);
     let pending = if credentials.is_some() && sign::signs(path) {
         Pending::Signed(Box::new(Signed {
             inner: pending,
             method,
             path,
-            params,
+            params: params.clone(),
             at,
             resent: false,
         }))
     } else {
         pending
     };
-    match at {
-        Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
-        None => cx.request(method, url, headers, body, pending),
-    }
+    sign::stage(cx, credentials, method, path, params, at, pending)
 }
 
 pub(crate) fn signature_rejected(body: &str) -> bool {
@@ -203,7 +186,6 @@ pub struct Bingx {
 
 impl Bingx {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let config_error = options
             .read_credentials
             .as_ref()
@@ -212,14 +194,11 @@ impl Bingx {
             None
         } else {
             options
-                .key
-                .as_ref()
-                .zip(options.secret.as_ref())
-                .filter(|(k, s)| !k.is_empty() && !s.is_empty())
-                .map(|(key, secret)| Credentials {
-                    key: key.clone(),
-                    secret: secret.clone(),
-                    read: options.read_credentials.clone(),
+                .credentials
+                .filter(|identity| identity.validate().is_ok())
+                .map(|primary| Credentials {
+                    primary,
+                    read: options.read_credentials,
                 })
         };
         Self {
@@ -311,10 +290,6 @@ impl Bingx {
             at,
             ..
         } = signed;
-        let (url, headers, body) =
-            params
-                .clone()
-                .into_request(method, path, self.credentials.as_ref(), cx.now);
         let scope = match &inner {
             Pending::Account(request) => account::auth_scope(request),
             _ => None,
@@ -323,14 +298,19 @@ impl Bingx {
             inner,
             method,
             path,
-            params,
+            params: params.clone(),
             at,
             resent: true,
         }));
-        let id = match at {
-            Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
-            None => cx.request(method, url, headers, body, pending),
-        };
+        let id = sign::stage(
+            cx,
+            self.credentials.as_ref(),
+            method,
+            path,
+            params,
+            at,
+            pending,
+        );
         if let (Some(scope), Some(credentials)) = (scope, self.credentials.as_ref()) {
             account::tag_read(cx, id, method, credentials, scope);
         }

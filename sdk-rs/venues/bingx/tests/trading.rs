@@ -28,8 +28,7 @@ fn issue(
     _at: Option<safe_cex_engine::json::ArrayAt>,
     pending: Pending,
 ) {
-    let (url, headers, body) = params.into_request(method, path, credentials, cx.now);
-    cx.request(method, url, headers, body, pending);
+    sign::stage(cx, credentials, method, path, params, None, pending);
 }
 struct TestVenue {
     trading: Trading,
@@ -94,16 +93,26 @@ impl Harness {
         Self::with_status(initial, "NEW")
     }
     fn with_status(initial: Option<(Order, &str)>, status: &str) -> Self {
+        let (local, identities) =
+            safe_cex_crypto::signer::LocalSigner::from_setup(safe_cex_crypto::signer::LocalSetup {
+                primary: Some(safe_cex_crypto::signer::LocalIdentity {
+                    key: safe_cex_crypto::signer::Secret::new("key".into()),
+                    secret: safe_cex_crypto::signer::Secret::new("secret".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .unwrap();
         let mut engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
             trading: Trading::default(),
             initial: initial.map(|(o, k)| (o, k.into(), status.into())),
             acknowledgements: Vec::new(),
             credentials: Credentials {
                 read: None,
-                key: "key".into(),
-                secret: "secret".into(),
+                primary: identities.primary.unwrap(),
             },
         });
+        engine.set_signer(Some(std::sync::Arc::new(local))).unwrap();
         engine.start(1_000.0);
         let mut h = Self {
             engine,

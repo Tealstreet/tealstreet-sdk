@@ -3,7 +3,9 @@ use safe_cex_engine::{
     AccountReadScope, Action, AuthOutcome, CredentialSlot, Engine, Event, HttpRequest, Notice,
     Response,
 };
-use safe_cex_venue_bingx::{Bingx, Options};
+use safe_cex_venue_bingx::Bingx;
+mod support;
+use support::Options;
 const MARKETS: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#;
 const DAILY: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#;
 const PREMIUM: &str = r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#;
@@ -47,7 +49,7 @@ fn auth(actions: &[Action]) -> Vec<(CredentialSlot, AccountReadScope, AuthOutcom
         .collect()
 }
 fn started(read: bool) -> (Engine<Bingx>, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+    let mut e = support::engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
@@ -56,7 +58,7 @@ fn started(read: bool) -> (Engine<Bingx>, Vec<Action>) {
             passphrase: Some("read-pass".into()),
         }),
         ..Options::default()
-    }));
+    });
     e.start(1000.);
     // Private reads may start before the public seed completes, so keep every startup action.
     let mut all = drain(&mut e);

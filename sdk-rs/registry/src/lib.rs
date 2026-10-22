@@ -1176,20 +1176,34 @@ pub fn build_with_signer<T: Visit>(
             )?,
         ),
         #[cfg(feature = "bingx")]
-        "bingx" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "bingx" => {
+            if options.key.as_ref().is_some_and(|s| !s.is_empty())
+                || options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "BingX credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 Bingx::new(BingxOptions {
-                    read_credentials: options.read_credentials.take(),
+                    read_credentials: identities.secondary,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
+                    credentials: identities.primary,
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "weex")]
         "weex" => finish(
             visitor,

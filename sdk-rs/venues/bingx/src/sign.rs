@@ -1,7 +1,6 @@
 //! Sorted HMAC query signing; POST parameters retain their native JSON types.
 #[path = "sign/dispatch.rs"]
 pub mod dispatch;
-use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
 use serde::Serialize;
@@ -9,9 +8,16 @@ use std::collections::BTreeMap;
 
 #[derive(Clone)]
 pub struct Credentials {
-    pub read: Option<safe_cex_engine::ReadCredentials>,
-    pub key: String,
-    pub secret: String,
+    pub read: Option<safe_cex_engine::signing::Identity>,
+    pub primary: safe_cex_engine::signing::Identity,
+}
+impl Credentials {
+    pub fn identity(&self, method: Method) -> &safe_cex_engine::signing::Identity {
+        self.read
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .unwrap_or(&self.primary)
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -78,29 +84,6 @@ impl Params {
             .collect::<Vec<_>>()
             .join("&")
     }
-    pub fn into_request(
-        mut self,
-        method: Method,
-        path: &str,
-        credentials: Option<&Credentials>,
-        now: f64,
-    ) -> RequestParts {
-        let mut headers = vec![("X-SOURCE-KEY", "Tealstreet".into())];
-        if let Some(c) = credentials {
-            let read = c.read.as_ref().filter(|_| method == Method::Get);
-            let key = read.map_or(c.key.as_str(), |r| &r.key);
-            let secret = read.map_or(c.secret.as_str(), |r| &r.secret);
-            headers.push(("X-BX-APIKEY", key.to_owned()));
-            if signs(path) {
-                self = self.num("timestamp", safe_cex_engine::time::wire_stamp_ms(now));
-                let signature =
-                    hmac_sha256(secret.as_bytes(), self.query().as_bytes(), Encoding::Hex);
-                self = self.str("signature", &signature);
-            }
-        }
-        self.render(method, path, headers)
-    }
-
     /// Native wire shape, shared by legacy construction and dispatch recipes.
     fn render(
         self,
@@ -135,12 +118,26 @@ pub fn signs(path: &str) -> bool {
     path != "/openApi/user/auth/userDataStream"
 }
 
-impl Drop for Credentials {
-    fn drop(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read.as_mut() {
-            read.erase_secrets();
-        }
+/// Stage native intent; only shared dispatch can materialize credentials.
+pub fn stage<P>(
+    cx: &mut safe_cex_engine::Cx<'_, P>,
+    credentials: Option<&Credentials>,
+    method: Method,
+    path: &'static str,
+    params: Params,
+    at: Option<safe_cex_engine::json::ArrayAt>,
+    pending: P,
+) -> safe_cex_engine::RequestId {
+    let recipe = credentials
+        .map(|c| dispatch::Http::new(c.identity(method).clone(), method, path, params.clone()));
+    let (url, headers, body) =
+        params.render(method, path, vec![("X-SOURCE-KEY", "Tealstreet".into())]);
+    let id = match at {
+        Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
+        None => cx.request(method, url, headers, body, pending),
+    };
+    if let Some(recipe) = recipe {
+        cx.sign_http(id, Box::new(recipe));
     }
+    id
 }
