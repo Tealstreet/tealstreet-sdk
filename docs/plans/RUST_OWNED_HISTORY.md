@@ -245,3 +245,25 @@ format/bans/links locally; full CI owns family/replay/build proof. Then separate
 fresh guard, separate exact-head merge and actual parent/tree verification.
 Paradex lookup/fallback coverage is a later slice: partial unrelated rows must
 never manufacture a definitive lookup miss.
+
+
+Phase-3 implementation uses a typed individual-row enum; page-local decoding
+requires result/list before staging. The adapter's contextual finalizer rebuilds
+the exact result kind, rejects mismatched variants, then sorts/dedupes/truncates
+accepted rows. No direct completion or history marker emitter remains in this
+adapter. Private `Listed.ret_code` is renamed `_ret_code` with identical explicit
+serde naming/parser because its last read-and-discard site migrated; account
+execution deserialization is unchanged. Native error codes are retained, transport
+errors are typed Network, and unclassified failures use the core Internal default.
+
+Independent correctness/adversarial reviews are clean and both answer the
+architecture gate: shared engine extension plus protocol adapter, not duplicated
+venue completion policy. Existing successful request sequences/variants pass.
+The new matrix covers first/later native, HTTP, transport and malformed-page
+failures, accepted-empty/filtered pages, strict caps/cycles, duplicate limit
+accounting, recovered hedge income, cross-window cause retention and category
+recovery with sorted global limits. Original adapter source fails five new
+account regressions at their intended assertions (typed first failure, retained
+later failure, hedge recovery, early cycle refusal and cross-window recovery);
+corrected code passes all eight new account/product tests. Final focused gates,
+actual signer dependency integration, final independent review and CI remain.

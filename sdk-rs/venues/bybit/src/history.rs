@@ -5,11 +5,10 @@ use crate::account::{order_side, order_status, order_type};
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
-use safe_cex_engine::Level;
-use safe_cex_engine::log::code;
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
-use safe_cex_engine::paging::{self, WindowOrder};
-use safe_cex_engine::{CommandId, Cx, Query as Read, Response};
+use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, Stall, WindowOrder};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Query as Read, Response, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -99,6 +98,69 @@ struct Trade {
     side: &'static str,
 }
 
+enum Row {
+    Fill(Execution),
+    Order(HistoricalOrder),
+    Income(Income),
+    Trade(Trade),
+}
+
+#[derive(Clone, Copy)]
+enum RowKind {
+    Fills,
+    Orders,
+    Income,
+    Trades,
+}
+
+impl RowKind {
+    fn empty(self) -> Rows {
+        match self {
+            Self::Fills => Rows::Fills(Vec::new()),
+            Self::Orders => Rows::Orders(Vec::new()),
+            Self::Income => Rows::Income(Vec::new()),
+            Self::Trades => Rows::Trades(Vec::new()),
+        }
+    }
+
+    fn owner(self, completion: Completion) -> CursorHistory<Row> {
+        let max_pages = if matches!(self, Self::Orders) {
+            MAX_ORDER_PAGES_PER_WINDOW
+        } else {
+            MAX_PAGES_PER_WINDOW
+        };
+        CursorHistory::new(
+            completion,
+            CursorWalk::new(max_pages),
+            |reason| {
+                match reason {
+                Stall::PageBudget => "Bybit order history reached its page limit; older orders in this window are omitted".into(),
+                _ => "Bybit history pagination is incomplete or did not advance".into(),
+            }
+            },
+            |_| Err("Bybit history requires query finalization".into()),
+        )
+    }
+
+    fn encode(self, rows: Vec<Row>, cap: usize) -> Result<String, VenueError> {
+        let mut shaped = self.empty();
+        for row in rows {
+            match (&mut shaped, row) {
+                (Rows::Fills(rows), Row::Fill(row)) => rows.push(row),
+                (Rows::Orders(rows), Row::Order(row)) => rows.push(row),
+                (Rows::Income(rows), Row::Income(row)) => rows.push(row),
+                (Rows::Trades(rows), Row::Trade(row)) => rows.push(row),
+                _ => {
+                    return Err(
+                        VenueError::new("Bybit history row kind changed").kind(ErrorKind::Internal)
+                    );
+                }
+            }
+        }
+        shaped.json(cap)
+    }
+}
+
 enum Rows {
     Fills(Vec<Execution>),
     Orders(Vec<HistoricalOrder>),
@@ -107,16 +169,22 @@ enum Rows {
 }
 
 impl Rows {
-    fn len(&self) -> usize {
+    fn stage(self, owner: &mut CursorHistory<Row>) {
         match self {
-            Self::Fills(rows) => rows.len(),
-            Self::Orders(rows) => rows.len(),
-            Self::Income(rows) => rows.len(),
-            Self::Trades(rows) => rows.len(),
+            Self::Fills(rows) => rows.into_iter().for_each(|row| owner.stage(Row::Fill(row))),
+            Self::Orders(rows) => rows
+                .into_iter()
+                .for_each(|row| owner.stage(Row::Order(row))),
+            Self::Income(rows) => rows
+                .into_iter()
+                .for_each(|row| owner.stage(Row::Income(row))),
+            Self::Trades(rows) => rows
+                .into_iter()
+                .for_each(|row| owner.stage(Row::Trade(row))),
         }
     }
 
-    fn json(&mut self, cap: usize) -> String {
+    fn json(&mut self, cap: usize) -> Result<String, VenueError> {
         match self {
             Self::Fills(rows) => {
                 rows.sort_by(|left, right| right.timestamp.total_cmp(&left.timestamp));
@@ -156,7 +224,7 @@ impl Rows {
             }
             Self::Trades(rows) => serde_json::to_string(rows),
         }
-        .unwrap_or_default()
+        .map_err(|error| error.to_string().into())
     }
 }
 
@@ -168,14 +236,27 @@ struct Walk {
     limit: u32,
     windows: VecDeque<(Option<f64>, Option<f64>)>,
     window: (Option<f64>, Option<f64>),
-    cursor: Option<String>,
-    pages: u32,
+    stage_started: bool,
     cap: usize,
     category_rows_start: usize,
-    rows: Rows,
+    kind: RowKind,
+    history: CursorHistory<Row>,
     inverse: bool,
     categories: VecDeque<Category>,
     original_windows: VecDeque<(Option<f64>, Option<f64>)>,
+}
+
+impl Walk {
+    fn full(&self) -> bool {
+        self.cap > 0
+            && self.history.accepted_len() + self.history.staged_len() - self.category_rows_start
+                >= self.cap
+    }
+
+    fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        self.history
+            .finish_with(cx, result, |rows| self.kind.encode(rows, self.cap));
+    }
 }
 
 #[derive(Default)]
@@ -313,6 +394,7 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
 
 impl BybitLinear {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
+        let completion = Completion::new(command);
         let symbol = match &read {
             Read::Fills { symbol, .. }
             | Read::OrderHistory { symbol, .. }
@@ -322,7 +404,7 @@ impl BybitLinear {
             }
         };
         if symbol.is_some_and(|symbol| !self.category_enabled(self.category_for(symbol))) {
-            cx.fail(command, "Bybit product is not enabled");
+            completion.finish(cx, Err("Bybit product is not enabled".into()));
             return;
         }
         let categories = if symbol.is_none() {
@@ -336,22 +418,22 @@ impl BybitLinear {
                 Read::PublicTrades { .. } | Read::OrderByClientId { .. }
             )
         {
-            cx.done(command, "[]".into());
+            completion.finish(cx, Ok("[]".into()));
             return;
         }
         if matches!(read, Read::Income { .. }) && (self.variant.is_spot() || self.variant.is_hyro())
         {
-            cx.fail(
-                command,
-                "This Bybit variant does not support income history",
+            completion.finish(
+                cx,
+                Err("This Bybit variant does not support income history".into()),
             );
             return;
         }
         let mut walk = match read {
             Read::OrderByClientId { .. } => {
-                cx.fail(
-                    command,
-                    "Bybit client order lookup is not supported by the Rust engine",
+                completion.finish(
+                    cx,
+                    Err("Bybit client order lookup is not supported by the Rust engine".into()),
                 );
                 return;
             }
@@ -377,10 +459,10 @@ impl BybitLinear {
                     limit: (cap as u32).clamp(1, FILLS_PAGE_LIMIT),
                     windows: windows(from_ms, to_ms),
                     window: (None, None),
-                    cursor: None,
-                    pages: 0,
+                    stage_started: false,
                     cap,
-                    rows: Rows::Fills(Vec::new()),
+                    kind: RowKind::Fills,
+                    history: RowKind::Fills.owner(completion),
                 }
             }
             Read::OrderHistory {
@@ -408,10 +490,10 @@ impl BybitLinear {
                     },
                     windows: windows(from_ms, to_ms),
                     window: (None, None),
-                    cursor: None,
-                    pages: 0,
+                    stage_started: false,
                     cap,
-                    rows: Rows::Orders(Vec::new()),
+                    kind: RowKind::Orders,
+                    history: RowKind::Orders.owner(completion),
                 }
             }
             Read::Income {
@@ -447,10 +529,10 @@ impl BybitLinear {
                     limit: (cap as u32).clamp(1, INCOME_PAGE_LIMIT),
                     windows: windows(from_ms, to_ms),
                     window: (None, None),
-                    cursor: None,
-                    pages: 0,
+                    stage_started: false,
                     cap,
-                    rows: Rows::Income(Vec::new()),
+                    kind: RowKind::Income,
+                    history: RowKind::Income.owner(completion),
                 }
             }
             Read::PublicTrades { symbol, limit } => Walk {
@@ -474,10 +556,10 @@ impl BybitLinear {
                 ),
                 windows: VecDeque::from([(None, None)]),
                 window: (None, None),
-                cursor: None,
-                pages: 0,
+                stage_started: false,
                 cap: 0,
-                rows: Rows::Trades(Vec::new()),
+                kind: RowKind::Trades,
+                history: RowKind::Trades.owner(completion),
             },
         };
         walk.original_windows = walk.windows.clone();
@@ -493,12 +575,19 @@ impl BybitLinear {
         let Some(walk) = self.history.reads.get_mut(&command) else {
             return;
         };
-        let full = walk.cap > 0 && walk.rows.len() - walk.category_rows_start >= walk.cap;
+        let full = walk.full();
         match walk.windows.pop_front().filter(|_| !full) {
             Some(window) => {
                 walk.window = window;
-                walk.cursor = None;
-                walk.pages = 0;
+                if walk.stage_started && !walk.history.restart_stage() {
+                    self.history
+                        .reads
+                        .remove(&command)
+                        .expect("present")
+                        .finish(cx, Ok(()));
+                    return;
+                }
+                walk.stage_started = true;
                 self.request_page(cx, command);
             }
             None => {
@@ -509,14 +598,17 @@ impl BybitLinear {
                         *value = category.as_str().into();
                     }
                     walk.inverse = category == Category::Inverse;
-                    walk.category_rows_start = walk.rows.len();
+                    walk.category_rows_start = walk.history.accepted_len();
                     walk.windows = walk.original_windows.clone();
                     self.select_category(category);
                     self.next_window(cx, command);
                     return;
                 }
-                let mut walk = self.history.reads.remove(&command).expect("present");
-                cx.done(command, walk.rows.json(walk.cap));
+                self.history
+                    .reads
+                    .remove(&command)
+                    .expect("present")
+                    .finish(cx, Ok(()));
             }
         }
     }
@@ -532,7 +624,7 @@ impl BybitLinear {
             .opt_num("startTime", walk.window.0)
             .opt_num("endTime", walk.window.1)
             .num("limit", f64::from(walk.limit))
-            .opt_str("cursor", walk.cursor.as_deref());
+            .opt_str("cursor", walk.history.cursor());
         let rest = Rest::get(walk.path, query);
         let rest = if walk.signed { rest.signed() } else { rest };
         self.send(cx, rest, Then::History(Request { command }));
@@ -548,85 +640,86 @@ impl BybitLinear {
         let body = match &response {
             Ok(response) => match venue_error(response) {
                 None => Ok(response.body),
-                Some((_, message)) => Err(message),
+                Some((code, message)) => Err(VenueError::new(message).venue_code(code.to_string())),
             },
-            Err(error) => Err((*error).to_owned()),
+            Err(error) => Err(VenueError::new(*error).kind(ErrorKind::Network)),
         };
         let Some(walk) = self.history.reads.get_mut(&command) else {
             return;
         };
-        let parsed = body.and_then(|body| page(walk, body).map_err(|e| e.to_string()));
-        let cursor = match parsed {
-            Ok(cursor) => cursor,
-            Err(message) => {
-                cx.command_error(command, format!("Bybit history ({}): {message}", walk.path));
-                self.history.reads.remove(&command);
-                cx.fail(command, message);
+        // Decode the whole required list before staging any rows from this page.
+        let parsed =
+            body.and_then(|body| page(walk, body).map_err(|error| error.to_string().into()));
+        let (rows, cursor) = match parsed {
+            Ok(page) => page,
+            Err(error) => {
+                // The owner emits a single incomplete marker on recovery, or a
+                // typed failure when no rows were accepted. No legacy duplicate.
+                self.history
+                    .reads
+                    .remove(&command)
+                    .expect("present")
+                    .finish(cx, Err(error));
                 return;
             }
         };
-        walk.pages += 1;
-        let full = walk.cap > 0 && walk.rows.len() - walk.category_rows_start >= walk.cap;
-        // TS stops an unbounded order read at its page cap with a warning and keeps the rows.
-        let capped_orders = matches!(walk.rows, Rows::Orders(_))
-            && walk.cap == 0
-            && walk.pages >= MAX_ORDER_PAGES_PER_WINDOW
-            && cursor
-                .as_ref()
-                .is_some_and(|c| walk.cursor.as_ref() != Some(c));
-        if capped_orders {
-            cx.event(Level::Warn, code::HISTORY_INCOMPLETE,
-                "Bybit order history reached its page limit; older orders in this window are omitted",
-                vec![("command", safe_cex_engine::Value::Num(f64::from(command)))],
-            );
-            walk.pages = 0;
-            self.next_window(cx, command);
-            return;
-        }
-        if !full
-            && cursor.as_ref().is_some_and(|cursor| {
-                walk.cursor.as_ref() == Some(cursor)
-                    || walk.pages
-                        >= if matches!(walk.rows, Rows::Orders(_)) {
-                            MAX_ORDER_PAGES_PER_WINDOW
-                        } else {
-                            MAX_PAGES_PER_WINDOW
-                        }
-            })
-        {
-            self.history.reads.remove(&command);
-            cx.fail(
-                command,
-                "Bybit history pagination is incomplete or did not advance",
-            );
-            return;
-        }
-        match cursor.filter(|_| !full) {
-            Some(cursor) => {
-                walk.cursor = Some(cursor);
-                self.request_page(cx, command);
+        rows.stage(&mut walk.history);
+        let full = walk.full();
+        let count = walk.history.staged_len();
+        match walk.history.advance(CursorPage {
+            next: cursor,
+            rows: count,
+            fresh: count,
+            want_more: !full,
+        }) {
+            CursorStep::More(_) => self.request_page(cx, command),
+            CursorStep::Stalled(reason)
+                if !(matches!(walk.kind, RowKind::Orders)
+                    && walk.cap == 0
+                    && reason == Stall::PageBudget) =>
+            {
+                // Endpoint-policy refusals must never become partial success.
+                self.history
+                    .reads
+                    .remove(&command)
+                    .expect("present")
+                    .history
+                    .reject(
+                        cx,
+                        VenueError::new(
+                            "Bybit history pagination is incomplete or did not advance",
+                        ),
+                    );
             }
-            None => {
-                walk.pages = 0;
-                self.next_window(cx, command);
-            }
+            CursorStep::Done | CursorStep::Stalled(_) => self.next_window(cx, command),
         }
     }
 }
 
-/// Map one page into the walk's rows; returns the next cursor, if any.
-fn page(walk: &mut Walk, body: &str) -> serde_json::Result<Option<String>> {
+/// Decode one page atomically; only the owner can admit its mapped rows.
+fn page(walk: &Walk, body: &str) -> serde_json::Result<(Rows, Option<String>)> {
     fn listed<'a, T: serde::Deserialize<'a>>(
         body: &'a str,
     ) -> serde_json::Result<(Vec<T>, Option<String>)> {
-        let listed = serde_json::from_str::<Listed<T>>(body)?;
-        let _ = listed.ret_code;
-        Ok(listed
-            .result
-            .map(|r| (r.list, r.next_page_cursor.filter(|c| !c.is_empty())))
-            .unwrap_or_default())
+        #[derive(serde::Deserialize)]
+        struct Envelope<T> {
+            result: RequiredList<T>,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RequiredList<T> {
+            list: Vec<T>,
+            #[serde(default)]
+            next_page_cursor: Option<String>,
+        }
+        let result = serde_json::from_str::<Envelope<T>>(body)?.result;
+        Ok((
+            result.list,
+            result.next_page_cursor.filter(|cursor| !cursor.is_empty()),
+        ))
     }
-    match &mut walk.rows {
+    let mut rows = walk.kind.empty();
+    let cursor = match &mut rows {
         Rows::Fills(rows) => {
             let (list, cursor) = listed::<ExecutionRow>(body)?;
             for e in list {
@@ -659,7 +752,7 @@ fn page(walk: &mut Walk, body: &str) -> serde_json::Result<Option<String>> {
                     maker: e.is_maker,
                 });
             }
-            Ok(cursor)
+            cursor
         }
         Rows::Orders(rows) => {
             let (list, cursor) = listed::<OrderRow>(body)?;
@@ -698,17 +791,17 @@ fn page(walk: &mut Walk, body: &str) -> serde_json::Result<Option<String>> {
                     updated_time: (updated > 0.0).then_some(updated),
                 });
             }
-            Ok(cursor)
+            cursor
         }
         Rows::Income(rows) => {
             let (list, cursor) = listed::<TransactionRow>(body)?;
             if list.is_empty() {
-                return Ok(None);
+                return Ok((Rows::Income(Vec::new()), None));
             }
             for row in &list {
                 incomes(row, rows);
             }
-            Ok(cursor)
+            cursor
         }
         Rows::Trades(rows) => {
             let (list, _) = listed::<RecentTrade>(body)?;
@@ -731,7 +824,29 @@ fn page(walk: &mut Walk, body: &str) -> serde_json::Result<Option<String>> {
                     side: side_name(order_side(t.side.as_deref())),
                 });
             }
-            Ok(None)
+            None
         }
+    };
+    Ok((rows, cursor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finalization_rejects_a_mismatched_row_instead_of_dropping_it() {
+        let row = Row::Trade(Trade {
+            id: "trade".into(),
+            symbol: "BTCUSDT".into(),
+            price: 100.0,
+            qty: 1.0,
+            quote_qty: 100.0,
+            timestamp: 1.0,
+            side: "buy",
+        });
+        let error = RowKind::Fills.encode(vec![row], 1).unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(error.message, "Bybit history row kind changed");
     }
 }

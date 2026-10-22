@@ -84,6 +84,14 @@ impl<T> HistoryRows<T> {
         self.completion.command()
     }
 
+    pub fn accepted_len(&self) -> usize {
+        self.accepted.len()
+    }
+
+    pub fn staged_len(&self) -> usize {
+        self.pending.len()
+    }
+
     /// Rows may be streamed before the final HTTP/envelope verdict is known.
     pub fn stage(&mut self, row: T) {
         self.pending.push(row);
@@ -94,7 +102,25 @@ impl<T> HistoryRows<T> {
         self.accepted.append(&mut self.pending);
     }
 
-    pub fn finish<P>(mut self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+        let encode = self.encode;
+        self.finish_with(cx, result, |rows| encode(&rows));
+    }
+
+    /// Strict endpoint-policy rejection is not a recoverable failed page, even
+    /// when earlier pages were accepted. Never publish its rows or marker.
+    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) {
+        self.completion.finish(cx, Err(error));
+    }
+
+    /// Final query shaping may sort/dedupe/limit accepted rows, using captured
+    /// endpoint metadata. The finalizer never sees a failed page's staged rows.
+    pub fn finish_with<P>(
+        mut self,
+        cx: &mut Cx<'_, P>,
+        result: Result<(), VenueError>,
+        encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
+    ) {
         if let Err(error) = result {
             if self.accepted.is_empty() {
                 return self.completion.finish(cx, Err(error));
@@ -111,7 +137,7 @@ impl<T> HistoryRows<T> {
             );
         }
         // Encoding failure still rejects; it cannot publish malformed partial rows.
-        self.completion.finish(cx, (self.encode)(&self.accepted));
+        self.completion.finish(cx, encode(self.accepted));
     }
 }
 
@@ -144,6 +170,14 @@ impl<T> CursorHistory<T> {
 
     pub fn command(&self) -> CommandId {
         self.rows.command()
+    }
+
+    pub fn accepted_len(&self) -> usize {
+        self.rows.accepted_len()
+    }
+
+    pub fn staged_len(&self) -> usize {
+        self.rows.staged_len()
     }
 
     pub fn cursor(&self) -> Option<&str> {
@@ -187,6 +221,23 @@ impl<T> CursorHistory<T> {
     }
 
     pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+        let encode = self.rows.encode;
+        self.finish_with(cx, result, |rows| encode(&rows));
+    }
+
+    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) {
+        let error = self.lifecycle_error.map_or(error, |message| {
+            VenueError::new(message).kind(ErrorKind::Internal)
+        });
+        self.rows.reject(cx, error);
+    }
+
+    pub fn finish_with<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        result: Result<(), VenueError>,
+        encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
+    ) {
         let lifecycle_error = self.lifecycle_error.or_else(|| {
             (result.is_ok() && !self.finished)
                 .then_some("history cursor completed with a page still pending")
@@ -197,6 +248,6 @@ impl<T> CursorHistory<T> {
                 .completion
                 .finish(cx, Err(VenueError::new(message).kind(ErrorKind::Internal)));
         }
-        self.rows.finish(cx, result);
+        self.rows.finish_with(cx, result, encode);
     }
 }

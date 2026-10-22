@@ -3189,3 +3189,33 @@ Existing account/factory callers add no argument. This is not evidence of a
 particular NX deployment or live signing session. Bybit/Aster protocol-time
 calibration remains separate from this merged ingress change; see
 [RUST_ENGINE_CLOCK.md](RUST_ENGINE_CLOCK.md).
+
+
+### Bybit general-history completion and finalization
+
+Bybit fills, order history, income and public trades now complete through the
+same engine owner. Each response requires a successful `result.list`, decoded
+in full before any of its mapped rows are admitted. A missing/null/malformed
+result or list no longer becomes an empty complete result. Before any accepted
+rows, native/HTTP/transport/parse failures reject with a typed error; after
+accepted rows, a failed page returns only those prior rows with one command-owned
+Warn `history.incomplete` immediately before completion, even at Error-only log
+level. A failed body's valid-looking prefix cannot leak into that result.
+
+The owner retains rows across Bybit's category and seven-day window stages.
+Final sorting, compound income/hedge-leg dedupe and the global caller limit apply
+to accepted rows on both normal and recovered completion. Limits still count
+mapped rows before final dedupe within each category; satisfying a requested
+limit takes precedence over a continued cursor or safety cap. Income's empty
+native list still ends that window. Public trades remain an unsigned single-page
+read, and keyless private history retains the existing no-I/O empty result.
+
+Pagination-policy refusals stay strict: bounded page caps and repeated cursors
+reject rather than manufacture partial success. Non-adjacent cursor cycles now
+reject earlier instead of walking until the page budget. Unbounded order-history
+page caps retain accepted rows with one owned marker across any later windows;
+a subsequent failed page preserves the earlier missing-coverage cause. Encoding
+and owner-lifecycle failures always reject. Method arguments and the B11 transport
+are unchanged; NX still must honor request-scoped incompleteness before marking
+history coverage complete. Other venue histories and background-coverage notices
+remain outside this slice; B11 and global enforcement stay open.

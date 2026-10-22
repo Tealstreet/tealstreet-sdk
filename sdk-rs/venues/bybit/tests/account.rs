@@ -2537,3 +2537,366 @@ fn refused_leverage_does_not_invalidate_an_authoritative_position_read() {
     assert!(h.result(122).unwrap().is_err());
     assert!(!h.has_request("/v5/position/list"));
 }
+
+fn owned_history_query(kind: usize, limit: Option<u32>) -> (Query, &'static str) {
+    match kind {
+        0 => (
+            Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit,
+            },
+            "/v5/execution/list",
+        ),
+        1 => (
+            Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: None,
+                to_ms: None,
+                limit,
+            },
+            "/v5/order/history",
+        ),
+        2 => (
+            Query::Income {
+                symbol: Some("BTCUSDT".into()),
+                kind: None,
+                from_ms: None,
+                to_ms: None,
+                limit,
+            },
+            "/v5/account/transaction-log",
+        ),
+        _ => (
+            Query::PublicTrades {
+                symbol: "BTCUSDT".into(),
+                limit,
+            },
+            "/v5/market/recent-trade",
+        ),
+    }
+}
+
+fn owned_history_row(kind: usize, id: &str) -> String {
+    match kind {
+        0 => format!(
+            r#"{{"symbol":"BTCUSDT","execId":"{id}","orderId":"o","side":"Buy","execPrice":"100","execQty":"1","execTime":"1671999000000"}}"#
+        ),
+        1 => format!(
+            r#"{{"symbol":"BTCUSDT","orderId":"{id}","side":"Buy","orderStatus":"Cancelled","createdTime":"1671999000000","qty":"1"}}"#
+        ),
+        2 => format!(
+            r#"{{"id":"{id}","symbol":"BTCUSDT","side":"Buy","size":"2","funding":"-0.5","fee":"0","cashFlow":"0","transactionTime":"1672128000000","type":"SETTLEMENT","currency":"USDT"}}"#
+        ),
+        _ => format!(
+            r#"{{"execId":"{id}","price":"100","size":"1","time":"1671999000000","side":"Buy"}}"#
+        ),
+    }
+}
+
+fn owned_history_page(rows: &[String], cursor: &str) -> String {
+    format!(
+        r#"{{"retCode":0,"result":{{"list":[{}],"nextPageCursor":"{cursor}"}}}}"#,
+        rows.join(",")
+    )
+}
+
+fn owned_history_markers(h: &Harness, command: u32) -> Vec<usize> {
+    h.notices
+        .iter()
+        .enumerate()
+        .filter_map(|(index, notice)| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                assert_eq!(event.level, safe_cex_engine::Level::Warn);
+                assert_eq!(
+                    event.fields,
+                    [("command", safe_cex_engine::Value::Num(f64::from(command)))]
+                );
+                Some(index)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn owned_history_failure(
+    h: &mut Harness,
+    request: safe_cex_engine::RequestId,
+    failure: usize,
+    kind: usize,
+) {
+    match failure {
+        0 => h.reply(request, 200, r#"{"retCode":10001,"retMsg":"bad request"}"#),
+        1 => h.reply(request, 503, "unavailable"),
+        2 => h.event(Event::HttpFailed {
+            request,
+            error: "connection lost",
+        }),
+        3 => h.reply(request, 200, r#"{"retCode":0}"#),
+        4 => h.reply(request, 200, r#"{"retCode":0,"result":{}}"#),
+        5 => h.reply(request, 200, r#"{"retCode":0,"result":{"list":null}}"#),
+        // A valid row before a malformed row must not leak from a failed page.
+        _ => h.reply(
+            request,
+            200,
+            &owned_history_page(
+                &[owned_history_row(kind, "must-not-leak"), "false".into()],
+                "next",
+            ),
+        ),
+    }
+}
+
+#[test]
+fn owned_history_first_page_failure_is_typed_and_never_empty_success() {
+    for kind in 0..4 {
+        for failure in 0..7 {
+            let mut h = ready();
+            h.notices.clear();
+            let (query, path) = owned_history_query(kind, None);
+            h.command(Command::Query {
+                command: 801,
+                query,
+            });
+            let request = h.take(path);
+            owned_history_failure(&mut h, request.id, failure, kind);
+            assert!(
+                h.result(801).unwrap().is_err(),
+                "kind {kind}, failure {failure}"
+            );
+            let error = h
+                .notices
+                .iter()
+                .find_map(|notice| match notice {
+                    safe_cex_engine::Notice::CommandFailed {
+                        command: 801,
+                        error,
+                    } => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(
+                error.kind.is_some(),
+                "typed: kind {kind}, failure {failure}"
+            );
+            if failure == 2 {
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
+            }
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 801).count(), 1);
+            assert!(owned_history_markers(&h, 801).is_empty());
+            assert!(!h.has_request(path));
+        }
+    }
+}
+
+#[test]
+fn owned_history_later_failure_retains_only_accepted_rows_with_owned_marker() {
+    for kind in 0..3 {
+        for failure in 0..7 {
+            let mut h = ready();
+            h.notices.clear();
+            h.engine.set_log_level(safe_cex_engine::Level::Error);
+            let (query, path) = owned_history_query(kind, None);
+            h.command(Command::Query {
+                command: 802,
+                query,
+            });
+            h.respond(
+                path,
+                200,
+                &owned_history_page(&[owned_history_row(kind, "accepted")], "page2"),
+            );
+            let request = h.take(path);
+            assert!(request.url.ends_with("&cursor=page2"));
+            owned_history_failure(&mut h, request.id, failure, kind);
+            let result = h.result(802).unwrap().as_ref().unwrap();
+            let rows: Vec<serde_json::Value> = serde_json::from_str(result).unwrap();
+            assert_eq!(rows.len(), 1, "kind {kind}, failure {failure}: {result}");
+            assert!(!result.contains("must-not-leak"));
+            if kind != 2 {
+                assert!(result.contains("accepted"));
+            }
+            let markers = owned_history_markers(&h, 802);
+            assert_eq!(markers.len(), 1);
+            assert!(matches!(
+                h.notices.get(markers[0] + 1),
+                Some(safe_cex_engine::Notice::CommandDone { command: 802, .. })
+            ));
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 802).count(), 1);
+            assert!(!h.has_request(path));
+        }
+    }
+}
+
+#[test]
+fn owned_history_empty_or_filtered_pages_do_not_qualify_for_failure_recovery() {
+    for kind in 0..2 {
+        for filtered in [false, true] {
+            let mut h = ready();
+            h.notices.clear();
+            let (query, path) = owned_history_query(kind, None);
+            h.command(Command::Query {
+                command: 803,
+                query,
+            });
+            let rows = if filtered {
+                vec![owned_history_row(kind, "filtered").replace("\"Buy\"", "\"invalid\"")]
+            } else {
+                vec![]
+            };
+            h.respond(path, 200, &owned_history_page(&rows, "page2"));
+            let request = h.take(path);
+            owned_history_failure(&mut h, request.id, 2, kind);
+            assert!(h.result(803).unwrap().is_err());
+            assert!(owned_history_markers(&h, 803).is_empty());
+        }
+    }
+    // Income's empty native list proves exhaustion, even with a bogus cursor.
+    let mut h = ready();
+    let (query, path) = owned_history_query(2, None);
+    h.command(Command::Query {
+        command: 803,
+        query,
+    });
+    h.respond(path, 200, &owned_history_page(&[], "ignored"));
+    assert_eq!(h.result(803).unwrap().as_ref().unwrap(), "[]");
+    assert!(!h.has_request(path));
+}
+
+#[test]
+fn owned_history_cursor_and_bounded_budget_refusals_stay_strict_after_rows() {
+    for kind in 0..3 {
+        for mode in 0..3 {
+            let mut h = ready();
+            h.notices.clear();
+            let (query, path) = owned_history_query(kind, Some(1000));
+            h.command(Command::Query {
+                command: 804,
+                query,
+            });
+            let budget = if kind == 1 { 20 } else { 10 };
+            let cursors: Vec<String> = match mode {
+                0 => vec!["same".into(), "same".into()],
+                1 => vec!["a".into(), "b".into(), "a".into()],
+                _ => (0..budget).map(|n| format!("c{n}")).collect(),
+            };
+            for (index, cursor) in cursors.iter().enumerate() {
+                h.respond(
+                    path,
+                    200,
+                    &owned_history_page(&[owned_history_row(kind, &index.to_string())], cursor),
+                );
+            }
+            assert!(h.result(804).unwrap().is_err(), "kind {kind}, mode {mode}");
+            assert!(owned_history_markers(&h, 804).is_empty());
+            assert!(!h.has_request(path));
+        }
+    }
+}
+
+#[test]
+fn owned_history_raw_duplicate_limit_wins_over_cursor_refusal() {
+    for kind in 0..3 {
+        let mut h = ready();
+        h.notices.clear();
+        let (query, path) = owned_history_query(kind, Some(2));
+        h.command(Command::Query {
+            command: 805,
+            query,
+        });
+        for _ in 0..2 {
+            h.respond(
+                path,
+                200,
+                &owned_history_page(&[owned_history_row(kind, "duplicate")], "same"),
+            );
+        }
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(h.result(805).unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(!h.has_request(path));
+        assert!(owned_history_markers(&h, 805).is_empty());
+    }
+}
+
+#[test]
+fn owned_history_recovered_income_keeps_hedge_legs_and_dedupes_page_repeats() {
+    let mut h = ready();
+    h.notices.clear();
+    let (query, path) = owned_history_query(2, None);
+    h.command(Command::Query {
+        command: 806,
+        query,
+    });
+    let long = owned_history_row(2, "shared");
+    let short = long
+        .replace("\"Buy\"", "\"Sell\"")
+        .replace("\"size\":\"2\"", "\"size\":\"-2\"");
+    h.respond(
+        path,
+        200,
+        &owned_history_page(&[long.clone(), short.clone()], "page2"),
+    );
+    h.respond(path, 200, &owned_history_page(&[long, short], "page3"));
+    let request = h.take(path);
+    owned_history_failure(&mut h, request.id, 6, 2);
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(806).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["tranId"], rows[1]["tranId"]);
+    assert_eq!(rows[0]["income"], -0.5);
+    assert_eq!(owned_history_markers(&h, 806).len(), 1);
+}
+
+#[test]
+fn owned_history_window_recovery_preserves_first_incomplete_cause() {
+    let mut h = ready();
+    h.notices.clear();
+    h.engine.set_log_level(safe_cex_engine::Level::Error);
+    let day = 86_400_000.0;
+    let to = 1_672_000_000_000.0;
+    h.command(Command::Query {
+        command: 807,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(to - 8.0 * day),
+            to_ms: Some(to),
+            limit: None,
+        },
+    });
+    for page in 0..20 {
+        h.respond(
+            "/v5/order/history",
+            200,
+            &owned_history_page(
+                &[owned_history_row(1, &format!("o{page}"))],
+                &format!("c{page}"),
+            ),
+        );
+    }
+    assert!(h.result(807).is_none());
+    let request = h.take("/v5/order/history");
+    assert!(!request.url.contains("cursor="));
+    owned_history_failure(&mut h, request.id, 2, 1);
+    let result = h.result(807).unwrap().as_ref().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(result)
+            .unwrap()
+            .len(),
+        20
+    );
+    let markers = owned_history_markers(&h, 807);
+    assert_eq!(markers.len(), 1);
+    let safe_cex_engine::Notice::Event(event) = &h.notices[markers[0]] else {
+        panic!()
+    };
+    assert!(event.message.contains("page limit"));
+    assert!(matches!(
+        h.notices.get(markers[0] + 1),
+        Some(safe_cex_engine::Notice::CommandDone { command: 807, .. })
+    ));
+}
