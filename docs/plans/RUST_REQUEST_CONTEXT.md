@@ -1405,3 +1405,12 @@ Apply the same current-map exactness and independently shrinking base/parent
 constraints afterwards. No guarantee/retry/outcome claim for legacy work.
 1767exclusive landing window is respected; integrate its actual pin plus these
 actual predecessors together before final checks/push/proof.
+
+The exact transition test is committed first and is assertion-RED because the
+two approved history-map pairs are absent from the checker. Original older
+counts/hashes/source pins remain unchanged; the new actual1761 source and olda0
+source are separately fingerprinted, and the new method kinds must be a subset
+of the old ones. Existing adversarial tests iterate every history pair, testing
+forged fingerprints/counts/paths/old maps and independently pruned newer bounds;
+they therefore cover these additions without weakening any original assertion.
+No checker, manifest or venue source change is included in this regression step.
