@@ -1271,3 +1271,13 @@ six fingerprints and every other path map are unchanged; no new fingerprints,
 call kinds or bootstrap exception. Existing adversarial shrink/regrowth controls
 must pass before updating the manifest, followed by the full ban gate. Record
 exact map hashes in the PR body. The bridge still must reach zero before master.
+
+Post-#1758 verification complete:995 native tests, strict all-target Clippy for
+engine/Binance/Phemex, scoped formatting,1,145 harness tests and all ban gates
+pass. The ratchet's12 adversarial controls passed before the manifest prune.
+Phemex income map SHA2565a1db4f9bd6460c6d035bfe439e6777fc9f055609e4036f15061f5e6dba9ed07
+becomes f13cd2730d7abc1d65c27847622a1ff49b7cd95c141112d5347b470e3b859b62;
+manifest5461976913e8158ebe4fe8a9b038150bb8e8cb7738c3e7cafd13ca6761a5d535
+becomes9136cef658d0891371b97dd6af83419e7715902e9f3712073330b0ef9747c3df.
+The landed Phemex source is exact; every other map remains identical. No new
+bootstrap authorization or exception was added. Final CI/proof still pending.
