@@ -562,3 +562,16 @@ through existing fail_context, then verify no callback, patch or reopened result
 No test-only status predicate, native fallback, timer or original assertion
 changes. Compile separately, run compiled tests under15s runtime timeout, retain
 assertion-RED logs, then independent source/RED review before production work.
+
+
+Original response-proof RED checkpoint: both compiled engine controls fail only
+at their final outcome/Store tables in0.00s (15s runtime bound), preserving the
+positive200 rows. All490 existing engine unit tests pass in0.87s under30s,
+with only the two new expected-RED controls filtered. All170 source insertions
+are cfg(test); default-false hostile fixture leaves every original assertion and
+path intact. The actual ordinary Bybit gateway control also remains assertion-
+RED in0.01s after current575 integration, retaining its200/110001 control.
+Independent source/RED review CLEAN, architecture No. Logs/receipts:
+/tmp/codex-response-proof-original-{red,existing-green}.log and matching.json,
+/tmp/codex-replacement-gateway-57582-runtime-red.log. These prove the shared
+boundary gap, not completion of auth/sibling/reuse or native cleanup acceptance.

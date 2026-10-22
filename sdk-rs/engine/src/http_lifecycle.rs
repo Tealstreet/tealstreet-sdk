@@ -879,6 +879,7 @@ mod tests {
         refuse_capture: bool,
         auth_reject: bool,
         retry_refusal: bool,
+        hostile_response_patch: bool,
         command_calls: Vec<CommandId>,
     }
     const GROUP: Pacing = Pacing {
@@ -985,6 +986,10 @@ mod tests {
         }
         fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
             self.responses += 1;
+            if self.hostile_response_patch {
+                cx.store
+                    .set_order_status("one", crate::model::OrderStatus::Canceled);
+            }
             if pending.0.operation() == Operation::Mutation {
                 #[cfg(feature = "order-locks")]
                 assert!(
@@ -1824,6 +1829,171 @@ mod tests {
             assert_eq!(engine.venue.responses, 0);
             assert!(engine.drain_actions().next().is_none());
         }
+    }
+
+    #[test]
+    fn response_proof_guard_precedes_store_capable_codec_for_whole_and_split_replies() {
+        let mut observed = Vec::new();
+        for status in [408, 500, 503, 600, u16::MAX, 200] {
+            for split in [false, true] {
+                let (mut engine, _) = start(Probe {
+                    hostile_response_patch: true,
+                    ..Probe::default()
+                });
+                engine.store.set_orders(vec![fixture_order("one")]);
+                let (_, token, _) = mutation(&mut engine, 7, 0.);
+                let permit = bind(&mut engine, token, 1.);
+                assert!(matches!(
+                    engine.claim_http(2., permit),
+                    Ok(Claim::Released(_))
+                ));
+                engine.drain_actions().for_each(drop);
+                let request = token.attempt().request;
+                if split {
+                    engine.handle(
+                        3.,
+                        Event::HttpStart {
+                            request,
+                            status,
+                            headers: "",
+                        },
+                    );
+                    engine.handle(
+                        4.,
+                        Event::HttpChunk {
+                            request,
+                            data: b"o",
+                        },
+                    );
+                    engine.handle(
+                        5.,
+                        Event::HttpChunk {
+                            request,
+                            data: b"k",
+                        },
+                    );
+                    engine.handle(6., Event::HttpEnd { request });
+                } else {
+                    engine.handle(
+                        6.,
+                        Event::HttpResponse {
+                            request,
+                            response: Response {
+                                status,
+                                headers: "",
+                                body: "ok",
+                            },
+                        },
+                    );
+                }
+                let actions = engine.drain_actions().collect::<Vec<_>>();
+                let unknown = actions
+                    .iter()
+                    .filter(|a| {
+                        matches!(a,
+                    Action::Notice(Notice::CommandFailed { command: 7, error })
+                    if error.outcome == Some(crate::Outcome::Unknown))
+                    })
+                    .count();
+                let done = actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+                    .count();
+                observed.push((
+                    status,
+                    split,
+                    engine.store.order("one").unwrap().status,
+                    engine.venue.responses,
+                    unknown,
+                    done,
+                ));
+                assert!(engine.io.pending.is_empty());
+                assert!(engine.io.managed_http.is_empty());
+            }
+        }
+        let mut expected = Vec::new();
+        for status in [408, 500, 503, 600, u16::MAX] {
+            for split in [false, true] {
+                expected.push((status, split, crate::model::OrderStatus::Open, 0, 1, 0));
+            }
+        }
+        for split in [false, true] {
+            expected.push((200, split, crate::model::OrderStatus::Canceled, 1, 0, 1));
+        }
+        assert_eq!(
+            observed, expected,
+            "unproven status must be intercepted before any Store-capable native callback"
+        );
+    }
+
+    #[test]
+    fn response_proof_guard_keeps_late_unproven_replies_out_of_reconciliation() {
+        let mut observed = Vec::new();
+        for status in [408, 500, 503, 600, u16::MAX, 200] {
+            let (mut engine, _) = start(Probe::default());
+            engine
+                .store
+                .set_orders(vec![fixture_order("one"), fixture_order("two")]);
+            let (context, token, timer) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            assert!(matches!(
+                engine.claim_http(2., permit),
+                Ok(Claim::Released(_))
+            ));
+            fail_mutation(&mut engine, &context, 3.);
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: 7, error })
+                if error.outcome == Some(crate::Outcome::Unknown)))
+                    .count(),
+                1
+            );
+            engine.handle(
+                4.,
+                Event::HttpResponse {
+                    request: token.attempt().request,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: "ok",
+                    },
+                },
+            );
+            engine.handle(101., Event::TimerFired { timer });
+            observed.push((
+                status,
+                engine.store.order("one").unwrap().status,
+                engine.store.order("two").unwrap().status,
+                engine.venue.reconciliations.borrow().len(),
+            ));
+            assert_eq!(engine.venue.responses, 0);
+            assert!(engine.drain_actions().next().is_none());
+            assert!(engine.io.pending.is_empty());
+            assert!(engine.io.managed_http.is_empty());
+        }
+        let mut expected = [408, 500, 503, 600, u16::MAX]
+            .map(|status| {
+                (
+                    status,
+                    crate::model::OrderStatus::Open,
+                    crate::model::OrderStatus::Open,
+                    0,
+                )
+            })
+            .to_vec();
+        expected.push((
+            200,
+            crate::model::OrderStatus::Canceled,
+            crate::model::OrderStatus::Canceled,
+            1,
+        ));
+        assert_eq!(
+            observed, expected,
+            "retired unproven response cannot gain reconciliation Store authority"
+        );
     }
 
     #[test]
