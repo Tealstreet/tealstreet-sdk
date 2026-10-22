@@ -211,3 +211,17 @@ neither puts credentials into readiness/permit metadata. Lost resources and
 callbacks are cleaned up on cancellation, timeout and disposal. Native actors
 and JS/Workers use the same synchronous claim contract; no scheduling or route
 authorization await is allowed between a successful claim and API handoff.
+
+The native scaffolding exposes `Transport::prepare_http` (typed unsupported by
+default), `PreparedHttp::bind`, and `BoundHttp::ready/dispatch`. Both the legacy
+and managed entry points use that executor. Binding preserves the signed packet,
+constructs the final request/frame and performs no HTTP handoff; dispatch invokes
+the transport API synchronously before spawning response work. The actor must
+check readiness immediately before claim and retain the returned abort handle.
+An unsigned preparation carries explicit public/primary/secondary route intent,
+with no fabricated credential header or HTTP-method inference. This scaffolding
+alone does not wire the engine's final claim or migrate any venue.
+
+Send-group configuration defines a fixed gap floor. Individual releases can
+extend the following gap (MEXC currently uses 450 ms or 1500 ms by job); the
+next request cannot weaken the gap recorded by the preceding physical handoff.

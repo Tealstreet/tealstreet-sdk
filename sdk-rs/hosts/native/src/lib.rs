@@ -15,7 +15,8 @@ pub use routing::{
 };
 pub use server::{FrameServer, ServerConfig};
 pub use transport::{
-    NetworkTransport, PayloadSigner, PayloadSignerFuture, PayloadSignerResult, Transport,
+    BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PayloadSigner,
+    PayloadSignerFuture, PayloadSignerResult, PreparedHttp, Transport,
 };
 
 use safe_cex_engine::{

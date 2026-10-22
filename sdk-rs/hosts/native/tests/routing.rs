@@ -540,6 +540,83 @@ async fn relay_hides_auth_and_delays_open_until_the_upstream_is_ready() {
 }
 
 #[tokio::test]
+async fn prepared_how_binds_after_auth_and_dropping_a_bound_packet_sends_no_http() {
+    use safe_cex_engine::request_context::RoutingIntent;
+    for cancel in [false, true] {
+        let (listener, origin) = listener().await;
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            ws.send(Message::text(r#"{"type":"rpc.auth","status":"success"}"#))
+                .await
+                .unwrap();
+            if cancel {
+                assert!(
+                    !matches!(ws.next().await, Some(Ok(Message::Text(_)))),
+                    "cancelling a prepared packet must not send an HTTP frame"
+                );
+            } else {
+                let packet = rpc(&mut ws).await;
+                assert_eq!(packet.kind, "rpc.http");
+                let arg = packet.arg.unwrap();
+                assert_eq!(
+                    arg.url,
+                    "https://venue.invalid/order?timestamp=123&signature=wire-sentinel"
+                );
+                assert_eq!(arg.headers["X-Signature"], "signature-sentinel");
+                assert_eq!(
+                    serde_json::from_str::<String>(arg.data.get()).unwrap(),
+                    r#"{ "id": 18446744073709551615, "n": 1.000 }"#
+                );
+                ws.send(Message::text(format!(r#"{{"type":"rpc.http","nonce":"{}","data":{{"status":200,"data_raw":"{{}}"}}}}"#, packet.nonce.unwrap()))).await.unwrap();
+                let _ = ws.next().await;
+            }
+        });
+        let plan = RoutingPlan {
+            http: HttpRoute {
+                mode: HttpRouteMode::How,
+                tunnel_url: Some(origin.replacen("http:", "ws:", 1) + "/tunnel"),
+                ..HttpRoute::default()
+            },
+            ..RoutingPlan::default()
+        };
+        let transport = NetworkTransport::with_routing(
+            plan,
+            Arc::new(|| {
+                Box::pin(async { panic!("IP-authenticated preparation must not request a token") })
+            }),
+        );
+        let mut packet = http_request(71, "https://venue.invalid/order".into());
+        packet.headers.clear();
+        packet.body = None;
+        let prepared = transport
+            .prepare_http(packet.clone(), RoutingIntent::Primary)
+            .await
+            .unwrap();
+        packet
+            .url
+            .push_str("?timestamp=123&signature=wire-sentinel");
+        packet
+            .headers
+            .push(("X-Signature", "signature-sentinel".into()));
+        packet.body = Some(r#"{ "id": 18446744073709551615, "n": 1.000 }"#.into());
+        let bound = prepared.bind(packet).unwrap();
+        assert!(bound.ready());
+        if cancel {
+            drop(bound);
+        } else {
+            let (events, mut inbox) = mpsc::unbounded_channel();
+            let _request_task = bound.dispatch(events);
+            assert_eq!(http_body(&mut inbox).await, b"{}");
+        }
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}
+
+#[tokio::test]
 async fn how_preserves_signed_url_headers_and_integer_body_and_streams_raw_response() {
     let (listener, origin) = listener().await;
     let server = tokio::spawn(async move {

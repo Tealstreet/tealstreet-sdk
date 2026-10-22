@@ -909,7 +909,39 @@ fn changed_group_policy_cannot_bypass_the_fixed_physical_send_gap() {
             admissions += 1;
             Ok(Admission::Unscheduled)
         }),
-        Err(Error::Invalid)
+        Ok(Claim::WaitUntil(460.))
     );
     assert_eq!(admissions, 0);
+}
+
+#[test]
+fn per_request_longer_gap_is_anchored_to_its_own_handoff_and_survives_next_request() {
+    let floor = Pacing {
+        group: 1,
+        minimum_gap_ms: 450.,
+    };
+    let mut pacing = SendPacing::new(&[floor]).unwrap();
+    let mut first = lifecycle(
+        1,
+        Some(Pacing {
+            group: 1,
+            minimum_gap_ms: 900.,
+        }),
+    );
+    let p1 = ready(&mut first);
+    claim(&mut first, p1, 10., &mut pacing).unwrap();
+    first.settle();
+    let mut second = lifecycle(2, Some(floor));
+    let p2 = ready(&mut second);
+    assert_eq!(
+        claim(&mut second, p2, 460., &mut pacing),
+        Ok(Claim::WaitUntil(910.))
+    );
+    assert!(claim(&mut second, p2, 910., &mut pacing).is_ok());
+    let mut third = lifecycle(3, Some(floor));
+    let p3 = ready(&mut third);
+    assert_eq!(
+        claim(&mut third, p3, 911., &mut pacing),
+        Ok(Claim::WaitUntil(1_360.))
+    );
 }

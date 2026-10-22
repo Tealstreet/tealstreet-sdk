@@ -19,6 +19,15 @@ pub enum Operation {
     Mutation,
 }
 
+/// Route preparation cannot inspect credentials which have not been signed or
+/// presented yet. This intent is nonsecret and independent of HTTP method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoutingIntent {
+    Public,
+    Primary,
+    Secondary,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RetryPolicy {
     #[default]
@@ -111,6 +120,13 @@ impl Context {
     }
     pub fn credential(&self) -> Option<&Credential> {
         self.credential.as_ref()
+    }
+    pub fn routing_intent(&self) -> RoutingIntent {
+        match self.credential.as_ref().map(|credential| credential.slot) {
+            None => RoutingIntent::Public,
+            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
+            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        }
     }
     pub fn deadline(&self) -> f64 {
         self.deadline
@@ -492,8 +508,8 @@ impl Lifecycle {
     }
 }
 
-/// Fixed set of per-engine send groups. Retiring a request never erases the
-/// previous release timestamp; concurrent ready requests share this registry.
+/// Fixed per-engine group floors. A request may extend the gap after its own
+/// handoff, never weaken the group floor or erase the previous release's gap.
 pub struct SendPacing {
     groups: Vec<(Pacing, Option<f64>)>,
 }
@@ -520,22 +536,23 @@ impl SendPacing {
         let Some(pacing) = pacing else {
             return Ok(None);
         };
-        let last = self
+        let eligible = self
             .groups
             .iter()
-            .find(|(group, _)| *group == pacing)
+            .find(|(group, _)| group.group == pacing.group)
             .ok_or(Error::Invalid)?
             .1;
-        Ok(last.and_then(|at| {
-            let eligible = (at + pacing.minimum_gap_ms).min(f64::MAX);
-            (now < eligible).then_some(eligible)
-        }))
+        Ok(eligible.filter(|at| now < *at))
     }
     fn released(&mut self, pacing: Option<Pacing>, now: f64) {
         if let Some(pacing) = pacing {
             // claim checked the fixed registry before invoking admission.
-            if let Some((_, last)) = self.groups.iter_mut().find(|(group, _)| *group == pacing) {
-                *last = Some(now);
+            if let Some((group, next)) = self
+                .groups
+                .iter_mut()
+                .find(|(group, _)| group.group == pacing.group)
+            {
+                *next = Some((now + group.minimum_gap_ms.max(pacing.minimum_gap_ms)).min(f64::MAX));
             }
         }
     }
