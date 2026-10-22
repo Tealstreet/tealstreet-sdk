@@ -631,3 +631,44 @@ expansion. Independent plan/API/code/adversarial and final artifact/body reviews
 full green tested-head CI, separate guard/merge and actual merge audit remain
 mandatory. Continue Kraken Spot and the remaining cumulative consumers before
 row reporting and snapshot freshness.
+
+
+Phase-3 native evidence checkpoint: both controls compile and fail on unchanged
+actual6e10 BloFin account.rs (blob ea9e5aee940676ec9d3fe109329fac34a1dd6bb0).
+The first decodes `(inf, 0.0005)` from real FILLS after q1/value1 then
+q1.5/average1e308. The second separately drains that invalid receipt and proves
+the corrected same-quantity `(298, 0.0005)` suffix is lost. These are two controls
+for one demonstrated final-output-validation/consumed-eligibility defect class;
+tests committed36bf7cee998 precede implementation. Standing same-contract owner
+approval applies; the financial findings were reported before production edits.
+
+Concrete API checkpoint before implementation:
+
+- `Cursor::prepare_prefix(previous: Option<Cursor>, quantity, value:
+  Option<f64>, arithmetic) -> Result<Option<Cursor>, Rejection>` validates the
+  supplied quantity/value first, rejects explicit zero quote at positive quantity,
+  and returns no change for valid regression/duplicates. Equal quantity only
+  enriches missing value. A forward report with a known previous quote requires
+  a supplied quote and a strictly positive checked quote difference. A missing
+  previous quote stays explicit and may seed observation progress without Fill.
+  This does not alter `Cursor::seed`, whose existing explicit-zero semantics stay.
+- `Arithmetic::DecimalCapped20` delegates the exact former BloFin subtraction
+  into num.rs; existing Binary/DecimalRounded are untouched. The arithmetic must
+  retain native capped-decimal `.round()` behavior, without new lot adjustment.
+- `ExecutionRounding::ScaledSignificant15` delegates BloFin's existing decimal
+  factor/round/divide conversion into num.rs with checked input/result. Existing
+  formatting-based Significant15 is not replaced or reinterpreted.
+- `Prepared::scaled(scale, rounding)` prepares positive finite public amount and
+  price in the native `delta contracts -> scale -> round` order, keeping its
+  unrounded contract-unit next anchor. No state commit occurs inside preparation.
+- Keep BloFin's tuple map, 500-entry retention and native lifecycle decisions.
+  Its local execution_prefix becomes only a typed engine delegate plus the same
+  three diagnostic mappings (invalid quote, missing quote, nonpositive interval),
+  with no local arithmetic. Live emit uses checked engine prefix/delivery/output
+  preparation before execution_progress and Fill. Historical quiet progress and
+  missing-quote recovery use validated prefix observation without requiring an
+  unused public price; they never emit historical notifications. Equal-quantity
+  enrichment remains quiet. Invalid live output keeps the prior anchor/eligibility.
+  Existing clean() callers outside execution output stay unchanged in this scope.
+
+Independent concrete API review is required before source implementation.
