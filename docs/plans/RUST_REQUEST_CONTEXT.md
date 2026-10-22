@@ -1223,3 +1223,61 @@ helper3 tests pass; MCP typecheck/lint pass. Independent review confirms only
 the shared hook wiring changed and the real ticker test's assertions, timeout,
 clock/socket/polling logic remain exact. Architecture gate No (reuse of the
 shared test transport seam). Fresh rebuilt-WASM CI still owns recovery proof.
+
+Next integrated CI diagnosis/plan (d4e): consumer WASM gates now all pass
+(603 SDK, 11 server, 9 MCP, 2 CLI, 2 RN). The scripted lifecycle fails all ten
+connect stages before replay because its fake transport has no prepareHttp.
+Recorder/fence wrappers spread the underlying transport, so merely adding a
+fake hook would also expose a real wrapper bug: an inherited native preparation
+can bypass the wrapper's request validation/recording. Extend those existing
+shared wrappers, never add a production request-only fallback. Fence validation
+runs on the final signed packet at bind, before claim; preparation/cancel/ready
+forward to the original resource. Recorder redacts/snapshots request data at
+bind, forwards physical dispatch first, then captures the response through the
+same existing redaction/streaming/failure-latch path as legacy request(). No
+writer/profile/provider callback may run between claim and underlying dispatch.
+Scripted fake preparation reuses existing prepareFetch with an explicit fake
+fetch adapter; no network fallback or copied preparation state machine. Add
+original-RED unit controls for final-packet fence enforcement and exact redacted
+recording/single dispatch, retain all ten actual lifecycle assertions/clocks and
+timeouts, run focused harness controls locally and fresh actual-WASM CI. Review
+this shared seam before implementation. Actual Phemex1758 is integrated at953f;
+its entire shared history/adapter delta must remain exact. Owner1764 merge hold
+is respected; no landing merge while its proof window is active.
+
+Wrapper plan audit refinement before source: explicitly shadow prepareHttp with
+undefined when unsupported; preserve method receivers and prepared/bound cancel,
+ready and expiry. Capture write command stage when preparation begins (before
+parked route/sign work), redact final bytes at bind, retain read completion-stage
+semantics. Cancel resources on bind failure. Managed main transport keeps the
+same redirect:error and min(configured timeout, 20s) limit via prepareFetch.
+Tests cover delayed binding, callback/redaction failures and underlying dispatch
+first. Independent plan/preservation review CLEAN, architecture No; actual1758
+all seven incoming blobs and all5,288 other paths remain exact after integration.
+
+Wrapper implementation verification: the original four new controls failed by
+assertion before the shared wrapper fix; the corrected full harness suite passes
+1,145 tests, including final-packet fencing, original write stage across parked
+preparation, immutable redacted capture, dispatch before recording and cleanup on
+bind/redaction failure. Legacy request remains async. Independent implementation
+review CLEAN, architecture No (shared prepared-transport wrapper integration).
+All ten scripted lifecycle assertions, clocks and timeouts are unchanged; their
+rebuilt-WASM recovery still requires fresh CI. Actual #1758 integration also
+passes995 engine/Binance/Phemex native tests and scoped formatting.
+
+Post-#1758 ratchet plan: prune only the three removed legacy completion calls
+from venues/phemex/src/income.rs (9->6); global inventory1274->1271. The remaining
+six fingerprints and every other path map are unchanged; no new fingerprints,
+call kinds or bootstrap exception. Existing adversarial shrink/regrowth controls
+must pass before updating the manifest, followed by the full ban gate. Record
+exact map hashes in the PR body. The bridge still must reach zero before master.
+
+Post-#1758 verification complete:995 native tests, strict all-target Clippy for
+engine/Binance/Phemex, scoped formatting,1,145 harness tests and all ban gates
+pass. The ratchet's12 adversarial controls passed before the manifest prune.
+Phemex income map SHA2565a1db4f9bd6460c6d035bfe439e6777fc9f055609e4036f15061f5e6dba9ed07
+becomes f13cd2730d7abc1d65c27847622a1ff49b7cd95c141112d5347b470e3b859b62;
+manifest5461976913e8158ebe4fe8a9b038150bb8e8cb7738c3e7cafd13ca6761a5d535
+becomes9136cef658d0891371b97dd6af83419e7715902e9f3712073330b0ef9747c3df.
+The landed Phemex source is exact; every other map remains identical. No new
+bootstrap authorization or exception was added. Final CI/proof still pending.
