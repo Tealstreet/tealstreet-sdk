@@ -49,6 +49,10 @@ impl Epoch {
 }
 ```
 
+`stamp()` observes without advancing; only explicit invalidation advances the
+domain. Metadata serial issue ordering uses advance then stamp on one common
+metadata clock issuer; its financial sibling has a separate issuer.
+
 The identity survives moves and rejects another Store/account, including equal
 numeric counters. Stamp fields/constructors are private; no clock, credentials,
 wire IDs or serialization. Prefer lazy stable issuer allocation: unused private
@@ -72,9 +76,9 @@ impl Store {
     fn orders_snapshot_current(&self, token: &OrderSnapshotToken) -> bool;
     fn invalidate_order_snapshots(&mut self);
     fn commit_orders_snapshot<I, F>(
-        &mut self, tokens: I, orders: Vec<Order>, native: F,
+        &mut self, tokens: I, publish: F,
     ) -> bool
-    where I: IntoIterator<Item = OrderSnapshotToken>, F: FnOnce();
+    where I: IntoIterator<Item = OrderSnapshotToken>, F: FnOnce(&[Order]) -> Vec<Order>;
 }
 ```
 
@@ -83,8 +87,9 @@ makes final consumption single-use without an active-read registry. Capture once
 and move through pages/join state. Final commit rejects an empty token inventory,
 foreign/exhausted/stale tokens before invoking the native closure or changing
 rows, loaded flags or dirty state. All fallible decoding/financial checks finish
-first. The closure is infallible, synchronous native-cache application and cannot
-reborrow the same Store. Publish only after it returns. No transport, async work,
+first. The closure is infallible, synchronous native-cache application and final
+owned-row construction. It receives the current rows read-only and cannot
+reborrow the same Store. Publish the returned rows only after it returns. No transport, async work,
 command callback or outbound action belongs inside this closure. This is one
 synchronous admission boundary, not a panic-recovery transaction.
 
@@ -105,8 +110,11 @@ mutable token state, extra observer or venue revision counter is introduced.
 These narrow engine auth regions are clear with RequestContext's owner.
 
 Binance retention of rejected rows currently reads native terminal state AFTER
-new binding proposals. Candidate rows must use the equivalent prospective view;
-only the admitted closure applies native caches. Bitunix's initial regular then
+new binding proposals. The admitted closure applies
+staged native bindings before deriving retained rows from its read-only current
+row slice, preserving that view without duplicate shadow-binding policy or
+cloning native maps. Independent correctness/adversarial API review precedes
+consumer source edits. Bitunix's initial regular then
 TP-SL commits are sequential: validate both tokens before either publication,
 then preserve the second half's view of the first Store/native result. Combining
 the two requires an explicitly equivalent staged sequential result.
