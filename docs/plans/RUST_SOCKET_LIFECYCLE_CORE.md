@@ -357,12 +357,35 @@ inactive sibling timers too and never regain a grant. Timer events are scoped
 and retired ones cannot reach venue callbacks. The component remains private to
 the engine and is staged under the focused native harness until engine wiring.
 
-Observe-only auth requires an explicit `Authenticated { first }` effect distinct
-from Ready: Bitunix accepts native server-push before login ACK and has no private
-subscription batch, but its first accepted ACK still starts account recovery.
+Observe-only auth has an explicit `Authenticated { first }` metadata effect
+distinct from Ready. Bitunix accepts native server-push before login ACK and has
+no private subscription batch. Its existing on-open path starts account recovery
+when positions are loaded; the ACK only cancels the login retry. Adoption must
+keep that recovery on open, never add ACK-triggered resync or gate it on auth.
 Duplicate positives cancel a pending same-socket login retry without granting a
-second Ready/recovery. Expiry is checked before both ingress and auth/traffic;
+second Ready. Expiry is checked before both ingress and auth/traffic;
 current text may reset Bitunix's stable backoff before its first pong, while idle
 activation still requires the pong. This is codec-independent policy, tested via
 a probe using actual Engine/Cx timers; no allocator or HTTP dispatch source edit
 belongs to this phase.
+
+The driver does not invoke public Cx.close recursively. Retirement effects reach
+Engine after state/timer revocation; Engine first uses an internal raw transport
+close/signing-cancel primitive, then invokes native invalidation, then submits
+the acknowledgment. Direct public close enters retirement exactly once. The
+staged probe uses ordinary close only because its Io has no managed registry.
+
+The staged transition driver passes 31 controls (22 state + nine supervised
+Engine/Cx probes), 397 library tests across engine/OKX/Bitunix/Binance, strict
+all-target Clippy for those four crates, fmt and banned-pattern checks. Both
+final correctness/adversarial reviews are CLEAR at driver SHA
+`8c1ab05f66383f730efa4c9f1b6067fc6b17fc238f93861933c22ca7ad0cbf64`.
+Review found and corrected non-representable clock handling: a shared preflight
+rejects NaN, infinities and non-advancing timer additions before physical
+allocation or epoch/auth/timer mutation. It validates representability only;
+Supervisor still owns expiry and backoff. `timer_admissible` must be queried by
+Engine **before** removing a live managed timer from Io; the staged probe does
+not prove that eventual engine boundary yet. Raw-close/signing cancellation,
+health/event admission, subscription drains and the two actual adoptions remain
+unwired; the six original venue RED tests are still expected to fail. No live
+runtime, allocator, hosted wire, replay or cutover-readiness claim is made here.

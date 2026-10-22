@@ -37,6 +37,7 @@ impl Epoch {
 pub enum SocketError {
     Capacity,
     InvalidPolicy,
+    InvalidTime,
     InvalidInterest,
     InvalidCoverage,
     Stale,
@@ -271,6 +272,7 @@ impl Lifecycle {
             .ok_or(SocketError::Stale)
     }
     pub(crate) fn begin(&mut self, feed: FeedId, socket: SocketId) -> Result<Epoch, SocketError> {
+        self.can_begin(feed)?;
         if socket.0 == 0
             || self
                 .feeds
@@ -280,9 +282,6 @@ impl Lifecycle {
             return Err(SocketError::NotPermitted);
         }
         let f = self.feeds.get_mut(feed.0).ok_or(SocketError::Stale)?;
-        if f.stopped || !matches!(f.phase, Phase::Initial | Phase::Granted) {
-            return Err(SocketError::NotPermitted);
-        }
         let generation = f.generation.checked_add(1).ok_or(SocketError::Capacity)?;
         let epoch = Epoch {
             feed,
@@ -298,6 +297,14 @@ impl Lifecycle {
         f.interests.queue.clear();
         Ok(epoch)
     }
+    pub(crate) fn can_begin(&self, feed: FeedId) -> Result<(), SocketError> {
+        let f = self.feeds.get(feed.0).ok_or(SocketError::Stale)?;
+        if f.stopped || !matches!(f.phase, Phase::Initial | Phase::Granted) {
+            return Err(SocketError::NotPermitted);
+        }
+        f.generation.checked_add(1).ok_or(SocketError::Capacity)?;
+        Ok(())
+    }
     pub(crate) fn epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.feeds.get(feed.0)?.epoch
     }
@@ -308,6 +315,11 @@ impl Lifecycle {
         self.feeds
             .get(feed.0)
             .is_some_and(|f| f.epoch.is_some() && f.authenticated)
+    }
+    pub(crate) fn awaiting_retry(&self, feed: FeedId) -> bool {
+        self.feeds
+            .get(feed.0)
+            .is_some_and(|f| !f.stopped && f.phase == Phase::Waiting)
     }
     pub(crate) fn admit(
         &mut self,
