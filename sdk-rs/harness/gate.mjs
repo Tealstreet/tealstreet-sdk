@@ -366,6 +366,8 @@ const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate) failures.push(...performanceFailures(
   performanceResults.ts.map((output) => output.metrics), performanceResults.rust.map((output) => output.metrics)));
+// Report order must not depend on the arrival order of keyed replay rows.
+failures.sort();
 writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   schema: 1, venue: values.venue, tape: values.tape,
   ...(ciWasm ? { ciWasm: ciWasm.metadata } : {}),
