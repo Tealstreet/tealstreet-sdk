@@ -856,3 +856,26 @@ f88ba46b09e7dc4c13d087c53f0bcdce87d5732f6ae6c11c9168d41f8f7f89aa, is the exact i
 this native guard phase neither grows nor rehashes any legacy site. Caller notes
 now explicitly include shared unproven-status classification and bounded native
 diagnostics, with ordinary Bybit still pending.
+
+## Response-proof publication boundary
+
+Owner resumed the parked follow-on while fixture1781 runs. Publish the completed
+shared journal/proof machinery and Binance reference first on
+feat/rust-response-proof-binance. Ordinary Bybit production is unchanged. Its
+new native gateway assertion-RED is retained exactly on the companion branch
+feat/rust-command-replacement-bybit at c439f79e044 (test commit28615dfbe80),
+where the ordinary adapter will turn it GREEN. The publication branch restores
+that test file exactly to actual1765: no landed assertion is removed or weakened,
+and no deliberate native RED is described as a passing publication gate.
+
+The shared replacement engine controls remain in this core; native Bybit
+replacement/finalizer adoption follows separately. Execution-group work is an
+indexed initial plan only, with no public API or implementation claim. Session
+Context follows this guard as owner assigned: Binance and BingX listen-key
+create/keepalive, no command or financial authority, provider-presented API key,
+explicit retry/expiry. Do not relabel those mutations as Read/Public.
+
+Finish the bounded final source/verification audit, preserve actual1775 and
+fixture1781 when they land, then run fresh CI/proof on the resulting publication
+head. Fixture1781 remains the next merge; neither this branch nor its local
+293-native-test receipt is a current CI, raw-equivalence or landing claim.
