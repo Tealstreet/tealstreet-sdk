@@ -10,7 +10,8 @@ Run `corepack yarn rust:measure-browser --inputs INPUTS --out OUTPUT` in CI.
 The job downloads `browser-wasm-families` and `browser-wasm-combined` from
 the same workflow run, checks source/run/build-input fingerprints and SHA-256
 for every JS/WASM file, then starts Chrome from the runner image. No build,
-browser library dependency, timing threshold or production behavior changes.
+browser library dependency, timing-failure gate or production behavior changes.
+The follow-up below adds informational median warnings only.
 `raw.json` retains all observations, version/source/runner provenance and
 failed-sample diagnostics; `table.md` contains medians. The first actual table
 and the run/artifact link are recorded in the PR before merge.
@@ -21,7 +22,7 @@ WASM fetch/compile/instantiate (worker clock). Chrome launch is separate.
 Combined web bypasses the family loader and is explicitly diagnostic. There
 is no account construction or exchange I/O. Fresh profiles clear browser
 caches; the runner's OS caches may be warm. Three samples are descriptive,
-not evidence for a timing threshold or real-user latency distribution.
+not evidence for a hard timing gate or real-user latency distribution.
 
 1. Add a measurement harness using CI's existing Chrome and Node 22 built-ins,
    with no dependency or production/WASM code changes. Each of three samples
@@ -91,3 +92,12 @@ These warnings never fail the job on latency. Revisit a hard gate only after
 **ten additional complete landing reports** beyond the three above, with runner
 and browser cohorts reviewed; dispatches, skipped and cancelled runs do not
 count. A hard timing gate remains a separate decision.
+
+`raw.json.warnings` is an array (empty when no median exceeds its threshold).
+Each warning records the artifact, unrounded median, threshold, source/run and
+runner/runtime cohort; the same record is emitted as an escaped GitHub warning
+annotation. Raw observations and the median table remain intact. Local tests:
+all 1,047 harness controls pass, including 16 browser/CDP cases. The five new
+regressions fail against the prior publication behavior while the 11 existing
+cases pass. Root typecheck/lint and independent correctness/adversarial review
+pass; the actual-browser dispatch is reviewed in the PR before merge.

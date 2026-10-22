@@ -119,6 +119,30 @@ export function measurementTable(assets, samples) {
   return lines.join('\n') + '\n';
 }
 
+export function completeMeasurements(assets, report, out, log = console.log) {
+  requireValue(Array.isArray(report.errors) && report.errors.length === 0, 'Cannot complete a browser report with errors');
+  const table = measurementTable(assets, report.samples);
+  report.warnings = assets.flatMap((asset) => {
+    const rows = report.samples.filter((row) => row.key === asset.key);
+    const medianMs = median(rows.map((row) => row.moduleReadyMs));
+    const thresholdMs = asset.key === 'combined' ? 125 : 75;
+    if (medianMs <= thresholdMs) return [];
+    const runtimes = [...new Map(rows.map(({ browser, jsVersion }) => [
+      JSON.stringify([browser, jsVersion]), { browser, jsVersion },
+    ])).values()];
+    const cohort = Object.fromEntries(['platform', 'arch', 'cpu', 'image', 'imageOS', 'node']
+      .map((key) => [key, report[key] ?? 'unknown']));
+    return [{ key: asset.key, medianMs, thresholdMs, sourceHead: report.sourceHead, runId: report.runId, cohort: { ...cohort, runtimes } }];
+  });
+  writeFileSync(join(out, 'table.md'), table);
+  report.status = 'complete';
+  log(table);
+  for (const warning of report.warnings) {
+    const data = JSON.stringify(warning).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+    log(`::warning title=WASM module readiness::${data}`);
+  }
+}
+
 export function debuggingPort(text) {
   const [port, path, ...extra] = text.trim().split('\n');
   requireValue(/^\d+$/.test(port) && Number(port) > 0 && Number(port) <= 65535 && /^\/devtools\/browser\/[\w-]+$/.test(path) && !extra.length, 'Invalid DevToolsActivePort');
@@ -200,7 +224,7 @@ export async function measureBrowser({ inputs, out, root = process.cwd(), env = 
   try {
     requireCi(env);
     const provenance = { sourceHead: sha(root), inputsSha256: buildInputFingerprint(root), runId: env.GITHUB_RUN_ID };
-    Object.assign(report, provenance, { platform: platform(), arch: arch(), cpu: cpus()[0]?.model, node: process.version, image: env.ImageVersion, workerSha256: hash(readFileSync(join(root, 'sdk-rs/harness/browser-cold-start-worker.mjs'))) });
+    Object.assign(report, provenance, { platform: platform(), arch: arch(), cpu: cpus()[0]?.model, node: process.version, image: env.ImageVersion, imageOS: env.ImageOS, workerSha256: hash(readFileSync(join(root, 'sdk-rs/harness/browser-cold-start-worker.mjs'))) });
     const assets = readBrowserInputs(inputs, provenance);
     report.assets = assets.map(({ key, layout, files }) => ({ key, layout, hashes: Object.fromEntries(Object.entries(files).map(([ext, f]) => [ext, { sha256: f.sha256, bytes: f.bytes }])) }));
     const http = browserServer(assets, root);
@@ -216,10 +240,7 @@ export async function measureBrowser({ inputs, out, root = process.cwd(), env = 
       save();
       console.log(`${asset.key} sample ${sample + 1}/${SAMPLE_COUNT}: ${measured.moduleReadyMs.toFixed(2)} ms`);
     }
-    const table = measurementTable(assets, report.samples);
-    writeFileSync(join(out, 'table.md'), table);
-    report.status = 'complete';
-    console.log(table);
+    completeMeasurements(assets, report, out);
   } catch (error) { report.status = 'failed'; report.errors.push(error.message); throw error; }
   finally { save(); if (server) await new Promise((resolve) => server.close(resolve)); }
   return report;

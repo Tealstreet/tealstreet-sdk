@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import {
-  archiveBrowserAssets, assetSpecs, browserServer, debuggingPort, measurementTable,
+  archiveBrowserAssets, assetSpecs, browserServer, completeMeasurements, debuggingPort, measurementTable,
   readBrowserInputs, stopChrome, validateMeasurements,
 } from './browser-cold-start.mjs';
 import { Cdp, evaluateWorker } from './browser-cdp.mjs';
@@ -201,4 +201,115 @@ test('worker evaluation rejects browser promise exceptions or missing values', a
   for (const response of [{ exceptionDetails: { text: 'worker error' } }, {}, { result: {} }])
     await assert.rejects(evaluateWorker({ send: async () => response }, 'families', 'bybit'), /Browser/);
   assert.deepEqual(await evaluateWorker({ send: async () => ({ result: { value: { moduleReadyMs: 5 } } }) }, 'families', 'bybit'), { moduleReadyMs: 5 });
+});
+
+function completionFixture(t) {
+  const { directory, assets } = fixture(t);
+  const report = {
+    ...expected, status: 'running', errors: [], samples: samplesFor(assets),
+    platform: 'linux', arch: 'x64', cpu: 'test CPU', image: 'test image',
+    imageOS: 'ubuntu24', node: 'v22.0.0',
+  };
+  const logs = [];
+  return { directory, assets, report, logs, complete: () => completeMeasurements(assets, report, directory, (line) => logs.push(line)) };
+}
+const setSampleModuleMs = (row, ms) => {
+  row.moduleReadyMs = ms;
+  row.initializeMs = ms - row.loaderImportMs;
+  row.roundTripMs = ms + row.bootstrapMs + 1;
+};
+const setModuleMs = (report, key, ms) => {
+  for (const row of report.samples) if (row.key === key) setSampleModuleMs(row, ms);
+};
+
+test('slow complete reports publish median warnings without failing or losing samples', (t) => {
+  const f = completionFixture(t);
+  setModuleMs(f.report, 'bybit', 76);
+  setModuleMs(f.report, 'combined', 126);
+  const samples = structuredClone(f.report.samples);
+  f.complete();
+  assert.equal(f.report.status, 'complete');
+  assert.deepEqual(f.report.errors, []);
+  assert.deepEqual(f.report.samples, samples);
+  assert.deepEqual(f.report.warnings.map(({ key, medianMs, thresholdMs }) => ({ key, medianMs, thresholdMs })), [
+    { key: 'bybit', medianMs: 76, thresholdMs: 75 },
+    { key: 'combined', medianMs: 126, thresholdMs: 125 },
+  ]);
+  assert.equal(readFileSync(join(f.directory, 'table.md'), 'utf8'), measurementTable(f.assets, samples));
+  assert.equal(f.logs.filter((line) => line.startsWith('::warning ')).length, 2);
+  assert.ok(f.logs.includes(measurementTable(f.assets, samples)));
+  assert.deepEqual(JSON.parse(JSON.stringify(f.report.warnings)), f.report.warnings);
+});
+
+test('warning thresholds use unrounded medians and a separate combined allowance', (t) => {
+  for (const [family, combined, keys] of [
+    [75, 125, []],
+    [75.00001, 125.00001, ['bybit', 'combined']],
+    [80, 80, ['bybit']],
+  ]) {
+    const f = completionFixture(t);
+    setModuleMs(f.report, 'bybit', family);
+    setModuleMs(f.report, 'combined', combined);
+    f.complete();
+    assert.deepEqual(f.report.warnings.map((w) => w.key), keys);
+    assert.equal(f.report.status, 'complete');
+  }
+});
+
+test('an isolated slow sample is retained without a median warning', (t) => {
+  const f = completionFixture(t);
+  setSampleModuleMs(f.report.samples.find((row) => row.key === 'bybit'), 159.2);
+  f.complete();
+  assert.deepEqual(f.report.warnings, []);
+  assert.equal(f.report.samples.find((row) => row.key === 'bybit').moduleReadyMs, 159.2);
+  assert.equal(f.logs.filter((line) => line.startsWith('::warning ')).length, 0);
+});
+
+test('warning records and safe annotations retain the runner and every observed Chrome/JS cohort', (t) => {
+  const f = completionFixture(t);
+  setModuleMs(f.report, 'bybit', 100);
+  const changed = f.report.samples.find((row) => row.key === 'bybit');
+  changed.browser = 'Chrome/124';
+  changed.jsVersion = '12.4';
+  f.report.cpu = 'CPU%0A\r\n::error::injected';
+  f.complete();
+  const warning = f.report.warnings[0];
+  assert.equal(warning.sourceHead, expected.sourceHead);
+  assert.equal(warning.runId, expected.runId);
+  assert.deepEqual(warning.cohort, {
+    platform: 'linux', arch: 'x64', cpu: f.report.cpu, image: 'test image',
+    imageOS: 'ubuntu24', node: 'v22.0.0', runtimes: [
+      { browser: 'Chrome/124', jsVersion: '12.4' },
+      { browser: 'Chrome/123', jsVersion: '12.3' },
+    ],
+  });
+  const annotations = f.logs.filter((line) => line.startsWith('::warning '));
+  assert.equal(annotations.length, 1);
+  const prefix = '::warning title=WASM module readiness::';
+  assert.ok(annotations[0].startsWith(prefix));
+  assert.doesNotMatch(annotations[0], /[\r\n]/);
+  assert.ok(annotations[0].includes('%250A'));
+  const data = annotations[0].slice(prefix.length).replaceAll('%0D', '\r').replaceAll('%0A', '\n').replaceAll('%25', '%');
+  assert.deepEqual(JSON.parse(data), warning);
+});
+
+test('completion rejects existing errors and invalid samples before publishing success or warnings', (t) => {
+  for (const corrupt of [
+    (r) => { r.errors.push('worker failed'); },
+    (r) => { r.samples.pop(); },
+    (r) => { r.samples[0].realm = 'Window'; },
+    (r) => { r.samples[0].moduleReadyMs = Infinity; },
+    (r) => { r.samples[0].wasmRequests[0].sha256 = 'wrong'; },
+  ]) {
+    const f = completionFixture(t);
+    setModuleMs(f.report, 'bybit', 100);
+    corrupt(f.report);
+    const errors = [...f.report.errors];
+    assert.throws(f.complete);
+    assert.deepEqual(f.report.errors, errors);
+    assert.notEqual(f.report.status, 'complete');
+    assert.equal(f.report.warnings, undefined);
+    assert.equal(existsSync(join(f.directory, 'table.md')), false);
+    assert.deepEqual(f.logs, []);
+  }
 });
