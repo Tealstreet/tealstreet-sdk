@@ -3,8 +3,8 @@
 use super::{CommandId, Cx, RequestId};
 use crate::VenueError;
 use crate::request_context::{
-    Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RetryEvidence, Scope,
-    WriteResult,
+    Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RejectionReports,
+    RetryEvidence, Scope, WriteResult,
 };
 use std::collections::HashMap;
 
@@ -263,6 +263,22 @@ impl ContextRegistry {
             .result(delivery.attempt.request, result)
     }
 
+    fn result_with_reports(
+        &mut self,
+        delivery: &Delivery,
+        result: WriteResult,
+        reports: RejectionReports,
+    ) -> Result<(), Error> {
+        if delivery.context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.command_mut(&delivery.context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .result_with_reports(delivery.attempt.request, result, reports)
+    }
+
     fn validate_completion(
         &self,
         command: CommandId,
@@ -345,13 +361,7 @@ impl ContextRegistry {
         let error = error
             .unwrap_or_else(|| VenueError::new("Command writes are not all confirmed accepted"));
         match writes.fail(error) {
-            Ok(error) => Seal::Failure(
-                error,
-                writes
-                    .rejections()
-                    .map(|(_, error)| error.message.clone())
-                    .collect(),
-            ),
+            Ok(error) => Seal::Failure(error, writes.reports().map(str::to_owned).collect()),
             Err(_) => Seal::Stale,
         }
     }
@@ -498,6 +508,24 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         self.io.request_contexts.result(delivery, result)
+    }
+
+    /// Native reports are published centrally with the terminal logical legs.
+    /// Capacity refusal leaves facts untouched: retry with empty reports to keep
+    /// native facts/partial IDs. Never bypass a provenance or state refusal.
+    pub fn http_write_result_with_reports(
+        &mut self,
+        context: &Context,
+        result: WriteResult,
+        reports: RejectionReports,
+    ) -> Result<(), Error> {
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.request_contexts.issuer) {
+            return Err(Error::Revoked);
+        }
+        self.io
+            .request_contexts
+            .result_with_reports(delivery, result, reports)
     }
 
     /// Retire a fully completed logical read/page join or write leg. Do not call
@@ -910,6 +938,85 @@ mod write_tests {
         WriteResult::Accepted {
             order_ids: vec!["accepted-id".into()],
         }
+    }
+
+    #[test]
+    fn native_report_api_preserves_delivery_authority_and_publishes_each_batch_message_once() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let first = io
+            .request_contexts
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        let second = io
+            .request_contexts
+            .issue(2, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        let foreign = ContextRegistry::default()
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        for (context, id) in [(&first, 11), (&second, 12)] {
+            io.request_contexts
+                .register_attempt(context, RequestId(id), 0.)
+                .unwrap();
+            *io.request_contexts
+                .release_flag(context, RequestId(id))
+                .unwrap()
+                .unwrap() = true;
+        }
+        io.http_delivery = Some(delivery(&second, 12));
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        for context in [&first, &foreign] {
+            assert_eq!(
+                cx.http_write_result_with_reports(
+                    context,
+                    rejected(),
+                    RejectionReports::new(vec!["wrong".into()]).unwrap()
+                ),
+                Err(Error::Revoked)
+            );
+        }
+        cx.http_write_result_with_reports(
+            &second,
+            rejected(),
+            RejectionReports::new(vec!["B1".into(), "B2".into()]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            cx.http_write_result_with_reports(
+                &second,
+                rejected(),
+                RejectionReports::new(vec!["duplicate".into()]).unwrap()
+            ),
+            Err(Error::State)
+        );
+        cx.io.http_delivery = Some(delivery(&first, 11));
+        cx.http_write_result_with_reports(
+            &first,
+            rejected(),
+            RejectionReports::new(vec!["A1".into(), "A2".into()]).unwrap(),
+        )
+        .unwrap();
+        cx.fail_context(&first, "fallback").unwrap();
+        assert_eq!(cx.fail_context(&first, "duplicate"), Err(Error::Revoked));
+        let messages: Vec<_> = cx
+            .io
+            .actions
+            .iter()
+            .filter_map(|a| match a {
+                crate::Action::Notice(Notice::CommandError { message, .. }) => {
+                    Some(message.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(messages, ["A1", "A2", "B1", "B2"]);
+        assert_eq!(cx.io.actions.iter().filter(|a| matches!(a,
+            crate::Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(Outcome::Rejected))).count(), 1);
     }
 
     #[test]

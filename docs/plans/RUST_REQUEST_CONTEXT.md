@@ -714,3 +714,22 @@ tests, shared signed/denied/order controls and strict three-crate Clippy. A comp
 queue-order fault fails the exact progress/physical-send ordering assertion;
 restoration passes. Independent review CLEAN / architecture No. These fake routes
 do not claim asynchronous transport/proxy execution or full venue replay proof.
+
+
+Ordering clarification from existing compatibility control: engine-issued leg
+IDs encode logical planning order, which can differ from physical registration.
+Retain the existing representative-error selection by logical leg ID and its
+Partial.total/failed_index assertions. Terminal reports use that same logical
+order (including reversed physical registration and A/B/retry-A); do not change
+it to first physical registration or callback arrival.
+
+
+Shared native-report checkpoint: 428 full engine order-lock tests, strict
+Clippy/fmt/bans and independent review CLEAN / architecture No. Explicit report
+metadata has command-wide count/retained-capacity bounds including prior attempts;
+capacity refusal is atomic and the tested empty-report fallback preserves native
+facts and partial IDs. Wrong issuer/delivery and duplicate publication remain
+refused. Compiled faults pin terminal logical-leg ordering and historical byte
+accounting, and both restored controls pass. Existing logical error selection
+and Partial.total/failed_index assertions are retained verbatim. This checkpoint
+adds the shared seam; it does not claim the venue adapters or final raw proof.

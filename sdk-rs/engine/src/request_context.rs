@@ -763,11 +763,57 @@ pub enum WriteResult {
     Failed(VenueError),
 }
 
+const REPORT_MESSAGES: usize = 256;
+const REPORT_MESSAGE_BYTES: usize = 8 * 1024;
+const REPORT_BYTES: usize = 64 * 1024;
+
+/// Native presentation facts, separate from execution outcome. Empty explicitly
+/// suppresses reports (silent native codes); it never suppresses the write fact.
+#[derive(Default, PartialEq)]
+pub struct RejectionReports {
+    messages: Vec<String>,
+    retained_bytes: usize,
+}
+
+impl RejectionReports {
+    pub fn new(messages: Vec<String>) -> Result<Self, Error> {
+        if messages.capacity() > REPORT_MESSAGES {
+            return Err(Error::Capacity);
+        }
+        let mut retained_bytes = messages
+            .capacity()
+            .checked_mul(std::mem::size_of::<String>())
+            .ok_or(Error::Capacity)?;
+        for message in &messages {
+            if message.capacity() > REPORT_MESSAGE_BYTES {
+                return Err(Error::Capacity);
+            }
+            retained_bytes = retained_bytes
+                .checked_add(message.capacity())
+                .ok_or(Error::Capacity)?;
+        }
+        if retained_bytes > REPORT_BYTES {
+            return Err(Error::Capacity);
+        }
+        Ok(Self {
+            messages,
+            retained_bytes,
+        })
+    }
+}
+
+impl std::fmt::Debug for RejectionReports {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RejectionReports(<redacted>)")
+    }
+}
+
 struct WriteAttempt {
     id: RequestId,
     leg: u64,
     released: bool,
     result: Option<WriteResult>,
+    reports: RejectionReports,
 }
 
 /// Bounded evidence retained for the whole command, including prior retries.
@@ -776,6 +822,8 @@ pub struct CommandWrites {
     attempts: Vec<WriteAttempt>,
     capacity: usize,
     sealed: bool,
+    report_bytes: usize,
+    report_messages: usize,
 }
 impl CommandWrites {
     pub fn new(capacity: usize) -> Result<Self, Error> {
@@ -786,6 +834,8 @@ impl CommandWrites {
             attempts: Vec::new(),
             capacity,
             sealed: false,
+            report_bytes: 0,
+            report_messages: 0,
         })
     }
     pub fn register(&mut self, id: RequestId, leg: u64) -> Result<(), Error> {
@@ -803,6 +853,7 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            reports: RejectionReports::default(),
         });
         Ok(())
     }
@@ -836,6 +887,7 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            reports: RejectionReports::default(),
         });
         Ok(())
     }
@@ -868,9 +920,38 @@ impl CommandWrites {
         Ok(())
     }
     pub fn result(&mut self, id: RequestId, result: WriteResult) -> Result<(), Error> {
+        let reports = match &result {
+            WriteResult::Rejected(error) => RejectionReports::new(vec![error.message.clone()])?,
+            _ => RejectionReports::default(),
+        };
+        self.result_with_reports(id, result, reports)
+    }
+
+    /// Atomic native fact plus bounded presentation metadata. A metadata refusal
+    /// leaves the attempt untouched; callers may record the same fact with empty
+    /// reports. Provenance/state failures are never a reason to bypass authority.
+    pub fn result_with_reports(
+        &mut self,
+        id: RequestId,
+        result: WriteResult,
+        reports: RejectionReports,
+    ) -> Result<(), Error> {
         if self.sealed {
             return Err(Error::State);
         }
+        if matches!(result, WriteResult::Accepted { .. }) && !reports.messages.is_empty() {
+            return Err(Error::Invalid);
+        }
+        let report_bytes = self
+            .report_bytes
+            .checked_add(reports.retained_bytes)
+            .filter(|bytes| *bytes <= REPORT_BYTES)
+            .ok_or(Error::Capacity)?;
+        let report_messages = self
+            .report_messages
+            .checked_add(reports.messages.len())
+            .filter(|count| *count <= REPORT_MESSAGES)
+            .ok_or(Error::Capacity)?;
         let attempt = self
             .attempts
             .iter_mut()
@@ -882,6 +963,9 @@ impl CommandWrites {
             return Err(Error::State);
         }
         attempt.result = Some(result);
+        attempt.reports = reports;
+        self.report_bytes = report_bytes;
+        self.report_messages = report_messages;
         Ok(())
     }
     /// Seal success only when every terminal logical leg is proven accepted.
@@ -1019,6 +1103,26 @@ impl CommandWrites {
                 _ => None,
             })
     }
+
+    /// Engine-issued logical leg ids carry planning order, independently of
+    /// physical registration/callback order and the position of a later retry.
+    pub fn reports(&self) -> impl Iterator<Item = &str> {
+        let mut terminal: Vec<_> = self
+            .attempts
+            .iter()
+            .enumerate()
+            .filter(|(index, attempt)| {
+                !self.attempts[index + 1..]
+                    .iter()
+                    .any(|later| later.leg == attempt.leg)
+            })
+            .map(|(_, attempt)| attempt)
+            .collect();
+        terminal.sort_unstable_by_key(|attempt| attempt.leg);
+        terminal
+            .into_iter()
+            .flat_map(|last| last.reports.messages.iter().map(String::as_str))
+    }
 }
 
 fn effects_free(error: &VenueError) -> bool {
@@ -1031,3 +1135,7 @@ fn effects_free(error: &VenueError) -> bool {
 #[cfg(test)]
 #[path = "request_context_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "request_context_reports_tests.rs"]
+mod report_tests;
