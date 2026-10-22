@@ -1859,6 +1859,82 @@ fn command_errors(actions: &[Action]) -> Vec<String> {
 }
 const ISOLATED_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"20","isolatedLongLeverage":"7","isolatedShortLeverage":"9"}]"#;
 
+fn joined_metadata(e: &mut Engine<WeexFutures>, first: u32, second: u32) -> HttpRequest {
+    let mut actions = Vec::new();
+    for id in [first, second] {
+        actions.extend(command(
+            e,
+            Command::FetchLeverage {
+                command: id,
+                symbol: "BTCUSDT".into(),
+            },
+        ));
+    }
+    let mut reads = actions
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(read) if read.url.contains("/account/symbolConfig") => Some(read),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reads.len(),
+        1,
+        "same-revision metadata callers share one read"
+    );
+    reads.pop().unwrap()
+}
+
+#[test]
+fn metadata_owner_coalesces_native_config_and_completes_both_callers() {
+    let mut e = engine();
+    let read = joined_metadata(&mut e, 950, 951);
+    let actions = raw_response(&mut e, &read, ISOLATED_CONFIG);
+    for id in [950, 951] {
+        assert_eq!(
+            actions.iter().filter(|action| matches!(action,
+                Action::Notice(Notice::CommandDone { command, result })
+                if *command == id && result == r#"{"buyLeverage":7.0,"sellLeverage":9.0,"marginType":"isolated"}"#
+            )).count(),
+            1,
+            "each joined command completes once with the same validated result"
+        );
+    }
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(MarginType::Isolated)
+    );
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+    )));
+}
+
+#[test]
+fn metadata_owner_fails_both_joined_callers_and_keeps_good_settings() {
+    let mut e = engine();
+    let before = e.store().setting("BTCUSDT");
+    let read = joined_metadata(&mut e, 952, 953);
+    let actions = raw_response(&mut e, &read, "[]");
+    for id in [952, 953] {
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| matches!(action,
+                    Action::Notice(Notice::CommandFailed { command, .. }) if *command == id
+                ))
+                .count(),
+            1,
+            "each joined command rejects once"
+        );
+    }
+    assert_eq!(e.store().setting("BTCUSDT"), before);
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Http(_) | Action::Notice(Notice::CommandDone { .. })
+    )));
+}
+
 #[test]
 fn leverage_read_is_a_fresh_symbol_scoped_configuration_read() {
     let mut e = engine();

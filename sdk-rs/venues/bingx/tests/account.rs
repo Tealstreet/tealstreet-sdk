@@ -1726,6 +1726,66 @@ fn malformed_position_update_keeps_valid_peers_and_requests_repair() {
 
 const RAILS: &str = r#"{"code":0,"data":{"longLeverage":12,"shortLeverage":34}}"#;
 const ISOLATED: &str = r#"{"code":0,"data":{"marginType":"ISOLATED"}}"#;
+
+fn joined_metadata(h: &mut Harness, first: u32, second: u32) -> HttpRequest {
+    fetch_leverage(h, first, "BTCUSDT");
+    fetch_leverage(h, second, "BTCUSDT");
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|request| request.url.contains(LEVERAGE))
+            .count(),
+        1,
+        "same-revision metadata callers share one leverage leg"
+    );
+    h.take(LEVERAGE)
+}
+
+#[test]
+fn metadata_owner_coalesces_each_native_leg_and_completes_both_callers() {
+    let mut h = Harness::ready();
+    let read = joined_metadata(&mut h, 950, 951);
+    h.reply(read.id, 200, FRESH_RAILS);
+    assert!(
+        h.done.is_empty(),
+        "leverage alone cannot finish either owner"
+    );
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|request| request.url.contains("/trade/marginType"))
+            .count(),
+        1,
+        "the joined group shares one margin leg too"
+    );
+    let margin = h.take("/trade/marginType");
+    h.reply(margin.id, 200, ISOLATED);
+    for command in [950, 951] {
+        assert_eq!(metadata_rails(&h, command), (8.0, 12.0));
+    }
+    assert_eq!(h.done.len(), 2);
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(MarginType::Isolated)
+    );
+}
+
+#[test]
+fn metadata_owner_fails_both_joined_callers_and_keeps_good_settings() {
+    let mut h = Harness::ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    let read = joined_metadata(&mut h, 952, 953);
+    h.reply(read.id, 503, "unavailable");
+    for command in [952, 953] {
+        failed_metadata(&h, command);
+    }
+    assert_eq!(h.done.len(), 2);
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    assert!(!h.requests.iter().any(|request| {
+        request.url.contains(LEVERAGE) || request.url.contains("/trade/marginType")
+    }));
+}
+
 fn metadata(h: &mut Harness, command: u32) -> HttpRequest {
     h.event(Event::Command(Command::FetchLeverage {
         command,

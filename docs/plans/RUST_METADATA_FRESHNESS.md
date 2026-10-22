@@ -154,3 +154,13 @@ gate: this is one engine choke point adopted by two different families, not two
 venue-specific fixes. Integrate actual shared dependencies before final proof,
 announce the merge window, then use a separate guard and separate exact-head
 merge on green. Verify actual parents/tree/owned and incoming blobs; report pin.
+
+## First original-RED checkpoint
+
+Before any implementation change, two coalescing/fan-out controls in each
+adapter compile and fail because two same-revision commands emit two reads
+instead of one. They cover success and error fan-out; BingX expects one request
+per native leg, not one request total. The pre-existing 69 BingX account and 41
+WEEX trading tests still pass with only these four new controls excluded.
+Implementation has not begun; this evidence does not prove the other planned
+freshness/cleanup boundaries yet.
