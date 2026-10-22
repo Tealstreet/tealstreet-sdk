@@ -522,3 +522,37 @@ fn mismatched_batch_rows_keep_only_reconciliation_ids_without_claiming_acceptanc
         assert!(!h.has_request("/fapi/v1/order"));
     }
 }
+
+#[test]
+fn background_catalogue_waits_for_shared_route_preparation() {
+    use safe_cex_engine::request_context::HttpAction;
+    use safe_cex_engine::Action;
+    let mut engine = support::engine(Options { public_data_only: true, ..Options::default() });
+    engine.start(1_000.);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(action)
+        if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("exchangeInfo")))));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}
+
+#[test]
+fn background_catalogue_reply_at_its_deadline_cannot_publish_markets() {
+    let mut h = Harness::started(Options { public_data_only: true, ..Options::default() });
+    let request = h.take("exchangeInfo");
+    h.now += 20_000.;
+    h.reply(request.id, 200, "", support::EXCHANGE_INFO);
+    assert!(!h.engine.store().loaded().markets);
+    assert!(h.engine.store().markets().is_empty());
+    assert!(!h.has_request("24hr"));
+}
+
+#[test]
+fn background_account_reply_at_its_deadline_cannot_publish_balance() {
+    let mut h = ready();
+    let request = h.take("/fapi/v3/account");
+    let before = h.engine.store().balance().clone();
+    h.now += 20_000.;
+    h.reply(request.id, 200, "", r#"{"totalInitialMargin":"48","totalWalletBalance":"1000","availableBalance":"952","assets":[{"asset":"USDT","walletBalance":"1000","unrealizedProfit":"10","marginBalance":"1010","maintMargin":"3.8","initialMargin":"48","availableBalance":"952"}],"positions":[]}"#);
+    assert_eq!(h.engine.store().balance(), &before);
+    assert!(!h.engine.store().loaded().balance);
+}
