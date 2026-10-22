@@ -11,6 +11,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Row admission | Active engine standardization plan | Before keyed private REST/WS rejection, snapshot retention or coverage migration. | [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md) |
+| Public TS recording | Active harness plan | Before TS-origin public capture or extending audited transport/venue support; live capture remains owner evidence. | [HARNESS_TS_PUBLIC_RECORDER.md](HARNESS_TS_PUBLIC_RECORDER.md) |
 | Account settings | Retained plan/evidence | Changing leverage, margin rails or settings refresh behavior. | [RUST_BINGX_LEVERAGE_RACES.md](RUST_BINGX_LEVERAGE_RACES.md) |
 | Account settings | Retained plan/evidence | Changing leverage, margin rails or settings refresh behavior. | [RUST_BITUNIX_SETTINGS_READ_PROGRESS.md](RUST_BITUNIX_SETTINGS_READ_PROGRESS.md) |
 | Account settings | Retained plan/evidence | Changing leverage, margin rails or settings refresh behavior. | [RUST_BYBIT_LEVERAGE_READ_FENCE.md](RUST_BYBIT_LEVERAGE_READ_FENCE.md) |
