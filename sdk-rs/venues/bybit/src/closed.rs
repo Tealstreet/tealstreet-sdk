@@ -111,6 +111,15 @@ impl BybitLinear {
         );
     }
 
+    pub(crate) fn on_closed_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        request.history.finish(cx, Err(error));
+    }
+
     pub(crate) fn on_closed_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,

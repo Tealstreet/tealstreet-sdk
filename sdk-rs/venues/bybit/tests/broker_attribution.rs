@@ -1,12 +1,14 @@
 use safe_cex_engine::Action;
-use safe_cex_venue_bybit::{BybitLinear, Options};
+use safe_cex_venue_bybit::BybitLinear;
 
 #[test]
 fn public_catalogue_preserves_factory_broker_attribution_without_credentials() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BybitLinear::new(Options {
-        public_data_only: true,
-        ..Options::default()
-    }));
+    let mut engine = safe_cex_engine::test_support::seeded_engine(BybitLinear::new(
+        safe_cex_venue_bybit::Options {
+            public_data_only: true,
+            ..safe_cex_venue_bybit::Options::default()
+        },
+    ));
     engine.start(0.0);
     let requests: Vec<_> = engine
         .drain_actions()

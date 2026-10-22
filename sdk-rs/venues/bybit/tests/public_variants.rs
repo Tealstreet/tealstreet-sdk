@@ -2,7 +2,8 @@
 mod support;
 
 use safe_cex_engine::{Command, Event, SocketChannel};
-use safe_cex_venue_bybit::{Endpoints, Options, Variant};
+use safe_cex_venue_bybit::{Endpoints, Variant};
+use support::Options;
 use support::{ACCOUNT_INFO, FEE_RATES, Harness, INSTRUMENTS, PRELAUNCH, TICKERS};
 
 // Spot Get Instruments Info example: basePrecision replaces derivatives' qtyStep.
