@@ -55,6 +55,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The shrink-only request provenance ratchet verifies immutable base
+          # and parent manifests, never a caller-supplied enlarged inventory.
+          fetch-depth: 0
       - name: Reject JavaScript emulation and deleted-port dependencies
         run: ./scripts/check-bans.sh
 
