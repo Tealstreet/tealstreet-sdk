@@ -13,7 +13,7 @@ pub enum ResultHeaderPolicy {
     #[default]
     Deny,
     /// Native values for these names take precedence; callback values otherwise
-    /// override native values, matching Axios's case-insensitive last assignment.
+    /// override native values with case-insensitive last-assignment precedence.
     Http { protected: &'static [&'static str] },
 }
 
