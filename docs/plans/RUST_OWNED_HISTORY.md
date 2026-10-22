@@ -1276,3 +1276,11 @@ Coordinate `engine/history.rs` with the managed Completion bridge; RequestContex
 authority stays outside this slice. Signer API inspection found current Phemex
 header construction infallible; do not invent a new sign-failure callback or
 change request builders. The signing lane confirmed these regions are clear.
+
+
+Final plan review: stage replacement must account for retired-stage request
+selections as well as the current walk count, and `with_request_budget` cannot
+be reapplied after restart to reset authority. Test the exact boundary across
+two stages, inability to reopen an exhausted budget, and invalid early restart
+without mutating pending rows or an existing gap. Keep the existing more-than-
+100,000 retained-output guard a strict policy rejection, never a partial success.
