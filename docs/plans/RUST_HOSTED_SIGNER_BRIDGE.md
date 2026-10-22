@@ -460,7 +460,16 @@ typecheck and lint, strict engine/registry/Binance/Bybit all-target Clippy and a
 WASM debug target check pass. Native touched-package gates pass after updating
 the intentional Bybit enablement assertion. Independent reviews clear Bybit
 codec adoption, shared capture policy, exact WS envelope and actual-WASM test
-oracles. The paired actual-WASM tests are authored and typechecked, not yet run:
-CI must rebuild the exact source and prove Binance/Bybit browser-to-keyless HTTP
-and WS, callback headers and MCP admission before readiness. Final replay proof,
-latest landing integration and a fresh separate guard remain required.
+oracles. CI run 39782904871 at ccde934c4da passed all 18 new actual-WASM
+Binance/Bybit browser-to-keyless HTTP/WS, callback-header and Hyro refusal tests.
+That run is not final proof: six older WASM tests and five unit expectations
+still asserted the superseded TS routing/refusal behavior. Replace those with
+positive declared-provider construction and actual Binance account startup:
+RemoteSigner retains streaming; PayloadSigner signs REST with same-attempt
+headers and creates no private session. Independent HMAC checks require actual
+signed requests, and capability-only construction counts zero transport calls.
+Keep native bare-constructor/no-provider and unadopted-family typed refusals.
+The updated legacy unit tests, package typecheck and lint pass locally; CI must
+run the updated actual-WASM tests before readiness. Owner queue places this PR
+after the AsterDEX financial-fix window (#1756). Final replay proof uses that
+actual landing, followed by independent evidence review and a separate guard.
