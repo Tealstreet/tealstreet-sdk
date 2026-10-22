@@ -1920,3 +1920,30 @@ summary health/filtering, empty text versus absent summary and key-only re-arm
 at capacity. Financial reducers, signing, clocks and snapshot fences stay native.
 Seventeen bounded persistent source files remain for subsequent fan-out; no
 all-venue closure, live capture or stronger replay parity claim is made here.
+
+
+### Row reporting: BloFin and Kraken consumer migration (2026-10-23)
+
+Moved BloFin position/order, Kraken futures row/unlisted-symbol and Kraken Spot
+row diagnostic memories onto existing engine RowReports. Architecture gate YES:
+this is consumer fan-out of cross-cutting policy, not another venue policy copy
+or new engine API. The futures real constructor explicitly chooses bounded
+ErrorUpgrade plus separate unbounded Once; BloFin and Spot use bounded Once.
+Native messages, severities, keys, empty identities, 4096 clear-before-lookup,
+re-arm sites and pre-admission reporting remain unchanged. The final 126 original
+native account controls (55 BloFin,39 futures,32 Spot), including eleven new
+compatibility controls, pass against unchanged actual #1775 production. Exact
+source/test/log hashes are bound in
+`/tmp/codex-row-blofin-kraken-original-final-receipt.json` (SHA256
+`aa9137471325c9cb881aaa2cf4bf16f060e482db5ad4943038a5a37521489bc6`).
+An initial Spot test expected REST text for WS execution diagnostics; only that
+fixture expectation was corrected before the final original-GREEN run. No
+production defect/RED, financial repair or all-venue closure claim. Other bounded
+and unbounded reporter consumers remain open; see RUST_ROW_ADMISSION.md.
+
+Migrated engine/BloFin/Kraken/Binance focused suites pass1253 native tests across
+68 groups; strict all-target Clippy, scoped fmt, bans, root44 typecheck/28 lint
+(root tasks cached) pass. Both independent source/caller reviews are CLEAN.
+Actual #1781 `ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated
+without conflicts, preserving both incoming files. Full green CI and current-head
+artifact proof remain pending.
