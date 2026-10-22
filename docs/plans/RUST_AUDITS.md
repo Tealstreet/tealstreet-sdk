@@ -39,6 +39,29 @@ hosted-signing delegates; they are not a generic ordinary-account rollback path.
 TxFlow has no production TS fallback. The branch cannot reach master until 1–3
 are settled for them; rollback availability remains explicit in decision 4.
 
+## Shared financial snapshot admission (Binance and Bitunix)
+
+The engine now owns an issuer-bound, checked order-snapshot write fence and one
+admission boundary before BOTH native cache application and Store publication.
+Binance and Bitunix replace their local order-write revision copies with linear
+Store tokens; all existing invalidation boundaries and native lagging-server,
+terminal, incarnation and client-ownership protections remain. Bitunix keeps
+row-selective WS healthy-peer progress and validates both initial endpoint
+tokens before regular then TP-SL native application. Snapshot publication does
+not invalidate sibling reads or metadata domains. The existing StaleGuard
+progress escape never overrides this write fence.
+
+This is standardization of native behavior, not a new original-RED fill fix.
+Permanent exhaustion refuses reads before HTTP and settles owned preflight;
+accepted native writes remain possible. Native compatibility and new exhaustion
+controls are recorded in [the contract](RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md).
+Only these two financial references are migrated. Metadata reuses the primitive
+in its own follow-up; RequestContext's initial late-response codec remains
+read-only. Safe late ACK patches to both Store and native terminal/filled tables
+must explicitly invalidate this fence before future snapshot application; they
+are not claimed implemented here. Broader Store mutation revisions protect a
+different boundary and must not replace selective snapshot-write admission.
+
 ## Error handling (scoping)
 
 Owner flags error handling as one of safe-cex's weakest points. Scope a

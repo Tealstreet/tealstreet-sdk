@@ -5,6 +5,7 @@ use safe_cex_engine::{Engine, ReadCredentials};
 use safe_cex_venue_bybit::{BybitLinear, Endpoints, Options as VenueOptions, Variant};
 #[derive(Clone, Default)]
 pub struct Options {
+    pub signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     pub recv_window: Option<u32>,
     pub read_credentials: Option<ReadCredentials>,
     pub variant: Variant,
@@ -47,6 +48,7 @@ impl Options {
         let (signer, identities) =
             LocalSigner::from_setup(LocalSetup { primary, secondary }).unwrap();
         let venue = BybitLinear::new(VenueOptions {
+            signing_policy: self.signing_policy,
             credentials: identities.primary,
             read_credentials: identities.secondary,
             recv_window: self.recv_window,

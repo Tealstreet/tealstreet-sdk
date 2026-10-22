@@ -299,3 +299,76 @@ fn an_early_stall_event_rearms_only_its_remaining_deadline() {
     let replaced = order_requests(fire(&mut e, rearmed, 11100.0));
     assert_eq!(replaced.len(), 1);
 }
+
+#[test]
+fn exhausted_admission_retires_both_stall_owners_and_does_not_rearm_them() {
+    let (mut e, socket) = ready();
+    let issued = begin(&mut e, socket);
+    let deadlines: Vec<_> = issued
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == BASE + 11100.0 => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(deadlines.len(), 2);
+    let queued = notify(&mut e, socket, 1200.0);
+    let debounce = timer_at(&queued, 2200.0);
+    safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
+    let retired = fire(&mut e, deadlines[0], 11100.0);
+    assert!(
+        !retired
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    // The engine already consumed the fired timer; the sibling must be canceled.
+    for timer in [deadlines[1], debounce] {
+        assert!(retired.iter().any(|action| matches!(action,
+            Action::ClearTimer { timer: cleared } if *cleared == timer)));
+    }
+    // Duplicate and sibling expired events have no stale timer ownership to rearm.
+    for timer in [deadlines[0], deadlines[1], debounce] {
+        let actions = fire(&mut e, timer, 11101.0);
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_) | Action::SetTimer { .. }))
+        );
+    }
+    assert!(e.store().loaded().orders);
+    assert!(e.store().order("one").is_some());
+}
+
+#[test]
+fn exhausted_order_authority_settles_owned_preflight_once_before_any_write() {
+    use safe_cex_engine::{Command, Method, Notice};
+    let (mut e, _) = ready();
+    safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
+    for (command, at) in [(91, 100.0), (92, 300.0)] {
+        let order = serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"take_profit_market","side":"buy","price":85000,"amount":0,"tpTriggerType":"mark_price"}"#).unwrap();
+        e.handle(
+            BASE + at,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![order],
+            }),
+        );
+        let positions = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("get_pending_positions"))
+            .unwrap();
+        let actions = answer(&mut e, positions.id, at + 100.0, POSITIONS);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed { command: failed, .. }) if *failed == command))
+                .count(),
+            1
+        );
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Http(r) if r.method == Method::Post || r.url.contains("get_pending_orders"))));
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandDone { command: done, .. }) if *done == command)));
+    }
+}

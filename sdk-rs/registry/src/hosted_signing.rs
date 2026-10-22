@@ -39,8 +39,17 @@ pub enum Input {
 #[derive(Clone, Copy)]
 pub enum OutputKind {
     Credential,
-    Http,
+    Http(safe_cex_engine::signing_headers::ResultHeaderPolicy),
     WsAuth(OutputFormat),
+}
+
+impl OutputKind {
+    pub fn header_policy(self) -> safe_cex_engine::signing_headers::ResultHeaderPolicy {
+        match self {
+            Self::Http(policy) => policy,
+            _ => Default::default(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -50,6 +59,8 @@ pub struct Output {
     pub credential: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<Vec<(String, String)>>,
 }
 
 pub fn prepare(
@@ -107,7 +118,7 @@ pub fn prepare(
                     context,
                     receipt,
                 ),
-                OutputKind::Http,
+                OutputKind::Http(crate::remote_signing_policy(venue).header_policy()),
             ))
         }
         Input::WsAuth {
@@ -133,6 +144,8 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    let mut headers = Vec::new();
+    kind.header_policy().apply(&mut headers, &result.headers)?;
     let key = result.values.first().ok_or(SignError::InvalidResult)?;
     let key = std::str::from_utf8(key).map_err(|_| SignError::InvalidResult)?;
     if key.is_empty() || key.contains(['\r', '\n']) {
@@ -142,6 +155,7 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Ok(Output {
             credential: Some(key.into()),
             signature: None,
+            headers: None,
         });
     }
     let mac = result
@@ -151,7 +165,7 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         .ok_or(SignError::InvalidResult)?;
     let signature = match kind {
         OutputKind::Credential => unreachable!(),
-        OutputKind::Http | OutputKind::WsAuth(OutputFormat::Hex) => safe_cex_crypto::hex(mac),
+        OutputKind::Http(_) | OutputKind::WsAuth(OutputFormat::Hex) => safe_cex_crypto::hex(mac),
         OutputKind::WsAuth(OutputFormat::Base64) => {
             safe_cex_crypto::encode(mac, safe_cex_crypto::Encoding::Base64)
         }
@@ -161,7 +175,8 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         ),
     };
     Ok(Output {
-        credential: matches!(kind, OutputKind::Http).then(|| key.into()),
+        credential: matches!(kind, OutputKind::Http(_)).then(|| key.into()),
         signature: Some(signature),
+        headers: (!headers.is_empty()).then_some(headers),
     })
 }
