@@ -1,7 +1,9 @@
 //! Component vectors through the injected provider, not production adoption.
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
-use safe_cex_engine::signing::{Identity, Provider};
+use safe_cex_engine::signing::{
+    Identity, Provider, SignError, SignFuture, SignRequest, SignResult, Signer,
+};
 use safe_cex_engine::{Action, Command, Cx, Engine, Method, Response, SocketId, TimerId, Venue};
 use safe_cex_venue_weex::dispatch_signing::{Http, Upgrade};
 
@@ -22,6 +24,15 @@ impl Venue for Probe {
             if self.alter == 1 {
                 spec.url.push_str("/wrong");
             }
+            if self.alter == 3 {
+                spec.headers.reverse();
+            }
+            if self.alter == 4 {
+                spec.binary = true;
+            }
+            if self.alter == 5 {
+                spec.channel = Some(safe_cex_engine::SocketChannel::Public);
+            }
             cx.connect_signed(spec, Box::new(step));
         } else {
             let step = Http::new(
@@ -30,11 +41,22 @@ impl Venue for Probe {
                 self.path.clone(),
                 self.body.clone(),
             );
-            let (mut url, headers, body) = step.unsigned();
+            let (mut url, mut headers, mut body) = step.unsigned();
             if self.alter == 1 {
                 url.push_str("/wrong");
             }
-            let id = cx.request(self.method, url, headers, body, ());
+            if self.alter == 2 {
+                body = Some(String::new());
+            }
+            if self.alter == 3 {
+                headers.reverse();
+            }
+            let method = if self.alter == 4 {
+                Method::Post
+            } else {
+                self.method
+            };
+            let id = cx.request(method, url, headers, body, ());
             cx.sign_http(id, Box::new(step));
         }
     }
@@ -67,6 +89,18 @@ fn setup() -> (Identity, Provider) {
 }
 fn run(method: Method, path: &str, body: Option<&str>, upgrade: bool, alter: u8) -> Vec<Action> {
     let (identity, provider) = setup();
+    run_with(identity, provider, method, path, body, upgrade, alter)
+}
+#[allow(clippy::too_many_arguments)]
+fn run_with(
+    identity: Identity,
+    provider: Provider,
+    method: Method,
+    path: &str,
+    body: Option<&str>,
+    upgrade: bool,
+    alter: u8,
+) -> Vec<Action> {
     let mut engine: Engine<Probe> = safe_cex_engine::test_support::seeded_engine(Probe {
         identity,
         method,
@@ -164,6 +198,172 @@ fn altered_url_never_releases_http_or_an_unauthenticated_upgrade() {
             !run(Method::Get, "/capi/v3/openOrders", None, upgrade, 1)
                 .iter()
                 .any(|action| matches!(action, Action::Http(_) | Action::WsConnect { .. }))
+        );
+    }
+}
+
+#[test]
+fn method_body_header_and_upgrade_role_tampering_is_not_sent() {
+    for (upgrade, alterations) in [(false, &[2, 3, 4][..]), (true, &[3, 4, 5][..])] {
+        for &alter in alterations {
+            let actions = run(Method::Get, "/capi/v3/openOrders", None, upgrade, alter);
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_) | Action::WsConnect { .. }))
+            );
+        }
+    }
+}
+
+struct Malformed {
+    local: Provider,
+    fault: u8,
+}
+impl Signer for Malformed {
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        Box::pin(async { Err(SignError::Unavailable) })
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if self.fault == 11 {
+            return Some(Err(SignError::Refused));
+        }
+        let mut result = self.local.sign_ready(request)?.ok()?;
+        match self.fault {
+            0 => {
+                result.values.pop();
+            }
+            1 => result.values[1].pop().map(|_| ()).unwrap(),
+            2 => result.values[0].clear(),
+            3 => result.values[2].clear(),
+            4 => result.values[0] = vec![0xff],
+            5 => result.values[2] = b"bad\r\nheader".to_vec(),
+            6 => result.values[0] = vec![b'x'; 8193],
+            7 => result.receipt.stamp_ms = Some(1235.),
+            8 => result.receipt.expiry_ms = Some(2000.),
+            9 => result.headers.push(("X-Extra".into(), "untrusted".into())),
+            10 => result.receipt.stamp_ms = Some(1234.5),
+            _ => unreachable!(),
+        }
+        Some(Ok(result))
+    }
+}
+#[test]
+fn malformed_provider_output_and_refusal_never_release_either_transport() {
+    for upgrade in [false, true] {
+        for fault in 0..=11 {
+            let (identity, local) = setup();
+            let actions = run_with(
+                identity,
+                std::sync::Arc::new(Malformed { local, fault }),
+                Method::Get,
+                "/capi/v3/openOrders",
+                None,
+                upgrade,
+                0,
+            );
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_) | Action::WsConnect { .. })),
+                "fault {fault}, upgrade {upgrade}"
+            );
+        }
+    }
+}
+#[test]
+fn missing_passphrase_ref_never_asks_the_provider_or_releases() {
+    for upgrade in [false, true] {
+        let (mut identity, _) = setup();
+        let provider: Provider = std::sync::Arc::new(NeverSigner);
+        identity.passphrase = None;
+        let actions = run_with(
+            identity,
+            provider,
+            Method::Get,
+            "/capi/v3/openOrders",
+            None,
+            upgrade,
+            0,
+        );
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Sign { .. } | Action::Http(_) | Action::WsConnect { .. }
+        )));
+    }
+}
+#[test]
+fn explicitly_empty_body_remains_present_on_wire() {
+    let requests = run(
+        Method::Get,
+        "/capi/v3/openOrders?limit=100&page=0",
+        Some(""),
+        false,
+        0,
+    );
+    let http = requests
+        .iter()
+        .find_map(|action| {
+            if let Action::Http(http) = action {
+                Some(http)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(http.body.as_deref(), Some(""));
+    assert_eq!(
+        http.headers,
+        headers("bCU4mL/nryWPHh2ijQKaUlRR81jLGrRazQ5ZFQPfR+E=")
+    );
+}
+
+struct NeverSigner;
+impl Signer for NeverSigner {
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        panic!("invalid intent must not reach provider")
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        panic!("invalid intent must not reach provider")
+    }
+}
+#[test]
+fn non_native_authority_fragment_or_transport_normalization_never_reaches_provider() {
+    for path in [
+        ".example.invalid/capture",
+        "",
+        "?query=1",
+        "/path#fragment",
+        "/path\\other",
+        "/line\r\n",
+        "/space here",
+        "/café",
+        "/capi/v3/../account",
+        "/capi/v3/%2e%2e/account",
+        "/capi/v3/account<bad>",
+        "/capi/v3/account?value=\"bad\"",
+    ] {
+        let (identity, _) = setup();
+        let actions = run_with(
+            identity,
+            std::sync::Arc::new(NeverSigner),
+            Method::Get,
+            path,
+            None,
+            false,
+            0,
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Sign { .. } | Action::Http(_))),
+            "path {path:?}"
         );
     }
 }

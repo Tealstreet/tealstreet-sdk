@@ -143,3 +143,21 @@ or managed construction, or claim raw-credential removal. Trusted setup and actu
 builder/managed lifetime adoption follow, consuming actual #1780 before final
 proof. The eventual HTTP recipe implements that shared declaration getter when
 its managed builder lands; no empty-header workaround is used for admission.
+
+
+The additive recipe accepts native `/capi/v3/` endpoint names (ASCII
+alphanumerics, slash, underscore and hyphen) plus the shared RFC3986 query
+builder's encoded spelling. It refuses arbitrary URLs, fragments, dot segments
+and literal query characters requiring transport rewriting. This is bounded
+native codec admission, not a URL normalizer. Existing builders' encoded query
+order and bytes remain authoritative. Header validation uses one owned outbound
+copy, erases it on validation failure, and moves it on success.
+
+Checkpoint verification: the original two release assertions fail against the
+unimplemented recipe, then the independent GET/POST/upgrade vectors pass through
+the actual injected provider. Additional controls cover method/body/header/role
+and fixed-origin tampering, absent passphrase refs with a provider that must never
+be called, malformed result count/MAC/credential/header/receipt, explicit provider
+refusal and absent-versus-empty body intent. This remains a component checkpoint;
+production builders, trusted setup, identity cutover and managed lifecycle are
+not yet migrated.
