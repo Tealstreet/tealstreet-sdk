@@ -1281,3 +1281,40 @@ manifest5461976913e8158ebe4fe8a9b038150bb8e8cb7738c3e7cafd13ca6761a5d535
 becomes9136cef658d0891371b97dd6af83419e7715902e9f3712073330b0ef9747c3df.
 The landed Phemex source is exact; every other map remains identical. No new
 bootstrap authorization or exception was added. Final CI/proof still pending.
+
+Fresh502caee diagnosis/plan: all1,145 harness controls and consumer startup pass;
+nine actual-WASM lifecycle cases pass. The first completes its live capture and
+TS replay, then Rust replay times out awaiting the private socket. The shared
+Rust tape transport in replay.mjs still exposes request() only, so managed
+startup refuses preparation. This is not the prior live transport failure.
+Reuse the existing canned-response prepareRecordedHttp helper without a second
+implementation: move its pure function to harness/recorded-http.mjs with the
+same typed declaration, retain the SDK support path as a re-export, and add the
+hook to the existing replay transport. Preserve its exact streamed request()
+callback,16KiB chunks, tape-clock provider, signature validation and recorded
+response selection. No production fallback, new executor, network fetch adapter,
+relaxed clocks/timeouts or changed lifecycle/replay assertions. Existing helper
+controls and harness tests verify the extraction; the unchanged actual-WASM
+lifecycle assertion is the CI regression for wiring. Review this shared seam
+before source, then fresh CI. Run502caee remains failed historical evidence, not
+a complete Binance ledger or final replay proof. Respect the #1764 merge hold.
+
+Recorded helper extraction verification before replay wiring: the original
+function body/comments are mechanically identical after type erasure; SDK
+support path is a typed re-export, runtime MJS has no imports/network/clock
+patches. All1,146 harness tests and the three unchanged SDK helper tests pass;
+SDK typecheck/lint pass. The new plain-Node control verifies original receiver,
+exact final packet/header snapshot, deferred single dispatch, identical lazy
+response stream and abort propagation. Independent review CLEAN, architecture
+No. No replay recovery claim until the hook is wired and rebuilt-WASM CI passes.
+
+Actual #1764 49470a1188b8e98dbdbbca573c67d25827921b19 real-integrated at471260:
+all six incoming blobs equal landing and all5,292 other paths equal566e14.
+The actual whole tree1f500afa47c791864eb3f3ed9db8dc6111e2f185 equals green
+head6133fb814dc/source run39820395109, providing the next matching baseline.
+Replay wiring is exactly the pure MJS import plus prepareHttp property on the
+existing Rust transport. Post-integration1,146 harness tests and bans pass;
+SDK helper3/typecheck/lint passed the extraction. Independent final source and
+preservation review CLEAN, architecture No. All ten lifecycle assertions/clocks/
+timeouts remain exact. Integrated engine/Binance/KuCoin native gates are running
+alongside fresh draft CI; no merge readiness or replay recovery is claimed.
