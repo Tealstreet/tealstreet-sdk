@@ -370,3 +370,80 @@ parsing, malformed-resource legacy fallback, provider-route mutation and resourc
 cleanup gaps, each with focused regression coverage. This is checkpoint evidence;
 command ledger/reconciliation, Binance/Bybit migrations, the legacy ratchet and
 complete final integrated CI/replay proof remain open.
+
+
+### Engine write evidence and sealing phase
+
+Extend the existing ContextRegistry/CommandWrites, not a parallel command executor.
+Each managed mutation belongs to a command owner/generation and a logical leg.
+Register physical request IDs before queueing; a retry references the previous
+physical attempt and requires both the original policy/deadline and an effects-free
+native refusal already recorded in the journal. A route/signature reprepare keeps
+one physical attempt because no transport release occurred. Capacity/invalid
+recipe failures leave the continuation usable and cannot commit partial journal
+or sequence registrations.
+
+The shared final claim validates journal release eligibility before admission;
+only successful claim records physical release. No fallible check follows the
+admission/pacing commit. Original raw deadline and final-release API stay frozen.
+Transport/sign/provider/timeouts produce failed-attempt evidence centrally. Venue
+codecs report only Accepted/definitive Rejected/Failed facts with accepted IDs;
+they do not join outcomes. Bind result reporting to a private full active attempt/context token
+(issuer, owner generation, logical leg and physical request), so stale/foreign/sibling/retry callbacks cannot
+supply another attempt's facts. Add one private current-delivery marker in Io,
+scoped/restored around all venue delivery (including preparation/signing failure
+and nested synthetic timeout events). A stale token cannot seal a reused numeric
+command ID belonging to a newer generation. Explicit leg completion also retains
+its prior-send journal.
+
+Cx.done/fail seals managed command evidence once. No release ->NotSent; all sent
+writes effects-free refused ->Rejected; known accepted/rejected mix ->None+Partial
+IDs and terminal rejected-leg notices; unresolved sent attempt or prior release
+then failed retry ->Unknown. A recovered retry does not report its old refusal.
+Representative text follows logical registration order, not callback arrival.
+A requested success with unresolved/failed mutation evidence must not become
+CommandDone. Legacy commands without a managed journal retain existing behavior.
+Keep active sent journals until sealing, even if another command is issued after
+the old context deadline but before its timer is delivered; bounded capacity may
+refuse new work rather than erase sent evidence.
+
+When a command seals, stop unsent work immediately. Released outstanding writes
+leave ordinary reducer/auth/command delivery and retain only bounded reconciliation
+continuations and response metadata. Introduce a narrow Venue reconciliation hook
+with Store/identity access only (no Cx, retry, command-done/error, auth or scheduler
+publication). Retain at most the existing 256 managed slots, no new network waits
+or extended transport deadline; a fixed 30s bounded reconciliation-state grace after
+the original raw deadline handles callbacks already racing cancellation.
+Evict expired tombstones lazily and fail closed at capacity. Managed mutation response headers/body and total retained metadata need explicit
+bounds: existing Incoming.body has no body cap. Preserve required raw mutation
+response bytes from the first chunk (including any portion already streamed),
+or reject mutation streaming before release; never reconstruct lost rows from
+splitter metadata. A closed size/capacity failure stays Unknown once released.
+Collect late response data without streaming reducers; a late complete
+response may reconcile identity/store once, never reopen a sealed command. Late
+old ACKs cannot overwrite a newer order revision or clear newer order-lock
+uncertainty; pass the original owner/attempt/release revision to the reconciliation
+boundary and restrict it to identity/order changes compatible with that fence. Reads
+and duplicates retain existing retirement behavior. Tests must pin timer-before-
+response, response-before-timer, late body/auth silence, duplicate/reused command
+IDs, old/new leg isolation, no capacity leak and no held outbound credential data.
+
+First implement/prove this shared engine lifecycle with an adversarial reference
+Probe, then enable production mutation entry only after reconciliation is wired.
+Next migrate Binance reads/writes, removing reached_venue/effective finalizer
+classification and using native fact reports; integrate actual Bybit signer
+before replacing its refused/effective/unknown/resent aggregation. Preserve
+command progress/Partial IDs and every incoming financial/clock/signing assertion.
+Core RED controls cover callback-order permutations, mixed known effects, all
+refusals, no release, unresolved writes, prior-send + provider/transport retry
+failure, and exactly-once finalization. Focused engine/Binance/native/JS/SDK checks
+and independent review precede the checkpoint commit. Full raw/timing proof stays
+on final integrated CI; no legacy-provenance sealing claim.
+
+
+Independent plan review: feasible, architecture No/shared concern, with explicit
+requirements above for full-token scoped delivery, evidence retention beyond live
+handle expiry, success sealing before teardown, atomic no-fail release commit,
+real response-size limits and mutation-stream preservation, and late revision
+fencing without extending transport activity. Do not enable mutations before
+those controls pass.
