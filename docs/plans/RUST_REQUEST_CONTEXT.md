@@ -1281,3 +1281,20 @@ manifest5461976913e8158ebe4fe8a9b038150bb8e8cb7738c3e7cafd13ca6761a5d535
 becomes9136cef658d0891371b97dd6af83419e7715902e9f3712073330b0ef9747c3df.
 The landed Phemex source is exact; every other map remains identical. No new
 bootstrap authorization or exception was added. Final CI/proof still pending.
+
+Fresh502caee diagnosis/plan: all1,145 harness controls and consumer startup pass;
+nine actual-WASM lifecycle cases pass. The first completes its live capture and
+TS replay, then Rust replay times out awaiting the private socket. The shared
+Rust tape transport in replay.mjs still exposes request() only, so managed
+startup refuses preparation. This is not the prior live transport failure.
+Reuse the existing canned-response prepareRecordedHttp helper without a second
+implementation: move its pure function to harness/recorded-http.mjs with the
+same typed declaration, retain the SDK support path as a re-export, and add the
+hook to the existing replay transport. Preserve its exact streamed request()
+callback,16KiB chunks, tape-clock provider, signature validation and recorded
+response selection. No production fallback, new executor, network fetch adapter,
+relaxed clocks/timeouts or changed lifecycle/replay assertions. Existing helper
+controls and harness tests verify the extraction; the unchanged actual-WASM
+lifecycle assertion is the CI regression for wiring. Review this shared seam
+before source, then fresh CI. Run502caee remains failed historical evidence, not
+a complete Binance ledger or final replay proof. Respect the #1764 merge hold.
