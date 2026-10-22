@@ -1106,3 +1106,90 @@ fn decoded_old_generation_cannot_complete_or_claim_a_reprepared_request() {
     );
     assert!(claim(&mut life, fresh, 10., &mut SendPacing::new(&[]).unwrap()).is_ok());
 }
+
+#[test]
+fn optimistic_success_never_erases_unresolved_failed_or_rejected_write_evidence() {
+    for state in 0..4 {
+        let mut writes = CommandWrites::new(2).unwrap();
+        writes.register(RequestId(1), 1).unwrap();
+        if state != 0 {
+            writes.released(RequestId(1)).unwrap();
+        }
+        if state == 2 {
+            writes
+                .result(RequestId(1), rejected("native refusal"))
+                .unwrap();
+        }
+        if state == 3 {
+            writes
+                .result(RequestId(1), WriteResult::Failed(failure("lost transport")))
+                .unwrap();
+        }
+        assert_eq!(writes.succeed(), Err(Error::State));
+        assert_eq!(
+            seal(&mut writes).outcome,
+            Some(match state {
+                0 => Outcome::NotSent,
+                2 => Outcome::Rejected,
+                _ => Outcome::Unknown,
+            })
+        );
+        assert_eq!(writes.succeed(), Err(Error::State));
+    }
+}
+
+#[test]
+fn write_success_seals_once_including_a_recovered_native_refusal() {
+    let mut empty = CommandWrites::new(2).unwrap();
+    assert_eq!(empty.succeed(), Err(Error::State));
+    let mut writes = CommandWrites::new(3).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    writes.released(RequestId(1)).unwrap();
+    writes
+        .result(RequestId(1), rejected("native clock refusal"))
+        .unwrap();
+    writes.retry(RequestId(1), RequestId(2)).unwrap();
+    assert_eq!(writes.succeed(), Err(Error::State));
+    writes.released(RequestId(2)).unwrap();
+    writes
+        .result(
+            RequestId(2),
+            WriteResult::Accepted {
+                order_ids: vec!["accepted".into()],
+            },
+        )
+        .unwrap();
+    assert_eq!(writes.succeed(), Ok(()));
+    assert_eq!(writes.succeed(), Err(Error::State));
+    assert_eq!(writes.fail(failure("late")), Err(Error::State));
+    assert_eq!(writes.register(RequestId(3), 2), Err(Error::State));
+    assert_eq!(writes.rejections().count(), 0);
+}
+
+#[test]
+fn known_partial_writes_cannot_be_sealed_as_success_or_lose_their_partial_projection() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    for id in [1, 2] {
+        writes.register(RequestId(id), u64::from(id)).unwrap();
+        writes.released(RequestId(id)).unwrap();
+    }
+    writes
+        .result(
+            RequestId(1),
+            WriteResult::Accepted {
+                order_ids: vec!["known-effect".into()],
+            },
+        )
+        .unwrap();
+    writes
+        .result(RequestId(2), rejected("native refusal"))
+        .unwrap();
+    assert_eq!(writes.succeed(), Err(Error::State));
+    let error = seal(&mut writes);
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.partial.unwrap().order_ids, ["known-effect"]);
+    assert_eq!(
+        writes.rejections().map(|(id, _)| id).collect::<Vec<_>>(),
+        [RequestId(2)]
+    );
+}

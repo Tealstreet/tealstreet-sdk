@@ -816,6 +816,27 @@ impl CommandWrites {
         attempt.result = Some(result);
         Ok(())
     }
+    /// Seal success only when every terminal logical leg is proven accepted.
+    /// Refused/failed/unresolved attempts remain available to the failure join;
+    /// a venue's optimistic done callback cannot erase their evidence.
+    pub fn succeed(&mut self) -> Result<(), Error> {
+        if self.sealed || self.attempts.is_empty() {
+            return Err(Error::State);
+        }
+        let accepted = self.attempts.iter().enumerate().all(|(index, attempt)| {
+            self.attempts[index + 1..]
+                .iter()
+                .any(|later| later.leg == attempt.leg)
+                || (attempt.released
+                    && matches!(attempt.result, Some(WriteResult::Accepted { .. })))
+        });
+        if !accepted {
+            return Err(Error::State);
+        }
+        self.sealed = true;
+        Ok(())
+    }
+
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
