@@ -11,6 +11,7 @@ import { canonicalUrl, Tape } from '../../../../../sdk-rs/harness/tape.mjs';
 import { venueOf } from '../../../../../sdk-rs/harness/venues.mjs';
 import { HYROTRADER_SIMULATOR_URL, HYROTRADER_SIMULATOR_WS_URL } from '../../exchanges/bybit/bybit.types';
 import { directTransport } from '../../transport/direct';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 type RecordRow = {
   type: string;
@@ -310,6 +311,7 @@ export const realVenue = (name: ExchangeName) => {
     [];
   const transport: Transport = {
     now: () => Date.now(),
+    prepareHttp: prepareRecordedHttp,
     webSocketHeaders: true,
     connect(url, handlers) {
       connectedSocketUrls.push(url);

@@ -1096,3 +1096,9 @@ Private gates remain declared diagnostics. Bitget stays on its original speed
 profile. Final integrated CI must remeasure; a repeat requires inspecting shared
 public-path work before treating it as runner variation, not a profile/budget
 change. This failed provisional run is not final replay proof.
+
+Canned-transport checkpoint: exactly one import plus prepareRecordedHttp member
+added to each fixture. All original provider/canonical-signature/refusal, startup,
+frame, clock and timeout assertions remain. The helper's three tests, SDK
+typecheck and explicit non-ignored fixture lint pass. Independent review CLEAN,
+architecture No; fresh compiled-WASM CI remains required.
