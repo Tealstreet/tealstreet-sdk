@@ -105,3 +105,11 @@ native eight-book dispatch fixture and strict registry Clippy pass. Release
 artifact and isolated missing-feature mutation proof remain CI-only/pending.
 Actual Aster profile #1734 `b95cad5a1003` is integrated; no own runtime source
 changes were introduced by integration.
+
+
+The final verifier controls also use the real engine fallback “This action is
+not supported on this venue” and a named-method refusal. Both reject, while an
+unsupported input symbol stays ingress-only. Error presence, not truthiness,
+classifies terminal failures, including an empty message. The 17 focused
+controls pass. Independent correctness review is clean; adversarial findings
+were addressed with these bounded negative controls before publication.

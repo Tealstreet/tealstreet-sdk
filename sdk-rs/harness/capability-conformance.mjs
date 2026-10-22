@@ -128,14 +128,17 @@ export function probeCapabilityCommand(instance, command, label) {
       assert.equal(action.command, command.command, `${label}: uncorrelated command output`);
       // Legacy operation-level refusals only. An unsupported symbol/argument is
       // a precondition, not proof that the advertised command is unavailable.
-      assert.doesNotMatch(action.error ?? action.message ?? '', /^(?:unsupported|not supported|not implemented)(?:$| command\b)|\b(?:command|operation|query|method)\b.*\b(?:unsupported|not supported|not implemented)\b/i,
+      assert.doesNotMatch(action.error ?? action.message ?? '', /^(?:unsupported|not supported|not implemented)(?:$| command\b)|\b(?:command|operation|query|method|action)\b.*\b(?:unsupported|not supported|not implemented)\b/i,
         `${label}: advertised handler is unsupported`);
+      assert.doesNotMatch(action.error ?? action.message ?? '',
+        new RegExp(`\\b${command.op}\\b.*\\b(?:unsupported|not supported|not implemented)\\b`, 'i'),
+        `${label}: advertised method is unsupported`);
     }
   }
   // Fresh instance per probe: no startup/earlier command can supply these actions.
   // This result is ingress evidence, not valid-state positive handler proof.
   const terminal = actions.find((action) => action.op === 'done');
-  const evidence = terminal ? (terminal.error ? 'precondition' : 'terminal')
+  const evidence = terminal ? (Object.hasOwn(terminal, 'error') ? 'precondition' : 'terminal')
     : actions.some((action) => ['http', 'sign', 'signPayload', 'wsSend'].includes(action.op)) ? 'request' : 'deferred';
   return { evidence, actions };
 }

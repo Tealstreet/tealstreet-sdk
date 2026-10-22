@@ -141,3 +141,15 @@ test('an unsupported input symbol is ingress-only, not an unavailable command', 
   ]), command, 'symbol precondition');
   assert.equal(proof.evidence, 'precondition');
 });
+
+
+test('real generic action fallback and named-method refusals cannot pass', () => {
+  for (const error of ['This action is not supported on this venue', 'fetchOrderBook is not supported']) {
+    assert.throws(() => probeCapabilityCommand(engine([
+      { op: 'done', command: 17, error },
+    ]), command, 'advertised operation'), /advertised/);
+  }
+  assert.equal(probeCapabilityCommand(engine([
+    { op: 'done', command: 17, error: '' },
+  ]), command, 'empty error').evidence, 'precondition');
+});
