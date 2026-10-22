@@ -271,3 +271,23 @@ the late identity-no-retry preservation correction repeats all 204 BingX tests.
 Strict all-target engine/BingX/Binance Clippy and final BingX Clippy/fmt pass.
 The legacy inventory remains an explicit full-port gate; this checkpoint neither
 updates allowances nor declares the remaining legacy builders ready for merge.
+
+### Managed candle command slice
+
+Preintegrate the refreshed reviewed #1780 head `a869e95dbc7` (actual #1775 and
+#1781 included); actual #1780 remains mandatory before this family merges.
+Next move credentialed FetchCandles through the existing managed Read adapter,
+with one command-scoped 20s Context, secondary GET selection and original-deadline
+retry. Public unsigned candles retain the native path. Preserve the existing
+query spelling, stream path, row validation, sorting and seconds conversion.
+
+The outer Signed pending owns the Context. Pass that exact authority to candle
+completion and failure; never complete a managed command by numeric ID or mint a
+replacement root at a response. Share the native candle result codec between
+legacy and managed completion instead of copying sort/validation logic. Keep
+provider error kind/outcome and native error text. Streaming errors and route/
+provider/timeout cleanup must settle the original Context once, with duplicate
+callbacks inert. Original-RED controls must show the actual credentialed command
+fails to publish managed preparation, then verify route/sign/bind/claim and
+success/native refusal/malformed row/provider refusal/original-deadline expiry.
+No metadata, history, session or write authority changes enter this slice.
