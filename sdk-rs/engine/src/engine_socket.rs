@@ -265,6 +265,16 @@ impl<V: Venue> Engine<V> {
                 .repair_interests(feed, &keys, encode),
         }
     }
+    fn socket_replay(&mut self, feed: FeedId) -> Result<u64, SocketError> {
+        let venue = &self.venue;
+        let store = &self.store;
+        self.io
+            .socket_driver
+            .state
+            .replay_interests(feed, |subscribe, items, emit| {
+                venue.encode_socket_interests(store, feed, subscribe, items, emit)
+            })
+    }
     pub(super) fn process_socket_work(&mut self, now: f64) {
         if !self.io.managed_sockets {
             return;
@@ -361,15 +371,7 @@ impl<V: Venue> Engine<V> {
                 let (event, epoch) = match effect {
                     Effect::Opened(e) => (LifecycleEvent::Opened(e), Some(e)),
                     Effect::Ready { epoch, reopened } => {
-                        let desired = self
-                            .io
-                            .socket_driver
-                            .state
-                            .desired(epoch.feed())
-                            .unwrap_or_default();
-                        if let Err(error) =
-                            self.socket_replace(epoch.feed(), InterestUpdate::Desired(desired))
-                        {
+                        if let Err(error) = self.socket_replay(epoch.feed()) {
                             self.socket_failed_feed(now, epoch.feed(), error);
                             continue;
                         }

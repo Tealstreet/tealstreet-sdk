@@ -667,3 +667,19 @@ interest allocation in the shared component, without changing venue codecs:
 Architecture gate: canonical ownership and release allocation are shared engine
 socket concerns. No OKX-specific storage path, budget increase, allocator change,
 HTTP delivery/admission change or native codec rewrite belongs in this phase.
+
+Checkpoint: committed original test `e176897f616` reproduces the nonempty-key
+allocation assertion failure with 27 compatibility passes. Canonical replay and
+repair now retain Arc handles through the same transaction, and final release
+moves owned coverage keys. Thirty lifecycle controls, including current external
+queue refusal, post-emission encoder failure, partial-drain preservation and
+repair ordering, pass; four-crate unit tests pass 585, strict all-target Clippy
+and engine fmt pass. Both independent source reviews are CLEAR on lifecycle
+SHA256 `598cf26427eb0aa61530aa16098460f9bb4475feca28c32b4f6d450bcba2a10d`
+and engine-socket SHA256
+`ca1ea26a50564c1b72081a3e9ecb7213ead269823adb82a502e47fc1f36fcf57`.
+The full ban check correctly refuses the stale Hyperliquid legacy inventory on
+this older socket branch against actual #1765; no exemption or inventory change
+is made here. Integrate current landing/shared prerequisites, rerun that gate,
+then obtain fresh CI before any readiness or memory/CPU/size claim. The existing
+numeric failures and separate safe-ID prerequisite remain open.

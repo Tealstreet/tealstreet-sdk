@@ -274,6 +274,28 @@ struct Feed {
     interests: Interests,
 }
 
+// A canonical replay retains immutable rows without recreating their strings.
+// Both sources still pass through the same validation and transaction below.
+enum InterestInput {
+    Proposed(Vec<Interest>),
+    Retained(Vec<Arc<Interest>>),
+}
+impl InterestInput {
+    fn len(&self) -> usize {
+        match self {
+            Self::Proposed(rows) => rows.len(),
+            Self::Retained(rows) => rows.len(),
+        }
+    }
+    fn rows(&self) -> impl Iterator<Item = &Interest> {
+        let (owned, shared): (&[Interest], &[Arc<Interest>]) = match self {
+            Self::Proposed(rows) => (rows, &[]),
+            Self::Retained(rows) => (&[], rows),
+        };
+        owned.iter().chain(shared.iter().map(Arc::as_ref))
+    }
+}
+
 /// Internal state of one engine. No venue can construct or mutate this registry.
 #[derive(Default)]
 pub(crate) struct Lifecycle {
@@ -603,6 +625,7 @@ impl Lifecycle {
         f.phase = Phase::Granted;
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn desired(&self, feed: FeedId) -> Result<Vec<Interest>, SocketError> {
         Ok(self
             .feeds
@@ -626,7 +649,7 @@ impl Lifecycle {
             &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
         ) -> Result<(), SocketError>,
     ) -> Result<u64, SocketError> {
-        self.replace_with_repair(feed, interests, &[], encode)
+        self.replace_with_repair(feed, InterestInput::Proposed(interests), &[], encode)
     }
     pub(crate) fn repair_interests(
         &mut self,
@@ -641,12 +664,44 @@ impl Lifecycle {
         if keys.len() > MAX_INTERESTS {
             return Err(SocketError::Capacity);
         }
-        self.replace_with_repair(feed, self.desired(feed)?, keys, encode)
+        self.replay_with_repair(feed, keys, encode)
+    }
+    pub(crate) fn replay_interests(
+        &mut self,
+        feed: FeedId,
+        encode: impl FnMut(
+            bool,
+            &[Interest],
+            &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+        ) -> Result<(), SocketError>,
+    ) -> Result<u64, SocketError> {
+        self.replay_with_repair(feed, &[], encode)
+    }
+    fn replay_with_repair(
+        &mut self,
+        feed: FeedId,
+        keys: &[String],
+        encode: impl FnMut(
+            bool,
+            &[Interest],
+            &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+        ) -> Result<(), SocketError>,
+    ) -> Result<u64, SocketError> {
+        let rows = self
+            .feeds
+            .get(feed.0)
+            .ok_or(SocketError::Stale)?
+            .interests
+            .desired
+            .values()
+            .cloned()
+            .collect();
+        self.replace_with_repair(feed, InterestInput::Retained(rows), keys, encode)
     }
     fn replace_with_repair(
         &mut self,
         feed: FeedId,
-        interests: Vec<Interest>,
+        interests: InterestInput,
         repair: &[String],
         mut encode: impl FnMut(
             bool,
@@ -665,7 +720,7 @@ impl Lifecycle {
         // argument state or invoking a native encoder.
         let mut unique = BTreeSet::new();
         let mut desired_bytes = 0usize;
-        for item in &interests {
+        for item in interests.rows() {
             if item.key.is_empty()
                 || item.key.len() > 1024
                 || item.wire_args.len() > MAX_FRAME_BYTES
@@ -727,19 +782,24 @@ impl Lifecycle {
             .ok_or(SocketError::Capacity)?;
         // Reuse immutable rows only when both key and native arguments match.
         // Changed arguments keep a distinct released row until unsubscribe.
-        let desired: BTreeMap<_, _> = interests
-            .into_iter()
-            .map(|i| {
-                let row = f
-                    .interests
-                    .desired
-                    .get(&i.key)
-                    .filter(|previous| previous.as_ref() == &i)
-                    .cloned()
-                    .unwrap_or_else(|| Arc::new(i));
-                (row.key.clone(), row)
-            })
-            .collect();
+        let desired: BTreeMap<_, _> = match interests {
+            InterestInput::Proposed(rows) => rows
+                .into_iter()
+                .map(|i| {
+                    let row = f
+                        .interests
+                        .desired
+                        .get(&i.key)
+                        .filter(|previous| previous.as_ref() == &i)
+                        .cloned()
+                        .unwrap_or_else(|| Arc::new(i));
+                    (row.key.clone(), row)
+                })
+                .collect(),
+            InterestInput::Retained(rows) => {
+                rows.into_iter().map(|row| (row.key.clone(), row)).collect()
+            }
+        };
         let forced: BTreeSet<_> = repair.iter().collect();
         if forced.len() != repair.len() || forced.iter().any(|k| !desired.contains_key(*k)) {
             return Err(SocketError::InvalidInterest);
@@ -837,13 +897,12 @@ impl Lifecycle {
         if queued.revision != f.interests.revision {
             return None;
         }
-        for key in &queued.batch.covered_keys {
+        for key in queued.batch.covered_keys {
             if queued.subscribe {
-                f.interests
-                    .released
-                    .insert(key.clone(), f.interests.desired.get(key)?.clone());
+                let row = f.interests.desired.get(&key)?.clone();
+                f.interests.released.insert(key, row);
             } else {
-                f.interests.released.remove(key);
+                f.interests.released.remove(&key);
             }
         }
         Some(queued.batch.text)
@@ -918,6 +977,86 @@ mod tests {
             allocation,
             "move the consumed coverage key instead of cloning it"
         );
+    }
+
+    #[test]
+    fn canonical_replay_rechecks_queue_budget_and_encoder_failure_atomically() {
+        let (mut l, f, e) = started(AuthMode::None);
+        l.replace_interests(f, vec![interest("A"), interest("B")], encode)
+            .unwrap();
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("+:A"));
+        let desired = l.feeds[f.0].interests.desired.clone();
+        let revision = l.feeds[f.0].interests.revision;
+        let front = l.feeds[f.0]
+            .interests
+            .queue
+            .front()
+            .unwrap()
+            .batch
+            .text
+            .clone();
+        l.external_queue_bytes = MAX_QUEUED_BYTES;
+        assert_eq!(l.replay_interests(f, encode), Err(SocketError::Capacity));
+        assert_eq!(l.feeds[f.0].interests.revision, revision);
+        assert_eq!(
+            l.feeds[f.0].interests.queue.front().unwrap().batch.text,
+            front
+        );
+        l.external_queue_bytes = 0;
+        let mut calls = 0;
+        assert_eq!(
+            l.replay_interests(f, |op, rows, emit| {
+                calls += 1;
+                encode(op, rows, emit)?;
+                Err(SocketError::InvalidCoverage)
+            }),
+            Err(SocketError::InvalidCoverage)
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(l.feeds[f.0].interests.revision, revision);
+        for (key, row) in desired {
+            assert!(Arc::ptr_eq(&row, &l.feeds[f.0].interests.desired[&key]));
+        }
+        assert_eq!(l.feeds[f.0].interests.released.len(), 1);
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("+:B"));
+        l.replay_interests(f, encode).unwrap();
+        assert_eq!(
+            l.release_batch(e, false),
+            None,
+            "already released rows do not replay twice"
+        );
+    }
+
+    #[test]
+    fn canonical_repair_retains_row_identity_and_unsubscribe_before_subscribe() {
+        let (mut l, f, e) = started(AuthMode::None);
+        l.replace_interests(f, vec![interest("A"), interest("B")], encode)
+            .unwrap();
+        while l.release_batch(e, false).is_some() {}
+        let desired = l.feeds[f.0].interests.desired.clone();
+        let revision = l.feeds[f.0].interests.revision;
+        assert_eq!(
+            l.repair_interests(f, &["missing".into()], encode),
+            Err(SocketError::InvalidInterest)
+        );
+        assert_eq!(
+            l.repair_interests(f, &["A".into(), "A".into()], encode),
+            Err(SocketError::InvalidInterest)
+        );
+        assert_eq!(l.feeds[f.0].interests.revision, revision);
+        l.repair_interests(f, &["A".into()], encode).unwrap();
+        for (key, row) in desired {
+            assert!(Arc::ptr_eq(&row, &l.feeds[f.0].interests.desired[&key]));
+        }
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("-:A"));
+        assert!(!l.feeds[f.0].interests.released.contains_key("A"));
+        assert!(l.feeds[f.0].interests.released.contains_key("B"));
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("+:A"));
+        assert!(Arc::ptr_eq(
+            &l.feeds[f.0].interests.desired["A"],
+            &l.feeds[f.0].interests.released["A"]
+        ));
+        assert_eq!(l.release_batch(e, false), None);
     }
 
     #[test]
@@ -1279,8 +1418,7 @@ mod tests {
         l.grant_retry(f).unwrap();
         let current = l.begin(f, SocketId(2)).unwrap();
         l.opened(current).unwrap();
-        l.replace_interests(f, l.desired(f).unwrap(), encode)
-            .unwrap();
+        l.replay_interests(f, encode).unwrap();
         assert!(l.feeds[f.0].interests.released.is_empty());
         assert_eq!(
             l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(),
@@ -1570,8 +1708,7 @@ mod tests {
         l.grant_retry(f).unwrap();
         let current = l.begin(f, SocketId(2)).unwrap();
         assert_eq!(l.opened(current), Ok(Some(true)));
-        let desired = l.desired(f).unwrap();
-        l.replace_interests(f, desired, encode).unwrap();
+        l.replay_interests(f, encode).unwrap();
         assert_eq!(l.release_batch(old, false), None);
         assert_eq!(l.release_batch(current, false).as_deref(), Some("+:A"));
         assert_eq!(l.release_batch(current, false).as_deref(), Some("+:B"));
