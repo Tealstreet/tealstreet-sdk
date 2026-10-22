@@ -687,3 +687,43 @@ blocker in quota charging, issuer/generation/latest-attempt admission, seal befo
 native cleanup, sibling retirement or late custody. Architecture gate: No; the
 policy is centralized in the shared engine. Family evidence codecs/adapters and
 whole follow-on approval remain pending.
+
+
+Binance native evidence/discard plan (after shared guard commit d9fb4aeaf50):
+read-only namespace audit confirms futures numeric IDs differ from Spot and PM
+public/cancel IDs. No generic recursive orderId/algoId scan, planned-ID fallback
+or arbitrary error-body retention is permitted.
+
+- Add native-only borrowed scalar DTO and root-array decoding in trading.rs.
+  Match the stored Call before selecting any identity: USD-M/COIN-M PlaceOne
+  uses positive u64 orderId; USD-M PlaceAlgo uses positive u64 algoId (not an
+  orderId alias). PlaceBatch streams only positive u64 orderId rows with no
+  error code. Never infer row-to-caller-leg attribution or accepted effects.
+- Spot/PM PlaceOne requires a native clientOrderId echo matching the request's
+  client ID and positive orderId. PM PlaceAlgo requires newClientStrategyId echo
+  matching its stored strategy ID and positive strategyId. Numeric strategyId,
+  algoId, clientAlgoId or orderId cannot replace the public client identity.
+  No echo/mismatched echo/error-coded row => no new ID evidence; still Unknown.
+- Settings and cancellations conservatively add no new IDs. In particular,
+  Spot cancel clientOrderId can name the cancellation request rather than the
+  original order; OCO/list IDs are not order identities. Prior engine journal
+  facts survive through the shared writer regardless of the native body.
+- Validate complete root-array JSON before streaming its borrowed scalar rows
+  to the existing writer. No Vec<RawValue>/Vec<BatchItem> or retained result map;
+  malformed tails cannot publish a staged prefix. Reject wrong/duplicate typed
+  fields, zero/negative/fractional/overflow IDs and contradictory code+ID rows.
+  Native code/message are bounded presentation only, never auth/outcome/retry.
+- Wire Venue hooks to this codec and remove a TradingState Job only when its
+  stored root Context owner equals the validated sealed owner generation. Drop
+  its queued steps/amendment plan without Store/account/ownership changes.
+  Remove the local408/5xx envelope check from on_trade_result: native malformed
+  success/batch/refusal semantics remain there; shared engine owns transport
+  envelope certainty before it can be called.
+- Native RED controls first: valid unproven future regular/algo/batch IDs retained
+  evidence-only; exact namespaces for Spot/PM, invalid/wrong-field/malformed-tail
+  controls, preexisting order/ownership intact, queued later work stopped, and
+  numeric command reuse safe. Preserve existing success/native code diagnostics,
+  IDs, ACK/partial/fallback assertions. Independent codec/namespace review before
+  production edits, then focused engine/Binance gates and adversarial audit.
+Architecture gate: No. The family implements only its native codec facts and
+matching native-plan discard on the shared proof/retirement path.
