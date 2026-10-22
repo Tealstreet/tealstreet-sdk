@@ -419,3 +419,10 @@ planned: these cover rollback/composition boundaries before ordinary Bybit
 adoption. Retain all existing23 replacement controls and native/parser assertions.
 Independent plan review precedes edits, then focused engine tests/strict checks
 and review before the local checkpoint. Return to1741 for any landed dependency.
+
+Atomicity plan audit CLEAN: target the otherwise-valid final journal stage with
+exact RetryForbidden, not an earlier policy/deadline/capacity error. Stale-owner
+controls run before100ms. Snapshot semantic owner/context/journal/pending/action
+state only; allocator reservation capacities are outside the contract. Permit
+only monotonic identity burn, then prove fresh successful admission performs the
+previously deferred cleanup. Architecture No; no production edits/new bug claim.
