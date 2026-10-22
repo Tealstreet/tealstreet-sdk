@@ -9,7 +9,7 @@ Companion contracts: [cutover callers](RUST_CUTOVER_CALLERS.md),
 [remote signing](RUST_REMOTE_SIGNING.md), [mobile](RUST_MOBILE_B3.md),
 [live evidence](RUST_LIVE_GATE.md) and [cutover readiness](RUST_CUTOVER_READINESS.md).
 
-Mirror source: landing `2ff8452aa53` (including actual #1696, #1697 and #1690).
+Mirror source: landing `fa960d9cfcf` (including actual #1696, #1697, #1690 and #1693).
 SDK source references below are relative to `packages/safe-cex/` unless stated.
 
 ## Current construction contract
@@ -160,8 +160,10 @@ must not cancel/recreate them or assume they vanished with a socket.
 
 Create a fresh exchange using the approved effective selection and identical
 account/product/routing/signing inputs. Bootstrap authoritative account state,
-reconcile existing orders/fills and pending outcomes, and wait for real startup
-and capability readiness. Cached loaded flags are insufficient. Publish the
+reconcile existing orders/fills, pending outcomes and venue-side protection or
+dead-man schedules together with their refresh owner, and wait for real startup
+and capability readiness. Switching engines must not silently abandon or
+duplicate a required protection refresher. Cached loaded flags are insufficient. Publish the
 new session generation and effective engine coherently to clients; resume
 writes/strategies only after reconciliation. Failure must remain visible and
 leave trading paused, rather than activate two writers.
