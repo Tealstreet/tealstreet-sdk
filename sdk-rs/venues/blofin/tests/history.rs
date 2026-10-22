@@ -274,3 +274,76 @@ fn id_cursor_request_sequence_is_pinned() {
         ]
     );
 }
+
+/// Filtering does not change native page-size/cursor progress, and the fill
+/// budget counts admitted executions across all accepted pages.
+#[test]
+fn filtered_fills_request_sequence_and_global_mapped_limit_are_pinned() {
+    let mut h = Harness::new();
+    h.seed();
+    query(
+        &mut h,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: Some("12".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(2),
+        },
+    );
+    let row = |id: u32, order: u32| {
+        format!(
+            r#"{{"instId":"BTC-USDT","tradeId":"{id}","orderId":"{order}","side":"buy","fillPrice":"60000","fillSize":"1","ts":"1700000000000"}}"#
+        )
+    };
+    let bodies = [
+        format!("{},{}", row(200, 99), row(100, 99)),
+        format!("{},{}", row(90, 12), row(80, 99)),
+        row(70, 12),
+    ];
+    let mut sent = Vec::new();
+    for body in bodies {
+        let r = h.take("fills-history");
+        sent.push(r.url.split_once("/api/").unwrap().1.to_owned());
+        h.respond(r, &format!(r#"{{"code":"0","data":[{body}]}}"#));
+    }
+    assert_eq!(
+        sent,
+        [
+            "v1/trade/fills-history?instId=BTC-USDT&orderId=12&limit=2",
+            "v1/trade/fills-history?instId=BTC-USDT&orderId=12&limit=2&after=100",
+            "v1/trade/fills-history?instId=BTC-USDT&orderId=12&limit=2&after=80",
+        ]
+    );
+    let rows = result(&h).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    assert_eq!(rows[0]["id"], "90");
+    assert_eq!(rows[1]["id"], "70");
+}
+
+#[test]
+fn income_final_limit_does_not_shorten_native_paging_or_split_native_id_dedupe() {
+    let mut h = Harness::new();
+    h.seed();
+    query(
+        &mut h,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    );
+    let page=(0..100).map(|i|format!(r#"{{"instId":"BTC-USDT","tradeId":"{}","ts":"1700000000000","fillPnl":"1","fee":"0.2"}}"#,1000-i)).collect::<Vec<_>>().join(",");
+    h.reply(
+        "fills-history",
+        &format!(r#"{{"code":"0","data":[{page}]}}"#),
+    );
+    let r = h.take("fills-history");
+    assert!(r.url.ends_with("limit=100&after=901"));
+    h.respond(r, r#"{"code":"0","data":[]}"#);
+    let rows = result(&h).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["tranId"], "1000:pnl");
+}
