@@ -15,7 +15,10 @@ batch diagnostic and venue-owned refused/effective/unknown/resent aggregation.
 Existing native fallback already returns successful IDs when every single is
 accepted; this is a missing shared journal representation, not a second native
 success bug. Native
-500 with retCode 0 can also reach apply_local_write before uncertainty is sealed.
+gateway failures can also enter benign already-gone/not-modified branches before
+uncertainty is sealed, applying cancellation effects or completing optimistically.
+The initial apply_local_write gate already rejects non-2xx retCode0 envelopes;
+preserve that guard rather than claiming it is absent.
 Extend the engine journal once; venues declare native facts and replacement
 intent only. No second executor, callback-order finalizer or error-text retry.
 
@@ -156,3 +159,13 @@ codec facts and one reference adoption, not a Bybit-specific cross-cutting fix.
 
 Independent architecture audit: No. These refinements belong in the one shared
 registry/journal bridge; no per-venue queue/authority/classification workaround.
+
+Re-verification for native RED: venue_error already rejects non-2xx retCode0
+before apply_local_write. The concrete unguarded path is later native benign
+message matching: Cancel with a gateway408/500 envelope whose message says
+order-not-exists can call note_order_terminal/mark_canceled and complete, because
+http_unknown is only propagated when errors is nonempty. Add a demo cancellation
+regression that keeps its original Store row and seals Unknown for those gateway
+responses, including retCode0 and110001; retain a valid200 already-gone control.
+This tests the approved native certainty boundary without inventing a missing
+initial guard. Source remains unchanged until shared-journal plan/audit gates.
