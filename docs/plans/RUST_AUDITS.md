@@ -1516,7 +1516,16 @@ signing arithmetic and the remaining cross-family history fan-out are unchanged.
   a reliable reference. Readback confirmation remains required.
 
 ### AsterDEX
-No confirmed highs.
+No open confirmed highs.
+- High: ~~negative cumulative execution observations consumed bounded ledger
+  slots as zero-valued entries, evicting a valid fill anchor and allowing its
+  identical replay to deliver the fill again after10,000 distinct malformed
+  observations.~~ Existing engine `ObservedProgress` now validates and caps
+  before observation admission; typed native commit keeps the10,000-entry
+  bound and accepted quiet observations. One original native assertion RED
+  proves the duplicate `(102,0.5)`; ten original compatibility controls and
+  all11 fixed controls pass, including initial REST seed, later-read isolation
+  and authoritative direct-ID independence. No new engine policy or raw-ID change.
 - Medium: ~~failed position-mode read silently leaves one-way, never retried, and
   orders can go before it lands (`asterdex/src/account.rs:566`); order events
   with unmapped types (e.g. `LIQUIDATION`) dropped with their fills

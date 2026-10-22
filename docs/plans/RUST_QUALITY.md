@@ -279,8 +279,17 @@ native-priced suffix before the venue commits execution identity, observations
 or terminal state; its existing authoritative Last policy remains distinct.
 Four original-source RED financial regressions and two original compatibility
 controls cover correction recovery, stored-state isolation, fallback and quiet
-identity admission. AsterDEX, KuCoin Spot fallback and Orderly cumulative paths
-still need fan-out before reporting policy and snapshot-token work.
+identity admission. KuCoin Spot fallback and Orderly cumulative adoption remain
+open. The owner prioritized the shared financial snapshot freshness core
+immediately after AsterDEX, before remaining fan-out and reporting. AsterDEX
+now uses the same capped
+preparation and validated observation type for its native no-ID path and
+one-time REST seed. Negative observations cannot consume retention slots and
+evict healthy fill anchors; native direct-ID delivery, duplicate observations,
+accepted quiet rows and10,000-entry bounds remain. One original assertion RED
+and ten original compatibility controls are all GREEN through the existing
+engine path; no second local subtraction/minimum helper was introduced.
+
 
 
 

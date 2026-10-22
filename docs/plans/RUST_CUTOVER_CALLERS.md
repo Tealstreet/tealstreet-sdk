@@ -3675,3 +3675,22 @@ shared pauses defer the same next native stage. Income retains #1751's behavior.
 No SDK arguments or row shapes change. B11 request-scoped incomplete-query
 handling/coverage and typed rejection handling remain required; no new NX handler
 or deployed-runtime proof is claimed. [Scope](RUST_OWNED_HISTORY.md).
+
+
+### AsterDEX validated cumulative observation admission
+
+AsterDEX no longer lets negative cumulative execution observations consume its
+bounded observation ledger and evict healthy fill anchors. Previously,10,000
+distinct malformed observations could make an already delivered fill eligible
+again. The native capped-suffix path now uses the existing engine helper before
+committing observations; accepted quiet rows still consume native retention
+slots, so this does not retain anchors beyond the existing10,000-order bound.
+
+Explicit execution IDs still deliver their positive native last quantity in
+full independently of unusable cumulative/display fields; valid duplicate-ID
+observations still advance the full observed anchor. Native last/average price
+precedence, the requirement for last AND cumulative evidence without an ID,
+one-time initial REST seeding and later REST/read isolation remain. FILLS
+revision, IDs/row shape, SDK arguments, signer/clock/lifecycle and NX interfaces
+are unchanged. This is a correction to financial admission, with no mandatory
+NX handler migration or universal cumulative-fan-out completion claim.
