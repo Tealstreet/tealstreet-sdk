@@ -994,3 +994,81 @@ immediately after this Aster slice, before remaining KuCoin Spot/Orderly
 cumulative adoption and reporting. It needs two different family consumers and
 API coordination with RequestContext late reconciliation and the pending
 metadata epoch core; no token implementation is included here.
+
+
+### KuCoin Spot cumulative fallback adoption — 2026-10-23 plan
+
+Start from actual post-gate-sort landing `2cf8c4c91dd`. This PR adopts the
+existing engine execution choke point for KuCoin Spot only; Orderly follows on
+a fresh branch because its selected-last/average pricing policy needs a separate
+review. Row reporting follows both. KuCoin futures, signing and request builders
+are outside this slice. The whole-KuCoin signer migration remains held by the
+other lane until this slice actually lands.
+
+The current Spot match path emits `matchSize.or(filledSize)` directly. Prove
+with an original native regression whether an absent `matchSize` and successive
+cumulative `filledSize` values duplicate the already observed prefix. This is a
+same-contract financial hypothesis until the unmodified reducer fails. Existing
+invalid-price controls already reject before dedupe; do not claim a new defect
+there. Architecture gate: yes, this concern is cross-cutting; use existing
+`execution::{Cursor, Report, Arithmetic, CumulativePrice}`, not venue arithmetic.
+
+Concrete source scope: `venues/kucoin/src/spot/mod.rs` and `tests/spot.rs`, plus
+this plan and the audit/quality/caller ledgers as warranted by proven evidence.
+No new engine arithmetic is currently needed. Retain a bounded 20,000-order
+map of native `Cursor`s and first-insertion FIFO, independently of the existing
+20,000 execution identities and terminal identities. Seed previously unseen
+order IDs from individually valid/admitted healthy rows (including healthy peers
+in a partially rejected snapshot) only when a current REST snapshot is accepted for
+Store publication, never from lookups, stale/failed reads, rejected rows, or non-match WS
+display observations. Do not replace a live execution anchor on later REST
+reads. Preserve anchors through reconnect, terminal removal and REST absence;
+forget them only on explicit bounded FIFO eviction. After eviction the retained
+history guarantee ends, just as for native bounded execution identities.
+
+For a match with present `matchSize`, prepare `Report::Last` using the exact
+native selected amount/price and optional native cumulative endpoint. Deliver
+unique authoritative last quantities before stale/terminal display fences,
+without capping by growth or cached geometry. Store its next anchor only when
+a native cumulative endpoint exists; absent-cumulative last fills must never
+invent a prefix. Prepare an absent-cumulative last against a zero cursor so an
+unrelated large anchor cannot overflow and reject its finite native amount.
+For absent `matchSize`, use only `filledSize` as the cumulative
+fallback endpoint (not `dealSize`), and `Report::Cumulative` with direct selected
+price and binary subtraction. Equal/regressed endpoints produce no fill and do
+not rewind the anchor. Preserve native presence-based quantity/price precedence,
+optional wire bounds/epsilon, side/market admission, and unrounded public fills.
+
+Preserve the identity key verbatim: order/trade ID, otherwise order/raw time/
+original selected native amount/price, never derived delta. Prepare without
+mutation, then admit identity and deliver before installing progress. Invalid
+financial data must consume neither identity nor progress. A quiet cumulative
+report must still allow native display processing. Do not reinterpret REST or
+non-match display changes as delivered executions.
+
+Before implementation, independently audit this policy. Add meaningful native
+original-RED/fixed-GREEN tests for successive fallback suffixes and retained
+prefixes after terminal/REST absence; retain existing unique late/terminal and
+decimal-roundoff controls. Add controls for direct-vs-fallback precedence,
+invalid selected-price correction with the same ID, repeated fallback without
+trade ID, stale REST, later REST non-reseeding and bounded retention as feasible.
+Run focused engine/KuCoin-spot/Binance native tests with `CARGO_BUILD_JOBS=4`,
+strict fmt/Clippy and root typecheck/lint. Independent source/adversarial/caller
+reviews must answer the architecture gate explicitly. Do not build local release
+WASM or run local replay/timing/size sweeps.
+
+Push for full green CI and authenticated venue+Binance raw replay evidence.
+Ordered gate/fixer comparisons require a post-#1762 baseline (actual `2cf8c4c91dd`
+or later, or an explicitly authenticated whole-tree-equivalent green head).
+No exclusion, comparator, timing threshold, tape or manifest changes. Any
+unexpected raw/gate change blocks for review; proven fixture-visible financial
+corrections are recorded explicitly. Integrate new shared dependencies before
+final proof as lane rules require. Fresh separate guard, then separate merge;
+audit actual parents/tree/preservation and report the actual pin immediately.
+
+Plan audit refinements: accepted partial REST snapshots seed individually healthy
+returned rows too; retained rejected copies are never new seeds. An authoritative
+fill without cumulative evidence cannot identify the interval of a later
+cumulative fallback; this migration does not claim to reconcile that ambiguity.
+First-insertion FIFO can evict even a still-active order at the documented bound.
+Both limits remain explicit; no unbounded history or fabricated prefix is added.
