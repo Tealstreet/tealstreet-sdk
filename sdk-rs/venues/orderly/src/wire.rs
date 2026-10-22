@@ -316,7 +316,7 @@ pub struct PositionRow<'a> {
 #[derive(Deserialize)]
 pub struct PositionPush<'a> {
     #[serde(borrow)]
-    pub positions: Vec<PositionRow<'a>>,
+    pub positions: Vec<&'a serde_json::value::RawValue>,
 }
 #[derive(Deserialize)]
 pub struct PositionMeta {
