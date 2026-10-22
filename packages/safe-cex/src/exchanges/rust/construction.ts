@@ -13,6 +13,8 @@ export type RemoteSigningPolicy = Readonly<{
   payloadSupported?: boolean;
   payloadRestOnly?: boolean;
   protectedHeaders?: readonly string[];
+  signatureEncoding?: 'hex' | 'base64';
+  passphraseHeader?: string;
   wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot'; requestId?: string }>;
 }>;
 
