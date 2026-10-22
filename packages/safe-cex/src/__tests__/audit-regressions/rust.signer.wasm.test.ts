@@ -4,10 +4,12 @@ import { createHmac } from 'node:crypto';
 import vector from '../../../../../sdk-rs/crypto/tests/fixtures/hmac/binance.json';
 import { expect, it } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 const identities = { primary: { credential: 'primary.credential', signing: 'primary.signing' } };
 const makeTransport = (sent: Parameters<Transport['request']>[0][]): Transport => ({
   now: () => 1_700_000_000_000,
+  prepareHttp: prepareRecordedHttp,
   request: async (request) => {
     sent.push(request);
     return { status: 200, headers: '', body: new TextEncoder().encode('[{"accountAlias":"account"}]') };

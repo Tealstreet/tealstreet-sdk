@@ -1,11 +1,8 @@
 //! Where a host's sockets and requests go: the network, or a recording.
-use crate::routing::{
-    HttpRouteMode, ProxyTokenProvider, RoutingPlan, RoutingState, authenticate_how,
-    authenticate_relay, insert_header, request_how,
-};
+use crate::routing::{ProxyTokenProvider, RoutingPlan, RoutingState, authenticate_relay};
 use crate::{Events, HostEvent};
 use futures_util::{SinkExt, StreamExt};
-use safe_cex_engine::{HttpRequest, Method, PayloadSignRequest, RequestId, SocketId};
+use safe_cex_engine::{HttpRequest, PayloadSignRequest, RequestId, SocketId};
 use std::future::Future;
 use std::io::Read;
 use std::pin::Pin;
@@ -17,6 +14,9 @@ use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest,
     http::{HeaderName, HeaderValue},
 };
+
+mod http;
+pub use http::{BoundHttp, HttpPrepareError, HttpPrepareFuture, PreparedHttp};
 
 pub struct PayloadSignerResult {
     pub signature: String,
@@ -35,6 +35,15 @@ pub type PayloadSignerFuture =
 pub type PayloadSigner = Arc<dyn Fn(PayloadSignRequest) -> PayloadSignerFuture + Send + Sync>;
 
 pub trait Transport {
+    /// Managed requests require explicit route preparation. The default fails
+    /// closed; a custom transport must implement the same final-handoff seam.
+    fn prepare_http(
+        &self,
+        _request: HttpRequest,
+        _intent: safe_cex_engine::request_context::RoutingIntent,
+    ) -> HttpPrepareFuture {
+        Box::pin(async { Err(HttpPrepareError::Unsupported) })
+    }
     fn sign_payload(
         &self,
         request: RequestId,
@@ -386,130 +395,33 @@ impl Transport for NetworkTransport {
         outgoing
     }
 
-    fn request(&self, mut request: HttpRequest, events: Events) {
-        let http = self.http.clone();
-        let routing = self.routing.clone();
+    fn prepare_http(
+        &self,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+    ) -> HttpPrepareFuture {
+        http::prepare(self, request, Some(intent))
+    }
+
+    fn request(&self, request: HttpRequest, events: Events) {
+        // The transitional path uses the same prepared executor. Only its route
+        // classification remains legacy until its venue declares context.
+        let id = request.id;
+        let packet = request.clone();
+        let preparation = http::prepare(self, request, None);
         tokio::spawn(async move {
-            let id = request.id;
-            let timeout =
-                Duration::from_millis(u64::from(request.timeout_ms.unwrap_or(20_000).max(1)));
-            let operation = async {
-                let route = match routing.as_ref() {
-                    Some(state) => Some(state.http(&request)?),
-                    None if request.route == Some(safe_cex_engine::RequestRoute::PublicCors) => {
-                        return Err("Public CORS request routing is not configured".into());
-                    }
-                    None => None,
-                };
-                let mut headers: Vec<_> = request
-                    .headers
-                    .iter()
-                    .map(|(name, value)| ((*name).to_owned(), value.clone()))
-                    .chain(request.signer_headers.iter().cloned())
-                    .collect();
-                if let Some(route) = &route {
-                    if !route.prefix.is_empty() {
-                        request.url = format!("{}/{}", route.prefix, request.url);
-                    }
-                    for (name, value) in &route.headers {
-                        insert_header(&mut headers, name.clone(), value.clone());
-                    }
-                    route.alias_headers(&mut headers)?;
-                    if route.authorize {
-                        let token = (routing.as_ref().unwrap().tokens)()
-                            .await
-                            .map_err(|_| "Proxy authorization failed".to_owned())?;
-                        if !token.is_empty() {
-                            insert_header(
-                                &mut headers,
-                                route.authorization_header.clone(),
-                                format!("Bearer {token}"),
-                            );
-                        }
-                    }
-                    if route.mode == HttpRouteMode::How {
-                        let tunnel = route
-                            .tunnel_url
-                            .as_deref()
-                            .ok_or("HOW route missing tunnelUrl")?;
-                        let state = routing.as_ref().unwrap();
-                        let upgrade = state
-                            .plan
-                            .ws_headers
-                            .iter()
-                            .map(|(name, value)| (name.clone(), value.clone()))
-                            .collect();
-                        let mut tunnel =
-                            reqwest::Url::parse(tunnel).map_err(|error| error.to_string())?;
-                        let query: Vec<_> = tunnel
-                            .query_pairs()
-                            .filter(|(name, _)| name != "v" && name != "t")
-                            .map(|(name, value)| (name.into_owned(), value.into_owned()))
-                            .collect();
-                        tunnel.set_query(None);
-                        tunnel
-                            .query_pairs_mut()
-                            .extend_pairs(query)
-                            .append_pair("v", "2")
-                            .append_pair("t", &format!("{:.0}", crate::now_ms()));
-                        let mut ws = open_socket(tunnel.as_str(), upgrade).await?;
-                        authenticate_how(&mut ws, &state.tokens).await?;
-                        let result = request_how(&mut ws, &request, &headers, &events).await;
-                        let _ = ws.close(None).await;
-                        return result;
-                    }
-                }
-                let method = match request.method {
-                    Method::Get => reqwest::Method::GET,
-                    Method::Post => reqwest::Method::POST,
-                    Method::Put => reqwest::Method::PUT,
-                    Method::Patch => reqwest::Method::PATCH,
-                    Method::Delete => reqwest::Method::DELETE,
-                };
-                let mut builder = http.request(method, &request.url).timeout(timeout);
-                for (name, value) in headers {
-                    builder = builder.header(name, value);
-                }
-                if let Some(body) = request.body {
-                    builder = builder.body(body);
-                }
-                let response = builder
-                    .send()
-                    .await
-                    .map_err(|error| error.without_url().to_string())?;
-                let headers = response
-                    .headers()
-                    .iter()
-                    .filter_map(|(name, value)| Some(format!("{name}: {}", value.to_str().ok()?)))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let _ = events.send(HostEvent::HttpStart {
-                    request: id,
-                    status: response.status().as_u16(),
-                    headers,
-                });
-                let mut body = response.bytes_stream();
-                while let Some(chunk) = body.next().await {
-                    let chunk = chunk.map_err(|error| error.to_string())?;
-                    for piece in chunk.chunks(16 * 1024) {
-                        let _ = events.send(HostEvent::HttpChunk(id, piece.to_vec()));
-                    }
-                }
-                let _ = events.send(HostEvent::HttpEnd(id));
-                Ok::<_, String>(())
-            };
             let result = tokio::select! {
                 biased;
                 _ = events.closed() => return,
-                result = tokio::time::timeout(timeout, operation) => result,
+                result = preparation => result,
             };
-            let failure = match result {
-                Ok(Ok(())) => None,
-                Ok(Err(error)) => Some(error),
-                Err(_) => Some("transport request timed out".into()),
-            };
-            if let Some(error) = failure {
-                let _ = events.send(HostEvent::HttpFailed(id, error));
+            match result.and_then(|prepared| prepared.bind(packet)) {
+                Ok(bound) => {
+                    bound.dispatch(events);
+                }
+                Err(error) => {
+                    let _ = events.send(HostEvent::HttpFailed(id, error.message().into()));
+                }
             }
         });
     }

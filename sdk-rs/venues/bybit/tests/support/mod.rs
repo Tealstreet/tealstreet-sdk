@@ -98,7 +98,7 @@ impl Harness {
     }
 
     pub fn collect(&mut self) {
-        for action in self.engine.drain_actions().collect::<Vec<_>>() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             if let Action::Notice(notice) = &action {
                 self.notices.push(notice.clone());
             }
@@ -107,6 +107,9 @@ impl Harness {
                     self.progress_at_request
                         .push((request.id, self.progress.len()));
                     self.requests.push(request);
+                }
+                Action::ManagedHttp(_) => {
+                    panic!("managed HTTP requires the prepared test-driver handshake")
                 }
                 Action::Sign { .. }
                 | Action::SignedOutbound { .. }
