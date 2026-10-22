@@ -1068,7 +1068,6 @@ impl Venue for Hyperliquid {
                 fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
                 client_order_lookup: true,
                 schedule_cancel: true,
-                host_clock: true,
                 ..safe_cex_engine::Capabilities::BASE
             }
         }

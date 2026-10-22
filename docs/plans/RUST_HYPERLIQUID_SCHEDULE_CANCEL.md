@@ -1,5 +1,10 @@
 # Hyperliquid scheduleCancel parity
 
+Clock policy supersession: [engine clock standardisation](RUST_ENGINE_CLOCK.md)
+replaces the historical per-venue `hostClock` opt-in below. Production SDK
+engines share one synchronized default; explicit host/tape clocks remain
+authoritative. Original implementation/regression receipts are retained.
+
 Fresh actual landing: `d510b9813235f7bf99c6eac9c630a583fb0c1212`.
 Plan first; independent of book-query implementations. No source merge during
 Hyperliquid harness #1689 priority window. Integrate its actual pin and current
