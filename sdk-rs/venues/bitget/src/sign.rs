@@ -19,7 +19,7 @@ pub fn headers(
     path: &str,
     body: &str,
 ) -> Vec<(&'static str, String)> {
-    let timestamp = num::format(now.floor());
+    let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(now));
     vec![
         ("ACCESS-KEY", key.to_owned()),
         ("ACCESS-PASSPHRASE", passphrase.to_owned()),

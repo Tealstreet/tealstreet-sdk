@@ -28,7 +28,7 @@ impl Credentials {
         body: &str,
         now: f64,
     ) -> Vec<(&'static str, String)> {
-        let timestamp = format!("{:.0}", now.floor());
+        let timestamp = format!("{:.0}", safe_cex_engine::time::wire_stamp_ms(now));
         let payload = format!(
             "{timestamp}{}{path_query}{body}",
             method.to_ascii_uppercase()
@@ -36,7 +36,7 @@ impl Credentials {
         self.auth(timestamp, payload)
     }
     pub fn ws_headers(&self, now: f64) -> Vec<(&'static str, String)> {
-        let timestamp = format!("{:.0}", now.floor());
+        let timestamp = format!("{:.0}", safe_cex_engine::time::wire_stamp_ms(now));
         let payload = format!("{timestamp}/v3/ws/private");
         self.auth(timestamp, payload)
     }

@@ -553,7 +553,8 @@ impl BitunixFutures {
         };
         match safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_signing_entropy(bytes)) {
             Ok(nonce) => {
-                let timestamp = safe_cex_engine::num::format(cx.now.floor());
+                let timestamp =
+                    safe_cex_engine::num::format(safe_cex_engine::time::wire_stamp_ms(cx.now));
                 let trimmed = sign::Credentials {
                     key: c.key.trim().into(),
                     secret: c.secret.trim().into(),

@@ -1302,6 +1302,10 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   signer refusal/timeout keeps typed rejection even after accepted rows.
   OKX general history and other query-marker sites still need
   fan-out and enforcement; these repairs do not claim a universal choke point.
+  BloFin general histories now share this owner too: actual later-page failures
+  retain only accepted rows with command-owned incompleteness; native paging
+  and header-preparation refusals still reject strictly. Successful cursor/row
+  mapping and final limits remain.
   Six background account-coverage markers have no command: the follow-on must
   route them through one engine-owned account/background notice, never attach a
   fabricated request ID or broadcast a command-owned marker.

@@ -31,7 +31,7 @@ pub fn request(
     params: &[(String, String)],
     body: Option<String>,
 ) -> Signed {
-    let timestamp = num::format(now.floor());
+    let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(now));
     let v1 = path.contains("/v1/");
     let serialized = query(params, v1);
     let mutation = method != Method::Get;
@@ -72,6 +72,34 @@ pub fn request(
             ),
         ],
     }
+}
+
+/// Legacy WS recipe; uses the same integer wire policy as REST.
+pub fn websocket_auth(options: &crate::Options, now: f64) -> Option<String> {
+    let secret = options.secret.as_deref()?;
+    let timestamp = safe_cex_engine::time::wire_stamp_ms(now);
+    let sign = signature(secret, &format!("|{}", num::format(timestamp)));
+    #[derive(serde::Serialize)]
+    struct Auth<'a> {
+        event: &'a str,
+        params: AuthParams<'a>,
+    }
+    #[derive(serde::Serialize)]
+    struct AuthParams<'a> {
+        apikey: &'a str,
+        sign: String,
+        timestamp: f64,
+    }
+    let text = serde_json::to_string(&Auth {
+        event: "auth",
+        params: AuthParams {
+            apikey: options.key.as_deref().unwrap_or(""),
+            sign,
+            timestamp,
+        },
+    })
+    .unwrap();
+    Some(text)
 }
 
 #[cfg(test)]
