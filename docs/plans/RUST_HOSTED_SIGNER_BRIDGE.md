@@ -389,3 +389,16 @@ no new crypto, retry, socket state or timing mechanism. These checks are native
 and mocked SDK boundaries, not actual-WASM proof. Actual-WASM paired hosted
 round trips, MCP guard adoption, Bybit feed/header adoption, current landing
 integration and complete CI/replay proof remain required before readiness.
+
+
+Next codec-adoption phase (Bybit): pass the already declared shared header policy
+through Bybit Options into its existing HTTP SignStep, retaining default deny in
+independent native fixtures. Apply that policy to normal and environment-probe
+HTTP work; WS work stays default deny. Gate private connection creation with the
+engine private-feed policy, preserving ordinary REST startup/polling and Hyro's
+existing WS readiness. Enable the five aliases only after native regressions:
+four REST-only account aliases plus all-five RemoteSigner/hosted pairing. Private
+Hyro PayloadSigner remains setup Unsupported/notSent per the owner decision.
+Test protected signature/key/timestamp versus overridable recvWindow header
+precedence, private-feed suppression/reconciliation, and hosted provider wire.
+No WS auth state/reconnect or outcome policy is added in this codec phase.
