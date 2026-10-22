@@ -998,3 +998,65 @@ fn a_market_without_a_positive_step_is_malformed_and_holds_its_exposure() {
     assert_eq!(h.engine.store().positions()[0].contracts, 1.0);
     assert!(warned(&h, "owned position market unavailable"));
 }
+
+#[test]
+fn decoded_position_rearms_skip_memory_before_the_snapshot_finishes() {
+    let mut h = Harness::new();
+    h.load();
+    let bad = r#"{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":null}"#;
+    let good = r#"{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":"200"}"#;
+    h.ws("user.positions", good);
+    for (rows, expected) in [
+        (bad.to_owned(), 1),
+        (bad.to_owned(), 1),
+        (format!("{good},{bad}"), 2),
+        (bad.to_owned(), 2),
+    ] {
+        next_tick(&mut h);
+        h.reply(
+            "get-positions",
+            &format!(r#"{{"code":0,"result":{{"data":[{rows}]}}}}"#),
+        );
+        h.reply("user-balance", BALANCE);
+        if h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("private/get-open-orders")))
+        {
+            h.reply("private/get-open-orders", EMPTY);
+            h.reply("advanced/get-open-orders", EMPTY);
+        }
+        let reports = h
+            .actions
+            .iter()
+            .filter(|a| {
+                matches!(a,
+                    Action::Notice(safe_cex_engine::Notice::Event(event))
+                        if event.message == "Crypto.com skipped unmappable position row BTCUSD-PERP"
+                )
+            })
+            .count();
+        assert_eq!(reports, expected);
+        if expected == 1 {
+            // The same remembered identity stays silent after its stored copy
+            // disappears: Crypto.com uses Once, not Coinbase's Error upgrade.
+            h.engine.store_mut().set_positions(vec![]);
+        }
+    }
+    let levels: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.message == "Crypto.com skipped unmappable position row BTCUSD-PERP" =>
+            {
+                Some(event.level)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        levels,
+        [safe_cex_engine::Level::Warn, safe_cex_engine::Level::Error]
+    );
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
+}

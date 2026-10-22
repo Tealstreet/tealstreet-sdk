@@ -466,3 +466,16 @@ namespace re-arm stays after revision rejection and before newer-cache merging.
 WOO position reporting remains before bad/freshness rejection, while order
 reporting retains its distinct generation/bad/envelope ordering. No grouped
 collector or native reporting boundary moves in phase1.
+
+
+Phase-1 implementation checkpoint: the three native adapters now use the shared
+reporter with original event sites and re-arm ordering intact. Four new engine
+controls pass (repeat/health, filtering, namespace/empty identity, bounded and
+unbounded capacity); all14 coverage unit controls pass. Exact final formatted
+native compatibility controls pass against all four original production blobs:
+Coinbase59, Crypto.com28, WOO55. These are compatibility GREEN, not bug REDs.
+The fixed five-crate suite passes1172 tests; strict all-target Clippy, scoped
+formatting, repository bans, root44 typecheck and28 lint tasks pass (root tasks
+cached). Both independent source/caller reviews are CLEAN. Full current-head CI,
+authenticated all-suite raw/ordered-gate comparison and a fresh separate guard
+remain required; this checkpoint is not a merge or replay-evidence claim.

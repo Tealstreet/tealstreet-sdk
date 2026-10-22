@@ -3890,3 +3890,15 @@ that do not establish the whole interval. Quiet and duplicate observations may
 advance native totals without inventing a delivered quote; blind gaps and bounded
 4096 terminal retention retain their documented limits. No broker/wire API change, deployed
 caller migration, live/provenance evidence or TypeScript removal is bundled.
+
+
+## Persistent row-reporting engine path
+
+Coinbase, Crypto.com and WOO skipped-row notices now use engine-owned repeat and
+re-arm memory. The observable notice levels, `row.skipped` code, message text and
+reporting time remain native-compatible, including Coinbase's single Error
+upgrade and WOO's changed-summary repeats. Host log filtering still suppresses
+delivery without suppressing health accounting or resetting report memory.
+No SDK arguments/results, order/position/FILLS publication or caller migration
+is added. This slice does not complete grouped/deferred reporting or the other
+consumer migrations; those remain in [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
