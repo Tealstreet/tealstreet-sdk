@@ -1,5 +1,7 @@
 # Phase 9: consumer cutover readiness
 
+For current landing → master blockers, see [Sam’s merge checklist](RUST_MASTER_MERGE_BLOCKERS.md).
+
 Branch: `feat/rust-cutover-readiness`, based on `origin/feat/rust-rewrite`.
 This change proves consumer contracts and records the deletion prerequisites;
 it does not delete TypeScript venues or enable Rust by default.
