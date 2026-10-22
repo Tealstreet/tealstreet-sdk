@@ -148,7 +148,7 @@ test('all five Yarn jobs prepare before probing caches or installing', () => {
   const rust = readFileSync(join(root, '.github/workflows/rust.yml'), 'utf8');
   assert.equal(rust.match(/'\.github\/actions\/prepare-yarn\/\*\*'/g)?.length, 2, 'helper changes must trigger push and PR Rust CI');
   const action = readFileSync(join(root, '.github/actions/prepare-yarn/action.yml'), 'utf8');
-  assert.ok(action.indexOf('prepare.sh') < action.indexOf('uses: actions/cache@'));
+  assert.ok(action.indexOf('prepare.sh') < action.indexOf('uses: actions/cache/restore@'));
   for (const key of ['runner.os', 'runner.arch', 'steps.yarn.outputs.version', "hashFiles('yarn.lock')"]) {
     assert.ok(action.includes(key), `dependency cache must include ${key}`);
   }
