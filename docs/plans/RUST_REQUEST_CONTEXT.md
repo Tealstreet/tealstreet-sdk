@@ -1145,3 +1145,24 @@ disposition: constant checks/codegen layout may still affect a narrow margin.
 No obviously unintended expensive work was found; remeasure final integrated CI
 and escalate a repeat with measured evidence before proposing any optimization.
 Architecture No; no Bitget-specific workaround or budget/profile change.
+
+Actual #1757 e6382b5cfc038612a15b4e4eade8542a62f2e1e5 integrated conflict-free.
+Independent preservation checked all5,217 unowned entries and all12 overlapping
+files' two-sided patch lines; all source/assertions preserved. Integration review
+found a real semantic composition gap: managed Binance reads/trades construct
+sign::Http directly, bypassing the incoming legacy helper's trusted header policy.
+Before final CI, route the three signed recipe sites through one native factory
+that attaches construction-owned policy. Keep key-only recipes default-deny.
+Adapt the incoming delegated-provider test driver through actual prepare/bind/
+claim (preserving all header/feed assertions), add managed trade positives and
+capture original assertion RED before the factory fix. Add empty headers only to
+the core SignResult fixture literal, matching the new optional-empty contract.
+No signing policy/capture/provider redesign; architecture No, shared policy
+propagation at the recipe boundary. Incoming private-feed/hosted APIs stay intact.
+
+Passive conformance checkpoint: valid managed Prepare/Bind/Cancel failed the
+exact incoming checker first. Updated one existing checker; all25 new/existing
+conformance and feature-control tests pass. Independent implementation review
+CLEAN: lossless counters, distinct third counters, zero/optional representation,
+closed nested schemas, passive ingress-only evidence and every prior unsupported/
+terminal/correlation assertion retained. No executor calls or capability growth.

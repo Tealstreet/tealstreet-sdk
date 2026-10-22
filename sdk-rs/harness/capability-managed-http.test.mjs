@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { probeCapabilityCommand } from './capability-conformance.mjs';
 const command = { op: 'fetchAccount', command: 17 };
 const packet = { request: 7, method: 'POST', url: 'https://venue.test/read', headers: [], timeoutMs: 1000, body: '{}' };
-const preparation = 'p1:7:18446744073709551615:0';
+const preparation = 'p1:7:18446744073709551615:18446744073709551615';
 const permit = 'r1:7:18446744073709551615:0:18446744073709551615';
 const probe = (action) => probeCapabilityCommand({ command: () => JSON.stringify([action]) }, command, 'managed schema');
 test('wide managed prepare and bind are ingress request evidence without executing', () => {
@@ -14,6 +14,7 @@ test('wide managed prepare and bind are ingress request evidence without executi
 });
 test('managed cancel is deferred and never physical request evidence', () => {
   assert.equal(probe({ op: 'managedHttp', phase: 'cancel', preparation, signing: 7 }).evidence, 'deferred');
+  assert.equal(probe({ op: 'managedHttp', phase: 'cancel', preparation: 'p1:7:1:0' }).evidence, 'deferred');
 });
 
 const prepare = () => ({ op: 'managedHttp', phase: 'prepare', preparation, intent: 'primary', packet: { ...packet } });
@@ -23,7 +24,7 @@ test('managed token parsing rejects aliases, lossy numbers, arity and counter ov
     7, '', 'p1:7:1', 'p1:7:1:0:0', 'p2:7:1:0',
     'p1:0:1:0', 'p1:4294967296:1:0', 'p1:7:0:0',
     'p1:07:1:0', 'p1:7:01:0', 'p1:7:1:00', 'p1:+7:1:0',
-    'p1:7:1: 0', 'p1:7:1:0\n', 'p1:7:1:1e2',
+    'p1:7:1: 0', 'p1:7:1:0\n', 'p1:7:1:1e2', 'p1:7:1:١',
     'p1:7:18446744073709551616:0', 'p1:7:1:18446744073709551616',
   ]) assert.throws(() => probe({ ...prepare(), preparation: invalid }), /managed schema/);
   for (const invalid of [
@@ -51,6 +52,8 @@ test('managed schemas are closed per phase and packets retain exact request corr
   ]) assert.throws(() => probe({ ...prepare(), packet: { ...packet, ...patch } }), /managed schema/);
 });
 test('optional fields match the encoder and valid route/intent declarations stay passive', () => {
+  assert.equal(probe({ ...prepare(), preparation: 'p1:7:1:0', packet: { ...packet, timeoutMs: 0, body: '' } }).evidence, 'request');
+  assert.equal(probe({ ...prepare(), preparation: 'p1:4294967295:1:0', packet: { ...packet, request: 4294967295 } }).evidence, 'request');
   for (const intent of ['public', 'primary', 'secondary']) {
     for (const route of ['primary', 'direct', 'publicCors']) {
       const action = prepare(); action.intent = intent; action.packet.route = route;
