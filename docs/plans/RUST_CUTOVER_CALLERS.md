@@ -211,6 +211,8 @@ The next REST-book batch checks GRVT #1686 (`850bc25e51e`) and Paradex
 #1687 (`90df20d2f14`) at their actual merges. The final B8 batch checks
 WEEX #1690 (`2ff8452aa53`) and Hyperliquid #1693 (`fa960d9cfcf`), closing
 the listed SDK-method gaps without closing separate caller or owner work.
+The fee-subject catch-up checks Hyperliquid #1701 (`b1510f267c7`) at its
+actual merge; harness-only #1698 adds no caller contract row.
 
 **Impact key.** *CT*: breaks at compile time. *RT*: compiles, behaves
 differently at runtime. *Blocker*: no new equivalent exists yet; cutover
@@ -320,6 +322,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1687 / `90df20d2f` | Paradex adds unsigned request-owned REST books on live/testnet roots with encoded raw symbols, default depth20 and explicit caller depth unchanged. Native order, duplicates and zero quantities remain; each level's `total` is price × amount in quote units, not cumulative. No IDs/version, scaling or subscription publication is added. |
 | #1690 / `2ff8452aa` | WEEX adds an owned unsigned Contract V3 REST book query, default limit200 and explicit limit unchanged. Native order, null-coalesced aliases, cumulative base-amount totals and exact string `lastUpdateId` remain; no contractVal scaling or level IDs. Strict malformed financial/version parsing rejects atomically. Shared GET pause may defer a new owner without retrying the failed owner. |
 | #1693 / `fa960d9cf` | Hyperliquid perpetual `scheduleCancel(time?: number \| null): Promise<void>` now arms a signed absolute UTC-ms deadline or clears on null/omitted time. SDK/host pre-JSON guards prevent unsafe values becoming accidental clears; native deadlines are checked again before signing. The owned promise requires an accepted control ACK; uncertainty stays `unknown` without replay or account-state inference. Renewal remains caller-owned; spot stays unsupported. The newly enabled perp hostClock adopts synchronized SDK time for all perpetual engine work/signing, not only scheduling. |
+| #1701 / `b1510f267` | Hyperliquid perpetual fee-tier reads use the configured vault ahead of the trading account (`applicationId`), rather than the API signer. Unresolved private identity waits for existing `userRole` discovery before queuing `userFees`. Signer inputs, existing `Market.makerFee`/`takerFee`, options and fee arithmetic stay unchanged. No new NX field or call is required; the analogous TS defect remains separate owner work. |
 
 #1543 (retry jitter), #1552 (bounded Binance Retry-After), #1545 (WASM
 headroom), and the #1541/#1544/#1548/#1557 replay-clock fixes do not change a
@@ -2641,6 +2644,36 @@ arm or clear. There is no automatic lifecycle arm/clear, renewal or application
 watchdog. Caller strategies own renewal, deadline slack and uncertainty
 handling. The bounded audit found no default NX/CLI/MCP schedule producer or
 renewal loop; manual and third-party SDK callers still own this contract.
+
+### Hyperliquid account/vault fee tiers (#1701)
+
+Native perpetual `userFees` now uses the same subject as other account reads:
+configured `vault` first, otherwise `applicationId`. It no longer substitutes
+the API agent/signer address. For unresolved private identity, the existing
+signer-address `userRole` read must establish identity before queuing fees.
+Failed, malformed or timed-out resolution does not query an unresolved fee
+subject; late/duplicate replies cannot bootstrap fees again. Configured/resolved
+fees remain queued before mode/account reads. Valid fee data is not a new
+startup or readiness gate.
+
+The maker/taker response fields still update native market rates and SDK
+`Market.makerFee`/`takerFee`. The anonymous public/no-identity path and its
+422/default-fee fallback remain; the native spot branch is unchanged. There is
+no new fee retry, caller option, transport/signing contract or fee arithmetic.
+Initial defaults or market readiness do not prove a successful account-tier
+query.
+
+Existing NX fee estimates consume these fields in
+`apps/web/src/components/placeOrder/classicOrderForms/MarketOrder.tsx:510-513`
+and `LimitOrder.tsx:662-665`; the order-line fee suffix uses them in
+`apps/web/src/components/chart/broker/lineManagers/OrderLineManager.ts:626-642`.
+No new argument or serialization field is required beyond adopting/delivering
+the corrected SDK engine. At the read-only NX audit pin, TS
+`packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.exchange.ts:1405-1439`
+still sends the signer key for fees; that analogous defect is not changed by
+#1701 and remains owner-managed. These source observations do not prove a
+deployed NX session uses corrected rates. B8 stays closed; separate delivery,
+caller migrations and evidence limits remain.
 
 ### MEXC port-review snapshot and plan corrections
 
