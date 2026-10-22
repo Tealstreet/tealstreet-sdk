@@ -326,7 +326,7 @@ Private data can arrive as:
 
 ### Order ID Generation
 
-Client-side IDs: `(BigInt(Date.now()) * 100n + random 0..99) % maxClientOrderIndex`. Lot orders increment the base ID by `BigInt(i)` and stay within int48 client-order bounds.
+Client-side IDs use one instance allocator: the timestamp/random candidate seeds a positive 48-bit index, and each reservation is greater than the previous reservation even when time moves backward. Every actual lot or sibling reserves independently before its send; interleaved orders can occupy intervening indices. Failed sends do not release indices, and exhaustion rejects instead of wrapping.
 
 ### Order Placement
 
@@ -341,7 +341,7 @@ Client-side IDs: `(BigInt(Date.now()) * 100n + random 0..99) % maxClientOrderInd
 9. If amount exceeds the market max amount, split into lots:
    - Calculate lot count: `Math.ceil(amount / maxSize)`
    - Calculate remainder: `amount % maxSize`
-   - Each lot gets sequential orderId (`orderId + BigInt(i)`)
+   - Each lot reserves its own orderId from the shared instance allocator
    - 100ms delay between lot submissions
    - Remainder submitted as final lot if non-zero
 10. Each lot: `signerAdapter.createOrder(...)`
@@ -597,7 +597,7 @@ When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets 
 
 10. **OHLCV timestamp normalization + fallback**: Candle timestamps are normalized to internal seconds, and `listenOHLCV()` uses REST fallback polling + de-dup emission whenever WS candles go stale.
 
-11. **SDK client order IDs**: `generateLighterClientId()` in `lighter.utils.ts` generates IDs but is not used in the main order flow — the exchange uses BigInt timestamp-based IDs instead.
+11. **SDK client order IDs**: `generateLighterClientId()` in `lighter.utils.ts` is not used in the main order flow. One synchronous instance allocator reserves positive 48-bit numeric indices for every single, split, bracket and batched leg. Frozen/backward time and overlapping sends cannot reuse an index within that instance; failed or unknown sends keep their reservations. Exhaustion rejects before the next send instead of wrapping. This is not a cross-device, cross-instance or restart uniqueness guarantee, and generated IDs are not retry authorization. Caller-supplied IDs remain unsupported.
 
 12. **Ticker mark/index fallback**: If `markPrice` is not provided but `indexPrice` is, mark is set to index price. `market_stats` may identify markets by `market_id` without `symbol`; keep id-based ticker matching and do not overwrite existing prices with `0` when optional fields are omitted.
 
