@@ -225,3 +225,27 @@ and the restored control are GREEN. No old evidence assertion was changed.
 No registry/root-completion/public bridge or native Bybit production migration
 is claimed: the committed native gateway regression intentionally remains RED
 until that adapter phase. Local-only; no PR/push or complete raw/CI proof.
+
+Next registry bridge API checkpoint before source: propose
+Cx::http_replacement_contexts(parent:&Context, children:&[Policy])->Result<Vec<Context>,Error>.
+Require the exact current parent Delivery, command Mutation, timed live handle,
+DefinitiveRefusal retry eligibility and recorded effects-free latest native fact.
+Reject empty/over256 input before allocation; child operation/credential/pacing
+match parent, retry policy cannot broaden parent, and every child deadline is
+min(parent.deadline,now+timeout). Reserve a checked monotonic io.next_id range
+(never rewind on refusal), stage every immutable issuer-bound Context, validate
+active-context+journal capacity and pre-reserve context storage. Call the journal's
+atomic replace last; on success only infallible expired-handle cleanup and staged
+context insertion remain. Failure retains original native refusal/authority and
+leaves no visible child/group. No loop over issue_bound and undo.
+
+CommandOwner retains the exact original completion-root Context, independent of
+logical-handle cleanup. Shared validate_handle rejects superseded send/retry
+handles; completion separately allows exact original root only for logical
+no-delivery timers. ANY superseded/historical mutation Delivery rejects completion
+even with that root argument; superseded nonroot authority also rejects without
+a Delivery. Root-used-as-sent-parent, expired-handle root timer, wrong issuer/
+generation/modified-root metadata and late parent callbacks are explicit tests.
+No new deadline/send permission; report original batch diagnostic before atomic
+supersession, with empty terminal journal report metadata. This bridge remains
+engine-owned; no direct numeric journal calls from Bybit.
