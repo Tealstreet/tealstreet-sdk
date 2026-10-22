@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Bitget signing | Active native checkpoint; hosted prerequisite pending | Before Bitget credential setup, private HTTP/WS builders or hosted signer adoption. | [RUST_BITGET_DISPATCH_SIGNER.md](RUST_BITGET_DISPATCH_SIGNER.md) |
 | Bybit signing | Active dispatch signer adoption | Before Bybit REST/probe/private WS authentication or credential setup changes. | [RUST_BYBIT_DISPATCH_SIGNER.md](RUST_BYBIT_DISPATCH_SIGNER.md) |
 | Integer protocol wire stamps | Active shared clock correction | Before formatting outbound timestamps or adopting dispatch signing recipes. | [RUST_PROTOCOL_WIRE_STAMP.md](RUST_PROTOCOL_WIRE_STAMP.md) |
 | Shared signer prerequisites | Active engine/provider plan | Before family signing migrations, credential decoding, nonce entropy, WS upgrades or signing receipts. | [RUST_SIGNER_PREREQUISITES.md](RUST_SIGNER_PREREQUISITES.md) |
