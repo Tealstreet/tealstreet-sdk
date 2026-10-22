@@ -1826,3 +1826,27 @@ prove how that unanchored last overlaps, an explicit remaining evidence limit.
 This fixes one financial defect with multiple native RED controls, not a claim
 of new live captures or complete all-family fill-helper adoption. Orderly and
 the shared row-reporting extension remain next.
+
+
+## GRVT owned-history fan-out
+
+~~GRVT general histories own accepted/staged output and numeric finalization
+alongside a separate shared cursor walk.~~ They now adopt CursorHistory for page
+admission/completion and the existing first/later actual-failure contract. A
+reusable engine staged-page discard preserves admitted rows/cursor/budget across
+existing retries and session refresh. Order-filtered fill totals, setup/session
+refusals and lookup proofs remain strict; native identity ledgers/units/request
+sequences are unchanged. Other adapters, managed completion and NX B11 coverage
+remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+
+## Crypto.com owned-history fan-out
+
+~~Crypto.com history output retention and numeric completion are venue-local
+alongside nanosecond continuation state.~~ Existing CursorHistory now owns page
+admission and command-owned finalization, reusing the shared staged-page reset.
+First/zero-accepted actual failure rejects typed; later actual loss retains prior
+accepted rows only. Exact cursor proof refusals stay strict. Native time bounds,
+identity rollback, mixed retry counter, pacing, public duplicates and ranged
+income limits remain. Other adapters and B11 runtime coverage stay open.
+[Scope](RUST_OWNED_HISTORY.md).
