@@ -1434,3 +1434,19 @@ preservation receipt: /tmp/codex-1741-history1760-61-checker-preservation.json.
 After actual1767 merges, real-integrate the actual stack once, write only the
 two exact landed manifest maps, prove total1264 and all151 other maps exact,
 then rerun scoped checks/full CI and fresh post1762 ordered-gate proof.
+
+Actual dependency integration checkpoint: merge9b2b6e310e3bc4757c3dec7b9ccc494993e463b1
+genuinely integrates actual1767 bf362312d3edfb4dfa00b726c172f944053b9198
+(and actual1760/1761) into the native-fixture correction. Conflict-free; all15
+incoming paths and5300 combined tree entries are independently exact, with no
+own/incoming overlap. Only the two approved manifest maps change1271->1264;
+all151 other maps remain byte-identical, and integrated source matches inventory
+exactly. Manifest SHA2569136cef658d0891371b97dd6af83419e7715902e9f3712073330b0ef9747c3df
+->6641f9871098eed887286ec09f6dbf0e6d2f4af6a58edfef3f67013e19233352.
+All12ratchet adversarial controls, full bans and scoped formatting pass; independent
+final manifest/preservation review CLEAN, architecture No. Native fixture113
+checks/strict verification remain recorded above; expanded integrated engine/
+Binance/GRVT/Crypto/Orderly checks run before readiness. Start draft CI in parallel
+with those additional checks; no proof/readiness/merge claim until every gate
+passes on the same immutable source. Preservation and inventory receipts are
+/tmp/codex-1741-post1767-{preservation,inventory-receipt}.json.
