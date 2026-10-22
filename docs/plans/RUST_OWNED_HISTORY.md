@@ -172,3 +172,21 @@ Plan before source changes; source merges held for row phase 2 #1711 until relea
   incompleteness handling and unchanged method args. Do not close B11 or claim
   other histories migrated. Follow subsequent fan-out with account/background
   notice core, then standalone/combined capability conformance.
+
+Phase-1 implementation audit: independent correctness and adversarial reviews
+are clean. Stage reset poisons a pending/dirty reset before any recoverable page
+failure can hide it; accepted rows, identities and first incomplete cause survive
+valid resets while cursor/budget history resets. Bybit keeps raw duplicates and
+requires result/list before staging. OKX keeps its seeded bound and delay, and
+outer HTTP/envelope validation precedes page admission. Bybit repeated adjacent
+cursors now stop early too; OKX retains its immediate unchanged-cursor exhaustion.
+The pre-migration request suites passed (six Bybit, five OKX tests); new first/later
+failure and missing-list regressions are checked against original source before
+final focused gates and full CI. Architecture gate: one shared engine extension
+with two protocol adapters, not separate per-venue completion implementations.
+
+Phase-1 focused verification: 1,225 engine/Bybit/OKX/BloFin/Binance tests pass;
+touched strict all-target Clippy, fmt, bans and doc links pass. Four original-
+source regressions fail at their intended assertions (first/malformed + later
+failure per Bybit/OKX), then corrected closed-position suites pass. Source merge
+still waits for #1711 priority release, full final-head CI and a separate guard.

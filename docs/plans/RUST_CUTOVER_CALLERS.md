@@ -3141,5 +3141,25 @@ still reject. A repeated non-adjacent continuation now stops with an owned incom
 cycling to the page cap; short pages, repeated identities and immediate unchanged
 cursors keep the existing termination behavior. No SDK method arguments, worker
 completeness envelope or NX ingestion requirement changes. B11 remains open for
-NX query association and coverage; other venue histories have not migrated to
-this core yet. [Implementation scope](RUST_OWNED_HISTORY.md).
+NX query association and coverage; subsequent closed-position migrations are
+scoped below and general-history fan-out remains active. [Implementation scope](RUST_OWNED_HISTORY.md).
+
+
+### Windowed / seeded closed-position fan-out
+
+Bybit and OKX closed-position reads now use the same staged/accepted history
+owner and cursor core. First failures before accepted rows are typed rejections;
+later failures return only accepted rows with one command-owned incomplete marker
+before the final result. Callers must carry this through B11's request-scoped
+completeness transport and avoid claiming complete history coverage.
+
+Bybit requires the successful `result.list`; missing/null/malformed data no
+longer becomes an empty complete result. Its 20-page budget resets per window,
+raw duplicate rows stay intact, and one owner retains earlier incompleteness
+across later windows. Adjacent repeated cursors and non-adjacent cycles now stop
+early with incomplete coverage. OKX keeps its initial upper-bound cursor, lower
+bound, 100 ms continuing-page delay and immediate unchanged-cursor exhaustion;
+non-adjacent cycles stop with incomplete coverage. Neither method's arguments
+change. This slice covers closed-position reads only; both venues' general
+history reads and the broader query-marker fan-out remain unfinished. No NX
+migration, deployment or B11 closure is claimed.

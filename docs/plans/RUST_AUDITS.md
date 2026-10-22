@@ -1237,7 +1237,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   success (actual merge receipts in [the sweep](RUST_PORT_WIRE_SWEEP.md)).
   The owned-history core now binds BloFin closed-position completion and cursor
   paging in `engine::history`; its venue no longer emits this marker directly.
-  Other query-marker sites still require fan-out and an enforcement gate; the
+  Bybit and OKX closed-position reads now share its staged/accepted cursor owner,
+  including per-window reset and seeded bounds. Their general history reads and
+  other query-marker sites still require fan-out and an enforcement gate; the
   earlier ownership repairs are retained, not a claim of a universal choke point.
   Six background account-coverage markers
   have no command and need a separate account-scoped protocol decision; never
