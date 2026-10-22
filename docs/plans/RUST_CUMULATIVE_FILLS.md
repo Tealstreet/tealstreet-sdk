@@ -742,3 +742,137 @@ history, caller API/FILLS layout, fixture, allowance or comparator changes.
 Independent docs review, actual shared-input integration and full CI/raw/package proof remain
 merge gates. The proof must cover both Kraken/Spot jobs sharing the crate plus
 Binance; freeze exact current inventories rather than assume a count.
+
+Phase 4 landed through clean replacement #1742 at
+07bb7f04d568a07f17a907e89224e511018100f1. All 43 applicable checks succeeded,
+with 134 full raw outputs, 67 Rust outputs, 38 stable groups and 13 ordered gate
+reports unchanged. Independent evidence and a fresh separate guard preceded the
+separate merge. The blocked Bybit stack was excluded; all incoming source/docs
+were preserved. Actual shared JSON policy #1744 is included in the next base.
+
+### Phase 5: BingX observed cumulative suffix (plan; not implemented)
+
+Fresh branch starts from actual #1744
+2c5c5f6987f35cafc0e272282e54da37c0a66d4f. The ongoing profile probe #1746 and
+hosted bridge #1745 remain separate. Coordinate BingX account regions with the
+metadata owner before edits; this slice owns only on_order execution preparation
+and its financial bookkeeping, not metadata read/coalescing/position settings.
+
+Source hypothesis only: on_order inserts execution identity before selecting
+the native Fill price, emits a positive quantity without validating that chosen
+price, then commits cumulative/terminal observations. A same-ID corrected event
+may consequently lose delivery eligibility. First prove independent original
+native assertions for invalid selected price, corrected same-ID/same-cumulative
+recovery, retained stored state and healthy subsequent peers. Exercise zero and
+negative chosen fallback prices separately where the native decoder admits them.
+No production-defect claim or broad mapping repair before original-source RED.
+
+Preserve native side/symbol/order identity checks, explicit trade-ID versus
+heuristic time/quantity/price keys, the special cumulative-growth escape for
+heuristic collisions, terminal and covered-history suppression when cumulative
+is absent, bootstrap seed semantics, 10,000-order/20,000-execution retention,
+native price precedence and explicit last-quantity-versus-cumulative behavior.
+Unused bad last price must not reject a valid selected native fallback. Quiet
+zero/no-growth observations and nontrade lifecycle behavior require controls.
+A separately valid lifecycle may legitimately terminate an order; do not invent
+a delivery backlog beyond that boundary.
+
+Architecture gate: YES. BingX and Aster's no-ID path both cap a last quantity by
+observed cumulative growth; do not add another local subtraction/minimum helper.
+After original RED, review a concrete extension of engine::execution that
+expresses that direct-price capped-suffix policy without reinterpreting the
+existing authoritative Last behavior or cumulative quote/average intervals.
+Preparation must remain pure, validate selected financial evidence before any
+identity/root/total/dedup/fill effects, retain native gap and seed policies, and
+use checked arithmetic when cumulative quantity is absent. Existing helper
+adopters must remain byte-identical. Do not choose a new ledger or retention
+policy without a separate review/decision.
+
+Then implement the engine policy first with meaningful generic controls and the
+minimal BingX adapter; original RED becomes GREEN. Run focused engine/BingX/
+Binance native tests, strict Clippy/fmt/bans and root checks, independent
+code/adversarial reviews and proven audit/quality updates. Refresh actual shared
+dependencies before final CI/proof; no merge jump over the bridge/profile queue.
+Freeze all BingX and Binance workloads and authenticate every raw field except
+top-level metrics, ordered status/failure/fixer arrays and exact matching CI
+package fingerprints/hashes. No fixture, allowance, comparator, signing/clock,
+history, metadata API or FILLS layout change. Fresh separate guard, separate
+merge and actual parents/tree/preservation report remain required.
+
+#### BingX original-source evidence and reviewed API
+
+On original production source at ce04209c3ae, regression-only 99491884a17
+produced four native assertion failures: selected zero/negative price emitted
+an invalid Fill; corrected same-ID/same-cumulative evidence lost delivery;
+and an invalid terminal execution advanced stored partial state. Two controls
+pass on original source: unused negative last price retains a valid fallback,
+and accepted zero-growth evidence still consumes its native trade identity.
+The production-prefix SHA is unchanged in the original-source receipt.
+
+Concrete API reviewed independently before implementation:
+`ObservedProgress::prepare_capped(self, last: Option<f64>, price: f64)` returns
+`Result<Option<PreparedObserved>, Rejection>`. It validates last evidence, caps
+it by positive cumulative growth when cumulative exists, uses full growth if
+last is absent, and delegates the selected quantity to the existing pure
+prepare path with a cursor seeded at previous observation. Missing cumulative
+uses checked addition. Existing authoritative Last/prepare semantics remain
+unchanged. Some(0) expresses native duplicate/lifecycle suppression; accepted
+None still permits native identity and quiet observation bookkeeping.
+
+The adapter first looks up identity without insertion, prepares selected
+financial evidence, then admits identity/progress/terminal/Fill effects.
+An error returns before even the order revision bump. Native price selection,
+coverage, terminal suppression, retained identities and liquidation/future-kind
+execution handling remain in the adapter. Generic tests cover growth caps,
+blind gaps, quiet observations, absent cumulative overflow and invalid price;
+independent API review is CLEAN (architecture YES, engine extension first).
+
+
+Implementation checkpoint: the distinct engine capped-suffix method and BingX
+adapter passed 811 focused engine/BingX/Binance native tests, strict all-target
+Clippy, formatting and bans. Root typecheck 44/44 and lint 28/28 passed entirely
+from cache. Final native-string regression fixtures were rerun against the exact
+original production prefix (four assertion RED, two compatibility GREEN), then
+restored against the fix (all six GREEN). Both independent source reviews are
+CLEAN; caller wording explicitly limits invalid-price rejection to positive
+live delivery, preserving accepted quiet bookkeeping. Fresh exact-head CI and
+full BingX/Binance raw evidence remain pending; no merge claim.
+
+#### BingX final dependency integration and proof plan
+
+Actual hosted bridge #1745 `5743c485d44` and measured profile #1746
+`3f0e3e450b2` are genuinely integrated. Under the overseer's explicit
+exact-head-stack authorization, frozen reviewed Bybit #1728
+`31035f3f09a71e5fb29d1083c217512972e5f9ec` is also genuinely integrated
+for parallel CI. Preservation review is CLEAN: all six original BingX-owned
+blobs remained unchanged before this documentation checkpoint, and every
+other blob exactly matches that frozen Bybit tree. Architecture gate remains
+YES: this is shared engine financial preparation with one bounded adopter.
+
+Fresh final evidence compares the complete 32-suite/110-workload roster
+against that exact frozen Bybit PR run, with both synthetic CI checkout trees
+and parents explicitly bound to their respective tested heads and the actual
+profile landing. All 976 raw outputs, including every full ID and request,
+remain compared with only top-level metrics excluded; ordered gate/fixer
+arrays and all package hashes/fingerprints remain mandatory. Earlier initial
+BingX evidence is historical and is not relabeled. No TS-reference difference
+is silently accepted. Merge remains blocked until #1728 actually lands with
+the unchanged frozen head as ancestor, full exact-head checks and independent
+evidence reviews pass, and a fresh separate guard confirms only these six
+owned files against actual landing. Any predecessor head change requires
+real integration and fresh CI/proof.
+
+Final proof refresh after the KCS landing trigger: actual #1753
+`35949503f7ffab45a942312cfa913da20ce4b71c` is genuinely integrated,
+including actual Bybit #1728. The earlier stacked 46d59 CI is preserved as
+FAILED solely on KCS CPU and is not final evidence. Use fully green exact
+KCS PR run39771903002/head38167 as the authenticated, source-equivalent
+baseline (actual merge tree equals that reviewed head), then fresh BingX
+exact-head CI/full32-suite proof. Bind the baseline PR synthetic checkout
+to [actual1746,38167] and the candidate checkout to [actual1753,new head];
+each tree and hard19-input fingerprint must match its own tested head.
+All976 raw fields, full IDs and ordered gates remain compared as before.
+No source, fixture, allowance or comparator changes accompany this refresh.
+Independent six-file preservation review and fresh normal separate guard
+against actual landing remain required; no predecessor-stack exception is
+needed now that both actual dependency merges are real ancestors.
