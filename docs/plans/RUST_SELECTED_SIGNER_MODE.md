@@ -10,3 +10,12 @@ Original-RED controls for all 9 aliases (Binance4 + Bybit5 including Hyro): both
 Verify focused shared setup/provider/constructor tests, SDK typecheck/lint and independent correctness/adversarial reviews; same PR caller/plan/index docs. New small shared PR queues immediately after1741;1773 consumes actual landing rather than carrying the fix. No merge under1741 hold.
 
 Architecture gate: correct the central mode-selection choke point for existing Binance/Bybit/Hyro; not an OKX-specific bypass. Raw public intent remains separate from selected runtime mode.
+
+Original controls reproduce 20 assertion failures and retain 14 compatibility
+passes across nine aliases, including dedicated Hyro admission. The shared
+selector, selected native setup flag and SDK admission/boot cache now pass all
+34 controls. Existing setup/runtime expectations are corrected only for the
+native flag; their raw public intent and mutation/forged-input checks remain.
+Six focused SDK suites pass 129 tests; SDK typecheck and lint pass. Both
+correctness and adversarial reviews are CLEAR. Actual dependency integration
+and final CI/proof remain pending. No native/engine/venue source or external schema changes.
