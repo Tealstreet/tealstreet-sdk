@@ -36,3 +36,18 @@ It is not a per-venue signer or normalization workaround. MEXC adoption still
 waits for shared RequestContext actual-release pacing; Phemex separately waits
 for raw/protocol expiry projection. Current queue #1734 -> #1735 -> #1728
 retains priority; this work may develop locally/CI meanwhile.
+
+Independent plan review resolved the defaults: undeclared fields retain caller
+`trimCredential` metadata, rather than forcing preservation. MEXC alone forces
+primary trim=true and secondary trim=false over opposite metadata. Trimming
+uses existing native Rust Unicode White_Space semantics, with a generic TS
+Unicode White_Space predicate for synchronous presence (not JS String.trim);
+U+0085 and U+FEFF are explicit parity regressions. SDK primaryComplete and cached
+canSign/publicDataOnly use effective presence before credential stripping.
+
+The engine owns non-secret CredentialSetupPolicy/IdentitySetupPolicy data;
+construction-rules.json owns family declarations, generated into Rust constants
+and consumed by the TS resolver. Crypto applies resolved policy once during
+trusted installation. Existing policy-free primitive setup APIs preserve caller
+metadata; venue-aware registry raw/JSON adapters are used by official native/WASM
+construction. Opaque external providers remain responsible for compliant material.
