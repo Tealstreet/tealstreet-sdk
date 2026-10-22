@@ -1168,3 +1168,14 @@ as required, retain strict differences and freshly certify only standing TS
 reference classes. No local release WASM build/replay/size/timing sweep. Fresh
 separate guard, separate merge, actual tree/parents/preservation audit and
 immediate overseer/peer report finish the slice; shared row-reporting follows.
+
+Plan-audit refinement: whole-growth inference requires exact equality to the
+selected arithmetic's positive cumulative delta, with no epsilon or gap
+extrapolation. It is best-effort: inferred quote overflow/unavailable prefix
+leaves quote missing and never rejects an otherwise valid direct Fill. Supplied
+average-times-cumulative overflow still rejects at the existing prepare-fill
+call sites, including quiet/equal/regressed reports; do not move those checks
+into root-only or stale sparse paths that never prepared a Fill. Positive last
+reports may deliver at equal/regressed endpoints under native pricing policy.
+Post-delivery enrichment only updates a live same-endpoint totals entry and
+never recreates an entry removed by native retention/root lifecycle effects.
