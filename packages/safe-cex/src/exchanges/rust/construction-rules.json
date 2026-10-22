@@ -13,7 +13,9 @@
     "lighter-robinhood": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
     "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
     "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true}},
-    "bybitspot": {"bridge": {"spot": true}},
+    "bybit": {"bridge": {"dispatchSigning": true}},
+    "bybitinverse": {"bridge": {"dispatchSigning": true}},
+    "bybitspot": {"bridge": {"spot": true, "dispatchSigning": true}},
     "binance": {"bridge": {"dispatchSigning": true}},
     "binancepm": {"bridge": {"dispatchSigning": true}},
     "binanceinverse": {"bridge": {"dispatchSigning": true}},
@@ -21,7 +23,7 @@
     "kucoinspot": {"bridge": {"spot": true}},
     "hyperliquidspot": {"bridge": {"spot": true}},
     "krakenspot": {"bridge": {"spot": true}},
-    "bybitdemo": {"bridge": {"demo": "always"}},
-    "hyrotrader": {"bridge": {"demo": "hyroMode"}}
+    "bybitdemo": {"bridge": {"demo": "always", "dispatchSigning": true}},
+    "hyrotrader": {"bridge": {"demo": "hyroMode", "dispatchSigning": true}}
   }
 }

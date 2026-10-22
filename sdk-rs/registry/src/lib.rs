@@ -453,7 +453,7 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
 }
 
 /// Trusted native/legacy setup. Consume fields once; never pass them to a venue.
-#[cfg(feature = "binance")]
+#[cfg(feature = "dispatch-signing")]
 pub fn prepare_local_signer(
     options: &mut EngineOptions,
 ) -> Result<
@@ -488,7 +488,7 @@ pub fn prepare_local_signer(
     Ok((std::sync::Arc::new(signer), identities))
 }
 /// Separate trusted JS/native provider setup, with fixed parse failures.
-#[cfg(feature = "binance")]
+#[cfg(feature = "dispatch-signing")]
 pub fn local_signer_from_json(
     input: String,
 ) -> Result<
@@ -512,7 +512,7 @@ pub fn build<T: Visit>(
 ) -> Result<T::Output, VenueError> {
     // Trusted compatibility setup consumes legacy input before venue construction.
     // All migrated execution still uses precisely one injected-provider path.
-    #[cfg(feature = "binance")]
+    #[cfg(feature = "dispatch-signing")]
     let (options, signer) = {
         let mut options = options;
         let signer = if construction::bridge(venue, &options).dispatch_signing
@@ -526,7 +526,7 @@ pub fn build<T: Visit>(
         };
         (options, signer)
     };
-    #[cfg(not(feature = "binance"))]
+    #[cfg(not(feature = "dispatch-signing"))]
     let signer = None;
     build_with_signer(venue, options, entropy, signer, visitor)
 }
@@ -1119,9 +1119,25 @@ pub fn build_with_signer<T: Visit>(
         ),
         #[cfg(feature = "bybit")]
         "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
-            let mut options = BybitOptions {
+            if options.key.as_ref().is_some_and(|s| !s.is_empty())
+                || options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Bybit credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(identity) = &identities.secondary {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let options = BybitOptions {
                 recv_window: tighter_recv_window(options.recv_window),
-                read_credentials: options.read_credentials.take(),
+                read_credentials: identities.secondary,
                 bybit_site_id: options.bybit_site_id.take(),
                 remote_signing: options.remote_signing,
                 enable_inverse_markets: options.enable_inverse_markets,
@@ -1135,29 +1151,17 @@ pub fn build_with_signer<T: Visit>(
                 },
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
-                key: options.key.take(),
-                secret: options.secret.take(),
+                credentials: identities.primary,
                 endpoints: options.endpoints.take().map(|e| BybitEndpoints {
                     rest: e.rest,
                     public_ws: e.public_ws,
                     private_ws: e.private_ws,
                 }),
             };
-            options.validate().map_err(|error| {
-                use zeroize::Zeroize;
-                options.key.zeroize();
-                options.secret.zeroize();
-                if let Some(read) = &mut options.read_credentials {
-                    read.erase_secrets();
-                }
-                invalid(&error)
-            })?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(BybitLinear::new(options), entropy)?,
-            )
+            options.validate().map_err(|error| invalid(&error))?;
+            let mut engine = Engine::new(BybitLinear::new(options), entropy)?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "bitget")]
         "bitget" | "bitgetusdc" | "bitgetinverse" => {
@@ -1444,7 +1448,7 @@ pub struct EngineOptions {
     #[serde(default)]
     pub recv_window: Option<f64>,
     #[cfg(any(
-        feature = "binance",
+        feature = "dispatch-signing",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "okx",
@@ -1539,7 +1543,7 @@ impl EngineOptions {
         self.key.zeroize();
         self.secret.zeroize();
         #[cfg(any(
-            feature = "binance",
+            feature = "dispatch-signing",
             feature = "kucoin",
             feature = "kucoinspot",
             feature = "okx",

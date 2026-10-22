@@ -6,6 +6,8 @@ publish.workspace = true
 description = "Every Rust venue, constructed by name from one options shape"
 
 [features]
+# Shared trusted provider setup; migrated families opt in here.
+dispatch-signing = ["dep:safe-cex-crypto"]
 default = [
     "bitunix",
     "grvt",
@@ -57,10 +59,10 @@ bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
 phemex = ["dep:safe-cex-venue-phemex"]
 cryptocom = ["dep:safe-cex-venue-cryptocom"]
-binance = ["dep:safe-cex-venue-binance", "dep:safe-cex-crypto"]
+binance = ["dep:safe-cex-venue-binance", "dispatch-signing"]
 kucoin = ["dep:safe-cex-venue-kucoin"]
 kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
-bybit = ["dep:safe-cex-venue-bybit"]
+bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 okx = ["dep:safe-cex-venue-okx"]
 orderly = ["dep:safe-cex-venue-orderly"]

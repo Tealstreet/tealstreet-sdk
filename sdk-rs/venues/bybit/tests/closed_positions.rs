@@ -1,8 +1,9 @@
 //! Venue-reported closed positions: raw `/v5/position/closed-pnl` rows, paged as TS pages them.
 mod support;
 use safe_cex_engine::{Command, VenueAction};
-use safe_cex_venue_bybit::{Endpoints, Options, Variant};
+use safe_cex_venue_bybit::{Endpoints, Variant};
 use support::Harness;
+use support::Options;
 
 const DAY: f64 = 24.0 * 3_600_000.0;
 const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;

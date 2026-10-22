@@ -8,6 +8,8 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+# Provider construction is shared by all migrated families.
+dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
@@ -63,10 +65,10 @@ default = [
     "phemex",
 ]
 cryptocom = ["safe-cex-venues/cryptocom", "text-ingress"]
-binance = ["safe-cex-venues/binance", "text-ingress"]
+binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing"]
 kucoin = ["safe-cex-venues/kucoin", "text-ingress"]
 kucoinspot = ["safe-cex-venues/kucoinspot", "text-ingress", "safe-cex-engine/command-kucoinspot"]
-bybit = ["safe-cex-venues/bybit", "text-ingress"]
+bybit = ["safe-cex-venues/bybit", "text-ingress", "dispatch-signing"]
 hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress"]
 okx = ["safe-cex-venues/okx", "text-ingress"]
 orderly = ["safe-cex-venues/orderly", "text-ingress"]

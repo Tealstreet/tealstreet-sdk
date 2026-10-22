@@ -41,3 +41,46 @@ landing baseline, excluding only root metrics. Independent correctness/adversari
 review, green CI and a fresh separate exact-scope trial guard precede merge.
 Family source may proceed after actual #1721; later RequestContext adoption remains
 separate and must preserve raw lease/deadline ownership.
+
+## Implementation checkpoint (unmerged)
+
+The five-alias venue uses only opaque identities; HTTP/probe and static WS recipes
+stage through the existing engine dispatch. Original signing code remains a
+cfg(test) oracle, with the signing-site ratchet now scanning this sign module too.
+The shared dispatch-signing Cargo feature enables provider setup in standalone
+registry/WASM artifacts, selected by existing construction policy rather than
+another venue setup path. Typed signer failures retain owned NotSent outcomes and
+prior effective/ambiguous aggregate evidence; history keeps its existing finalizer.
+
+347 Bybit native tests pass, including thirteen dispatch/provider regression groups;
+standalone registry two tests and standalone host two tests pass. The latter cover
+all five setup constructors, while ordinary immediate startup GET checks cover
+four aliases: Hyro intentionally waits for its catalogue before private reads.
+Its supported owned-read and static WS paths are exercised by venue regressions.
+Focused SDK 18 tests, typecheck, lint, strict Bybit/standalone registry Clippy pass.
+Independent source review and CI/replay evidence are still required.
+
+Owner sequencing: cumulative-fill #1725 first, shared wire-stamp PR second,
+this Bybit migration third. Replace temporary local canonical flooring with that
+actual shared DispatchContext.stamp_ms API before merge; keep the independent old
+oracle unchanged. RequestContext is a later shared fan-out, not a gate on this
+signer migration; the existing legacy bridge remains explicit until that adoption.
+
+Command outcome aggregation remains an explicit RequestContext consolidation
+target: Binance's reached_venue guard and Bybit's refused/effective/unknown flags
+currently live in their adapters. This migration must preserve existing evidence
+independently of first-error text; it introduces no additional aggregation service.
+
+Independent adversarial review also reproduced mixed provider/native failures in
+both orders: an actual definitive native refusal must update existing aggregate
+evidence even after an earlier provider error. Bare HTTP400/429 cases retire the
+provider-only classification and retain the existing native classification.
+Both compiled RED regressions now pass with no new aggregation state.
+
+Four additional ordinary/Hyro retry cases reproduced provider-only NotSent after
+an earlier native signature rejection or transport callback. Owner-approved
+conservative behavior: Rest.resent routes retry-provider failure through the
+existing sanitized failure/reconciliation path, yielding Unknown; no second
+mutation is sent and planned identity/body stay immutable. Precise native
+Rejected versus transport Unknown provenance remains RequestContext work.
+These cases compiled and failed before the change; all thirteen groups pass now.

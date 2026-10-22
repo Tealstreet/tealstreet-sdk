@@ -135,9 +135,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
 // Opaque marker: JS hosts fulfil the Action::Sign/Event::Signed seam. This
 // contains no keys and cannot fall back to local signing if injection is missing.
-#[cfg(feature = "binance")]
+#[cfg(feature = "dispatch-signing")]
 struct ExternalSigner;
-#[cfg(feature = "binance")]
+#[cfg(feature = "dispatch-signing")]
 impl safe_cex_engine::signing::Signer for ExternalSigner {
     fn sign(
         &self,
@@ -567,11 +567,11 @@ impl WasmEngine {
         let signer_setup_json = signer_setup_json.map(zeroize::Zeroizing::new);
         let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
             .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
-        #[cfg(feature = "binance")]
+        #[cfg(feature = "dispatch-signing")]
         let mut options = options;
         let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
         let external_signer = options.signing.is_some() && signer_setup_json.is_none();
-        #[cfg(feature = "binance")]
+        #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {
             if !dispatch_signing {
                 return Err(js_sys::Error::new(
@@ -593,7 +593,7 @@ impl WasmEngine {
         } else {
             None
         };
-        #[cfg(not(feature = "binance"))]
+        #[cfg(not(feature = "dispatch-signing"))]
         let signer = {
             if signer_setup_json.is_some() {
                 return Err(js_sys::Error::new(
@@ -961,6 +961,153 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "bybit")]
+    mod bybit_signer_construction {
+        use crate::WasmEngine;
+        use serde_json::{Value, json};
+
+        const ALIASES: [&str; 5] = [
+            "bybit",
+            "bybitinverse",
+            "bybitspot",
+            "bybitdemo",
+            "hyrotrader",
+        ];
+        const NOW: f64 = 1_700_000_000_000.;
+
+        fn options(venue: &str) -> Value {
+            if venue == "hyrotrader" {
+                json!({"endpoints": {
+                    "rest": "https://hyro.invalid",
+                    "publicWs": "wss://hyro.invalid/public",
+                    "privateWs": "wss://hyro.invalid/private"
+                }})
+            } else {
+                json!({})
+            }
+        }
+
+        fn header<'a>(action: &'a Value, name: &str) -> Option<&'a str> {
+            action["headers"].as_array()?.iter().find_map(|entry| {
+                (entry[0].as_str() == Some(name))
+                    .then(|| entry[1].as_str())
+                    .flatten()
+            })
+        }
+
+        #[test]
+        fn all_aliases_construct_with_setup_and_ordinary_startup_gets_are_signed() {
+            for venue in ALIASES {
+                let setup = json!({
+                    "primary": {"key": "host-primary", "secret": "host-primary-secret"},
+                    "secondary": {"key": "host-secondary", "secret": "host-secondary-secret"}
+                });
+                let Ok(mut engine) =
+                    WasmEngine::new(venue, &options(venue).to_string(), Some(setup.to_string()))
+                else {
+                    panic!("{venue}: trusted provider construction must succeed");
+                };
+                assert!(engine.dispatch_signing, "{venue}");
+                assert!(!engine.requires_external_signer(), "{venue}");
+                let construction: Value = serde_json::from_str(&engine.construction()).unwrap();
+                assert_eq!(construction["bridge"]["dispatchSigning"], true, "{venue}");
+                let actions: Vec<Value> = serde_json::from_str(&engine.start(NOW)).unwrap();
+                assert!(
+                    !actions.iter().any(|action| action["op"] == "sign"),
+                    "{venue}"
+                );
+                let signed: Vec<_> = actions
+                    .iter()
+                    .filter(|action| header(action, "X-BAPI-SIGN").is_some())
+                    .collect();
+                if venue == "hyrotrader" {
+                    // Hyro defers private startup until its catalogue is usable.
+                    assert!(signed.is_empty());
+                    assert!(!actions.is_empty());
+                    continue;
+                }
+                assert!(
+                    !signed.is_empty(),
+                    "{venue}: startup must release signed GETs"
+                );
+                for action in signed {
+                    assert_eq!(action["op"], "http", "{venue}");
+                    assert_eq!(action["method"], "GET", "{venue}");
+                    assert_eq!(
+                        header(action, "X-BAPI-API-KEY"),
+                        Some("host-secondary"),
+                        "{venue}"
+                    );
+                    assert_eq!(
+                        header(action, "X-BAPI-TIMESTAMP"),
+                        Some("1700000000000"),
+                        "{venue}"
+                    );
+                    assert_eq!(header(action, "X-BAPI-SIGN").unwrap().len(), 64, "{venue}");
+                }
+            }
+        }
+
+        #[test]
+        fn all_aliases_admit_opaque_external_signing_and_release_only_after_completion() {
+            for venue in ALIASES {
+                let mut input = options(venue);
+                input["signing"] = json!({
+                    "primary": {"credential": "primary.credential", "signing": "primary.signing"},
+                    "secondary": {"credential": "secondary.credential", "signing": "secondary.signing"}
+                });
+                let Ok(mut engine) = WasmEngine::new(venue, &input.to_string(), None) else {
+                    panic!("{venue}: opaque external provider construction must succeed");
+                };
+                assert!(engine.requires_external_signer(), "{venue}");
+                assert!(engine.use_external_signer().is_ok(), "{venue}");
+                let actions: Vec<Value> = serde_json::from_str(&engine.start(NOW)).unwrap();
+                assert!(
+                    !actions
+                        .iter()
+                        .any(|action| header(action, "X-BAPI-SIGN").is_some()),
+                    "{venue}: signing has not completed"
+                );
+                if venue == "hyrotrader" {
+                    assert!(!actions.iter().any(|action| action["op"] == "sign"));
+                    continue;
+                }
+                let sign = actions
+                    .iter()
+                    .find(|action| action["op"] == "sign")
+                    .unwrap();
+                let values: Vec<Vec<u8>> = sign["work"]["operations"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|operation| match operation["kind"].as_str().unwrap() {
+                        "present" => {
+                            assert_eq!(operation["key"], "secondary.credential", "{venue}");
+                            b"external-secondary".to_vec()
+                        }
+                        "sign" => {
+                            assert_eq!(operation["key"], "secondary.signing", "{venue}");
+                            vec![0xab; 32]
+                        }
+                        kind => panic!("{venue}: unexpected signing operation {kind}"),
+                    })
+                    .collect();
+                let completion = json!({"values": values, "receipt": sign["work"]["receipt"]});
+                let released: Vec<Value> = serde_json::from_str(&engine.signed(
+                    u32::try_from(sign["attempt"].as_u64().unwrap()).unwrap(),
+                    &completion.to_string(),
+                    NOW + 1.,
+                ))
+                .unwrap();
+                assert!(released.iter().any(|action| {
+                    action["op"] == "http"
+                        && header(action, "X-BAPI-API-KEY") == Some("external-secondary")
+                        && header(action, "X-BAPI-SIGN") == Some("abababababababababababababababababababababababababababababababab")
+                }), "{venue}: completed provider values must reach the actual HTTP action");
+            }
+        }
+    }
+
     /// Each venue's record equals the name lists `rust.exchange.ts` used before
     /// the engine reported it.
     #[cfg(all(
