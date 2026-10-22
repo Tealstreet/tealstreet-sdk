@@ -1202,3 +1202,108 @@ preintegration of reviewed Bybit #1728 head31035f3f09a71e5fb29d1083c217512972e5f
 which includes actual #1746 build policy3f0e3e450b2, for parallel CI. Actual
 Bybit ancestry, all actual shared predecessors, final exact-head CI/replay and
 separate guard/merge remain required; no landing/deployment claim.
+
+## Phemex income range ownership (planned)
+
+Start from actual #1756 `5f6488c7664`. This slice adopts the existing shared
+`RangeHistory` owner for `venues/phemex/src/income.rs`; it adds no pager policy or
+venue-local marker emitter. Single-page fills/orders/trades and client-ID lookup
+remain outside this bounded slice. No signing format, request path, credential
+selection, rate-pause behavior or financial Store mutation changes.
+
+The current income adapter keeps separate `RangeWalk`, page, accepted rows and
+numeric command fields. Failure of a later page/currency discards accepted
+ledger rows, and a saturated range rejects its entire result. Replace these
+parallel states with one `RangeHistory<Income>` and `Completion`, retained across
+USDT/USDC stages through an additive checked shared range-stage restart. Stage decoded rows
+until the full page validates; feed native timestamp/identity coverage into the
+shared pager before applying the existing time/type filter. Failed page prefixes
+must never enter accepted results. Preserve occurrence identities, running-balance
+components, ordering, optional result truncation, limits, probes and both
+settlement currencies. No new offset paging or endpoint behavior is invented.
+
+Before implementation, add behavior assertions that fail on current source:
+first-page transport/HTTP/malformed failure rejects with a typed error and no
+success/marker; later-page or second-currency failure retains only accepted
+rows, emits exactly one command-owned incomplete Warn, then completes. Cover
+streamed failed-page prefixes, two simultaneous command owners and Error-only
+logging. Saturated-timestamp coverage must become a shared-owned incomplete
+success with accepted rows rather than an empty complete result or total loss.
+Existing successful short/full-page, duplicate identities, type filtering,
+window boundaries, both currencies, rate deferral and strict admission controls
+remain. Explicit construction/signing/serialization refusals stay terminal and
+must not become recoverable pages; classify only facts the failure callback
+actually provides, preserving native details where available.
+
+Plan audit must check the current `RangeHistory` stage API, Phemex request/sign
+failure call graph and test helpers before production changes. Add or adapt
+focused assertion tests first and retain original-red logs. Then implement the
+shared-owner adapter, run focused engine/Phemex/Binance native tests and strict
+checks with Cargo concurrency four, and obtain correctness/adversarial reviews.
+Use Corepack Yarn only; never run the account-policy check. No local release
+WASM, full replay or timing matrix. CI and source-bound artifact proof own those
+gates. Document the caller-visible retained-partial/typed-first-failure contract
+and supersede the historical all-or-nothing test expectation explicitly.
+
+Architecture gate: adoption of one engine-owned range/completion policy by a
+new family, not a per-venue fix of a cross-cutting concern. Coordinate request
+builder ownership with the signer lane before editing; this slice does not
+change engine dispatch, RequestContext, execution, row admission or metadata.
+Merge only after #1737 and any then-current owner queue dependencies, with fresh
+integration/proof and a separate announced guard and match-head merge.
+
+
+Phemex plan audit refinement: `RangeHistory` currently lacks the cursor owner's
+stage restart and filtered-admission operations. Add these to the engine core
+before venue adoption. A checked `restart_stage(RangeWalk)` must require finished
+state with no active fetch, staged rows/facts or lifecycle error, fold the old
+walk's coverage gap into the same Completion, retain accepted rows and first gap,
+and preserve the cumulative request budget across stages. Never construct a new
+command owner for the second currency. Add shared lifecycle/coverage/budget tests.
+
+Add shared `accept_page_where` filtering after the pager has observed every
+validated native timestamp/identity. Only selected rows satisfying the output
+predicate enter accepted rows; `accepted_len` must exclude filtered rows. A
+query whose earlier pages produced no eligible output still rejects on failure,
+not an empty partial success. The venue must not keep a parallel accepted vector
+or use placeholder Option rows to inflate acceptance. Engine tests must pin
+filter-before-retention/after-coverage semantics and rejected-page prefix
+isolation. The adapter remains responsible only for native decoding and its
+existing time/type predicate, final sort/truncate and currency selection.
+
+Both methods are additive shared owner operations, not a Phemex pager fork.
+Coordinate `engine/history.rs` with the managed Completion bridge; RequestContext
+authority stays outside this slice. Signer API inspection found current Phemex
+header construction infallible; do not invent a new sign-failure callback or
+change request builders. The signing lane confirmed these regions are clear.
+
+
+Final plan review: stage replacement must account for retired-stage request
+selections as well as the current walk count, and `with_request_budget` cannot
+be reapplied after restart to reset authority. Test the exact boundary across
+two stages, inability to reopen an exhausted budget, and invalid early restart
+without mutating pending rows or an existing gap. Keep the existing more-than-
+100,000 retained-output guard a strict policy rejection, never a partial success.
+
+
+Saturated-stage sequencing is an intentional change: the old USDT truncated
+walk rejected before USDC. The shared owner will retain that coverage gap and
+continue the requested USDC stage, then return eligible accepted rows with one
+owned marker. Test that additional stage explicitly. Healthy request sequences
+stay unchanged. Preserve equal-bound padding only inside the walker
+(`end.max(start + 1)`), native-request clipping to actual end, and output filtering
+against the actual caller end rather than the padded synthetic bound.
+
+Phemex implementation checkpoint: the four original-source behavior assertions
+are RED before adoption and GREEN through the shared range owner. New core
+controls cover composite ownership/first gaps, early restart, filtered coverage
+and cumulative budgets. Independent review found a boundary regression in the
+initial adapter: a padded equal-bound walk admitted against the synthetic end
+while native HTTP used the actual end. A new assertion reproduced an inverted
+continuation. Additive shared `restrict_active_range` now binds narrower native
+bounds before dispatch and rejects expansion/inversion or changes after staging;
+coverage still sees all decoded row facts. Both direct and streamed edge cases
+are corrected, with additional core restriction controls. The range owner is
+boxed inside the native request to keep Pending's enum variants bounded, rather
+than suppressing the strict Clippy size check. This does not change completion
+authority, request wire or the planned physical-release integration boundary.
