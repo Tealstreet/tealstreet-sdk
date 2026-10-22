@@ -90,3 +90,27 @@ exact slot counts, nonempty UTF-8/header-safe presentation and the final combine
 header budget. WS keeps its existing two-result signature-only contract. The
 OKX and Bitget declarations remain unenabled/default-deny; tests exercise their
 common pure work/formatter without opening the hosted/runtime admission gates.
+
+## Phase 2 provider checkpoint
+
+Reuse the setup-field validation/absent-only fallback helper for local and
+callback providers. The trusted delegated setup consumes an optional passphrase
+into provider custody and exposes only a distinct opaque Present ref; inherited
+secondary passphrases reuse the setup-resolved primary ref. No material enters
+engine identities, SDK options or callback receiver snapshots.
+
+Keep a passphrase Present map separate from public-key interpolation. A request
+may present it only in a fully validated batch containing a Sign operation for
+an owning identity (including a setup-authorized alias); a Credential payload
+part cannot name it. Validate the entire batch before any callback. Missing or
+empty required material refuses before callback/I/O; no wire response is expected
+to supply a passphrase. The unchanged remote wire requests the declared hex or
+base64 format; base64 must be canonical padded encoding of exactly 32 MAC bytes,
+including pad-bit checks. No format inference from context or payload.
+
+Two-family provider/helper tests cover strict encoding, independent golden MACs,
+missing/cross-slot/ref-interpolation refusal, setup fallback, callback count,
+cancellation and scrubbed custody. Existing Binance/Bybit wire/receiver/import
+controls remain unchanged. This phase changes neither native dispatch/release
+ownership nor runtime family admission. Keep actual hosted SDK acceptance as a
+mandatory family gate, with no claim from these lower-level probes.
