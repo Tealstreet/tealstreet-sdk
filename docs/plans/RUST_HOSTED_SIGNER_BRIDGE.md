@@ -402,3 +402,16 @@ Hyro PayloadSigner remains setup Unsupported/notSent per the owner decision.
 Test protected signature/key/timestamp versus overridable recvWindow header
 precedence, private-feed suppression/reconciliation, and hosted provider wire.
 No WS auth state/reconnect or outcome policy is added in this codec phase.
+
+
+Hosted callback-header closure: signing-only captures currently deny all result
+headers, which would reject a keyless PayloadSigner HTTP callback that supplies
+headers. Add a trusted-policy capture entry point while preserving default deny
+for all existing primitive/WS/credential captures. Store the declared HTTP policy
+beside the same work/metadata/fences; validate receipt, lengths and all headers
+before output. Registry HTTP formatting applies the shared protected-name policy
+and returns optional bounded headers; the standalone SDK interceptor receives
+these as its existing PayloadSigner result, retaining its original precedence.
+No new external sign-request/response field, host map or unsigned recipe state.
+Add RED/GREEN capture tests, codec policy tests and actual-WASM callback-header
+round trips. Coordinate additive API with RequestContext before final integration.
