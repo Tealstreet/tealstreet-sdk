@@ -802,7 +802,8 @@ count/byte limits across attempts and retries, UTF-8 text boundaries, hostile
 String/Vec capacities, exhausted-text markers, no-release/partial/Unknown joins,
 retry refusal, and unchanged ordinary result/partial schema. Add compiled fault
 controls for optimistic success and erased prior retained IDs. Native Binance
-count-mismatched batches must reject before iterating/retaining their rows.
+count-mismatched batches must reject row-to-caller attribution and reducer effects;
+the later owner correction below retains valid native IDs as reconciliation evidence.
 
 
 Evidence-budget review refinements: caps count retained entries, including
@@ -954,3 +955,10 @@ reject delegated/parked/pacing paths that this fixture does not model. Reuse it
 for the probe's startup and order actions without a production legacy fallback.
 This validates entropy through the actual compiled engine boundary, not network
 or proxy preparation; CI must rerun the probe before emitting replay artifacts.
+
+Batch-count correction checkpoint: independent review CLEAN / architecture No;
+the revised evidence matrix failed before the correction and now passes. All
+278 Binance tests and strict engine/Binance Clippy pass; the original Coin-M
+short-ACK ID assertion is unchanged. Caller contract: Unknown PartialIDs are
+exact reconciliation/cancellation evidence only, not proof of accepted caller
+legs or a safe retry. No total/failed-index attribution is invented.

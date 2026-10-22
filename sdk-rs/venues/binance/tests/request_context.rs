@@ -474,28 +474,51 @@ fn expired_native_write_retires_unknown_without_reducing_a_late_ack() {
 }
 
 #[test]
-fn mismatched_batch_rows_are_unproven_and_never_retained_as_accepted_ids() {
-    let mut h = ready();
-    let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_str(
-        r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
-    )
-    .unwrap();
-    h.event(Event::Command(Command::PlaceOrders {
-        command: 707,
-        orders: vec![order; 6],
-    }));
-    let batch = h.take("/fapi/v1/batchOrders");
-    h.reply(
-        batch.id,
-        200,
-        "",
-        r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5},{"orderId":6}]"#,
-    );
-    let error = &h.failures.iter().find(|(id, _)| *id == 707).unwrap().1;
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert!(
-        error.partial.is_none(),
-        "unmatched rows are not accepted identity facts"
-    );
-    assert!(!h.has_request("/fapi/v1/order"));
+fn mismatched_batch_rows_keep_only_reconciliation_ids_without_claiming_acceptance() {
+    for (body, expected) in [
+        (r#"[{"orderId":1},{"orderId":2}]"#, vec!["1", "2"]),
+        (
+            r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5},{"orderId":6}]"#,
+            vec!["1", "2", "3", "4", "5", "6"],
+        ),
+        (
+            r#"[{"orderId":11},{"orderId":"bad"},{"orderId":12},{"orderId":13,"code":-2010}]"#,
+            vec!["11", "12"],
+        ),
+        (
+            r#"[{"orderId":0},{"orderId":-1},{"orderId":14,"code":0},{"orderId":18446744073709551616}]"#,
+            vec![],
+        ),
+        ("[]", vec![]),
+    ] {
+        let mut h = ready();
+        put_order(&mut h);
+        let before = h.engine.store().orders().to_vec();
+        let order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+        )
+        .unwrap();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 707,
+            orders: vec![order; 6],
+        }));
+        let batch = h.take("/fapi/v1/batchOrders");
+        h.reply(batch.id, 200, "", body);
+        let error = &h.failures.iter().find(|(id, _)| *id == 707).unwrap().1;
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        let ids = error
+            .partial
+            .as_ref()
+            .map_or(&[][..], |partial| partial.order_ids.as_slice());
+        assert_eq!(
+            ids, expected,
+            "native IDs are evidence, not caller-leg attribution: {body}"
+        );
+        if let Some(partial) = &error.partial {
+            assert_eq!((partial.total, partial.failed_index), (None, None));
+        }
+        assert_eq!(h.engine.store().orders(), before);
+        assert!(h.result(707).unwrap().is_err());
+        assert!(!h.has_request("/fapi/v1/order"));
+    }
 }

@@ -17,6 +17,7 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
+use serde_json::value::RawValue;
 use std::collections::{HashMap, VecDeque};
 
 const BROKER_PREFIX: &str = "x-s3vFFRQp";
@@ -631,6 +632,9 @@ impl BinanceFutures {
             Err(error) => Err((0, error.to_owned())),
         };
         let mut ids = Vec::new();
+        // Native IDs on an ambiguous batch are reconciliation evidence only;
+        // never feed them into accepted placement planning or caller bindings.
+        let mut evidence_ids = Vec::new();
         let error = match (call, outcome) {
             (
                 Call::PlaceOne {
@@ -680,14 +684,22 @@ impl BinanceFutures {
             (Call::PlaceBatch { expected, strict }, Ok(body)) => {
                 let mut rejection = None;
                 batch_reports = true;
-                if let Ok(items) = serde_json::from_str::<Vec<BatchItem>>(body) {
-                    if items.len() != expected {
+                if let Ok(rows) = serde_json::from_str::<Vec<&RawValue>>(body) {
+                    if rows.len() != expected {
                         unproven = true;
+                        for row in rows {
+                            if let Ok(item) = serde_json::from_str::<BatchItem>(row.get())
+                                && let (Some(id), None) = (item.order_id, item.code)
+                                && id > 0
+                            {
+                                evidence_ids.push(id.to_string());
+                            }
+                        }
                         rejection = Some((
                             0,
                             "Binance batch response count does not match the request".into(),
                         ));
-                    } else {
+                    } else if let Ok(items) = serde_json::from_str::<Vec<BatchItem>>(body) {
                         for item in items {
                             match (item.order_id, item.code) {
                                 (Some(id), None) => ids.push(id.to_string()),
@@ -710,6 +722,9 @@ impl BinanceFutures {
                                 }
                             }
                         }
+                    } else {
+                        unproven = true;
+                        rejection = Some((0, "Binance batch response malformed".into()));
                     }
                     continue_after_item_refusal = !strict && !unproven;
                 } else {
@@ -818,8 +833,10 @@ impl BinanceFutures {
         if native_response {
             let fact = match native_fact_error {
                 Some(mut error) => {
-                    if !ids.is_empty() {
-                        error = error.partial_ids(&ids);
+                    if !ids.is_empty() || !evidence_ids.is_empty() {
+                        let partial_ids: Vec<_> =
+                            ids.iter().chain(&evidence_ids).cloned().collect();
+                        error = error.partial_ids(&partial_ids);
                     }
                     if unproven || error.outcome == Some(Outcome::Unknown) {
                         WriteResult::Failed(error)
