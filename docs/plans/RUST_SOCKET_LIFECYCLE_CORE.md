@@ -633,3 +633,37 @@ none of its HTTP bootstrap exceptions. Alias/UFCS/member references and macro
 escapes are covered; source counts must equal the inventory and both site/family
 maps must be subsets of every available historical/base map. Empty legacy
 family inventory requires deletion of the temporary engine feature.
+
+## Canonical replay storage follow-up
+
+The retained-memory and steady-CPU findings above remain real. The temporary
+feature boundary has no fresh measurement yet. First reduce avoidable socket
+interest allocation in the shared component, without changing venue codecs:
+
+1. Keep the existing `Vec<Interest>` proposal and `&[Interest]` encoder contracts.
+   Canonicalize external proposals to validated `BTreeMap<String, Arc<Interest>>`
+   once, then route external replacement, reconnect replay and repair through one
+   transactional preparation/coverage/budget/commit implementation. Add an
+   internal replay entrypoint that clones canonical Arc handles instead of
+   deep-copying every desired key/argument into a throwaway proposal. Repair
+   likewise uses canonical rows. Reconnect still starts from empty released
+   state; replay increments the same revision and preserves exact codec frames.
+2. Final batch release consumes its owned coverage keys into the released map
+   instead of cloning each key immediately before dropping the queued batch.
+   Keep epoch, readiness, signer barrier, revision and desired-row checks in the
+   existing final-release path; staging still grants no release progress.
+3. Original assertion-RED allocation controls prove nonempty coverage-key storage
+   is transferred at final release. Add replay/repair compatibility and failure
+   atomicity controls: same desired Arc identities, exact unsubscribe/subscribe
+   order, rejected encoder/coverage leaves old state and queued frames unchanged,
+   stale epoch/barrier cannot consume keys. Logical double-copy reservation and
+   all per-feed/aggregate input/frame/queue bounds remain unchanged.
+4. Independent plan and source reviews, lifecycle/driver/engine ordering controls,
+   focused engine/OKX/Bitunix/Binance tests, strict Clippy/fmt/bans. Fresh CI alone
+   decides retained-memory, Bitunix CPU and size; no local timing or claimed
+   numeric savings. CPU ingress/runtime-index changes remain a separate phase,
+   not bundled as an unmeasured behavioral shortcut.
+
+Architecture gate: canonical ownership and release allocation are shared engine
+socket concerns. No OKX-specific storage path, budget increase, allocator change,
+HTTP delivery/admission change or native codec rewrite belongs in this phase.
