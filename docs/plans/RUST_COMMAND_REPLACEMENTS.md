@@ -426,3 +426,14 @@ controls run before100ms. Snapshot semantic owner/context/journal/pending/action
 state only; allocator reservation capacities are outside the contract. Permit
 only monotonic identity burn, then prove fresh successful admission performs the
 previously deferred cleanup. Architecture No; no production edits/new bug claim.
+
+Local atomicity checkpoint: all26 replacement-filtered engine controls and strict
+all-target engine Clippy/fmt pass. All original23 controls remain unchanged.
+Second-child collision preserves the entire semantic registry/owner/journal and
+expired handle before a fresh checked range commits; denied facts preserve exact
+accepted/known/failed IDs through sealing (including accepted plus presentation
+failure). Old/current generation cross-pairs refuse before expiry, then the live
+owner still admits a child. Independent final correctness/adversarial review
+CLEAN, architecture No. Test-only; ordinary Bybit remains unchanged and its
+original gateway regression is still intentionally RED. No publication/PR or
+whole-phase completion claim. Return to1741 for actual1763 integration/freshCI.

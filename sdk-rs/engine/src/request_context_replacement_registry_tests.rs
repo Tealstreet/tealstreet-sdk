@@ -384,6 +384,196 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct RegistryState {
+    contexts: std::collections::HashMap<u64, Context>,
+    generation: u64,
+    completion_root: Context,
+    last_deadline: f64,
+    mutation_declared: bool,
+    pending: usize,
+    deliveries: usize,
+    latest: Option<RequestId>,
+    reports: Vec<String>,
+    rejections: Vec<(RequestId, VenueError)>,
+}
+
+fn registry_state(registry: &ContextRegistry, parent: &Context) -> RegistryState {
+    let owner = &registry.commands[&7];
+    let writes = owner.writes.as_ref().unwrap();
+    RegistryState {
+        contexts: registry.contexts.clone(),
+        generation: owner.generation,
+        completion_root: owner.completion_root.clone(),
+        last_deadline: owner.last_deadline,
+        mutation_declared: owner.mutation_declared,
+        pending: owner.pending,
+        deliveries: owner.deliveries,
+        latest: writes.latest(parent.leg()),
+        reports: writes.reports().map(str::to_owned).collect(),
+        rejections: writes
+            .rejections()
+            .map(|(id, error)| (id, error.clone()))
+            .collect(),
+    }
+}
+
+#[test]
+fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() {
+    let mut io = super::super::Io::<()>::default();
+    let mut store = Store::default();
+    let parent = io
+        .request_contexts
+        .issue(1, Scope::Command(7), policy(), 0.)
+        .unwrap();
+    for (identity, timeout_ms) in [(99, 1), (21, 100)] {
+        io.request_contexts
+            .issue(
+                identity,
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    timeout_ms,
+                    retry: RetryPolicy::Never,
+                    ..policy()
+                },
+                0.,
+            )
+            .unwrap();
+    }
+    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
+    io.next_id = 20;
+    let before = registry_state(&io.request_contexts, &parent);
+    let mut cx = Cx {
+        now: 2.,
+        store: &mut store,
+        io: &mut io,
+    };
+    assert_eq!(
+        cx.http_replacement_contexts(&parent, &[policy(), policy()]),
+        Err(Error::Duplicate)
+    );
+    assert_eq!(registry_state(&cx.io.request_contexts, &parent), before);
+    assert_eq!(
+        cx.io.next_id, 22,
+        "the denied checked range is never reused"
+    );
+    assert!(!cx.io.request_contexts.contexts.contains_key(&20));
+    assert!(
+        cx.io.request_contexts.contexts.contains_key(&99),
+        "denial cannot perform expiry cleanup"
+    );
+    assert!(cx.io.pending.is_empty());
+    assert!(cx.io.actions.is_empty());
+    let children = cx
+        .http_replacement_contexts(&parent, &[policy(), policy()])
+        .unwrap();
+    assert_eq!(
+        children.iter().map(Context::leg).collect::<Vec<_>>(),
+        [22, 23]
+    );
+    assert!(
+        children
+            .iter()
+            .all(|child| child.deadline() == 100. && child.owner() == parent.owner())
+    );
+    assert_eq!(cx.io.next_id, 24);
+    assert!(!cx.io.request_contexts.contexts.contains_key(&99));
+    assert!(cx.io.request_contexts.contexts.contains_key(&21));
+    assert_eq!(
+        cx.io.request_contexts.validate(&parent, 2.),
+        Err(Error::Revoked)
+    );
+    assert!(cx.io.pending.is_empty());
+    assert!(cx.io.actions.is_empty());
+}
+
+#[test]
+fn replacement_final_journal_denial_preserves_owner_contexts_and_money_facts() {
+    for case in 0..5 {
+        let mut registry = ContextRegistry::default();
+        let parent = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+        registry
+            .register_attempt(&parent, RequestId(11), 0.)
+            .unwrap();
+        *registry
+            .release_flag(&parent, RequestId(11))
+            .unwrap()
+            .unwrap() = true;
+        let delivery = refusal_delivery(&parent);
+        let fact = match case {
+            0 | 4 => Some(WriteResult::Accepted {
+                order_ids: vec!["known-exact-id".into()],
+            }),
+            1 => Some(WriteResult::KnownPartial(
+                VenueError::new("known effects").partial_ids(&["known-exact-id".into()]),
+            )),
+            2 => Some(WriteResult::Failed(
+                VenueError::new("lost reply").partial_ids(&["known-exact-id".into()]),
+            )),
+            _ => None,
+        };
+        if let Some(fact) = fact {
+            registry.result(&delivery, fact).unwrap();
+        }
+        let before = registry_state(&registry, &parent);
+        assert_eq!(
+            registry.replace(&parent, &delivery, 20, &[policy(), policy()], 1.),
+            Err(Error::RetryForbidden)
+        );
+        assert_eq!(registry_state(&registry, &parent), before);
+        assert!(!registry.contexts.contains_key(&20));
+        assert!(!registry.contexts.contains_key(&21));
+        let fallback = (case == 4).then(|| VenueError::new("presentation failure"));
+        let result = registry.seal(7, Some(&delivery), Some(&parent), fallback);
+        match (case, result) {
+            (0, Seal::Success) => {}
+            (1..=4, Seal::Failure(error, _)) => {
+                assert_eq!(
+                    error.outcome,
+                    if matches!(case, 1 | 4) {
+                        None
+                    } else {
+                        Some(Outcome::Unknown)
+                    }
+                );
+                if case != 3 {
+                    assert_eq!(error.partial.unwrap().order_ids, ["known-exact-id"]);
+                }
+            }
+            _ => panic!("denied replacement cannot rewrite the original money fact"),
+        }
+    }
+}
+
+#[test]
+fn replacement_old_command_generation_cannot_mutate_the_reissued_owner() {
+    let mut registry = ContextRegistry::default();
+    let old = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+    let old_delivery = refusal(&mut registry, &old, 11);
+    registry.finish(7);
+    let current = registry.issue(2, Scope::Command(7), policy(), 1.).unwrap();
+    let current_delivery = refusal(&mut registry, &current, 11);
+    assert_ne!(old.owner(), current.owner());
+    let before = registry_state(&registry, &current);
+    for (argument, delivery) in [
+        (&old, &old_delivery),
+        (&current, &old_delivery),
+        (&old, &current_delivery),
+    ] {
+        assert_eq!(
+            registry.replace(argument, delivery, 20, &[policy()], 2.),
+            Err(Error::Revoked)
+        );
+        assert_eq!(registry_state(&registry, &current), before);
+    }
+    let child = registry
+        .replace(&current, &current_delivery, 20, &[policy()], 2.)
+        .unwrap();
+    assert_eq!(child[0].owner(), current.owner());
+    assert_eq!(child[0].deadline(), 101.);
+}
+
 #[derive(Default)]
 struct PhysicalReplacement {
     root: Option<Context>,
