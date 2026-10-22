@@ -1493,7 +1493,8 @@ describe('RustEngineExchange', () => {
     const sockets: Array<(text: string) => void> = [];
     const correctedTime = 1765805280000;
     expect(Date.now()).not.toBe(correctedTime);
-    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(correctedTime);
+    // An explicit host/tape clock owns REST and WS signing, independently of SDK time.
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(correctedTime + 60_000);
     const signedTimestamps: string[] = [];
     const subscriptionTimestamps: string[] = [];
     const writes: Array<{ method: string; body?: string }> = [];
@@ -1508,7 +1509,7 @@ describe('RustEngineExchange', () => {
       collateral: '{"netEquity":"1000","netEquityAvailable":"900","netEquityLocked":"100","pnlUnrealized":"0"}',
     };
     const transport: Transport = {
-      now: () => Date.now(),
+      now: () => correctedTime,
       connect: (_url, { onOpen, onMessage }) => {
         sockets.push(onMessage);
         setTimeout(onOpen, 0);

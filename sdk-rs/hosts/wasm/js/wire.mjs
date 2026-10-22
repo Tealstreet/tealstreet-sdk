@@ -51,10 +51,11 @@ export const marketQuantityUnits = (flags) => {
   return units;
 };
 // CAPABILITIES: a flag word (bit order below), then four-bit enum fields.
+// Null reserves the retired host-clock bit 14; later flags retain their positions.
 const CAPABILITY_FLAGS = [
   'clientOrderLookup', 'fillHistory', 'orderHistory', 'incomeHistory', 'fillsByOrderId', 'accountLeverage',
   'accountMarginType', 'cancelWithSymbols', 'amendWithSymbol', 'orderBookQuery', 'options', 'accountTier',
-  'closedPositions', 'balanceInfo', 'hostClock', 'marketRefresh',
+  'closedPositions', 'balanceInfo', null, 'marketRefresh',
   'stpControls', 'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
   'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
   'isolatedBookSubscriptions', 'inverseClosedPositions', 'scheduleCancel',
@@ -546,7 +547,9 @@ export class Frame {
     requireEnd(section, section.offset + 8);
     const [flags, enums] = new Uint32Array(this.buffer, section.offset, 2);
     const record = {};
-    CAPABILITY_FLAGS.forEach((name, bit) => { record[name] = ((flags >>> bit) & 1) === 1; });
+    CAPABILITY_FLAGS.forEach((name, bit) => {
+      if (name !== null) record[name] = ((flags >>> bit) & 1) === 1;
+    });
     CAPABILITY_ENUMS.forEach(([name, values], field) => {
       const value = values[(enums >>> (field * 4)) & 0xf];
       if (value === undefined) throw new Error(`unknown capability ${name}`);

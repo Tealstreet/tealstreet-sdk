@@ -59,7 +59,6 @@ export interface EngineCapabilities {
   accountTier: boolean;
   closedPositions: boolean;
   balanceInfo: boolean;
-  hostClock: boolean;
   marketRefresh: boolean;
   positionHistory: 'unsupported' | 'fillsAccount' | 'fillsSymbol' | 'bybit' | 'okx' | 'blofin' | 'wooOrders';
   closedPositionFormat: 'unsupported' | 'bybit' | 'okx' | 'blofin';

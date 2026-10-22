@@ -331,9 +331,13 @@ export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngin
   loadWasmEngine = loader;
 };
 
-let engineTransport: () => Transport = nativeTransport;
-/** Where engine sockets and requests go; tests replace it with a recording. */
-export const setRustEngineTransport = (factory: () => Transport) => {
+const synchronizedEngineTransport = (): Transport => ({
+  ...nativeTransport(),
+  now: () => virtualClock.getCurrentTimeMs(),
+});
+let engineTransport: (() => Transport) | undefined;
+/** Explicit hosts own their clock; omit the factory to restore the synchronized SDK default. */
+export const setRustEngineTransport = (factory?: () => Transport) => {
   engineTransport = factory;
 };
 
@@ -362,6 +366,7 @@ export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private readonly defaultHistoricalPositions = (this as BaseExchange).fetchHistoricalPositions;
   private host?: EngineHostType;
+  private engineNow = (): number => virtualClock.getCurrentTimeMs();
   private engineFailure?: Error;
   private publicFeedDisabled = false;
 
@@ -647,7 +652,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private wooJournal = async (opts: Parameters<BaseExchange['fetchHistoricalPositions']>[0]) => {
-    const to = opts.to ?? Date.now();
+    const to = opts.to ?? this.engineNow();
     const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
     const orders = await this.fetchHistoricalOrders({ from, to });
     const records = wooOrdersToPositionRecords(orders, {
@@ -777,6 +782,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.isPublicDataOnly && !this.signerSetup?.primaryComplete && isKeylessRemoteSigned(this.name, this.options)) {
       throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
     }
+    const transportFactory = engineTransport;
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {
         if (!this.isDisposed) return;
@@ -786,6 +792,11 @@ export class RustEngineExchange extends BaseExchange {
       this.startupWaiters.add(disposed);
       try {
         void loadWasmEngine(this.name)
+          .then(async (module) => {
+            if (this.isDisposed) throw new Error('Exchange disposed during startup');
+            if (!transportFactory) await virtualClock.start();
+            return module;
+          })
           .then(resolve, reject)
           .finally(() => this.startupWaiters.delete(disposed));
       } catch (error) {
@@ -808,7 +819,7 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    let transport = createEngineTransport(this.name, this.options, engineTransport(),this.signerSetup);
+    let transport = createEngineTransport(this.name, this.options, (transportFactory ?? synchronizedEngineTransport)(), this.signerSetup);
     if (this.bridgeConstruction.payloadSigning) {
       transport = paradexSigningTransport(this.options, transport);
       if (this.options.payloadSigner) transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
@@ -893,13 +904,12 @@ export class RustEngineExchange extends BaseExchange {
       this.signerSetup,
     );
     // Construction transfers allocation ownership only when EngineHost succeeds.
-    let hostClock = false;
     let host: EngineHost;
     try {
       if (engine.construction) this.constructionRecord = JSON.parse(engine.construction()) as EngineConstruction;
       host = new EngineHost(
         engine,
-        { ...transport, now: () => (hostClock ? virtualClock.getCurrentTimeMs() : transport.now()) },
+        transport,
         {
           onFrame: this.receiveFrame,
           onLog: this.receiveLog,
@@ -928,12 +938,12 @@ export class RustEngineExchange extends BaseExchange {
     }
     try {
       const capabilities = host.capabilities();
-      hostClock = capabilities.hostClock;
       this.adoptEngineCapabilities(capabilities);
     } catch (error) {
       host.dispose();
       throw error;
     }
+    this.engineNow = () => transport.now();
     this.host = host;
   };
 
@@ -1945,8 +1955,6 @@ export class RustEngineExchange extends BaseExchange {
     if (time != null) {
       if (typeof time !== 'number' || !Number.isSafeInteger(time))
         throw new Error('Hyperliquid scheduleCancel time must be a safe integer UTC timestamp in milliseconds');
-      if (time < virtualClock.getCurrentTimeMs() + 5_000)
-        throw new Error('Hyperliquid scheduleCancel time must be at least 5 seconds in the future');
     }
     if (this.routesToWorker) {
       await this.callWorker('scheduleCancel', time);
@@ -1955,6 +1963,8 @@ export class RustEngineExchange extends BaseExchange {
     const ready = this.capabilitiesFor('scheduleCancel');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.scheduleCancel) throw new Error('scheduleCancel is unavailable for this venue');
+    if (time != null && time < this.engineNow() + 5_000)
+      throw new Error('Hyperliquid scheduleCancel time must be at least 5 seconds in the future');
     await this.command({ op: 'scheduleCancel', ...(time == null ? {} : { time }) });
   };
 
@@ -2065,7 +2075,7 @@ export class RustEngineExchange extends BaseExchange {
    * under-counted history presented as complete is the failure the journal refuses.
    */
   private bybitJournal = async (opts: { account: string; from?: number; to?: number }) => {
-    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const to = opts.to ?? this.engineNow();
     const from = opts.from ?? to - 7 * 24 * 60 * 60 * 1000;
     if (this.isPublicDataOnly) return [];
     const rows = await this.fetchClosedPositionRows({ from, to }, false);

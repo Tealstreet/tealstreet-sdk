@@ -186,8 +186,11 @@ Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
 read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
 maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
-order-book queries, options, and whether signatures take the host clock as-is
-(`hostClock`: the host then passes the synced `virtualClock`). `RustEngineExchange` routes from that record,
+order-book queries and options. Clock selection is shared engine-host policy:
+the default SDK transport awaits the shared `virtualClock` startup and reads it
+dynamically for every venue. Explicit host/recording transports retain their own
+clock; native servers supply their OS clock and own its synchronization. There is no per-venue
+`hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
 `fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from

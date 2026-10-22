@@ -77,13 +77,13 @@ fn failed(actions: &[Action], owner: u32, outcome: Outcome) {
     );
 }
 #[test]
-fn perp_capability_and_synced_clock_are_enabled_while_spot_is_refused() {
+fn perp_schedule_capability_is_enabled_while_spot_is_refused() {
     let perp = serde_json::to_value(Hyperliquid::new(options()).capabilities()).unwrap();
     assert_eq!(perp["scheduleCancel"], true);
-    assert_eq!(perp["hostClock"], true);
+    assert!(perp.get("hostClock").is_none());
     let spot = serde_json::to_value(Hyperliquid::new_spot(options()).capabilities()).unwrap();
     assert_eq!(spot["scheduleCancel"], false);
-    assert_eq!(spot["hostClock"], false);
+    assert!(spot.get("hostClock").is_none());
 }
 #[test]
 fn arm_clear_and_null_are_signed_without_catalogue_or_order_side_effects() {

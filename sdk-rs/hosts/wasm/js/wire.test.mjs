@@ -1029,7 +1029,6 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     accountTier: false,
     closedPositions: true,
     balanceInfo: false,
-    hostClock: true,
     marketRefresh: false,
     stpControls: false,
     bybitExecutionControls: false,
@@ -1050,6 +1049,9 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     closedPositionFormat: 'unsupported',
     fillHistoryTime: 'asProvided',
   });
+  assert.deepEqual(capabilities(1 << 14, 0), capabilities(0, 0));
+  assert.equal(Object.hasOwn(capabilities(1 << 14, 0), 'hostClock'), false);
+  assert.equal(Object.hasOwn(capabilities(1 << 14, 0), 'null'), false);
   assert.equal(capabilities(1 << 15, 0).marketRefresh, true);
   assert.equal(capabilities(1 << 25, 0).scheduleCancel, true);
   assert.equal(capabilities(0, 0).scheduleCancel, false);
