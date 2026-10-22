@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { LocalSignerSetup, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
+import { derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
 
 const options = () =>
   ({
@@ -137,4 +138,83 @@ it('incomplete secondary setup reports typed invalidInput/notSent at constructio
   let failure: unknown;
   try { new LocalSignerSetup({ ...options(), secondary_secret: '' }); } catch (error) { failure = error; }
   expect(failure).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+});
+
+
+it.each([
+  ['NEL is trimmed', '\u0085', true, false],
+  ['BOM is preserved', '\ufeff', true, true],
+  ['ASCII whitespace is trimmed', ' \t\n', true, false],
+  ['interior whitespace is preserved', '  key value  ', true, true],
+  ['caller preservation is retained', '\u0085', false, true],
+] as const)('%s in synchronous provider intent', (_label, key, trimCredential, complete) => {
+  const input = { ...options(), key, localSigner: { primary: { trimCredential } } };
+  const setup = new LocalSignerSetup(input);
+  expect(setup.primaryComplete).toBe(complete);
+  const exchange = new RustEngineExchange('binance', input, new DefaultStore());
+  try {
+    expect(exchange.isPublicDataOnly).toBe(!complete);
+    expect(JSON.stringify(exchange.options)).not.toContain('audit-secret-sentinel');
+    expect(input.key).toBe(key);
+  } finally {
+    setup.dispose();
+    exchange.dispose();
+  }
+});
+
+
+describe('shared credential setup policy', () => {
+  it('declares MEXC primary trimming and secondary preservation once without enabling signing', () => {
+    const policy = deriveSignerSetupPolicy('mexc');
+    expect(policy).toEqual({ primary: { trimCredential: true }, secondary: { trimCredential: false } });
+    expect(deriveSignerSetupPolicy('binance')).toEqual({});
+    const input = { ...options(), key: '\u0085 primary ', secondary_key: ' secondary ', localSigner: {
+      primary: { trimCredential: false, stableId: 'primary/7' },
+      secondary: { trimCredential: true, stableId: 'read/7' },
+    } };
+    const setup = new LocalSignerSetup(input, policy);
+    let received: unknown;
+    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    setup.construct(Engine as never, 'mexc', '{}');
+    expect(received).toEqual({
+      primary: { key: input.key, secret: input.secret, passphrase: input.passphrase, stableId: 'primary/7', trimCredential: true },
+      secondary: { key: input.secondary_key, secret: input.secondary_secret, passphrase: input.secondary_passphrase, stableId: 'read/7', trimCredential: false },
+    });
+    expect(input.localSigner.primary.trimCredential).toBe(false);
+    expect(input.localSigner.secondary.trimCredential).toBe(true);
+    expect(input.key).toBe('\u0085 primary ');
+    expect(() => new RustEngineExchange('mexc', input, new DefaultStore())).toThrow(/not supported/);
+  });
+
+  it.each([['\u0085', false], ['\ufeff', true], [' \t', false], ['  a b  ', true]] as const)(
+    'uses native whitespace semantics for MEXC intent %j', (key, present) => {
+      const input = { ...options(), key, localSigner: { primary: { trimCredential: false } } };
+      const setup = new LocalSignerSetup(input, deriveSignerSetupPolicy('mexc'));
+      expect(setup.primaryComplete).toBe(present);
+      expect(derivePublicMode('mexc', input, undefined, setup.credentialPresence))
+        .toEqual({ canSign: present, publicDataOnly: !present });
+      setup.dispose();
+    },
+  );
+
+  it('does not invent slots solely because a family has a setup policy', () => {
+    const setup = new LocalSignerSetup({ publicDataOnly: true } as ExchangeOptions, deriveSignerSetupPolicy('mexc'));
+    let received: unknown;
+    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    setup.construct(Engine as never, 'mexc', '{}');
+    expect(received).toEqual({});
+    expect(setup.primaryComplete).toBe(false);
+    expect(setup.hasSecondary).toBe(false);
+  });
+
+  it('validates secondary effective presence without trimming secrets or overriding undeclared metadata', () => {
+    const input = { ...options(), secondary_key: '\u0085', localSigner: { secondary: { trimCredential: true } } };
+    expect(() => new LocalSignerSetup(input)).toThrow(/nonempty key and secret/);
+    const setup = new LocalSignerSetup(input, deriveSignerSetupPolicy('mexc'));
+    expect(setup.hasSecondary).toBe(true);
+    let received: unknown;
+    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    setup.construct(Engine as never, 'mexc', '{}');
+    expect(received).toMatchObject({ secondary: { key: '\u0085', secret: input.secondary_secret, passphrase: input.secondary_passphrase, trimCredential: false } });
+  });
 });

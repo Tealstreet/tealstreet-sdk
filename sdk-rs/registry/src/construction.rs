@@ -1,4 +1,5 @@
 //! Synchronous SDK and native construction share these declarative conditions.
+use safe_cex_engine::signing::{CredentialSetupPolicy, IdentitySetupPolicy};
 use serde::{Deserialize, Serialize};
 
 use crate::EngineOptions;
@@ -25,6 +26,7 @@ struct Rule {
     private_eligible: Option<Conditions>,
     explicit_private_error: Option<&'static str>,
     bridge: BridgeRule,
+    signer_setup: CredentialSetupPolicy,
 }
 
 struct BridgeRule {
@@ -88,6 +90,11 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
 }
 
 include!(concat!(env!("OUT_DIR"), "/construction_rules.rs"));
+
+/// Family declarations are compiled from the shared construction table.
+pub fn signer_setup_policy(venue: &str) -> CredentialSetupPolicy {
+    venue_rule(venue).unwrap_or(&DEFAULT_RULE).signer_setup
+}
 
 /// Raw caller intent, supplied only by SDKs that use shared construction rules.
 #[derive(Deserialize)]

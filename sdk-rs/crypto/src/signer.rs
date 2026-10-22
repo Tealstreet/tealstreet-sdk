@@ -2,8 +2,8 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, Encoding, KeyRef, Operation, PayloadPart, SignError, SignFuture, SignRequest,
-    SignResult, Signer,
+    Algorithm, CredentialSetupPolicy, Encoding, KeyRef, Operation, PayloadPart, SignError,
+    SignFuture, SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::HashMap;
@@ -64,6 +64,23 @@ impl LocalSigner {
     pub fn from_setup(
         setup: LocalSetup,
     ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
+        Self::from_setup_with_policy(setup, CredentialSetupPolicy::default())
+    }
+    /// Shared family rules override only declared fields before installation.
+    pub fn from_setup_with_policy(
+        mut setup: LocalSetup,
+        policy: CredentialSetupPolicy,
+    ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
+        for (identity, rule) in [
+            (&mut setup.primary, policy.primary),
+            (&mut setup.secondary, policy.secondary),
+        ] {
+            if let Some(identity) = identity
+                && let Some(trim) = rule.and_then(|rule| rule.trim_credential)
+            {
+                identity.trim_credential = trim;
+            }
+        }
         let mut signer = Self::new();
         let mut install = |slot: &str, identity: Option<LocalIdentity>| {
             identity
@@ -130,13 +147,20 @@ impl LocalSigner {
     pub fn from_json(
         input: String,
     ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
+        Self::from_json_with_policy(input, CredentialSetupPolicy::default())
+    }
+    /// Own and wipe the setup buffer under the same bounds as policy-free setup.
+    pub fn from_json_with_policy(
+        input: String,
+        policy: CredentialSetupPolicy,
+    ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
         let input = Zeroizing::new(input);
         if input.len() > 4 * 1024 * 1024 {
             return Err(SignError::InvalidRequest);
         }
         let setup: LocalSetup =
             serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
-        Self::from_setup(setup)
+        Self::from_setup_with_policy(setup, policy)
     }
     pub fn remove(&mut self, reference: &KeyRef) {
         self.keys.remove(reference);
@@ -296,6 +320,138 @@ impl Signer for LocalSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_policy_overrides_only_declared_trim_fields_before_present_and_hmac() {
+        use safe_cex_engine::signing::IdentitySetupPolicy;
+        let policy = CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                trim_credential: Some(true),
+            }),
+            secondary: Some(IdentitySetupPolicy {
+                trim_credential: Some(false),
+            }),
+        };
+        let setup = r#"{
+            "primary":{"key":" primary-key ","secret":" primary-secret ","passphrase":" primary-pass ","stableId":"account/primary","trimCredential":false},
+            "secondary":{"key":" secondary-key ","secret":" secondary-secret ","passphrase":" secondary-pass ","stableId":"account/secondary","trimCredential":true}
+        }"#;
+        let (signer, identities) =
+            LocalSigner::from_json_with_policy(setup.into(), policy).unwrap();
+        for (identity, key, passphrase, stable, mac) in [
+            (
+                identities.primary.unwrap(),
+                "primary-key",
+                " primary-pass ",
+                "account/primary",
+                "4f8d4471dddca1b3792fc9f83256ce90afab9d5c79a71336c6ff3a6d6b18cb95",
+            ),
+            (
+                identities.secondary.unwrap(),
+                " secondary-key ",
+                " secondary-pass ",
+                "account/secondary",
+                "db697a69b671ef53c2dc18ee6491eaeecd3e428d152f41385efcc5f82289a7fb",
+            ),
+        ] {
+            assert_eq!(identity.require_stable_id(), Ok(stable));
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![
+                    Operation::Present {
+                        key: identity.credential.clone(),
+                    },
+                    Operation::Present {
+                        key: identity.passphrase.unwrap(),
+                    },
+                    Operation::Sign {
+                        algorithm: Algorithm::HmacSha256,
+                        key: identity.signing,
+                        payload: vec![
+                            PayloadPart::Bytes {
+                                bytes: b"fixture:".to_vec(),
+                            },
+                            PayloadPart::Credential {
+                                key: identity.credential,
+                            },
+                            PayloadPart::Bytes {
+                                bytes: b":body".to_vec(),
+                            },
+                        ],
+                    },
+                ],
+            };
+            let result = signer.sign_now(&request).unwrap();
+            assert_eq!(result.values[0], key.as_bytes());
+            assert_eq!(result.values[1], passphrase.as_bytes());
+            // Fixed Python stdlib HMAC oracle, including surrounding secret spaces.
+            assert_eq!(crate::hex(&result.values[2]), mac);
+        }
+    }
+
+    #[test]
+    fn undeclared_setup_policy_preserves_caller_metadata_and_absent_slots() {
+        use safe_cex_engine::signing::IdentitySetupPolicy;
+        let (signer, identities) = LocalSigner::from_setup_with_policy(
+            LocalSetup {
+                primary: Some(LocalIdentity {
+                    key: Secret::new(" primary-key ".into()),
+                    secret: Secret::new("primary-secret".into()),
+                    trim_credential: true,
+                    ..Default::default()
+                }),
+                secondary: None,
+            },
+            CredentialSetupPolicy {
+                primary: Some(IdentitySetupPolicy::default()),
+                secondary: Some(IdentitySetupPolicy {
+                    trim_credential: Some(true),
+                }),
+            },
+        )
+        .unwrap();
+        assert!(identities.secondary.is_none());
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Present {
+                key: identities.primary.unwrap().credential,
+            }],
+        };
+        assert_eq!(
+            signer.sign_now(&request).unwrap().values,
+            [b"primary-key".to_vec()]
+        );
+        assert_eq!(
+            serde_json::from_str::<CredentialSetupPolicy>("{}").unwrap(),
+            CredentialSetupPolicy::default()
+        );
+        for invalid in [
+            r#"{"primry":{}}"#,
+            r#"{"primary":{"trimCredental":true}}"#,
+            r#"{"secondary":{"trimCredential":"true"}}"#,
+        ] {
+            assert!(serde_json::from_str::<CredentialSetupPolicy>(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn policy_setup_retains_json_bounds_and_closed_failures() {
+        let policy = CredentialSetupPolicy::default();
+        for input in [
+            " ".repeat(4 * 1024 * 1024 + 1),
+            r#"{"primary":{"secret":"sentinel"},"unknown":"sentinel"}"#.into(),
+            r#"{"primary":{"secret":"sentinel","secretEncoding":"hex"}}"#.into(),
+            r#"{"primary":{"stableId":"bad\nmapping"}}"#.into(),
+        ] {
+            assert!(matches!(
+                LocalSigner::from_json_with_policy(input, policy),
+                Err(SignError::InvalidRequest)
+            ));
+        }
+    }
+
     fn vector() -> serde_json::Value {
         serde_json::from_str(include_str!("../tests/fixtures/hmac/binance.json")).unwrap()
     }

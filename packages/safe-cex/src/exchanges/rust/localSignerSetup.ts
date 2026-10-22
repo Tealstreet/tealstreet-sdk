@@ -1,6 +1,7 @@
 import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
+import type { CredentialPresence, CredentialSetupPolicy, IdentitySetupPolicy } from './construction';
 
 type LocalIdentity = LocalIdentityMetadata & { key?: string; secret?: string; passphrase?: string };
 type Credentials = { primary?: LocalIdentity; secondary?: LocalIdentity };
@@ -32,31 +33,49 @@ const signerMetadata = (input: unknown): LocalSignerMetadata => {
   return { primary: identityMetadata(value.primary), secondary: identityMetadata(value.secondary) };
 };
 
+// Match Rust str::trim's Unicode White_Space semantics. JS String.trim also
+// removes BOM and keeps NEL, which would disagree with the provider's key bytes.
+const credentialPresent = (key: string | undefined, trim: boolean): boolean =>
+  typeof key === 'string' && (trim ? key.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '') : key).length > 0;
+
+const effectiveMetadata = (
+  metadata: LocalIdentityMetadata | undefined,
+  policy: IdentitySetupPolicy | undefined,
+): LocalIdentityMetadata | undefined =>
+  policy?.trimCredential === undefined ? metadata : { ...metadata, trimCredential: policy.trimCredential };
+
 /** Trusted local-provider setup. Secret strings stay inside this capsule until
  * consumed by the Rust provider; JS cannot promise physical string zeroization. */
 export class LocalSignerSetup {
   #credentials: Credentials | undefined;
   readonly hasSecondary: boolean;
   readonly primaryComplete: boolean;
+  readonly credentialPresence: CredentialPresence;
 
-  constructor(options: ExchangeOptions) {
+  constructor(options: ExchangeOptions, policy: CredentialSetupPolicy = {}) {
     const setupMetadata = signerMetadata(options.localSigner);
+    const primaryMetadata = effectiveMetadata(setupMetadata.primary, policy.primary);
+    const secondaryMetadata = effectiveMetadata(setupMetadata.secondary, policy.secondary);
     const secondary =
       options.secondary_key !== undefined ||
       options.secondary_secret !== undefined ||
       options.secondary_passphrase !== undefined ||
       setupMetadata.secondary !== undefined;
-    if (secondary && (!options.secondary_key || !options.secondary_secret)) {
+    if (secondary && (!credentialPresent(options.secondary_key, secondaryMetadata?.trimCredential === true) || !options.secondary_secret)) {
       const message = 'Rust engine secondary signing keys require a nonempty key and secret';
       throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
     }
     this.hasSecondary = secondary;
-    this.primaryComplete = Boolean(options.key && options.secret);
+    this.credentialPresence = Object.freeze({
+      key: credentialPresent(options.key, primaryMetadata?.trimCredential === true),
+      secret: Boolean(options.secret),
+    });
+    this.primaryComplete = this.credentialPresence.key && this.credentialPresence.secret;
     this.#credentials = {
       ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
-        ? { primary: { ...setupMetadata.primary, key: options.key, secret: options.secret, passphrase: options.passphrase } }
+        ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }
         : {}),
-      ...(secondary ? { secondary: { ...setupMetadata.secondary, key: options.secondary_key, secret: options.secondary_secret, passphrase: options.secondary_passphrase } } : {}),
+      ...(secondary ? { secondary: { ...secondaryMetadata, key: options.secondary_key, secret: options.secondary_secret, passphrase: options.secondary_passphrase } } : {}),
     };
   }
 

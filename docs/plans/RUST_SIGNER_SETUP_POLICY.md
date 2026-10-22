@@ -11,7 +11,7 @@ per-family/per-slot field policy once and apply it inside trusted setup before
 opaque identities are installed. Never trim secrets in a venue or recipe.
 
 1. Audit trusted setup and synchronous public/private intent. Define one
-   declarative policy with preservation as the default and MEXC primary-only
+   declarative policy preserving caller metadata by default and applying MEXC primary-only
    credential trimming. Policy-selected fields are authoritative; caller
    metadata cannot silently undo the venue contract. Keep secret decoding,
    explicit stable IDs and absent/empty passphrases unchanged.
@@ -34,7 +34,7 @@ opaque identities are installed. Never trim secrets in a venue or recipe.
 Architecture gate: this extends the shared credential setup choke point.
 It is not a per-venue signer or normalization workaround. MEXC adoption still
 waits for shared RequestContext actual-release pacing; Phemex separately waits
-for raw/protocol expiry projection. Current queue #1734 -> #1735 -> #1728
+for raw/protocol expiry projection. Current queue #1734 -> #1736 -> #1735 -> #1728
 retains priority; this work may develop locally/CI meanwhile.
 
 Independent plan review resolved the defaults: undeclared fields retain caller
@@ -51,3 +51,12 @@ and consumed by the TS resolver. Crypto applies resolved policy once during
 trusted installation. Existing policy-free primitive setup APIs preserve caller
 metadata; venue-aware registry raw/JSON adapters are used by official native/WASM
 construction. Opaque external providers remain responsible for compliant material.
+
+Implementation checkpoint: the shared pipeline is implemented without enabling
+MEXC signing. Full focused engine/crypto/Binance/registry/host tests733 pass;
+standalone MEXC+dispatch-signing provider groups9 pass; SDK groups23 plus
+typecheck/lint and Rust strict Clippy/fmt/bans pass. Disabling only the native
+policy override reproduces three behavior RED regressions, restored to GREEN.
+Two SDK RED cases reproduce stale primaryComplete for NEL/ASCII whitespace.
+Independent correctness/adversarial reviews are clean across all13 source/test
+paths. CI/replay proof and actual intervening landing integrations remain open.

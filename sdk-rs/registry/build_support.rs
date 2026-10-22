@@ -27,6 +27,21 @@ struct Rule {
     explicit_private_error: Option<String>,
     #[serde(default)]
     bridge: BridgeRule,
+    #[serde(default)]
+    signer_setup: CredentialSetupPolicy,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+struct CredentialSetupPolicy {
+    primary: Option<IdentitySetupPolicy>,
+    secondary: Option<IdentitySetupPolicy>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+struct IdentitySetupPolicy {
+    trim_credential: Option<bool>,
 }
 
 #[derive(Default, Debug, Deserialize)]
@@ -92,8 +107,20 @@ fn rule(value: &Rule) -> String {
         bridge.isolated_book_subscriptions,
         bridge.dispatch_signing
     );
+    let slot = |value: &Option<IdentitySetupPolicy>| match value {
+        Some(value) => format!(
+            "Some(IdentitySetupPolicy {{ trim_credential: {:?} }})",
+            value.trim_credential
+        ),
+        None => "None".into(),
+    };
+    let signer_setup = format!(
+        "CredentialSetupPolicy {{ primary: {}, secondary: {} }}",
+        slot(&value.signer_setup.primary),
+        slot(&value.signer_setup.secondary),
+    );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge} }}",
+        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup} }}",
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )
@@ -111,4 +138,38 @@ pub fn generate(json: &str) -> Result<String, String> {
     }
     output.push_str("_ => None,\n} }\n");
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate;
+
+    #[test]
+    fn signer_setup_rules_emit_constant_explicit_and_undeclared_fields() {
+        let output = generate(r#"{
+            "default":{"canSign":[],"privateEligible":[]},
+            "venues":{
+                "mexc":{"signerSetup":{"primary":{"trimCredential":true},"secondary":{"trimCredential":false}}},
+                "empty":{"signerSetup":{"primary":{}}}
+            }
+        }"#).unwrap();
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true) }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false) }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
+    }
+
+    #[test]
+    fn malformed_signer_setup_rules_fail_closed_at_build_time() {
+        for setup in [
+            r#"{"primry":{}}"#,
+            r#"{"primary":{"trimCredental":true}}"#,
+            r#"{"secondary":{"trimCredential":"false"}}"#,
+            r#"{"secondary":{"secret":"not-a-policy-field"}}"#,
+        ] {
+            let rules = format!(
+                r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"signerSetup":{setup}}}}}}}"#
+            );
+            assert!(generate(&rules).is_err());
+        }
+    }
 }

@@ -579,7 +579,7 @@ impl WasmEngine {
                 ));
             }
             let (signer, identities) =
-                safe_cex_venues::local_signer_from_json(std::mem::take(&mut *input))
+                safe_cex_venues::local_signer_from_json_for(venue, std::mem::take(&mut *input))
                     .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
@@ -587,7 +587,8 @@ impl WasmEngine {
             Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
         } else if dispatch_signing {
             let (signer, identities) =
-                safe_cex_venues::prepare_local_signer(&mut options).map_err(construction_error)?;
+                safe_cex_venues::prepare_local_signer_for(venue, &mut options)
+                    .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
         } else {

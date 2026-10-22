@@ -36,7 +36,7 @@ compile_error!(
 );
 
 mod construction;
-pub use construction::{BridgeConstruction, PublicMode};
+pub use construction::{BridgeConstruction, PublicMode, signer_setup_policy};
 #[cfg(feature = "bybit")]
 mod hyro;
 #[cfg(feature = "bybit")]
@@ -463,6 +463,35 @@ pub fn prepare_local_signer(
     ),
     VenueError,
 > {
+    prepare_local_signer_with_policy(options, Default::default())
+}
+
+/// Trusted legacy setup with the shared family policy applied before installation.
+#[cfg(feature = "dispatch-signing")]
+pub fn prepare_local_signer_for(
+    venue: &str,
+    options: &mut EngineOptions,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    prepare_local_signer_with_policy(options, construction::signer_setup_policy(venue))
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn prepare_local_signer_with_policy(
+    options: &mut EngineOptions,
+    policy: safe_cex_engine::signing::CredentialSetupPolicy,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
     let primary = if options.key.is_some() || options.secret.is_some() {
         Some(LocalIdentity {
@@ -483,8 +512,9 @@ pub fn prepare_local_signer(
             passphrase: read.passphrase.take().map(Secret::new),
             ..Default::default()
         });
-    let (signer, identities) = LocalSigner::from_setup(LocalSetup { primary, secondary })
-        .map_err(|_| invalid("Invalid local signer setup"))?;
+    let (signer, identities) =
+        LocalSigner::from_setup_with_policy(LocalSetup { primary, secondary }, policy)
+            .map_err(|_| invalid("Invalid local signer setup"))?;
     Ok((std::sync::Arc::new(signer), identities))
 }
 /// Separate trusted JS/native provider setup, with fixed parse failures.
@@ -498,8 +528,38 @@ pub fn local_signer_from_json(
     ),
     VenueError,
 > {
-    let (signer, identities) = safe_cex_crypto::signer::LocalSigner::from_json(input)
-        .map_err(|_| invalid("Invalid local signer setup"))?;
+    local_signer_from_json_with_policy(input, Default::default())
+}
+
+/// Separate trusted setup with compiled family rules; not family adoption.
+#[cfg(feature = "dispatch-signing")]
+pub fn local_signer_from_json_for(
+    venue: &str,
+    input: String,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    local_signer_from_json_with_policy(input, construction::signer_setup_policy(venue))
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn local_signer_from_json_with_policy(
+    input: String,
+    policy: safe_cex_engine::signing::CredentialSetupPolicy,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    let (signer, identities) =
+        safe_cex_crypto::signer::LocalSigner::from_json_with_policy(input, policy)
+            .map_err(|_| invalid("Invalid local signer setup"))?;
     Ok((std::sync::Arc::new(signer), identities))
 }
 
@@ -518,7 +578,7 @@ pub fn build<T: Visit>(
         let signer = if construction::bridge(venue, &options).dispatch_signing
             && options.signing.is_none()
         {
-            let (provider, identities) = prepare_local_signer(&mut options)?;
+            let (provider, identities) = prepare_local_signer_for(venue, &mut options)?;
             options.signing = Some(identities);
             Some(provider)
         } else {

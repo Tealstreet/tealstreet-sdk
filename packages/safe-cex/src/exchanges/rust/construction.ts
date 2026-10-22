@@ -4,10 +4,19 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import rules from './construction-rules.json';
 import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 
+export type IdentitySetupPolicy = { trimCredential?: boolean };
+export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
+export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
+
 type Rule = {
   canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string;
+  signerSetup?: CredentialSetupPolicy;
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
+
+/** Trusted setup policy; unspecified fields retain explicit caller metadata. */
+export const deriveSignerSetupPolicy = (name: ExchangeName): CredentialSetupPolicy =>
+  (rules.venues as Record<string, Rule>)[name]?.signerSetup ?? {};
 
 /** Construction-time policy from the same declarations the native registry reports. */
 export const deriveBridgeConstruction = (name: ExchangeName, options: ExchangeOptions): EngineBridgeConstruction => {
@@ -28,11 +37,12 @@ export const derivePublicMode = (
   name: ExchangeName,
   options: ExchangeOptions,
   nativeVersion?: 'v1' | 'v3',
+  credentialPresence?: CredentialPresence,
 ): Required<Pick<EngineConstruction, 'canSign' | 'publicDataOnly'>> => {
   const rule = (rules.venues as Record<string, Rule>)[name];
   const inputs: Record<string, boolean> = {
-    key: Boolean(options.key),
-    secret: Boolean(options.secret),
+    key: credentialPresence?.key ?? Boolean(options.key),
+    secret: credentialPresence?.secret ?? Boolean(options.secret),
     remoteSigner: Boolean(options.remoteSigner),
     payloadSigner: Boolean(options.payloadSigner),
     applicationId: Boolean(options.applicationId),

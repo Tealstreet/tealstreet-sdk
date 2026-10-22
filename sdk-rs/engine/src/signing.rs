@@ -7,6 +7,21 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+/// Non-secret rules applied only while trusted setup installs provider material.
+/// An undeclared slot/field preserves the caller's setup metadata.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct CredentialSetupPolicy {
+    pub primary: Option<IdentitySetupPolicy>,
+    pub secondary: Option<IdentitySetupPolicy>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct IdentitySetupPolicy {
+    pub trim_credential: Option<bool>,
+}
+
 /// Opaque provider-owned identity. This is not an API key or a private key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]

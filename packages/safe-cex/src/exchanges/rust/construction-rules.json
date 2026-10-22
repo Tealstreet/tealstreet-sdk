@@ -4,6 +4,7 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "mexc": {"signerSetup": {"primary": {"trimCredential": true}, "secondary": {"trimCredential": false}}},
     "coinbase": {"canSign": [["key"]], "bridge": {"primaryCredentialsOnly": true}},
     "coinbasespot": {"canSign": [["key"]], "bridge": {"spot": true, "primaryCredentialsOnly": true}},
     "txflow": {"canSign": [["secret"], ["applicationId"]], "privateEligible": []},
