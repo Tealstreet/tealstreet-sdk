@@ -759,7 +759,7 @@ impl Okx {
                 cx.store.set_hedged(hedged);
                 self.account.account_level = level;
                 self.account.configured = true;
-                self.connect(cx, PRIVATE);
+                self.ensure_feed(cx, PRIVATE);
                 self.account_refresh(cx);
                 if self.account.tick.is_none() {
                     self.account.tick = Some(cx.set_timer(2_000.0));

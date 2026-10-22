@@ -194,6 +194,23 @@ impl<P> Cx<'_, P> {
 }
 
 impl<V: Venue> Engine<V> {
+    pub(super) fn has_socket_work(&self) -> bool {
+        !self.io.socket_effects.is_empty()
+            || !self.io.socket_proposals.is_empty()
+            || self
+                .io
+                .socket_driver
+                .frames_ready(self.io.dispatch_now, |socket| {
+                    self.io.signing.has_socket(socket)
+                })
+            || self.io.socket_after.iter().any(|(epoch, _)| {
+                self.io.socket_driver.one_shot_ready(
+                    *epoch,
+                    self.io.dispatch_now,
+                    self.io.signing.has_socket(epoch.socket()),
+                )
+            })
+    }
     fn socket_mutate<R>(
         &mut self,
         now: f64,

@@ -1058,6 +1058,7 @@ impl Polls {
     }
 }
 
+#[cfg(feature = "managed-sockets")]
 #[path = "engine_socket.rs"]
 mod managed_sockets;
 
@@ -1107,13 +1108,21 @@ struct Io<P> {
     auth_failure_counted: bool,
     /// Each retried read's latest Error time and digit-normalised text, by call site.
     retried_failures: HashMap<&'static str, (f64, String)>,
+    #[cfg(feature = "managed-sockets")]
     socket_driver: crate::socket_driver::Driver,
+    #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
+    #[cfg(feature = "managed-sockets")]
     socket_failed: bool,
+    #[cfg(feature = "managed-sockets")]
     socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
+    #[cfg(feature = "managed-sockets")]
     socket_proposals: std::collections::VecDeque<managed_sockets::Proposal>,
+    #[cfg(feature = "managed-sockets")]
     socket_proposal_bytes: usize,
+    #[cfg(feature = "managed-sockets")]
     socket_proposal_next: u64,
+    #[cfg(feature = "managed-sockets")]
     socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
 }
 
@@ -1162,19 +1171,37 @@ impl<P> Default for Io<P> {
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
             retried_failures: HashMap::new(),
+            #[cfg(feature = "managed-sockets")]
             socket_driver: Default::default(),
+            #[cfg(feature = "managed-sockets")]
             managed_sockets: false,
+            #[cfg(feature = "managed-sockets")]
             socket_failed: false,
+            #[cfg(feature = "managed-sockets")]
             socket_effects: Default::default(),
+            #[cfg(feature = "managed-sockets")]
             socket_proposals: Default::default(),
+            #[cfg(feature = "managed-sockets")]
             socket_proposal_bytes: 0,
+            #[cfg(feature = "managed-sockets")]
             socket_proposal_next: 0,
+            #[cfg(feature = "managed-sockets")]
             socket_after: Default::default(),
         }
     }
 }
 
 impl<P> Io<P> {
+    fn managed_socket_active(&self) -> bool {
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.managed_sockets
+        }
+        #[cfg(not(feature = "managed-sockets"))]
+        {
+            false
+        }
+    }
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
         Some(self.signatures.swap_remove(index).1)
@@ -1197,6 +1224,10 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    #[cfg(not(feature = "managed-sockets"))]
+    fn managed_send_allowed(&self, _socket: SocketId) -> bool {
+        true
+    }
     /// Calibrated venue UTC for outbound timestamps, absolute expiry and
     /// time-based nonces. Timers, deadlines and emitted data retain `self.now`.
     pub fn protocol_now(&self) -> f64 {
@@ -1225,7 +1256,7 @@ impl<P> Cx<'_, P> {
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
         let spec = spec.into();
-        if self.io.managed_sockets
+        if self.io.managed_socket_active()
             || spec.channel == Some(SocketChannel::Public)
                 && self.io.public_feed_policy != PublicFeedPolicy::Direct
         {
@@ -1308,7 +1339,8 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn close(&mut self, socket: SocketId) {
-        if self.io.managed_sockets {
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
             if let Some(epoch) = self.io.socket_driver.state.socket_epoch(socket) {
                 self.retire_socket(epoch.feed(), crate::socket_lifecycle::RetireReason::Stopped);
             }
@@ -2020,6 +2052,7 @@ pub trait Venue {
         self.on_request_failed(cx, pending, error);
     }
 
+    #[cfg(feature = "managed-sockets")]
     fn socket_control(
         &self,
         _store: &Store,
@@ -2029,9 +2062,11 @@ pub trait Venue {
     ) -> crate::socket_lifecycle::Control {
         crate::socket_lifecycle::Control::Other
     }
+    #[cfg(feature = "managed-sockets")]
     fn socket_startup_ready(&self, _store: &Store) -> bool {
         false
     }
+    #[cfg(feature = "managed-sockets")]
     fn on_socket_event(
         &mut self,
         _cx: &mut Cx<'_, Self::Pending>,
@@ -2039,6 +2074,7 @@ pub trait Venue {
     ) -> Result<(), crate::socket_lifecycle::SocketError> {
         Err(crate::socket_lifecycle::SocketError::NotPermitted)
     }
+    #[cfg(feature = "managed-sockets")]
     fn encode_socket_interests(
         &self,
         _store: &Store,
@@ -2744,7 +2780,8 @@ impl<V: Venue> Engine<V> {
             self.startup_watch_at =
                 watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
         }
-        if self.io.managed_sockets {
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
             // Managed ingress shares the ordinary event prelude and epilogue.
             // In particular health accounting is reset once per host event.
             if self.handle_managed_socket(now, &event) {
@@ -3180,7 +3217,7 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
-                if cx.io.managed_sockets {
+                if cx.io.managed_socket_active() {
                     cx.close(socket);
                 } else {
                     cx.close(socket);
@@ -3198,6 +3235,7 @@ impl<V: Venue> Engine<V> {
         result: Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
         use crate::signing_dispatch::Completion;
+        #[cfg(feature = "managed-sockets")]
         if let Some((socket, connect)) = self.io.signing.outbound_socket(attempt)
             && !self.socket_gate(now, socket, connect)
         {
@@ -3295,7 +3333,10 @@ impl<V: Venue> Engine<V> {
         loop {
             while let Some(action) = queued.pop_front() {
                 let emitted = self.io.actions.len();
-                let live = if !self.io.managed_sockets {
+                #[cfg(not(feature = "managed-sockets"))]
+                let live = true;
+                #[cfg(feature = "managed-sockets")]
+                let live = if !self.io.managed_socket_active() {
                     true
                 } else {
                     match &action {
@@ -3449,12 +3490,20 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    #[cfg(not(feature = "managed-sockets"))]
+    fn process_socket_work(&mut self, _now: f64) {}
+    #[cfg(not(feature = "managed-sockets"))]
+    fn has_socket_work(&self) -> bool {
+        false
+    }
+
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         self.process_socket_work(self.io.dispatch_now);
         self.dispatch_actions(self.io.dispatch_now);
         self.process_socket_work(self.io.dispatch_now);
-        if self.io.managed_sockets {
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
             self.fence_socket_actions(self.io.dispatch_now);
             self.dispatch_actions(self.io.dispatch_now);
             self.drain_socket_frames(self.io.dispatch_now);
@@ -3481,21 +3530,7 @@ impl<V: Venue> Engine<V> {
     pub fn has_actions(&self) -> bool {
         !self.io.actions.is_empty()
             || !self.io.signing_admission.is_empty()
-            || !self.io.socket_effects.is_empty()
-            || !self.io.socket_proposals.is_empty()
-            || self
-                .io
-                .socket_driver
-                .frames_ready(self.io.dispatch_now, |socket| {
-                    self.io.signing.has_socket(socket)
-                })
-            || self.io.socket_after.iter().any(|(epoch, _)| {
-                self.io.socket_driver.one_shot_ready(
-                    *epoch,
-                    self.io.dispatch_now,
-                    self.io.signing.has_socket(epoch.socket()),
-                )
-            })
+            || self.has_socket_work()
             || self.io.signing.next_work().is_some()
             || self.store.rejected_empty_catalogue()
     }

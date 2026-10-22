@@ -204,7 +204,7 @@ impl BitunixFutures {
             .channel(channel)
             .feed(identity, recover)
     }
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed) {
+    fn ensure_feed(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed) {
         if let Err(error) = self.managed_connect(cx, feed) {
             cx.notice(
                 Level::Error,
@@ -576,7 +576,7 @@ impl Venue for BitunixFutures {
                 rows.shrink_to_fit();
                 cx.store.set_markets(rows);
                 self.discovery.succeeded(cx, DiscoveryRead::Markets);
-                self.connect(cx, Feed::Futures);
+                self.ensure_feed(cx, Feed::Futures);
                 self.tickers(cx);
                 self.private_start(cx);
             }
@@ -587,7 +587,7 @@ impl Venue for BitunixFutures {
                 let count = cx.store.markets().len();
                 for start in (0..count).step_by(300) {
                     for channel in ["ticker", "price"] {
-                        self.connect(
+                        self.ensure_feed(
                             cx,
                             Feed::Public {
                                 channel,

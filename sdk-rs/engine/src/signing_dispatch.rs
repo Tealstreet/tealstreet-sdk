@@ -199,6 +199,7 @@ impl Dispatch {
     }
     /// Read-only target for engine socket epoch/expiry admission. The pending
     /// recipe and all HTTP lifecycle state remain owned by Dispatch.
+    #[cfg(feature = "managed-sockets")]
     pub fn outbound_socket(&self, attempt: RequestId) -> Option<(SocketId, bool)> {
         let pending = self
             .pending

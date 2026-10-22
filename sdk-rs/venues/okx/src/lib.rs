@@ -428,7 +428,7 @@ impl Okx {
         );
     }
 
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+    fn ensure_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         if let Err(error) = self.managed_connect(cx, channel) {
             cx.notice(
                 Level::Error,
@@ -1230,10 +1230,10 @@ impl Venue for Okx {
                 self.price_tickers = price_ticker_indexes(cx.store);
                 self.account_prices(cx);
                 if self.connections[PUBLIC].feed.is_none() {
-                    self.connect(cx, PUBLIC);
+                    self.ensure_feed(cx, PUBLIC);
                 }
                 if self.connections[BUSINESS].feed.is_none() {
-                    self.connect(cx, BUSINESS);
+                    self.ensure_feed(cx, BUSINESS);
                 }
                 if refresh {
                     self.ticker_seed(cx, false);

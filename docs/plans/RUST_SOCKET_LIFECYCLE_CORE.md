@@ -607,3 +607,29 @@ and Binance, all-target strict Clippy, then fresh CI for standalone Aster size,
 combined host fixtures and the full replay. Retained-memory representation and
 hot-path work remain separate measured failures to address; the feature boundary
 alone makes no claim to repair either.
+
+The feature is temporary, not a permanent opt-out. End state: every socket
+family uses this shared core, the legacy inventory is empty, then the feature
+and feature-off compatibility paths are deleted. Remaining family/site records
+are checked against source and must only shrink against existing history and
+the immutable PR base, just like the legacy-request inventory. Aster's later
+adoption must shrink code to fit the unchanged budget; no budget increase is
+a migration mechanism. Managed venue wrappers are named `ensure_feed` so the
+conservative legacy `connect` reference scanner needs no receiver exemption.
+
+Remaining legacy WASM families: apexomni, asterdex, backpack, binance, bingx,
+bitget, bitrue, blofin, bybit, coinbase, cryptocom, grvt, hyperliquid, kraken,
+kucoin, kucoinspot, lighter, mexc, orderly, paradex, phemex, polymarket, txflow,
+weex and woo. Kraken Spot shares the Kraken family; KuCoin Spot is a separate
+family within the KuCoin crate. BreakoutProp has no socket path.
+
+The checked inventories are
+[socket-legacy-families.json](../../sdk-rs/scripts/socket-legacy-families.json)
+and [socket-legacy-sites.json](../../sdk-rs/scripts/socket-legacy-sites.json).
+The seed has 25 families and 90 conservative member/qualified/helper references
+in 48 files, including the 47 concrete Cx connect sites from the audit. The
+checker reuses the request ratchet's lexical and immutable-base authority but
+none of its HTTP bootstrap exceptions. Alias/UFCS/member references and macro
+escapes are covered; source counts must equal the inventory and both site/family
+maps must be subsets of every available historical/base map. Empty legacy
+family inventory requires deletion of the temporary engine feature.

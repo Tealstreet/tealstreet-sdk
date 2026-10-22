@@ -271,7 +271,7 @@ impl BitunixFutures {
             })
             .collect();
         cx.store.set_settings(settings);
-        self.connect(cx, Feed::Private);
+        self.ensure_feed(cx, Feed::Private);
         self.read_axis(cx, Axis::Balance);
         self.read_axis(cx, Axis::Positions);
         self.read_axis(cx, Axis::Orders);
