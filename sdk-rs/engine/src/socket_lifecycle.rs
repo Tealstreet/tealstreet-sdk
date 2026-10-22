@@ -1077,6 +1077,85 @@ mod tests {
         assert!(l.traffic(e, true, false));
     }
     #[test]
+    fn immutable_interest_storage_is_shared_only_after_actual_release() {
+        let (mut l, f, e) = started(AuthMode::None);
+        l.replace_interests(f, vec![interest("A")], encode).unwrap();
+        let pointer = l.feeds[f.0].interests.desired["A"].wire_args.as_ptr();
+        assert!(l.feeds[f.0].interests.released.is_empty());
+        assert_eq!(l.release_batch(e, true), None);
+        assert!(l.feeds[f.0].interests.released.is_empty());
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("+:A"));
+        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
+        let bytes = l.feeds[f.0].interests.bytes();
+        l.replace_interests(f, vec![interest("A"), interest("B")], encode).unwrap();
+        assert_eq!(l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
+        assert!(l.feeds[f.0].interests.bytes() > bytes, "logical budgets still count both maps");
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("+:B"));
+        l.replace_interests(f, vec![interest("A"), interest("B")], encode).unwrap();
+        assert_eq!(l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(l.release_batch(e, false), None);
+    }
+
+    #[test]
+    fn shared_interest_replacement_retains_old_arguments_until_unsubscribe_release() {
+        let (mut l, f, e) = started(AuthMode::None);
+        l.replace_interests(f, vec![interest("A")], encode).unwrap();
+        l.release_batch(e, false).unwrap();
+        let pointer = l.feeds[f.0].interests.released["A"].wire_args.as_ptr();
+        l.replace_interests(f, vec![Interest { key: "A".into(), wire_args: "new-A".into() }], encode).unwrap();
+        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args, "A");
+        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
+        assert_ne!(l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("-:A"));
+        assert!(l.feeds[f.0].interests.released.is_empty());
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("+:new-A"));
+        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(),
+                   l.feeds[f.0].interests.desired["A"].wire_args.as_ptr());
+    }
+
+    #[test]
+    fn partially_encoded_failure_preserves_shared_rows_revision_and_old_queue() {
+        let (mut l, f, e) = started(AuthMode::None);
+        l.replace_interests(f, vec![interest("A"), interest("B")], encode).unwrap();
+        l.release_batch(e, false).unwrap();
+        let pointer = l.feeds[f.0].interests.released["A"].wire_args.as_ptr();
+        let desired = l.feeds[f.0].interests.desired["B"].wire_args.as_ptr();
+        let revision = l.feeds[f.0].interests.revision;
+        let mut emitted = 0;
+        assert_eq!(l.replace_interests(f, vec![interest("C")], |op, rows, emit| {
+            encode(op, rows, emit)?;
+            emitted += 1;
+            Err(SocketError::Capacity)
+        }), Err(SocketError::Capacity));
+        assert_eq!(emitted, 1);
+        assert_eq!(l.feeds[f.0].interests.revision, revision);
+        assert_eq!(l.feeds[f.0].interests.desired["B"].wire_args.as_ptr(), desired);
+        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(l.release_batch(e, false).as_deref(), Some("+:B"));
+        assert_eq!(l.release_batch(e, false), None);
+    }
+
+    #[test]
+    fn shared_interest_reconnect_reuses_desired_without_publishing_released_progress() {
+        let (mut l, f, old) = started(AuthMode::None);
+        l.replace_interests(f, vec![interest("A")], encode).unwrap();
+        l.release_batch(old, false).unwrap();
+        let pointer = l.feeds[f.0].interests.desired["A"].wire_args.as_ptr();
+        l.retire(f).unwrap();
+        l.retired(old, true).unwrap();
+        l.grant_retry(f).unwrap();
+        let current = l.begin(f, SocketId(2)).unwrap();
+        l.opened(current).unwrap();
+        l.replace_interests(f, l.desired(f).unwrap(), encode).unwrap();
+        assert!(l.feeds[f.0].interests.released.is_empty());
+        assert_eq!(l.feeds[f.0].interests.desired["A"].wire_args.as_ptr(), pointer);
+        assert_eq!(l.release_batch(old, false), None);
+        assert_eq!(l.release_batch(current, false).as_deref(), Some("+:A"));
+        assert_eq!(l.feeds[f.0].interests.released["A"].wire_args.as_ptr(), pointer);
+    }
+
+    #[test]
     fn partially_released_update_retains_unchanged_unsent_interest() {
         let (mut l, f, e) = started(AuthMode::None);
         l.replace_interests(f, vec![interest("A"), interest("B")], encode)
