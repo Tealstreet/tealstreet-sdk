@@ -80,7 +80,7 @@ import {
   workerCallClientOrderIds,
 } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import { deriveBridgeConstruction, derivePublicMode } from './construction';
+import { deriveBridgeConstruction, derivePublicMode, deriveSignerSetupPolicy } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { LocalSignerSetup, withoutSigningCredentials } from './localSignerSetup';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
@@ -598,8 +598,8 @@ export class RustEngineExchange extends BaseExchange {
       const message = 'Local signer setup is not supported for this Rust venue yet';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    const signingMode=bridgeConstruction.dispatchSigning ? derivePublicMode(exchangeName,options) : undefined;
-    const signerSetup=bridgeConstruction.dispatchSigning ? new LocalSignerSetup(options) : undefined;
+    const signerSetup=bridgeConstruction.dispatchSigning ? new LocalSignerSetup(options,deriveSignerSetupPolicy(exchangeName)) : undefined;
+    const signingMode=signerSetup ? derivePublicMode(exchangeName,options,undefined,signerSetup.credentialPresence) : undefined;
     if (signerSetup) options=withoutSigningCredentials(options);
     const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
       ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
