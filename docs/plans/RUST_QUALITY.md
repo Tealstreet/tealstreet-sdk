@@ -379,6 +379,36 @@ is separate from Store display, terminal IDs and execution-ID retention. Native
 bounded retention and missing-endpoint ambiguity remain documented; this is not
 new live/provenance evidence or closure of Orderly/reporting fan-out.
 
+
+GRVT general histories now use one shared CursorHistory/Completion for output
+admission, cursor progress and command-owned coverage. A reusable engine page
+discard clears failed retry prefixes without rewinding accepted output, budget,
+identity progress or first gaps. Order-filtered complete-fill proofs and queued
+session/preparation refusal stay strict, while later actual general-query loss
+retains accepted pages only. No venue marker emitter or copied pager/terminal
+policy is introduced; other families and B11 runtime coverage remain open.
+
+
+Crypto.com histories now adopt the existing CursorHistory/Completion and staged
+page reset APIs. The engine owns accepted-only completion and one command-owned
+coverage marker; the adapter supplies exact u64 native cursor/identity facts and
+retains native strict proof checks. No new engine API, copied marker emitter or
+paging/retention implementation; other adapters and caller runtime coverage
+remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+## Orderly observed-average execution adoption
+
+Orderly's selected-last/average derivation now uses the additive engine
+`prepare_observed_average` operation. A separate observation may commit before
+native dedup; inferred quote may enrich only a live same-endpoint cursor after
+unique positive Fill delivery. Original-source public price assertions expose
+the missing/zero-average quote-poisoning defect; compatibility controls preserve
+native arbitrary-last quotient pricing, gaps, quiet/duplicate observations,
+field presence, overflow, REST non-seeding, late identity and bounded eviction.
+Whole-growth inference is Binary-only and best-effort, with supplied evidence
+validated before effects. Shared row-reporting policy/fan-out remains separate;
+this does not claim new live captures or universal financial contract coverage.
+
 ## Draft Engine socket lifecycle references
 
 OKX and Bitunix adopt one Engine registry/driver for epoch admission, typed auth,
