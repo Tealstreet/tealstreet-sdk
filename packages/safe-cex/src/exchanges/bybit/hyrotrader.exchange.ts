@@ -378,7 +378,14 @@ export class HyrotraderExchange extends BybitExchange {
     const observations = new Set<string>();
     this.activeOrderObservations.add(observations);
     try {
-      return await this.orderRecovery.submit(payloads, (response: BybitCreateOrderResponse) => {
+      const normalizedPayloads = payloads.map((payload) => {
+        const triggerDirection = payload.triggerDirection;
+        if (typeof triggerDirection !== 'string') return payload;
+        const numericTriggerDirection = Number(triggerDirection);
+        if (!Number.isInteger(numericTriggerDirection)) return payload;
+        return { ...payload, triggerDirection: numericTriggerDirection };
+      });
+      return await this.orderRecovery.submit(normalizedPayloads, (response: BybitCreateOrderResponse) => {
         response.recorded = true;
         const id = response.data.result.orderId;
         if (this.isDisposed || observations.has(id) || response.authoritativeSeen) return;

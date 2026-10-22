@@ -1205,6 +1205,9 @@ Slippage protection uses the simulator-configured gate. Explicit `maxSlippagePct
 and Bybit BBO/TickSize options are rejected because the contract does not establish
 client-defined protection. Plain market orders remain supported.
 Optional simulator preview/evidence endpoints are not used by this connector.
+Hyro conditional creates follow Bybit semantics but the simulator JSON contract is
+stricter about scalar types: send `triggerDirection` as numeric `1`/`2`, not a
+string.
 
 `hyrotrader.ws-private.ts` waits for correlated auth and subscribe acknowledgements,
 then reconciles all pages of current orders/positions and the UNIFIED wallet before

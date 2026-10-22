@@ -80,6 +80,25 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
     ids.forEach((id) => expect(id.length).toBeLessThanOrEqual(36));
     post.mock.calls.forEach(([, payload]) => expect(payload.positionIdx).toBe(0));
   });
+  it('sends conditional triggerDirection as a number for the simulator contract', async () => {
+    const { exchange, store } = setup();
+    store.update({ tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', mark: 83_000, last: 83_000 } as any] });
+    const post = vi.fn().mockResolvedValue(success({ orderId: 'conditional' }));
+    exchange.xhr = { post } as any;
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Conditional,
+      side: OrderSide.Sell,
+      amount: 0.002,
+      triggerPrice: 84_000,
+    });
+    expect(post).toHaveBeenCalledExactlyOnceWith(
+      ENDPOINTS.CREATE_ORDER,
+      expect.objectContaining({ triggerDirection: 1 }),
+      expect.anything(),
+    );
+    expect(typeof post.mock.calls[0][1].triggerDirection).toBe('number');
+  });
   it('cancels individual orders and retires only successful rows', async () => {
     const { exchange, store } = setup();
     const rows = ['first', 'second'].map((id) => ({ ...order, id, status: OrderStatus.Open }) as Order);
