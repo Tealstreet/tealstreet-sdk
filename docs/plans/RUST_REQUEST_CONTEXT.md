@@ -137,6 +137,14 @@ Venue codecs still establish definitive ACK/refusal facts. The engine alone join
 those facts and seals the command; a pre-send sibling failure cannot mask a sent
 write. Keep representative error text separate from the aggregate outcome.
 
+Owner-confirmed projection: no released writes yields `NotSent`; all sent writes
+definitively refused yields `Rejected`; known accepted plus definitively rejected
+legs yields the existing partial contract (`outcome=None` with Partial IDs and
+terminal rejected legs reported). `Unknown` requires an unresolved sent attempt
+or the prior-send/failed-retry case below. A recovered retry's old refusal stays
+in attempt history and must not be reported as a rejected logical leg. Test all
+four projections independently of callback order.
+
 Required retry case: a first write attempt reaches the venue (including Bybit
 native 10004/10002 followed by a staged retry), then the retry fails at the
 signer/provider or host transport (`network lost; error sign`). The logical

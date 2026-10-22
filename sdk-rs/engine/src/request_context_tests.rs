@@ -869,8 +869,43 @@ fn partial_native_rejection_forbids_replaying_the_effective_logical_write() {
         Err(Error::RetryForbidden)
     );
     let error = seal(&mut writes);
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.outcome, None);
     assert_eq!(error.partial.unwrap().order_ids, ["accepted"]);
+}
+
+#[test]
+fn fully_known_partial_execution_preserves_ids_and_each_native_refusal_without_unknown() {
+    for order in [[1, 2, 3], [3, 2, 1]] {
+        let mut writes = CommandWrites::new(3).unwrap();
+        for id in [1, 2, 3] {
+            writes.register(RequestId(id), u64::from(id)).unwrap();
+            writes.released(RequestId(id)).unwrap();
+        }
+        for id in order {
+            writes
+                .result(
+                    RequestId(id),
+                    if id == 1 {
+                        WriteResult::Accepted {
+                            order_ids: vec!["accepted-native-id".into()],
+                        }
+                    } else {
+                        WriteResult::Rejected(failure("native refusal").venue_code(id.to_string()))
+                    },
+                )
+                .unwrap();
+        }
+        let error = seal(&mut writes);
+        assert_eq!(error.outcome, None);
+        assert_eq!(error.partial.unwrap().order_ids, ["accepted-native-id"]);
+        assert_eq!(
+            writes
+                .rejections()
+                .map(|(_, error)| error.venue_code.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            ["2", "3"]
+        );
+    }
 }
 
 #[test]
@@ -883,6 +918,38 @@ fn staged_retry_timeout_does_not_erase_prior_attempt_evidence() {
         .unwrap();
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     assert_eq!(seal(&mut writes).outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn recovered_retry_is_not_reported_as_a_rejected_logical_leg() {
+    let mut writes = CommandWrites::new(3).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    writes.released(RequestId(1)).unwrap();
+    writes
+        .result(RequestId(1), rejected("recoverable clock refusal"))
+        .unwrap();
+    writes.retry(RequestId(1), RequestId(2)).unwrap();
+    writes.released(RequestId(2)).unwrap();
+    writes
+        .result(
+            RequestId(2),
+            WriteResult::Accepted {
+                order_ids: vec!["accepted-retry".into()],
+            },
+        )
+        .unwrap();
+    writes.register(RequestId(3), 2).unwrap();
+    writes.released(RequestId(3)).unwrap();
+    writes
+        .result(RequestId(3), rejected("native refusal"))
+        .unwrap();
+    let error = seal(&mut writes);
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.partial.unwrap().order_ids, ["accepted-retry"]);
+    assert_eq!(
+        writes.rejections().map(|(id, _)| id).collect::<Vec<_>>(),
+        [RequestId(3)]
+    );
 }
 
 #[test]

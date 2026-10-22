@@ -684,6 +684,13 @@ impl CommandWrites {
         }
         self.sealed = true;
         let any_released = self.attempts.iter().any(|a| a.released);
+        let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
+            a.released
+                && (matches!(a.result, None | Some(WriteResult::Failed(_)))
+                    || self.attempts[index + 1..]
+                        .iter()
+                        .any(|later| later.leg == a.leg && !later.released))
+        });
         let all_rejected = any_released
             && self
                 .attempts
@@ -724,13 +731,17 @@ impl CommandWrites {
                 .map(|(_, error)| error)
         };
         let mut error = select(true).or_else(|| select(false)).unwrap_or(fallback);
-        error.outcome = Some(if !any_released {
-            Outcome::NotSent
+        error.outcome = if !any_released {
+            Some(Outcome::NotSent)
+        } else if uncertain {
+            Some(Outcome::Unknown)
         } else if all_rejected {
-            Outcome::Rejected
+            Some(Outcome::Rejected)
         } else {
-            Outcome::Unknown
-        });
+            // Definitively accepted effects plus known refusals retain the
+            // existing partial contract; do not invent execution uncertainty.
+            None
+        };
         let mut ids = error
             .partial
             .as_ref()
@@ -759,6 +770,24 @@ impl CommandWrites {
             }
         }
         Ok(error)
+    }
+
+    /// Retain each terminal logical-leg refusal for the existing reporting path.
+    /// A refusal recovered by a later attempt is history, not a rejected leg.
+    /// Reading evidence never reopens a sealed command or emits another result.
+    pub fn rejections(&self) -> impl Iterator<Item = (RequestId, &VenueError)> {
+        self.attempts
+            .iter()
+            .enumerate()
+            .filter(|(index, attempt)| {
+                !self.attempts[index + 1..]
+                    .iter()
+                    .any(|later| later.leg == attempt.leg)
+            })
+            .filter_map(|(_, attempt)| match &attempt.result {
+                Some(WriteResult::Rejected(error)) => Some((attempt.id, error)),
+                _ => None,
+            })
     }
 }
 
