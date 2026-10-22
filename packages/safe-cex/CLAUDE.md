@@ -74,6 +74,22 @@ not JavaScript String.trim. Secret/passphrase bytes and stable IDs are unchanged
 This policy does not enable an unmigrated family; opaque external providers
 remain responsible for compliant provisioning.
 
+The same construction declaration carries hosted signature encoding and an
+optional passphrase presentation header. Registry HTTP captures snapshot that
+policy and request a distinct Present operation for the setup-owned passphrase
+ref; they never interpolate it into the HMAC payload. Formatting validates the
+entire result and combined header bounds before publication. Callback precedence
+uses the existing declared, case-insensitive header policy. These codec metadata
+fields do not enable runtime family admission or replace actual hosted tests.
+Callback setup reuses the same required-field/absent-only fallback resolver,
+consuming passphrase material into a separate provider Present map and exposing
+only opaque refs to the engine. Presenting one requires admitted signing work
+for its owning identity; it cannot be used in a Credential payload part. Missing
+required material rejects synchronously. The unchanged remote wire supplies only
+the MAC, in the declared hex or canonical padded base64 encoding of 32 raw bytes;
+it cannot supply a missing passphrase. Generic options and callback receiver
+snapshots retain no passphrase, and disposal revokes the setup wrapper.
+
 Callers must provision worker/hosted providers separately rather than copy
 `exchange.options` as credentials, and use readiness/public-mode metadata instead
 of checking `options.key`. Raw legacy native/WASM input is a trusted compatibility
@@ -90,9 +106,24 @@ signing after TS venue classes are deleted; no TS venue/API factory is created.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture
 tokens are single use and fenced by raw deadlines, protocol expiry and clock
 revision; provider text and partial results are not returned on failure.
-This signing-side bridge does not itself enable keyless `remoteSigner` or
-`PayloadSigner` routing to Rust. That separate companion must preserve REST-only
-PayloadSigner feeds, result headers and explicit account/secondary selection.
+The shared delegated-provider companion admits keyless `remoteSigner` and
+`PayloadSigner` accounts only for aliases enabled in construction-rules.json.
+RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary
+remote signing is refused. PayloadSigner retains REST-only private feeds and
+declared native result-header precedence. Its ordinary-function receiver is a
+private frozen public-metadata snapshot with the selected public key, excluding
+all secret/passphrase fields and arbitrary nested caller objects. Callbacks must
+hold their own secret instead of reading `this.secret`; generic exchange options
+retain neither credentials nor callbacks. Provision callbacks in the executing
+host/worker because ordinary worker initialization cannot serialize functions.
+The central policy also declares legacy WS labels and extraData codecs. Metadata
+comes from prepared receipt/payload structure, never a new wall clock or advisory
+context; HTTP remains distinct even when its query matches WS preimage grammar.
+Signing-only HTTP captures accept only their trusted declared header policy;
+WS and credential captures retain default deny.
+The delegated provider initializes UTF-8 codecs only when provider work begins.
+Importing the native registry before its host installs TextEncoder/TextDecoder
+must remain supported; signing and frame I/O require those runtime codecs.
 
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and

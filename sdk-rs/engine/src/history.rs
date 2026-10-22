@@ -122,6 +122,12 @@ impl<T> HistoryRows<T> {
         self.pending.push(row);
     }
 
+    /// Retry only the current unvalidated page. Previously admitted output and
+    /// its completion/coverage authority are never rolled back.
+    pub fn discard_staged_page(&mut self) {
+        self.pending.clear();
+    }
+
     /// Call only after the page's HTTP, envelope and row validation succeeds.
     pub fn accept_page(&mut self) {
         self.accepted.append(&mut self.pending);
@@ -129,7 +135,11 @@ impl<T> HistoryRows<T> {
 
     /// Range selection is validated before mutating either row set. Indices
     /// come from the engine pager, in original native-page order.
-    fn accept_selected_page(&mut self, selected: &[usize]) -> bool {
+    fn accept_selected_page_where(
+        &mut self,
+        selected: &[usize],
+        mut retain: impl FnMut(&T) -> bool,
+    ) -> bool {
         if selected.iter().any(|index| *index >= self.pending.len())
             || selected.windows(2).any(|pair| pair[0] >= pair[1])
         {
@@ -139,7 +149,9 @@ impl<T> HistoryRows<T> {
         for (index, row) in self.pending.drain(..).enumerate() {
             if selected.peek() == Some(&index) {
                 selected.next();
-                self.accepted.push(row);
+                if retain(&row) {
+                    self.accepted.push(row);
+                }
             }
         }
         true
@@ -239,6 +251,21 @@ impl<T> CursorHistory<T> {
 
     pub fn stage(&mut self, row: T) {
         self.rows.stage(row);
+    }
+
+    /// A transport or session retry may replace an unvalidated response body,
+    /// never an already completed stage or a poisoned cursor lifecycle.
+    /// This clears output staging only: direct `fresh` observations are not
+    /// rolled back. Keep retryable page identities local until validation.
+    #[must_use]
+    pub fn discard_staged_page(&mut self) -> bool {
+        if self.finished || self.lifecycle_error.is_some() {
+            self.lifecycle_error
+                .get_or_insert("history cursor page discarded after completion");
+            return false;
+        }
+        self.rows.discard_staged_page();
+        true
     }
 
     /// Start a new endpoint window/stage with a fresh page budget and cursor
@@ -348,6 +375,8 @@ pub struct RangeHistory<T> {
     lifecycle_error: Option<&'static str>,
     incomplete_message: fn(u32) -> String,
     request_budget: Option<(u32, String)>,
+    retired_requests: u64,
+    started: bool,
 }
 
 impl<T> RangeHistory<T> {
@@ -366,13 +395,20 @@ impl<T> RangeHistory<T> {
             lifecycle_error: None,
             incomplete_message,
             request_budget: None,
+            retired_requests: 0,
+            started: false,
         }
     }
 
     /// Bound selected native requests across every chunk, using the walk's
     /// existing count. A deferred fetch is selected once and resumed as-is.
     pub fn with_request_budget(mut self, budget: u32, message: impl Into<String>) -> Self {
-        if budget == 0 || self.walk.requests != 0 || self.active.is_some() || self.finished {
+        if budget == 0
+            || self.started
+            || self.walk.requests != 0
+            || self.active.is_some()
+            || self.finished
+        {
             self.lifecycle_error = Some("history range request budget must be set before fetching");
         } else {
             self.request_budget = Some((budget, message.into()));
@@ -386,6 +422,64 @@ impl<T> RangeHistory<T> {
 
     pub fn accepted_len(&self) -> usize {
         self.rows.accepted_len()
+    }
+
+    /// Replace only a completed range stage, retaining the logical owner,
+    /// accepted output, first coverage gap and total request budget.
+    #[must_use]
+    pub fn restart_stage(&mut self, walk: RangeWalk) -> bool {
+        if !self.finished
+            || self.active.is_some()
+            || !self.pending_facts.is_empty()
+            || self.rows.staged_len() != 0
+            || self.lifecycle_error.is_some()
+            || walk.requests != 0
+        {
+            self.lifecycle_error
+                .get_or_insert("history range stage restarted before completion");
+            return false;
+        }
+        self.record_range_gap();
+        self.retired_requests = self
+            .retired_requests
+            .saturating_add(u64::from(self.walk.requests));
+        self.walk = walk;
+        self.finished = false;
+        self.started = true;
+        true
+    }
+
+    fn record_range_gap(&mut self) {
+        let gaps = self.walk.incomplete_chunks();
+        if gaps > 0 {
+            self.rows
+                .completion
+                .incomplete((self.incomplete_message)(gaps));
+        }
+    }
+
+    /// Bind a selected fetch to narrower native request bounds before issuing
+    /// it. Inclusive endpoints may pad a zero-width walk only internally;
+    /// coverage must use the range actually requested from the venue.
+    #[must_use]
+    pub fn restrict_active_range(&mut self, from: f64, to: f64) -> bool {
+        let valid = self.active.is_some_and(|(selected_from, selected_to)| {
+            from.is_finite()
+                && to.is_finite()
+                && selected_from <= from
+                && from <= to
+                && to <= selected_to
+        }) && !self.finished
+            && self.lifecycle_error.is_none()
+            && self.pending_facts.is_empty()
+            && self.rows.staged_len() == 0;
+        if !valid {
+            self.lifecycle_error
+                .get_or_insert("history range request bounds are invalid or already staged");
+            return false;
+        }
+        self.active = Some((from, to));
+        true
     }
 
     /// Row and native range facts are staged together, never independently.
@@ -405,9 +499,19 @@ impl<T> RangeHistory<T> {
         self.accept_page_with_coverage(None);
     }
 
+    /// Coverage sees every validated native row before output filtering. Only
+    /// retained selected rows can authorize partial recovery after a later error.
+    pub fn accept_page_where(&mut self, retain: impl FnMut(&T) -> bool) {
+        self.accept_page_inner(None, retain);
+    }
+
     /// Missing native cursor coverage is an admitted page fact. Validate all
     /// lifecycle and row/fact invariants before retaining it or advancing bounds.
     pub fn accept_page_with_coverage(&mut self, gap: Option<String>) {
+        self.accept_page_inner(gap, |_| true);
+    }
+
+    fn accept_page_inner(&mut self, gap: Option<String>, retain: impl FnMut(&T) -> bool) {
         if self.lifecycle_error.is_some()
             || self.finished
             || self.active.is_none()
@@ -423,7 +527,7 @@ impl<T> RangeHistory<T> {
         }
         let (from, to) = self.active.take().expect("active checked");
         let selected = self.walk.page(from, to, &self.pending_facts);
-        if !self.rows.accept_selected_page(&selected) {
+        if !self.rows.accept_selected_page_where(&selected, retain) {
             self.lifecycle_error = Some("history range selection is invalid");
         }
         self.pending_facts.clear();
@@ -432,6 +536,7 @@ impl<T> RangeHistory<T> {
     /// The adapter supplies transport and any ChunkDone pacing; only the owner
     /// advances bounds or decides when the range has finished.
     pub fn step(&mut self) -> Step {
+        self.started = true;
         if self.lifecycle_error.is_some()
             || self.finished
             || self.active.is_some()
@@ -445,7 +550,10 @@ impl<T> RangeHistory<T> {
         let step = self.walk.step();
         if matches!(step, Step::Fetch { .. })
             && let Some((budget, message)) = &self.request_budget
-            && self.walk.requests > *budget
+            && self
+                .retired_requests
+                .saturating_add(u64::from(self.walk.requests))
+                > u64::from(*budget)
         {
             self.rows.completion.incomplete(message.clone());
             self.finished = true;
@@ -492,12 +600,7 @@ impl<T> RangeHistory<T> {
                 .rows
                 .reject(cx, VenueError::new(message).kind(ErrorKind::Internal));
         }
-        let gaps = self.walk.incomplete_chunks();
-        if gaps > 0 {
-            self.rows
-                .completion
-                .incomplete((self.incomplete_message)(gaps));
-        }
+        self.record_range_gap();
         self.rows.finish_with(cx, result, encode);
     }
 }
@@ -595,5 +698,212 @@ mod cursor_probe_tests {
         history.advance_probe(page("b"));
         assert_eq!(history.accepted_len(), 1);
         assert!(history.lifecycle_error.is_none());
+    }
+}
+
+#[cfg(test)]
+mod range_stage_tests {
+    use super::*;
+
+    fn owner() -> RangeHistory<String> {
+        RangeHistory::new(
+            Completion::new(71),
+            RangeWalk::new(0., 10., 10., 200),
+            |_| "range gap".into(),
+            |_| Ok("[]".into()),
+        )
+    }
+    fn next_fetch(history: &mut RangeHistory<String>) -> (f64, f64) {
+        match history.step() {
+            Step::Fetch { from, to } => (from, to),
+            other => panic!("expected fetch: {other:?}"),
+        }
+    }
+    fn finish_empty(history: &mut RangeHistory<String>) {
+        for _ in 0..100 {
+            match history.step() {
+                Step::Fetch { .. } => history.accept_page(),
+                Step::ChunkDone => {}
+                Step::Finished => return,
+            }
+        }
+        panic!("bounded range must finish");
+    }
+    #[test]
+    fn composite_stage_retains_owner_rows_and_first_gap() {
+        let mut history = owner();
+        next_fetch(&mut history);
+        history.stage(
+            "first currency".into(),
+            PageRow {
+                timestamp: 1.,
+                identity: "usdt".into(),
+            },
+        );
+        history.accept_page_with_coverage(Some("first gap".into()));
+        finish_empty(&mut history);
+        assert!(history.restart_stage(RangeWalk::new(0., 10., 10., 200)));
+        assert_eq!(history.command(), 71);
+        assert_eq!(
+            history.rows.completion.incomplete.as_deref(),
+            Some("first gap")
+        );
+        next_fetch(&mut history);
+        history.stage(
+            "second currency".into(),
+            PageRow {
+                timestamp: 1.,
+                identity: "usdc".into(),
+            },
+        );
+        history.accept_page_with_coverage(Some("later gap".into()));
+        finish_empty(&mut history);
+        assert_eq!(history.rows.accepted, ["first currency", "second currency"]);
+        assert_eq!(
+            history.rows.completion.incomplete.as_deref(),
+            Some("first gap")
+        );
+    }
+    #[test]
+    fn early_restart_poisoning_does_not_drop_staged_rows_or_change_the_walk() {
+        let mut history = owner();
+        next_fetch(&mut history);
+        history.stage(
+            "pending".into(),
+            PageRow {
+                timestamp: 1.,
+                identity: "pending".into(),
+            },
+        );
+        history.rows.completion.incomplete("existing gap");
+        assert!(!history.restart_stage(RangeWalk::new(100., 200., 100., 1)));
+        assert_eq!(history.active, Some((0., 10.)));
+        assert_eq!(history.rows.pending, ["pending"]);
+        assert_eq!(history.pending_facts.len(), 1);
+        assert_eq!(
+            history.rows.completion.incomplete.as_deref(),
+            Some("existing gap")
+        );
+        assert_eq!(history.retired_requests, 0);
+        assert_eq!(history.walk.requests, 1);
+        assert!(history.lifecycle_error.is_some());
+    }
+    #[test]
+    fn filtered_output_does_not_count_as_accepted_but_still_advances_coverage() {
+        let mut history = owner();
+        next_fetch(&mut history);
+        history.stage(
+            "excluded".into(),
+            PageRow {
+                timestamp: 5.,
+                identity: "seen".into(),
+            },
+        );
+        history.accept_page_where(|_| false);
+        assert_eq!(history.accepted_len(), 0);
+        assert_eq!(next_fetch(&mut history), (5., 10.));
+        history.stage(
+            "duplicate".into(),
+            PageRow {
+                timestamp: 5.,
+                identity: "seen".into(),
+            },
+        );
+        history.accept_page_where(|_| true);
+        assert_eq!(
+            history.accepted_len(),
+            0,
+            "filtered identity already covered"
+        );
+        assert!(history.rows.pending.is_empty());
+    }
+    #[test]
+    fn request_budget_spans_stages_and_cannot_reopen_after_exhaustion() {
+        let mut history = owner().with_request_budget(2, "shared budget");
+        next_fetch(&mut history);
+        history.accept_page();
+        assert_eq!(history.step(), Step::Finished);
+        assert!(history.restart_stage(RangeWalk::new(0., 10., 10., 200)));
+        next_fetch(&mut history);
+        history.accept_page();
+        assert_eq!(history.step(), Step::Finished);
+        assert!(history.restart_stage(RangeWalk::new(0., 10., 10., 200)));
+        assert_eq!(history.step(), Step::Finished, "third fetch never issued");
+        assert!(history.active.is_none());
+        assert_eq!(
+            history.rows.completion.incomplete.as_deref(),
+            Some("shared budget")
+        );
+        assert!(history.restart_stage(RangeWalk::new(0., 10., 10., 200)));
+        assert_eq!(
+            history.step(),
+            Step::Finished,
+            "restart never renews budget"
+        );
+    }
+    #[test]
+    fn restarted_owner_cannot_replace_its_budget() {
+        let mut history = owner().with_request_budget(1, "original budget");
+        next_fetch(&mut history);
+        history.accept_page();
+        assert_eq!(history.step(), Step::Finished);
+        assert!(history.restart_stage(RangeWalk::new(0., 10., 10., 200)));
+        let mut history = history.with_request_budget(100, "reset budget");
+        assert!(history.lifecycle_error.is_some());
+        assert_eq!(history.step(), Step::Finished);
+        assert!(history.active.is_none());
+        assert_eq!(history.request_budget, Some((1, "original budget".into())));
+    }
+
+    #[test]
+    fn clipped_native_range_preserves_outside_row_coverage_without_continuation() {
+        let mut history = RangeHistory::new(
+            Completion::new(71),
+            RangeWalk::new(0., 1., 1., 200),
+            |_| "gap".into(),
+            |_: &[String]| Ok("[]".into()),
+        );
+        assert_eq!(next_fetch(&mut history), (0., 1.));
+        assert!(history.restrict_active_range(0., 0.));
+        history.stage(
+            "outside".into(),
+            PageRow {
+                timestamp: 1.,
+                identity: "outside".into(),
+            },
+        );
+        history.accept_page_where(|_| false);
+        assert_eq!(history.accepted_len(), 0);
+        assert_eq!(
+            history.step(),
+            Step::Finished,
+            "outside row cannot extend the native range"
+        );
+        assert!(history.walk.incomplete_chunks() > 0);
+    }
+
+    #[test]
+    fn native_bounds_cannot_expand_invert_or_change_after_staging() {
+        for (from, to) in [(-1., 1.), (0., 11.), (2., 1.), (f64::NAN, 1.)] {
+            let mut history = owner();
+            next_fetch(&mut history);
+            assert!(!history.restrict_active_range(from, to));
+            assert_eq!(history.active, Some((0., 10.)));
+            assert!(history.lifecycle_error.is_some());
+        }
+        let mut history = owner();
+        assert!(!history.restrict_active_range(0., 1.));
+        let mut history = owner();
+        next_fetch(&mut history);
+        history.stage(
+            "pending".into(),
+            PageRow {
+                timestamp: 1.,
+                identity: "pending".into(),
+            },
+        );
+        assert!(!history.restrict_active_range(0., 1.));
+        assert_eq!(history.rows.pending, ["pending"]);
+        assert_eq!(history.active, Some((0., 10.)));
     }
 }

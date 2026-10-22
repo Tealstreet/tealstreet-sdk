@@ -156,6 +156,12 @@ Medium:
    stored copy and logs once (Error when none is kept); snapshots still hold
    while discovery or the catalogue is incomplete, and structural failures stay
    fatal. Skips are coded `row.skipped` notices.
+   Financial freshness now also has one engine boundary:
+   [RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md](RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md).
+   Issuer-bound checked epochs and linear Store tokens admit native cache effects
+   and rows together for Binance/Bitunix; native semantic fences and Bitunix WS
+   healthy-peer progress remain. This first core does not claim metadata or all
+   venue adoption, nor safe RequestContext late-ACK patches.
    Standardization continues in [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md):
    `RowAdmission` now owns bounded coverage, unknown/overflow conflict policy,
    silent page/stream merge and coded reporting; `SnapshotCoverage` remains its
@@ -279,8 +285,17 @@ native-priced suffix before the venue commits execution identity, observations
 or terminal state; its existing authoritative Last policy remains distinct.
 Four original-source RED financial regressions and two original compatibility
 controls cover correction recovery, stored-state isolation, fallback and quiet
-identity admission. AsterDEX, KuCoin Spot fallback and Orderly cumulative paths
-still need fan-out before reporting policy and snapshot-token work.
+identity admission. KuCoin Spot fallback and Orderly cumulative adoption remain
+open. The owner prioritized the shared financial snapshot freshness core
+immediately after AsterDEX, before remaining fan-out and reporting. AsterDEX
+now uses the same capped
+preparation and validated observation type for its native no-ID path and
+one-time REST seed. Negative observations cannot consume retention slots and
+evict healthy fill anchors; native direct-ID delivery, duplicate observations,
+accepted quiet rows and10,000-entry bounds remain. One original assertion RED
+and ten original compatibility controls are all GREEN through the existing
+engine path; no second local subtraction/minimum helper was introduced.
+
 
 
 
@@ -335,3 +350,61 @@ can publish one owned gap. First/zero-accepted failure rejects; later actual
 failure stops and retains accepted pages. Fills/order/public-trade lists and their
 remaining native completeness fact still need conversion; this is not universal
 history enforcement or B11/deployment closure.
+
+
+WEEX fills/orders/public-trade lists now adopt the existing CursorHistory owner
+across native windows and paired normal/algo reads. Shared owner dedupe and
+window generation replace native accepted-row/dedupe/window-loop state. Coverage
+facts publish only after whole-page admission and final success; no native
+HISTORY_INCOMPLETE emitters remain in WEEX histories. Explicit algo continuation
+is an owned gap, with no new paging algorithm. Income remains the prior slice;
+other families and caller/deployment proof remain open.
+
+Phemex income uses one engine range/completion owner across both currency stages.
+Original-source RED controls pin typed first failure, eligible-only partial
+recovery, later-currency loss and failed streamed-page prefixes. Core controls
+cover first gaps, stage lifecycle, cumulative budgets, filtering after coverage
+and actual native-bound restrictions; concurrent owners and Error-only logging
+stay isolated. Saturation intentionally continues USDC with an owned gap; no
+per-venue completeness emitter or positive deployed-runtime claim is introduced.
+
+## KuCoin Spot cumulative fallback adoption
+
+The native Spot fallback now uses the engine execution helper rather than
+emitting a cumulative amount directly. Original-source fixtures reproduce prefix
+overdelivery; the staged-seed and native-identity controls preserve direct last
+quantities, selected-field presence, binary precision, late/terminal delivery,
+partial healthy peers and failed/stale/lookup nonpublication. Financial progress
+is separate from Store display, terminal IDs and execution-ID retention. Native
+bounded retention and missing-endpoint ambiguity remain documented; this is not
+new live/provenance evidence or closure of Orderly/reporting fan-out.
+
+
+GRVT general histories now use one shared CursorHistory/Completion for output
+admission, cursor progress and command-owned coverage. A reusable engine page
+discard clears failed retry prefixes without rewinding accepted output, budget,
+identity progress or first gaps. Order-filtered complete-fill proofs and queued
+session/preparation refusal stay strict, while later actual general-query loss
+retains accepted pages only. No venue marker emitter or copied pager/terminal
+policy is introduced; other families and B11 runtime coverage remain open.
+
+
+Crypto.com histories now adopt the existing CursorHistory/Completion and staged
+page reset APIs. The engine owns accepted-only completion and one command-owned
+coverage marker; the adapter supplies exact u64 native cursor/identity facts and
+retains native strict proof checks. No new engine API, copied marker emitter or
+paging/retention implementation; other adapters and caller runtime coverage
+remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+## Orderly observed-average execution adoption
+
+Orderly's selected-last/average derivation now uses the additive engine
+`prepare_observed_average` operation. A separate observation may commit before
+native dedup; inferred quote may enrich only a live same-endpoint cursor after
+unique positive Fill delivery. Original-source public price assertions expose
+the missing/zero-average quote-poisoning defect; compatibility controls preserve
+native arbitrary-last quotient pricing, gaps, quiet/duplicate observations,
+field presence, overflow, REST non-seeding, late identity and bounded eviction.
+Whole-growth inference is Binary-only and best-effort, with supplied evidence
+validated before effects. Shared row-reporting policy/fan-out remains separate;
+this does not claim new live captures or universal financial contract coverage.

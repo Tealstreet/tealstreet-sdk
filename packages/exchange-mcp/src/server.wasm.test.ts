@@ -32,6 +32,21 @@ it('rejects the HMAC proxy signer before starting a default Rust account', async
   expect(fixture.sockets).toEqual([]);
 });
 
+it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot'] as const)(
+  'admits %s HMAC proxy signers through declared Rust provider setup before startup', async (name) => {
+    const fixture = rustBinancePublicFixture();
+    setRustEngineTransport(() => fixture.transport);
+    instance = await createServer(readConfig({ EXCHANGE: name, EXCHANGE_ENGINE: 'rust',
+      EXCHANGE_API_KEY: 'proxy-public', EXCHANGE_SIGNER_HEADER: 'X-Test-Signature', EXCHANGE_SIGNER_SIGNATURE: 'placeholder' }), 'test');
+    expect(instance.exchange).toBeInstanceOf(RustEngineExchange);
+    expect(instance.exchange.isPublicDataOnly).toBe(false);
+    expect(instance.exchange.options).not.toHaveProperty('payloadSigner');
+    expect(instance.exchange.options).not.toHaveProperty('secret');
+    expect(fixture.requests).toEqual([]);
+    expect(fixture.sockets).toEqual([]);
+  },
+);
+
 vi.mock('@tealstreet/safe-cex/src/utils/virtualClock', async (original) => {
   const actual = await original<typeof import('@tealstreet/safe-cex/src/utils/virtualClock')>();
   return { ...actual, virtualClock: { ...actual.virtualClock, start: async () => {} } };

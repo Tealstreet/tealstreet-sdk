@@ -3,8 +3,10 @@
 use crate::account::{OrderRow, id, side};
 use crate::sign::Params;
 use crate::{Cryptocom, Pending};
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId, num};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId, VenueError, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet};
@@ -17,7 +19,6 @@ enum Kind {
     Trades,
 }
 pub struct Request {
-    command: CommandId,
     kind: Kind,
     path: &'static str,
     symbol: Option<String>,
@@ -26,14 +27,13 @@ pub struct Request {
     from_ns: u64,
     to_ns: u64,
     limit: usize,
-    rows: Vec<Row>,
+    history: Box<CursorHistory<Row>>,
     seen: HashSet<String>,
     page_count: usize,
     oldest: u64,
     invalid: bool,
     retries: u8,
     exact_page: bool,
-    committed: usize,
     page_seen: Vec<String>,
 }
 #[derive(Default)]
@@ -203,7 +203,7 @@ impl Request {
         if time >= self.from_ns && time < self.to_ns && self.seen.insert(identity.clone()) {
             self.page_seen.push(identity);
             if matches {
-                self.rows.push(row);
+                self.history.stage(row);
             }
         }
     }
@@ -292,7 +292,6 @@ impl Cryptocom {
             return;
         };
         let request = Request {
-            command,
             kind,
             path,
             symbol,
@@ -309,14 +308,20 @@ impl Cryptocom {
                     100
                 }) as usize
             },
-            rows: vec![],
+            history: Box::new(CursorHistory::new(
+                Completion::new(command),
+                CursorWalk::starting_at(u32::MAX, to_ns.to_string()),
+                |_| "Crypto.com history page safety bound exhausted".into(),
+                |rows| {
+                    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
+                },
+            )),
             seen: HashSet::new(),
             page_count: 0,
             oldest: u64::MAX,
             invalid: false,
             retries: 0,
             exact_page: true,
-            committed: 0,
             page_seen: vec![],
         };
         if request.limit == 0 || from_ns == to_ns {
@@ -458,7 +463,7 @@ impl Cryptocom {
                 let price = num::parse(r.p);
                 let qty = num::parse(r.q);
                 request.page_count += 1;
-                request.rows.push(Row::Trade(Trade {
+                request.history.stage(Row::Trade(Trade {
                     id: id(r.d),
                     symbol: r.i.into(),
                     price,
@@ -473,35 +478,51 @@ impl Cryptocom {
     }
     pub(crate) fn history_response(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         if request.invalid {
-            cx.fail(request.command, "invalid history row");
+            self.history_finish(cx, request, Err(VenueError::new("invalid history row")));
             return;
         }
+        let mut next_bound = None;
         if !matches!(request.kind, Kind::Trades)
             && request.page_count > 0
-            && request.rows.len() < request.limit
+            && request.history.accepted_len() + request.history.staged_len() < request.limit
+            // A short page of only prior identities proves native exhaustion,
+            // even when its rows omit exact cursors. Full pages may move older.
+            && !(request.page_seen.is_empty() && request.page_count < 100)
         {
-            if request.page_seen.is_empty() && request.page_count < 100 {
-                request.rows.truncate(request.limit);
-                cx.done(
-                    request.command,
-                    serde_json::to_string(&request.rows).unwrap(),
-                );
-                return;
-            }
             if !request.exact_page {
-                cx.fail(
-                    request.command,
-                    "Crypto.com history page omitted nanosecond cursors",
+                request.history.reject(
+                    cx,
+                    VenueError::new("Crypto.com history page omitted nanosecond cursors"),
                 );
                 return;
             }
             let next = request.oldest.saturating_add(1);
             if request.oldest < request.from_ns { /* range exhausted */
             } else if next >= request.to_ns {
-                cx.fail(request.command, "Crypto.com history cursor did not advance");
+                request.history.reject(
+                    cx,
+                    VenueError::new("Crypto.com history cursor did not advance"),
+                );
                 return;
             } else {
-                request.committed = request.rows.len();
+                next_bound = Some(next);
+            }
+        }
+        let step = request.history.advance(CursorPage {
+            next: next_bound.map(|bound| bound.to_string()),
+            rows: request.page_count,
+            fresh: request.page_seen.len(),
+            want_more: next_bound.is_some(),
+        });
+        match step {
+            CursorStep::More(_) => {
+                let Some(next) = next_bound else {
+                    request.history.reject(
+                        cx,
+                        VenueError::new("Crypto.com missing native history bound"),
+                    );
+                    return;
+                };
                 request.page_seen.clear();
                 request.exact_page = true;
                 request.to_ns = next;
@@ -510,14 +531,25 @@ impl Cryptocom {
                 request.retries = 0;
                 let timer = cx.set_timer(1000.0);
                 self.history.waiting.insert(timer, request);
-                return;
             }
+            CursorStep::Done => self.history_finish(cx, request, Ok(())),
+            CursorStep::Stalled(_) => request.history.reject(
+                cx,
+                VenueError::new("Crypto.com history page safety bound exhausted"),
+            ),
         }
-        request.rows.truncate(request.limit);
-        cx.done(
-            request.command,
-            serde_json::to_string(&request.rows).unwrap(),
-        );
+    }
+    fn history_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        result: Result<(), VenueError>,
+    ) {
+        let limit = request.limit;
+        request.history.finish_with(cx, result, move |mut rows| {
+            rows.truncate(limit);
+            serde_json::to_string(&rows).map_err(|error| VenueError::new(error.to_string()))
+        });
     }
     pub(crate) fn history_failed(
         &mut self,
@@ -533,7 +565,12 @@ impl Cryptocom {
         };
         if retry {
             // A failed page is never appended; preserve earlier complete pages.
-            request.rows.truncate(request.committed);
+            if !request.history.discard_staged_page() {
+                request
+                    .history
+                    .reject(cx, VenueError::new("Crypto.com history page reset failed"));
+                return;
+            }
             for identity in request.page_seen.drain(..) {
                 request.seen.remove(&identity);
             }
@@ -545,7 +582,7 @@ impl Cryptocom {
             let timer = cx.set_timer(1000.0);
             self.history.waiting.insert(timer, request);
         } else {
-            cx.fail(request.command, error);
+            self.history_finish(cx, request, Err(VenueError::new(error)));
         }
     }
 }

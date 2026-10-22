@@ -38,6 +38,7 @@ pub struct Prepared {
 
 struct Pending<T> {
     work: SignRequest,
+    header_policy: crate::signing_headers::ResultHeaderPolicy,
     metadata: T,
     issued_at: f64,
     protocol_at: f64,
@@ -76,6 +77,28 @@ impl<T> Capture<T> {
         revision: u64,
         timeout_ms: u32,
     ) -> Result<Prepared, SignError> {
+        self.prepare_with_policy(
+            (work, crate::signing_headers::ResultHeaderPolicy::Deny),
+            metadata,
+            now,
+            protocol_now,
+            revision,
+            timeout_ms,
+        )
+    }
+
+    /// Trusted HTTP captures opt into the same declared policy as dispatch.
+    /// This policy is retained with work and cannot come from SignRequest.context.
+    pub fn prepare_with_policy(
+        &mut self,
+        work: (SignRequest, crate::signing_headers::ResultHeaderPolicy),
+        metadata: T,
+        now: f64,
+        protocol_now: f64,
+        revision: u64,
+        timeout_ms: u32,
+    ) -> Result<Prepared, SignError> {
+        let (work, header_policy) = work;
         work.validate()?;
         if !valid_clock(now)
             || !valid_clock(protocol_now)
@@ -105,6 +128,7 @@ impl<T> Capture<T> {
             id,
             Pending {
                 work,
+                header_policy,
                 metadata,
                 issued_at: now,
                 protocol_at: protocol_now,
@@ -137,7 +161,9 @@ impl<T> Capture<T> {
     ) -> Result<(T, SignResult), SignError> {
         let pending = self.take(id, now, protocol_now, revision)?;
         let result = result?;
-        pending.work.validate_result(&result)?;
+        pending
+            .work
+            .validate_result_with_policy(&result, pending.header_policy)?;
         Ok((pending.metadata, result))
     }
 
@@ -153,7 +179,9 @@ impl<T> Capture<T> {
     ) -> Result<(T, SignResult), SignError> {
         let pending = self.take(id, now, protocol_now, revision)?;
         let result = run(&pending.work)?;
-        pending.work.validate_result(&result)?;
+        pending
+            .work
+            .validate_result_with_policy(&result, pending.header_policy)?;
         Ok((pending.metadata, result))
     }
 
@@ -656,5 +684,58 @@ mod tests {
             ));
             assert!(captures.is_empty());
         }
+    }
+    #[test]
+    fn trusted_http_headers_are_attempt_owned_without_weakening_default_capture_fences() {
+        use crate::signing_headers::ResultHeaderPolicy;
+        let mut captures = Capture::default();
+        for policy in [
+            ResultHeaderPolicy::Deny,
+            ResultHeaderPolicy::Http { protected: &[] },
+        ] {
+            let prepared = captures
+                .prepare_with_policy((work(None), policy), (), 100., 1000., 7, 500)
+                .unwrap();
+            let mut signed = result(prepared.work.receipt);
+            signed.headers = vec![("X-Proof".into(), "attempt".into())];
+            let completion = captures.finish(prepared.id, 101., 1001., 7, Ok(signed));
+            assert_eq!(
+                completion.is_ok(),
+                matches!(policy, ResultHeaderPolicy::Http { .. })
+            );
+            assert!(captures.is_empty());
+        }
+        for (now, revision, header) in [
+            (101., 8, "valid"),
+            (600., 7, "valid"),
+            (101., 7, "bad\r\nvalue"),
+        ] {
+            let prepared = captures
+                .prepare_with_policy(
+                    (work(None), ResultHeaderPolicy::Http { protected: &[] }),
+                    (),
+                    100.,
+                    1000.,
+                    7,
+                    500,
+                )
+                .unwrap();
+            let mut signed = result(prepared.work.receipt);
+            signed.headers = vec![("X-Proof".into(), header.into())];
+            assert!(
+                captures
+                    .finish(prepared.id, now, 1001., revision, Ok(signed))
+                    .is_err()
+            );
+            assert!(captures.is_empty());
+        }
+        let prepared = prepare(&mut captures, ());
+        let mut signed = result(prepared.work.receipt);
+        signed.headers = vec![("X-Proof".into(), "default-deny".into())];
+        assert!(
+            captures
+                .finish(prepared.id, 101., 1001., 7, Ok(signed))
+                .is_err()
+        );
     }
 }

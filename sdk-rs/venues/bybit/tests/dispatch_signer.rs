@@ -46,6 +46,7 @@ impl Signer for Gate {
             _ => Some(Ok(SignResult {
                 values: vec![b"bad\r\ncredential".to_vec(), vec![0; 32]],
                 receipt: request.receipt,
+                headers: Vec::new(),
             })),
         }
     }

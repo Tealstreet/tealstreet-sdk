@@ -876,3 +876,332 @@ No source, fixture, allowance or comparator changes accompany this refresh.
 Independent six-file preservation review and fresh normal separate guard
 against actual landing remain required; no predecessor-stack exception is
 needed now that both actual dependency merges are real ancestors.
+
+### Phase 6: AsterDEX observed cumulative adoption (plan first)
+
+Fresh branch begins at actual BingX #1749
+`c189ec6e7b326daaa411a7ef8c7b666c88f7ea52`. Architecture gate: YES,
+Aster's no-execution-ID last-quantity cap is the same cross-cutting policy as
+BingX. Reuse existing `engine::execution::ObservedProgress::prepare_capped`;
+no second local cumulative subtraction/minimum policy. Scope is Aster account
+execution bookkeeping and native account controls, plus existing audit/quality/
+caller/plan sections if behavior is proven to change. Signing/calibration,
+listen-key lifecycle, REST reconciliation and history remain native.
+
+Before production edits, run compatibility controls on original source for
+last quantity below/above growth, blind gaps and full observed anchors, equal/
+regressing cumulative reports, explicit IDs and their duplicates, absent
+cumulative evidence, invalid-price retry, legacy flat executionReport and
+unknown order kinds. Preserve existing explicit-ID authoritative last fills
+in full, including reordered/late unique events independently of displayed
+order state. Valid explicit-ID events INCLUDING duplicates must still advance
+the independent observation ledger; REST/display seeds are not delivery.
+No-ID delivery still requires native cumulative evidence; do not enable the
+BingX absent-cumulative fallback there. Preserve positive native price
+precedence and separate 10,000-entry execution-ID/observed-order retention.
+
+Concrete API to review before implementation: derive the previous observation
+without mutation, construct `ObservedProgress::new(previous, Some(filled))`,
+use `prepare_capped(Some(last), selected_price)` for the no-ID branch, and
+commit the accepted full observed quantity through the native bounded map.
+Explicit-ID delivery admission remains independent; do not gate a valid direct
+last fill on an unusable cumulative/display field. The shared helper owns
+subtraction/capping/monotonic quantity, while Aster owns identity, storage and
+retention. Accepted zero-growth evidence must preserve native bookkeeping.
+
+Investigate negative cumulative observations consuming bounded ledger slots
+as a source hypothesis, not a defect claim. Any same-contract financial fix
+requires an assertion RED against original production code and GREEN through
+the existing shared helper, preserving direct last-fill independence and
+healthy peers. The owner has standing approval for proven helper-contract
+financial defects; document each in PR/AUDITS. Do not silently clamp malformed
+financial evidence or change quiet/retention semantics without proof. If the
+existing helper cannot express a proven native policy, review an engine
+extension before any per-venue workaround.
+
+Run focused engine/AsterDEX/Binance native tests, strict Clippy/fmt/bans and
+root checks. Independent code/adversarial/caller review follows. No local
+WASM build/replay/size/timing run. Integrate newer shared dependencies before
+final exact-head CI/full authenticated replay evidence, with raw IDs/requests/
+receipts/checkpoints and ordered gates intact except top-level metrics.
+The current history sequence #1748/#1750/#1754/#1751/#1752 has merge priority;
+this slice does not jump it. Fresh separate guard and separate match-head
+merge, actual parents/tree/preservation audit and overseer report are required.
+
+#### Aster original evidence and concrete adoption API
+
+Unmodified actual c189 account source SHA256
+`80b79f5d772f5832f60c53e3bcd2694a5ba8b4706cc1714e34a26eb4f14f5711`
+reproduces one native assertion RED: after a delivered0.5 fill,10,000 distinct
+negative cumulative observations evict its healthy ledger anchor and replay
+delivers another `(102.0,0.5)` instead of no Fill. Eight original compatibility
+controls pass, including10,000 valid quiet observations still applying native
+retention, direct IDs with unusable cumulative evidence, duplicate-ID full
+observations, blind gaps, legacy messages and native selected-price retry.
+This is a proven helper-contract financial defect under standing owner scope.
+
+Concrete implementation to review before source edits: replace private
+`execution_progress(&mut self,id,filled)->f64` with
+`commit_execution_progress(&mut self,id,progress:ObservedProgress)`. Its bounded
+map stores `progress.quantity()` directly; the engine owns validation and the
+monotonic maximum. Read previous observation without mutation in on_order,
+then call `ObservedProgress::new(previous,Some(filled))`. Only the no-ID branch
+prepares `Some(last)` with the selected positive native price; only an accepted
+preparation commits observation and optional delivery. Accepted None still
+commits valid quiet observations. Explicit-ID delivery stays before and
+independent of this observation path; valid cumulative evidence from its
+duplicates still commits. Rejected observations skip only that ledger effect;
+continue native order-state handling, so no unrelated lifecycle change.
+No new engine API, quote policy, retention scheme, logging implementation or
+absent-cumulative fallback is introduced. Re-run original RED as GREEN and all
+original compatibility controls before broader focused checks/review.
+
+Implementation checkpoint: existing engine preparation and typed bounded
+observation commit now serve Aster no-ID delivery and initial REST seeding.
+The direct-ID block and native order-state continuation remain unchanged.
+Final11-fixture suite was run against the exact original account source under
+finally/restore: one duplicate-Fill assertion RED and ten compatibility GREEN,
+then all11 GREEN through the shared path. The two additional controls prove
+initial REST suppression without hiding direct IDs and later REST reads not
+replacing live observations. 799 focused engine/Aster/Binance native tests
+and strict all-target Clippy pass. Both independent source/adversarial/caller
+reviews are CLEAN; root typecheck44/44 and lint28/28 pass fully cached. Fresh
+dependency integration/CI/replay evidence remain pending.
+
+
+#### Aster final history-stack integration checkpoint
+
+The overseer authorized exact-head preintegration of reviewed frozen history
+stack `b1333485b086281a0c9cb23a464c34e06c931d90` for overlapping CI/proof.
+Porcelain merge `09c19daa676` preserves all incoming source/test files and the
+reviewed Aster account source/tests byte-for-byte. Two documentation conflicts
+were resolved exactly as separately approved in #1756 comment6341814528;
+marker and per-section checks passed before committing. All incoming history
+sections and the Aster financial-admission section remain.
+
+Final merge still requires actual #1754/#1751/#1752 with the frozen ancestry
+and reviewed source/tree preserved, full green current-head CI and authenticated
+replay proof, independent artifact/control review, and a fresh separate guard.
+Any predecessor head change requires genuine integration and fresh checks.
+The overseer reserved this final proof window after the history queue lands.
+Initial700 evidence remains historical, including its retained strict-false WOO
+TS checkpoint-0 variation with both complete pre-change variants independently
+authenticated and all488 Rust outputs equal under the standing reference rule.
+No exclusions, local WASM builds or local replays were introduced.
+
+The owner reprioritized the shared financial snapshot freshness-token core
+immediately after this Aster slice, before remaining KuCoin Spot/Orderly
+cumulative adoption and reporting. It needs two different family consumers and
+API coordination with RequestContext late reconciliation and the pending
+metadata epoch core; no token implementation is included here.
+
+
+### KuCoin Spot cumulative fallback adoption — 2026-10-23 plan
+
+Start from actual post-gate-sort landing `2cf8c4c91dd`. This PR adopts the
+existing engine execution choke point for KuCoin Spot only; Orderly follows on
+a fresh branch because its selected-last/average pricing policy needs a separate
+review. Row reporting follows both. KuCoin futures, signing and request builders
+are outside this slice. The whole-KuCoin signer migration remains held by the
+other lane until this slice actually lands.
+
+The current Spot match path emits `matchSize.or(filledSize)` directly. Prove
+with an original native regression whether an absent `matchSize` and successive
+cumulative `filledSize` values duplicate the already observed prefix. This is a
+same-contract financial hypothesis until the unmodified reducer fails. Existing
+invalid-price controls already reject before dedupe; do not claim a new defect
+there. Architecture gate: yes, this concern is cross-cutting; use existing
+`execution::{Cursor, Report, Arithmetic, CumulativePrice}`, not venue arithmetic.
+
+Concrete source scope: `venues/kucoin/src/spot/mod.rs` and `tests/spot.rs`, plus
+this plan and the audit/quality/caller ledgers as warranted by proven evidence.
+No new engine arithmetic is currently needed. Retain a bounded 20,000-order
+map of native `Cursor`s and first-insertion FIFO, independently of the existing
+20,000 execution identities and terminal identities. Seed previously unseen
+order IDs from individually valid/admitted healthy rows (including healthy peers
+in a partially rejected snapshot) only when a current REST snapshot is accepted for
+Store publication, never from lookups, stale/failed reads, rejected rows, or non-match WS
+display observations. Do not replace a live execution anchor on later REST
+reads. Preserve anchors through reconnect, terminal removal and REST absence;
+forget them only on explicit bounded FIFO eviction. After eviction the retained
+history guarantee ends, just as for native bounded execution identities.
+
+For a match with present `matchSize`, prepare `Report::Last` using the exact
+native selected amount/price and optional native cumulative endpoint. Deliver
+unique authoritative last quantities before stale/terminal display fences,
+without capping by growth or cached geometry. Store its next anchor only when
+a native cumulative endpoint exists; absent-cumulative last fills must never
+invent a prefix. Prepare an absent-cumulative last against a zero cursor so an
+unrelated large anchor cannot overflow and reject its finite native amount.
+For absent `matchSize`, use only `filledSize` as the cumulative
+fallback endpoint (not `dealSize`), and `Report::Cumulative` with direct selected
+price and binary subtraction. Equal/regressed endpoints produce no fill and do
+not rewind the anchor. Preserve native presence-based quantity/price precedence,
+optional wire bounds/epsilon, side/market admission, and unrounded public fills.
+
+Preserve the identity key verbatim: order/trade ID, otherwise order/raw time/
+original selected native amount/price, never derived delta. Prepare without
+mutation, then admit identity and deliver before installing progress. Invalid
+financial data must consume neither identity nor progress. A quiet cumulative
+report must still allow native display processing. Do not reinterpret REST or
+non-match display changes as delivered executions.
+
+Before implementation, independently audit this policy. Add meaningful native
+original-RED/fixed-GREEN tests for successive fallback suffixes and retained
+prefixes after terminal/REST absence; retain existing unique late/terminal and
+decimal-roundoff controls. Add controls for direct-vs-fallback precedence,
+invalid selected-price correction with the same ID, repeated fallback without
+trade ID, stale REST, later REST non-reseeding and bounded retention as feasible.
+Run focused engine/KuCoin-spot/Binance native tests with `CARGO_BUILD_JOBS=4`,
+strict fmt/Clippy and root typecheck/lint. Independent source/adversarial/caller
+reviews must answer the architecture gate explicitly. Do not build local release
+WASM or run local replay/timing/size sweeps.
+
+Push for full green CI and authenticated venue+Binance raw replay evidence.
+Ordered gate/fixer comparisons require a post-#1762 baseline (actual `2cf8c4c91dd`
+or later, or an explicitly authenticated whole-tree-equivalent green head).
+No exclusion, comparator, timing threshold, tape or manifest changes. Any
+unexpected raw/gate change blocks for review; proven fixture-visible financial
+corrections are recorded explicitly. Integrate new shared dependencies before
+final proof as lane rules require. Fresh separate guard, then separate merge;
+audit actual parents/tree/preservation and report the actual pin immediately.
+
+Plan audit refinements: accepted partial REST snapshots seed individually healthy
+returned rows too; retained rejected copies are never new seeds. An authoritative
+fill without cumulative evidence cannot identify the interval of a later
+cumulative fallback; this migration does not claim to reconcile that ambiguity.
+First-insertion FIFO can evict even a still-active order at the documented bound.
+Both limits remain explicit; no unbounded history or fabricated prefix is added.
+
+Original native evidence: nine focused fixtures on unchanged production source
+produce six assertion REDs (raw cumulative prefix emitted instead of suffix)
+and three compatibility GREENs. The RED scenarios cover successive endpoints,
+terminal/REST removal, partial-snapshot healthy peers, later REST non-reseeding
+and non-match display updates. Original log is retained separately.
+
+Further seed-provenance refinement: a paged read stages raw validated seed
+candidates alongside mapped rows, before mapping may substitute newer cached
+Store rows. At final current, non-lookup commit, only candidates whose identities
+are admitted by the SnapshotBuilder may seed previously unseen IDs. A failed
+later page or revision mismatch discards all staged seeds. This keeps display
+observations and retained rejected copies out of execution authority.
+
+KuCoin implementation checkpoint: existing engine Cursor now prepares direct
+last/fallback reports; raw REST seed candidates retain provenance until accepted
+current nonlookup commit. Independent source/adversarial reviews found no source
+blocker and required additional lifecycle/identity tests, which are included.
+The final19-fixture cumulative suite was run against the exact original source
+with finally/restore:13 assertion REDs expose the same prefix-overdelivery defect,
+6 compatibility controls pass. Original source SHA256 is
+`3c9993f80b66bb4e7265fbae892a857caf900e827fa66306f244b8840f664e47`.
+The corrected78-test Spot suite and bounded FIFO unit control pass; the broader
+focused engine/KuCoin/Binance run passed919 tests, including the final78 Spot
+controls. Strict all-target Clippy/fmt and root44 typecheck/28 lint pass.
+Full current-head CI and authenticated post-sort replay evidence remain pending.
+
+### Orderly observed-average adoption — 2026-10-23 plan
+
+KuCoin Spot slice #1764 is merged as actual `49470a1188b` with the separate guard,
+match-head merge and complete tree/preservation audit. Start this next slice on
+fresh `feat/rust-cumulative-orderly-adoption` from that actual landing. The owner
+explicitly approved an additive shared `prepare_observed_average` operation:
+preserve Orderly's native arbitrary-last quotient unless an original native RED
+proves a wrong Fill. Keep `Report::Last` strict. This is a shared financial choke
+point extension, not a venue arithmetic copy. Other lanes' queued history,
+RequestContext and signer prerequisite merges keep their existing order.
+
+Source scope is engine `execution.rs`, Orderly `account.rs`, focused native/helper
+tests and existing plan/audit/quality/caller ledgers. No signing, requests,
+transport, Store freshness, row-reporting, tape, normalization or manifest edits.
+The planned API is:
+
+`Cursor::prepare_observed_average(self, quantity: f64, last: Option<f64>,
+average: Option<f64>, direct: Option<f64>, arithmetic: Arithmetic)
+-> Result<PreparedObservation, Rejection>`.
+
+The result exposes optional `observation() -> Option<Cursor>` separately from
+optional `delivery() -> Option<Prepared>`. Use the existing native totals map as
+`HashMap<String, Cursor>`; add no second persisted ledger. Native cumulative
+field precedence and absent cumulative resolving to literal zero stay in the
+adapter. Present last quantity/direct price win by presence, including zero.
+Keep binary arithmetic, direct-price precedence and the legacy quote-delta
+quotient over the selected amount. Quiet positive cumulative observations may
+commit without a Fill. Equal/regressed cumulative never replaces its quote.
+All supplied financial fields still validate before any root, stamp, total,
+terminal or dedupe effect. Keep exact native error text.
+
+Missing/zero average must remain distinguishable from a trusted quote in the
+Cursor, while legacy quotient pricing explicitly uses its existing zero fallback
+when quote evidence is unavailable. That representation alone must not change
+observable native behavior. A candidate quote-poisoning bug needs native proof:
+from zero, cumulative1/last1/direct100 without average emits1@100 but stores zero
+quote; next cumulative2/average100 without last/direct emits1@200 rather than100.
+Prove this against original production before claiming or fixing it, including a
+zero-average variant. A blind gap (cumulative10/last1/direct100) cannot establish
+quote1000 and must not be extrapolated as a whole prefix.
+
+If proven, use existing engine `direct_suffix` only for a validated whole-growth
+direct execution with a known preceding quote (or the empty prefix). Inferred
+quote may install only after native identity/dedup admits the unique Fill; it
+must not be consumed by duplicate/quiet/invalid reports. Preserve native
+observation-before-dedup order: install the optional observed endpoint first,
+then only an admitted delivery may enrich its same-endpoint missing quote using
+existing `Cursor::enrich_quote` and `Prepared::next`. This prevents a duplicate
+higher-cumulative direct report from inventing quote coverage. Stage all results
+before effects; native root/tree all-or-none behavior remains.
+
+First add compatibility fixtures and original-RED financial controls without
+calling a nonexistent engine API. Cover explicit last/direct zero precedence,
+quiet forward observations, equal/regressed and missing cumulative, duplicate ID
+with a higher endpoint, unused regressing average with direct price, sparse older
+terminal rows, REST non-seeding, outer healthy peers/root rollback, late unique
+fills before display gates, exact binary0.3-0.2, native identity precedence and
+4096 retention. Explicit native quotes/averages and gap controls must stay
+separate. Review the concrete API/preparation and quote-enrichment policies
+independently before implementation; no per-venue financial workaround.
+
+Run engine/Orderly/Binance focused native tests with four Cargo jobs, strict
+Clippy/fmt/bans and root checks. Independent correctness/adversarial/caller
+reviews answer the architecture gate. Final full green CI and authenticated
+all-suite raw proof use a post-#1762 baseline, integrate new shared dependencies
+as required, retain strict differences and freshly certify only standing TS
+reference classes. No local release WASM build/replay/size/timing sweep. Fresh
+separate guard, separate merge, actual tree/parents/preservation audit and
+immediate overseer/peer report finish the slice; shared row-reporting follows.
+
+Plan-audit refinement: whole-growth inference requires exact equality to the
+selected arithmetic's positive cumulative delta, with no epsilon or gap
+extrapolation. It is best-effort: inferred quote overflow/unavailable prefix
+leaves quote missing and never rejects an otherwise valid direct Fill. Supplied
+average-times-cumulative overflow still rejects at the existing prepare-fill
+call sites, including quiet/equal/regressed reports; do not move those checks
+into root-only or stale sparse paths that never prepared a Fill. Positive last
+reports may deliver at equal/regressed endpoints under native pricing policy.
+Post-delivery enrichment only updates a live same-endpoint totals entry and
+never recreates an entry removed by native retention/root lifecycle effects.
+
+Orderly implementation checkpoint: additive `PreparedObservation` separates the
+strictly forward observation from the uniquely admitted delivery. The existing
+totals map stores `Cursor`; native financial calculations now call the shared
+operation. Inferred quote enrichment requires Binary arithmetic, exact whole
+growth, a known preceding quote/empty prefix and a unique positive direct Fill.
+Other arithmetic policies can prepare native deliveries but never infer a quote
+using a mismatched binary interval. No changes to `Report::Last`.
+
+The final21 native fixtures on exact original engine/Orderly source yield three
+assertion REDs (missing average, zero average, and the same defect in a corrected
+root child) and18 compatibility GREENs. Each RED observes1@200 rather than1@100;
+the corrected21 cases pass. Root rollback assertions pass on original code and
+remain compatibility controls, not a newly claimed root-atomicity defect.
+Seven focused engine controls cover observation/delivery separation, exact
+whole-growth qualification, known-prefix requirements, supplied-vs-inferred
+overflow, direct/last zero precedence, regressed/equal observations and the
+non-Binary inference boundary. Full current-head CI/replay proof is pending.
+
+Final focused verification passed851 engine/Orderly/Binance native tests, strict
+all-target Clippy, formatting/bans, root44 typecheck and28 lint (root cache hits).
+Both independent final source/test/caller reviews are clean. The native match
+identity fixture uses actual `match_id`, including a repeated higher endpoint;
+its final exact-original rerun preserves3 assertion REDs/18 compatibility GREENs.
+The final native fixture SHA256 is
+`f0caeffeb5bcce22277f2a636af1706c36c159c4882b8124d9b7cce10f2d09ca`.
