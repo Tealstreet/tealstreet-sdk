@@ -245,12 +245,14 @@ impl safe_cex_engine::SignStep for PrimitiveStep {
     fn prepare(
         &mut self,
         action: &mut safe_cex_engine::Action,
-        now: f64,
+        context: &safe_cex_engine::DispatchContext<'_>,
     ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        let now = context.now_ms;
         if let safe_cex_engine::Action::Http(request) = action {
             request.url = format!("https://venue.invalid/orders?timestamp={}", now.floor());
         }
         Ok(safe_cex_engine::signing::SignRequest {
+            receipt: Default::default(),
             context: Default::default(),
             operations: vec![safe_cex_engine::signing::Operation::Present {
                 key: safe_cex_engine::signing::KeyRef("account/header".into()),
@@ -265,7 +267,7 @@ impl safe_cex_engine::SignStep for PrimitiveStep {
         if let safe_cex_engine::Action::Http(request) = action {
             request.headers.push((
                 "X-Provider",
-                String::from_utf8(result.0[0].clone()).unwrap(),
+                String::from_utf8(result.values[0].clone()).unwrap(),
             ));
         }
         Ok(())
@@ -301,9 +303,10 @@ impl safe_cex_engine::signing::Signer for PrimitiveProvider {
             let _guard = guard;
             entered.send(()).unwrap();
             release.notified().await;
-            Ok(safe_cex_engine::signing::SignResult(vec![
-                b"provider-value".to_vec(),
-            ]))
+            Ok(safe_cex_engine::signing::SignResult::new(
+                vec![b"provider-value".to_vec()],
+                request.receipt,
+            ))
         })
     }
 }

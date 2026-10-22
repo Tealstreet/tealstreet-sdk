@@ -719,13 +719,16 @@ test('Workers obtains opaque signer refs and provider from deployment setup only
       assert.equal(venue, 'binance');
       assert.equal(env, environment);
       calls.push('provision');
-      return { identities, signer: () => [] };
+      return { identities, signer: (request) => ({ values: [[1]], receipt: request.receipt }) };
     },
     loadEngine: async () => ({ WasmEngine: class {
       constructor(venue, options) { calls.push(JSON.parse(options)); }
       requiresExternalSigner() { return true; }
       useExternalSigner() { calls.push('installed'); }
-      start() { return '[]'; }
+      start() { return JSON.stringify([{ op: 'sign', attempt: 7, timeoutMs: 1000, work: {
+        operations: [{ kind: 'present', key: 'account/key' }], context: {}, receipt: { expiryMs: 2000 },
+      } }]); }
+      signed(id, result) { calls.push({ signed: id, result: JSON.parse(result) }); return '[]'; }
       free() {}
     } }),
   });
@@ -742,6 +745,10 @@ test('Workers obtains opaque signer refs and provider from deployment setup only
     assert.equal(calls[0], 'provision');
     assert.deepEqual(calls[1].signing, identities);
     assert.equal(calls[2], 'installed');
+    await until(() => calls.some((call) => call?.signed === 7));
+    assert.deepEqual(calls.find((call) => call?.signed === 7), {
+      signed: 7, result: { values: [[1]], receipt: { expiryMs: 2000 } },
+    });
   } finally { object.leave(client); }
 });
 
