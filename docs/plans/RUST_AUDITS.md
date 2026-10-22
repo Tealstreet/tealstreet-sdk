@@ -152,8 +152,10 @@ High:
   WOO/Bitrue consumers. Checked average/direct-suffix quote binding and public
   execution rounding now also serve Bitunix and Coinbase(+spot); compatibility
   controls preserve historical quotes, equal-endpoint corrections and native
-  Spot/INTX/CFM quantity units. BloFin, BingX, AsterDEX, Kraken Spot, Orderly
-  and the KuCoin Spot fallback still need adoption before
+  Spot/INTX/CFM quantity units. BloFin also uses checked prefix admission,
+  capped-decimal arithmetic and scaled public-output preparation before live
+  progress commits. BingX, AsterDEX, Kraken Spot, Orderly and the KuCoin Spot
+  fallback still need adoption before
   row reporting and snapshot freshness. ApeX cumulative events still never
   emit public fills; synthetic history remains distinct. No live capture claim.
 - ~~WOO advances its delivered cumulative anchor on a zero/negative last
@@ -991,6 +993,17 @@ backward (`packages/safe-cex/src/utils/virtualClock.ts:98–110,151`).
   are resent.
 
 ### BloFin
+
+- High: ~~a finite cumulative quote can overflow its incremental price division,
+  emit an infinite-price Fill and consume the corrected same-quantity suffix.~~
+  Shared engine prefix/delivery preparation now validates division, contract
+  scaling and public rounding before live progress commits. Two separate native
+  original-RED/core-GREEN controls prove rejection of `(inf, 0.0005)` and recovery
+  of the corrected `.0005 @298` receipt once. Both failures were reproduced on
+  unchanged actual #1729 source before the fix; this is a real financial defect,
+  covered by the owner's same-helper-contract approval. Native historical floors,
+  missing-quote observation recovery, startup census/buffering and 500-prefix
+  retention stay separate; no public Fill is synthesized from historical data.
 
 - ~~BloFin's closed-position page-cap ownership omission~~ now emits the actual
   request command before retained rows complete. Its native cap regression
