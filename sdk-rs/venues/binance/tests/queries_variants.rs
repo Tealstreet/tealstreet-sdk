@@ -125,8 +125,7 @@ fn usd_m_and_pm_history_maps_stp_expiration_as_canceled_without_changing_filled(
 }
 
 #[test]
-fn best_effort_history_error_stays_visible_before_empty_success_without_capturing_background_logs()
-{
+fn first_history_failure_rejects_typed_without_capturing_background_logs() {
     let mut h = Harness::started(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
@@ -162,9 +161,18 @@ fn best_effort_history_error_stays_visible_before_empty_success_without_capturin
         "",
         r#"{"code":-1,"msg":"history unavailable"}"#,
     );
-    assert_eq!(h.result(91), Some(&Ok("[]".into())));
-    assert_eq!(h.command_errors.len(), 1);
-    assert_eq!(h.command_errors[0].0, 91);
-    assert!(h.command_errors[0].1.contains("history unavailable"));
-    assert_eq!(h.command_notices, [(91, "error"), (91, "done")]);
+    assert!(
+        h.result(91)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("history unavailable")
+    );
+    assert!(h.command_errors.is_empty());
+    assert_eq!(h.failures.len(), 1);
+    assert_eq!(
+        h.failures[0].1.kind,
+        Some(safe_cex_engine::ErrorKind::Internal)
+    );
+    assert_eq!(h.command_notices, [(91, "failed")]);
 }
