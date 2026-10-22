@@ -36,6 +36,12 @@ impl<'a> DispatchContext<'a> {
 
 /// Canonicalisation and result insertion only; no keys or I/O.
 pub trait SignStep: Send {
+    /// Static public codec data for the unsigned managed transport intent.
+    /// Credentials and signatures belong exclusively to provider/apply results.
+    /// The managed queue snapshots this once; it grants no callback authority.
+    fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
     fn prepare(
         &mut self,
         outbound: &mut Action,

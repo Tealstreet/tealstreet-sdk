@@ -45,6 +45,22 @@ pub struct Params(BTreeMap<String, Param>);
 
 pub type RequestParts = (String, Vec<(&'static str, String)>, Option<String>);
 
+/// Native public transport bytes, shared with managed unsigned intent. API-key
+/// and signature material are deliberately absent from this static declaration.
+pub fn unsigned_headers(method: Method) -> &'static [(&'static str, &'static str)] {
+    if method == Method::Post {
+        &[
+            ("X-SOURCE-KEY", "Tealstreet"),
+            ("Content-Type", "application/json"),
+        ]
+    } else {
+        &[
+            ("X-SOURCE-KEY", "Tealstreet"),
+            ("Content-Type", "application/json, charset=utf-8"),
+        ]
+    }
+}
+
 impl Params {
     pub fn new() -> Self {
         Self::default()
@@ -91,14 +107,14 @@ impl Params {
         path: &str,
         mut headers: Vec<(&'static str, String)>,
     ) -> RequestParts {
+        let public = unsigned_headers(method);
+        headers.push((public[1].0, public[1].1.into()));
         let url = format!("{}{path}", crate::paths::REST);
         if method == Method::Post {
-            headers.push(("Content-Type", "application/json".into()));
             let body = (!self.0.is_empty())
                 .then(|| serde_json::to_string(&self.0).expect("finite request parameters"));
             (url, headers, body)
         } else {
-            headers.push(("Content-Type", "application/json, charset=utf-8".into()));
             let query = self.query();
             (
                 if query.is_empty() {
@@ -130,8 +146,14 @@ pub fn stage<P>(
 ) -> safe_cex_engine::RequestId {
     let recipe = credentials
         .map(|c| dispatch::Http::new(c.identity(method).clone(), method, path, params.clone()));
-    let (url, headers, body) =
-        params.render(method, path, vec![("X-SOURCE-KEY", "Tealstreet".into())]);
+    let (url, headers, body) = params.render(
+        method,
+        path,
+        vec![(
+            unsigned_headers(method)[0].0,
+            unsigned_headers(method)[0].1.into(),
+        )],
+    );
     let id = match at {
         Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
         None => cx.request(method, url, headers, body, pending),
