@@ -5,10 +5,18 @@ use safe_cex_venue_paradex::Options;
 use support::*;
 
 fn private() -> Harness {
+    private_with_signer(false)
+}
+fn private_with_signer(delegated: bool) -> Harness {
     let mut h = Harness::empty(Options {
-        key: Some(format!("0x{}1", "0".repeat(63))),
+        key: Some(if delegated {
+            "opaque-public-subkey".into()
+        } else {
+            format!("0x{}1", "0".repeat(63))
+        }),
         paradex_address: Some("0x123".into()),
         subkey_address: Some("0x456".into()),
+        payload_signer: delegated,
         ..Options::default()
     });
     h.reply("/markets", MARKETS);
@@ -17,6 +25,25 @@ fn private() -> Harness {
         "/system/config",
         r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#,
     );
+    if delegated {
+        let request = h
+            .actions
+            .iter()
+            .find_map(|a| match a {
+                safe_cex_engine::Action::SignPayload { request, .. } => Some(*request),
+                _ => None,
+            })
+            .unwrap();
+        h.e.handle(
+            h.now,
+            safe_cex_engine::Event::PayloadSigned {
+                request,
+                signature: "fixture signature",
+                headers: vec![],
+            },
+        );
+        h.collect();
+    }
     h.reply("/auth/", r#"{"jwt_token":"test-jwt"}"#);
     h.reply("/account/margin", r#"{"configs":[]}"#);
     h.reply("/positions", r#"{"results":[]}"#);
@@ -902,4 +929,150 @@ fn capped_open_lookup_keeps_nondefinitive_proof_without_a_new_warning() {
     assert!(!h.actions.iter().any(|a| matches!(a,
         safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(e)) if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE
     )));
+}
+
+#[test]
+fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
+    for delegated in [false, true] {
+        for kind in 0..3 {
+            let mut h = private_with_signer(delegated);
+            h.actions.clear();
+            read(&mut h, 105, owned_history_query(kind));
+            // Expire JWT before the first response schedules the next leg.
+            h.now += 180_001.0;
+            let row = if kind == 1 { ORDER } else { FILL };
+            h.reply(
+                owned_history_path(kind),
+                &format!(r#"{{"results":[{row}],"next":"queued-auth"}}"#),
+            );
+            if delegated {
+                let request = h
+                    .actions
+                    .iter()
+                    .rev()
+                    .find_map(|a| match a {
+                        safe_cex_engine::Action::SignPayload { request, .. } => Some(*request),
+                        _ => None,
+                    })
+                    .unwrap();
+                h.e.handle(
+                    h.now,
+                    safe_cex_engine::Event::PayloadSignFailed {
+                        request,
+                        error: "fixture signing refusal",
+                    },
+                );
+                h.collect();
+            } else {
+                let auth = h.take("/auth/");
+                h.respond(auth, 503, r#"{"error":"auth unavailable"}"#);
+            }
+            assert!(h.result(105).is_err());
+            assert_eq!(
+                h.failures.last().unwrap().outcome,
+                Some(safe_cex_engine::Outcome::NotSent)
+            );
+            assert!(!h.actions.iter().any(|a| matches!(a,
+                safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(e)) if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE
+            )));
+            assert!(
+                !h.pending
+                    .iter()
+                    .any(|r| r.url.contains("cursor=queued-auth"))
+            );
+        }
+    }
+}
+
+#[test]
+fn lookup_cycle_on_the_budget_boundary_is_still_a_strict_rejection() {
+    let mut h = private();
+    read(
+        &mut h,
+        106,
+        Query::OrderByClientId {
+            symbol: "BTC-USD-PERP".into(),
+            client_order_id: "absent".into(),
+        },
+    );
+    for page in 0..49 {
+        h.reply(
+            "/orders?",
+            &format!(r#"{{"results":[],"next":"open-{page}"}}"#),
+        );
+    }
+    h.reply("/orders?", r#"{"results":[],"next":"open-0"}"#);
+    assert!(h.result(106).unwrap_err().contains("cursor"));
+    assert!(!h.pending.iter().any(|r| r.url.contains("orders-history")));
+}
+
+#[test]
+fn lookup_never_accepts_found_rows_from_a_failed_envelope() {
+    for history in [false, true] {
+        let mut h = private();
+        read(
+            &mut h,
+            107,
+            Query::OrderByClientId {
+                symbol: "BTC-USD-PERP".into(),
+                client_order_id: "caller".into(),
+            },
+        );
+        let path = if history {
+            h.reply("/orders?", r#"{"results":[]}"#);
+            "/orders-history?"
+        } else {
+            "/orders?"
+        };
+        let request = h.take(path);
+        h.respond(
+            request,
+            200,
+            &format!(r#"{{"error":"UNAVAILABLE","results":[{ORDER}]}}"#),
+        );
+        assert!(h.result(107).is_err());
+    }
+}
+
+#[test]
+fn fills_empty_traversal_fallback_retains_its_owner_and_single_page_shape() {
+    let mut h = private();
+    h.actions.clear();
+    read(&mut h, 108, fills(Some(100)));
+    for page in 0..5 {
+        h.reply(
+            "/fills?",
+            &format!(r#"{{"results":[],"next":"empty-{page}"}}"#),
+        );
+    }
+    let request = h.take("/orders-history?");
+    assert!(request.url.contains("limit=100"));
+    assert!(!request.url.contains("cursor="));
+    h.respond(
+        request,
+        200,
+        &format!(r#"{{"results":[{ORDER}],"next":"ignored"}}"#),
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(108).unwrap()).unwrap();
+    assert_eq!(rows[0]["qty"], 1.5);
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.url.contains("/fills?") || r.url.contains("/orders-history?"))
+    );
+    assert!(!h.actions.iter().any(|a| matches!(a,
+        safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(e)) if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE
+    )));
+    let mut h = private();
+    read(&mut h, 109, fills(Some(100)));
+    h.reply(
+        "/fills?",
+        &format!(
+            r#"{{"results":[{}],"next":"filtered"}}"#,
+            FILL.replace("BTC-USD-PERP", "ETH-USD-PERP")
+        ),
+    );
+    h.reply("/fills?", r#"{"results":[]}"#);
+    assert_eq!(h.result(109), Ok("[]"));
+    assert!(!h.pending.iter().any(|r| r.url.contains("orders-history")));
 }
