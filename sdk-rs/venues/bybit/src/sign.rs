@@ -1,17 +1,10 @@
 //! Canonical Bybit recipes. The shared dispatch signer owns credentials and HMACs.
 pub use safe_cex_engine::signing::Identity as Credentials;
-use safe_cex_engine::signing::{
-    Algorithm, Context, Operation, PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
-};
+use safe_cex_engine::signing::{Context, SignError, SignReceipt, SignRequest, SignResult};
 use safe_cex_engine::{Action, DispatchContext, SignStep, num};
 pub const RECV_WINDOW_MS: u32 = 20_000;
 pub const BROKER_ID: &str = "Tealstreet";
 const WS_AUTH_EXPIRY_MS: f64 = 10_000.0;
-fn bytes(value: impl Into<Vec<u8>>) -> PayloadPart {
-    PayloadPart::Bytes {
-        bytes: value.into(),
-    }
-}
 fn credential(value: &[u8]) -> Result<&str, SignError> {
     let value = std::str::from_utf8(value).map_err(|_| SignError::InvalidResult)?;
     if value.is_empty() || value.contains(['\r', '\n']) {
@@ -58,30 +51,13 @@ impl SignStep for Http {
         };
         let stamp = dispatch.stamp_ms();
         self.stamp = num::format(stamp);
-        Ok(SignRequest {
-            receipt: SignReceipt {
-                stamp_ms: Some(stamp),
-                expiry_ms: None,
-            },
-            context: context(&http.url, http.method.as_str()),
-            operations: vec![
-                Operation::Present {
-                    key: self.credentials.credential.clone(),
-                },
-                Operation::Sign {
-                    algorithm: Algorithm::HmacSha256,
-                    key: self.credentials.signing.clone(),
-                    payload: vec![
-                        bytes(self.stamp.as_bytes()),
-                        PayloadPart::Credential {
-                            key: self.credentials.credential.clone(),
-                        },
-                        bytes(self.window.to_string().into_bytes()),
-                        bytes(self.payload.as_bytes()),
-                    ],
-                },
-            ],
-        })
+        Ok(crate::hosted_signing::http_work(
+            &self.credentials,
+            self.payload.clone(),
+            stamp,
+            self.window.to_string(),
+            context(&http.url, http.method.as_str()),
+        ))
     }
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
         let Action::Http(http) = outbound else {
@@ -134,23 +110,17 @@ impl SignStep for WsAuth {
         }
         let expiry = dispatch.stamp_ms() + WS_AUTH_EXPIRY_MS;
         self.expires = num::format(expiry);
-        Ok(SignRequest {
-            receipt: SignReceipt {
-                stamp_ms: None,
-                expiry_ms: Some(expiry),
-            },
-            context: context(&self.origin, "WS"),
-            operations: vec![
-                Operation::Present {
-                    key: self.credentials.credential.clone(),
-                },
-                Operation::Sign {
-                    algorithm: Algorithm::HmacSha256,
-                    key: self.credentials.signing.clone(),
-                    payload: vec![bytes(format!("GET/realtime{}", self.expires).into_bytes())],
-                },
-            ],
-        })
+        let mut work = crate::hosted_signing::ws_work(
+            &self.credentials,
+            format!("GET/realtime{}", self.expires),
+            context(&self.origin, "WS"),
+        );
+        // Native auth generates this expiry; hosted auth preserves caller bytes.
+        work.receipt = SignReceipt {
+            stamp_ms: None,
+            expiry_ms: Some(expiry),
+        };
+        Ok(work)
     }
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
         let Action::WsSend { text, .. } = outbound else {

@@ -42,7 +42,7 @@ review, green CI and a fresh separate exact-scope trial guard precede merge.
 Family source may proceed after actual #1721; later RequestContext adoption remains
 separate and must preserve raw lease/deadline ownership.
 
-## Implementation checkpoint (unmerged)
+## Historical implementation checkpoints (unmerged)
 
 The five-alias venue uses only opaque identities; HTTP/probe and static WS recipes
 stage through the existing engine dispatch. Original signing code remains a
@@ -61,7 +61,7 @@ Its supported owned-read and static WS paths are exercised by venue regressions.
 Focused SDK 18 tests, typecheck, lint, strict Bybit/standalone registry Clippy pass.
 Independent source review and CI/replay evidence are still required.
 
-Current owner sequence: actual #1734 Aster profile rollback, #1736 financial,
+Historical owner sequence: actual #1734 Aster profile rollback, #1736 financial,
 #1735 background coverage, then this migration and #1739 Kraken financial. Actual #1726 stamp
 `e09e34486259f4efb44cc04c84a9eec6f37c5974`, #1727 history
 `361a4ccafadcf0385d0f708d124596601da83402`, #1729 financial
@@ -104,3 +104,51 @@ Historical pre-extraction validation was 1,025 focused engine/Binance/Bybit/
 registry/host tests plus strict checks; post-seam validation was 1,035 focused
 native tests, 16 SDK tests, SDK typecheck/lint and Rust strict Clippy/fmt/bans. Final integration tests, actual-WASM CI
 and authenticated replay proof are pending; no final signature-equality claim.
+
+
+## Hosted bridge integration checkpoint (unmerged)
+
+Actual signing-side bridge #1745
+`5743c485d44e348e3d29039c4ebe83f6a78f0186` is real-integrated by porcelain
+merge `57491e9fba0`. Independent preservation review confirms the exact49-path
+prior scope and every incoming setup/capture/build change. The two conflicts
+retain all #1738 MEXC/passphrase tests with the unmigrated negative correctly
+scoped to Bitunix, and retain shared hosted-work ratchet descriptors while
+retiring obsolete Bybit credential-custody entries.
+
+Native HTTP and WS preparation now reuse the landed Bybit hosted work builders;
+HTTP bytes, private credential interpolation and clamped window are unchanged.
+Native WS explicitly retains its generated expiry receipt; the separate hosted
+API continues signing the original caller preimage. Independent review confirms
+result application, freshness, ownership/error semantics and the cfg(test) oracle
+are unchanged. There is no new executor, retry ledger or raw-secret fallback.
+
+The obsolete closed-admission WASM fixture is replaced with mandatory positive
+provider HTTP and WS cases for all five aliases. They use independent Node HMAC
+expectations for indexed GET queries, exact JSON bodies and all three WS output
+encodings, with primary identity despite secondary setup, original caller expiry,
+configured receive window/site routing, custody and zero venue/startup I/O.
+Hyro origins are explicitly configured and restored. The generic unmigrated
+control moves to Bitunix while retaining its positive legacy WS signature.
+Existing Binance positives and the Bybit native primary/secondary read case stay.
+These new actual-WASM cases await a fresh CI rebuild; local unit mocks are not
+evidence that they pass.
+
+Ratchet classification: #1745's raw textual baseline grew509->520 only through
+seven opaque work-builder/import descriptors and four cfg(test) algorithm/fixture
+matches in Binance sign.rs and Bybit hosted_signing.rs. Independent inspection
+found no new production secret access, holder or cryptographic executor. This
+Bybit update reuses those builders and removes obsolete custody descriptors;
+its complete raw baseline is519, below landed520, with no new fingerprint added
+by the helper reuse. Checker patterns are unchanged in this follow-up.
+
+Focused local checks pass:1,080 native engine/Binance/Bybit/registry/host tests,
+86 SDK tests plus five rule tests, SDK typecheck/lint, Rust strict Clippy/fmt and
+bans. Standalone Bybit registry and host feature checks also pass; their
+focused executions are recorded separately from the default-feature count.
+Current merge hold belongs to #1746's global WASM build-policy proof;
+this branch must integrate its actual pin before final CI/replay proof. Queue:
+#1746, then this #1728, then the other ready venue/history work. Earlier923 CI
+and replay receipts remain historical; fresh source-specific proof is required.
+Keyless RemoteSigner/PayloadSigner header/feed adaptation remains the shared
+bridge's mandatory half2, not a claim of this family migration.
