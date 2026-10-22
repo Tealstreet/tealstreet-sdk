@@ -1283,6 +1283,7 @@ pub fn build_with_signer<T: Visit>(
                 return Err(invalid("Engine signing provider is required"));
             }
             let options = BybitOptions {
+                signing_policy: remote_signing_policy(venue),
                 recv_window: tighter_recv_window(options.recv_window),
                 read_credentials: identities.secondary,
                 bybit_site_id: options.bybit_site_id.take(),

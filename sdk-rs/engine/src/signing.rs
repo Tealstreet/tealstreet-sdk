@@ -290,10 +290,18 @@ impl SignRequest {
     /// Validate provider output against this exact atomic request. Dispatch and
     /// signing-only capture share receipt, result-count and byte-shape policy.
     pub fn validate_result(&self, result: &SignResult) -> Result<(), SignError> {
+        self.validate_result_with_policy(result, crate::signing_headers::ResultHeaderPolicy::Deny)
+    }
+
+    /// Only a trusted capture/recipe may supply HTTP callback-header authority.
+    /// Advisory request context and provider output never choose this policy.
+    pub fn validate_result_with_policy(
+        &self,
+        result: &SignResult,
+        policy: crate::signing_headers::ResultHeaderPolicy,
+    ) -> Result<(), SignError> {
         validate_result_shape(&self.expected_result_lengths(), self.receipt, result)?;
-        // One-off compatibility captures and arbitrary primitive work cannot
-        // grant HTTP header authority. Dispatch uses its trusted recipe policy.
-        crate::signing_headers::ResultHeaderPolicy::Deny.validate(&result.headers)
+        policy.validate(&result.headers)
     }
 
     pub(crate) fn expected_result_lengths(&self) -> Vec<Option<usize>> {

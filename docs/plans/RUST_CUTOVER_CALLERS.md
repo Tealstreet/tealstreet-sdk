@@ -3502,10 +3502,10 @@ cumulative-fill completion claim is introduced; remaining consumers are tracked
 in [the fan-out plan](RUST_CUMULATIVE_FILLS.md).
 
 
-### Keyless Rust signing: shared callback provider (Binance first)
+### Keyless Rust signing: shared callback provider (Binance and Bybit)
 
-Binance, Binance PM, Binance Inverse and Binance Spot Rust accounts admit the
-existing `remoteSigner` and `PayloadSigner` options through the same host-injected
+Binance, Binance PM, Binance Inverse, Binance Spot, Bybit, Bybit Inverse,
+Bybit Spot, Bybit Demo and HyroTrader Rust accounts admit the existing `remoteSigner` and `PayloadSigner` options through the same host-injected
 primitive provider used by local signing. The sign-request/sign-response wire
 is unchanged; browser signing still uses the standalone hosted-signing module,
 without constructing a TS venue. RemoteSigner takes precedence over PayloadSigner
@@ -3515,8 +3515,13 @@ a secondary signing identity is refused before invoking the remote callback.
 PayloadSigner receives the selected public key and exact native HMAC preimage.
 Private PayloadSigner accounts remain REST-only, including Binance Inverse;
 listen-key creation/renewal, private sockets and subscriptions are suppressed.
-Callback headers belong only to that validated attempt and keep declared Binance
-precedence, including case-insensitive API-key replacement. This does not add a
+The four ordinary Bybit aliases also retain REST-only PayloadSigner startup and
+reconciliation. Callback headers belong only to that validated attempt: Binance
+keeps case-insensitive API-key replacement; Bybit protects native signature,
+API key and timestamp while retaining the existing callback recvWindow precedence.
+The signing-only HTTP capture uses that same declared policy before returning
+headers through the existing hosted config shape; WS/credential captures deny
+callback headers. This does not add a
 provider queue, retry policy or separate signing deadline.
 
 PayloadSigner receiver **contract change**: an ordinary callback is bound to a
@@ -3536,6 +3541,13 @@ worker initialization cannot serialize functions. Saved-account, exchange-server
 and open-source hosted callers must keep callback provisioning rather than copy
 credentials from generic exchange options. Unadopted families keep their existing
 routing until their declared provider policy and native feed/header paths are
-verified. Private Hyro PayloadSigner will be typed `unsupported`/`notSent` at
+verified. Private Hyro PayloadSigner is typed `unsupported`/`notSent` at
 setup: its TS combination never completes the private handshake. Hyro RemoteSigner
-remains a separate supported target; no REST-only readiness is invented for it.
+is supported with its existing streaming handshake; no REST-only readiness is
+invented for it. Existing external WS signers receive the legacy labels and
+metadata: `bybit` plus `{expires}` for all five Bybit aliases; Binance Spot keeps
+its alias, fixed subscription id and `{apiKey, recvWindow, timestamp}`. These
+values come from exact prepared work, owned public identity and its receipt;
+HTTP does not inherit WS metadata or fixed ids even when query bytes coincide.
+Production routing never imports a TS venue class. Wire-comparison tests retain
+the legacy WS methods only as independent test references.

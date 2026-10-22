@@ -79,7 +79,7 @@ fn all_nine_aliases_share_rest_only_payload_policy_with_declared_precedence() {
         "hyrotrader",
     ] {
         let policy = safe_cex_venues::remote_signing_policy(name);
-        assert_eq!(policy.enabled, name.starts_with("binance"), "{name}");
+        assert!(policy.enabled, "{name}");
         assert_eq!(policy.payload_supported, name != "hyrotrader", "{name}");
         assert_eq!(
             policy.private_feed(true),
@@ -130,4 +130,24 @@ fn runtime_admission_requires_dispatch_and_complete_shared_policy() {
     ] {
         assert!(generate(r#"{"dispatchSigning":true}"#, incomplete).is_err());
     }
+}
+
+#[test]
+fn remote_wire_policy_rejects_unknown_codecs_labels_and_unbound_fixed_ids() {
+    for wire in [
+        r#"{"exchangeName":"bybit","extraData":"typo"}"#,
+        r#"{"exchangeName":"bybit","requestId":"fixed"}"#,
+        r#"{"exchangeName":"Bybit"}"#,
+        r#"{"exchangeName":"bybit","typo":true}"#,
+        r#"{"exchangeName":"binancespot","extraData":"binanceSpot","requestId":""}"#,
+    ] {
+        let json = format!(
+            r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{{"wire":{wire}}}}}}}}}"#
+        );
+        assert!(build_support::generate(&json).is_err(), "{wire}");
+    }
+    build_support::generate(include_str!(
+        "../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
+    ))
+    .unwrap();
 }

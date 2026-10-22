@@ -12,7 +12,7 @@ describe('shared delegated signing declarations', () => {
   });
   it.each([...binance, ...bybit])('%s distinguishes reviewed runtime admission from future codec policy', (name) => {
     expect(deriveRemoteSigningPolicy(name)).toMatchObject({
-      enabled: binance.includes(name),
+      enabled: true,
       payloadSupported: name !== 'hyrotrader',
     });
   });

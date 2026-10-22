@@ -40,6 +40,21 @@ struct RemoteSigningPolicy {
     payload_supported: bool,
     payload_rest_only: bool,
     protected_headers: Option<Vec<String>>,
+    wire: Option<RemoteSigningWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemoteSigningWire {
+    exchange_name: String,
+    extra_data: Option<RemoteExtraData>,
+    request_id: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum RemoteExtraData {
+    BybitExpiry,
+    BinanceSpot,
 }
 
 #[derive(Default, Deserialize)]
@@ -186,6 +201,23 @@ pub fn generate(json: &str) -> Result<String, String> {
             return Err(
                 "delegated signing requires dispatch, header and private-feed policy".into(),
             );
+        }
+        if let Some(wire) = &policy.remote_signing.wire
+            && (wire.exchange_name.is_empty()
+                || wire.exchange_name.len() > 64
+                || !wire
+                    .exchange_name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase())
+                || wire.request_id.as_ref().is_some_and(|id| {
+                    id.is_empty()
+                        || id.len() > 256
+                        || id.bytes().any(|byte| byte.is_ascii_control())
+                })
+                || (wire.request_id.is_some()
+                    && !matches!(wire.extra_data, Some(RemoteExtraData::BinanceSpot))))
+        {
+            return Err("invalid delegated wire declaration".into());
         }
         if let Some(names) = &policy.remote_signing.protected_headers
             && (names.len() > 32

@@ -13,6 +13,7 @@ export type RemoteSigningPolicy = Readonly<{
   payloadSupported?: boolean;
   payloadRestOnly?: boolean;
   protectedHeaders?: readonly string[];
+  wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot'; requestId?: string }>;
 }>;
 
 type Rule = {

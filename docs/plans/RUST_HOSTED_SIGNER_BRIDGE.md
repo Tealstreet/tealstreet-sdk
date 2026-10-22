@@ -427,3 +427,40 @@ key authority from advisory Context. Ordinary HTTP primitive envelopes keep
 unique correlation ids and no synthetic WS metadata. Regression tests invoke the
 legacy TS WS methods with fixed clock/id and compare complete serialized
 requests for each alias; production code imports no TS venue classes.
+
+
+Codec/capture implementation checkpoint: four ordinary Bybit aliases load and
+continue REST account polling under the shared immutable RestOnly policy; no
+private auth/socket/supervision work is created. Disabling only the private
+connect guard produces compiled RED, then exact source restoration is GREEN.
+Normal/probe HTTP work adopts the same declared header policy, with native auth
+fields protected and callback recvWindow precedence retained. Hyro RemoteSigner
+keeps streaming; private PayloadSigner rejects typed at setup.
+
+The shared hosted capture now retains trusted HTTP policy beside its exact work
+and existing single-use/raw-deadline/protocol-expiry/revision fences. WS and
+credential captures stay default deny. The typed output carries only bounded,
+validated, policy-filtered attempt headers into the standalone interceptor.
+Native capture/codec tests cover accepted HTTP, denied WS/credential headers,
+malformed headers and unchanged lifetime fences.
+
+Legacy WS wire tests compare complete serialized requests to the actual TS WS
+methods for all five Bybit aliases and Binance Spot. Pure HTTP controls preserve
+original aliases and unique correlation even for a Binance Spot query with the
+same bytes as WS auth. The trusted canonical builders distinguish that collision:
+HTTP uses opaque Bytes plus a validated stamp; native Spot WS delimits an owned
+Credential part, while hosted WS has no HTTP stamp. These invariants are part of
+the codec contract and must be kept when adding builders. Full admission maps
+validate codec/receipt facts before any callback; a malformed later operation
+cannot cause an earlier signing call. Independent review caught and cleared both
+the original HTTP label/grammar collision and late-batch validation issues.
+
+Local gates: 113 focused SDK tests, 178 host JS tests, 35 MCP tests, SDK/MCP
+typecheck and lint, strict engine/registry/Binance/Bybit all-target Clippy and a
+WASM debug target check pass. Native touched-package gates pass after updating
+the intentional Bybit enablement assertion. Independent reviews clear Bybit
+codec adoption, shared capture policy, exact WS envelope and actual-WASM test
+oracles. The paired actual-WASM tests are authored and typechecked, not yet run:
+CI must rebuild the exact source and prove Binance/Bybit browser-to-keyless HTTP
+and WS, callback headers and MCP admission before readiness. Final replay proof,
+latest landing integration and a fresh separate guard remain required.

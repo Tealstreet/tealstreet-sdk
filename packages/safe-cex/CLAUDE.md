@@ -100,6 +100,11 @@ all secret/passphrase fields and arbitrary nested caller objects. Callbacks must
 hold their own secret instead of reading `this.secret`; generic exchange options
 retain neither credentials nor callbacks. Provision callbacks in the executing
 host/worker because ordinary worker initialization cannot serialize functions.
+The central policy also declares legacy WS labels and extraData codecs. Metadata
+comes from prepared receipt/payload structure, never a new wall clock or advisory
+context; HTTP remains distinct even when its query matches WS preimage grammar.
+Signing-only HTTP captures accept only their trusted declared header policy;
+WS and credential captures retain default deny.
 
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and

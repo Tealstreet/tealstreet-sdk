@@ -3,6 +3,8 @@ import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from 
 
 import { nanoid } from 'nanoid';
 
+import { deriveRemoteSigningPolicy } from './construction';
+
 export interface RemoteSignerIdentity {
   credential: string;
   signing: string;
@@ -136,11 +138,38 @@ function payloadReceiver(options: Partial<ExchangeOptions> | undefined, key: str
   return Object.freeze(receiver);
 }
 
+/** Decode only the declared prepared WS grammar; never use advisory context as
+ * authority or draw a new timestamp. HTTP work keeps ordinary correlation ids.
+ */
+function wsMetadata(codec: 'bybitExpiry' | 'binanceSpot' | undefined, payload: string, key: string, receipt: SignReceipt, credentialDelimited: boolean): Record<string, unknown> | undefined {
+  // Native WS recipes delimit the owned public key as a Credential part;
+  // hosted WS captures have no HTTP stamp. An HTTP query can share WS grammar.
+  if (receipt.stampMs !== undefined && !credentialDelimited) return undefined;
+  const stamp = (text: string) => /^(0|[1-9][0-9]*)$/.test(text) && Number.isSafeInteger(Number(text)) ? Number(text) : undefined;
+  if (codec === 'bybitExpiry') {
+    if (!payload.startsWith('GET/realtime')) return undefined;
+    const expiry = stamp(payload.slice('GET/realtime'.length));
+    if (expiry === undefined || (receipt.expiryMs !== undefined && receipt.expiryMs !== expiry)) throw refused();
+    return { expires: expiry };
+  } else if (codec === 'binanceSpot') {
+    const prefix = `apiKey=${key}&recvWindow=`;
+    if (!payload.startsWith(prefix)) return undefined;
+    const tail = payload.slice(prefix.length).split('&timestamp=');
+    const recvWindow = tail.length === 2 ? stamp(tail[0]) : undefined;
+    const timestamp = tail.length === 2 ? stamp(tail[1]) : undefined;
+    if (recvWindow === undefined || timestamp === undefined || (receipt.stampMs !== undefined && receipt.stampMs !== timestamp)) throw refused();
+    return { apiKey: key, recvWindow, timestamp };
+  }
+  return undefined;
+}
+
 /** Bridge only trusted account-owned public identities to legacy HMAC callbacks.
  * Advisory SignRequest.context never establishes key or account authority.
  */
 export function createRemoteSignerProvider(options: RemoteSignerProviderOptions): Signer {
   const { exchangeName, remoteSigner, payloadSigner } = options;
+  const declaration = deriveRemoteSigningPolicy(exchangeName)?.wire;
+  const wire = declaration && { ...declaration };
   let accountName: string | undefined;
   const owned = new Map<string, { identity: RemoteSignerIdentity; primary: boolean; receiver: Readonly<Record<string, unknown>> }>();
   const credentials = new Map<string, { bytes: number[]; identity: RemoteSignerIdentity }>();
@@ -205,7 +234,10 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         const payload = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
         let offset = 0;
         for (const part of parts) { payload.set(part, offset); offset += part.length; }
-        return { kind: 'sign' as const, entry, payload: decoder.decode(payload) };
+        const text = decoder.decode(payload);
+        const credentialDelimited = operation.payload.length === 3 && operation.payload[1].kind === 'credential';
+        const extraData = remoteSigner ? wsMetadata(wire?.extraData, text, entry.identity.publicCredential, receipt, credentialDelimited) : undefined;
+        return { kind: 'sign' as const, entry, payload: text, extraData };
       });
       const signatures = work.filter((item) => item.kind === 'sign').length;
       const values: number[][] = [];
@@ -214,13 +246,14 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         if (signal.aborted) throw canceled();
         if (item.kind === 'present') { values.push(item.bytes); continue; }
         if (remoteSigner) {
-          const id = nanoid();
+          const { extraData } = item;
+          const id = (extraData && wire?.requestId) || nanoid();
           const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({
             id,
             type: 'ws-auth',
-            exchangeName,
+            exchangeName: extraData ? (wire?.exchangeName ?? exchangeName) : exchangeName,
             ...(accountName === undefined ? {} : { accountName }),
-            wsAuth: { toSign: item.payload, outputFormat: 'hex' },
+            wsAuth: { toSign: item.payload, outputFormat: 'hex', ...(extraData === undefined ? {} : { extraData }) },
           }));
           if (!record(response) || response.id !== id
             || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
