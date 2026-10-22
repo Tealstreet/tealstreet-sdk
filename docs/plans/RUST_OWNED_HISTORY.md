@@ -69,6 +69,17 @@ adapter, not a second venue marker helper. Focused engine/Binance and shared-own
 reference crates, strict Clippy/fmt/bans/links locally; full family/replay/WASM CI,
 then a separate fresh guard, separate exact merge and actual tree/parent proof.
 
+Local range-core checkpoint: shared RangeHistory now owns bounds, staged facts,
+selection and lifecycle; no Binance adapter code is changed yet. Six new core
+tests cover 18 scenario paths including actual 50-page budget exhaustion, active
+chunk gaps before rollover, no double count after finish, empty/filtered recovery
+eligibility and strict signer/encoder/lifecycle failures. These and the nine
+existing history tests pass; strict engine all-target Clippy passes. Independent
+correctness/adversarial reviews are clean; the additional budget control follows
+the adversarial suggestion. This checkpoint is local only with unmerged #1719
+as a reviewed dependency; actual dependency integration and reference regressions
+remain required before publication.
+
 ## Contract and sequence
 
 1. Reference PR: engine-owned history completion and cursor paging, exercised by
