@@ -1384,6 +1384,7 @@ describe('typed HTTP operation deadlines', () => {
     );
     expect(deadlineTimers).toHaveLength(1);
     const rejected = expect(pending).rejects.toThrow('disposed');
+    await vi.waitFor(() => expect(raw.request).toHaveBeenCalledTimes(1));
     routed.dispose!();
     await rejected;
     expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(true);
@@ -1742,4 +1743,302 @@ it('routes provider-owned secondary reads using metadata without credentials in 
     expect(safe).not.toHaveProperty('secret');
     expect(safe).not.toHaveProperty('secondary_key');
   } finally { routed.dispose?.(); }
+});
+
+describe('managed engine HTTP preparation', () => {
+  const managedRaw = () => {
+    const raw = makeRaw();
+    const cancel = vi.fn();
+    const dispatch = vi.fn(async () => ({ status: 200, body: new Uint8Array([49]) }));
+    const ready = vi.fn(() => true);
+    const bind = vi.fn((_packet: Request) => ({ ready, dispatch }));
+    const prepareHttp = vi.fn<NonNullable<Transport['prepareHttp']>>(async () => ({ bind, cancel }));
+    return { raw: { ...raw, prepareHttp }, cancel, dispatch, ready, bind, prepareHttp };
+  };
+  const packet = () => ({ ...request(), request: 77, headers: {}, intent: 'primary' as const });
+
+  it('finishes proxy authorization before readiness and binds the exact signed packet without I/O', async () => {
+    const probe = managedRaw();
+    let token!: (value: string) => void;
+    mocks.token.mockReturnValue(
+      new Promise<string>((resolve) => {
+        token = resolve;
+      }),
+    );
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: true }), probe.raw);
+    const original = packet();
+    const preparing = routed.prepareHttp!(original);
+    expect(probe.prepareHttp).not.toHaveBeenCalled();
+    expect(probe.raw.request).not.toHaveBeenCalled();
+    token('managed-proxy');
+    const prepared = await preparing;
+    expect(probe.prepareHttp.mock.lastCall![0].headers.Authorization).toBe('Bearer managed-proxy');
+    expect(probe.dispatch).not.toHaveBeenCalled();
+    const signed = {
+      ...original,
+      url: original.url + '&stamp=123.000&sig=%2B+%20',
+      headers: { 'X-BAPI-SIGN': 'exact-signature' },
+      body: ' {"id":900719925474099312345,"p":1.2300}\n',
+    };
+    const bound = prepared.bind(signed);
+    const final = probe.bind.mock.lastCall![0] as Request;
+    expect(final.url).toBe(`${PRIVATE_PROXY_ASIA}/${signed.url}`);
+    expect(final.body).toBe(signed.body);
+    expect(final.headers).toMatchObject({ 'X-BAPI-SIGN': 'exact-signature', Authorization: 'Bearer managed-proxy' });
+    expect(bound.ready()).toBe(true);
+    expect(probe.dispatch).not.toHaveBeenCalled();
+    const response = bound.dispatch();
+    expect(probe.dispatch).toHaveBeenCalledTimes(1);
+    expect(probe.raw.request).not.toHaveBeenCalled();
+    await response;
+    expect(() => bound.dispatch()).toThrow();
+    routed.dispose!();
+  });
+
+  it('routes a POST read by secondary intent before its key header exists', async () => {
+    const probe = managedRaw();
+    const routed = createEngineTransport(
+      'binance',
+      options({ secondary_key: 'read-key', secondary_secret: 'read-secret', secondaryProxyUrl: 'https://read.proxy' }),
+      probe.raw,
+    );
+    const original = { ...packet(), url: 'https://fapi.binance.com/private/read', intent: 'secondary' as const };
+    const prepared = await routed.prepareHttp!(original);
+    expect(probe.prepareHttp.mock.lastCall![0].url).toBe(`https://read.proxy/${original.url}`);
+    const signed = { ...original, headers: { 'X-MBX-APIKEY': 'read-key' } };
+    await prepared.bind(signed).dispatch();
+    expect((probe.bind.mock.lastCall![0] as Request).headers['X-MBX-APIKEY']).toBe('read-key');
+    expect(probe.raw.request).not.toHaveBeenCalled();
+    routed.dispose!();
+  });
+
+  it('routes public Binance futures by intent even if input carries a misleading key header', async () => {
+    const probe = managedRaw();
+    const routed = createEngineTransport('binance', options({ tealstreetProxy: true }), probe.raw);
+    const original = {
+      ...packet(),
+      url: 'https://fapi.binance.com/public',
+      intent: 'public' as const,
+      headers: { 'X-MBX-APIKEY': 'not-a-route-selector' },
+    };
+    const prepared = await routed.prepareHttp!(original);
+    expect(probe.prepareHttp.mock.lastCall![0].url).toBe(original.url);
+    expect(mocks.token).not.toHaveBeenCalled();
+    prepared.cancel!();
+    routed.dispose!();
+  });
+
+  it('fails closed when raw or tunnel adapters cannot prepare, without invoking their opaque send', async () => {
+    for (const tealstreetTunnel of [false, true]) {
+      const raw = makeRaw();
+      const routed = createEngineTransport('bybit', options({ tealstreetTunnel }), raw);
+      await expect(routed.prepareHttp!(packet())).rejects.toMatchObject({ code: 'HTTP_PREPARATION_UNSUPPORTED' });
+      expect(raw.request).not.toHaveBeenCalled();
+      expect(mocks.adapter).not.toHaveBeenCalled();
+      routed.dispose!();
+    }
+  });
+
+  it('does not renew the original deadline when binding after readiness', async () => {
+    vi.useFakeTimers();
+    const probe = managedRaw();
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+    const original = { ...packet(), timeoutMs: 100 };
+    const prepared = await routed.prepareHttp!(original);
+    await vi.advanceTimersByTimeAsync(75);
+    const bound = prepared.bind(original);
+    expect((probe.bind.mock.lastCall![0] as Request).timeoutMs).toBe(25);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(() => bound.ready()).toThrow('timed out');
+    expect(probe.cancel).toHaveBeenCalledTimes(1);
+    expect(probe.dispatch).not.toHaveBeenCalled();
+    routed.dispose!();
+  });
+
+  it.each(['method', 'origin', 'route', 'request'] as const)(
+    'rejects changed %s before binding the transport',
+    async (field) => {
+      const probe = managedRaw();
+      const routed = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+      const original = packet();
+      const prepared = await routed.prepareHttp!(original);
+      const changed = {
+        ...original,
+        ...{
+          method: { method: 'GET' },
+          origin: { url: 'https://other.test/read' },
+          route: { route: 'direct' as const },
+          request: { request: 78 },
+        }[field],
+      };
+      expect(() => prepared.bind(changed)).toThrow();
+      expect(probe.bind).not.toHaveBeenCalled();
+      expect(probe.cancel).toHaveBeenCalledTimes(1);
+      routed.dispose!();
+    },
+  );
+
+  it('cancels late readiness after disposal without disturbing a separate request', async () => {
+    const probe = managedRaw();
+    let resolve!: (prepared: { bind: typeof probe.bind; cancel: typeof probe.cancel }) => void;
+    probe.prepareHttp.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+    const first = routed.prepareHttp!(packet());
+    const rejected = expect(first).rejects.toThrow('disposed');
+    routed.dispose!();
+    await rejected;
+    resolve({ bind: probe.bind, cancel: probe.cancel });
+    await Promise.resolve();
+    expect(probe.cancel).toHaveBeenCalledTimes(1);
+    expect(probe.dispatch).not.toHaveBeenCalled();
+    const peer = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+    await (await peer.prepareHttp!(packet())).bind(packet()).dispatch();
+    expect(probe.dispatch).toHaveBeenCalledTimes(1);
+    peer.dispose!();
+  });
+
+  it.each(['x-site-id', 'X-SITE-ID'])(
+    'rejects a conflicting signed site header %s before inner bind',
+    async (header) => {
+      const probe = managedRaw();
+      const routed = createEngineTransport(
+        'bybit',
+        options({ transport: directTransport, bybitSiteId: 'BRA_BTL' }),
+        probe.raw,
+      );
+      const original = packet();
+      const prepared = await routed.prepareHttp!(original);
+      expect(() => prepared.bind({ ...original, headers: { [header]: 'other-site' } })).toThrow();
+      expect(probe.bind).not.toHaveBeenCalled();
+      expect(probe.dispatch).not.toHaveBeenCalled();
+      routed.dispose!();
+    },
+  );
+
+  it('releases a bound resource exactly once without cancelling a shared peer', async () => {
+    const probe = managedRaw();
+    const cancelBound = vi.fn();
+    probe.bind.mockReturnValueOnce({ ready: probe.ready, dispatch: probe.dispatch, cancel: cancelBound } as ReturnType<
+      typeof probe.bind
+    >);
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+    const first = (await routed.prepareHttp!(packet())).bind(packet());
+    const peer = (await routed.prepareHttp!({ ...packet(), request: 78 })).bind({ ...packet(), request: 78 });
+    first.cancel!();
+    first.cancel!();
+    expect(cancelBound).toHaveBeenCalledTimes(1);
+    expect(probe.cancel).toHaveBeenCalledTimes(1);
+    expect(peer.ready()).toBe(true);
+    await peer.dispatch();
+    expect(probe.dispatch).toHaveBeenCalledTimes(1);
+    routed.dispose!();
+  });
+
+  it.each(['missing', 'null', 'no-bind', 'missing-bound', 'no-ready', 'no-dispatch'])(
+    'rejects malformed managed %s resources without legacy send',
+    async (shape) => {
+      const probe = managedRaw();
+      const invalid: Record<string, unknown> = {
+        missing: undefined,
+        null: null,
+        'no-bind': { cancel: probe.cancel },
+        'missing-bound': { bind: () => undefined },
+        'no-ready': { bind: () => ({ dispatch: probe.dispatch }) },
+        'no-dispatch': { bind: () => ({ ready: probe.ready }) },
+      };
+      probe.prepareHttp.mockResolvedValueOnce(invalid[shape] as never);
+      const routed = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+      try {
+        await expect(
+          (async () => {
+            const prepared = await routed.prepareHttp!(packet());
+            await prepared.bind(packet()).dispatch();
+          })(),
+        ).rejects.toMatchObject({ code: 'HTTP_PREPARATION_INVALID' });
+        expect(probe.raw.request).not.toHaveBeenCalled();
+        expect(probe.dispatch).not.toHaveBeenCalled();
+      } finally {
+        routed.dispose!();
+      }
+    },
+  );
+
+  it('rejects legacy signed-header mutation inside the provider route callback', async () => {
+    const raw = makeRaw();
+    const provider = {
+      ...directTransport,
+      rest: vi.fn((context: Parameters<typeof directTransport.rest>[0]) => {
+        (context.config.headers as Record<string, string>).Authorization = 'mutated';
+        return { baseURL: context.config.baseURL, proxied: false };
+      }),
+    };
+    const routed = createEngineTransport('coinbase', options({ transport: provider }), raw);
+    await expect(
+      routed.request({
+        ...request('https://api.coinbase.com/api/v3/brokerage/orders'),
+        headers: { Authorization: 'signed-jwt' },
+      }),
+    ).rejects.toThrow('changed signed');
+    expect(raw.request).not.toHaveBeenCalled();
+    routed.dispose!();
+  });
+
+  it.each(['bytes', 'stream'])('releases inner resources once after a successful %s response and explicit cancellation', async (mode) => {
+    const probe = managedRaw();
+    const cancelBound = vi.fn();
+    const dispatch = vi.fn(async () => ({ status: 200, body: mode === 'bytes' ? new Uint8Array([1]) :
+      (async function* () { yield new Uint8Array([1]); })() }));
+    probe.bind.mockReturnValueOnce({ ready: probe.ready, dispatch, cancel: cancelBound } as ReturnType<typeof probe.bind>);
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+    const prepared = await routed.prepareHttp!(packet());
+    const bound = prepared.bind(packet());
+    const response = await bound.dispatch();
+    if (!(response.body instanceof Uint8Array)) for await (const chunk of response.body) expect(chunk).toEqual(new Uint8Array([1]));
+    prepared.cancel!();
+    bound.cancel!();
+    expect(cancelBound).toHaveBeenCalledTimes(1);
+    expect(probe.cancel).toHaveBeenCalledTimes(1);
+    routed.dispose!();
+    expect(cancelBound).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains legacy configured site-header precedence', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ transport: directTransport, bybitSiteId: 'BRA_BTL' }), raw);
+    await routed.request({ ...request(), headers: { 'x-site-id': 'caller-value' } });
+    expect(raw.request.mock.lastCall![0].headers['x-site-id']).toBe('BRA_BTL');
+    routed.dispose!();
+  });
+
+  it('retires a bound resource if caller cancellation happens synchronously during bind', async () => {
+    const probe = managedRaw();
+    const controller = new AbortController();
+    const cancelBound = vi.fn();
+    probe.bind.mockImplementationOnce(() => {
+      controller.abort(new Error('caller cancelled'));
+      return { ready: probe.ready, dispatch: probe.dispatch, cancel: cancelBound } as ReturnType<typeof probe.bind>;
+    });
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+    const original = { ...packet(), signal: controller.signal };
+    const prepared = await routed.prepareHttp!(original);
+    expect(() => prepared.bind(original)).toThrow('caller cancelled');
+    expect(cancelBound).toHaveBeenCalledTimes(1);
+    expect(probe.cancel).toHaveBeenCalledTimes(1);
+    expect(probe.dispatch).not.toHaveBeenCalled();
+    routed.dispose!();
+  });
+
+  it('exposes the underlying prepared resource expiry in the engine raw clock domain', async () => {
+    const probe = managedRaw();
+    probe.prepareHttp.mockResolvedValueOnce({ bind: probe.bind, cancel: probe.cancel, expiresAt: 42 });
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), probe.raw);
+    const prepared = await routed.prepareHttp!(packet());
+    expect(prepared.expiresAt).toBe(42);
+    prepared.cancel!();
+    routed.dispose!();
+  });
 });

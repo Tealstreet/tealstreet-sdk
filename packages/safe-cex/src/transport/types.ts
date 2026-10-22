@@ -33,6 +33,8 @@ export interface RestTransportContext {
   exchange: ExchangeName;
   options: ExchangeOptions;
   config: CreateAxiosDefaults;
+  /** Managed engine requests select routing before credential presentation. */
+  credentialIntent?: 'public' | 'primary' | 'secondary';
   /** A host may resolve the account once and reuse it across requests. */
   routing?: ResolvedRouting;
   /** Server fetch runtimes must supply the browser headers expected by the proxy. */

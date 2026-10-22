@@ -49,7 +49,8 @@ Binance's four aliases and Bybit's five aliases. High-level credential input is 
 no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached
 construction metadata preserves `canSign`/public mode; transport receives only
-read-identity presence and uses materialised outbound headers for routing.
+read-identity presence; managed routing uses explicit credential intent before
+credentials are materialised, while legacy requests retain header-based routing.
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
 `stableId` per primary/secondary identity. It is consumed with passphrases through
@@ -73,6 +74,22 @@ stripped. Whitespace follows Rust Unicode White_Space (NEL removed, BOM kept),
 not JavaScript String.trim. Secret/passphrase bytes and stable IDs are unchanged.
 This policy does not enable an unmigrated family; opaque external providers
 remain responsible for compliant provisioning.
+
+The same construction declaration carries hosted signature encoding and an
+optional passphrase presentation header. Registry HTTP captures snapshot that
+policy and request a distinct Present operation for the setup-owned passphrase
+ref; they never interpolate it into the HMAC payload. Formatting validates the
+entire result and combined header bounds before publication. Callback precedence
+uses the existing declared, case-insensitive header policy. These codec metadata
+fields do not enable runtime family admission or replace actual hosted tests.
+Callback setup reuses the same required-field/absent-only fallback resolver,
+consuming passphrase material into a separate provider Present map and exposing
+only opaque refs to the engine. Presenting one requires admitted signing work
+for its owning identity; it cannot be used in a Credential payload part. Missing
+required material rejects synchronously. The unchanged remote wire supplies only
+the MAC, in the declared hex or canonical padded base64 encoding of 32 raw bytes;
+it cannot supply a missing passphrase. Generic options and callback receiver
+snapshots retain no passphrase, and disposal revokes the setup wrapper.
 
 Callers must provision worker/hosted providers separately rather than copy
 `exchange.options` as credentials, and use readiness/public-mode metadata instead
@@ -951,6 +968,18 @@ route. Optional HTTP `direct` / `publicCors` route hints support venue clock fal
 hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
+
+Managed engine HTTP uses `Transport.prepareHttp` to finish route/proxy-token
+and tunnel readiness before signing. `credentialIntent` (`public`, `primary`,
+`secondary`) selects the route independently of HTTP method or credential headers;
+custom routing providers must honor it. A custom HTTP/tunnel adapter without the
+prepared interface fails explicitly instead of invoking its legacy sender.
+Preparation and binding never send HTTP. Binding preserves signed URL/query/body
+bytes and rejects conflicting host headers; `ready()` rechecks the original
+request deadline and resource, and `dispatch()` invokes fetch/WebSocket.send
+synchronously after the engine release claim. Cancellation releases only that
+request's prepared/bound resources. Opaque legacy requests share the executor but
+retain their older routing and carry no managed release/outcome guarantee.
 
 Engine venue requests use native authorization headers. On Coinbase and its
 spot alias, an ordinary REST proxy owns `Authorization`, so the host moves the

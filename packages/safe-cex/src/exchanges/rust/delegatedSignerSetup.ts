@@ -5,7 +5,8 @@ import type { CredentialPresence } from './construction';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { nanoid } from 'nanoid';
 
-import { parseLocalSignerMetadata, withoutSigningCredentials } from './localSignerSetup';
+import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
+import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
 import { createRemoteSignerProvider } from './remoteSignerProvider';
 
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
@@ -19,8 +20,14 @@ const publicCredential = (input: unknown, trim: boolean): string | undefined => 
   return key.length ? key : undefined;
 };
 
+/** Presence selects a mode; malformed configured callbacks still fail validation. */
+export const selectDelegatedSigningMode = (
+  options: Pick<ExchangeOptions, 'remoteSigner' | 'payloadSigner'>,
+): 'remote' | 'payload' | undefined => options.remoteSigner !== undefined ? 'remote'
+  : options.payloadSigner !== undefined ? 'payload' : undefined;
+
 /** Trusted setup for aliases admitted by the shared caller policy. This capsule
- * does not enable a venue or retain local signing material. Remote authority
+ * does not enable a venue or retain a local signing secret. Remote authority
  * precedes PayloadSigner; neither can fall back to a local secret.
  */
 export class DelegatedSignerSetup {
@@ -32,41 +39,60 @@ export class DelegatedSignerSetup {
   #venue: ExchangeName;
   #publicMode: Readonly<{ requested: boolean | null; remoteSigner: boolean; payloadSigner: boolean; apiKeyIndexPresent: boolean }>;
   readonly intent: Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
+  readonly usesPayloadSigner: boolean;
   readonly hasSecondary: boolean;
   readonly primaryComplete: boolean;
   readonly credentialPresence: CredentialPresence;
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
     const metadata = parseLocalSignerMetadata(options.localSigner);
+    const setupPolicy = deriveSignerSetupPolicy(name);
+    const primaryMetadata = effectiveIdentityMetadata(metadata.primary, setupPolicy.primary);
+    const secondaryMetadata = effectiveIdentityMetadata(metadata.secondary, setupPolicy.secondary);
     this.intent = Object.freeze({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
+    this.usesPayloadSigner = selectDelegatedSigningMode(options) === 'payload';
     const remoteSigner = options.remoteSigner;
-    const payloadSigner = remoteSigner ? undefined : options.payloadSigner;
+    const payloadSigner = this.usesPayloadSigner ? options.payloadSigner : undefined;
     if (!remoteSigner && !payloadSigner) invalid('Delegated signing requires a configured callback');
     if ((this.intent.remoteSigner && (!remoteSigner || typeof remoteSigner.sign !== 'function'
       || typeof remoteSigner.isAvailable !== 'function' || typeof remoteSigner.onAvailabilityChange !== 'function'))
       || (this.intent.payloadSigner && typeof options.payloadSigner !== 'function')) invalid();
     this.#publicMode = Object.freeze({ requested: options.publicDataOnly ?? null,
       ...this.intent, apiKeyIndexPresent: Boolean(options.apiKeyIndex) });
-    const primary = publicCredential(options.key, metadata.primary?.trimCredential === true);
-    const secondary = publicCredential(options.secondary_key, metadata.secondary?.trimCredential === true);
+    const primary = publicCredential(options.key, primaryMetadata?.trimCredential === true);
+    const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
       || options.secondary_passphrase !== undefined || metadata.secondary !== undefined;
     if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');
-    const identity = (stableId: string | undefined) => Object.freeze({
+    const presence = { key: primary !== undefined, secret: Boolean(remoteSigner || payloadSigner) };
+    const publicDataOnly = derivePublicMode(name, options, undefined, presence).publicDataOnly;
+    const primaryPassphrase = resolveSetupPassphrase('primary', primary !== undefined, options.passphrase,
+      options.passphrase, setupPolicy.primary, publicDataOnly);
+    const secondaryPassphrase = resolveSetupPassphrase('secondary', secondary !== undefined, options.secondary_passphrase,
+      options.passphrase, setupPolicy.secondary, publicDataOnly);
+    const presentsPassphrase = deriveRemoteSigningPolicy(name)?.passphraseHeader !== undefined;
+    const primaryPassphraseRef = presentsPassphrase && primaryPassphrase.value
+      ? `delegated/${nanoid()}/passphrase` : undefined;
+    const secondaryPassphraseRef = !presentsPassphrase || secondary === undefined || !secondaryPassphrase.value ? undefined
+      : secondaryPassphrase.inheritPrimary ? primaryPassphraseRef : `delegated/${nanoid()}/passphrase`;
+    const identity = (stableId: string | undefined, passphrase: string | undefined) => Object.freeze({
       credential: `delegated/${nanoid()}/credential`,
       signing: `delegated/${nanoid()}/signing`,
       ...(stableId === undefined ? {} : { stableId }),
+      ...(passphrase === undefined ? {} : { passphrase }),
     });
     const identities: SigningIdentities = Object.freeze({
-      ...(primary === undefined ? {} : { primary: identity(metadata.primary?.stableId) }),
-      ...(secondary === undefined ? {} : { secondary: identity(metadata.secondary?.stableId) }),
+      ...(primary === undefined ? {} : { primary: identity(primaryMetadata?.stableId, primaryPassphraseRef) }),
+      ...(secondary === undefined ? {} : { secondary: identity(secondaryMetadata?.stableId, secondaryPassphraseRef) }),
     });
     try {
       this.#provider = createRemoteSignerProvider({
         exchangeName: name,
         identities: {
-          ...(identities.primary && primary !== undefined ? { primary: { ...identities.primary, publicCredential: primary } } : {}),
-          ...(identities.secondary && secondary !== undefined ? { secondary: { ...identities.secondary, publicCredential: secondary } } : {}),
+          ...(identities.primary && primary !== undefined ? { primary: { ...identities.primary, publicCredential: primary,
+            ...(primaryPassphraseRef === undefined ? {} : { passphraseValue: primaryPassphrase.value }) } } : {}),
+          ...(identities.secondary && secondary !== undefined ? { secondary: { ...identities.secondary, publicCredential: secondary,
+            ...(secondaryPassphraseRef === undefined ? {} : { passphraseValue: secondaryPassphrase.value }) } } : {}),
         },
         remoteSigner,
         payloadSigner,
@@ -111,7 +137,7 @@ export class DelegatedSignerSetup {
         remoteSigner: _remote, payloadSigner: _payload, signing: _signing, readCredentials: _readCredentials, ...safe
       } = withoutSigningCredentials(parsed as ExchangeOptions) as ExchangeOptions & { signing?: unknown; readCredentials?: unknown };
       return new Constructor(venue, JSON.stringify({ ...safe, signing: this.#identities,
-        remoteSigning: true, payloadSigner: this.intent.payloadSigner, publicMode: this.#publicMode }));
+        remoteSigning: true, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
     } catch (error) {
       this.dispose();
       throw error;

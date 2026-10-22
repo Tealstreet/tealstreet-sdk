@@ -359,3 +359,66 @@ facts publish only after whole-page admission and final success; no native
 HISTORY_INCOMPLETE emitters remain in WEEX histories. Explicit algo continuation
 is an owned gap, with no new paging algorithm. Income remains the prior slice;
 other families and caller/deployment proof remain open.
+
+Phemex income uses one engine range/completion owner across both currency stages.
+Original-source RED controls pin typed first failure, eligible-only partial
+recovery, later-currency loss and failed streamed-page prefixes. Core controls
+cover first gaps, stage lifecycle, cumulative budgets, filtering after coverage
+and actual native-bound restrictions; concurrent owners and Error-only logging
+stay isolated. Saturation intentionally continues USDC with an owned gap; no
+per-venue completeness emitter or positive deployed-runtime claim is introduced.
+
+## KuCoin Spot cumulative fallback adoption
+
+The native Spot fallback now uses the engine execution helper rather than
+emitting a cumulative amount directly. Original-source fixtures reproduce prefix
+overdelivery; the staged-seed and native-identity controls preserve direct last
+quantities, selected-field presence, binary precision, late/terminal delivery,
+partial healthy peers and failed/stale/lookup nonpublication. Financial progress
+is separate from Store display, terminal IDs and execution-ID retention. Native
+bounded retention and missing-endpoint ambiguity remain documented; this is not
+new live/provenance evidence or closure of Orderly/reporting fan-out.
+
+
+GRVT general histories now use one shared CursorHistory/Completion for output
+admission, cursor progress and command-owned coverage. A reusable engine page
+discard clears failed retry prefixes without rewinding accepted output, budget,
+identity progress or first gaps. Order-filtered complete-fill proofs and queued
+session/preparation refusal stay strict, while later actual general-query loss
+retains accepted pages only. No venue marker emitter or copied pager/terminal
+policy is introduced; other families and B11 runtime coverage remain open.
+
+
+Crypto.com histories now adopt the existing CursorHistory/Completion and staged
+page reset APIs. The engine owns accepted-only completion and one command-owned
+coverage marker; the adapter supplies exact u64 native cursor/identity facts and
+retains native strict proof checks. No new engine API, copied marker emitter or
+paging/retention implementation; other adapters and caller runtime coverage
+remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+## Orderly observed-average execution adoption
+
+Orderly's selected-last/average derivation now uses the additive engine
+`prepare_observed_average` operation. A separate observation may commit before
+native dedup; inferred quote may enrich only a live same-endpoint cursor after
+unique positive Fill delivery. Original-source public price assertions expose
+the missing/zero-average quote-poisoning defect; compatibility controls preserve
+native arbitrary-last quotient pricing, gaps, quiet/duplicate observations,
+field presence, overflow, REST non-seeding, late identity and bounded eviction.
+Whole-growth inference is Binary-only and best-effort, with supplied evidence
+validated before effects. Shared row-reporting policy/fan-out remains separate;
+this does not claim new live captures or universal financial contract coverage.
+
+
+## Persistent row-reporting compatibility
+
+`coverage::RowReports` centralizes persistent repeat/re-arm memory for the first
+Coinbase, Crypto.com and WOO consumers. The engine API returns whether repeat
+suppression admitted `row_skipped`, independently of host filtering; it does not
+mean a row or snapshot was admitted. Native event level/code/text/order, Error
+upgrade policy, namespace boundaries and early decoded-key re-arm remain.
+Original account controls are compatibility GREEN, not defect RED evidence.
+New engine controls cover all three policies, capacity reset before duplicate
+lookup, independent unbounded mode, borrowed lookup and host-filtered health.
+Grouped/deferred reporting and the remaining persistent consumer fan-out stay
+explicit follow-ups; see [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
