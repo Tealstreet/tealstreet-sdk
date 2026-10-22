@@ -72,6 +72,7 @@ okx = ["safe-cex-venues/okx", "text-ingress"]
 orderly = ["safe-cex-venues/orderly", "text-ingress"]
 
 [dependencies]
+zeroize.workspace = true
 safe-cex-engine = { workspace = true, features = ["polling-control"] }
 safe-cex-venues.workspace = true
 serde.workspace = true

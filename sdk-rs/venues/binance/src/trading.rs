@@ -70,6 +70,8 @@ struct Planned {
 
 #[derive(Default)]
 struct Job {
+    /// Any response/failure of a dispatched leg prevents aggregate notSent.
+    reached_venue: bool,
     steps: VecDeque<Vec<Planned>>,
     outstanding: usize,
     /// Run every step even after a failure (cancel-all's two families).
@@ -467,6 +469,9 @@ impl BinanceFutures {
         let Some(step) = step.filter(|step| !step.is_empty()) else {
             let job = self.trading.jobs.remove(&command).expect("present");
             let error = job.error.map(|mut error| {
+                if job.reached_venue && error.outcome == Some(Outcome::NotSent) {
+                    error.outcome = Some(Outcome::Unknown);
+                }
                 if (job.effective || !job.ids.is_empty())
                     && error.outcome == Some(Outcome::Rejected)
                 {
@@ -504,6 +509,27 @@ impl BinanceFutures {
         cx: &mut Cx<'_, Pending>,
         request: Request,
         response: Result<Response<'_>, &str>,
+    ) {
+        if let Some(job) = self.trading.jobs.get_mut(&request.command) {
+            job.reached_venue = true;
+        }
+        self.on_trade_result(cx, request, response, None);
+    }
+    pub(crate) fn on_trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        let message = error.message.clone();
+        self.on_trade_result(cx, request, Err(&message), Some(error));
+    }
+    fn on_trade_result(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Result<Response<'_>, &str>,
+        signing_error: Option<VenueError>,
     ) {
         let Request { command, call } = request;
         // A gateway failure is unproven whatever body it carries.
@@ -683,7 +709,7 @@ impl BinanceFutures {
                 cx.command_error(command, message.clone());
             }
             if let Some(job) = self.trading.jobs.get_mut(&command) {
-                let mut failed = failure(code, message);
+                let mut failed = signing_error.unwrap_or_else(|| failure(code, message));
                 if unproven {
                     failed.outcome = Some(Outcome::Unknown);
                 }
@@ -2179,7 +2205,7 @@ fn identities(params: &Params) -> Vec<OrderIdentityReceipt> {
 #[cfg(test)]
 mod audit_tests {
     use super::generated_id_with;
-    use crate::{BinanceFutures, Options, Variant, market_from_wire, wire::SymbolInfo};
+    use crate::{BinanceFutures, Variant, market_from_wire, wire::SymbolInfo};
     use safe_cex_engine::model::{
         OrderSide, OrderType, PlaceOrderOpts, Position, PositionSide, Ticker,
     };
@@ -2229,14 +2255,16 @@ mod audit_tests {
     fn engine(variant: Variant, fail_at: usize) -> Engine<BinanceFutures> {
         FAIL_AT.set(fail_at);
         IDS.set(0);
-        let mut venue = BinanceFutures::new(Options {
+        let (mut venue, signer) = crate::test_config::Options {
             variant,
             key: Some("api-key".into()),
             secret: Some("secret".into()),
-            ..Options::default()
-        });
+            ..crate::test_config::Options::default()
+        }
+        .build();
         venue.trading.id_generator = Some(injected_uuid);
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+        engine.set_signer(Some(signer)).unwrap();
         let info: SymbolInfo<'_> = serde_json::from_str(r#"{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}"#).unwrap();
         engine
             .store_mut()
@@ -2307,6 +2335,294 @@ mod audit_tests {
                     "{variant:?} {kind:?} fail_at={fail_at}"
                 );
                 assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 91, error }) if error.message.contains("entropy unavailable") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))), "{variant:?} {kind:?} fail_at={fail_at}: {actions:?}");
+            }
+        }
+    }
+
+    struct RefusingSigner;
+    impl safe_cex_engine::signing::Signer for RefusingSigner {
+        fn sign(
+            &self,
+            _: safe_cex_engine::signing::SignRequest,
+        ) -> safe_cex_engine::signing::SignFuture {
+            Box::pin(async { Err(safe_cex_engine::signing::SignError::Refused) })
+        }
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn sign_ready(
+            &self,
+            _: &safe_cex_engine::signing::SignRequest,
+        ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+        {
+            Some(Err(safe_cex_engine::signing::SignError::Refused))
+        }
+    }
+
+    #[test]
+    fn refused_signer_reports_not_sent_once_for_every_binance_family() {
+        for variant in [
+            Variant::UsdM,
+            Variant::PortfolioMargin,
+            Variant::CoinM,
+            Variant::Spot,
+        ] {
+            let mut engine = engine(variant, usize::MAX);
+            engine
+                .set_signer(Some(std::sync::Arc::new(RefusingSigner)))
+                .unwrap();
+            engine.handle(
+                1000.0,
+                Event::Command(Command::PlaceOrders {
+                    command: 92,
+                    orders: vec![limit()],
+                }),
+            );
+            let actions: Vec<_> = engine.drain_actions().collect();
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_))),
+                "{variant:?}"
+            );
+            let failures: Vec<_> = actions
+                .iter()
+                .filter_map(|action| match action {
+                    Action::Notice(Notice::CommandFailed { command: 92, error }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(failures.len(), 1, "{variant:?}: {actions:?}");
+            assert_eq!(
+                failures[0].outcome,
+                Some(safe_cex_engine::Outcome::NotSent),
+                "{variant:?}"
+            );
+            assert!(failures[0].message.to_lowercase().contains("sign"));
+            assert_eq!(engine.drain_actions().count(), 0);
+        }
+    }
+
+    struct HungSigner;
+    impl safe_cex_engine::signing::Signer for HungSigner {
+        fn sign(
+            &self,
+            _: safe_cex_engine::signing::SignRequest,
+        ) -> safe_cex_engine::signing::SignFuture {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    #[test]
+    fn signing_failures_in_private_reads_never_become_successful_empty_history() {
+        use safe_cex_engine::{ErrorKind, Outcome, Query};
+        for variant in [Variant::UsdM, Variant::PortfolioMargin] {
+            for hung in [false, true] {
+                let mut commands = vec![Command::Query {
+                    command: 94,
+                    query: Query::OrderByClientId {
+                        symbol: "BTCUSDT".into(),
+                        client_order_id: "lookup".into(),
+                    },
+                }];
+                if matches!(variant, Variant::UsdM | Variant::PortfolioMargin) {
+                    commands.push(Command::FetchAccount { command: 94 });
+                    commands.push(Command::Query {
+                        command: 94,
+                        query: Query::OrderHistory {
+                            symbol: Some("BTCUSDT".into()),
+                            from_ms: None,
+                            to_ms: None,
+                            limit: None,
+                        },
+                    });
+                    commands.push(Command::Query {
+                        command: 94,
+                        query: Query::Fills {
+                            symbol: Some("BTCUSDT".into()),
+                            order_id: None,
+                            from_ms: None,
+                            to_ms: None,
+                            limit: None,
+                        },
+                    });
+                }
+                for command in commands {
+                    let mut engine = engine(variant, usize::MAX);
+                    let signer: safe_cex_engine::signing::Provider = if hung {
+                        std::sync::Arc::new(HungSigner)
+                    } else {
+                        std::sync::Arc::new(RefusingSigner)
+                    };
+                    engine.set_signer(Some(signer)).unwrap();
+                    let label = format!("{variant:?} hung={hung} {command:?}");
+                    engine.handle(1000.0, Event::Command(command));
+                    let mut actions: Vec<_> = engine.drain_actions().collect();
+                    if hung {
+                        let timers: Vec<_> = actions
+                            .iter()
+                            .filter_map(|a| match a {
+                                Action::SetTimer { timer, .. } => Some(*timer),
+                                _ => None,
+                            })
+                            .collect();
+                        assert!(!timers.is_empty(), "{variant:?}");
+                        for timer in timers {
+                            engine.handle(100_000.0, Event::TimerFired { timer });
+                        }
+                        actions.extend(engine.drain_actions());
+                    }
+                    assert!(
+                        !actions.iter().any(|a| matches!(
+                            a,
+                            Action::Http(_)
+                                | Action::Notice(Notice::CommandDone { command: 94, .. })
+                        )),
+                        "{variant:?}: {actions:?}"
+                    );
+                    let failures: Vec<_> = actions
+                        .iter()
+                        .filter_map(|a| match a {
+                            Action::Notice(Notice::CommandFailed { command: 94, error }) => {
+                                Some(error)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(failures.len(), 1, "{variant:?} hung={hung}: {actions:?}");
+                    assert_eq!(
+                        failures[0].outcome,
+                        Some(Outcome::NotSent),
+                        "{label}: {actions:?}"
+                    );
+                    assert_eq!(
+                        failures[0].kind,
+                        Some(if hung {
+                            ErrorKind::Timeout
+                        } else {
+                            ErrorKind::InvalidInput
+                        })
+                    );
+                }
+            }
+        }
+    }
+
+    struct FirstSignatureOnly {
+        inner: safe_cex_engine::signing::Provider,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    impl safe_cex_engine::signing::Signer for FirstSignatureOnly {
+        fn sign(
+            &self,
+            _: safe_cex_engine::signing::SignRequest,
+        ) -> safe_cex_engine::signing::SignFuture {
+            unreachable!("immediate provider")
+        }
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn sign_ready(
+            &self,
+            request: &safe_cex_engine::signing::SignRequest,
+        ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+        {
+            if self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                == 0
+            {
+                self.inner.sign_ready(request)
+            } else {
+                Some(Err(safe_cex_engine::signing::SignError::Refused))
+            }
+        }
+    }
+
+    #[test]
+    fn later_signer_refusal_cannot_label_an_earlier_dispatched_leg_not_sent() {
+        for variant in [
+            Variant::UsdM,
+            Variant::PortfolioMargin,
+            Variant::CoinM,
+            Variant::Spot,
+        ] {
+            for accepted in [false, true] {
+                let mut engine = engine(variant, usize::MAX);
+                let signer = FirstSignatureOnly {
+                    inner: engine.signer().unwrap(),
+                    calls: std::sync::atomic::AtomicUsize::new(0),
+                };
+                engine
+                    .set_signer(Some(std::sync::Arc::new(signer)))
+                    .unwrap();
+                engine.handle(
+                    1000.0,
+                    Event::Command(Command::PlaceOrders {
+                        command: 93,
+                        orders: vec![limit(); 6],
+                    }),
+                );
+                let first: Vec<_> = engine
+                    .drain_actions()
+                    .filter_map(|a| match a {
+                        Action::Http(r) => Some(r),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(first.len(), 1, "{variant:?}");
+                let request = &first[0];
+                let body = if request.url.contains("batchOrders") {
+                    r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5}]"#
+                } else {
+                    r#"{"orderId":1}"#
+                };
+                if accepted {
+                    engine.handle(
+                        1001.0,
+                        Event::HttpResponse {
+                            request: request.id,
+                            response: safe_cex_engine::Response {
+                                status: 200,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                } else {
+                    engine.handle(
+                        1001.0,
+                        Event::HttpFailed {
+                            request: request.id,
+                            error: "connection closed",
+                        },
+                    );
+                }
+                let actions: Vec<_> = engine.drain_actions().collect();
+                assert!(
+                    !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                    "{variant:?}"
+                );
+                let failures: Vec<_> = actions
+                    .iter()
+                    .filter_map(|a| match a {
+                        Action::Notice(Notice::CommandFailed { command: 93, error }) => Some(error),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    failures.len(),
+                    1,
+                    "{variant:?} accepted={accepted}: {actions:?}"
+                );
+                assert_eq!(
+                    failures[0].outcome,
+                    Some(safe_cex_engine::Outcome::Unknown),
+                    "{variant:?} accepted={accepted}"
+                );
+                if accepted && variant == Variant::CoinM {
+                    assert!(!failures[0].partial.as_ref().unwrap().order_ids.is_empty());
+                }
             }
         }
     }

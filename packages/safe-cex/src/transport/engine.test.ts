@@ -1726,3 +1726,20 @@ describe('Bitunix explicit WebSocket routing', () => {
     expect(plan.ws.private.host).toBeUndefined();
   });
 });
+
+
+it('routes provider-owned secondary reads using metadata without credentials in transport options', async () => {
+  const raw = makeRaw();
+  const safe = { transport: tealstreetTransport, tealstreetTunnel: false, secondaryProxyUrl: 'https://read.invalid' } as ExchangeOptions;
+  const routed = createEngineTransport('binance', safe, raw, { hasSecondary: true });
+  const url = 'https://fapi.binance.com/fapi/v1/account';
+  try {
+    await routed.request({ method: 'GET', url, headers: { 'X-MBX-APIKEY': 'read-key' } });
+    expect(raw.request.mock.lastCall![0].url).toBe(`https://read.invalid/${url}`);
+    await routed.request({ method: 'GET', route: 'primary', url, headers: { 'X-MBX-APIKEY': 'venue-key' } });
+    expect(raw.request.mock.lastCall![0].url).not.toContain('read.invalid');
+    expect(safe).not.toHaveProperty('key');
+    expect(safe).not.toHaveProperty('secret');
+    expect(safe).not.toHaveProperty('secondary_key');
+  } finally { routed.dispose?.(); }
+});

@@ -91,7 +91,7 @@ it.each([
       asterdexApiVersion: expected,
       bridge: {
         spot: false, demo: false, primaryCredentialsOnly: false, payloadSigning: false,
-        apiKeyIndexRequired: false, isolatedBookSubscriptions: true,
+        apiKeyIndexRequired: false, isolatedBookSubscriptions: true, dispatchSigning: false,
       },
     });
     const actions = JSON.parse(engine.start(1_700_000_000_000));

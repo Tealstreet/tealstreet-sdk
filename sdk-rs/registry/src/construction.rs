@@ -34,6 +34,7 @@ struct BridgeRule {
     payload_signing: bool,
     api_key_index_required: bool,
     isolated_book_subscriptions: bool,
+    dispatch_signing: bool,
 }
 
 enum DemoRule {
@@ -52,6 +53,7 @@ pub struct BridgeConstruction {
     pub payload_signing: bool,
     pub api_key_index_required: bool,
     pub isolated_book_subscriptions: bool,
+    pub dispatch_signing: bool,
 }
 
 pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
@@ -81,6 +83,7 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
         payload_signing: rule.payload_signing,
         api_key_index_required: rule.api_key_index_required,
         isolated_book_subscriptions: rule.isolated_book_subscriptions,
+        dispatch_signing: rule.dispatch_signing,
     }
 }
 
@@ -108,12 +111,26 @@ pub struct Resolved {
 pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
     let mode = options.public_mode.as_ref()?;
     let rule = venue_rule(venue);
+    let identities = options
+        .signing
+        .as_ref()
+        .filter(|_| bridge(venue, options).dispatch_signing);
     let present = |value: &Option<String>| value.as_ref().is_some_and(|value| !value.is_empty());
     let matches = |conditions: Conditions, can_sign: bool| {
         conditions.iter().all(|group| {
             group.iter().any(|input| match input {
-                Input::Key => present(&options.key),
-                Input::Secret => present(&options.secret),
+                Input::Key => {
+                    present(&options.key)
+                        || identities
+                            .and_then(|s| s.primary.as_ref())
+                            .is_some_and(|id| !id.credential.0.is_empty())
+                }
+                Input::Secret => {
+                    present(&options.secret)
+                        || identities
+                            .and_then(|s| s.primary.as_ref())
+                            .is_some_and(|id| !id.signing.0.is_empty())
+                }
                 Input::RemoteSigner => mode.remote_signer,
                 Input::PayloadSigner => mode.payload_signer,
                 Input::ApplicationId => present(&options.application_id),

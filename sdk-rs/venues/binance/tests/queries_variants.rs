@@ -1,6 +1,7 @@
+use support::Options;
 mod support;
 use safe_cex_engine::{Command, Event, Query};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 #[test]

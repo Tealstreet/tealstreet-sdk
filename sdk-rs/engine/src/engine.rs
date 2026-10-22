@@ -449,7 +449,7 @@ impl From<&String> for SocketSpec {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Action {
     WsConnect {
         /// Preserve application binary frames rather than decoding UTF-8.
@@ -469,6 +469,17 @@ pub enum Action {
         socket: SocketId,
     },
     Http(HttpRequest),
+    /// Internal outbound queue wrapper; always unwrapped/validated by drain.
+    SignedOutbound {
+        attempt: RequestId,
+        outbound: Box<Action>,
+    },
+    /// Atomic primitive/credential work; hosts never log payload or result bytes.
+    Sign {
+        attempt: RequestId,
+        work: crate::signing::SignRequest,
+        timeout_ms: u32,
+    },
     SignPayload {
         request: RequestId,
         payload: PayloadSignRequest,
@@ -482,6 +493,18 @@ pub enum Action {
         timer: TimerId,
     },
     Notice(Notice),
+}
+
+impl std::fmt::Debug for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Notice(notice) => f.debug_tuple("Notice").field(notice).finish(),
+            _ => f
+                .debug_struct("Action")
+                .field("kind", &std::mem::discriminant(self))
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 /// Venue-specific actions outside the shared trading surface.
@@ -766,6 +789,10 @@ pub enum Event<'a> {
         request: RequestId,
         error: &'a str,
     },
+    Signed {
+        attempt: RequestId,
+        result: Result<crate::signing::SignResult, crate::signing::SignError>,
+    },
     PayloadSigned {
         request: RequestId,
         signature: &'a str,
@@ -1038,6 +1065,10 @@ struct Io<P> {
     public_feed_policy: PublicFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
+    signing: crate::signing_dispatch::Dispatch,
+    signer: Option<crate::signing::Provider>,
+    dispatch_now: f64,
+    signing_admission: Vec<(Action, crate::signing::SignError)>,
     streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
@@ -1076,6 +1107,10 @@ impl<P> Default for Io<P> {
             public_feed_policy: PublicFeedPolicy::Direct,
             pending: HashMap::new(),
             signatures: Vec::new(),
+            signing: Default::default(),
+            signer: None,
+            dispatch_now: 0.,
+            signing_admission: Vec::new(),
             streams: HashMap::new(),
             incoming: HashMap::new(),
             timers: HashMap::new(),
@@ -1158,15 +1193,29 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
-        self.io.actions.push(Action::WsSend {
+        let action = Action::WsSend {
             socket,
             text: text.into(),
-        });
+        };
+        if self.io.signing.has_socket(socket) {
+            if self.io.signing.hold(action.clone()).is_err() {
+                self.io
+                    .signing_admission
+                    .push((action, crate::signing::SignError::Unavailable));
+            }
+        } else {
+            self.io.actions.push(action);
+        }
     }
 
     pub fn close(&mut self, socket: SocketId) {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
+        }
+        for timer in self.io.signing.close_socket(socket) {
+            if timer.0 != 0 {
+                self.io.actions.push(Action::ClearTimer { timer });
+            }
         }
         // The host drops engine-initiated closes without reporting them back.
         // They are deliberate, so they never make the next connect a reconnect.
@@ -1290,6 +1339,66 @@ impl<P> Cx<'_, P> {
         self.request_streamed_body(method, url, headers, None, at, pending)
     }
 
+    /// Attach a venue's unsigned HTTP recipe. Preparation happens at dispatch.
+    pub fn sign_http(&mut self, request: RequestId, step: Box<dyn crate::SignStep>) {
+        let Some(index) = self
+            .io
+            .actions
+            .iter()
+            .position(|a| matches!(a, Action::Http(http) if http.id == request))
+        else {
+            return;
+        };
+        let outbound = self.io.actions.remove(index);
+        self.stage_signed(index, outbound, step);
+    }
+
+    /// WS authentication uses the same deadline/freshness/generation service.
+    pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
+        let index = self.io.actions.len();
+        self.stage_signed(index, Action::WsSend { socket, text }, step);
+    }
+
+    fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        let attempt = self.io.signing.next_id();
+        // Exhaustion is handled through the same asynchronous failure event.
+        let timer = if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
+            TimerId(0)
+        } else {
+            TimerId(self.io.next())
+        };
+        let staged = self
+            .io
+            .signing
+            .stage(attempt, outbound.clone(), step, timer, self.now);
+        let error = staged.as_ref().err();
+        if error.is_some() {
+            // Retain the continuation even when admission fails, so the engine
+            // reports a typed pre-dispatch failure instead of silently dropping it.
+            self.io
+                .signing_admission
+                .push((outbound, crate::signing::SignError::Unavailable));
+            return;
+        }
+        if timer.0 != 0 {
+            self.io.actions.push(Action::SetTimer {
+                timer,
+                at_ms: staged.expect("checked admission"),
+            });
+        }
+        self.io.actions.insert(
+            index,
+            Action::Sign {
+                attempt,
+                work: crate::signing::SignRequest {
+                    operations: Vec::new(),
+                    context: Default::default(),
+                },
+                timeout_ms: 0,
+            },
+        );
+    }
+
     /// Stream a POSTed read while retaining its typed request body.
     pub fn request_streamed_body(
         &mut self,
@@ -1321,6 +1430,10 @@ impl<P> Cx<'_, P> {
 
     /// Set host policy on an outbound action before the host drains it.
     pub fn route_request(&mut self, id: RequestId, route: RequestRoute) {
+        if let Some(request) = self.io.signing.request_mut(id) {
+            request.route = Some(route);
+            return;
+        }
         if let Some(request) = self
             .io
             .actions
@@ -1337,6 +1450,15 @@ impl<P> Cx<'_, P> {
 
     /// Bound the whole host operation, including route setup and response body.
     pub fn request_timeout(&mut self, id: RequestId, timeout_ms: u32) {
+        if let Some((timer, at_ms)) = self.io.signing.timeout_request(id, timeout_ms) {
+            if timer.0 != 0 {
+                self.io
+                    .actions
+                    .retain(|a| !matches!(a,Action::SetTimer {timer:old,..} if *old==timer));
+                self.io.actions.push(Action::SetTimer { timer, at_ms });
+            }
+            return;
+        }
         if let Some(request) = self
             .io
             .actions
@@ -1649,6 +1771,16 @@ pub trait Venue {
     ) -> Option<AuthOutcome> {
         None
     }
+    /// Shared dispatch signing failure, typed before transport. Composite jobs
+    /// retain earlier attempt outcomes when projecting this attempted notSent.
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_sign_failed(cx, pending, &error.message);
+    }
     /// Delegated signing failed before an HTTP write could reach the venue.
     fn on_sign_failed(
         &mut self,
@@ -1836,6 +1968,22 @@ impl<V: Venue> Engine<V> {
             #[cfg(feature = "book-deltas")]
             book_market_rows: Vec::new(),
         })
+    }
+
+    /// Trusted construction installs the provider handle; no key material enters the engine.
+    pub fn set_signer(
+        &mut self,
+        signer: Option<crate::signing::Provider>,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(VenueError::new("Signer must be configured before startup")
+                .kind(ErrorKind::InvalidInput));
+        }
+        self.io.signer = signer;
+        Ok(())
+    }
+    pub fn signer(&self) -> Option<crate::signing::Provider> {
+        self.io.signer.clone()
     }
 
     /// Host configuration is immutable once startup begins.
@@ -2073,6 +2221,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn start(&mut self, now: f64) {
+        self.io.dispatch_now = now;
         if std::mem::replace(&mut self.started, true) {
             return;
         }
@@ -2087,6 +2236,23 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        self.io.dispatch_now = now;
+        if let Event::Signed { attempt, result } = event {
+            self.sign_completed(now, attempt, result);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            return;
+        }
+        if let Event::TimerFired { timer } = &event
+            && let Some((_, pending)) = self.io.signing.expire(*timer)
+        {
+            self.sign_failed(now, pending.outbound, crate::signing::SignError::TimedOut);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            return;
+        }
         if let Event::TimerFired { timer } = &event
             && self.ack_timer.is_some_and(|(own, _)| own == *timer)
         {
@@ -2245,6 +2411,11 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_message(&mut cx, socket, text)
             }
             Event::WsClosed { socket, code } => {
+                for timer in cx.io.signing.close_socket(socket) {
+                    if timer.0 != 0 {
+                        cx.io.actions.push(Action::ClearTimer { timer });
+                    }
+                }
                 cx.io.sockets.closed(socket, true);
                 cx.io.health.count(log_code::WS_CLOSED);
                 self.venue.on_close(&mut cx, socket, code)
@@ -2261,6 +2432,7 @@ impl<V: Venue> Engine<V> {
             } => self.http_start(now, request, status, headers),
             Event::HttpChunk { request, data } => self.http_chunk(now, request, data),
             Event::HttpEnd { request } => self.http_end(now, request),
+            Event::Signed { .. } => unreachable!("handled before venue dispatch"),
             Event::PayloadSigned {
                 request,
                 signature,
@@ -2304,6 +2476,13 @@ impl<V: Venue> Engine<V> {
                 #[cfg(feature = "order-locks")]
                 cx.io.order_read_tokens.remove(&request);
                 cx.io.take_signature(request);
+                if let Some(pending) = cx.io.signing.remove_request(request)
+                    && pending.timer.0 != 0
+                {
+                    cx.io.actions.push(Action::ClearTimer {
+                        timer: pending.timer,
+                    });
+                }
                 cx.io.streams.remove(&request);
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
@@ -2580,8 +2759,208 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    fn sign_failed(&mut self, now: f64, outbound: Action, error: crate::signing::SignError) {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        match outbound {
+            Action::Http(http) => {
+                #[cfg(feature = "order-locks")]
+                cx.io.order_read_tokens.remove(&http.id);
+                cx.io.streams.remove(&http.id);
+                if let Some(pending) = cx.io.pending.remove(&http.id) {
+                    self.venue
+                        .on_sign_error(&mut cx, pending.value, error.venue_error());
+                }
+            }
+            Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
+                cx.close(socket);
+                self.venue.on_close(&mut cx, socket, 1006);
+            }
+            _ => {}
+        }
+    }
+
+    fn sign_completed(
+        &mut self,
+        now: f64,
+        attempt: RequestId,
+        result: Result<crate::signing::SignResult, crate::signing::SignError>,
+    ) {
+        use crate::signing_dispatch::Completion;
+        let Some(completion) = self.io.signing.finish(attempt, now, result) else {
+            return;
+        };
+        match completion {
+            Completion::Ready(pending, outbound) => {
+                if pending.timer.0 != 0 {
+                    self.io.actions.push(Action::ClearTimer {
+                        timer: pending.timer,
+                    });
+                }
+                self.io.signing.ready(attempt, pending);
+                self.io.actions.push(Action::SignedOutbound {
+                    attempt,
+                    outbound: Box::new(outbound),
+                });
+            }
+            Completion::Stale(mut pending) => {
+                if pending.timer.0 != 0 {
+                    self.io.actions.push(Action::ClearTimer {
+                        timer: pending.timer,
+                    });
+                    pending.timer = TimerId(0);
+                }
+                // New identity invalidates every late completion from the old attempt.
+                let next = self.io.signing.next_id();
+                self.io.signing.retry(next, pending);
+                self.io.actions.push(Action::Sign {
+                    attempt: next,
+                    work: crate::signing::SignRequest {
+                        operations: Vec::new(),
+                        context: Default::default(),
+                    },
+                    timeout_ms: 0,
+                });
+            }
+            Completion::Failed(pending, error) => {
+                if pending.timer.0 != 0 {
+                    self.io.actions.push(Action::ClearTimer {
+                        timer: pending.timer,
+                    });
+                }
+                self.sign_failed(now, pending.outbound, error);
+            }
+        }
+    }
+
+    /// Hosts call this with their canonical engine clock immediately before a
+    /// delayed drain. Normal event-driven drains use the current event time.
+    pub fn prepare_dispatch(&mut self, now: f64) {
+        self.io.dispatch_now = now;
+    }
+
+    /// Callback actions must traverse the same queue as the original event.
+    /// In particular, an empty signing marker is internal preparation work.
+    fn queue_dispatch_callback_actions(
+        &mut self,
+        queued: &mut std::collections::VecDeque<Action>,
+        emitted: usize,
+    ) {
+        for action in self.io.actions.split_off(emitted).into_iter().rev() {
+            queued.push_front(action);
+        }
+    }
+
+    fn dispatch_actions(&mut self, now: f64) {
+        use crate::signing_dispatch::Completion;
+        for (outbound, error) in std::mem::take(&mut self.io.signing_admission) {
+            self.sign_failed(now, outbound, error);
+        }
+        let mut queued = std::collections::VecDeque::from(std::mem::take(&mut self.io.actions));
+        loop {
+            while let Some(action) = queued.pop_front() {
+                match action {
+                    Action::SignedOutbound { attempt, outbound } => {
+                        match self.io.signing.release(attempt, *outbound, now) {
+                            Some(Completion::Ready(_, outbound)) => self.io.actions.push(outbound),
+                            Some(Completion::Stale(mut pending)) => {
+                                pending.timer = TimerId(0);
+                                let next = self.io.signing.next_id();
+                                self.io.signing.retry(next, pending);
+                            }
+                            Some(Completion::Failed(pending, error)) => {
+                                let emitted = self.io.actions.len();
+                                self.sign_failed(now, pending.outbound, error);
+                                self.queue_dispatch_callback_actions(&mut queued, emitted);
+                            }
+                            None => {}
+                        }
+                    }
+                    Action::Sign {
+                        attempt,
+                        work,
+                        timeout_ms,
+                    } => {
+                        if !work.operations.is_empty() {
+                            self.io.actions.push(Action::Sign {
+                                attempt,
+                                work,
+                                timeout_ms,
+                            });
+                            continue;
+                        }
+                        if !self.io.signing.can_prepare(attempt) {
+                            continue;
+                        }
+                        let work = match self.io.signing.prepare(attempt, now) {
+                            Ok(work) => work,
+                            Err(error) => {
+                                let emitted = self.io.actions.len();
+                                self.sign_completed(now, attempt, Err(error));
+                                self.queue_dispatch_callback_actions(&mut queued, emitted);
+                                continue;
+                            }
+                        };
+                        if let Some(result) =
+                            self.io.signer.as_ref().and_then(|s| s.sign_ready(&work))
+                        {
+                            let emitted = self.io.actions.len();
+                            self.sign_completed(now, attempt, result);
+                            // Inline local completion retains original mixed action order.
+                            self.queue_dispatch_callback_actions(&mut queued, emitted);
+                        } else {
+                            if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
+                                let emitted = self.io.actions.len();
+                                self.sign_completed(
+                                    now,
+                                    attempt,
+                                    Err(crate::signing::SignError::Unavailable),
+                                );
+                                self.queue_dispatch_callback_actions(&mut queued, emitted);
+                                continue;
+                            }
+                            if self.io.signing.timer(attempt).is_some_and(|t| t.0 == 0) {
+                                let timer = TimerId(self.io.next());
+                                if let Some(at_ms) = self.io.signing.arm(attempt, timer) {
+                                    self.io.actions.push(Action::SetTimer { timer, at_ms });
+                                }
+                            }
+                            let timeout_ms = self.io.signing.timeout_ms(attempt, now);
+                            self.io.actions.push(Action::Sign {
+                                attempt,
+                                work,
+                                timeout_ms,
+                            });
+                        }
+                    }
+                    action => self.io.actions.push(action),
+                }
+            }
+            if let Some(action) = self.io.signing.take_plain() {
+                queued.push_back(action);
+                continue;
+            }
+            if let Some(attempt) = self.io.signing.next_work() {
+                queued.push_back(Action::Sign {
+                    attempt,
+                    work: crate::signing::SignRequest {
+                        operations: vec![],
+                        context: Default::default(),
+                    },
+                    timeout_ms: 0,
+                });
+                continue;
+            }
+            break;
+        }
+    }
+
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
+        self.dispatch_actions(self.io.dispatch_now);
         if self.store.take_rejected_empty_catalogue() {
             push_event(
                 &mut self.io.actions,
@@ -2599,7 +2978,10 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn has_actions(&self) -> bool {
-        !self.io.actions.is_empty() || self.store.rejected_empty_catalogue()
+        !self.io.actions.is_empty()
+            || !self.io.signing_admission.is_empty()
+            || self.io.signing.next_work().is_some()
+            || self.store.rejected_empty_catalogue()
     }
 
     /// The venue's synchronized book for `symbol`, if any.
@@ -6418,3 +6800,7 @@ mod fill_frame_tests {
         assert!(kinds(engine.take_frame(2.)).contains(&section::ORDERS));
     }
 }
+
+#[cfg(test)]
+#[path = "signing_tests.rs"]
+mod dispatch_signing_tests;

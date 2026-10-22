@@ -38,6 +38,7 @@ struct BridgeRule {
     payload_signing: bool,
     api_key_index_required: bool,
     isolated_book_subscriptions: bool,
+    dispatch_signing: bool,
 }
 
 #[derive(Default, Debug, Deserialize)]
@@ -82,13 +83,14 @@ fn rule(value: &Rule) -> String {
     };
     let bridge = &value.bridge;
     let bridge = format!(
-        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {} }}",
+        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {} }}",
         bridge.spot,
         bridge.demo,
         bridge.primary_credentials_only,
         bridge.payload_signing,
         bridge.api_key_index_required,
-        bridge.isolated_book_subscriptions
+        bridge.isolated_book_subscriptions,
+        bridge.dispatch_signing
     );
     format!(
         "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge} }}",

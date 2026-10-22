@@ -96,6 +96,13 @@ which builds the engine through `safe-cex-venues` from the same options JSON the
 wasm host accepts (the default `venues` feature). It does not accept account
 creation or credentials over the client protocol.
 
+For migrated dispatch-signing families, prefer opaque credential refs plus a
+provider injected with `Host::with_signer` or `add_venue_with_signer`. The local
+provider owns the keys; engine/venue options retain refs only. `add_venue` still
+normalizes legacy credential inputs through trusted setup until cutover callers
+migrate. Neither registration method adds credential setup to the client wire.
+See [the signer contract](../../../docs/plans/RUST_SIGNER.md).
+
 Register engines before sending them any commands, including subscriptions. All
 commands must enter through the server so its internal IDs cannot collide with
 pre-existing venue jobs. Registration rejects an engine that has received any

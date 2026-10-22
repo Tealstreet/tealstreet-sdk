@@ -1,7 +1,8 @@
 //! Scripted discovery regressions; no network or account credentials.
+use support::Options;
 mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
-use safe_cex_venue_binance::{BinanceFutures, Options};
+use safe_cex_venue_binance::BinanceFutures;
 use support::Harness;
 
 /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
@@ -10,10 +11,10 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"symbols":[{"broken":true},{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"###;
 fn public_engine() -> Engine<BinanceFutures> {
-    safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(Options {
+    support::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }))
+    })
 }
 #[test]
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
@@ -78,11 +79,11 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(Options {
+    let mut engine = support::engine(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     let catalogue = engine
         .drain_actions()

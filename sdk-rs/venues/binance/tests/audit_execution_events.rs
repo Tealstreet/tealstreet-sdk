@@ -1,11 +1,12 @@
 //! ORDER_TRADE_UPDATE examples and execution/expiration semantics:
 //! https://developers.binance.com/en/docs/products/derivatives-trading-coin-futures/user-data-streams
 //! https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams
+use support::Options;
 mod support;
 
 use safe_cex_engine::Event;
 use safe_cex_engine::model::OrderStatus;
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn ready(variant: Variant) -> Harness {

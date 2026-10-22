@@ -182,7 +182,7 @@ const KEEPALIVE_MS = 30_000;
  * supplies engineOptions for protocol choices tied to its resolved routes,
  * overriding conflicting caller flags before engine construction.
  */
-export const createEngineObject = ({ loadEngine, createTransport, accountToken, flush = { store: 250, books: 60 } }) =>
+export const createEngineObject = ({ loadEngine, createTransport, createSigner, accountToken, flush = { store: 250, books: 60 } }) =>
   class EngineObject {
     constructor(state, env) {
       this.state = state;
@@ -250,6 +250,7 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
         // A new start replaces any failure reported by an earlier engine lifetime.
         this.startupFailure = undefined;
         let host;
+        let engine;
         try {
           const { WasmEngine } = await loadEngine(message.venue);
           if (this.starting !== attempt || !this.clients.has(client)) return;
@@ -258,11 +259,15 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
             this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Engine routing requires a configured createTransport factory' });
             return;
           }
+          // Deployment-owned provider and refs; never take a provider from the wire.
+          const signing = await createSigner?.(this.state, this.env, message.venue);
+          if (this.starting !== attempt || !this.clients.has(client)) return;
           const raw = workersTransport();
           const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
           if (this.starting !== attempt || !this.clients.has(client)) return;
+          engine = new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...(signing ? { signing: signing.identities } : {}), ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders }));
           host = new EngineHost(
-            new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders })),
+            engine,
             transport,
             {
               onFrame: (frame) => this.broadcast(frame),
@@ -284,6 +289,7 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
                 for (const optedIn of this.accountAuthClients) this.reply(optedIn, { op: 'accountAuth', ...result });
               },
             },
+            { ownsEngine: true, ...(signing ? { signer: signing.signer } : {}) },
           );
           if (this.starting !== attempt || !this.clients.has(client)) { host.dispose(); return; }
           this.host = host;
@@ -293,6 +299,7 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
           if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
         } catch {
           host?.dispose();
+          if (!host) { try { engine?.free?.(); } catch { /* Best-effort failed construction cleanup. */ } }
           if (this.host === host) this.host = undefined;
           this.reply(client, { op: 'event', level: 'error', code: 'host.rejected', fields: {}, message: 'Engine start failed' });
         } finally {

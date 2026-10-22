@@ -1,9 +1,10 @@
 //! Portfolio margin's USD-M side against Binance's documented payloads.
+use support::Options;
 mod support;
 
 use safe_cex_engine::model::{MarginType, OrderSide, OrderStatus, OrderType, PlaceOrderOpts};
 use safe_cex_engine::{Command, Event, Method};
-use safe_cex_venue_binance::Options;
+
 use support::Harness;
 
 const POSITION_RISK: &str = r#"[{"entryPrice":"95000.0","leverage":"20","markPrice":"96000.0","maxNotionalValue":"6000000.0","positionAmt":"0.010","notional":"960.0","symbol":"BTCUSDT","unRealizedProfit":"10.0","liquidationPrice":"80000.5","positionSide":"BOTH","updateTime":1720736417660}]"#;
