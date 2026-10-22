@@ -608,3 +608,86 @@ byte-exact restoration of the migrated source, with receipt
 caller reviews are CLEAN; repeat-suppressed summary health wording was tightened.
 Actual #1741 integration, current-head full CI and authenticated all-suite raw/
 ordered-gate proof remain required. No merge, live or all-venue closure claim.
+
+
+## Next reporter fan-out: BloFin and Kraken (plan, 2026-10-23)
+
+Start from actual grouped/deferred reporter merge #1775,
+`15c6334b514e9edd34ad2fa38034aab1277148ba`. Its current-head evidence is
+strict975/976 with all488 Rust outputs and110 ordered gates unchanged; the sole
+ApeX TS count variant has both complete pre-change controls authenticated. That
+completed proof does not substitute for the new slice's proof.
+
+Architecture gate: **YES, this is another consumer of cross-cutting reporting
+policy.** Use existing engine `RowReports`, `RowRepeat`, `forget`, `clear` and
+`rearm_namespace`; no new venue or engine policy. Scope is BloFin account.rs,
+Kraken futures account.rs, Kraken Spot account.rs, their existing native account
+tests and this plan/AUDITS/QUALITY/CALLERS. No execution arithmetic, row admission,
+Store/freshness, signing, request authority, WS lifecycle or history changes.
+
+1. BloFin position/order skip sets become separate bounded Once reporters.
+   Keep the thin native formatting adapter, exact skip severity and empty IDs.
+   Decode-based `forget` stays before mapping/final read acceptance, including
+   reads that later fail or become stale. Accepted position revision clearing
+   stays at its native Balance-response site; rejected Positions bypass that
+   response, and order clearing stays only
+   on its clean accepted path. Once never gains Warn-to-Error upgrades.
+2. Kraken futures skip memory becomes bounded ErrorUpgrade, explicitly selected
+   in the real `Account::new` constructor. Preserve order/position namespaces,
+   raw-symbol position labels, stale WS no-rearm and `recovered` filtering of
+   accepted/rejected duplicate identities. Use the shared namespace rearm at
+   the existing sites. Its distinct unlisted-symbol memory becomes explicit
+   **unbounded Once**, also explicitly initialized in `Account::new`: raw
+   symbols remain shared across REST/WS/orders/positions;
+   clean/mapped reads and reconnects never rearm it. Reporting stays during
+   mapping before snapshot admission: stale/held reads still consume unlisted
+   suppression, while unknown zero-quantity positions remain silent and consume
+   no memory. Malformed catalogue holds remain a separate admission decision.
+3. Kraken Spot skip memory becomes bounded Once with the native coin/order
+   namespaces, including an empty order identity. Keep diagnostics before
+   admission where native, mapped-only versus clean namespace rearm, and
+   `StaleGuard` decisions: rejected stale reads do not rearm; admitted stale
+   balance reads do. Keep REST orders' native unfiltered accepted-ID rearm
+   iterator; balance and WS use their native `allows_absence` filtering. A
+   valid-plus-rejected duplicate identity must not prompt a filtering cleanup.
+   Do not tighten admission during a reporter migration.
+
+Before production edits, add native original-GREEN compatibility controls for
+those exact ordering/duplicate/severity/identity boundaries. In particular pin
+BloFin decoded-but-unmapped and later failed/stale reads, all three order aliases,
+futures Warn/Error progression and independent keys, permanent unlisted-symbol
+suppression including stale/held and zero-quantity controls, and Spot
+rejected-stale versus admitted-clean rearm. Run the selected
+final tests against unchanged production and seal the source/test/log receipt;
+rerun unchanged controls after migration. No product defect or original-RED claim.
+
+Verification: focused engine/BloFin/Kraken/Binance native suites, all-target strict
+Clippy, scoped fmt, bans and root checks, with `CARGO_BUILD_JOBS=4`. Independent
+correctness/adversarial plan and source/caller reviews; preserve exact incoming
+docs and source on integration. Fresh full green CI, complete32-suite raw and
+ordered-gate proof with current whole-variant controls, separate porcelain guard
+then separate merge. No local release WASM builds, full replays, timing tests,
+threshold/budget/manifest changes or live captures. The #1781 clock-fixture merge
+slot comes first; integrate its actual shared inputs before final proof. Coordinate
+BloFin/Kraken whole-family signing with its owner; those signer edits remain held
+for this slice's actual pin. Re-audit the remaining bounded and unbounded reporter
+inventory after this slice; this plan makes no all-venue closure claim.
+
+
+### BloFin/Kraken implementation checkpoint
+
+The plan above is implemented using existing RowReports only: BloFin's two
+bounded Once memories, Kraken futures' explicit bounded ErrorUpgrade and
+separate unbounded Once, and Kraken Spot's bounded Once. Thin formatting/re-arm
+adapters retain the native sites and iterator choices. Eleven new native
+compatibility controls pass together with all126 account tests on unchanged
+actual #1775 production before migration. The original source/test/log receipt
+is `aa9137471325c9cb881aaa2cf4bf16f060e482db5ad4943038a5a37521489bc6`.
+Independent plan/test-design/source/caller reviews are CLEAN. Migrated checks
+pass1253 focused native tests across68 groups, strict all-target Clippy, scoped
+fmt, bans and root44 typecheck/28 lint (root tasks cached). Actual #1781
+`ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated conflict-free;
+its two incoming files and all unowned source are preserved. Fresh full
+CI/current-head raw proof, final data reviews and separate guard/merge remain
+required. This checkpoint makes no product-RED,
+private parity or all-venue fan-out completion claim.

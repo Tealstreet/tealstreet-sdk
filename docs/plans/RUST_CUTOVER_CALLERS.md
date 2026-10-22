@@ -4041,6 +4041,25 @@ No SDK argument/result, remote/header/signing contract, order/position/FILLS wir
 shape, caller migration or financial/snapshot authority changes. Remaining
 persistent reporter consumers stay open in RUST_ROW_ADMISSION.md.
 
+
+## BloFin and Kraken row-reporting adoption (2026-10-23)
+
+BloFin, Kraken futures and Kraken Spot use the existing engine reporter instead
+of five account-owned suppression collections. Caller-visible diagnostic text,
+severity, ordering and repeat/re-arm timing remain native. BloFin retains its
+separate position/order bounded Once memories, decode-time per-key forgetting
+and existing accepted-read clear sites. Kraken futures retains bounded
+Warn-to-Error upgrade memory and separate unbounded Once unlisted-symbol memory;
+unlisted mapping still reports before snapshot admission, zero-quantity unknown
+positions stay silent, and reconnect never rearms that memory. Kraken Spot
+retains bounded Once, coin/order namespaces (including empty order identity),
+admitted-versus-rejected stale balance behavior and the different REST/WS mapped
+identity filters. No SDK call/result, order/position/FILLS shape, health policy,
+financial or snapshot authority, signing, HTTP/WS lifecycle or caller migration
+changes. The 126 final native account compatibility tests pass on unchanged
+pre-migration production, including eleven new controls; this is no defect-RED
+claim. Full CI and a fresh current-head raw proof remain the merge gates.
+
 ### Backpack histories: shared owner with native offset requests
 
 Fills, closed orders, funding income and single-page public trades now use the
