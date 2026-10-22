@@ -1,13 +1,15 @@
-//! Bounded reverse-cursor reads. Incomplete account history never returns partial fills.
+//! Bounded reverse-cursor reads share engine-owned page admission and completion.
+//! Order-filtered fill totals remain strict proofs, never partial executions.
 use crate::account::decode_order;
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
-use safe_cex_engine::{CommandId, Cx, Query, Response};
+use safe_cex_engine::{CommandId, Cx, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet};
@@ -25,7 +27,6 @@ enum Kind {
     Lookup,
 }
 pub(crate) struct Request {
-    command: CommandId,
     kind: Kind,
     symbol: Option<String>,
     instrument: Option<String>,
@@ -42,7 +43,7 @@ pub(crate) struct Request {
     limit: usize,
     income_kind: Option<String>,
     combine_income: bool,
-    walk: CursorWalk,
+    history: Box<CursorHistory<Row>>,
     seen: HashSet<String>,
     page_seen: HashSet<String>,
     raw_seen: HashSet<String>,
@@ -50,8 +51,6 @@ pub(crate) struct Request {
     page_count: usize,
     stage_count: usize,
     failed: Option<String>,
-    rows: Vec<Row>,
-    staged: Vec<Row>,
 }
 /// Request-level failures fail the read; row-level ones skip only that row.
 enum Rejected {
@@ -75,13 +74,16 @@ impl Request {
     pub(crate) fn is_public(&self) -> bool {
         self.kind == Kind::Trades
     }
-    pub(crate) fn reset(&mut self) {
-        self.staged.clear();
+    pub(crate) fn reset(&mut self) -> bool {
+        if !self.history.discard_staged_page() {
+            return false;
+        }
         self.page_seen.clear();
         self.page_raw.clear();
         self.page_lifecycles.clear();
         self.page_count = 0;
         self.failed = None;
+        true
     }
     fn accepts(&self, symbol: &str, time: u64) -> bool {
         self.symbol.as_ref().is_none_or(|s| s == symbol)
@@ -90,11 +92,11 @@ impl Request {
     }
     fn append(&mut self, key: String, row: Row) {
         if !self.seen.contains(&key) && self.page_seen.insert(key) {
-            self.staged.push(row);
+            self.history.stage(row);
         }
     }
     fn count(&self) -> usize {
-        self.rows.len() + self.staged.len()
+        self.history.accepted_len() + self.history.staged_len()
     }
     fn complete_fills(&self) -> bool {
         self.kind == Kind::Fills && self.order_id.is_some()
@@ -436,7 +438,6 @@ impl Grvt {
             .as_deref()
             .and_then(|id| self.account.order_created(id));
         let request = Request {
-            command,
             kind,
             symbol,
             instrument: selected.map(|m| m.id.clone()),
@@ -453,9 +454,19 @@ impl Grvt {
             limit: limit.unwrap_or(1000).clamp(1, 1000) as usize,
             income_kind,
             combine_income,
-            walk: CursorWalk::new(PAGE_CAP)
-                .stall_on_empty_page()
-                .stall_on_no_new_rows(),
+            history: Box::new(CursorHistory::new(
+                Completion::new(command),
+                CursorWalk::new(PAGE_CAP)
+                    .stall_on_empty_page()
+                    .stall_on_no_new_rows(),
+                |reason| match reason {
+                    Stall::PageBudget => "INCOMPLETE: GRVT history page cap reached".into(),
+                    _ => "INCOMPLETE: GRVT history cursor stalled or page cap reached".into(),
+                },
+                |rows| {
+                    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
+                },
+            )),
             seen: HashSet::new(),
             page_seen: HashSet::new(),
             raw_seen: HashSet::new(),
@@ -463,8 +474,6 @@ impl Grvt {
             page_count: 0,
             stage_count: 0,
             failed: None,
-            rows: vec![],
-            staged: vec![],
         };
         self.history_send(cx, request);
     }
@@ -506,7 +515,7 @@ impl Grvt {
                 st: request.wire_start().map(|t| t.to_string()),
                 et: request.to.to_string(),
                 l: PAGE_SIZE,
-                c: request.walk.cursor().unwrap_or(""),
+                c: request.history.cursor().unwrap_or(""),
             })
             .expect("query")
         };
@@ -819,8 +828,8 @@ impl Grvt {
                 .map_err(|e| e.to_string())
             })();
             match result {
-                Ok(data) => cx.done(r.command, data),
-                Err(error) => cx.fail(r.command, error),
+                Ok(data) => cx.done(r.history.command(), data),
+                Err(error) => cx.fail(r.history.command(), error),
             };
             return;
         }
@@ -848,53 +857,76 @@ impl Grvt {
                 .iter()
                 .filter(|id| !r.raw_seen.contains(*id))
                 .count(),
-            want_more: r.complete_fills() || r.stage_count + r.staged.len() < r.limit,
+            want_more: r.complete_fills() || r.stage_count + r.history.staged_len() < r.limit,
         };
-        let more = match r.walk.advance(page) {
+        let admitted = r.history.staged_len();
+        let more = match r.history.advance(page) {
             CursorStep::More(_) => true,
             CursorStep::Done => false,
-            CursorStep::Stalled(Stall::PageBudget) => {
-                self.history_failed(cx, r, "INCOMPLETE: GRVT history page cap reached");
-                return;
-            }
-            CursorStep::Stalled(_) => {
-                self.history_failed(
-                    cx,
-                    r,
-                    "INCOMPLETE: GRVT history cursor stalled or page cap reached",
-                );
+            CursorStep::Stalled(reason) => {
+                let message = match reason {
+                    Stall::PageBudget => "INCOMPLETE: GRVT history page cap reached",
+                    _ => "INCOMPLETE: GRVT history cursor stalled or page cap reached",
+                };
+                self.history_failed(cx, r, message);
                 return;
             }
         };
-        r.stage_count += r.staged.len();
+        r.stage_count += admitted;
         r.seen.extend(r.page_seen.drain());
         r.raw_seen.extend(r.page_raw.drain());
         r.lifecycles.extend(r.page_lifecycles.drain());
-        r.rows.append(&mut r.staged);
-        if !r.complete_fills() {
-            r.rows.sort_by(|a, b| b.time().total_cmp(&a.time()));
-            r.rows.truncate(r.limit);
-        }
         if !more && r.combine_income && r.kind == Kind::Funding {
             r.kind = Kind::IncomeFills;
-            r.walk.restart();
+            if !r.history.restart_stage() {
+                self.history_rejected(cx, r, "GRVT history stage restart failed");
+                return;
+            }
             r.stage_count = 0;
             r.raw_seen.clear();
-            r.reset();
+            if !r.reset() {
+                self.history_rejected(cx, r, "GRVT history page reset failed");
+                return;
+            }
             self.history_send(cx, r);
             return;
         }
         if more {
-            r.reset();
+            if !r.reset() {
+                self.history_rejected(cx, r, "GRVT history page reset failed");
+                return;
+            }
             self.history_send(cx, r);
             return;
         }
-        r.rows.sort_by(|a, b| b.time().total_cmp(&a.time()));
-        r.rows.truncate(r.limit);
-        match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(r.command, data),
-            Err(error) => cx.fail(r.command, error),
-        };
+        self.history_finish(cx, r, Ok(()));
+    }
+    fn history_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        result: Result<(), VenueError>,
+    ) {
+        let limit = request.limit;
+        request.history.finish_with(cx, result, move |mut rows| {
+            rows.sort_by(|a, b| b.time().total_cmp(&a.time()));
+            rows.truncate(limit);
+            serde_json::to_string(&rows).map_err(|error| VenueError::new(error.to_string()))
+        });
+    }
+    /// Preparation/session refusal and complete-order proofs never publish a
+    /// partial total, even if an earlier history page was admitted.
+    pub(crate) fn history_rejected(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+    ) {
+        if request.kind == Kind::Lookup {
+            cx.fail(request.history.command(), error.to_owned());
+        } else {
+            request.history.reject(cx, VenueError::new(error));
+        }
     }
     pub(crate) fn history_failed(
         &mut self,
@@ -902,6 +934,10 @@ impl Grvt {
         request: Request,
         error: &str,
     ) {
-        cx.fail(request.command, error.to_owned());
+        if request.kind == Kind::Lookup || request.complete_fills() {
+            self.history_rejected(cx, request, error);
+        } else {
+            self.history_finish(cx, request, Err(VenueError::new(error)));
+        }
     }
 }

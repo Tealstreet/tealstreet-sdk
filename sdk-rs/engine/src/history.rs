@@ -122,6 +122,12 @@ impl<T> HistoryRows<T> {
         self.pending.push(row);
     }
 
+    /// Retry only the current unvalidated page. Previously admitted output and
+    /// its completion/coverage authority are never rolled back.
+    pub fn discard_staged_page(&mut self) {
+        self.pending.clear();
+    }
+
     /// Call only after the page's HTTP, envelope and row validation succeeds.
     pub fn accept_page(&mut self) {
         self.accepted.append(&mut self.pending);
@@ -245,6 +251,21 @@ impl<T> CursorHistory<T> {
 
     pub fn stage(&mut self, row: T) {
         self.rows.stage(row);
+    }
+
+    /// A transport or session retry may replace an unvalidated response body,
+    /// never an already completed stage or a poisoned cursor lifecycle.
+    /// This clears output staging only: direct `fresh` observations are not
+    /// rolled back. Keep retryable page identities local until validation.
+    #[must_use]
+    pub fn discard_staged_page(&mut self) -> bool {
+        if self.finished || self.lifecycle_error.is_some() {
+            self.lifecycle_error
+                .get_or_insert("history cursor page discarded after completion");
+            return false;
+        }
+        self.rows.discard_staged_page();
+        true
     }
 
     /// Start a new endpoint window/stage with a fresh page budget and cursor

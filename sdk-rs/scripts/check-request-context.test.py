@@ -187,6 +187,8 @@ class RequestContextBan(unittest.TestCase):
         expected = {
             'venues/coinbase/src/history.rs': (7, 3, '7f923fa1fa91b9f81e47a240cadedad920dcad577279ab675d23b2f4a84ffb54', 'd6fe784f25ab245b2860a9f6d46c3617cbc1c4545197e29a140dadeca7e91372'),
             'venues/weex/src/history.rs': (17, 10, '28fb5096b49ad5e340d77654b9b7b0bc4b5922b4dc58af5cff5fcfdff2161327', '477c91d6c2d026dea59a81d4dc539b56985dadf3606bdb7eae5b4ed505936163'),
+            'venues/cryptocom/src/history.rs': (15, 10, '8c08399ee9544d819511127584929ff3a4d532831d64ffc1886424efb4842b0c', '0716d0d13befbecad3402c21949f8d88fa30f02b9a761b1d3dbeae65570526f6'),
+            'venues/grvt/src/history.rs': (13, 11, 'f97e2d042aad67c83cb7b67fd2e18fe2ea1911d39bee4928b4bfcd29a53a9173', '10b79560bfa80b935be2f78f7f6a3fb2e7b44436372c89a588a15d558c07fa3e'),
         }
         self.assertEqual(set(expected), set(ban.HISTORY_BOOTSTRAPS))
         for path, (before, after, old_hash, landed_hash) in expected.items():
@@ -196,14 +198,27 @@ class RequestContextBan(unittest.TestCase):
                 self.assertLess(after, before)
                 for value, digest in [(old, old_hash), (landed, landed_hash)]:
                     self.assertEqual(hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest(), digest)
-                source = ban.git('show', '5f6488c7664b68cf8b866d2f7f914a3fc99e5fc6:sdk-rs/' + path)
+                ref = ('fe44969d033529c244fc4f33fce5395c0273df04'
+                       if path in {'venues/cryptocom/src/history.rs', 'venues/grvt/src/history.rs'}
+                       else '5f6488c7664b68cf8b866d2f7f914a3fc99e5fc6')
+                source = ban.git('show', ref + ':sdk-rs/' + path)
                 self.assertEqual(dict(ban.fingerprints(source)), landed)
+                if ref == 'fe44969d033529c244fc4f33fce5395c0273df04':
+                    original = ban.git('show', 'a0c528f910efed5993b63abe8ded522b2f7c26ee:sdk-rs/' + path)
+                    self.assertEqual(dict(ban.fingerprints(original)), old)
+                    def kinds(text):
+                        stream = ban.tokens(text)
+                        return {token.removeprefix('r#') for index, token in enumerate(stream)
+                                if index and stream[index - 1] in {'.', '::'}
+                                and token.removeprefix('r#') in ban.METHODS}
+                    self.assertLessEqual(kinds(source), kinds(original))
 
     def test_history_bootstraps_cannot_expand_or_override_any_newer_pruned_constraint(self):
         for path, (old_map, new_map) in ban.HISTORY_BOOTSTRAPS.items():
             with self.subTest(path=path):
                 old, landed = {path: old_map}, {path: new_map}
                 self.assertFalse(ban.check(landed, landed, [('original', old)]))
+                self.assertTrue(ban.check(old, old, [('already-landed', landed)]))
                 digest = next(iter(new_map))
                 pruned_map = dict(new_map)
                 del pruned_map[digest]

@@ -1318,3 +1318,135 @@ SDK helper3/typecheck/lint passed the extraction. Independent final source and
 preservation review CLEAN, architecture No. All ten lifecycle assertions/clocks/
 timeouts remain exact. Integrated engine/Binance/KuCoin native gates are running
 alongside fresh draft CI; no merge readiness or replay recovery is claimed.
+
+### Native recorded transport regression (2026-10-22, before correction)
+
+Exact corea0c528 native CI39824926892/job119985877284 passed native44unit
+and3entropy tests, then hung in tests/host.rs::the_native_loop_streams_startup_and_publishes_books
+from17:46:49 until30-minute job cancellation. Its Tape only implements legacy
+request, so managed Binance startup receives the intentional Unsupported default
+and the old fixture polls for a WS forever. The exact compiled test also times
+out after15 runtime seconds locally (compilation excluded); receipt
+/tmp/codex-1741-native-host-runtime-red.json. No rerun or production fallback.
+
+Plan before correction: add one test-only prepared-packet binder under native
+tests/support, retaining unsigned request identity/method/route/origin metadata
+and a one-use binding closure. It validates before handing the exact final packet
+to an existing executor, never performs I/O at preparation/bind, and prints no
+packet values. Tape explicitly opts into prepare_http, with Bound.dispatch calling
+its unchanged three-chunk response emitter synchronously after final claim.
+Bounded socket-start and host-join waits replace the unbounded fixture waits; all
+existing traffic, sleeps, book/frame assertions remain unchanged. Assert managed
+preparation/dispatch counters so a legacy bypass cannot pass.
+
+The same native integration inventory finds NoticeNetwork in routing.rs wraps
+Binance's legacy request only. Reuse that prepared-packet binder around the real
+NetworkTransport.prepare_http and its actual BoundHttp, applying its existing
+loopback URL/header mapping to BOTH unsigned preparation and final bind. Its
+existing explicit account_route fixture selects Primary versus Public intent;
+never infer intent from headers or modify production routing. Preserve every
+connection/body/token/HOW redaction assertion and real network executor. Other
+custom transports serve synthetic unmanaged venues; do not change them.
+
+Add focused binder controls for no dispatch during prepare/bind, exact packet
+bytes, one-use ownership and identity/method/origin refusal. Run the exact formerly
+hanging integration test under a runtime-only timeout, all native integration
+tests under a bounded outer process-group timeout, focused managedHTTP unit tests,
+strict native Clippy/fmt and independent correctness/adversarial review before
+any next push. Keep production Unsupported behavior and its existing negative
+control. Architecture gate: No; this is shared test-transport contract adoption,
+not a per-venue runtime workaround or a fallback to legacy dispatch.
+
+Native fixture plan audit: validate the ORIGINAL id/method/route/URL boundary
+before any fixture mapping; capture its deadline before async preparation and
+never renew it at bind. NoticeNetwork must return the real network BoundHttp
+directly, preserving ready/drop/dispatch/abort. Tape's canned bound checks that
+original deadline and emits unchanged chunks synchronously only at dispatch.
+Timeout failures must abort AND await the spawned host; timing out an owned
+JoinHandle would detach it. Bound/cancel drop emits no response. Static errors
+and custom Debug must not print packets. Independent plan review CLEAN,
+architecture No; exact15s runtime timeout is reproduced, not a compilation delay.
+
+Native fixture correction verification: the exact old compiled host test times
+out after15 runtime seconds at a0; after explicit preparation adoption, the
+rebuilt host binary's four tests (three shared binder controls plus original host
+integration) pass in0.06s total. All six native binaries pass113tests under30s
+process-group runtime limits each: entropy3, host4, routing37, native unit44,
+server19, signing6. Original startup/book/frame/chunk/sleep and all routing
+connection/body/token/HOW security assertions remain intact. Strict native
+all-target Clippy and formatting pass. Independent final review CLEAN verified
+all current fixture source hashes and result log hashes against
+/tmp/codex-1741-native-final-suite-receipt.json (SHA256 c42209b2a3a3b3a24c6f1e50fabe928ad734ce1a70b070a7fc860d2972db4d62).
+Architecture No; no production Unsupported fallback or executor change. This
+resolves the demonstrated fixture hang; cancelled a0 CI/proof stays historical.
+Fresh actual dependency integration and green full CI/raw/package evidence
+remain required before merge.
+
+### Exact landed GRVT/Crypto history inventory refresh (before integration)
+
+Standing owner net-shrink authorization applies to actual1760
+54cedc77ef6f89e2efd7e78938ebec6f1b84ac69 and actual1761
+fe44969d033529c244fc4f33fce5395c0273df04. Only two legacy source maps
+need re-expression: GRVT history13->11 (hashf97e2d042aad67c83cb7b67fd2e18fe2ea1911d39bee4928b4bfcd29a53a9173
+->10b79560bfa80b935be2f78f7f6a3fb2e7b44436372c89a588a15d558c07fa3e),
+Crypto.com history15->10 (hash8c08399ee9544d819511127584929ff3a4d532831d64ffc1886424efb4842b0c
+->0716d0d13befbecad3402c21949f8d88fa30f02b9a761b1d3dbeae65570526f6).
+Total1271->1264; GRVT lib19map remains byte-identical, as must every other map.
+These are already-landed history calls re-expressed, no new site kind.
+
+Commit exact old/landed map and adversarial acceptance controls FIRST, including
+actual source hash binding, changed old bounds, forged paths/fingerprints/counts,
+reverse transition and independently newer pruned constraints. Then extend the
+existing exact history transition table with only those two immutable pairs; no
+parser/ratchet relaxation. Preserve the two older exact history transitions and
+all original bootstrap/signer-factory controls. Update manifest only to exact
+actual landed maps after real integration; all unaffected maps must be identical.
+Apply the same current-map exactness and independently shrinking base/parent
+constraints afterwards. No guarantee/retry/outcome claim for legacy work.
+1767exclusive landing window is respected; integrate its actual pin plus these
+actual predecessors together before final checks/push/proof.
+
+The exact transition test is committed first and is assertion-RED because the
+two approved history-map pairs are absent from the checker. Original older
+counts/hashes/source pins remain unchanged; the new actual1761 source and olda0
+source are separately fingerprinted, and the new method kinds must be a subset
+of the old ones. Existing adversarial tests iterate every history pair, testing
+forged fingerprints/counts/paths/old maps and independently pruned newer bounds;
+they therefore cover these additions without weakening any original assertion.
+No checker, manifest or venue source change is included in this regression step.
+
+Independent pinned-source audit CLEAN: incoming venue-source delta is exactly
+GRVT history/lib plus Crypto history. All151 other maps remain exact. GRVT
+re-expresses the same done/fail calls using history.command(); Crypto removes
+six direct done/fail calls and adds one conservative scanner false positive
+for a negated request.page_seen expression (the existing macro heuristic sees
+the variable token request). That is not new physical HTTP/completion work;
+freeze it exactly and leave the conservative parser unchanged. Net scanner
+counts still shrink1271->1264. Explicit reverse-transition rejection was added
+to every history-pair adversarial control before checker edits. Architecture No.
+
+Exact transition table checkpoint: all12 inventory controls pass after adding
+only the two pinned pairs. Independent final audit verifies every surrounding
+source byte, parser/enforcement AST and older pair unchanged. Manifest stays
+unchanged at1271 until actual source integration; no complete bans/ready claim.
+Crypto's conservative match is not a new physical call/site kind. Source
+preservation receipt: /tmp/codex-1741-history1760-61-checker-preservation.json.
+After actual1767 merges, real-integrate the actual stack once, write only the
+two exact landed manifest maps, prove total1264 and all151 other maps exact,
+then rerun scoped checks/full CI and fresh post1762 ordered-gate proof.
+
+Actual dependency integration checkpoint: merge9b2b6e310e3bc4757c3dec7b9ccc494993e463b1
+genuinely integrates actual1767 bf362312d3edfb4dfa00b726c172f944053b9198
+(and actual1760/1761) into the native-fixture correction. Conflict-free; all15
+incoming paths and5300 combined tree entries are independently exact, with no
+own/incoming overlap. Only the two approved manifest maps change1271->1264;
+all151 other maps remain byte-identical, and integrated source matches inventory
+exactly. Manifest SHA2569136cef658d0891371b97dd6af83419e7715902e9f3712073330b0ef9747c3df
+->6641f9871098eed887286ec09f6dbf0e6d2f4af6a58edfef3f67013e19233352.
+All12ratchet adversarial controls, full bans and scoped formatting pass; independent
+final manifest/preservation review CLEAN, architecture No. Native fixture113
+checks/strict verification remain recorded above; expanded integrated engine/
+Binance/GRVT/Crypto/Orderly checks run before readiness. Start draft CI in parallel
+with those additional checks; no proof/readiness/merge claim until every gate
+passes on the same immutable source. Preservation and inventory receipts are
+/tmp/codex-1741-post1767-{preservation,inventory-receipt}.json.
