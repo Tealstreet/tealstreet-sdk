@@ -127,6 +127,15 @@ impl Cursor {
         self.value
     }
 
+    /// A validated correction may fill missing quote evidence at an already
+    /// admitted endpoint, without moving quantity or replacing a known value.
+    pub fn enrich_quote(self, observation: Self) -> Option<Self> {
+        (self.quantity == observation.quantity
+            && self.value.is_none()
+            && observation.value.is_some())
+        .then_some(observation)
+    }
+
     /// Extend a known quote anchor using a direct price for this exact suffix.
     pub fn direct_suffix(self, quantity: f64, price: f64) -> Result<Self, Rejection> {
         let interval = QuantityInterval::new(self.quantity, quantity)?;
@@ -838,6 +847,36 @@ mod tests {
         }
         assert!(IntervalHistory::new(0.0, 0).is_err());
         assert!(IntervalHistory::new(f64::NAN, 500).is_err());
+    }
+
+    #[test]
+    fn quote_enrichment_fills_only_missing_evidence_at_the_same_quantity() {
+        let delivered = Cursor::seed(10.0, None).unwrap();
+        let correction = Cursor::seed(10.0, Some(1000.0)).unwrap();
+        assert_eq!(delivered.enrich_quote(correction), Some(correction));
+        assert_eq!(
+            correction.enrich_quote(Cursor::seed(10.0, Some(1100.0)).unwrap()),
+            None
+        );
+        assert_eq!(
+            delivered.enrich_quote(Cursor::seed(20.0, Some(2000.0)).unwrap()),
+            None
+        );
+        assert_eq!(
+            delivered.enrich_quote(Cursor::seed(5.0, Some(500.0)).unwrap()),
+            None
+        );
+        assert_eq!(delivered.enrich_quote(delivered), None);
+        let explicit_zero = Cursor::seed(10.0, Some(0.0)).unwrap();
+        assert_eq!(explicit_zero.enrich_quote(correction), None);
+        assert_eq!(delivered.enrich_quote(explicit_zero), Some(explicit_zero));
+        assert_eq!(
+            Cursor::default()
+                .enrich_quote(Cursor::seed(0.0, Some(0.0)).unwrap())
+                .unwrap()
+                .quantity(),
+            0.0
+        );
     }
 
     fn cumulative(quantity: f64, value: Option<f64>, fallback: Option<f64>) -> Report {

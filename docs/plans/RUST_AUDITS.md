@@ -166,7 +166,12 @@ High:
   reports and their same-ID correction from doubling displayed quantity (.007
   instead of .006). Deliberately, inferred last-only observations now wait for
   a valid financial receipt; explicit cumulative observations stay independent.
-  Complete exact-head CI/raw-artifact proof remains required before merge.
+  A fifth original-RED/core-GREEN control recovers a missing Bitrue delivered
+  quote from a valid same-quantity correction, then delivers10@120 once.
+  Shared enrichment fills missing evidence at the exact endpoint only; it
+  cannot replace a known quote, move quantity or replay a Fill. Five controls
+  cover four defect classes. Complete exact-head CI/raw-artifact proof remains
+  required before merge.
 - ~~Binance COIN-M treats `EXPIRED` as terminal, dropping a triggered stop's fill
   (`binance/src/account.rs:1186`).~~ Fixed: late native executions emit independently of lifecycle terminal state.
 - ~~Binance USD-M amend re-places the full original size when the order filled
@@ -1472,6 +1477,8 @@ Mostly matches TS.
   trusted REST quote anchor and loses a later valid execution.~~ Shared checked
   quote preparation keeps the trusted anchor; native original-RED/core-GREEN
   control proves the10@130 suffix, with interval dedup/floor/cap preserved.
+  A second control repairs missing delivered quote evidence from a matching
+  correction and proves the next10@120 suffix, without duplicate delivery.
 - High: ~~orders refused on symbols with no account leverage data, and a fresh
   account can never trade (`bitrue/src/trading.rs:363`, `account.rs:948`);
   default margin to Cross and take leverage from a successful change, never

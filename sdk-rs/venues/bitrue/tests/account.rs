@@ -643,12 +643,23 @@ fn corrected_quote_at_a_delivered_endpoint_prices_the_next_suffix_once() {
     let mut h = Harness::new();
     h.seed();
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","l":"1","L":"100","ap":"1e308"}}"#);
-    assert_eq!(h.fills(), [(100.0, 10.0)], "uniform execution evidence is independently valid");
+    assert_eq!(
+        h.fills(),
+        [(100.0, 10.0)],
+        "uniform execution evidence is independently valid"
+    );
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","ap":"100"}}"#);
-    assert!(h.fills().is_empty(), "quote correction cannot replay quantity");
+    assert!(
+        h.fills().is_empty(),
+        "quote correction cannot replay quantity"
+    );
     let next = r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"2","ap":"110"}}"#;
     h.ws(next);
-    assert_eq!(h.fills(), [(120.0, 10.0)], "the exact corrected endpoint proves the new suffix VWAP");
+    assert_eq!(
+        h.fills(),
+        [(120.0, 10.0)],
+        "the exact corrected endpoint proves the new suffix VWAP"
+    );
     h.ws(next);
     assert!(h.fills().is_empty());
     assert_eq!(h.e.store().orders()[0].filled, 20.0);

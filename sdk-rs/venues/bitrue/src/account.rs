@@ -1040,6 +1040,18 @@ impl Bitrue {
                 });
             }
         }
+        // A no-delivery correction can supply a missing quote at the exact
+        // delivered endpoint. It cannot consume quantity or overwrite proof.
+        if row.x == "TRADE"
+            && let Some(anchor) = basis
+                .zip(quote)
+                .and_then(|(basis, quote)| basis.enrich_quote(quote))
+            && let Some(value) = anchor.value()
+        {
+            self.account
+                .execution_quotes
+                .insert(id.clone(), (anchor.quantity(), value));
+        }
         if row.x == "TRADE"
             && delivery_known
             && filled >= execution_previous

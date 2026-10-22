@@ -420,3 +420,25 @@ Add engine controls for mismatched endpoints, existing known value, explicit
 zero quote and absent evidence; keep original native correction/duplicate
 financial assertions. Freeze this slice after these five controls/four financial
 bug classes; broader findings go to the next phase unless they block this API.
+
+Enrichment API and revised code/adversarial checkpoints independently CLEAN.
+The fifth native control is GREEN with the shared missing-only, matching-endpoint
+operation; known/explicit-zero values, absent evidence and quantity mismatches
+remain unchanged. All five original-RED controls now have current-GREEN evidence.
+Frozen replay suite:13 cases/134 outputs/67 Rust/38 implementation-mode groups,
+SHA617f4fa116796af40e8745a28b2045bcb17b30e2c17df0425ac43feb9eba8d60;
+WOO2,Bitrue2,Binance9. Authenticated predecessor Rust39726413024/headf8d6cc2
+matches actual signer802e9c8 tree, all134 raw bytes bound to live archive digests,
+6 PASS/7 known FAIL. Current full comparison and exact-head CI remain pending.
+
+Final local readiness on actual signer/history/clock dependencies:1484 combined
+engine/WOO/Bitrue/Binance/Bybit/Bitget native tests pass, including all five actual
+original-RED/current-GREEN controls and the original five reference-core controls.
+Strict all-target six-crate Clippy, fmt and bans pass; fresh root44 typecheck and
+28 lint tasks pass after incoming signer SDK changes. Enrichment code/adversarial
+and both actual integration preservation reviews are CLEAN, architecture YES.
+No more source changes are planned for this slice unless final CI/proof finds a
+blocking defect. Full exact-head CI,134 complete raw comparisons plus matching
+CI-package fingerprints, final independent evidence review and separate guard/
+merge remain mandatory. Scheduler-only1723 exception is scoped to its actual
+read_scheduler.rs+plan diff and conflict-free trial, not a blanket source waiver.

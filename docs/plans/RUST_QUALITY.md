@@ -171,7 +171,7 @@ Medium:
    financial defects before progress/dedup commit. See
    [RUST_CUMULATIVE_FILLS.md](RUST_CUMULATIVE_FILLS.md). The engine now owns
    observed/delivered/position suffix separation and bounded priced intervals;
-   WOO/Bitrue adopt it with four more original-RED/core-GREEN controls. An
+   WOO/Bitrue adopt it with five more original-RED/core-GREEN controls. An
    exclusive borrow keeps prepared interval decisions current until consuming
    commit, which precedes Fill emission; aggregate VWAP cannot price a clipped
    subset. Remaining cumulative consumers still need fan-out before reporting
