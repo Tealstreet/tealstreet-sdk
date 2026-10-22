@@ -3376,15 +3376,21 @@ missing/malformed-list failure before any mapped rows are accepted rejects typed
 An actual later-page failure returns only earlier accepted rows plus one
 command-owned Warn `history.incomplete` immediately before completion, including
 at Error-only logging. A valid-looking prefix from a failed page is excluded.
-Previously later income failure rejected and discarded its accepted ledger;
-this conversion applies the shared retained-row policy instead.
+Previously later income and filtered symbol-scoped fill failures rejected and
+discarded their accepted rows; this conversion applies the shared retained-row
+policy instead. Legacy transport and stream-decode callbacks share the same
+unclassified failure path, so these first-page errors use the engine's
+`internal` fallback rather than claiming a distinct `network` classification.
 
 Native paging refusals remain strict: missing/repeated cursor or the page budget
 never become partial success. Header/signing preparation refusal also remains
 strict after accepted rows. Native request sequences, cursor selection before
 filters, global mapped-fill limit, one native trade's separate PnL/fee income
 rows, final sorting/limits, single-page orders and unsigned public trades remain.
-Keyless no-I/O and unsupported lookup admission keep their existing behavior.
+Keyless no-I/O still returns an empty array. Unsupported client-order-ID lookup
+now reports `unsupported`/`notSent`; invalid ranges and unknown markets report
+`invalidInput`/`notSent`, where those admission errors previously had no kind.
+Caller error-category/telemetry tags therefore become explicit user-error kinds.
 The separate closed-position query is unchanged. No SDK argument or required new
 NX handler is introduced; B11's incomplete-query coverage and typed rejection
 handling remain required. Other histories/background notices still need fan-out.

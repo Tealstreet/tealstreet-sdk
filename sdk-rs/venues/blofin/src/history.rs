@@ -1,9 +1,9 @@
 //! Rare reads stream into typed results; they never change the account store.
 use super::*;
-use safe_cex_engine::VenueError;
 use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
 use safe_cex_engine::url::encode;
+use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 use safe_cex_engine::{
     Query,
     model::{OrderStatus, OrderType},
@@ -272,9 +272,11 @@ impl Blofin {
             Query::OrderByClientId { .. } => {
                 completion.finish(
                     cx,
-                    Err(VenueError::new(
-                        "BloFin client-order-ID lookup is unsupported",
-                    )),
+                    Err(
+                        VenueError::new("BloFin client-order-ID lookup is unsupported")
+                            .kind(ErrorKind::Unsupported)
+                            .outcome(Outcome::NotSent),
+                    ),
                 );
                 return;
             }
@@ -304,14 +306,21 @@ impl Blofin {
         {
             completion.finish(
                 cx,
-                Err(VenueError::new("Invalid BloFin history time range")),
+                Err(VenueError::new("Invalid BloFin history time range")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent)),
             );
             return;
         }
         if let Some(s) = symbol
             && cx.store.market(s).is_none()
         {
-            completion.finish(cx, Err(VenueError::new(format!("Unknown market {s}"))));
+            completion.finish(
+                cx,
+                Err(VenueError::new(format!("Unknown market {s}"))
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent)),
+            );
             return;
         }
         if matches!(&query, Query::Fills { symbol: None, .. }) {
@@ -340,7 +349,9 @@ impl Blofin {
             Query::OrderByClientId { .. } => {
                 request.reject(
                     cx,
-                    VenueError::new("BloFin client-order-ID lookup is unsupported"),
+                    VenueError::new("BloFin client-order-ID lookup is unsupported")
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(Outcome::NotSent),
                 );
                 return;
             }

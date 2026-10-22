@@ -546,3 +546,16 @@ paths are exact; the reviewed BloFin implementation is unchanged. This is policy
 foundation without runtime adoption, so it adds no caller behavior row. Fresh
 focused/strict checks and CI use this shared-engine dependency. The #1725
 financial window remains independent and is observed before any final guard.
+
+
+A bounded caller review caught admission metadata regression before merge:
+passing unsupported lookup/invalid input through Completion's unclassified
+Internal fallback would mislabel known user errors. Those native admission
+facts now set the existing common VenueError kind/outcome fields explicitly:
+Unsupported/notSent for lookup, InvalidInput/notSent for range/market. No new
+classifier/helper/engine source is added. A four-case admission regression fails
+against frozen 1f3 (Internal instead of Unsupported) and passes corrected code.
+The generic history_failed callback intentionally retains the common Internal
+default because both transport and stream malformed/missing-list callbacks use
+it; a blanket Network label would misclassify decode failures. Caller wording
+records these metadata changes and includes later filtered-fill recovery.

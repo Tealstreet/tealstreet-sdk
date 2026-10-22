@@ -322,3 +322,54 @@ fn actual_page_budget_remains_strict_after_all_admitted_pages() {
     typed_failure(&h, 7);
     assert!(!h.pending.iter().any(|r| r.url.contains("fills-history")));
 }
+
+#[test]
+fn native_admission_facts_have_explicit_user_error_kinds_before_io() {
+    for (query_value, expected) in [
+        (
+            Query::OrderByClientId {
+                symbol: "BTCUSDT".into(),
+                client_order_id: "client".into(),
+            },
+            ErrorKind::Unsupported,
+        ),
+        (
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: Some(f64::NAN),
+                to_ms: None,
+                limit: None,
+            },
+            ErrorKind::InvalidInput,
+        ),
+        (
+            Query::OrderHistory {
+                symbol: Some("BTCUSDT".into()),
+                from_ms: Some(2.0),
+                to_ms: Some(1.0),
+                limit: None,
+            },
+            ErrorKind::InvalidInput,
+        ),
+        (
+            Query::PublicTrades {
+                symbol: "UNKNOWNUSDT".into(),
+                limit: None,
+            },
+            ErrorKind::InvalidInput,
+        ),
+    ] {
+        let mut h = harness();
+        let before = h.pending.len();
+        query(&mut h, 7, query_value);
+        let error = outcome(&h, 7)
+            .expect("admission settles")
+            .expect_err("admission rejects");
+        assert_eq!(error.kind, Some(expected));
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert_eq!(h.pending.len(), before);
+        assert!(markers(&h, 7).is_empty());
+        assert_eq!(timeline(&h, 7), ["failed"]);
+    }
+}
