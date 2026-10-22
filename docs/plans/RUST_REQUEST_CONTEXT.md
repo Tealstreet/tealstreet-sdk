@@ -1307,3 +1307,14 @@ SDK typecheck/lint pass. The new plain-Node control verifies original receiver,
 exact final packet/header snapshot, deferred single dispatch, identical lazy
 response stream and abort propagation. Independent review CLEAN, architecture
 No. No replay recovery claim until the hook is wired and rebuilt-WASM CI passes.
+
+Actual #1764 49470a1188b8e98dbdbbca573c67d25827921b19 real-integrated at471260:
+all six incoming blobs equal landing and all5,292 other paths equal566e14.
+The actual whole tree1f500afa47c791864eb3f3ed9db8dc6111e2f185 equals green
+head6133fb814dc/source run39820395109, providing the next matching baseline.
+Replay wiring is exactly the pure MJS import plus prepareHttp property on the
+existing Rust transport. Post-integration1,146 harness tests and bans pass;
+SDK helper3/typecheck/lint passed the extraction. Independent final source and
+preservation review CLEAN, architecture No. All ten lifecycle assertions/clocks/
+timeouts remain exact. Integrated engine/Binance/KuCoin native gates are running
+alongside fresh draft CI; no merge readiness or replay recovery is claimed.
