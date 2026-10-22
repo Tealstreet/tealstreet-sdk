@@ -198,3 +198,50 @@ incoming source and plan changes are retained. The caller refresh also records
 #1709's retired hostClock/bit14 and shared clock ingress, superseding historical
 venue opt-ins. Both integration reviews are clean; all 1,225 focused native tests,
 strict touched-crate Clippy, formatting, bans and touched links pass again.
+
+## Next fan-out: Bybit general histories
+
+Fresh `feat/rust-owned-history-bybit` starts from actual #1712 `0e15f31a874`.
+Keep implementation outside engine dispatch/request/signing, coverage, clock,
+account reducers and host adapters. Integrate actual queued dependency changes
+before final CI; #1715 and install-retry #1716 still precede later merges.
+
+Extend engine `HistoryRows`/`CursorHistory` with consuming `finish_with`, whose
+single-use finalizer receives only accepted `Vec<T>` and can capture native query
+sorting/dedupe/limit metadata. Existing `finish` delegates through that same path.
+Lifecycle poison and premature completion reject before invoking the finalizer;
+failed-page staging is discarded; first/no-accepted-row failures reject typed;
+actual later-page failure retains accepted rows plus one command-owned marker.
+Encoding failure still emits neither marker nor success. Add a shared consuming
+strict-rejection path for pagination-policy refusals, distinct from recoverable
+actual page failure. Never pass a policy refusal into the recovery branch.
+
+Migrate only `venues/bybit/src/history.rs` in this slice: one owner from initial
+admission/no-I/O paths through category/window restarts and final completion.
+Use a typed row enum and engine-owned accepted/staged storage; mismatched row
+variants reject, never silently filter away records. Preserve mapped-row counts
+before final dedupe, per-category limit accounting, global truncation, page/window
+budgets, native arguments and unsigned public-trade behavior. Preserve income's
+compound identity including source/hedge legs and its empty-list termination.
+Make missing/malformed result/list fail rather than become empty complete output;
+return serialization failures instead of `unwrap_or_default()`. Bounded cap and
+repeated-cursor policy errors stay strict; unbounded order cap retains rows with
+owned incompleteness across subsequent windows. Any intentional early cycle
+termination difference needs an explicit caller note and regression.
+
+Engine tests cover context-capturing finalization, staged-row exclusion, strict
+policy rejection after accepted rows, encoding errors and poisoned lifecycle not
+invoking the finalizer. Bybit account/product/variant regressions cover first and
+later native/HTTP/transport/malformed failures, Error-only marker-before-result,
+empty accepted pages, window/category recovery, duplicate limit accounting,
+hedge-income identity and strict cap/cursor policy. Prove original RED/core GREEN
+for changed behaviors; preserve existing assertions. Update AUDITS/QUALITY and
+caller scope without claiming other histories, background coverage or B11 closed.
+
+Use independent plan/correctness/adversarial review and state the architecture
+answer: shared engine completion/paging extension, not duplicated venue policy.
+Focused engine/Bybit plus Binance native tests, strict touched-crate Clippy,
+format/bans/links locally; full CI owns family/replay/build proof. Then separate
+fresh guard, separate exact-head merge and actual parent/tree verification.
+Paradex lookup/fallback coverage is a later slice: partial unrelated rows must
+never manufacture a definitive lookup miss.
