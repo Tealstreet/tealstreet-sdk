@@ -1014,6 +1014,262 @@ fn identity_marker_count(actions: &[Action], code: &str) -> usize {
         .filter(|a| matches!(a,Action::Notice(Notice::Event(event))if event.code==code))
         .count()
 }
+
+fn list_query(kind: u8) -> Query {
+    match kind {
+        0 => identity_fills(Some(NOW), Some(NOW + 8.0 * DAY)),
+        1 => Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        _ => Query::PublicTrades {
+            symbol: "BTCUSDT".into(),
+            limit: None,
+        },
+    }
+}
+fn list_failure(e: &mut Engine<WeexFutures>, r: HttpRequest, mode: u8) -> Vec<Action> {
+    if mode == 0 {
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: r.id,
+                error: "list reset",
+            },
+        );
+        return e.drain_actions().collect();
+    }
+    if mode == 1 {
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status: 503,
+                    headers: "",
+                    body: "unavailable",
+                },
+            },
+        );
+        return e.drain_actions().collect();
+    }
+    let (prefix, algo) = if r.url.contains("allAlgoOrders") {
+        (
+            serde_json::from_str::<serde_json::Value>(ALGO).unwrap()["orders"][0].to_string(),
+            true,
+        )
+    } else if r.url.contains("market/trades") {
+        (
+            format!(
+                r#"{{"id":"failed-prefix","price":"69000","qty":"1","quoteQty":"69000","time":{NOW},"isBuyerMaker":true}}"#
+            ),
+            false,
+        )
+    } else if r.url.contains("order/history") {
+        (
+            serde_json::from_str::<serde_json::Value>(NORMAL).unwrap()[0].to_string(),
+            false,
+        )
+    } else {
+        (
+            fill_identity_row("id", "failed-prefix", "BTCUSDT", NOW + 8.0 * DAY),
+            false,
+        )
+    };
+    let body = match mode {
+        2 if algo => format!(r#"{{"orders":[{prefix},null]}}"#),
+        2 => format!("[{prefix},null]"),
+        3 => r#"{"code":40014,"msg":"native refusal"}"#.to_owned(),
+        4 if algo => r#"{"orders":null}"#.to_owned(),
+        4 => "{}".to_owned(),
+        5 if algo => format!(r#"{{"orders":[{prefix},"#),
+        5 => format!("[{prefix},"),
+        _ => unreachable!(),
+    };
+    response(e, NOW, r.id, &body)
+}
+#[test]
+fn owned_lists_first_failure_is_typed_without_false_complete_history() {
+    for kind in 0..3 {
+        for mode in 0..6 {
+            let mut e = engine();
+            e.set_log_level(safe_cex_engine::Level::Error);
+            let actions = command(&mut e, list_query(kind));
+            let r = request(
+                &actions,
+                if kind == 0 {
+                    "userTrades"
+                } else if kind == 1 {
+                    "order/history"
+                } else {
+                    "market/trades"
+                },
+            );
+            owned_income_failure(&list_failure(&mut e, r, mode), 7);
+        }
+    }
+}
+#[test]
+fn owned_lists_later_window_or_algo_failure_returns_only_accepted_rows() {
+    for kind in 0..2 {
+        for mode in 0..6 {
+            let mut e = engine();
+            e.set_log_level(safe_cex_engine::Level::Error);
+            let actions = command(&mut e, list_query(kind));
+            let r = request(
+                &actions,
+                if kind == 0 {
+                    "userTrades"
+                } else {
+                    "order/history"
+                },
+            );
+            let body = if kind == 0 {
+                format!("[{}]", fill_identity_row("id", "kept", "BTCUSDT", NOW))
+            } else {
+                NORMAL.into()
+            };
+            let actions = response(&mut e, NOW, r.id, &body);
+            no_completion(&actions);
+            let r = request(
+                &actions,
+                if kind == 0 {
+                    "userTrades"
+                } else {
+                    "allAlgoOrders"
+                },
+            );
+            let actions = list_failure(&mut e, r, mode);
+            owned_income_partial(&actions, 1);
+            assert!(!result(&actions).unwrap().contains("failed-prefix"));
+        }
+    }
+}
+#[test]
+fn owned_lists_empty_or_filtered_prior_window_cannot_authorize_partial_success() {
+    for filtered in [false, true] {
+        let mut e = engine();
+        let actions = command(&mut e, list_query(0));
+        let r = request(&actions, "userTrades");
+        let body = if filtered {
+            format!("[{}]", fill_identity_row("id", "other", "ETHUSDT", NOW))
+        } else {
+            "[]".into()
+        };
+        let actions = response(&mut e, NOW, r.id, &body);
+        let r = request(&actions, "userTrades");
+        owned_income_failure(&list_failure(&mut e, r, 0), 7);
+    }
+}
+#[test]
+fn owned_missing_fill_fact_waits_for_valid_page_and_final_success() {
+    let mut e = engine();
+    let actions = command(&mut e, list_query(0));
+    let r = request(&actions, "userTrades");
+    let body = format!(
+        "[{},{}]",
+        fill_identity_row("id", "kept", "BTCUSDT", NOW),
+        fill_identity_row("id", "", "BTCUSDT", NOW)
+    );
+    let actions = response(&mut e, NOW, r.id, &body);
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::HISTORY_INCOMPLETE),
+        0,
+        "no coverage publication before final success"
+    );
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+        1
+    );
+    let r = request(&actions, "userTrades");
+    let actions = response(&mut e, NOW, r.id, "[]");
+    owned_income_partial(&actions, 1);
+}
+#[test]
+fn owned_failed_fill_page_cannot_publish_or_consume_a_missing_id_fact() {
+    let mut e = engine();
+    let actions = command(&mut e, identity_fills(None, None));
+    let r = request(&actions, "userTrades");
+    let body = format!("[{},null]", fill_identity_row("id", "", "BTCUSDT", NOW));
+    let actions = response(&mut e, NOW, r.id, &body);
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+        0
+    );
+    owned_income_failure(&actions, 7);
+    let actions = command(&mut e, identity_fills(None, None));
+    let r = request(&actions, "userTrades");
+    let actions = response(
+        &mut e,
+        NOW,
+        r.id,
+        &format!("[{}]", fill_identity_row("id", "", "BTCUSDT", NOW)),
+    );
+    owned_income_partial(&actions, 0);
+    assert_eq!(
+        identity_marker_count(&actions, safe_cex_engine::log::code::ROW_SKIPPED),
+        1
+    );
+}
+#[test]
+fn owned_algo_advertised_more_is_a_validated_gap_even_without_rows() {
+    for normal in [false, true] {
+        let mut e = engine();
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let actions = command(&mut e, list_query(1));
+        let r = request(&actions, "order/history");
+        let actions = response(&mut e, NOW, r.id, if normal { NORMAL } else { "[]" });
+        let r = request(&actions, "allAlgoOrders");
+        let actions = response(&mut e, NOW, r.id, r#"{"orders":[],"hasMore":true}"#);
+        owned_income_partial(&actions, usize::from(normal));
+    }
+}
+#[test]
+fn owned_algo_malformed_continuation_metadata_excludes_the_whole_page() {
+    for metadata in ["null", "\"yes\"", "[]", "1"] {
+        let mut e = engine();
+        let actions = command(&mut e, list_query(1));
+        let r = request(&actions, "order/history");
+        let actions = response(&mut e, NOW, r.id, NORMAL);
+        let r = request(&actions, "allAlgoOrders");
+        let body = ALGO.replace("\"hasMore\":false", &format!("\"hasMore\":{metadata}"));
+        let actions = response(&mut e, NOW, r.id, &body);
+        owned_income_partial(&actions, 1);
+    }
+}
+#[test]
+fn public_list_keeps_duplicate_ids_and_native_order() {
+    let mut e = engine();
+    let actions = command(&mut e, list_query(2));
+    let r = request(&actions, "market/trades");
+    let row = |id: &str, time: f64| {
+        format!(
+            r#"{{"id":"{id}","price":"10","qty":"1","quoteQty":"10","time":{time},"isBuyerMaker":false}}"#
+        )
+    };
+    let actions = response(
+        &mut e,
+        NOW,
+        r.id,
+        &format!(
+            "[{},{},{}]",
+            row("same", NOW),
+            row("other", NOW + 1.0),
+            row("same", NOW)
+        ),
+    );
+    let rows: serde_json::Value = serde_json::from_str(&result(&actions).unwrap()).unwrap();
+    assert_eq!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["same", "other", "same"]
+    );
+}
 #[test]
 fn empty_fill_identity_aliases_keep_valid_financial_peers_and_mark_owned_incomplete_once() {
     for field in ["id", "tradeId", "fillId"] {
