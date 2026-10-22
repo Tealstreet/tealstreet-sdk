@@ -240,3 +240,11 @@ accepted-page completion and `RangeHistory` owns income bounds, dedupe selection
 coverage and finalization; failed prefixes are not accepted, and signing failures
 stay strict. Other general histories remain to migrate;
 this does not close the cross-venue enforcement work. See [the plan](RUST_OWNED_HISTORY.md).
+
+
+BloFin general histories also use the landed cursor/completion owner for typed
+staged/accepted rows and native-ID dedupe. Whole-response admission excludes
+failed prefixes; actual later-page failures recover only accepted rows with owned
+incompleteness. Missing/repeated cursor, page budget and header-preparation
+refusal remain strict. Raw paging counts, request pins and native financial
+shaping are retained; no engine extension or universal enforcement claim.

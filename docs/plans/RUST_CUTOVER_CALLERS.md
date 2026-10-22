@@ -3366,3 +3366,26 @@ a nonce domain; this does not itself implement a new venue identity or migrate
 persisted MEXC key-derived user IDs. Those mappings are later cutover work.
 
 [Provider contract and prerequisites](RUST_SIGNER_PREREQUISITES.md).
+
+
+### BloFin general histories: owned cursor completion
+
+BloFin fills, orders, income and public trades now retain one shared engine
+cursor/completion owner across pages. A transport, HTTP/native, malformed-row or
+missing/malformed-list failure before any mapped rows are accepted rejects typed.
+An actual later-page failure returns only earlier accepted rows plus one
+command-owned Warn `history.incomplete` immediately before completion, including
+at Error-only logging. A valid-looking prefix from a failed page is excluded.
+Previously later income failure rejected and discarded its accepted ledger;
+this conversion applies the shared retained-row policy instead.
+
+Native paging refusals remain strict: missing/repeated cursor or the page budget
+never become partial success. Header/signing preparation refusal also remains
+strict after accepted rows. Native request sequences, cursor selection before
+filters, global mapped-fill limit, one native trade's separate PnL/fee income
+rows, final sorting/limits, single-page orders and unsigned public trades remain.
+Keyless no-I/O and unsupported lookup admission keep their existing behavior.
+The separate closed-position query is unchanged. No SDK argument or required new
+NX handler is introduced; B11's incomplete-query coverage and typed rejection
+handling remain required. Other histories/background notices still need fan-out.
+[Owner contract and scope](RUST_OWNED_HISTORY.md).

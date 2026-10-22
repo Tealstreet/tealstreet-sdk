@@ -522,3 +522,18 @@ failure; strict pagination refusal remains tested.
 This remains a local unpublished checkpoint on actual #1721. Integrate actual
 range reference #1724 before final proof, then add the caller/audit/quality catch-up
 on that base to preserve incoming doc sections. No cutover/NX/remote closure.
+
+
+Actual range reference #1724 `22550c4050c33a2f0c0b5bd84b26c027883650e0`
+is real-integrated into this BloFin slice. Its 12 nonshared plan/source/test
+blobs and all four reviewed BloFin source/test blobs remain exact. The only
+conflict was independent added sections in this shared plan; the overseer
+authorized retaining incoming Range blocks then BloFin blocks without rewriting
+or deleting lines, and both original complete documents remain ordered
+subsequences of the resolution. No source/test/contract conflict occurred.
+Caller/audit/quality catch-up is added after that integration, preserving the
+incoming Binance and actual #1721 provider sections. Fresh focused gates and
+independent integration/caller reviews precede exact-head CI and separate guard.
+The financial #1725 hold is respected: this fan-out touches no Binance, engine
+execution/num, WOO or Bitrue source; integrate its actual shared-engine dependency
+if it lands before the final proof.
