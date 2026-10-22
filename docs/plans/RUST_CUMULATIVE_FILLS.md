@@ -706,3 +706,25 @@ Preserve snapshot/history and nontrade lifecycle suppression, timestamp/cumulati
 After original RED: independent concrete integration/API review, minimal adapter adoption, native engine/Kraken/Binance tests and strict/fmt/bans/root checks, code/adversarial review, docs audit entries only for proven defects, then fresh exact-head full CI. Freeze every current Kraken Spot and Binance workload and compare all authenticated indexed raw outputs except top-level metrics, ordered gate status/failures/fixers, and exact matching CI packages/fingerprints without fallback. No fixture/allowance/comparator changes. Final evidence review, fresh separate guard, separate merge and actual-parent/tree/source-preservation report.
 
 Primary schema read 2026-10-22: https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/executions . Trade and filled are separate event types; cumulative quantity/value and native trade identity are distinct fields. Actual live recapture remains outside this offline financial slice.
+
+Phase-4 native original-source controls at `62c7a01ec21` both fail financial/state
+assertions on unchanged actual #1736 Kraken Spot source blob
+`0f2e738cf0b818043fd3dc09de9066191fc29576`: a nonpositive-price cumulative
+trade loses the corrected same-quantity `(price=100, amount=0.5)` delivery;
+an invalid final trade commits `(filled=2, Closed, Market)` instead of keeping
+`(0.5, Open, Limit)`. Original source/log receipts are retained. This is the
+same validate-before-commit defect class, covered by the standing financial
+helper approval. No production change has been made at this checkpoint.
+
+Concrete integration: after constructing the candidate order but BEFORE adding
+its native time, terminal id, provenance, row or Fill, prepare live `trade`
+financial evidence with `Cursor::seed(previous_order_filled, None)` and
+`Cursor::prepare(report, Arithmetic::Binary)`. An explicit `last_qty` uses
+`Report::Last { amount, cumulative: e.cum_qty, price: native_price }`; otherwise
+use `Report::Cumulative { quantity: filled, price: CumulativePrice::Direct(native_price) }`.
+Any seed/preparation rejection adds the row identity to the existing rejected
+set and exits that row; existing execution admission handles retention/reporting.
+Only a prepared delivery contributes Fill price/amount. Zero/no-growth returns
+remain quiet, and snapshot/nontrade lifecycle rows bypass financial delivery
+preparation exactly as before. Keep native identity and final dedup staging.
+No shared API extension, new ledger or seed/retention reinterpretation is needed.
