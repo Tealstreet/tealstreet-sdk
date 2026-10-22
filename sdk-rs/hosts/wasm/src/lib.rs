@@ -135,9 +135,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
 // Opaque marker: JS hosts fulfil the Action::Sign/Event::Signed seam. This
 // contains no keys and cannot fall back to local signing if injection is missing.
-#[cfg(feature = "binance")]
+#[cfg(feature = "dispatch-signing")]
 struct ExternalSigner;
-#[cfg(feature = "binance")]
+#[cfg(feature = "dispatch-signing")]
 impl safe_cex_engine::signing::Signer for ExternalSigner {
     fn sign(
         &self,
@@ -567,11 +567,11 @@ impl WasmEngine {
         let signer_setup_json = signer_setup_json.map(zeroize::Zeroizing::new);
         let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
             .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
-        #[cfg(feature = "binance")]
+        #[cfg(feature = "dispatch-signing")]
         let mut options = options;
         let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
         let external_signer = options.signing.is_some() && signer_setup_json.is_none();
-        #[cfg(feature = "binance")]
+        #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {
             if !dispatch_signing {
                 return Err(js_sys::Error::new(
@@ -593,7 +593,7 @@ impl WasmEngine {
         } else {
             None
         };
-        #[cfg(not(feature = "binance"))]
+        #[cfg(not(feature = "dispatch-signing"))]
         let signer = {
             if signer_setup_json.is_some() {
                 return Err(js_sys::Error::new(
@@ -961,6 +961,68 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "dispatch-signing", not(target_arch = "wasm32")))]
+    mod shared_dispatch_provider {
+        use super::super::ExternalSigner;
+        use safe_cex_engine::signing::{
+            Context, KeyRef, Operation, SignError, SignRequest, Signer,
+        };
+
+        #[test]
+        fn external_marker_never_materializes_credentials_or_signatures() {
+            let signer = ExternalSigner;
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Context::default(),
+                operations: vec![Operation::Present {
+                    key: KeyRef("opaque-test-credential".into()),
+                }],
+            };
+            assert!(!signer.immediate());
+            assert!(signer.sign_ready(&request).is_none());
+            // The host fulfils Action::Sign. Accidentally polling the marker
+            // must retain its existing closed failure, never expose material.
+            let mut future = signer.sign(request);
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(matches!(
+                std::future::Future::poll(future.as_mut(), &mut context),
+                std::task::Poll::Ready(Err(SignError::Unavailable))
+            ));
+        }
+
+        #[cfg(feature = "bybit")]
+        #[test]
+        fn shared_provider_feature_does_not_adopt_unmigrated_public_bybit() {
+            let Ok(mut engine) =
+                super::super::WasmEngine::new("bybit", r#"{"publicDataOnly":true}"#, None)
+            else {
+                panic!("public Bybit setup must remain native-safe and successful");
+            };
+            assert!(!engine.dispatch_signing);
+            assert!(!engine.requires_external_signer());
+            #[derive(serde::Deserialize)]
+            struct Outbound {
+                op: String,
+                url: Option<String>,
+            }
+            let actions: Vec<Outbound> = serde_json::from_str(&engine.start(1000.)).unwrap();
+            assert!(actions.iter().any(|action| {
+                action.op == "http"
+                    && action
+                        .url
+                        .as_deref()
+                        .is_some_and(|url| url.contains("/v5/market/"))
+            }));
+            assert!(actions.iter().all(|action| {
+                !matches!(
+                    action.op.as_str(),
+                    "sign" | "signPayload" | "signedOutbound"
+                )
+            }));
+            assert!(!engine.requires_external_signer());
+        }
+    }
+
     /// Each venue's record equals the name lists `rust.exchange.ts` used before
     /// the engine reported it.
     #[cfg(all(
