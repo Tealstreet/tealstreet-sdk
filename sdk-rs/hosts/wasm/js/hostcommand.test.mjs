@@ -482,7 +482,7 @@ const coverageEvent = (command) => ({
   op: 'event', level: 'warn', code: 'history.incomplete', message: 'partial history', fields: { command },
 });
 
-test('native WEEX incomplete failure fixture reaches only its pending caller before rejection', async () => {
+test('native WEEX incomplete fixture flags retained income only for its pending caller', async () => {
   const event = JSON.parse(readFileSync(new URL('../../../venues/weex/tests/fixtures/incomplete-query-event.json', import.meta.url), 'utf8'));
   const events = [[], []];
   const r = rig();
@@ -491,13 +491,14 @@ test('native WEEX incomplete failure fixture reaches only its pending caller bef
     events[0].push(event);
   } });
   const second = r.host.command({ op: 'fetchIncome' }, { onEvent: (event) => events[1].push(event) });
-  const rejected = assert.rejects(first, /page reset/);
   r.host.run(JSON.stringify([
     event,
-    { op: 'done', command: 1, error: 'page reset' },
+    { op: 'done', command: 1, result: '[{"tranId":"kept"}]' },
     { op: 'done', command: 2, result: '[]' },
   ]));
-  await rejected;
+  const retained = await first;
+  assert.equal(retained.incomplete, true);
+  assert.deepEqual([...retained], [{ tranId: 'kept' }]);
   const { op, ...notice } = event;
   assert.equal(op, 'event');
   assert.deepEqual(events, [[notice], []]);

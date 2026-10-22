@@ -119,6 +119,27 @@ impl Venue for Fixture {
                 completion.finish(cx, result);
             }
             Read::Cursor(mut history) => {
+                if matches!(response.body, "probe-staged" | "probe-admitted") {
+                    history.stage("1".into());
+                    if response.body == "probe-admitted" {
+                        history.advance(CursorPage {
+                            next: Some("a".into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        });
+                    }
+                    for next in ["b", "c"] {
+                        history.advance_probe(CursorPage {
+                            next: Some(next.into()),
+                            rows: 1,
+                            fresh: 1,
+                            want_more: true,
+                        });
+                    }
+                    history.finish(cx, Ok(()));
+                    return;
+                }
                 if matches!(
                     response.body,
                     "finalizer-policy" | "finalizer-poison" | "finalizer-active"
@@ -647,6 +668,18 @@ fn contextual_cursor_finalization_never_runs_after_lifecycle_failure() {
         assert!(
             matches!(&notices[0], Notice::CommandFailed { command: 44, error }
             if error.kind == Some(ErrorKind::Internal))
+        );
+    }
+}
+
+#[test]
+fn probe_misuse_cannot_return_unmarked_partial_query_rows() {
+    for body in ["probe-staged", "probe-admitted"] {
+        let notices = finalizer_case(body, true);
+        assert_eq!(notices.len(), 1);
+        assert!(
+            matches!(&notices[0],Notice::CommandFailed {command:44,error}
+            if error.kind==Some(ErrorKind::Internal) && error.message=="history probe cannot admit result rows")
         );
     }
 }
