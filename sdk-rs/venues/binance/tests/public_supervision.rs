@@ -1,6 +1,7 @@
+use support::Options;
 mod support;
 use safe_cex_engine::{Event, PublicFeedPolicy, SocketId};
-use safe_cex_venue_binance::{Options, Variant};
+use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 const SPOT_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","baseAssetPrecision":8,"quoteAssetPrecision":8}]}"#;

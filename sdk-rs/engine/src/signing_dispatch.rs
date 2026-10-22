@@ -99,7 +99,9 @@ impl Dispatch {
             pending.prepared_at = None;
             return Some(Completion::Stale(pending));
         }
-        if let Action::Http(http) = &mut action {
+        if let Action::Http(http) = &mut action
+            && (http.timeout_ms.is_some() || pending.timer.0 != 0 || now != pending.staged_at)
+        {
             http.timeout_ms = Some((pending.deadline - now).ceil().max(1.) as u32);
         }
         Some(Completion::Ready(pending, action))

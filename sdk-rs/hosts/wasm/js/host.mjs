@@ -230,6 +230,8 @@ export class EngineHost {
       try { engine[setter](source); }
       catch { throw entropyFailure('Engine entropy must be configured before startup'); }
     }
+    if (engine.requiresExternalSigner?.() && options.signer === undefined)
+      throw new ExchangeError('Engine signing provider is required', { message:'Engine signing provider is required', kind:'invalidInput', outcome:'notSent' });
     if (options.signer !== undefined) {
       if (typeof options.signer !== 'function' || typeof engine.useExternalSigner !== 'function')
         throw new TypeError('Engine requires a callable signing provider');

@@ -4,7 +4,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, RequestId, Response,
     SocketId, TimerId,
 };
-use safe_cex_venue_binance::{BinanceFutures, Options};
+use safe_cex_venue_binance::BinanceFutures;
+mod config;
+pub use config::{Options, engine};
 
 pub const EXCHANGE_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"#;
 pub const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"100","priceChangePercent":"1","volume":"2","quoteVolume":"3"}]"#;
@@ -50,7 +52,7 @@ impl Harness {
     }
 
     pub fn started_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(BinanceFutures::new(options));
+        let mut engine = engine(options);
         engine.set_public_feed_policy(policy).unwrap();
         let mut harness = Self {
             engine,
@@ -88,7 +90,9 @@ impl Harness {
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
             match action {
-                Action::SignPayload { .. } => {
+                Action::SignPayload { .. }
+                | Action::Sign { .. }
+                | Action::SignedOutbound { .. } => {
                     panic!("delegated signing is unsupported in the binance test harness")
                 }
                 Action::Http(request) => {

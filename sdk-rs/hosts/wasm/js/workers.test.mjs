@@ -708,3 +708,39 @@ test('Workers routes the native WEEX empty-fill fixture before retained rows onl
     assert.deepEqual(messages[1], [{ op: 'done', id: 77, result: [] }]);
   } finally { for (const client of clients) object.leave(client); }
 });
+
+test('Workers obtains opaque signer refs and provider from deployment setup only', async () => {
+  const identities = { primary: { credential: 'account/key', signing: 'account/sign' } };
+  const calls = [];
+  const EngineObject = createEngineObject({
+    accountToken: () => 'fixture-token',
+    flush: { store: 1e9, books: 1e9 },
+    createSigner(state, env, venue) {
+      assert.equal(venue, 'binance');
+      assert.equal(env, environment);
+      calls.push('provision');
+      return { identities, signer: () => [] };
+    },
+    loadEngine: async () => ({ WasmEngine: class {
+      constructor(venue, options) { calls.push(JSON.parse(options)); }
+      requiresExternalSigner() { return true; }
+      useExternalSigner() { calls.push('installed'); }
+      start() { return '[]'; }
+      free() {}
+    } }),
+  });
+  const environment = {};
+  const object = new EngineObject({ storage: { setAlarm() {} } }, environment);
+  const messages = [];
+  const client = { send(message) { messages.push(message); } };
+  object.clients.add(client);
+  await object.receive(client, JSON.stringify({ op: 'start', venue: 'binance', options: {
+    signing: { primary: { credential: 'untrusted', signing: 'untrusted' } },
+  } }));
+  try {
+    assert.ok(object.host, messages.join('\n'));
+    assert.equal(calls[0], 'provision');
+    assert.deepEqual(calls[1].signing, identities);
+    assert.equal(calls[2], 'installed');
+  } finally { object.leave(client); }
+});

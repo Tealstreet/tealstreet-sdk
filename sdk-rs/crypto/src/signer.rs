@@ -9,6 +9,35 @@ use sha2::{Digest, Sha256, Sha512};
 use std::collections::HashMap;
 use zeroize::Zeroizing;
 
+/// Trusted provider setup only. Never place these values in venue/engine options.
+#[derive(Default, serde::Deserialize)]
+pub struct LocalSetup {
+    pub primary: Option<LocalIdentity>,
+    pub secondary: Option<LocalIdentity>,
+}
+#[derive(Default, serde::Deserialize)]
+pub struct LocalIdentity {
+    #[serde(default)]
+    pub key: Secret,
+    #[serde(default)]
+    pub secret: Secret,
+}
+#[derive(Default)]
+pub struct Secret(Zeroizing<String>);
+impl Secret {
+    pub fn new(value: String) -> Self {
+        Self(Zeroizing::new(value))
+    }
+    fn into_bytes(mut self) -> Vec<u8> {
+        std::mem::take(&mut *self.0).into_bytes()
+    }
+}
+impl<'de> serde::Deserialize<'de> for Secret {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        <String as serde::Deserialize>::deserialize(deserializer).map(Self::new)
+    }
+}
+
 #[derive(Default)]
 pub struct LocalSigner {
     keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
@@ -20,6 +49,49 @@ impl LocalSigner {
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
         self.keys.insert(reference, Zeroizing::new(bytes));
+    }
+    pub fn from_setup(setup: LocalSetup) -> (Self, safe_cex_engine::signing::Identities) {
+        let mut signer = Self::new();
+        let mut install = |slot: &str, identity: Option<LocalIdentity>| {
+            identity.map(|identity| {
+                let key = identity.key.into_bytes();
+                let secret = identity.secret.into_bytes();
+                let credential = KeyRef(if key.is_empty() {
+                    String::new()
+                } else {
+                    format!("{slot}.credential")
+                });
+                let signing = KeyRef(if secret.is_empty() {
+                    String::new()
+                } else {
+                    format!("{slot}.signing")
+                });
+                if !key.is_empty() {
+                    signer.insert(credential.clone(), key);
+                }
+                if !secret.is_empty() {
+                    signer.insert(signing.clone(), secret);
+                }
+                safe_cex_engine::signing::Identity {
+                    credential,
+                    signing,
+                }
+            })
+        };
+        let identities = safe_cex_engine::signing::Identities {
+            primary: install("primary", setup.primary),
+            secondary: install("secondary", setup.secondary),
+        };
+        (signer, identities)
+    }
+    /// Own and wipe the setup input on both successful and malformed construction.
+    pub fn from_json(
+        input: String,
+    ) -> Result<(Self, safe_cex_engine::signing::Identities), SignError> {
+        let input = Zeroizing::new(input);
+        let setup: LocalSetup =
+            serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
+        Ok(Self::from_setup(setup))
     }
     pub fn remove(&mut self, reference: &KeyRef) {
         self.keys.remove(reference);

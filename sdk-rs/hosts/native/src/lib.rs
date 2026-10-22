@@ -298,13 +298,18 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     let events = self.events.clone();
                     tokio::spawn(async move {
                         use safe_cex_engine::signing::SignError;
+                        if events.is_closed() {
+                            return;
+                        }
                         let result = match signer {
-                            Some(signer) => tokio::time::timeout(
-                                Duration::from_millis(u64::from(timeout_ms)),
-                                signer.sign(work),
-                            )
-                            .await
-                            .unwrap_or(Err(SignError::TimedOut)),
+                            Some(signer) => tokio::select! {
+                                biased;
+                                _ = events.closed() => return,
+                                result = tokio::time::timeout(
+                                    Duration::from_millis(u64::from(timeout_ms)),
+                                    signer.sign(work),
+                                ) => result.unwrap_or(Err(SignError::TimedOut)),
+                            },
                             None => Err(SignError::Unavailable),
                         };
                         let _ = events.send(HostEvent::Signed(attempt, result));

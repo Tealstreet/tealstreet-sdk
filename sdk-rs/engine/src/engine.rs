@@ -1771,6 +1771,16 @@ pub trait Venue {
     ) -> Option<AuthOutcome> {
         None
     }
+    /// Shared dispatch signing failure, typed before transport. Composite jobs
+    /// retain earlier attempt outcomes when projecting this attempted notSent.
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_sign_failed(cx, pending, &error.message);
+    }
     /// Delegated signing failed before an HTTP write could reach the venue.
     fn on_sign_failed(
         &mut self,
@@ -2762,7 +2772,7 @@ impl<V: Venue> Engine<V> {
                 cx.io.streams.remove(&http.id);
                 if let Some(pending) = cx.io.pending.remove(&http.id) {
                     self.venue
-                        .on_sign_failed(&mut cx, pending.value, &error.to_string());
+                        .on_sign_error(&mut cx, pending.value, error.venue_error());
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {

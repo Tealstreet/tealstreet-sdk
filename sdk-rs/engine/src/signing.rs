@@ -12,6 +12,29 @@ use std::sync::Arc;
 #[serde(transparent)]
 pub struct KeyRef(pub String);
 
+/// A venue's non-sensitive references to credential presentation and signing.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Identity {
+    pub credential: KeyRef,
+    pub signing: KeyRef,
+}
+impl Identity {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.credential.0.is_empty() || self.signing.0.is_empty() {
+            Err("Secondary read credentials require a nonempty key and secret")
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Only opaque identities cross into registry/engine options.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Identities {
+    pub primary: Option<Identity>,
+    pub secondary: Option<Identity>,
+}
+
 /// Exact primitive contracts, independent of venue request formatting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,6 +196,20 @@ pub enum SignError {
     InvalidRequest,
     InvalidResult,
     TimedOut,
+}
+impl SignError {
+    pub fn venue_error(self) -> crate::VenueError {
+        use crate::{ErrorKind, Outcome, VenueError};
+        let kind = match self {
+            Self::TimedOut => ErrorKind::Timeout,
+            Self::Refused | Self::InvalidRequest => ErrorKind::InvalidInput,
+            Self::Unsupported => ErrorKind::Unsupported,
+            _ => ErrorKind::Internal,
+        };
+        VenueError::new(self.to_string())
+            .kind(kind)
+            .outcome(Outcome::NotSent)
+    }
 }
 impl std::fmt::Display for SignError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

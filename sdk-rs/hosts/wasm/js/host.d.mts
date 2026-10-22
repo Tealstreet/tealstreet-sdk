@@ -232,6 +232,8 @@ export class EngineDisposedError extends Error {
 export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
 export type SignPart = { kind: 'bytes'; bytes: number[] } | { kind: 'credential'; key: string }
   | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' };
+export interface SigningIdentity { credential: string; signing: string }
+export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface SignRequest {
   operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
   context: { venue: string; method: string; host: string; path: string };
@@ -318,6 +320,7 @@ export interface EngineBridgeConstruction {
   payloadSigning: boolean;
   apiKeyIndexRequired: boolean;
   isolatedBookSubscriptions: boolean;
+  dispatchSigning:boolean;
 }
 
 export interface EngineConstruction {
@@ -357,6 +360,7 @@ export interface WasmEngineLike {
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
+  requiresExternalSigner?(): boolean;
   useExternalSigner?(): void;
   signed?(attempt: number, resultJson: string, now: number): string;
   signFailed?(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;

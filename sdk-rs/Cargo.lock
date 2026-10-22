@@ -3602,6 +3602,7 @@ dependencies = [
  "getrandom 0.2.17",
  "reqwest",
  "rustls",
+ "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-venue-binance",
  "safe-cex-venues",
@@ -3916,6 +3917,7 @@ dependencies = [
 name = "safe-cex-venues"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-venue-apexomni",
  "safe-cex-venue-asterdex",
@@ -3960,6 +3962,7 @@ dependencies = [
  "serde",
  "serde_json",
  "wasm-bindgen",
+ "zeroize",
 ]
 
 [[package]]

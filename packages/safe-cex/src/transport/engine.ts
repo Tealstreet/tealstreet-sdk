@@ -507,6 +507,7 @@ export const createEngineTransport = (
   exchange: ExchangeName,
   options: ExchangeOptions,
   transport: Transport,
+  credentials?: { hasSecondary:boolean },
 ): Transport => {
   assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
@@ -560,7 +561,9 @@ export const createEngineTransport = (
   const publicCorsHttp = publicCorsProxy
     ? httpTransport(exchange, options, transport, provider, restRouting, publicCorsProxy)
     : undefined;
-  const readOptions = options.secondary_key ? secondaryReadOptions(options, provider) : undefined;
+  const readOptions = credentials?.hasSecondary
+    ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
+    : options.secondary_key ? secondaryReadOptions(options, provider) : undefined;
   const readHttp = readOptions
     ? httpTransport(exchange, readOptions, transport, provider, resolved(exchange, readOptions, provider).restRouting)
     : undefined;

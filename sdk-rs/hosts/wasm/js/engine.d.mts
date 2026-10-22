@@ -5,7 +5,7 @@ export class WasmEngine implements WasmEngineLike {
   capabilities(): string;
   construction(): string;
   /** Native construction failures throw Error with JSON-encoded venueError detail. */
-  constructor(venue: string, optionsJson: string);
+  constructor(venue: string, optionsJson: string, signerSetupJson?:string);
   /** Configure identity/ID and jitter entropy before startup; signing stays independent. */
   setEntropy(source: EntropyProvider): void;
   /** Explicit independent override for signing nonces and salts, before startup only. */
@@ -29,6 +29,7 @@ export class WasmEngine implements WasmEngineLike {
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
+  requiresExternalSigner(): boolean;
   useExternalSigner(): void;
   signed(attempt: number, resultJson: string, now: number): string;
   signFailed(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;

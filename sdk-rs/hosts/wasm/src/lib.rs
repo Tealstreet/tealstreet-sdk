@@ -133,6 +133,22 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
+// Opaque marker: JS hosts fulfil the Action::Sign/Event::Signed seam. This
+// contains no keys and cannot fall back to local signing if injection is missing.
+#[cfg(feature = "binance")]
+struct ExternalSigner;
+#[cfg(feature = "binance")]
+impl safe_cex_engine::signing::Signer for ExternalSigner {
+    fn sign(
+        &self,
+        _: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        Box::pin(std::future::ready(Err(
+            safe_cex_engine::signing::SignError::Unavailable,
+        )))
+    }
+}
+
 /// Owns whichever venue engine the registry builds.
 struct Boxed;
 
@@ -503,6 +519,7 @@ fn construction_error(detail: safe_cex_engine::VenueError) -> js_sys::Error {
 
 #[wasm_bindgen]
 pub struct WasmEngine {
+    external_signer: bool,
     construction: String,
     inner: Box<dyn AnyEngine>,
 }
@@ -540,21 +557,61 @@ impl WasmEngine {
         feature = "okx"
     ))]
     #[wasm_bindgen(constructor)]
-    pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, js_sys::Error> {
-        let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
+    pub fn new(
+        venue: &str,
+        options_json: &str,
+        signer_setup_json: Option<String>,
+    ) -> Result<WasmEngine, js_sys::Error> {
+        // Own the setup buffer before any parsing or feature/venue refusal.
+        let signer_setup_json = signer_setup_json.map(zeroize::Zeroizing::new);
+        let mut options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
             .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
+        let external_signer = options.signing.is_some() && signer_setup_json.is_none();
+        #[cfg(feature = "binance")]
+        let signer = if let Some(mut input) = signer_setup_json {
+            if !options.construction(venue).bridge.dispatch_signing {
+                return Err(js_sys::Error::new(
+                    "Local signer setup is not supported for this venue yet",
+                ));
+            }
+            let (signer, identities) =
+                safe_cex_venues::local_signer_from_json(std::mem::take(&mut *input))
+                    .map_err(construction_error)?;
+            options.signing = Some(identities);
+            Some(signer)
+        } else if external_signer {
+            Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
+        } else if options.construction(venue).bridge.dispatch_signing {
+            let (signer, identities) =
+                safe_cex_venues::prepare_local_signer(&mut options).map_err(construction_error)?;
+            options.signing = Some(identities);
+            Some(signer)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "binance"))]
+        let signer = {
+            if signer_setup_json.is_some() {
+                return Err(js_sys::Error::new(
+                    "Local signer setup is not supported for this venue yet",
+                ));
+            }
+            None
+        };
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
-        let inner = safe_cex_venues::build(
+        let inner = safe_cex_venues::build_with_signer(
             venue,
             options,
             Some(production_entropy().map_err(construction_error)?),
+            signer,
             Boxed,
         )
         .map_err(construction_error)?;
         Ok(Self {
             inner,
             construction,
+            external_signer,
         })
     }
 
@@ -574,7 +631,13 @@ impl WasmEngine {
     /// JS providers execute atomic batches outside the engine. Must be installed before start.
     #[wasm_bindgen(js_name = useExternalSigner)]
     pub fn use_external_signer(&mut self) -> Result<(), js_sys::Error> {
-        self.inner.external_signer().map_err(construction_error)
+        self.inner.external_signer().map_err(construction_error)?;
+        self.external_signer = true;
+        Ok(())
+    }
+    #[wasm_bindgen(js_name=requiresExternalSigner)]
+    pub fn requires_external_signer(&self) -> bool {
+        self.external_signer
     }
 
     #[wasm_bindgen(js_name = signed)]
@@ -1230,7 +1293,7 @@ mod tests {
                 isolated_book_subscriptions: venue == "asterdex",
                 inverse_closed_positions: venue == "bybitinverse",
             };
-            let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, "")) else {
+            let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, ""), None) else {
                 panic!("{venue} engine constructs");
             };
             assert_eq!(engine.inner.capabilities(), expected, "{venue}");
@@ -1243,6 +1306,7 @@ mod tests {
             let Ok(engine) = super::WasmEngine::new(
                 venue,
                 &engine_options(venue, r#","enableOptionMarkets":true"#),
+                None,
             ) else {
                 panic!("{venue} engine constructs");
             };
@@ -1356,6 +1420,10 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
+            fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+                Ok(())
+            }
+            fn prepare_dispatch(&mut self, _: f64) {}
             fn capabilities(&self) -> safe_cex_engine::Capabilities {
                 safe_cex_engine::Capabilities::BASE
             }
@@ -1399,6 +1467,7 @@ mod tests {
         let events = Rc::new(RefCell::new(Vec::new()));
         let drains = Rc::new(Cell::new(0));
         let mut engine = WasmEngine {
+            external_signer: false,
             construction: "{}".into(),
             inner: Box::new(Commands {
                 events: Rc::clone(&events),
@@ -1566,6 +1635,10 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
+        fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+            Ok(())
+        }
+        fn prepare_dispatch(&mut self, _: f64) {}
         fn capabilities(&self) -> safe_cex_engine::Capabilities {
             safe_cex_engine::Capabilities::BASE
         }
@@ -1625,6 +1698,10 @@ mod tests {
 
         struct Counted;
         impl AnyEngine for Counted {
+            fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+                Ok(())
+            }
+            fn prepare_dispatch(&mut self, _: f64) {}
             fn capabilities(&self) -> safe_cex_engine::Capabilities {
                 safe_cex_engine::Capabilities::BASE
             }
@@ -1665,6 +1742,7 @@ mod tests {
         }
         let health: serde_json::Value = serde_json::from_str(
             &WasmEngine {
+                external_signer: false,
                 construction: "{}".into(),
                 inner: Box::new(Counted),
             }
@@ -1683,6 +1761,7 @@ mod tests {
     #[test]
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
+            external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
@@ -1707,10 +1786,12 @@ mod tests {
     #[test]
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
+            external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
+            external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };

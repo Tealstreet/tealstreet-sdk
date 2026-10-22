@@ -75,3 +75,11 @@ test('disposal aborts provider and forbids later engine calls', async () => {
   assert.deepEqual(r.events, [['installed']]);
   assert.equal(r.timers.size, 0);
 });
+
+test('opaque signing refs require the host provider before startup', () => {
+  const engine = { requiresExternalSigner: () => true };
+  assert.throws(() => new EngineHost(engine, {}, {}), (error) =>
+    error.kind === 'invalidInput' && error.outcome === 'notSent');
+  const host = new EngineHost({ ...engine, useExternalSigner() {} }, {}, {}, { signer: () => [] });
+  host.dispose();
+});

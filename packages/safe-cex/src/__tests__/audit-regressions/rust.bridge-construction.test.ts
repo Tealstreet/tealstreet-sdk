@@ -13,7 +13,7 @@ afterEach(() => {
 it('uses construction policy before startup instead of inferring identity or read credentials from the name', () => {
   const policy: EngineBridgeConstruction = {
     spot: true, demo: true, primaryCredentialsOnly: true,
-    payloadSigning: false, apiKeyIndexRequired: false, isolatedBookSubscriptions: false,
+    payloadSigning: false, apiKeyIndexRequired: false, isolatedBookSubscriptions: false, dispatchSigning:false,
   };
   vi.spyOn(construction, 'deriveBridgeConstruction').mockReturnValue(policy);
   const options = {
@@ -34,7 +34,7 @@ it('uses construction policy before startup instead of inferring identity or rea
 it('applies the declared API-index guard before loading or starting an engine', async () => {
   vi.spyOn(construction, 'deriveBridgeConstruction').mockReturnValue({
     spot: false, demo: false, primaryCredentialsOnly: false,
-    payloadSigning: false, apiKeyIndexRequired: true, isolatedBookSubscriptions: false,
+    payloadSigning: false, apiKeyIndexRequired: true, isolatedBookSubscriptions: false, dispatchSigning:false,
   });
   const exchange = new RustEngineExchange('binance', { key: '', secret: '', apiKeyIndex: '256' }, new DefaultStore());
   running.push(exchange);

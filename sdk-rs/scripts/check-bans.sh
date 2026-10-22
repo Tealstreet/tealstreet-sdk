@@ -60,4 +60,8 @@ then
   status=1
 fi
 
+if ! python3 scripts/check-signing.test.py || ! python3 scripts/check-signing.py; then
+  status=1
+fi
+
 exit $status

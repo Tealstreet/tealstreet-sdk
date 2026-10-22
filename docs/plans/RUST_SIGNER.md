@@ -68,3 +68,49 @@ Exclusive core source window; #1707 may land first. After the core merges,
 `codex-5c57jl` and `codex-mxb4mq` migrate assigned families in parallel against
 its actual API/pin. The server-order memo and Aster profile rollback are held;
 no TS deletion/default flip or remote wire work is part of this core PR.
+
+
+## Reference API and cutover callers
+
+`engine::signing` defines `Signer`, `SignRequest`, `Operation`, `KeyRef` and
+closed `SignError` values. `SignStep` supplies venue canonicalization/insertion;
+`Cx::sign_http` / `send_signed` stage unsigned actions. `prepare_dispatch(Cx.now)`
+and `drain_actions` share one ordered, bounded dispatch service. The default local
+provider supports HMAC-SHA256/512, SHA256 and SHA256(secret-suffix); the remaining
+primitive vocabulary refuses explicitly until its concrete provider is added.
+Local immediate batches preserve replay action/timer ordering. Async batches have
+independent deadlines, ordered completion, freshness rechecks and late-reply fences.
+
+Native callers supply `Engine::set_signer`, `Host::with_signer`, or the trusted
+`FrameServer::add_venue_with_signer` registration. Raw JS hosts use
+`EngineHost(..., options: { signer })`; Workers deployments may supply
+`createSigner(state, env, venue) -> { signer, identities }`. Only refs enter
+`EngineOptions.signing`; the Workers command wire cannot supply provider callbacks.
+Unmigrated families reject these refs/providers rather than pretending to use them.
+
+Binance USD-M/PM/COIN-M/Spot high-level `ExchangeOptions` credential inputs remain
+a trusted setup adapter. `RustEngineExchange` extracts them before `BaseExchange`
+retains options, caches non-secret private/public construction metadata, and uses
+an opaque one-use `LocalSignerSetup`. The raw WASM constructor accepts optional
+argument 3, `signerSetupJson`, separately from generic engine-options JSON. It
+consumes the setup into a local provider and wipes owned Rust buffers, including
+on parse/refusal paths. JavaScript releases its references but cannot promise
+physical string zeroization. Custom WASM loaders must forward argument 3.
+
+**Required NX adoption:** worker/hosted bootstrap currently copies
+`exchange.options`, and signingHost caches keys from it. Provision the worker's
+provider through a separate trusted setup channel; generic retained options no
+longer carry credentials. Use public/signing-state metadata for old `options.key`
+checks. Provider callbacks remain local. Reload/CLI construction from saved account
+configuration remains a setup input. Legacy raw native/WASM credential input
+normalizes into this same provider path; remove that adapter before TS
+venue/reference deletion, after all cutover bootstrap callers migrate. This PR
+does not implement remote HTTP/WS signing or claim the pinned NX callers migrated.
+
+The ban in `scripts/check-bans.sh` freezes exact legacy HMAC/ed25519/secret source
+sites outside unmigrated sign modules; Binance's sign module is scanned too, with
+its existing test-only oracle sites frozen. New or duplicated sites fail CI, and
+negative controls cover both ordinary venue source and the migrated sign module.
+This is a migration guard for those patterns, not proof that every possible
+cryptographic primitive or secret spelling is detected. Family migrations remove
+their legacy entries as provider recipes replace eager signing.
