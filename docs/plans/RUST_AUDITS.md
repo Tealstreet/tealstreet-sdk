@@ -1818,3 +1818,25 @@ prove how that unanchored last overlaps, an explicit remaining evidence limit.
 This fixes one financial defect with multiple native RED controls, not a claim
 of new live captures or complete all-family fill-helper adoption. Orderly and
 the shared row-reporting extension remain next.
+
+## Orderly observed-average quote retention
+
+~~High: a uniquely delivered whole-growth direct Fill with no cumulative average
+(or average zero) stores a fabricated zero quote. A later average-priced suffix
+can be mispriced: cumulative1/last1/direct100 then cumulative2/average100 emits
+the second1@200 rather than1@100.~~ Original native assertions prove missing-
+average, zero-average and corrected-root-child instances of this one financial
+defect. Shared engine `prepare_observed_average` keeps unknown quote explicit and
+lets an admitted direct Fill establish only its exact whole new interval, from
+an already known prefix or the empty prefix. Inferred overflow is best-effort;
+supplied average-product overflow still rejects before effects.
+
+The Orderly adapter retains one native totals map with terminal-FIFO eviction,
+native identity precedence,
+observation-before-dedup, quiet forward observations, binary quantities, REST
+non-seeding, sparse freshness gates and late unique delivery. Missing cumulative
+still resolves to zero and never invents a prefix. Equal/regressed endpoints do
+not replace quote. A blind gap cannot infer a whole historical quote; the native
+arbitrary-last quote-delta quotient and its zero fallback remain deliberately
+unchanged. `Report::Last` remains strict. Native/root/helper controls are evidence
+for this repair, not live capture, new caller deployment or reporting closure.

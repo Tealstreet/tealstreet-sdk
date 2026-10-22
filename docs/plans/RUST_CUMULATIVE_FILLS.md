@@ -1179,3 +1179,29 @@ into root-only or stale sparse paths that never prepared a Fill. Positive last
 reports may deliver at equal/regressed endpoints under native pricing policy.
 Post-delivery enrichment only updates a live same-endpoint totals entry and
 never recreates an entry removed by native retention/root lifecycle effects.
+
+Orderly implementation checkpoint: additive `PreparedObservation` separates the
+strictly forward observation from the uniquely admitted delivery. The existing
+totals map stores `Cursor`; native financial calculations now call the shared
+operation. Inferred quote enrichment requires Binary arithmetic, exact whole
+growth, a known preceding quote/empty prefix and a unique positive direct Fill.
+Other arithmetic policies can prepare native deliveries but never infer a quote
+using a mismatched binary interval. No changes to `Report::Last`.
+
+The final21 native fixtures on exact original engine/Orderly source yield three
+assertion REDs (missing average, zero average, and the same defect in a corrected
+root child) and18 compatibility GREENs. Each RED observes1@200 rather than1@100;
+the corrected21 cases pass. Root rollback assertions pass on original code and
+remain compatibility controls, not a newly claimed root-atomicity defect.
+Seven focused engine controls cover observation/delivery separation, exact
+whole-growth qualification, known-prefix requirements, supplied-vs-inferred
+overflow, direct/last zero precedence, regressed/equal observations and the
+non-Binary inference boundary. Full current-head CI/replay proof is pending.
+
+Final focused verification passed851 engine/Orderly/Binance native tests, strict
+all-target Clippy, formatting/bans, root44 typecheck and28 lint (root cache hits).
+Both independent final source/test/caller reviews are clean. The native match
+identity fixture uses actual `match_id`, including a repeated higher endpoint;
+its final exact-original rerun preserves3 assertion REDs/18 compatibility GREENs.
+The final native fixture SHA256 is
+`f0caeffeb5bcce22277f2a636af1706c36c159c4882b8124d9b7cce10f2d09ca`.

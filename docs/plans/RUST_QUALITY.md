@@ -378,3 +378,16 @@ partial healthy peers and failed/stale/lookup nonpublication. Financial progress
 is separate from Store display, terminal IDs and execution-ID retention. Native
 bounded retention and missing-endpoint ambiguity remain documented; this is not
 new live/provenance evidence or closure of Orderly/reporting fan-out.
+
+## Orderly observed-average execution adoption
+
+Orderly's selected-last/average derivation now uses the additive engine
+`prepare_observed_average` operation. A separate observation may commit before
+native dedup; inferred quote may enrich only a live same-endpoint cursor after
+unique positive Fill delivery. Original-source public price assertions expose
+the missing/zero-average quote-poisoning defect; compatibility controls preserve
+native arbitrary-last quotient pricing, gaps, quiet/duplicate observations,
+field presence, overflow, REST non-seeding, late identity and bounded eviction.
+Whole-growth inference is Binary-only and best-effort, with supplied evidence
+validated before effects. Shared row-reporting policy/fan-out remains separate;
+this does not claim new live captures or universal financial contract coverage.
