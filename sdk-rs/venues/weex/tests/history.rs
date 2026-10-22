@@ -102,6 +102,191 @@ fn income(from: Option<f64>, to: Option<f64>) -> Query {
         limit: Some(1),
     }
 }
+
+fn owned_income_failure(actions: &[Action], command: u32) {
+    let errors: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1, "first failure must terminate exactly once");
+    assert_eq!(errors[0].kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert!(
+        !actions.iter().any(
+            |a| matches!(a,Action::Notice(Notice::CommandDone{command:id,..}) if *id==command)
+        )
+    );
+    assert!(!actions.iter().any(|a| matches!(a,Action::Notice(Notice::Event(e)) if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+    );
+}
+fn owned_income_partial(actions: &[Action], count: usize) {
+    let markers: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| match a {
+            Action::Notice(Notice::Event(e))
+                if e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some((i, e))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(markers.len(), 1, "one final command-owned coverage marker");
+    assert_eq!(
+        markers[0].1.fields,
+        vec![("command", safe_cex_engine::Value::Num(7.0))]
+    );
+    assert_eq!(markers[0].1.level, safe_cex_engine::Level::Warn);
+    let done = actions
+        .iter()
+        .position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+        .expect("partial success");
+    assert!(markers[0].0 < done);
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&result(actions).unwrap())
+            .unwrap()
+            .len(),
+        count
+    );
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 7, .. })
+            | Action::Http(_)
+            | Action::SetTimer { .. }
+    )));
+}
+fn failed_income_page(e: &mut Engine<WeexFutures>, req: HttpRequest, mode: u8) -> Vec<Action> {
+    match mode {
+        0 => e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: req.id,
+                error: "page reset",
+            },
+        ),
+        1 => e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: req.id,
+                response: Response {
+                    status: 503,
+                    headers: "",
+                    body: "unavailable",
+                },
+            },
+        ),
+        2 => {
+            return response(
+                e,
+                NOW,
+                req.id,
+                &format!(
+                    r#"{{"items":[{},{{"income":"bad"}}]}}"#,
+                    bill(999, NOW + 999.0)
+                ),
+            );
+        }
+        3 => return response(e, NOW, req.id, r#"{"items":null}"#),
+        _ => unreachable!(),
+    }
+    e.drain_actions().collect()
+}
+fn full_income_page() -> String {
+    format!(
+        r#"{{"items":[{}]}}"#,
+        (0..100)
+            .map(|i| bill(i + 1, NOW + i as f64))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+#[test]
+fn owned_income_first_failure_rejects_without_marker_or_continuation() {
+    for ranged in [false, true] {
+        for mode in 0..4 {
+            let mut e = engine();
+            e.set_log_level(safe_cex_engine::Level::Error);
+            let actions = command(
+                &mut e,
+                if ranged {
+                    income(Some(NOW), Some(NOW + 1000.0))
+                } else {
+                    income(None, None)
+                },
+            );
+            let req = request(&actions, "/account/income");
+            owned_income_failure(&failed_income_page(&mut e, req, mode), 7);
+        }
+    }
+}
+#[test]
+fn owned_income_later_failure_returns_accepted_page_without_failed_prefix() {
+    for mode in 0..4 {
+        let mut e = engine();
+        let mut now = NOW;
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let actions = command(&mut e, income(Some(NOW), Some(NOW + 1000.0)));
+        let req = request(&actions, "/account/income");
+        let actions = response(&mut e, now, req.id, &full_income_page());
+        let actions = advance(&mut e, &mut now, actions);
+        let req = request(&actions, "/account/income");
+        let actions = failed_income_page(&mut e, req, mode);
+        owned_income_partial(&actions, 100);
+        assert!(!result(&actions).unwrap().contains("999"));
+    }
+}
+#[test]
+fn owned_income_empty_prior_chunk_does_not_authorize_partial_success() {
+    let mut e = engine();
+    let mut now = NOW;
+    let actions = command(&mut e, income(Some(NOW), Some(NOW + 200.0 * DAY)));
+    let req = request(&actions, "/account/income");
+    let actions = response(&mut e, now, req.id, r#"{"items":[]}"#);
+    let actions = advance(&mut e, &mut now, actions);
+    let actions = advance(&mut e, &mut now, actions);
+    let req = request(&actions, "/account/income");
+    owned_income_failure(&failed_income_page(&mut e, req, 0), 7);
+}
+#[test]
+fn owned_income_cursor_gap_is_emitted_once_at_success_only() {
+    for empty in [false, true] {
+        let mut e = engine();
+        let mut now = NOW;
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let actions = command(&mut e, income(Some(NOW), Some(NOW + 1000.0)));
+        let req = request(&actions, "/account/income");
+        let body = format!(
+            r#"{{"items":[{}],"hasNextPage":true}}"#,
+            if empty {
+                String::new()
+            } else {
+                bill(1, NOW + 1.0)
+            }
+        );
+        let mut actions = response(&mut e, now, req.id, &body);
+        assert!(!actions.iter().any(|a|matches!(a,Action::Notice(Notice::Event(v)) if v.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)),"coverage publishes with completion only");
+        for _ in 0..3 {
+            if actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+            {
+                break;
+            }
+            actions = advance(&mut e, &mut now, actions);
+        }
+        owned_income_partial(&actions, usize::from(!empty));
+    }
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Execution {
