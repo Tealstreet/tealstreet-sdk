@@ -190,3 +190,11 @@ touched strict all-target Clippy, fmt, bans and doc links pass. Four original-
 source regressions fail at their intended assertions (first/malformed + later
 failure per Bybit/OKX), then corrected closed-position suites pass. Source merge
 still waits for #1711 priority release, full final-head CI and a separate guard.
+
+Final windowed-slice integration includes actual row phase2 #1711
+`bd1a69072c7`, CI bootstrap #1713 `04bec2ac52f` and clock #1709
+`6f815755c37`. All seven reviewed history source/test files remain byte-identical;
+incoming source and plan changes are retained. The caller refresh also records
+#1709's retired hostClock/bit14 and shared clock ingress, superseding historical
+venue opt-ins. Both integration reviews are clean; all1,225 focused native tests,
+strict touched-crate Clippy, formatting, bans and touched links pass again.
