@@ -753,3 +753,24 @@ cloning or reconstructing the owner. Include rest.rs in owned scope. No shared
 signing/dispatch change is introduced. Native preparation and CFM-family tests
 may use existing cfg(test) private access, never a production mutator. Rows lane
 confirmed no current Coinbase history/request-builder ownership conflict.
+
+Coinbase implementation receipt: original12 history preservation tests pass;
+regression-only ca876aa0aac adds nine assertion-RED integration cases and a
+CFM-to-Spot original-RED control. Expanded controls against exact original native
+source produce10PASS/12 assertionRED; corrected bytes restored by hash in finally.
+The controls cover typed first/zero-row failure, accepted-only failed-prefix
+exclusion, command isolation at Error-only logging, filtered fingerprint conflict,
+native continuation/proof refusal, queued signing refusal, duplicate-only changing
+cursors and the50-page cap. Corrected final22 history controls and native family
+control pass; full final Coinbase187 tests pass. Earlier broad engine/Coinbase/
+Binance833 controls pass; final adapter strict all-target Clippy/fmt/signing bans,
+four touched-plan link checks and diff checks pass. Native owner is boxed to
+preserve bounded Pending layout without changing lib.rs or lint allowances.
+
+Plan/correctness/adversarial reviews CLEAN after one caught mismatch: native Page
+metadata deserialization must reject strictly, whereas malformed whole-response
+stream/decode failure retains ordinary accepted-page recovery. Explicit controls
+now prove that split. Shared default CursorWalk does not enable a new no-fresh
+termination policy; duplicate-only changing cursors reach the existing family cap.
+No engine source/API added. Full exact-head CI/replay/actual build predecessors
+remain pending; queue keeps actual1728 then KCS1753 ahead of this source slice.

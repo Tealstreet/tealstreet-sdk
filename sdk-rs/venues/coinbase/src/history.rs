@@ -1,15 +1,16 @@
 //! Advanced Trade history reads; their JSON results never enter account state.
 use crate::{Coinbase, Pending, ProductKind, account, account_wire::Decimal, public::ws_symbol};
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 const MAX_OUTPUT: usize = 1000;
-/// Pages per product family before a read with a pending cursor fails.
+/// Pages per product family before a pending cursor records incomplete coverage.
 const MAX_PAGES: u32 = 50;
 const MAX_TIME: f64 = 253402300799999.0;
 #[derive(Default)]
@@ -32,10 +33,10 @@ pub struct Request {
     to: Option<f64>,
     limit: usize,
     page_items: usize,
-    walk: CursorWalk,
+    owner: Box<CursorHistory<Row>>,
     families: VecDeque<ProductKind>,
     family: ProductKind,
-    family_rows: usize,
+    family_start: usize,
     rows: Vec<Row>,
     ids: HashMap<String, String>,
     invalid: Option<String>,
@@ -295,10 +296,15 @@ impl Coinbase {
                 to,
                 limit,
                 page_items: 0,
-                walk: CursorWalk::new(MAX_PAGES),
+                owner: Box::new(CursorHistory::new(
+                    Completion::new(command),
+                    CursorWalk::new(MAX_PAGES),
+                    |_| "Coinbase history cursor repeated or page limit exceeded".into(),
+                    |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
+                )),
                 families,
                 family,
-                family_rows: 0,
+                family_start: 0,
                 rows: vec![],
                 ids: HashMap::new(),
                 invalid: None,
@@ -399,12 +405,22 @@ impl Coinbase {
                     self.request(cx, Method::Get, path, None, Some(at), Pending::History(req))
                 {
                     self.history.active.remove(&command);
-                    cx.fail(command, e);
+                    cx.fail(
+                        command,
+                        VenueError::new(e)
+                            .kind(ErrorKind::Internal)
+                            .outcome(Outcome::NotSent),
+                    );
                 }
             }
             Err(e) => {
                 self.history.active.remove(&command);
-                cx.fail(command, e);
+                req.owner.reject(
+                    cx,
+                    VenueError::new(e)
+                        .kind(ErrorKind::Internal)
+                        .outcome(Outcome::NotSent),
+                );
             }
         }
     }
@@ -588,9 +604,8 @@ impl Coinbase {
             if req.from.is_some_and(|from| time < from) || req.to.is_some_and(|to| time > to) {
                 return Ok(());
             }
-            req.family_rows += 1;
             req.rows.push(row);
-            if req.rows.len() > MAX_OUTPUT * 2 {
+            if req.owner.accepted_len() + req.rows.len() > MAX_OUTPUT * 2 {
                 return Err("Coinbase history result exceeds limit".into());
             }
             Ok(())
@@ -629,12 +644,14 @@ impl Coinbase {
         let page = match serde_json::from_str::<Page>(response.body) {
             Ok(p) => p,
             Err(e) => {
-                self.history_failed(cx, req, &e.to_string());
+                // Native continuation/proof metadata is a policy boundary;
+                // a wrong type cannot be followed, even after admitted rows.
+                self.history_rejected(cx, req, &e.to_string());
                 return;
             }
         };
         if page.proof_token_required {
-            self.history_failed(
+            self.history_rejected(
                 cx,
                 req,
                 "Coinbase history requires an additional account proof token",
@@ -647,21 +664,34 @@ impl Coinbase {
             } else {
                 req.page_items > 0 && !page.cursor.is_empty()
             };
-        let want_more = req.family_rows < req.limit;
+        let want_more = req.owner.accepted_len() - req.family_start + req.rows.len() < req.limit;
         // Orders announce more pages with has_next; that flag without a usable
         // cursor cannot be followed.
         if more && want_more && (page.cursor.is_empty() || page.cursor.len() > 2048) {
-            self.history_failed(
+            self.history_rejected(
                 cx,
                 req,
                 "Coinbase history cursor repeated or page limit exceeded",
             );
             return;
         }
-        let step = req.walk.advance(CursorPage {
+        // The entire response passed native validation. Only now may its
+        // mapped rows affect shared identity membership and accepted coverage.
+        let fresh = req.rows.len();
+        for row in req.rows.drain(..) {
+            let key = match &row {
+                Row::Fill(r) => format!("{}:{}", r.symbol, r.id),
+                Row::Order(r) => r.id.clone(),
+                Row::Trade(r) => r.id.clone(),
+            };
+            if req.owner.fresh(key) {
+                req.owner.stage(row);
+            }
+        }
+        let step = req.owner.advance(CursorPage {
             next: more.then_some(page.cursor),
             rows: req.page_items,
-            fresh: req.page_items,
+            fresh,
             want_more,
         });
         match step {
@@ -671,11 +701,7 @@ impl Coinbase {
                 return;
             }
             CursorStep::Stalled(_) => {
-                self.history_failed(
-                    cx,
-                    req,
-                    "Coinbase history cursor repeated or page limit exceeded",
-                );
+                self.history_finish(cx, req, Ok(()));
                 return;
             }
             CursorStep::Done => {}
@@ -683,23 +709,44 @@ impl Coinbase {
         if let Some(next) = req.families.pop_front() {
             req.family = next;
             req.page_items = 0;
-            req.family_rows = 0;
-            req.walk.restart();
+            req.family_start = req.owner.accepted_len();
+            if !req.owner.restart_stage() {
+                self.history_rejected(cx, req, "Coinbase history stage cannot restart");
+                return;
+            }
             self.history_read(cx, req, None);
             return;
         }
-        req.rows
-            .sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
-        req.rows.truncate(req.limit);
+        self.history_finish(cx, req, Ok(()));
+    }
+    fn history_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        req: Request,
+        result: Result<(), VenueError>,
+    ) {
         self.history.active.remove(&req.command);
-        match serde_json::to_string(&req.rows).map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(req.command, data),
-            Err(error) => cx.fail(req.command, error),
-        };
+        req.owner.finish_with(cx, result, |mut rows| {
+            rows.sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
+            rows.truncate(req.limit);
+            serde_json::to_string(&rows).map_err(|e| VenueError::new(e.to_string()))
+        });
     }
     pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, req: Request, error: &str) {
+        self.history_finish(cx, req, Err(VenueError::new(error)));
+    }
+    fn history_rejected(&mut self, cx: &mut Cx<'_, Pending>, req: Request, error: &str) {
         self.history.active.remove(&req.command);
-        cx.fail(req.command, error);
+        req.owner.reject(cx, VenueError::new(error));
+    }
+    pub(crate) fn history_unsent(&mut self, cx: &mut Cx<'_, Pending>, req: Request, error: &str) {
+        self.history.active.remove(&req.command);
+        req.owner.reject(
+            cx,
+            VenueError::new(error)
+                .kind(ErrorKind::Internal)
+                .outcome(Outcome::NotSent),
+        );
     }
 }
 fn history_symbol(cx: &Cx<'_, Pending>, product: &str, requested: Option<&str>) -> String {

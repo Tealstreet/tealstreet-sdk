@@ -595,7 +595,7 @@ fn later_failed_pages_never_publish_their_valid_prefix() {
         let r = d.request();
         match mode {
             0 => d.reply(r, 200, &format!(r#"{{"fills":[{b},{{}}],"cursor":""}}"#)),
-            1 => d.reply(r, 200, &format!(r#"{{"fills":[{b}],"cursor":null}}"#)),
+            1 => d.reply(r, 200, &format!(r#"{{"fills":[{b}],"cursor":"next" "#)),
             2 => d.reply(r, 503, &format!(r#"{{"fills":[{b}],"cursor":""}}"#)),
             _ => d.e.handle(
                 d.now,
@@ -742,4 +742,84 @@ fn concurrent_queries_bind_only_the_incomplete_owner_at_error_level() {
     assert_partial(&mut d, &["a"]);
     assert!(d.completed.contains(&(88, true)));
     assert_eq!(d.completed.iter().filter(|(id, _)| *id == 77).count(), 1);
+}
+
+#[test]
+fn malformed_continuation_metadata_rejects_even_after_accepted_rows() {
+    for tail in [
+        r#""cursor":null"#.to_string(),
+        format!(r#""cursor":"{}""#, "x".repeat(2049)),
+    ] {
+        let mut d = Driver::new(true, "BTC-USD", false);
+        d.query(fills(3));
+        let r = d.request();
+        let a = fill("a", "100", "1", false, "2024-01-01T00:00:00Z");
+        d.reply(r, 200, &format!(r#"{{"fills":[{a}],"cursor":"next"}}"#));
+        let r = d.request();
+        let prefix = fill("bad-prefix", "100", "1", false, "2024-01-01T00:00:01Z");
+        d.reply(r, 200, &format!(r#"{{"fills":[{prefix}],{tail}}}"#));
+        assert!(d.result().is_err());
+        assert_eq!(
+            d.error.unwrap().kind,
+            Some(safe_cex_engine::ErrorKind::Internal)
+        );
+        assert!(
+            !d.events
+                .iter()
+                .any(|e| e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+        );
+    }
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.query(history("BTC-USD"));
+    let r = d.request();
+    d.reply(
+        r,
+        200,
+        &format!(
+            r#"{{"orders":[{}],"has_next":true,"cursor":"next"}}"#,
+            order("BTC-USD", "0", "")
+        ),
+    );
+    let r = d.request();
+    d.reply(r, 200, r#"{"orders":[],"has_next":true}"#);
+    assert!(d.result().is_err());
+    assert_eq!(
+        d.error.unwrap().kind,
+        Some(safe_cex_engine::ErrorKind::Internal)
+    );
+    assert!(
+        !d.events
+            .iter()
+            .any(|e| e.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+    );
+}
+
+#[test]
+fn filtered_fingerprint_conflict_cannot_hide_behind_shared_deduplication() {
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.query(fills(4));
+    let a = fill("a", "100", "1", false, "2024-01-01T00:00:00Z");
+    let filtered = fill("filtered", "100", "1", false, "2023-12-31T23:59:00Z");
+    let r = d.request();
+    d.reply(
+        r,
+        200,
+        &format!(r#"{{"fills":[{filtered},{a}],"cursor":"next"}}"#),
+    );
+    let r = d.request();
+    let conflict = fill("filtered", "101", "1", false, "2024-01-01T00:00:00Z");
+    d.reply(r, 200, &format!(r#"{{"fills":[{conflict}],"cursor":""}}"#));
+    assert_partial(&mut d, &["a"]);
+}
+
+#[test]
+fn duplicate_only_changing_cursors_continue_to_native_family_budget() {
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.query(fills(3));
+    let a = fill("a", "100", "1", false, "2024-01-01T00:00:00Z");
+    for i in 0..50 {
+        let r = d.request();
+        d.reply(r, 200, &format!(r#"{{"fills":[{a}],"cursor":"next-{i}"}}"#));
+    }
+    assert_partial(&mut d, &["a"]);
 }

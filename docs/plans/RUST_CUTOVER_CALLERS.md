@@ -3441,3 +3441,35 @@ not change. B11's request-scoped incomplete-query ingestion/coverage and typed
 rejection handling remain required; this slice adds no mandatory NX handler and
 does not close the remaining history fan-out.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+### Coinbase Advanced Trade histories: one accepted-page owner
+
+Fills, historical orders and public trades now use the engine CursorHistory
+owner. The same owner spans CFM then Spot family reads. A transport/HTTP or
+whole-response decode/mapping failure before any mapped rows are admitted
+rejects typed; after admitted rows, an actual failed page returns only earlier
+accepted pages with one command-owned Warn history.incomplete before successful
+completion, including at Error-only logging. An empty or entirely filtered
+earlier page cannot authorize partial recovery. A conflicting native identity
+invalidates the entire page before shared dedupe, even when its earlier copy
+was filtered. The failed page's prefix never enters results. Repeated cursors
+and the 50-page per-family cap now return owned incomplete coverage instead of
+discarding accepted history.
+
+Native continuation/proof metadata refusals stay strict: wrong typed fields,
+unusable continuing cursors and proof_token_required reject even after admitted
+rows. Both immediate request preparation refusal and the later queued signing
+refusal are strict internal/notSent; ordinary legacy stream/transport failures
+use the shared internal fallback because the callback also carries parse errors.
+These runtime errors previously had no kind, so caller error-kind telemetry
+becomes explicit. Query admission errors keep their existing classification.
+
+Native endpoints/family order, cursor escaping, immediate requests subject to the
+existing REST pacing, per-family output limits, fingerprint validation before
+UTC filtering, CFM contract units, public maker-side inversion, stable timestamp
+sort and final global truncation remain. No SDK query argument or row shape
+change, no Starbase wiring and no new mandatory NX handler; B11 request-scoped
+incomplete-query ingestion/coverage and typed rejection handling remain required.
+This adoption does not close the remaining history fan-out or prove live/deployed
+completeness. [Owner contract and scope](RUST_OWNED_HISTORY.md).

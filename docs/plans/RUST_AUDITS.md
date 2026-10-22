@@ -1407,6 +1407,13 @@ Normal inputs send the same requests as TS; the risk is resilience.
   can mislabel value.
 
 ### Coinbase (already defaults to Rust)
+- Owned-history follow-up: Advanced Trade fills/orders/public trades now share
+  the engine CursorHistory owner, including CFM-to-Spot reads. Later actual
+  page failures retain only admitted pages with command-owned incomplete coverage;
+  zero-admitted failures reject typed, while native continuation/proof and
+  queued signing refusals remain strict. Native mapping, requests and account
+  state are unchanged; Starbase and NX B11 coverage are not closed. See
+  [RUST_OWNED_HISTORY.md](RUST_OWNED_HISTORY.md).
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
   site) rejects every snapshot and blocks all trading incl. cancel
   (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed
