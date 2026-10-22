@@ -30,8 +30,8 @@ const msgpackValue = (value) => {
 };
 const l1Actions = new Set(['order', 'cancel', 'cancelByCloid', 'modify', 'batchModify',
   'updateLeverage', 'updateIsolatedMargin', 'scheduleCancel']);
-const agentInfo = new Set(['userRole', 'userFees']);
-const accountInfo = new Set(['clearinghouseState', 'spotClearinghouseState', 'frontendOpenOrders',
+const agentInfo = new Set(['userRole']);
+const accountInfo = new Set(['userFees', 'clearinghouseState', 'spotClearinghouseState', 'frontendOpenOrders',
   'openOrders', 'userAbstraction', 'maxBuilderFee', 'userFills', 'userFillsByTime',
   'historicalOrders', 'userFunding', 'userNonFundingLedgerUpdates', 'portfolio',
   'userRateLimit', 'activeAssetData', 'subAccounts']);

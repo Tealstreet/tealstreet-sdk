@@ -81,16 +81,32 @@ test('endpoint/network identity is bound independently from a valid signature', 
 test('private info binds account, vault and agent subjects; metadata stays unsigned', () => {
   const verify = validator({ applicationId: VAULT });
   for (const kind of ['metaAndAssetCtxs', 'perpDexs', 'spotMetaAndAssetCtxs']) verify(info(kind));
-  for (const kind of ['clearinghouseState', 'frontendOpenOrders', 'spotClearinghouseState', 'userAbstraction', 'maxBuilderFee']) {
+  for (const kind of ['userFees', 'clearinghouseState', 'frontendOpenOrders', 'spotClearinghouseState', 'userAbstraction', 'maxBuilderFee']) {
     verify(info(kind, VAULT));
     assert.throws(() => verify(info(kind, options.key)), /identity mismatch/);
     assert.throws(() => verify(info(kind)), /identity mismatch/);
   }
-  for (const kind of ['userRole', 'userFees']) {
+  for (const kind of ['userRole']) {
     verify(info(kind, options.key));
     assert.throws(() => verify(info(kind, VAULT)), /identity mismatch/);
   }
-  validator({ vault: VAULT })(info('clearinghouseState', VAULT));
+  const vaultAccount = validator({ vault: VAULT });
+  vaultAccount(info('clearinghouseState', VAULT));
+  vaultAccount(info('userFees', VAULT));
+  assert.throws(() => vaultAccount(info('userFees', options.key)), /identity mismatch/);
+});
+
+test('Tape fee reads bind distinct signer, master and vault subjects independently', () => {
+  const vault = `0x${'22'.repeat(20)}`;
+  for (const [config, expected] of [[{ ...options, applicationId: VAULT }, VAULT],
+    [{ ...options, applicationId: VAULT, vault }, vault]]) {
+    const record = { t: 0, type: 'http', method: 'POST', url: info('userFees', expected).url,
+      requestBody: info('userFees', expected).body, status: 200, body: '{}' };
+    const tape = new Tape([record], venueOf('hyperliquid'), true, 30000, undefined, [], config);
+    assert.throws(() => tape.respond(record.method, record.url, info('userFees', options.key).body), /identity mismatch/);
+    if (config.vault) assert.throws(() => tape.respond(record.method, record.url, info('userFees', VAULT).body), /identity mismatch/);
+    assert.equal(tape.respond(record.method, record.url, record.requestBody).status, 200);
+  }
 });
 
 test('public anonymous fee probe preserves only the recorded 422 fallback', () => {

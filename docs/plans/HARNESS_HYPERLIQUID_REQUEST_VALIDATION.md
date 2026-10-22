@@ -15,7 +15,8 @@ existing verifier and production SDK/Rust signing stay intact.
    Agent signer with generic crypto primitives. Do not call production signing
    helpers or derive expected values from the candidate output. Bind configured
    endpoint/network, public signer, vault and private info subjects; account reads
-   and agent-fee reads have different subjects. Preserve unsigned public metadata.
+   and role-discovery reads have different subjects; userFees belongs to the
+   trading account, not its signing agent. Preserve unsigned public metadata.
    Keep crypto loading lazy to preserve public/performance cold-load workloads.
 2. Validate fields that normalization would otherwise erase: signature/nonce,
    generated cloid representation/uniqueness and caller-ID ownership. Preserve
@@ -92,7 +93,7 @@ bytes remain unchanged. Request validation certifies the exercised authenticatio
 and intent contract, not full action-schema coverage, private parity or live
 behavior. Existing six/eight private account differences remain strict FAILs.
 
-Focused protocol/clock tests: 29 pass. Removing only the catalog factory makes
+Focused protocol/clock tests: 30 pass. Removing only the catalog factory makes
 the actual Tape invalid-signature regression fail with "Missing expected
 exception": the old path consumed the ACK. Cross-action nonce reuse, eviction/out-of-order values, time-stage poisoning, missing/changed
 references, caller ownership and uint64 tamper controls pass with the factory.
@@ -106,3 +107,15 @@ public-data-only, no-wallet rejection/fallback: matched status must remain422;
 a fabricated200 and every private empty-subject read reject. This is not an
 authenticated account read. One diagnostic TS correctness replay identified the
 failure; no local public timing or release build was run.
+
+Late independent-source audit corrected an incorrect agent-fee assumption before
+merge. Official info-endpoint rules bind userFees to the trading account; only
+userRole uses the signing key for this connector's discovery flow. Distinct
+signer/master/vault controls now reject signer-based fee queries. The equal-key
+private fixtures do not expose this configuration gap and their bytes stay
+unchanged. Both production implementations still select options.key for fees
+(Rust account.rs:200-203; TS hyperliquid.exchange.ts:1465-1466); reported separately,
+with no production fix in this harness PR. CI39696883317 evidence is historical
+for the pre-correction head; current-head CI/proof must refresh before merge.
+Sources: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint
+and https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees .
