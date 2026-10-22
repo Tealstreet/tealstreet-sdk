@@ -702,3 +702,15 @@ must retry the atomic native-fact write with empty reports, preserving the nativ
 classification and all partial IDs; it must never drop the fact or panic because
 an oversized diagnostic was supplied. Test this fallback separately from stale
 provenance errors, which must never gain a second authority or numeric fallback.
+
+
+Prepared fixture checkpoint: the shared test-only executor is adopted by both
+Binance and actual Bybit drivers; their unsupported-action guards remain. The
+initial three-crate suite passed 1,078 tests across 54 suites. Review then caught
+a delayed-drain clock gap; its exact stamp control failed before correction and
+passes after prepare_dispatch(now) precedes the initial drain. Relevant restored
+checks include Binance security plus 15 Bybit dispatch-signing/protocol-clock
+tests, shared signed/denied/order controls and strict three-crate Clippy. A compiled
+queue-order fault fails the exact progress/physical-send ordering assertion;
+restoration passes. Independent review CLEAN / architecture No. These fake routes
+do not claim asynchronous transport/proxy execution or full venue replay proof.

@@ -2642,6 +2642,143 @@ mod tests {
     }
 
     #[test]
+    fn prepared_fixture_claims_signed_packets_and_preserves_progress_before_sibling_sends() {
+        struct Immediate;
+        impl crate::signing::Signer for Immediate {
+            fn sign(&self, _: crate::signing::SignRequest) -> crate::signing::SignFuture {
+                panic!("immediate fixture cannot park a provider");
+            }
+            fn immediate(&self) -> bool {
+                true
+            }
+            fn sign_ready(
+                &self,
+                work: &crate::signing::SignRequest,
+            ) -> Option<Result<crate::signing::SignResult, crate::signing::SignError>> {
+                Some(Ok(crate::signing::SignResult::new(
+                    vec![b"value".to_vec()],
+                    work.receipt,
+                )))
+            }
+        }
+        // Already queued legacy signing must use the same supplied drain time,
+        // rather than the last engine event's stale dispatch clock.
+        {
+            let mut engine = crate::test_support::seeded_engine(Probe::default());
+            engine
+                .set_signer(Some(std::sync::Arc::new(Immediate)))
+                .unwrap();
+            engine.start(0.);
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 100,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            let request = cx.request(
+                Method::Get,
+                "https://venue.test/read".into(),
+                vec![],
+                None,
+                Pending(context),
+            );
+            cx.sign_http(request, Box::new(Recipe));
+            let actions = crate::test_support::prepared_actions(&mut engine, 9.);
+            assert!(
+                actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(http) if http.url.ends_with("stamp=9"))),
+                "queued legacy signing must use the fixture drain clock"
+            );
+        }
+        for deny in [false, true] {
+            let mut engine = crate::test_support::seeded_engine(Probe {
+                deny,
+                ..Probe::default()
+            });
+            engine
+                .set_signer(Some(std::sync::Arc::new(Immediate)))
+                .unwrap();
+            engine.start(0.);
+            for command in [7, 8] {
+                Cx {
+                    now: 0.,
+                    store: &mut engine.store,
+                    io: &mut engine.io,
+                }
+                .command_progress(
+                    command,
+                    vec![crate::model::OrderIdentityReceipt {
+                        symbol: "X".into(),
+                        kind: crate::model::OrderIdentityKind::ClientOrderId,
+                        identity: format!("intent-{command}"),
+                    }],
+                );
+                queue_mutation(&mut engine, command, 0., true);
+            }
+            let actions = crate::test_support::prepared_actions(&mut engine, 1.);
+            let released: Vec<_> = actions
+                .iter()
+                .enumerate()
+                .filter_map(|(index, a)| match a {
+                    Action::Http(http) => {
+                        assert_eq!(
+                            http.signer_headers,
+                            [("x-credential".into(), "value".into())]
+                        );
+                        assert!(http.url.ends_with("stamp=1"));
+                        Some(index)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(released.len(), if deny { 0 } else { 2 });
+            assert!(
+                actions
+                    .iter()
+                    .all(|a| !matches!(a, Action::ManagedHttp(_) | Action::Sign { .. }))
+            );
+            if !deny {
+                let first = actions
+                    .iter()
+                    .position(|a| {
+                        matches!(
+                            a,
+                            Action::Notice(Notice::CommandProgress { command: 7, .. })
+                        )
+                    })
+                    .unwrap();
+                let second = actions
+                    .iter()
+                    .position(|a| {
+                        matches!(
+                            a,
+                            Action::Notice(Notice::CommandProgress { command: 8, .. })
+                        )
+                    })
+                    .unwrap();
+                assert!(first < released[0] && released[0] < second && second < released[1]);
+                assert_eq!(engine.venue.receipts, 2);
+            } else {
+                assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(crate::Outcome::NotSent))).count(), 2);
+                assert_eq!(engine.venue.releases.len(), 2);
+                assert_eq!(engine.venue.receipts, 0);
+            }
+        }
+    }
+
+    #[test]
     fn default_venue_without_reconciliation_codec_cannot_release_a_managed_mutation() {
         // ProbeVenue deliberately does not override the trait capture hook.
         let venue = crate::test_support::ProbeVenue::new(Probe::default(), |_, cx| {

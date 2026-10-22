@@ -46,6 +46,93 @@ pub fn http_requests<V: Venue>(engine: &mut Engine<V>) -> Vec<HttpRequest> {
         .collect()
 }
 
+/// Immediate fake routes for native venue fixtures. Physical HTTP is returned
+/// only after prepare, bind and the engine's final synchronous release claim.
+/// Delayed pacing/routes and delegated signing deliberately remain unsupported.
+pub fn prepared_actions<V: Venue>(engine: &mut Engine<V>, now: f64) -> Vec<Action> {
+    use crate::request_context::{Claim, HttpAction, Prepared};
+    use std::collections::{HashMap, VecDeque};
+
+    engine.prepare_dispatch(now);
+    let mut queue = VecDeque::from(engine.drain_actions().collect::<Vec<_>>());
+    let mut resources = HashMap::new();
+    let mut actions = Vec::new();
+    let mut count = 0;
+    while let Some(action) = queue.pop_front() {
+        count += 1;
+        assert!(
+            count <= 65_536,
+            "prepared fixture action loop exceeded its bound"
+        );
+        let Action::ManagedHttp(action) = action else {
+            actions.push(action);
+            continue;
+        };
+        match *action {
+            HttpAction::Prepare {
+                preparation,
+                request,
+                ..
+            } => {
+                if !engine.http_preparation_pending(preparation) {
+                    continue;
+                }
+                assert_eq!(request.id, preparation.attempt().request);
+                let id = u64::from(request.id.0);
+                assert!(
+                    resources.insert(request.id, (preparation, id)).is_none(),
+                    "fixture route replaced without cancellation"
+                );
+                engine.http_prepared(
+                    now,
+                    preparation,
+                    Prepared {
+                        id,
+                        expires_at: None,
+                    },
+                );
+            }
+            HttpAction::Bind {
+                preparation,
+                permit,
+                request,
+            } => {
+                assert_eq!(
+                    resources.remove(&request.id),
+                    Some((preparation, permit.prepared_id())),
+                    "fixture bind needs its exact prepared route"
+                );
+                match engine.claim_http(now, permit) {
+                    Ok(Claim::Released(_)) => actions.push(Action::Http(request)),
+                    Ok(Claim::WaitUntil(_)) => {
+                        panic!("delayed prepared fixture pacing is unsupported")
+                    }
+                    Err(_) => {} // Engine publishes the typed preparation failure/reprepare.
+                }
+            }
+            HttpAction::Cancel { preparation, .. } => {
+                let request = preparation.attempt().request;
+                if resources
+                    .get(&request)
+                    .is_some_and(|(token, _)| *token == preparation)
+                {
+                    resources.remove(&request);
+                }
+            }
+        }
+        // Preserve progress/receipt order at each handoff, rather than moving
+        // an earlier packet behind all later sibling actions.
+        for action in engine.drain_actions().collect::<Vec<_>>().into_iter().rev() {
+            queue.push_front(action);
+        }
+    }
+    assert!(
+        resources.is_empty(),
+        "parked external signing is unsupported by the immediate fixture"
+    );
+    actions
+}
+
 /// Explicit fixture injection for BOTH identity and signing. Never a production default.
 pub fn seeded_entropy(seed: u64) -> crate::entropy::Entropy {
     fn source(mut state: u64) -> crate::entropy::Fill {
