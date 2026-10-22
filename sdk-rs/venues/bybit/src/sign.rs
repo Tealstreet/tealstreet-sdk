@@ -29,7 +29,7 @@ impl Credentials {
         window: Option<u32>,
     ) -> Vec<(&'static str, String)> {
         let window = window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS);
-        let timestamp = num::format(timestamp_ms.floor());
+        let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(timestamp_ms));
         let signed = format!("{timestamp}{}{window}{payload}", self.key);
         let signature = hmac_sha256(self.secret.as_bytes(), signed.as_bytes(), Encoding::Hex);
         vec![
@@ -44,7 +44,9 @@ impl Credentials {
 
     /// `{"op":"auth","args":[key, expires, HMAC("GET/realtime" + expires)]}`.
     pub fn ws_auth(&self, now_ms: f64) -> String {
-        let expires = num::format((now_ms + WS_AUTH_EXPIRY_MS).floor());
+        let expires = num::format(safe_cex_engine::time::wire_stamp_ms(
+            now_ms + WS_AUTH_EXPIRY_MS,
+        ));
         let signature = hmac_sha256(
             self.secret.as_bytes(),
             format!("GET/realtime{expires}").as_bytes(),

@@ -62,7 +62,7 @@ impl SignStep for Http {
         outbound: &mut Action,
         context: &safe_cex_engine::DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
-        let now = context.now_ms;
+        let now = context.stamp_ms();
         let Action::Http(http) = outbound else {
             return Err(SignError::InvalidRequest);
         };
@@ -74,7 +74,7 @@ impl SignStep for Http {
             let query = self
                 .query
                 .clone()
-                .num("timestamp", now.floor())
+                .num("timestamp", now)
                 .num(
                     "recvWindow",
                     self.recv_window.unwrap_or(f64::from(RECV_WINDOW_MS)),
@@ -91,7 +91,7 @@ impl SignStep for Http {
         Ok(SignRequest {
             receipt: if self.signed {
                 safe_cex_engine::signing::SignReceipt {
-                    stamp_ms: Some(now.floor()),
+                    stamp_ms: Some(now),
                     expiry_ms: None,
                 }
             } else {
@@ -143,8 +143,8 @@ impl SignStep for SpotSubscribe {
         _: &mut Action,
         context: &safe_cex_engine::DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
-        let now = context.now_ms;
-        self.timestamp = now.floor();
+        let now = context.stamp_ms();
+        self.timestamp = now;
         Ok(SignRequest {
             receipt: safe_cex_engine::signing::SignReceipt {
                 stamp_ms: Some(self.timestamp),
