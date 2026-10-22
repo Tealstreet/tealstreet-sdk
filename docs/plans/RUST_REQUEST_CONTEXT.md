@@ -1356,3 +1356,13 @@ strict native Clippy/fmt and independent correctness/adversarial review before
 any next push. Keep production Unsupported behavior and its existing negative
 control. Architecture gate: No; this is shared test-transport contract adoption,
 not a per-venue runtime workaround or a fallback to legacy dispatch.
+
+Native fixture plan audit: validate the ORIGINAL id/method/route/URL boundary
+before any fixture mapping; capture its deadline before async preparation and
+never renew it at bind. NoticeNetwork must return the real network BoundHttp
+directly, preserving ready/drop/dispatch/abort. Tape's canned bound checks that
+original deadline and emits unchanged chunks synchronously only at dispatch.
+Timeout failures must abort AND await the spawned host; timing out an owned
+JoinHandle would detach it. Bound/cancel drop emits no response. Static errors
+and custom Debug must not print packets. Independent plan review CLEAN,
+architecture No; exact15s runtime timeout is reproduced, not a compilation delay.
