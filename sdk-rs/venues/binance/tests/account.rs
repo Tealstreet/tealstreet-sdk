@@ -1027,18 +1027,27 @@ fn fills_windows_cover_the_last_millisecond_of_the_range() {
     assert_eq!(param(&r.url, "endTime").as_deref(), Some("604800001"));
 }
 
-/// Keeps landing's bridge contract for a failed later fills window: a command
-/// error, then an empty success that does not return earlier windows' rows.
+/// The shared history owner retains earlier accepted windows after a later
+/// actual page failure and marks their missing coverage before completion.
 #[test]
-fn a_failed_later_fills_window_reports_a_command_error_before_an_empty_success() {
+fn a_failed_later_fills_window_retains_prior_rows_with_owned_incompleteness() {
     let mut h = ready();
     fills_over(&mut h, 25, 10.0);
     let r = h.take("/fapi/v1/userTrades");
     h.reply(r.id, 200, "", TRADE);
     let r = h.take("/fapi/v1/userTrades");
     h.reply(r.id, 503, "", "unavailable");
-    assert_eq!(h.result(25), Some(&Ok("[]".into())));
-    assert!(h.command_errors.iter().any(|(command, _)| *command == 25));
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(25).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(!h.command_errors.iter().any(|(command, _)| *command == 25));
+    assert!(h.events.iter().any(|event| {
+        event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+            && event
+                .fields
+                .contains(&("command", safe_cex_engine::Value::Num(25.0)))
+    }));
+    assert_eq!(h.command_notices, [(25, "incomplete"), (25, "done")]);
 }
 
 #[test]
