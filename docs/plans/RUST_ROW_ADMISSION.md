@@ -539,7 +539,9 @@ Actual consumers and preserved boundaries:
    each native read and flush ONLY at the existing admitted joined-order point,
    after rejected/fresh-row merging and before Store removal/upsert. Stored-copy
    lookup, exact Error text, restoring known unsupported rows and emission order
-   stay native. Rejected/stale/incomplete joins never consume report memory.
+   stay native. Admitted partial joins still flush unsupported rows; only whole
+   failed, noncurrent or incomplete joins skip flushing. Known-copy restoration
+   stays outside suppression, and mapped/clean rows never re-arm Bybit memory.
    Add `AccountState::new()` selecting unbounded Once, and replace ONLY the two
    actual lib.rs construction sites (main account and extra product accounts).
    Audit all default/reset/move paths; no default bounded reporter may leak into
@@ -577,3 +579,9 @@ WASM/replays/timing, threshold/profile/allowance changes or live captures. On
 full green, announce and run a fresh separate guard, merge separately, audit the
 actual tree/parents and report its pin. Remaining seventeen bounded reporter
 files are later bounded fan-out slices, not closed by this phase.
+
+Phase2 plan/API review checkpoint: both independent correctness and adversarial
+reviews are CLEAN. Preserve WOO retention/page-progress accessors and Bybit extra-
+product account swapping. Original-GREEN compatibility controls precede migration;
+no product defect or RED claim is made. Signing/RequestContext owners explicitly
+cleared these AccountState constructors and accepted-join diagnostic regions.
