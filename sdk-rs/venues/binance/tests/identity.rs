@@ -23,10 +23,13 @@ fn seeded(options: Options) -> TestEngine {
 }
 fn ask(engine: &mut TestEngine) -> Vec<Action> {
     engine.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    engine.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(engine, NOW)
 }
 fn identity_request(engine: &mut TestEngine) -> HttpRequest {
-    let actions = ask(engine);
+    let actions: Vec<_> = ask(engine)
+        .into_iter()
+        .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect();
     assert_eq!(
         actions.len(),
         1,

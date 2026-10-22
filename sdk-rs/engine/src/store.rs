@@ -36,6 +36,7 @@ pub struct Store {
     // Sorted row indexes borrow ticker identity instead of copying every symbol.
     ticker_by_symbol: Vec<u32>,
     orders: Vec<Order>,
+    orders_revision: u64,
     order_snapshot_epoch: Epoch,
     positions: Vec<Position>,
     position_ids: bool,
@@ -471,6 +472,10 @@ impl Store {
         self.orders.iter().find(|order| order.id == id)
     }
 
+    pub(crate) fn orders_revision(&self) -> u64 {
+        self.orders_revision
+    }
+
     /// Capture once before issuing a logical order read. Exhaustion is permanent.
     pub fn begin_orders_snapshot(&mut self) -> Option<OrderSnapshotToken> {
         self.order_snapshot_epoch.stamp().map(OrderSnapshotToken)
@@ -519,6 +524,7 @@ impl Store {
 
     /// Replace every order with a venue snapshot.
     pub fn set_orders(&mut self, orders: Vec<Order>) {
+        self.orders_revision = self.orders_revision.saturating_add(1);
         self.orders = orders;
         self.changes.orders = true;
         self.set_loaded(|loaded| loaded.orders = true);
@@ -527,6 +533,7 @@ impl Store {
     /// Insert or replace by id. A closed or canceled row stays, with its
     /// status, until the next snapshot replaces the list.
     pub fn upsert_order(&mut self, order: Order) {
+        self.orders_revision = self.orders_revision.saturating_add(1);
         match self
             .orders
             .iter()
@@ -543,6 +550,7 @@ impl Store {
         let Some(order) = self.orders.iter_mut().find(|order| order.id == id) else {
             return false;
         };
+        self.orders_revision = self.orders_revision.saturating_add(1);
         update(order);
         self.changes.orders = true;
         true
@@ -557,6 +565,7 @@ impl Store {
         self.orders
             .retain(|order| !ids.contains(&order.id.as_str()));
         if self.orders.len() != before {
+            self.orders_revision = self.orders_revision.saturating_add(1);
             self.changes.orders = true;
         }
     }
