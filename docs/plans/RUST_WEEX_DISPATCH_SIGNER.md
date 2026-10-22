@@ -30,6 +30,10 @@ cycle and settings generation policy. Hosted admission remains separately gated.
   primary-ref fallback in the existing trusted setup policy; explicit empty
   rejects and public mode does not waive supplied-secondary validation. Literal
   secret bytes remain literal; do not guess an encoding from their appearance.
+  Preserve incomplete-primary CONFIG_INVALID/deactivation rather than treating
+  an unusable supplied identity as absent and publishing an empty account. Test
+  partial key/secret/passphrase inputs in native, raw and SDK setup, including
+  the existing public-mode boundary.
 - Declare static Content-Type `application/json` and User-Agent `Tealstreet`
   once. Reuse them in legacy references and managed intent. Final native order
   remains ACCESS-KEY, ACCESS-PASSPHRASE, ACCESS-TIMESTAMP, ACCESS-SIGN, then those
@@ -44,7 +48,9 @@ cycle and settings generation policy. Hosted admission remains separately gated.
 Use trusted setup `primary.stableId`; absence yields typed identity-unavailable.
 Never hash a public key, invent a fallback or restore raw-key custody in the
 engine. Native accountConfig validates trading eligibility but supplies no
-mapped venue UID. Preserve that validation where it remains required.
+mapped venue UID. Preserve that validation where it remains required. Identity
+GET may sign with secondary credentials, but its returned stableId always comes
+from primary setup metadata; test distinct primary/secondary stableIds explicitly.
 
 The same-PR caller section must spell out persisted migration: existing IDs are
 `weex:` plus lowercase hex of the first 12 SHA256 bytes of the primary public
