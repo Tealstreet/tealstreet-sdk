@@ -14,6 +14,7 @@ pub mod fence;
 pub mod history;
 pub mod json;
 pub mod log;
+pub mod metadata;
 pub mod model;
 pub mod num;
 #[cfg(feature = "order-locks")]

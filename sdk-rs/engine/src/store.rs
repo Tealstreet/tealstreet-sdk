@@ -42,6 +42,7 @@ pub struct Store {
     currency_balances: Option<Vec<CurrencyBalance>>,
     /// Stable symbols retain account settings across market replacement/delisting.
     settings: HashMap<Box<str>, MarketSetting>,
+    metadata: Option<Box<crate::metadata::State>>,
     hedged: bool,
     loaded: Loaded,
     latency: f64,
@@ -624,6 +625,9 @@ impl Store {
             })
             .collect();
         self.changes.settings = true;
+        if let Some(metadata) = &mut self.metadata {
+            metadata.changed(None);
+        }
     }
 
     pub fn update_setting(&mut self, symbol: &str, update: impl FnOnce(&mut MarketSetting)) {
@@ -632,7 +636,92 @@ impl Store {
         update(setting);
         if *setting != before {
             self.changes.settings = true;
+            if let Some(metadata) = &mut self.metadata {
+                metadata.changed(Some(symbol));
+            }
         }
+    }
+
+    fn metadata_state(&mut self) -> &mut crate::metadata::State {
+        self.metadata.get_or_insert_with(Default::default)
+    }
+
+    pub fn begin_metadata(
+        &mut self,
+        symbol: &str,
+        command: crate::CommandId,
+        publish: bool,
+        fallback: crate::metadata::Fallback,
+    ) -> Result<crate::metadata::Admission, crate::VenueError> {
+        self.metadata_state()
+            .begin(symbol, command, publish, fallback)
+    }
+
+    pub fn metadata_eligible(&self, token: crate::metadata::Token) -> bool {
+        self.metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.eligible(token))
+    }
+
+    pub fn metadata_observation(&mut self) -> crate::metadata::Observation {
+        self.metadata_state().observation()
+    }
+
+    pub fn invalidate_metadata(&mut self, symbol: Option<&str>) {
+        self.metadata_state().invalidate(symbol);
+    }
+    pub fn metadata_revision(&self) -> u64 {
+        self.metadata
+            .as_ref()
+            .map_or(0, |metadata| metadata.revision())
+    }
+
+    /// A background read cannot overwrite a newer read or settings write.
+    pub fn observe_setting(
+        &mut self,
+        symbol: &str,
+        stamp: crate::metadata::Observation,
+        setting: crate::metadata::ObservedSetting,
+    ) -> bool {
+        if !self.metadata_state().observe(symbol, stamp) {
+            return false;
+        }
+        self.settings.insert(symbol.into(), setting.0);
+        self.changes.settings = true;
+        true
+    }
+
+    pub fn metadata_write_started(
+        &mut self,
+        command: crate::CommandId,
+        symbol: Option<&str>,
+    ) -> Result<(), crate::VenueError> {
+        self.metadata_state().write_started(command, symbol)
+    }
+    pub fn metadata_write_finished(&mut self, command: crate::CommandId) {
+        self.metadata_state().write_finished(command);
+    }
+    pub fn metadata_write_pending(&self, symbol: &str) -> bool {
+        self.metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.write_pending(symbol))
+    }
+
+    /// Completes ownership and publishes a full validated proposal atomically.
+    /// Native caches must be updated infallibly before notifying its waiters.
+    pub fn finish_metadata(
+        &mut self,
+        token: crate::metadata::Token,
+        result: Result<crate::metadata::Proposal, crate::VenueError>,
+    ) -> Option<crate::metadata::Completion> {
+        let symbol = self.metadata.as_ref()?.symbol(token)?.to_owned();
+        let cached = self.setting(&symbol);
+        let (completion, publication) = self.metadata.as_mut()?.complete(token, result, cached)?;
+        if let Some(setting) = publication {
+            self.settings.insert(symbol.into_boxed_str(), setting);
+            self.changes.settings = true;
+        }
+        Some(completion)
     }
 
     pub fn hedged(&self) -> bool {
