@@ -774,3 +774,12 @@ now prove that split. Shared default CursorWalk does not enable a new no-fresh
 termination policy; duplicate-only changing cursors reach the existing family cap.
 No engine source/API added. Full exact-head CI/replay/actual build predecessors
 remain pending; queue keeps actual1728 then KCS1753 ahead of this source slice.
+
+Coinbase CI scan follow-up: gitleaks8.30.1 found exactly one generic-api-key
+false positive in original regression commitca876aa0aac, native family fixture
+line10: the same literal organizations/test/apiKeys/test already recorded for
+existing Coinbase history/account/trading fixtures. The native seed is fixed
+[7;32], not an account credential. Add only that exact commit/path/rule/line
+fingerprint to .gitleaksignore; no scanner rule, path pattern or config change.
+Full original-range scan reproduces RED1, exact exception makes GREEN0; independent
+source/report review CLEAN. This adds a ninth owned path, with no runtime change.
