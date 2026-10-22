@@ -1813,6 +1813,7 @@ fn user_snapshot_skip_errors_escalate_once_and_rearm_after_mapping() {
         s.collect();
     };
     report(&mut s, 0, &row);
+    let stored = s.e.store().order("order-a").unwrap().clone();
     s.errors.clear();
     s.logs.clear();
     report(&mut s, 1, &bad);
@@ -1827,11 +1828,16 @@ fn user_snapshot_skip_errors_escalate_once_and_rearm_after_mapping() {
         1,
         "a warned row losing its copy upgrades once"
     );
+    // Reappearing cached state must not reset the one Error upgrade.
+    s.e.store_mut().set_orders(vec![stored]);
     report(&mut s, 4, &bad);
-    assert_eq!(s.errors.len(), 1);
-    report(&mut s, 5, &row);
+    assert_eq!((s.logs.len(), s.errors.len()), (2, 1));
     s.e.store_mut().set_orders(vec![]);
-    report(&mut s, 6, &bad);
+    report(&mut s, 5, &bad);
+    assert_eq!(s.errors.len(), 1);
+    report(&mut s, 6, &row);
+    s.e.store_mut().set_orders(vec![]);
+    report(&mut s, 7, &bad);
     assert_eq!(s.errors.len(), 2, "mapping re-arms the missing-copy error");
 }
 
