@@ -1,10 +1,12 @@
 # Engine row admission and snapshot isolation
 
 Owner: codex-mxb4mq. Base: actual landing `5569062869971dbfce492e3259bbcd5ebded8869`.
-Status: plan before implementation; owner-directed standardization, not a new
-per-venue repair. The shared Signer core owns its exclusive source merge window;
-this lane avoids request/dispatch/pending-signature code and integrates its actual
-merge before final row-core CI/merge.
+Status: phase 1 merged; phase 2 plan before implementation. Owner-directed
+engine standardization, not a new per-venue copy. Sequencing update: the owner
+narrowed the Signer window to dispatch/request/signing and host files, allowing
+the disjoint row core to merge first; the Signer lane integrates its actual pin.
+Finish all keyed row-admission migrations before the separately assigned
+financial-snapshot commit/freshness-token core.
 
 ## Contract
 
@@ -135,3 +137,69 @@ architecture answer **No** (engine choke point plus two consumers).
 
 Final Signer integration, current-head full CI and complete raw replay
 comparison remain merge requirements; this local receipt does not claim them.
+
+## Phase 1 merged receipt
+
+Actual #1708 `b2f074bf26374bc6c4b37c5d03fa1126483390a6`, green head
+`0dcf53f9709824e4e4ba07087c066dbaf65fbe9e`, Rust CI `39708007324`.
+All 43 applicable checks succeeded; browser PR job was intentionally skipped.
+All 222 complete raw outputs (111 Rust, 21 exact workloads, 62 implementation/
+mode groups) equal source-equivalent baseline #1707 CI `39705386690`, excluding
+only top-level metrics. Ordered diagnostics, full identities/requests/receipts/
+checkpoints and 9 PASS/12 known FAIL statuses are unchanged. Independent final
+evidence review CLEAN; separate fresh exact-six-file guard preceded separate
+merge; actual parents/tree/owned/incoming blobs matched. Original pre-merge
+Signer-wait language above is retained historical planning, superseded by the
+explicit sequencing decision at the top and in #1708's body.
+
+## Phase 2: Bitget / Orderly existing keyed admission
+
+Base: actual phase-1 merge `b2f074bf2637`. Fresh branch
+`feat/rust-row-admission-bitget-orderly`; commit/review this plan before source.
+
+This first fan-out PR migrates the existing Bitget REST/WS and Orderly REST
+coverage/reporting sites without changing decoded economics, retained keys,
+notice text/level/order/count, foreign-product filtering or freshness policy.
+Use engine `RowAdmission`/`SnapshotBuilder::skip` for a single rejected identity;
+use silent `reject` plus the shared `row_skipped` reporter for already-recorded
+or grouped decisions. Bitget mixed-mode rejection protects multiple symbols
+but reports once, exactly as today. Its all-unmappable scope hold, observation
+barriers and retained native plan/trailing routes remain unchanged. Orderly
+mode/position/normal+algo paging retains duplicate/root/page/completeness
+checks, per-row PnL bounds, flat-row treatment and source timestamps.
+
+Files: `venues/bitget/src/account.rs`, `venues/orderly/src/account.rs`, this
+plan and nearby `RUST_QUALITY.md`. No engine/host/SDK/clock/signer, wire, fixture,
+manifest, normalizer, workflow or caller contract changes. Mapping remains
+venue-specific; coverage and coded rejection policy must not be copied locally.
+
+Inventory boundary: Orderly WS `position` currently decodes a typed array and
+execution-report arrays use a typed iterator. They are still outside per-row
+admission; do not label them migrated by changing REST imports. Audit/migrate
+those paths next using the engine core and offline red/green controls, preserving
+financial execution validation and terminal/proof side effects. Structural
+frames and immutable fill contracts must not be weakened to claim fan-out.
+Remaining families follow after Orderly, before the snapshot token.
+
+Verification: preserve existing mixed-row/continuous-WS/mode/metadata and
+Orderly margin/partial-PnL/algo/stale-ACK tests. Run Bitget + Orderly + Binance
+native tests, touched-crate strict Clippy/fmt, bans and root typecheck/lint under
+`CARGO_BUILD_JOBS=4`. As a semantics-preserving migration, use existing behavior
+regressions and full raw equality rather than adding implementation-mirroring
+tests. Independent plan/code/adversarial/evidence review must answer the
+architecture gate: shared engine adoption, no per-venue shared policy.
+
+CI owns release builds/full strict/size/timing. Compare complete archived TS
+and Rust correctness/performance outputs for all Bitget/Orderly aliases plus
+Binance against source-equivalent actual landing. Require exact literal suite,
+tape SHA/books/mode/run coverage, distinct contained raw files and run/head/source
+receipts; exclude only top-level metrics. Any dependent landing change needs
+actual integration and a matching baseline. Keep all known keys/declarations and
+raw IDs/requests/receipts/checkpoints. Full green head, fresh exact-scope guard
+and merge as separate calls, actual merge audit and Aimux report remain required.
+No local release builds, replay/load/timing sweep or live capture.
+
+Independent phase-2 plan review CLEAN, architecture answer **No**, before code.
+The exact archived suite includes separate BitgetUSDC (shared crate) as well as
+Bitget, Orderly and Binance: 29 workloads / 184 complete outputs / 92 Rust.
+Preserve Bitget synthetic USDC provenance; do not label it a live capture.
