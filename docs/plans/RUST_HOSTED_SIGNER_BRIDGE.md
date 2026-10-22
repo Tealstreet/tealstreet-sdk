@@ -100,8 +100,9 @@ Lazy signing constructs the same one-use credentialed engine/host without start.
 WS signs the ORIGINAL toSign bytes. In particular Bybit must not generate a new
 expiry while the caller keeps the old expiry. Factor the native MAC/encoding
 builder, not a second cryptographic implementation. Unsupported output formats
-fail in the existing response envelope. Default captures use primary refs;
-versioned secondary selectors below require matching trusted credential binding.
+fail in the existing response envelope. Default captures use primary refs. The
+existing external wire has no secondary selector; half 2 must preserve that primary-only contract, not require a new
+acknowledgement or silently reinterpret a secondary request.
 
 Estimated half 1 scope: engine capture/provider validation and WASM/host facade,
 Binance/Bybit shared primitive builders, extracted TS shape helpers and SDK
@@ -127,20 +128,39 @@ semantic extension within the unchanged envelope, with cross-half tests.
 
 Preserve REST-only PayloadSigner behavior through one shared construction-time
 private-feed policy, adopted by Binance before listen-key/subscription/keepalive
-work and Bybit before private supervision. Do not suppress only socket egress or
-mislabel the account public. Preserve callback result headers in bounded shared
-per-attempt metadata, validated and retired with the signature/receipt; no side
-map or transport-time mutation. Existing native auth fields remain authoritative;
-header conflicts require an explicit tested policy, not silent dropping.
-Coordinate this shared header/release region with RequestContext ownership.
+work and Bybit before private supervision. This one policy applies to all nine
+Binance/Bybit aliases. Binance Inverse currently lacks the TS guard used by the
+other aliases; the owner approved correcting that exception centrally. Do not
+suppress only socket egress or mislabel the account public. Preserve callback
+result headers in bounded shared per-attempt metadata, validated and retired
+with the signature/receipt; no side map or transport-time mutation. SignResult currently accepts only values and
+receipt; extending it requires the shared provider/dispatch path, coordinated
+with RequestContext ownership. Validate header names, CR/LF, count and aggregate
+size before the same attempt can release; retire them on stale completion,
+retry, cancellation and timeout. Preserve each venue's existing TS header
+precedence exactly as declared per-venue data in this one shared policy, without
+per-venue execution branches: Binance permits callback auth-header overrides;
+Bybit fixes SIGN/APIKEY/TIMESTAMP but permits a callback RECV-WINDOW override.
+Tests must prove both precedences; no behavior change for existing signers.
 
-Agree the secondary-key mapping before enabling keyless reads: use versioned
-existing wsAuth.extraData containing requested slot and public API credential;
-the browser resolves only its trusted account's matching identity. Return an
-explicit nonsecret acknowledgement in existing response metadata; reject missing,
-wrong-account/key/slot/version acknowledgement from old primary-only handlers.
-Never silently sign secondary data with the primary secret. Request correlation
-continues to use the unchanged id; no secret/passphrase is carried on the wire.
+Owner-confirmed unchanged-wire schemas: RemoteSigner receives the existing
+`{id, type: 'ws-auth', exchangeName, accountName?, wsAuth: {toSign,
+outputFormat: 'hex'}}` request and returns `{id, wsAuthSignature?, error?}`.
+No field, version marker or acknowledgement becomes required. Account selection
+and optional accountName retain existing TS semantics; validate the response id
+against the pending request. PayloadSigner keeps `{exchangeName, key, payload,
+scheme: 'hmac-sha256', encoding: 'hex'|'base64'}` and returns the existing
+`{signature, headers?}` shape. Strictly decode the signature to the required raw
+MAC bytes and bind optional headers to that exact operation/receipt.
+
+The legacy RemoteSigner wire cannot select secondary keys: use primary-only,
+document it, and refuse an operation that actually requires secondary authority
+rather than guess or sign secondary bytes under primary material. No external
+signer or exchange-server update is required. An optional reserved acknowledgement
+header may be accepted if present, but cannot be required for existing handlers;
+none is necessary for the primary-only implementation. No secret/passphrase is
+carried on the wire. Audit PayloadSigner's explicit public-key selector separately
+and preserve only the secondary selection it already supports.
 
 Preserve signer availability, disposal, authority precedence, public bypass and
 private readiness. Route factory/worker supported aliases to Rust only once the
@@ -149,9 +169,9 @@ workers or claim deployed external migration from mirror tests.
 
 Estimated half 2: shared private-feed/header policy 250-450 production lines,
 provider capsule/routing/selection 300-550, plus 900-1600 tests across shared,
-native, actual-WASM and SDK layers. Nine Binance/Bybit aliases, primary/secondary,
-REST-only feed suppression, custom headers, wrong account/ack/id, unavailable/
-timeout/disposal, calibration and exact unchanged-wire round trips are required.
+native, actual-WASM and SDK layers. Nine Binance/Bybit aliases, primary-only remote
+authority and required-secondary refusal, REST-only feed suppression, custom
+headers, wrong account/id, unavailability, timeout/disposal, calibration and exact unchanged-wire round trips are required.
 Keep the two halves reviewable; neither size estimate is implementation proof.
 
 Architecture gate: both halves extend shared provider/setup/host services.
