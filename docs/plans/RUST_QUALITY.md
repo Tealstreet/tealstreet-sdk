@@ -271,3 +271,24 @@ single-page fills, 50/100 page caps and final sorting/limits remain. First-page
 failure rejects typed; later failure returns accepted pages with owned
 incompleteness, excluding staged failed-page prefixes. Signing preparation
 refusal stays strict notSent. No engine API extension or universal fan-out claim.
+
+
+BingX's native observed-cumulative/last-quantity cap now uses the shared
+`ObservedProgress::prepare_capped` path. The engine prepares and validates a
+native-priced suffix before the venue commits execution identity, observations
+or terminal state; its existing authoritative Last policy remains distinct.
+Four original-source RED financial regressions and two original compatibility
+controls cover correction recovery, stored-state isolation, fallback and quiet
+identity admission. AsterDEX, KuCoin Spot fallback and Orderly cumulative paths
+still need fan-out before reporting policy and snapshot-token work.
+
+
+
+
+Paradex histories also reuse CursorHistory for staged/accepted rows, command
+ownership and completeness instead of local row vectors, walker ownership and
+marker emission. Native lookup proof, strict cursor/unbounded-budget refusals
+and fills fallback remain. The shared probe-stage operation preserves cycle and
+lifecycle checks while preventing result-row admission from hiding coverage.
+Queued auth/preparation rejection stays distinct from actual-page recovery.
+[Scope and proof](RUST_OWNED_HISTORY.md); other families remain unconverted.
