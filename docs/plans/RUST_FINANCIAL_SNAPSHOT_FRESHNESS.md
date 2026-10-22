@@ -2,7 +2,8 @@
 
 Owner: codex-mxb4mq. Base: actual Aster #1756
 `5f6488c7664b68cf8b866d2f7f914a3fc99e5fc6`.
-Status: committed plan/API proposal before tests or implementation. Owner priority
+Status: plan/API committed before implementation; shared core and both native
+references implemented, final CI/raw proof pending. Owner priority
 is this shared core with Binance and Bitunix references, before remaining
 cumulative fan-out and reporting. #1737 has the next landing slot; integrate its
 actual shared inputs before final proof. RequestContext and metadata owners
@@ -181,3 +182,30 @@ Integrate actual shared predecessors, wait for full current-head green CI and
 complete evidence reviews, run a fresh exact-scope revert/trial guard and merge
 as separate calls. Audit actual parents/tree/owned and all incoming files, report
 the actual pin to the overseer and affected owners. No live captures or orders.
+
+## Implementation and local evidence
+
+Plan checkpoints `1a72d442724`, `72ab6fd5bdc` and `772d9407f89` preceded their
+respective source/API changes. The common boundary is in `fence.rs` and Store;
+Binance replaces ten native revision invalidations, Bitunix six. The auth hook
+now receives read-only Store context at all three existing observation sites,
+before account callbacks. Other auth implementations only accept an unused arg.
+Bitunix initial publication consumes both endpoint tokens in one callback while
+preserving regular then TP-SL row/native views.
+
+Original focused engine/Binance/Bitunix baseline: 876 tests green. Shared core,
+auth and touched override/native-host suites: 1,226 green; strict Clippy passed.
+Binance's 266 compatibility tests remain green plus one new permanent-exhaustion
+control. Bitunix's 230 tests pass, including initial halves in either arrival
+order, native fill-baseline nonconsumption, retired stall/debounce ownership and
+two preflight commands each failing once before any dependent HTTP write.
+Permanent capture failure retires both endpoint stall owners and the shared
+order debounce. This corrects a lifecycle issue found during review of the new
+exhaustion API; it is not represented as an original production bug.
+
+Independent correctness and adversarial phase reviews are clean after the
+native-callback positive sentinel and exhaustion ownership controls were added.
+Architecture gate: YES, a cross-cutting concern handled in one engine primitive
+and Store admission entry, with two distinct native consumers. Metadata adoption,
+remaining venue snapshot fan-out and RequestContext safe late patches remain
+follow-ons. Final authenticated CI evidence and actual merge receipt are pending.
