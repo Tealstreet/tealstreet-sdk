@@ -1263,3 +1263,16 @@ quality evidence, publish draft CI and keep all existing watches. Final current
 landing integration, authenticated full raw/package proof, independent reviews,
 announcement, separate guard and separate merge remain required. B11/runtime/
 cutover claims stay open.
+
+Hyperliquid plan review is CLEAN on the existing APIs. Bind progress to newest
+physical timestamp plus cumulative validated native identities, never page ordinal
+or filtered output count; physical inclusive startTime must not gain one ms.
+Admit positive page 200 with an owned gap and no request 201, but allow a terminal
+probe after 199 positive pages. Full zero-new-ID pages pass an explicit coverage
+gap through shared admission; short zero-new-ID pages end normally. Fold order
+transitions in encounter order before filtering, keeping the first equal-time,
+equal-rank update. Preserve successful-page-only history_weight accounting and
+existing queue reservations. Clock/row owners confirm no concrete Hyperliquid
+source overlap. Existing full-overlap test's strict rejection is an explicitly
+superseded general-query contract: retain its assertion of missing coverage and
+add accepted-row/owned-marker assertions rather than silently dropping the test.
