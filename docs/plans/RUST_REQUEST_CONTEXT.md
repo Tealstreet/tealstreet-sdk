@@ -1244,3 +1244,13 @@ timeouts, run focused harness controls locally and fresh actual-WASM CI. Review
 this shared seam before implementation. Actual Phemex1758 is integrated at953f;
 its entire shared history/adapter delta must remain exact. Owner1764 merge hold
 is respected; no landing merge while its proof window is active.
+
+Wrapper plan audit refinement before source: explicitly shadow prepareHttp with
+undefined when unsupported; preserve method receivers and prepared/bound cancel,
+ready and expiry. Capture write command stage when preparation begins (before
+parked route/sign work), redact final bytes at bind, retain read completion-stage
+semantics. Cancel resources on bind failure. Managed main transport keeps the
+same redirect:error and min(configured timeout, 20s) limit via prepareFetch.
+Tests cover delayed binding, callback/redaction failures and underlying dispatch
+first. Independent plan/preservation review CLEAN, architecture No; actual1758
+all seven incoming blobs and all5,288 other paths remain exact after integration.
