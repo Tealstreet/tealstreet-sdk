@@ -1153,6 +1153,7 @@ mod tests {
                 result: Ok(crate::signing::SignResult {
                     values: vec![b"value".to_vec()],
                     receipt: work.receipt,
+                    headers: vec![],
                 }),
             },
         );
