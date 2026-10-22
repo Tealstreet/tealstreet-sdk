@@ -184,10 +184,8 @@ impl<P> Io<P> {
             .iter()
             .filter_map(|(request, managed)| {
                 (managed.lifecycle.context().leg() == context.leg()
-                    && managed.lifecycle.context().owner() == context.owner()
-                    && (managed.lifecycle.release().is_none()
-                        || managed.lifecycle.context().operation() == Operation::Read))
-                    .then_some(*request)
+                    && managed.lifecycle.context().owner() == context.owner())
+                .then_some(*request)
             })
             .collect::<Vec<_>>();
         for request in requests {
@@ -201,9 +199,7 @@ impl<P> Io<P> {
 
     pub(super) fn retire_http_command(&mut self, command: CommandId) {
         let requests = self.managed_http.iter().filter_map(|(request, managed)| {
-            (matches!(managed.lifecycle.context().owner(), Owner::Command {id, ..} if id == command)
-                && (managed.lifecycle.release().is_none()
-                    || managed.lifecycle.context().operation() == Operation::Read))
+            matches!(managed.lifecycle.context().owner(), Owner::Command {id, ..} if id == command)
                 .then_some(*request)
         }).collect::<Vec<_>>();
         for request in requests {
@@ -229,7 +225,14 @@ impl<P> Io<P> {
     }
 
     fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
-        self.take_managed(request)?;
+        let managed = self.take_managed(request)?;
+        if managed.lifecycle.context().operation() == Operation::Mutation
+            && managed.lifecycle.release().is_some()
+        {
+            self.http_responses.retire(request);
+        } else {
+            self.http_responses.remove(request);
+        }
         self.streams.remove(&request);
         self.incoming.remove(&request);
         #[cfg(feature = "order-locks")]
@@ -420,6 +423,7 @@ impl<V: Venue> Engine<V> {
         }
         self.io.request_contexts.enter_delivery(&delivery);
         if let Some(pending) = self.io.discard_managed(request) {
+            self.begin_event_scope();
             let previous = self.io.http_delivery.replace(delivery.clone());
             self.venue.on_http_preparation_failed(
                 &mut Cx {
@@ -434,6 +438,10 @@ impl<V: Venue> Engine<V> {
             self.io.http_delivery = previous;
         }
         self.io.request_contexts.exit_delivery(&delivery);
+        self.finish_event_scope(now);
+        if self.venue.cancel_needs_stored_order() {
+            self.release_held(now);
+        }
     }
 
     /// The host checks its bound resource, calls this, and immediately invokes
@@ -468,6 +476,35 @@ impl<V: Venue> Engine<V> {
             .request_contexts
             .release_flag(managed.lifecycle.context(), request)?;
         let pending = self.io.pending.get_mut(&request).ok_or(Error::Revoked)?;
+        let mutation = managed.lifecycle.context().operation() == Operation::Mutation;
+        if mutation {
+            let capture = if self.io.streams.contains_key(&request) {
+                Err(Error::Invalid)
+            } else {
+                self.venue.capture_http_reconciliation(&pending.value)
+            }
+            .and_then(|data| {
+                self.io.http_responses.insert(
+                    crate::request_context::ReconciliationRecord::new(
+                        managed.lifecycle.context().owner(),
+                        managed.lifecycle.context().leg(),
+                        managed.lifecycle.attempt(),
+                        managed.lifecycle.context().deadline(),
+                        data,
+                    ),
+                    now,
+                )
+            });
+            if let Err(error) = capture {
+                self.http_preparation_failed(
+                    now,
+                    preparation,
+                    error,
+                    VenueError::new("HTTP mutation reconciliation is unavailable"),
+                );
+                return Err(error);
+            }
+        }
         let time = ReleaseTime {
             raw_ms: now,
             protocol_ms: self.io.protocol_clock.at(now),
@@ -485,6 +522,17 @@ impl<V: Venue> Engine<V> {
             }
             managed.recipe = None;
             managed.signing_attempt = None;
+            if mutation {
+                self.io.http_write_revision = self.io.http_write_revision.saturating_add(1);
+                let record = self
+                    .io
+                    .http_responses
+                    .get_mut(request)
+                    .expect("reconciliation reserved before admission");
+                record.release = Some(release);
+                record.order_revision = self.store.orders_revision();
+                record.write_revision = self.io.http_write_revision;
+            }
             #[cfg(feature = "order-locks")]
             {
                 if managed.lifecycle.context().operation() == Operation::Mutation {
@@ -501,6 +549,9 @@ impl<V: Venue> Engine<V> {
                 },
                 release.signature,
             );
+        }
+        if mutation && !matches!(result, Ok(Claim::Released(_))) {
+            self.io.http_responses.remove(request);
         }
         if let Err(error) = result {
             self.http_preparation_failed(
@@ -651,6 +702,154 @@ impl<V: Venue> Engine<V> {
     pub(super) fn settle_http_event(&mut self, request: RequestId) {
         self.io.discard_managed(request);
     }
+
+    /// Active mutations and late responses share one bounded raw collector.
+    /// No mutation array is streamed into ordinary reducers before completion.
+    pub(super) fn collect_write_response(
+        &mut self,
+        now: f64,
+        event: &Event<'_>,
+        admitted: bool,
+    ) -> bool {
+        let request = match event {
+            Event::HttpResponse { request, .. }
+            | Event::HttpStart { request, .. }
+            | Event::HttpChunk { request, .. }
+            | Event::HttpEnd { request }
+            | Event::HttpFailed { request, .. } => *request,
+            _ => return false,
+        };
+        if !self.io.http_responses.contains(request) {
+            return false;
+        }
+        if !now.is_finite() {
+            self.fail_write_collection(now, request, Error::Invalid);
+            return true;
+        }
+        // Invalid duplicate/order events for an active request are ignored by
+        // the ordinary admission state machine. Only retirement during timeout
+        // may turn a denied current event into a valid late response.
+        if !admitted && self.io.managed_http.contains_key(&request) {
+            return true;
+        }
+        let collected = match event {
+            Event::HttpResponse { response, .. } => self
+                .io
+                .http_responses
+                .start(request, response.status, response.headers)
+                .and_then(|()| {
+                    self.io
+                        .http_responses
+                        .chunk(request, response.body.as_bytes())
+                }),
+            Event::HttpStart {
+                status, headers, ..
+            } => self.io.http_responses.start(request, *status, headers),
+            Event::HttpChunk { data, .. } => self.io.http_responses.chunk(request, data),
+            Event::HttpEnd { .. } => Ok(()),
+            Event::HttpFailed { .. } => {
+                // A live request still needs the ordinary failure callback;
+                // a retired failure only consumes its late-response custody.
+                self.io.http_responses.remove(request);
+                return !self.io.managed_http.contains_key(&request);
+            }
+            _ => unreachable!(),
+        };
+        if let Err(error) = collected {
+            self.fail_write_collection(now, request, error);
+            return true;
+        }
+        if !matches!(event, Event::HttpResponse { .. } | Event::HttpEnd { .. }) {
+            return true;
+        }
+        let record = match self.io.http_responses.complete(request) {
+            Ok(record) => record,
+            Err(error) => {
+                self.fail_write_collection(now, request, error);
+                return true;
+            }
+        };
+        let response = Response {
+            status: record.status.expect("complete response has a status"),
+            headers: &record.headers,
+            body: std::str::from_utf8(&record.body).expect("completion validated UTF-8"),
+        };
+        let ordinary = !record.late;
+        if record.late {
+            self.venue.reconcile_http(
+                &mut crate::request_context::Reconciliation::new(
+                    &record,
+                    &mut self.store,
+                    self.io.http_write_revision,
+                ),
+                &record.data,
+                response,
+            );
+        } else if let Some(pending) = self.io.pending.remove(&request) {
+            self.begin_event_scope();
+            self.count_http_status(response.status);
+            #[cfg(feature = "order-locks")]
+            {
+                self.io.order_read_tokens.remove(&request);
+            }
+            let delivery = self
+                .io
+                .managed_http
+                .get(&request)
+                .expect("active capture has a managed request")
+                .delivery();
+            self.io.request_contexts.enter_delivery(&delivery);
+            let previous = self.io.http_delivery.replace(delivery.clone());
+            observe_account_auth(
+                &self.venue,
+                &pending,
+                &response,
+                true,
+                now,
+                &mut self.io.actions,
+            );
+            self.venue.on_response(
+                &mut Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                },
+                pending.value,
+                response,
+            );
+            self.io.http_delivery = previous;
+            self.io.request_contexts.exit_delivery(&delivery);
+            self.io.discard_managed(request);
+        }
+        drop(record);
+        self.io.http_responses.remove(request);
+        // Only active ordinary delivery owns event bookkeeping. Late codecs
+        // never drive auth/retry/deferred commands or tickers.
+        if ordinary {
+            self.finish_event_scope(now);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+        }
+        true
+    }
+
+    fn fail_write_collection(&mut self, now: f64, request: RequestId, _reason: Error) {
+        self.io.http_responses.remove(request);
+        if self.io.managed_http.contains_key(&request) {
+            self.handle_event(
+                now,
+                Event::HttpFailed {
+                    request,
+                    error: "HTTP mutation response failed integrity bounds",
+                },
+            );
+            self.io.discard_managed(request);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -672,6 +871,10 @@ mod tests {
         receipts: usize,
         finish_in_item: Option<bool>,
         signed: bool,
+        reconciliations: std::cell::RefCell<Vec<String>>,
+        refuse_capture: bool,
+        auth_reject: bool,
+        command_calls: Vec<CommandId>,
     }
     const GROUP: Pacing = Pacing {
         group: 1,
@@ -679,6 +882,28 @@ mod tests {
     };
     impl Venue for Probe {
         type Pending = Pending;
+        fn capture_http_reconciliation(
+            &self,
+            _: &Pending,
+        ) -> Result<crate::request_context::ReconciliationData, Error> {
+            if self.refuse_capture {
+                return Err(Error::Invalid);
+            }
+            crate::request_context::ReconciliationData::new("native-correlation".into())
+        }
+        fn reconcile_http(
+            &self,
+            cx: &mut crate::request_context::Reconciliation<'_>,
+            data: &crate::request_context::ReconciliationData,
+            response: Response<'_>,
+        ) {
+            assert_eq!(data.as_str(), "native-correlation");
+            self.reconciliations.borrow_mut().push(response.body.into());
+            if response.body == "ok" {
+                cx.set_order_status("one", crate::model::OrderStatus::Canceled);
+                cx.set_order_status("two", crate::model::OrderStatus::Canceled);
+            }
+        }
         fn http_pacing(&self) -> &[Pacing] {
             &[GROUP]
         }
@@ -736,12 +961,15 @@ mod tests {
         }
         fn on_http_preparation_failed(
             &mut self,
-            _: &mut Cx<'_, Pending>,
-            _: Pending,
+            cx: &mut Cx<'_, Pending>,
+            pending: Pending,
             reason: Error,
             error: VenueError,
         ) {
             self.failures.push((reason, error.outcome));
+            if pending.0.operation() == Operation::Mutation {
+                cx.fail_context(&pending.0, error).unwrap();
+            }
         }
         fn on_signing_receipt(
             &mut self,
@@ -752,7 +980,32 @@ mod tests {
         }
         fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
             self.responses += 1;
-            cx.finish_http_context(&pending.0).unwrap();
+            if pending.0.operation() == Operation::Mutation {
+                #[cfg(feature = "order-locks")]
+                assert!(
+                    cx.io.order_response_token.is_none(),
+                    "write cannot inherit a prior read fence"
+                );
+                if self.auth_reject {
+                    let error = VenueError::new("native authentication refusal")
+                        .kind(ErrorKind::AuthInvalid);
+                    cx.http_write_result(
+                        &pending.0,
+                        crate::request_context::WriteResult::Rejected(error.clone()),
+                    )
+                    .unwrap();
+                    cx.fail_context(&pending.0, error).unwrap();
+                    return;
+                }
+                cx.http_write_result(
+                    &pending.0,
+                    crate::request_context::WriteResult::Accepted { order_ids: vec![] },
+                )
+                .unwrap();
+                cx.done_context(&pending.0, "ok".into()).unwrap();
+            } else {
+                cx.finish_http_context(&pending.0).unwrap();
+            }
         }
         fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, _: &str) {
             self.items += 1;
@@ -765,10 +1018,19 @@ mod tests {
                 }
             }
         }
-        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {
-            panic!("unexpected transport failure");
+        fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+            if pending.0.operation() == Operation::Mutation {
+                cx.fail_context(&pending.0, error).unwrap();
+            } else {
+                panic!("unexpected transport failure");
+            }
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+            if let Command::FetchLeverage { command, .. }
+            | Command::CancelSymbolOrders { command, .. } = &command
+            {
+                self.command_calls.push(*command);
+            }
             if let Command::FetchLeverage { command, .. } = command {
                 cx.done(command, "null".into());
             }
@@ -1310,6 +1572,503 @@ mod tests {
                 _ => None,
             })
             .unwrap()
+    }
+
+    /// White-box fixture for the still-gated mutation lifecycle. This stages the
+    /// same registry/pending objects without opening the production queue API.
+    fn mutation(
+        engine: &mut Engine<Probe>,
+        command: CommandId,
+        at: f64,
+    ) -> (Context, Preparation, TimerId) {
+        let context = Cx {
+            now: at,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .http_context(
+            Scope::Command(command),
+            Policy {
+                operation: Operation::Mutation,
+                credential: None,
+                timeout_ms: 100,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        )
+        .unwrap();
+        let request = RequestId(engine.io.next());
+        let generation = u64::from(engine.io.next());
+        let timer = TimerId(engine.io.next());
+        engine
+            .io
+            .request_contexts
+            .register_attempt(&context, request, at)
+            .unwrap();
+        let lifecycle = Lifecycle::new(
+            context.clone(),
+            Attempt {
+                request,
+                generation,
+            },
+        );
+        let token = lifecycle.preparation();
+        engine.io.managed_http.insert(
+            request,
+            Managed {
+                lifecycle,
+                original: HttpRequest {
+                    id: request,
+                    method: Method::Post,
+                    route: None,
+                    timeout_ms: Some(100),
+                    url: "https://venue.test/write".into(),
+                    headers: vec![],
+                    signer_headers: vec![],
+                    body: Some("{}".into()),
+                },
+                timer,
+                response_started: false,
+                signing_attempt: None,
+                recipe: None,
+            },
+        );
+        engine.io.pending.insert(
+            request,
+            PendingHttp {
+                value: Pending(context.clone()),
+                auth: None,
+            },
+        );
+        engine.io.timers.insert(timer, ());
+        (context, token, timer)
+    }
+
+    fn fixture_order(id: &str) -> crate::model::Order {
+        use crate::model::*;
+        Order {
+            id: id.into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "X".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 1.,
+            amount: 1.,
+            filled: 0.,
+            remaining: 1.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+
+    fn fail_mutation(engine: &mut Engine<Probe>, context: &Context, at: f64) {
+        Cx {
+            now: at,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .fail_context(context, "original command deadline")
+        .unwrap();
+    }
+
+    #[test]
+    fn retired_mutation_retains_mid_body_and_reconciles_once_without_reopening_command() {
+        let (mut engine, _) = start(Probe::default());
+        engine
+            .store
+            .set_orders(vec![fixture_order("one"), fixture_order("two")]);
+        let (context, token, timer) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        assert!(matches!(
+            engine.claim_http(2., permit),
+            Ok(Claim::Released(_))
+        ));
+        engine.handle(
+            3.,
+            Event::HttpStart {
+                request: token.attempt().request,
+                status: 200,
+                headers: "header",
+            },
+        );
+        engine.handle(
+            4.,
+            Event::HttpChunk {
+                request: token.attempt().request,
+                data: b"o",
+            },
+        );
+        fail_mutation(&mut engine, &context, 5.);
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
+        assert!(engine.io.pending.is_empty());
+        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.incoming.is_empty());
+        engine.handle(
+            6.,
+            Event::HttpChunk {
+                request: token.attempt().request,
+                data: b"k",
+            },
+        );
+        engine.handle(
+            7.,
+            Event::HttpEnd {
+                request: token.attempt().request,
+            },
+        );
+        engine.handle(
+            8.,
+            Event::HttpEnd {
+                request: token.attempt().request,
+            },
+        );
+        engine.handle(101., Event::TimerFired { timer });
+        assert_eq!(&*engine.venue.reconciliations.borrow(), &["ok"]);
+        assert_eq!(
+            engine.store.order("one").unwrap().status,
+            crate::model::OrderStatus::Canceled
+        );
+        assert_eq!(
+            engine.store.order("two").unwrap().status,
+            crate::model::OrderStatus::Canceled
+        );
+        assert_eq!(engine.venue.responses, 0);
+        assert!(engine.drain_actions().all(|a| !matches!(
+            a,
+            Action::Http(_) | Action::Notice(_) | Action::SetTimer { .. }
+        )));
+        assert!(!engine.io.http_responses.contains(token.attempt().request));
+    }
+
+    #[test]
+    fn newer_order_or_physical_write_fences_late_reconciliation() {
+        for newer_write in [false, true] {
+            let (mut engine, _) = start(Probe::default());
+            engine
+                .store
+                .set_orders(vec![fixture_order("one"), fixture_order("two")]);
+            let (context, token, _) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            engine.claim_http(2., permit).unwrap();
+            fail_mutation(&mut engine, &context, 3.);
+            if newer_write {
+                let (_, replacement, _) = mutation(&mut engine, 7, 4.);
+                let permit = bind(&mut engine, replacement, 5.);
+                engine.claim_http(6., permit).unwrap();
+            } else {
+                engine.store.upsert_order(fixture_order("unrelated"));
+            }
+            engine.drain_actions().for_each(drop);
+            engine.handle(
+                7.,
+                Event::HttpResponse {
+                    request: token.attempt().request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: "ok",
+                    },
+                },
+            );
+            assert_eq!(&*engine.venue.reconciliations.borrow(), &["ok"]);
+            assert_eq!(
+                engine.store.order("one").unwrap().status,
+                crate::model::OrderStatus::Open
+            );
+            assert_eq!(
+                engine.store.order("two").unwrap().status,
+                crate::model::OrderStatus::Open
+            );
+            assert_eq!(engine.venue.responses, 0);
+            assert!(engine.drain_actions().next().is_none());
+        }
+    }
+
+    #[test]
+    fn timer_before_response_is_unknown_and_response_before_timer_succeeds_once() {
+        for timer_first in [true, false] {
+            let (mut engine, _) = start(Probe::default());
+            let (_, token, timer) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            engine.claim_http(2., permit).unwrap();
+            if timer_first {
+                engine.handle(100., Event::TimerFired { timer });
+            }
+            engine.handle(
+                if timer_first { 101. } else { 3. },
+                Event::HttpResponse {
+                    request: token.attempt().request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: "ok",
+                    },
+                },
+            );
+            engine.handle(102., Event::TimerFired { timer });
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(
+                        a,
+                        Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+                    ))
+                    .count(),
+                1
+            );
+            assert_eq!(engine.venue.responses, usize::from(!timer_first));
+            assert_eq!(
+                engine.venue.reconciliations.borrow().len(),
+                usize::from(timer_first)
+            );
+            assert!(engine.io.pending.is_empty());
+            assert!(engine.io.managed_http.is_empty());
+        }
+    }
+
+    #[test]
+    fn mutation_capture_and_streaming_refusals_precede_admission_and_physical_send() {
+        for refuse_capture in [false, true] {
+            let (mut engine, _) = start(Probe {
+                refuse_capture,
+                ..Probe::default()
+            });
+            let (_, token, _) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            if !refuse_capture {
+                engine.io.streams.insert(
+                    token.attempt().request,
+                    (ArrayAt::Root, ItemCheck::Splitter),
+                );
+            }
+            assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
+            assert!(engine.venue.releases.is_empty());
+            assert!(!engine.io.http_responses.contains(token.attempt().request));
+            assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(crate::Outcome::NotSent))));
+        }
+    }
+
+    #[test]
+    fn active_mutation_resets_auth_scope_and_counts_http_status_but_late_ack_does_neither() {
+        let (mut engine, _) = start(Probe {
+            auth_reject: true,
+            ..Probe::default()
+        });
+        for (command, status) in [(7, 429), (8, 503)] {
+            let (_, token, _) = mutation(&mut engine, command, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            engine.claim_http(2., permit).unwrap();
+            engine.io.auth_failure_counted = true;
+            #[cfg(feature = "order-locks")]
+            {
+                engine.io.order_response_token = Some(123);
+            }
+            engine.handle(
+                3.,
+                Event::HttpResponse {
+                    request: token.attempt().request,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: "denied",
+                    },
+                },
+            );
+        }
+        assert_eq!(engine.health().auth_failures, 2);
+        assert_eq!(engine.health().rate_limited, 1);
+        assert_eq!(engine.health().http_failures, 1);
+        let (context, token, _) = mutation(&mut engine, 9, 4.);
+        let permit = bind(&mut engine, token, 5.);
+        engine.claim_http(6., permit).unwrap();
+        fail_mutation(&mut engine, &context, 7.);
+        engine.drain_actions().for_each(drop);
+        let health = engine.health().clone();
+        engine.handle(
+            8.,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status: 429,
+                    headers: "",
+                    body: "denied",
+                },
+            },
+        );
+        assert_eq!(engine.health(), &health);
+        assert_eq!(engine.venue.responses, 2);
+        assert_eq!(engine.venue.reconciliations.borrow().len(), 1);
+        assert!(engine.drain_actions().next().is_none());
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn active_mutation_completion_drains_deferred_order_locks_without_an_unrelated_event() {
+        let (mut engine, _) = start(Probe::default());
+        let placing = Command::PlaceOrders {
+            command: 7,
+            orders: vec![],
+        };
+        engine
+            .io
+            .order_locks
+            .acquire(&placing, &engine.store, true)
+            .unwrap();
+        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
+            command: 8,
+            symbol: String::new()
+        }));
+        let (_, token, _) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        engine.claim_http(2., permit).unwrap();
+        engine.handle(
+            3.,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "ok",
+                },
+            },
+        );
+        assert_eq!(engine.venue.command_calls, vec![8]);
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn managed_read_callback_cannot_suppress_an_engine_owned_deferred_uncertainty_failure() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            command: Some(9),
+            ..Probe::default()
+        });
+        engine
+            .io
+            .order_locks
+            .acquire(
+                &Command::PlaceOrders {
+                    command: 7,
+                    orders: vec![],
+                },
+                &engine.store,
+                true,
+            )
+            .unwrap();
+        engine.io.order_locks.note_write();
+        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
+            command: 8,
+            symbol: String::new()
+        }));
+        engine.io.order_locks.finish(7, true);
+        let permit = bind(&mut engine, tokens[0], 1.);
+        engine.claim_http(2., permit).unwrap();
+        engine.handle(
+            3.,
+            Event::HttpResponse {
+                request: tokens[0].attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "[]",
+                },
+            },
+        );
+        assert_eq!(
+            engine
+                .drain_actions()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
+                .count(),
+            1
+        );
+        assert_eq!(engine.venue.responses, 1);
+        assert!(engine.io.http_delivery.is_none());
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn pre_send_refusal_releases_a_deferred_command_without_waiting_for_an_event() {
+        let (mut engine, _) = start(Probe {
+            refuse_capture: true,
+            ..Probe::default()
+        });
+        engine
+            .io
+            .order_locks
+            .acquire(
+                &Command::PlaceOrders {
+                    command: 7,
+                    orders: vec![],
+                },
+                &engine.store,
+                true,
+            )
+            .unwrap();
+        assert!(engine.io.order_locks.defer(&Command::CancelSymbolOrders {
+            command: 8,
+            symbol: String::new()
+        }));
+        let (_, token, _) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
+        assert_eq!(engine.venue.command_calls, vec![8]);
+        assert!(engine.venue.releases.is_empty());
+    }
+
+    #[test]
+    fn oversize_released_response_seals_unknown_and_cannot_reopen_on_a_late_ack() {
+        let (mut engine, _) = start(Probe::default());
+        let (_, token, _) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        engine.claim_http(2., permit).unwrap();
+        engine.handle(
+            3.,
+            Event::HttpStart {
+                request: token.attempt().request,
+                status: 200,
+                headers: "",
+            },
+        );
+        engine.handle(
+            4.,
+            Event::HttpChunk {
+                request: token.attempt().request,
+                data: &vec![b'x'; 256 * 1024 + 1],
+            },
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
+        assert_eq!(engine.venue.responses, 0);
+        assert!(engine.io.pending.is_empty());
+        assert!(engine.io.managed_http.is_empty());
+        engine.handle(
+            5.,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "ok",
+                },
+            },
+        );
+        assert_eq!(engine.venue.responses, 0);
+        assert!(engine.venue.reconciliations.borrow().is_empty());
+        assert!(
+            engine
+                .drain_actions()
+                .all(|a| !matches!(a, Action::Notice(_)))
+        );
     }
     fn response(engine: &mut Engine<Probe>, token: Preparation, at: f64) {
         engine.handle(

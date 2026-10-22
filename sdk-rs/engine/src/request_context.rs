@@ -6,6 +6,61 @@
 use crate::signing::{KeyRef, SignReceipt};
 use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
 
+#[path = "http_reconciliation.rs"]
+mod reconciliation;
+pub use reconciliation::ReconciliationData;
+pub(crate) use reconciliation::{
+    Record as ReconciliationRecord, Responses as ReconciliationResponses,
+};
+
+/// Late ACK codec view. Order changes are allowed only when neither another
+/// released write nor any Store order update has superseded the release fence.
+/// No command, auth, retry, scheduler or order-lock authority is exposed.
+pub struct Reconciliation<'a> {
+    pub owner: Owner,
+    pub leg: u64,
+    pub release: HttpRelease,
+    store: &'a mut crate::Store,
+    may_update: bool,
+}
+
+impl<'a> Reconciliation<'a> {
+    pub(crate) fn new(
+        record: &ReconciliationRecord,
+        store: &'a mut crate::Store,
+        write_revision: u64,
+    ) -> Self {
+        Self {
+            owner: record.owner,
+            leg: record.leg,
+            release: record.release.expect("only released writes are reconciled"),
+            may_update: record.order_revision != u64::MAX
+                && record.write_revision != u64::MAX
+                && record.order_revision == store.orders_revision()
+                && record.write_revision == write_revision,
+            store,
+        }
+    }
+
+    pub fn orders(&self) -> &[crate::model::Order] {
+        self.store.orders()
+    }
+
+    /// All patches in this one callback share its initial atomic fence. Its
+    /// first accepted patch does not invalidate the remaining patches.
+    pub fn upsert_order(&mut self, order: crate::model::Order) -> bool {
+        if !self.may_update {
+            return false;
+        }
+        self.store.upsert_order(order);
+        true
+    }
+
+    pub fn set_order_status(&mut self, id: &str, status: crate::model::OrderStatus) -> bool {
+        self.may_update && self.store.set_order_status(id, status)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Owner {
     Command { id: CommandId, generation: u64 },

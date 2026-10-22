@@ -489,3 +489,20 @@ retire response state without changing a sealed Unknown outcome.
 Implementation: pure bounded response/tombstone service and tests first; then
 engine retirement/event wiring and restricted Store revision view; then adversarial
 native lifecycle tests, independent review and only then mutation activation.
+
+
+The closed-queue collector checkpoint additionally shares the ordinary active
+response event scope/status counters/deferred-lock drain. Late codecs bypass all
+of those paths. Engine-generated deferred finalization temporarily clears an
+unrelated HTTP delivery token and restores it afterward. Preparation failures
+use the same normal event bookkeeping. Independent review is CLEAN; behavioral
+fault controls pin delivering-capacity retention, auth scope, deferred authority
+and order/write revision fencing. No production mutation support is claimed yet.
+
+Before activation, shared order-lock accounting must use the command owning the
+released write (legacy note_write currently marks every active placement). Only
+Unknown managed seals may preserve placement uncertainty; a fully known journal
+seal resolves that command's sent marker before ordinary lock retirement. Legacy
+lock behavior stays unchanged. Controls must cover two active commands with only
+one physically sent, all-definitive refusals, known partial effects and unresolved
+sent effects. This is shared engine lifecycle work, not venue policy.

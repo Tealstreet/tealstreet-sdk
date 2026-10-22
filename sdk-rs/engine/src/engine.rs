@@ -1062,6 +1062,8 @@ struct Io<P> {
     http_delivery: Option<request_context_registry::Delivery>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
+    http_responses: crate::request_context::ReconciliationResponses,
+    http_write_revision: u64,
     entropy: Option<crate::entropy::Entropy>,
     #[cfg(feature = "order-locks")]
     order_locks: crate::order_locks::OrderLocks,
@@ -1107,6 +1109,8 @@ impl<P> Default for Io<P> {
         Self {
             request_contexts: Default::default(),
             http_delivery: None,
+            http_responses: Default::default(),
+            http_write_revision: 0,
             managed_http: HashMap::new(),
             http_pacing: Default::default(),
             entropy: None,
@@ -1835,6 +1839,26 @@ pub enum SigningTarget<'a, P> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    /// Bounded native correlation metadata only. No credential, outbound packet
+    /// or recipe may be retained here. Managed mutations require this codec.
+    fn capture_http_reconciliation(
+        &self,
+        _pending: &Self::Pending,
+    ) -> Result<crate::request_context::ReconciliationData, crate::request_context::Error> {
+        Err(crate::request_context::Error::Invalid)
+    }
+
+    /// Pure late response codec, separate from ordinary reducers. Immutable
+    /// venue access and the restricted view cannot reopen a command or publish
+    /// authentication/retry/scheduler state or clear an order-lock fence.
+    fn reconcile_http(
+        &self,
+        _cx: &mut crate::request_context::Reconciliation<'_>,
+        _data: &crate::request_context::ReconciliationData,
+        _response: Response<'_>,
+    ) {
+    }
+
     /// Fixed per-engine send-group floors; individual attempts may only extend
     /// the gap following their physical transport handoff.
     fn http_pacing(&self) -> &[crate::request_context::Pacing] {
@@ -2388,7 +2412,18 @@ impl<V: Venue> Engine<V> {
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         self.io.dispatch_now = now;
-        if self.expire_http_timer(now, &event) || !self.admit_http_event(now, &event) {
+        self.io.http_responses.prune(now);
+        if self.expire_http_timer(now, &event) {
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            return;
+        }
+        let admitted = self.admit_http_event(now, &event);
+        if self.collect_write_response(now, &event, admitted) {
+            return;
+        }
+        if !admitted {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
@@ -2538,11 +2573,7 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
-        #[cfg(feature = "order-locks")]
-        {
-            self.io.order_response_token = None;
-        }
-        self.io.auth_failure_counted = false;
+        self.begin_event_scope();
         #[cfg(feature = "command-tracking")]
         if matches!(&event, Event::Command(_)) {
             self.commands_received = true;
@@ -2780,6 +2811,30 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_command(&mut cx, command);
             }
         }
+        self.finish_event_scope(now);
+    }
+
+    fn begin_event_scope(&mut self) {
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.order_response_token = None;
+        }
+        self.io.auth_failure_counted = false;
+    }
+
+    fn count_http_status(&mut self, status: u16) {
+        if status == 429 {
+            self.io.health.count(log_code::RATE_LIMITED);
+        } else if status >= 500 {
+            self.io.health.count(log_code::HTTP_FAILED);
+        }
+    }
+
+    fn finish_event_scope(&mut self, now: f64) {
+        // Deferred commands are engine-owned work, not part of the HTTP codec
+        // whose callback just released the lock. Do not lend that codec's
+        // attempt authority to an unrelated internal finalization.
+        let delivery = self.io.http_delivery.take();
         #[cfg(feature = "order-locks")]
         for (command, failed) in self.io.order_locks.ready() {
             if failed && self.venue.fence_uncertain_cancel_all() {
@@ -2802,6 +2857,7 @@ impl<V: Venue> Engine<V> {
                 self.handle(now, Event::Command(command));
             }
         }
+        self.io.http_delivery = delivery;
         self.restore_shared_tickers(false, now);
     }
 
@@ -2868,17 +2924,12 @@ impl<V: Venue> Engine<V> {
         ) else {
             return;
         };
+        self.count_http_status(incoming.status);
         let mut cx = Cx {
             now,
             store: &mut self.store,
             io: &mut self.io,
         };
-        let status = incoming.status;
-        if status == 429 {
-            cx.io.health.count(log_code::RATE_LIMITED);
-        } else if status >= 500 {
-            cx.io.health.count(log_code::HTTP_FAILED);
-        }
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
