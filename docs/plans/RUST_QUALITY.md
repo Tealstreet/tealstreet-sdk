@@ -161,8 +161,10 @@ Medium:
    silent page/stream merge and coded reporting; `SnapshotCoverage` remains its
    compatibility alias. Bybit and Bitunix use the shared collector without
    changing their scoped freshness/lineage rules. Existing helpers' presence
-   does not prove every keyed REST/WS call site is migrated: Bitget/Orderly and
-   the remaining inventory are follow-up phases. Snapshot commits retain the
+   does not prove every keyed REST/WS call site is migrated: Bitget existing
+   REST/WS and Orderly REST now use shared admission/reporting; Orderly typed WS
+   arrays and the remaining inventory are follow-up phases. Snapshot commits
+   retain the
    current protected rows; venue freshness checks precede accepted-row writes.
 6. ~~Per-venue `from_options` in a `safe-cex-venues` crate shared by hosts;
    delete ~130 lines of TS credential checks (`rust.exchange.ts:431-645`);

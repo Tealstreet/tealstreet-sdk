@@ -1,7 +1,7 @@
 use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::coverage::{RowAdmission, row_skipped};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -24,7 +24,7 @@ pub enum Request {
     Probe,
     Positions {
         rows: Vec<Position>,
-        skipped: SnapshotCoverage<PositionKey>,
+        skipped: RowAdmission<PositionKey>,
         coins: std::collections::VecDeque<String>,
         started: f64,
     },
@@ -48,7 +48,7 @@ pub struct OrderSnapshot {
     pages: u32,
     page_count: usize,
     rows: Vec<Order>,
-    skipped: SnapshotCoverage<String>,
+    skipped: RowAdmission<String>,
     plans: Vec<(String, String)>,
     trailing: Vec<(String, (String, f64))>,
     started: f64,
@@ -417,7 +417,7 @@ impl BitgetFutures {
             Some(at),
             Request::Positions {
                 rows: vec![],
-                skipped: SnapshotCoverage::default(),
+                skipped: RowAdmission::default(),
                 coins,
                 started: cx.now,
             },
@@ -474,7 +474,7 @@ impl BitgetFutures {
                 pages: 0,
                 page_count: 0,
                 rows: vec![],
-                skipped: SnapshotCoverage::default(),
+                skipped: RowAdmission::default(),
                 plans: vec![],
                 trailing: vec![],
                 started: cx.now,
@@ -550,15 +550,11 @@ impl BitgetFutures {
                     Ok(p) => rows.push(p),
                     Err(error) => {
                         let key = self.position_key(item);
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            format!(
-                                "skipped Bitget position record {}: {error}",
-                                key.as_ref().map_or("without symbol", |(s, _)| s.as_str())
-                            ),
+                        let message = format!(
+                            "skipped Bitget position record {}: {error}",
+                            key.as_ref().map_or("without symbol", |(s, _)| s.as_str())
                         );
-                        skipped.reject(key);
+                        skipped.skip(cx, key, Level::Warn, message);
                     }
                 }
             }
@@ -622,15 +618,11 @@ impl BitgetFutures {
                     Ok(orders) => snapshot.rows.extend(orders),
                     Err(error) => {
                         let id = order_row_id(item);
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            format!(
-                                "skipped Bitget order record {}: {error}",
-                                id.as_deref().unwrap_or("without id")
-                            ),
+                        let message = format!(
+                            "skipped Bitget order record {}: {error}",
+                            id.as_deref().unwrap_or("without id")
                         );
-                        snapshot.skipped.reject(id);
+                        snapshot.skipped.skip(cx, id, Level::Warn, message);
                     }
                 }
             }
@@ -1112,7 +1104,7 @@ impl BitgetFutures {
         &self,
         cx: &mut Cx<'_, Pending>,
         positions: &mut Vec<Position>,
-        skipped: &mut SnapshotCoverage<PositionKey>,
+        skipped: &mut RowAdmission<PositionKey>,
         snapshot: bool,
     ) -> HashSet<String> {
         let mut conflicts = HashSet::new();
@@ -1145,7 +1137,11 @@ impl BitgetFutures {
             }
             positions.retain(|p| !conflicts.contains(&p.symbol));
             if !conflicts.is_empty() {
-                cx.notice(Level::Warn, code::ROW_SKIPPED, "skipped Bitget position stream record: conflicting account position modes; cached exposure retained");
+                row_skipped(
+                    cx,
+                    Level::Warn,
+                    "skipped Bitget position stream record: conflicting account position modes; cached exposure retained",
+                );
             }
         }
         conflicts
@@ -1263,7 +1259,7 @@ impl BitgetFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut rows: Vec<Order>,
-        skipped: &SnapshotCoverage<String>,
+        skipped: &RowAdmission<String>,
         virtual_only: bool,
         started: f64,
         stream_revision: u64,
@@ -1533,7 +1529,7 @@ impl BitgetFutures {
                 };
                 let empty = rows.is_empty();
                 let mut positions = Vec::with_capacity(rows.len());
-                let mut skipped = SnapshotCoverage::default();
+                let mut skipped = RowAdmission::default();
                 for item in rows {
                     let mapped = match serde_json::from_str::<PositionRow>(item.get()) {
                         Ok(row) => {
@@ -1555,10 +1551,10 @@ impl BitgetFutures {
                     match mapped {
                         Ok(position) => positions.push(position),
                         Err(error) => {
-                            skipped.reject(self.position_key(item.get()));
-                            cx.notice(
+                            skipped.skip(
+                                cx,
+                                self.position_key(item.get()),
                                 Level::Warn,
-                                code::ROW_SKIPPED,
                                 format!("skipped Bitget position stream record: {error}"),
                             );
                         }
@@ -2125,11 +2121,7 @@ impl BitgetFutures {
                 .ws_order_revisions
                 .insert(id, self.account.ws_order_clock);
         }
-        cx.notice(
-            Level::Warn,
-            code::ROW_SKIPPED,
-            "invalid Bitget order stream record",
-        );
+        row_skipped(cx, Level::Warn, "invalid Bitget order stream record");
         if self.account.orders_timer.is_none() {
             self.account.orders_timer = Some(cx.set_timer(500.0));
         }

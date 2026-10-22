@@ -203,3 +203,10 @@ Independent phase-2 plan review CLEAN, architecture answer **No**, before code.
 The exact archived suite includes separate BitgetUSDC (shared crate) as well as
 Bitget, Orderly and Binance: 29 workloads / 184 complete outputs / 92 Rust.
 Preserve Bitget synthetic USDC provenance; do not label it a live capture.
+
+Phase-2 local implementation review CLEAN, architecture **No**: Bitget grouped
+mode reports and silent barriers, Orderly PnL/flat/unknown/page/root decisions
+and parent/child freshness metadata are unchanged. 628 Bitget/Orderly/Binance
+native tests, strict touched-crate Clippy/fmt/bans and 44 root typecheck/28 lint
+tasks pass. Full current-head CI and all 184 raw outputs remain pending; these
+local results do not establish complete migration of Orderly WS or other venues.
