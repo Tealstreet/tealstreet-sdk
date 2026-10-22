@@ -1,4 +1,5 @@
 import { copyHistoryCompleteness } from '../../historyCompleteness';
+import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   AccountAuthResult,
@@ -412,12 +413,28 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    if (this.bridgeConstruction.dispatchSigning) {
+      try {
+        await this.ensureHost();
+        return await signHostedHttp(this.name, this.options, Boolean(this.signerSetup?.primaryComplete), this.host!, request);
+      } catch {
+        return { id: request.id, error: 'Hosted HTTP signing failed' };
+      }
+    }
     const signer = this.hostedSigner();
     if (!signer) return { id: request.id, error: 'Exchange does not have xhr for signing' };
     return (await signer).signHttpRequest(request);
   };
 
   override signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    if (this.bridgeConstruction.dispatchSigning) {
+      try {
+        await this.ensureHost();
+        return await signHostedWsAuth(this.host!, request);
+      } catch {
+        return { id: request.id, error: 'Hosted WS auth signing failed' };
+      }
+    }
     const signer = this.hostedSigner();
     return signer ? (await signer).signWsAuth(request) : this.localSignWsAuth(request);
   };

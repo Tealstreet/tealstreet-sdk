@@ -2,19 +2,16 @@ import type { HOWRegion } from '../../httpOverWebsocket/axiosHttpOverWebsocketAd
 import type { IsSignatureRejection } from '../../utils/signatureRejection';
 import type { ExchangeOptions } from '../../types';
 
-import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
-import { nanoid } from 'nanoid';
 import qs from 'qs';
 
-import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
-import { canSignPayload, signPayload } from '../../utils/payloadSigner';
 import { isNodeOrBunRuntime } from '../../utils/runtime';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { getBybitResponseMeta } from './bybit.response';
 import { getBybitSiteHeaders } from './bybit.site';
+import { createBybitRequestInterceptor } from './bybit.signing';
 import { BASE_URL, BROKER_ID, DEMO_URL, ENDPOINTS, RECV_WINDOW } from './bybit.types';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
@@ -48,7 +45,6 @@ const isSignedRequest = (config: { headers?: any } | undefined) => Boolean(confi
 
 // Public market data: tickers, instruments-info and kline. IP-metered by Bybit
 // whether or not a signature rides along.
-const isPublicEndpoint = (url?: string) => Boolean(url?.includes('/v5/market/'));
 
 const isInstrumentsInfoRequest = (error: any) => error?.config?.url === ENDPOINTS.MARKETS;
 
@@ -198,60 +194,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // Must be a SINGLE interceptor because axios runs request interceptors in
   // LIFO order — splitting into two would cause signing to run before requestId
   // is added, producing a signature mismatch.
-  xhr.interceptors.request.use(async (config) => {
-    const nextConfig = {
-      ...config,
-      params: {
-        ...config.params,
-        requestId: nanoid(),
-      },
-    };
-
-    // Tag `nextConfig`, not `config` — every return below is built from it, so
-    // a tag on `config` would be dropped by the spread above. Broader than the
-    // kline check, which misses tickers and instruments-info; this only skips
-    // the hosted signing round trip and never decides signing.
-    if (isPublicEndpoint(nextConfig.url)) markSkipRemoteSigning(nextConfig);
-
-    if (nextConfig.method === 'get' && nextConfig.url === ENDPOINTS.KLINE) {
-      return { ...nextConfig, headers: new AxiosHeaders(bybitSiteHeaders) };
-    }
-
-    // Skip signing when remote signer handles it
-    if (options.remoteSigner) {
-      return nextConfig;
-    }
-
-    // Skip signing when no API key (public-only mode)
-    if (!options.key || !canSignPayload(options)) {
-      return nextConfig;
-    }
-
-    // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
-    // A resent config carries the body axios already serialized; stringifying
-    // it again would sign a quoted copy of what actually goes out.
-    const body = typeof nextConfig.data === 'string' ? nextConfig.data : JSON.stringify(nextConfig.data);
-    const data = nextConfig.method === 'get' ? qs.stringify(nextConfig.params) : body;
-
-    const timestamp = virtualClock.getCurrentTimeMs();
-    const { signature, headers: signerHeaders } = await signPayload(
-      options,
-      exchange.name,
-      [timestamp, options.key, recvWindow, data].join(''),
-      'hex',
-    );
-
-    const headers = new AxiosHeaders({
-      // Signer headers last: a replayed config still carries the previous signature's.
-      ...nextConfig.headers,
-      ...signerHeaders,
-      'X-BAPI-SIGN': signature,
-      'X-BAPI-API-KEY': options.key,
-      'X-BAPI-TIMESTAMP': timestamp,
-    });
-
-    return { ...nextConfig, headers };
-  });
+  xhr.interceptors.request.use(createBybitRequestInterceptor(options, exchange.name, undefined, bybitSiteHeaders));
 
   if (options.tealstreetTunnel) {
     const region = options.proxyRegion as HOWRegion | undefined;

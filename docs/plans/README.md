@@ -183,6 +183,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | WEEX selected-symbol metadata refresh | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_WEEX_METADATA_REFRESH.md](RUST_WEEX_METADATA_REFRESH.md) |
 | WOO perpetual Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_WOO_PROGRESS.md](RUST_WOO_PROGRESS.md) |
 | Shared dispatch signer provider | In progress | Enabling trusted provider construction in another standalone family. | [RUST_SHARED_DISPATCH_PROVIDER.md](RUST_SHARED_DISPATCH_PROVIDER.md) |
+| Hosted signer compatibility | In progress: signing-side capture; keyless companion pending | Changing public hosted sign APIs or migrating a family away from raw credentials. | [RUST_HOSTED_SIGNER_BRIDGE.md](RUST_HOSTED_SIGNER_BRIDGE.md) |
 | Shared signer setup field policy | In progress | Changing trusted per-family credential transforms or synchronous signing intent. | [RUST_SIGNER_SETUP_POLICY.md](RUST_SIGNER_SETUP_POLICY.md) |
 | Bitget public CPU | Historical investigation | Read before changing public parsing or Bitget family throughput profiles | [RUST_BITGET_PUBLIC_CPU.md](RUST_BITGET_PUBLIC_CPU.md) |
 | Shared JSON WASM profile | CI experiment | Before changing shared JSON optimization or removing whole-family throughput exceptions. | [RUST_JSON_WASM_PROFILE.md](RUST_JSON_WASM_PROFILE.md) |

@@ -36,6 +36,11 @@ export class WasmEngine implements WasmEngineLike {
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner(): boolean;
   useExternalSigner(): void;
+  hostedSigningClock(now: number): string;
+  prepareHostedSigning(inputJson: string, now: number): string;
+  localHostedSigning(id: number, now: number): string;
+  finishHostedSigning(id: number, resultJson: string, now: number): string;
+  cancelHostedSigning(id: number): void;
   signed(attempt: number, resultJson: string, now: number): string;
   signFailed(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;
   prepareDispatch(now: number): string;

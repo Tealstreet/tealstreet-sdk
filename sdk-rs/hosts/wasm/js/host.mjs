@@ -11,6 +11,15 @@ function signingReceipt(value) {
   return { ...(stampMs === undefined ? {} : { stampMs }), ...(expiryMs === undefined ? {} : { expiryMs }) };
 }
 
+function checkedSigningResult(expected, count, result) {
+  const receipt = signingReceipt(result?.receipt);
+  if (!receipt || !expected || receipt.stampMs !== expected.stampMs || receipt.expiryMs !== expected.expiryMs
+    || !Array.isArray(result?.values) || result.values.length !== count
+    || result.values.some((bytes) => !Array.isArray(bytes) || bytes.length > 1048576
+      || bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))) return undefined;
+  return { values: result.values.map((bytes) => Array.from(bytes)), receipt };
+}
+
 // Runs a WasmEngine against a transport: executes its actions (sockets, HTTP,
 // timers) and feeds the results back in. The same host serves browser workers,
 // Cloudflare Workers, and the replay harness; only the transport differs.
@@ -252,6 +261,7 @@ export class EngineHost {
     }
     this.signer = options.signer;
     this.primitiveSignings = new Map();
+    this.hostedSignings = new Map();
     this.entropy = identity;
     this.engine = engine;
     this.ownsEngine = options.ownsEngine === true;
@@ -517,11 +527,10 @@ export class EngineHost {
       attempt(() => this.transport.clearTimeout(pending.timer));
     }
     this.signings.clear();
-    for (const pending of this.primitiveSignings.values()) {
-      attempt(() => pending.controller.abort());
-      attempt(() => this.transport.clearTimeout(pending.timer));
-    }
+    for (const pending of this.primitiveSignings.values()) attempt(() => pending.cancel());
     this.primitiveSignings.clear();
+    for (const pending of this.hostedSignings.values()) attempt(() => pending.cancel());
+    this.hostedSignings.clear();
     for (const socket of this.sockets.values()) attempt(() => socket.close());
     for (const handle of this.timers.values()) attempt(() => this.transport.clearTimeout(handle));
     this.sockets.clear();
@@ -591,42 +600,118 @@ export class EngineHost {
     }
   }
 
-  sign(action) {
-    if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
-    const expectedReceipt = signingReceipt(action.work.receipt);
-    const id = action.attempt;
+  // Provider calls from dispatch and signing-only capture share cancellation,
+  // bounds, receipt validation and sanitized closed errors.
+  primitiveSigning(work, timeoutMs, execute, complete) {
+    const expectedReceipt = signingReceipt(work?.receipt);
+    const expectedCount = work?.operations?.length;
     const controller = new AbortController();
-    const finish = (result, code) => {
-      const pending = this.primitiveSignings.get(id);
-      if (!pending || pending.controller !== controller || this.disposed) return;
-      this.primitiveSignings.delete(id);
-      this.transport.clearTimeout(pending.timer);
-      if (code) {
-        controller.abort();
-        this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));
-      } else {
-        this.run(this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
+    let settled = false;
+    const clearTimer = () => {
+      if (pending.timer !== undefined) {
+        try { this.transport.clearTimeout(pending.timer); } catch { /* Completion must still settle. */ }
       }
     };
-    const timer = this.transport.setTimeout(() => finish(undefined, 'timedOut'), action.timeoutMs);
-    this.primitiveSignings.set(id, { controller, timer });
-    Promise.resolve().then(() => {
-      if (controller.signal.aborted || this.disposed) return;
-      if (!this.signer) { finish(undefined, 'unavailable'); return; }
-      return this.signer(action.work, { signal: controller.signal });
-    }).then((result) => {
-      if (controller.signal.aborted || this.disposed) return;
-      const receipt = signingReceipt(result?.receipt);
-      if (!receipt || !expectedReceipt || receipt.stampMs !== expectedReceipt.stampMs
-        || receipt.expiryMs !== expectedReceipt.expiryMs
-        || !Array.isArray(result?.values) || result.values.length !== action.work.operations.length
-        || result.values.some((bytes) => !Array.isArray(bytes) || bytes.length > 1048576
-          || bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))) {
-        finish(undefined, 'invalidResult');
-        return;
+    const finish = (result, code) => {
+      if (settled) return;
+      settled = true;
+      clearTimer();
+      if (code) {
+        try { controller.abort(); } catch { /* Provider listeners cannot strand completion. */ }
       }
-      finish({ values: result.values.map((bytes) => Array.from(bytes)), receipt });
-    }).catch(() => finish(undefined, 'refused'));
+      complete(result, code);
+    };
+    // Register correlation before arming: injected timers may fire inline or
+    // throw. Both paths must retire the native capture and settle the caller.
+    const pending = {
+      controller,
+      timer: undefined,
+      cancel: () => finish(undefined, 'unavailable'),
+      start: () => {
+        try { pending.timer = this.transport.setTimeout(() => finish(undefined, 'timedOut'), timeoutMs); }
+        catch { finish(undefined, 'unavailable'); return; }
+        if (settled) { clearTimer(); return; }
+        Promise.resolve().then(() => {
+          if (controller.signal.aborted || this.disposed) return;
+          if (!execute) { finish(undefined, 'unavailable'); return; }
+          return execute({ signal: controller.signal });
+        }).then((result) => {
+          if (controller.signal.aborted || this.disposed) return;
+          const checked = checkedSigningResult(expectedReceipt, expectedCount, result);
+          if (!checked) { finish(undefined, 'invalidResult'); return; }
+          finish(checked);
+        }).catch(() => finish(undefined, 'refused'));
+      },
+    };
+    return pending;
+  }
+
+  sign(action) {
+    if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
+    const id = action.attempt;
+    const pending = this.primitiveSigning(action.work, action.timeoutMs,
+      this.signer && ((context) => this.signer(action.work, context)), (result, code) => {
+        if (this.primitiveSignings.get(id) !== pending || this.disposed) return;
+        this.primitiveSignings.delete(id);
+        if (code) this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));
+        else this.run(this.invoke(this.engine.signed, id, JSON.stringify(result), this.transport.now()));
+      });
+    this.primitiveSignings.set(id, pending);
+    pending.start();
+  }
+
+  hostedSigningClock() {
+    if (this.disposed) throw new EngineDisposedError();
+    if (typeof this.engine.hostedSigningClock !== 'function')
+      throw new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' });
+    return JSON.parse(this.invokeHosted(this.engine.hostedSigningClock, this.transport.now()));
+  }
+
+  invokeHosted(fn, ...args) {
+    const output = this.invoke(fn, ...args);
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    return output;
+  }
+
+  hostedSigning(input) {
+    if (this.disposed) return Promise.reject(new EngineDisposedError());
+    if (typeof this.engine.prepareHostedSigning !== 'function')
+      return Promise.reject(new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' }));
+    let prepared;
+    try { prepared = JSON.parse(this.invokeHosted(this.engine.prepareHostedSigning, JSON.stringify(input), this.transport.now())); }
+    catch (error) { return Promise.reject(error); }
+    const { id, work, deadlineMs } = prepared;
+    const duration = deadlineMs - this.transport.now();
+    if (!Number.isInteger(id) || id <= 0 || id > 0xffff_ffff || this.hostedSignings.has(id)
+      || !Number.isFinite(duration) || duration <= 0 || duration > 5000) {
+      this.engine.cancelHostedSigning?.(id);
+      return Promise.reject(new ExchangeError('Invalid hosted signing request', { kind: 'invalidInput', outcome: 'notSent' }));
+    }
+    if (!this.signer) {
+      try {
+        return Promise.resolve(JSON.parse(this.invokeHosted(this.engine.localHostedSigning, id, this.transport.now())));
+      } catch (error) {
+        try { this.engine.cancelHostedSigning(id); } catch { /* Preserve the closed native error. */ }
+        return Promise.reject(error);
+      }
+    }
+    return new Promise((resolve, reject) => {
+      const execute = (context) => this.signer(work, context);
+      const pending = this.primitiveSigning(work, duration, execute, (result, code) => {
+        this.hostedSignings.delete(id);
+        if (code || this.disposed) {
+          try { this.engine.cancelHostedSigning(id); } catch { /* Keep a closed signing error. */ }
+          reject(new ExchangeError(code === 'timedOut' ? 'Hosted signing timed out' : 'Hosted signing failed', {
+            kind: code === 'timedOut' ? 'timeout' : code === 'refused' ? 'invalidInput' : 'internal', outcome: 'notSent',
+          }));
+          return;
+        }
+        try { resolve(JSON.parse(this.invokeHosted(this.engine.finishHostedSigning, id, JSON.stringify(result), this.transport.now()))); }
+        catch (error) { reject(error); }
+      });
+      this.hostedSignings.set(id, pending);
+      pending.start();
+    });
   }
 
   signPayload(action) {

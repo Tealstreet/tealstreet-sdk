@@ -48,6 +48,14 @@ mod managed_http;
 use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
+    #[cfg(feature = "dispatch-signing")]
+    fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
+        None
+    }
+    #[cfg(feature = "dispatch-signing")]
+    fn signing_clock(&self, now: f64) -> (f64, u64) {
+        (now, 0)
+    }
     fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError>;
     fn prepare_dispatch(&mut self, now: f64);
     fn set_entropy(
@@ -105,6 +113,14 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    #[cfg(feature = "dispatch-signing")]
+    fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
+        Engine::signer(self)
+    }
+    #[cfg(feature = "dispatch-signing")]
+    fn signing_clock(&self, now: f64) -> (f64, u64) {
+        Engine::signing_clock(self, now)
+    }
     fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
         self.set_signer(None)
     }
@@ -573,6 +589,132 @@ pub struct WasmEngine {
     external_signer: bool,
     construction: String,
     inner: Box<dyn AnyEngine>,
+    #[cfg(feature = "dispatch-signing")]
+    hosted_identity: Option<(String, safe_cex_engine::signing::Identities)>,
+    #[cfg(feature = "dispatch-signing")]
+    hosted_captures:
+        safe_cex_engine::signing_capture::Capture<safe_cex_venues::hosted_signing::OutputKind>,
+}
+
+#[cfg(feature = "dispatch-signing")]
+fn hosted_error(error: safe_cex_engine::signing::SignError) -> js_sys::Error {
+    construction_error(error.venue_error())
+}
+
+#[cfg(feature = "dispatch-signing")]
+#[wasm_bindgen]
+impl WasmEngine {
+    /// Clock capture only: does not start the venue or emit any action.
+    #[wasm_bindgen(js_name = hostedSigningClock)]
+    pub fn hosted_signing_clock(&self, now: f64) -> Result<String, js_sys::Error> {
+        use safe_cex_engine::signing::{SignError, SignReceipt};
+        if self.hosted_identity.is_none() || !now.is_finite() || now < 0. {
+            return Err(hosted_error(SignError::Unavailable));
+        }
+        let (protocol_now, revision) = self.inner.signing_clock(now);
+        let stamp_ms = safe_cex_engine::time::wire_stamp_ms(protocol_now);
+        SignReceipt {
+            stamp_ms: Some(stamp_ms),
+            expiry_ms: None,
+        }
+        .validate()
+        .map_err(hosted_error)?;
+        Ok(serde_json::json!({"stampMs": stamp_ms, "revision": revision.to_string()}).to_string())
+    }
+
+    #[wasm_bindgen(js_name = prepareHostedSigning)]
+    pub fn prepare_hosted_signing(
+        &mut self,
+        input: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        use safe_cex_engine::signing::SignError;
+        if input.len() > 1024 * 1024 {
+            return Err(hosted_error(SignError::InvalidRequest));
+        }
+        let (venue, identities) = self
+            .hosted_identity
+            .as_ref()
+            .ok_or_else(|| hosted_error(SignError::Unsupported))?;
+        let input: safe_cex_venues::hosted_signing::Input =
+            serde_json::from_str(input).map_err(|_| hosted_error(SignError::InvalidRequest))?;
+        let (protocol_now, revision) = self.inner.signing_clock(now);
+        let mut timeout = safe_cex_engine::signing_capture::MAX_TIMEOUT_MS;
+        if let safe_cex_venues::hosted_signing::Input::Http {
+            stamp_ms,
+            revision: captured,
+            ..
+        } = &input
+        {
+            let age = protocol_now - *stamp_ms;
+            if captured != &revision.to_string() || !age.is_finite() || !(0. ..5000.).contains(&age)
+            {
+                return Err(hosted_error(SignError::InvalidRequest));
+            }
+            timeout = (5000. - age).ceil().clamp(1., 5000.) as u32;
+        }
+        let (work, kind) = safe_cex_venues::hosted_signing::prepare(venue, identities, input)
+            .map_err(hosted_error)?;
+        let prepared = self
+            .hosted_captures
+            .prepare(work, kind, now, protocol_now, revision, timeout)
+            .map_err(hosted_error)?;
+        Ok(serde_json::json!({"id": prepared.id.get(), "work": prepared.work, "deadlineMs": prepared.deadline_ms}).to_string())
+    }
+
+    /// Executes only this account's already prepared work, never caller refs.
+    #[wasm_bindgen(js_name = localHostedSigning)]
+    pub fn local_hosted_signing(&mut self, id: u32, now: f64) -> Result<String, js_sys::Error> {
+        use safe_cex_engine::signing::SignError;
+        let id = safe_cex_engine::signing_capture::CaptureId::from_raw(id)
+            .ok_or_else(|| hosted_error(SignError::Unavailable))?;
+        let provider = self.inner.signer();
+        let (protocol_now, revision) = self.inner.signing_clock(now);
+        let (kind, result) = self
+            .hosted_captures
+            .execute(id, now, protocol_now, revision, |work| {
+                provider
+                    .ok_or(SignError::Unavailable)?
+                    .sign_ready(work)
+                    .unwrap_or(Err(SignError::Unavailable))
+            })
+            .map_err(hosted_error)?;
+        let output =
+            safe_cex_venues::hosted_signing::finish(kind, &result).map_err(hosted_error)?;
+        serde_json::to_string(&output).map_err(|_| hosted_error(SignError::InvalidResult))
+    }
+
+    #[wasm_bindgen(js_name = finishHostedSigning)]
+    pub fn finish_hosted_signing(
+        &mut self,
+        id: u32,
+        result: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        use safe_cex_engine::signing::{SignError, SignResult};
+        let id = safe_cex_engine::signing_capture::CaptureId::from_raw(id)
+            .ok_or_else(|| hosted_error(SignError::Unavailable))?;
+        let result = if result.len() > 5 * 1024 * 1024 {
+            Err(SignError::InvalidResult)
+        } else {
+            serde_json::from_str::<SignResult>(result).map_err(|_| SignError::InvalidResult)
+        };
+        let (protocol_now, revision) = self.inner.signing_clock(now);
+        let (kind, result) = self
+            .hosted_captures
+            .finish(id, now, protocol_now, revision, result)
+            .map_err(hosted_error)?;
+        let output =
+            safe_cex_venues::hosted_signing::finish(kind, &result).map_err(hosted_error)?;
+        serde_json::to_string(&output).map_err(|_| hosted_error(SignError::InvalidResult))
+    }
+
+    #[wasm_bindgen(js_name = cancelHostedSigning)]
+    pub fn cancel_hosted_signing(&mut self, id: u32) {
+        if let Some(id) = safe_cex_engine::signing_capture::CaptureId::from_raw(id) {
+            self.hosted_captures.cancel(id);
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -656,6 +798,15 @@ impl WasmEngine {
             }
             None
         };
+        #[cfg(feature = "dispatch-signing")]
+        let hosted_identity = dispatch_signing
+            .then(|| {
+                options
+                    .signing
+                    .clone()
+                    .map(|identities| (venue.to_owned(), identities))
+            })
+            .flatten();
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
         let inner = safe_cex_venues::build_with_signer(
@@ -671,6 +822,10 @@ impl WasmEngine {
             construction,
             dispatch_signing,
             external_signer,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_identity,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_captures: Default::default(),
         })
     }
 
@@ -1588,6 +1743,10 @@ mod tests {
         let drains = Rc::new(Cell::new(0));
         let mut engine = WasmEngine {
             dispatch_signing: false,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_identity: None,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_captures: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::new(Commands {
@@ -1864,6 +2023,10 @@ mod tests {
         let health: serde_json::Value = serde_json::from_str(
             &WasmEngine {
                 dispatch_signing: false,
+                #[cfg(feature = "dispatch-signing")]
+                hosted_identity: None,
+                #[cfg(feature = "dispatch-signing")]
+                hosted_captures: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
                 inner: Box::new(Counted),
@@ -1884,6 +2047,10 @@ mod tests {
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
             dispatch_signing: false,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_identity: None,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_captures: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
@@ -1910,12 +2077,20 @@ mod tests {
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
             dispatch_signing: false,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_identity: None,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_captures: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
             dispatch_signing: false,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_identity: None,
+            #[cfg(feature = "dispatch-signing")]
+            hosted_captures: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
