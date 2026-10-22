@@ -525,8 +525,9 @@ on that base to preserve incoming doc sections. No cutover/NX/remote closure.
 
 
 Actual range reference #1724 `22550c4050c33a2f0c0b5bd84b26c027883650e0`
-is real-integrated into this BloFin slice. Its 12 nonshared plan/source/test
-blobs and all four reviewed BloFin source/test blobs remain exact. The only
+is real-integrated into this BloFin slice. Its nine incoming paths outside the
+four owned shared docs, and all four reviewed BloFin source/test blobs, remain
+exact; incoming lines in those shared docs are preserved. The only
 conflict was independent added sections in this shared plan; the overseer
 authorized retaining incoming Range blocks then BloFin blocks without rewriting
 or deleting lines, and both original complete documents remain ordered
