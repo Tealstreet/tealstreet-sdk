@@ -1116,8 +1116,10 @@ TxFlow loses nothing (master TS was a placeholder).
   Regressions cover root-only symbol and inherited-parent binding, sparse/root
   controls, sequence fences, cumulative correction and structural inertness.
   This introduces no caller API change. Shared cumulative execution preparation
-  across twelve crates is separately assigned to the later engine snapshot-token
-  follow-on; this Orderly repair does not claim the other paths are fixed.
+  across eleven public-Fill crates plus ApeX synthetic-history progress is
+  separately assigned to the next engine cumulative-fill choke point before the
+  reporting/fan-out and snapshot-token phases. ApeX cumulative reports do not
+  emit public Fill. This Orderly repair does not claim the other paths are fixed.
 - ~~High (Orderly, all six brokers): standalone SL/TP rejected because the app always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.~~ Matching protective prices are accepted and covered by app-shaped regressions.
 - ~~Medium: cancel-all only loops symbols in the store instead of the unscoped DELETE (`rust.exchange.ts` has no Orderly override; engine supports `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on that side (`trading.rs:254`).~~ All broker aliases cancel globally; independent trailing/quantity protections are preserved, and mixed-parent contradictions fail before cancellation. See [verification](RUST_ORDER_RACES.md).
 - Low: ~~one bad market row or unknown order row fails closed~~ (stale:

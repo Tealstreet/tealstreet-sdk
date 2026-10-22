@@ -330,3 +330,20 @@ typecheck and28 lint tasks pass. Independent code/adversarial review CLEAN;
 architecture answer No for this approved shared-boundary adoption. Full exact-
 head CI, current dependency integration and all138 archived outputs remain
 pending; local results do not claim them or complete the other keyed consumers.
+
+Latest owner sequencing decision (supersedes the earlier bundled-helper order):
+after this Orderly WS PR, build the cumulative-fill derivation engine choke point
+first, proving source-only financial-loss candidates before repairs; then extend
+persistent row reporting and migrate its remaining consumers; finally implement
+the snapshot commit/freshness token. The twelve-crate inventory includes eleven
+public cumulative-derived Fill paths plus ApeX synthetic execution/history
+progress; ApeX cumulative orders intentionally do not emit public Fill. Preserve
+that settled distinction and do not fabricate a public-fill RED claim there.
+
+Dependency refresh: actual infra #1713 `04bec2ac52ff295ad94f912145269feefc142197`
+was integrated by clean porcelain merge `134bcf0ec797`. All eight incoming files
+and six owned-file blobs were preserved; exact six-file scope against landing.
+Initial head `148c941fed6` suffered four unrelated Corepack registry503 failures
+before replay; its complete Orderly48-output comparison is unchanged. Initial
+CI is historical iteration evidence; final actual clock/workflow dependencies,
+full green head and complete138-output proof still gate merge.
