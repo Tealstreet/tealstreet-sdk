@@ -21,15 +21,17 @@
     "lighter-robinhood": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
     "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
     "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true}},
-    "bybitspot": {"bridge": {"spot": true}},
-    "binance": {"bridge": {"dispatchSigning": true}},
-    "binancepm": {"bridge": {"dispatchSigning": true}},
-    "binanceinverse": {"bridge": {"dispatchSigning": true}},
-    "binancespot": {"bridge": {"spot": true, "dispatchSigning": true}},
+    "bybit": {"remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
+    "bybitinverse": {"remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
+    "bybitspot": {"bridge": {"spot": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
+    "binance": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": []}},
+    "binancepm": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": []}},
+    "binanceinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": []}},
+    "binancespot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": []}},
     "kucoinspot": {"bridge": {"spot": true}},
     "hyperliquidspot": {"bridge": {"spot": true}},
     "krakenspot": {"bridge": {"spot": true}},
-    "bybitdemo": {"bridge": {"demo": "always"}},
-    "hyrotrader": {"bridge": {"demo": "hyroMode"}}
+    "bybitdemo": {"bridge": {"demo": "always"}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
+    "hyrotrader": {"bridge": {"demo": "hyroMode"}, "remoteSigning": {"payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}}
   }
 }

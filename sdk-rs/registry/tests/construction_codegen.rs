@@ -27,3 +27,83 @@ fn invalid_or_incomplete_shared_rules_fail_the_build() {
         assert!(build_support::generate(json).is_err(), "{json}");
     }
 }
+
+#[test]
+fn delegated_policy_is_declared_once_and_invalid_headers_fail_the_build() {
+    let output = build_support::generate(
+        r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+        "v":{"remoteSigning":{"payloadRestOnly":true,"protectedHeaders":[]}},
+        "protected":{"remoteSigning":{"payloadRestOnly":true,"protectedHeaders":["X-Fixed"]}}
+    }}"#,
+    )
+    .unwrap();
+    assert!(
+        output.contains(
+            "RemoteSigningPolicy { payload_rest_only: true, protected_headers: Some(&[]) }"
+        )
+    );
+    assert!(output.contains(
+        "RemoteSigningPolicy { payload_rest_only: true, protected_headers: Some(&[\"X-Fixed\"]) }"
+    ));
+    assert!(
+        output
+            .contains("RemoteSigningPolicy { payload_rest_only: false, protected_headers: None }")
+    );
+    for declaration in [
+        r#"{"payloadRestOnly":"true"}"#,
+        r#"{"protectedHeader":["X-Fixed"]}"#,
+        r#"{"protectedHeaders":["Bad Name"]}"#,
+        r#"{"protectedHeaders":["X-Injected\r\n"]}"#,
+        r#"{"protectedHeaders":[""]}"#,
+    ] {
+        let json = format!(
+            r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{declaration}}}}}}}"#
+        );
+        assert!(build_support::generate(&json).is_err());
+    }
+}
+
+#[test]
+fn all_nine_aliases_share_rest_only_payload_policy_with_declared_precedence() {
+    use safe_cex_engine::signing_headers::ResultHeaderPolicy;
+    use safe_cex_engine::signing_policy::PrivateFeedPolicy;
+    for name in [
+        "binance",
+        "binancepm",
+        "binanceinverse",
+        "binancespot",
+        "bybit",
+        "bybitinverse",
+        "bybitspot",
+        "bybitdemo",
+        "hyrotrader",
+    ] {
+        let policy = safe_cex_venues::remote_signing_policy(name);
+        assert_eq!(
+            policy.private_feed(true),
+            PrivateFeedPolicy::RestOnly,
+            "{name}"
+        );
+        assert_eq!(
+            policy.private_feed(false),
+            PrivateFeedPolicy::Streaming,
+            "{name}"
+        );
+        let expected: &[&str] = if name.starts_with("binance") {
+            &[]
+        } else {
+            &["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]
+        };
+        assert_eq!(
+            policy.header_policy(),
+            ResultHeaderPolicy::Http {
+                protected: expected
+            },
+            "{name}"
+        );
+    }
+    assert_eq!(
+        safe_cex_venues::remote_signing_policy("unmigrated").header_policy(),
+        ResultHeaderPolicy::Deny
+    );
+}

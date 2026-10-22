@@ -29,6 +29,15 @@ struct Rule {
     bridge: BridgeRule,
     #[serde(default)]
     signer_setup: CredentialSetupPolicy,
+    #[serde(default)]
+    remote_signing: RemoteSigningPolicy,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+struct RemoteSigningPolicy {
+    payload_rest_only: bool,
+    protected_headers: Option<Vec<String>>,
 }
 
 #[derive(Default, Deserialize)]
@@ -134,8 +143,25 @@ fn rule(value: &Rule) -> String {
         slot(&value.signer_setup.primary),
         slot(&value.signer_setup.secondary),
     );
+    let protected = value.remote_signing.protected_headers.as_ref().map_or_else(
+        || "None".into(),
+        |names| {
+            format!(
+                "Some(&[{}])",
+                names
+                    .iter()
+                    .map(|name| format!("{name:?}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        },
+    );
+    let remote_signing = format!(
+        "RemoteSigningPolicy {{ payload_rest_only: {}, protected_headers: {protected} }}",
+        value.remote_signing.payload_rest_only
+    );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup} }}",
+        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing} }}",
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )
@@ -145,6 +171,20 @@ pub fn generate(json: &str) -> Result<String, String> {
     let rules: Rules = serde_json::from_str(json).map_err(|error| error.to_string())?;
     if rules.default.can_sign.is_none() || rules.default.private_eligible.is_none() {
         return Err("default signing and private conditions are required".into());
+    }
+    for policy in std::iter::once(&rules.default).chain(rules.venues.values()) {
+        if let Some(names) = &policy.remote_signing.protected_headers
+            && (names.len() > 32
+                || names.iter().any(|name| {
+                    name.is_empty()
+                        || name.len() > 256
+                        || !name.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
+                        })
+                }))
+        {
+            return Err("invalid protected callback header declaration".into());
+        }
     }
     let mut output = format!("const DEFAULT_RULE: Rule = {};\n", rule(&rules.default));
     output.push_str("fn venue_rule(venue: &str) -> Option<&'static Rule> { match venue {\n");

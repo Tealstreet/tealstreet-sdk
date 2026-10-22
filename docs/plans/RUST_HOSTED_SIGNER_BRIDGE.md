@@ -275,3 +275,18 @@ snapshots reject sparse/provider-overridden arrays and mutable getter swaps.
 All 383 native engine tests, 178 JS host tests and strict Clippy pass; two
 independent reviews are clean after the protected-shadow and snapshot corrections.
 No family recipe opts in yet; the standalone SDK adapter is still not installed.
+
+
+Paused local work after actual #1746 landed: shared construction declarations now
+cover all nine Binance/Bybit aliases (one JSON source for SDK/native generation),
+with REST-only PayloadSigner intent separate from public/account eligibility and
+explicit protected-header data. Engine policy/config accessors use the regions
+agreed with RequestContext's owner. Initial Binance producer guards and signed
+HTTP header-policy adoption are implemented locally. Registry cargo check passes;
+this policy/adoption slice still needs final native regressions, independent
+review, TS checks and runtime setup/provider wiring. Bybit runtime adoption is
+not implemented; its current policy test intentionally pins the pre-#1728 admission.
+The delegated setup capsule is separately under review with focused tests; its
+single native-readCredentials scrub finding must be closed before readiness.
+No half-2 source is pushed or merge-ready. Finish #1728 first on actual #1746,
+then resume this branch and integrate the actual predecessors before final proof.

@@ -39,7 +39,8 @@ mod construction;
 #[cfg(feature = "dispatch-signing")]
 pub mod hosted_signing;
 pub use construction::{
-    BridgeConstruction, PublicMode, signer_setup_policy, signer_setup_public_data_only,
+    BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
+    signer_setup_public_data_only,
 };
 #[cfg(feature = "bybit")]
 mod hyro;
@@ -186,6 +187,7 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
 struct Startup {
     account: bool,
     log_level: Level,
+    private_feed: safe_cex_engine::signing_policy::PrivateFeedPolicy,
 }
 
 fn finish<T: Visit, V: Venue + 'static>(
@@ -195,6 +197,7 @@ fn finish<T: Visit, V: Venue + 'static>(
     mut engine: Engine<V>,
 ) -> Result<T::Output, VenueError> {
     engine.set_public_feed_policy(policy).map_err(invalid)?;
+    engine.set_private_feed_policy(startup.private_feed)?;
     engine.set_account_startup(startup.account);
     engine.set_log_level(startup.log_level);
     Ok(visitor.visit(engine))
@@ -738,6 +741,7 @@ pub fn build_with_signer<T: Visit>(
     }
     let startup = Startup {
         account: options.account_startup,
+        private_feed: remote_signing_policy(venue).private_feed(options.payload_signer),
         log_level: match options.log_level.as_deref() {
             None => Level::Info,
             Some(text) => Level::parse(text)
@@ -1121,6 +1125,7 @@ pub fn build_with_signer<T: Visit>(
             }
             let mut engine = Engine::new(
                 BinanceFutures::new(BinanceOptions {
+                    signing_policy: remote_signing_policy(venue),
                     recv_window: options.recv_window,
                     read_credentials: identities.secondary,
                     testnet: options.testnet,
