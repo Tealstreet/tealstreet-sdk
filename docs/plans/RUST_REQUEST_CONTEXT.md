@@ -1381,3 +1381,27 @@ Architecture No; no production Unsupported fallback or executor change. This
 resolves the demonstrated fixture hang; cancelled a0 CI/proof stays historical.
 Fresh actual dependency integration and green full CI/raw/package evidence
 remain required before merge.
+
+### Exact landed GRVT/Crypto history inventory refresh (before integration)
+
+Standing owner net-shrink authorization applies to actual1760
+54cedc77ef6f89e2efd7e78938ebec6f1b84ac69 and actual1761
+fe44969d033529c244fc4f33fce5395c0273df04. Only two legacy source maps
+need re-expression: GRVT history13->11 (hashf97e2d042aad67c83cb7b67fd2e18fe2ea1911d39bee4928b4bfcd29a53a9173
+->10b79560bfa80b935be2f78f7f6a3fb2e7b44436372c89a588a15d558c07fa3e),
+Crypto.com history15->10 (hash8c08399ee9544d819511127584929ff3a4d532831d64ffc1886424efb4842b0c
+->0716d0d13befbecad3402c21949f8d88fa30f02b9a761b1d3dbeae65570526f6).
+Total1271->1264; GRVT lib19map remains byte-identical, as must every other map.
+These are already-landed history calls re-expressed, no new site kind.
+
+Commit exact old/landed map and adversarial acceptance controls FIRST, including
+actual source hash binding, changed old bounds, forged paths/fingerprints/counts,
+reverse transition and independently newer pruned constraints. Then extend the
+existing exact history transition table with only those two immutable pairs; no
+parser/ratchet relaxation. Preserve the two older exact history transitions and
+all original bootstrap/signer-factory controls. Update manifest only to exact
+actual landed maps after real integration; all unaffected maps must be identical.
+Apply the same current-map exactness and independently shrinking base/parent
+constraints afterwards. No guarantee/retry/outcome claim for legacy work.
+1767exclusive landing window is respected; integrate its actual pin plus these
+actual predecessors together before final checks/push/proof.
