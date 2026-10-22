@@ -228,8 +228,9 @@ level 3, explicit package overrides, other 38 alias argument arrays, combined
 arguments, optimization/bindings and native Cargo profiles unchanged. WOO's
 complete argument array must equal pre-#1746 actual hosted-bridge landing
 `5743c485d44e348e3d29039c4ebe83f6a78f0186`. Any WOO artifact difference from
-that older build must be attributed to intervening shared source inputs, not
-claimed byte-identical merely because arguments match. Compare old/current
+that older build must be attributed to intervening build-covered source inputs,
+including WOO and shared inputs, not claimed byte-identical merely because
+arguments match. Compare old/current
 source with the restored policy and inspect authenticated CI package receipts;
 no local release build or replay. Use the #1753 same-source/profile evidence
 standard if shared inputs prevent historical byte identity.
@@ -249,3 +250,12 @@ then fresh CI/proof, separate guard and separate exact-head merge. Verify actual
 parents/tree and notify dependent lanes. Reporter AsterDEX/GRVT/TxFlow work is
 saved separately at plan12d54/testaea90 with unchanged production and original
 124/124 native account controls; resume after this priority restore.
+
+Plan audit clarification: the pre-#1746-to-current source inventory includes
+WOO's subsequently landed account reporter/financial code as well as shared
+signing/engine inputs. Attribute historical byte deltas to the authenticated
+complete source projection; do not describe that interval as shared-only. The
+restored historical WOO arguments execute on the current candidate source.
+This PR also removes only the owner-flagged stale test/proof-status tail of its
+existing #1782 CALLERS section; behavior text is preserved. #1776 wording stays
+with its owner. This housekeeping adds no runtime scope.
