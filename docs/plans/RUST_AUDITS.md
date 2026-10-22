@@ -550,8 +550,14 @@ Remaining evidence limitations:
   deltas; Rust-versus-itself is not a replacement oracle. No frozen-output or
   independent-oracle completion is claimed by the tape-time sweep.
 - Existing public recordings were driven by Rust; TS-only subscriptions can
-  still be absent. Fixtures were refreshed alongside behavior changes.
-  HyroTrader, BreakoutProp and Bitget USDC public fixtures are synthetic.
+  still be absent. The [opt-in public TS recorder](HARNESS_TS_PUBLIC_RECORDER.md)
+  adds offline-tested capture support for audited Binance USD-M production TS,
+  observing actual outgoing subscriptions and raw adapter response bytes. It
+  does not replace the Rust recorder or any existing fixture. Unsupported
+  reference/custom/session paths fail explicitly. Actual TS-origin recaptures
+  for this and other venues still need owner-approved live recording; fake
+  transport tests prove mechanics, not captured venue coverage. HyroTrader,
+  BreakoutProp and Bitget USDC public fixtures retain synthetic provenance.
 - ~~No actual browser cold-start observations.~~ #1688 (`b6cb612bc7c`) adds
   actual Chrome worker observations for 28 families plus a combined diagnostic,
   with three fresh processes/profiles each. It remains measurement-only with
