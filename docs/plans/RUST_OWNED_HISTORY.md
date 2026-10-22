@@ -435,3 +435,15 @@ and protocol-clock #1722 are already ancestors. Signer prerequisites #1721 have
 next merge priority; this range reference can run provisional CI, but it must
 real-integrate that actual shared-engine merge before final proof/guard. No
 unmerged signer API or caller migration is claimed in these docs.
+
+
+Signer prerequisites #1721 actually merged as
+`802e9c8c6e947aa36864aabb7254aa6e50c92b4e` and are real-integrated without
+conflicts before final range-reference proof. All 26 incoming paths are retained;
+the eight owned core/adapter source/test files remain identical to reviewed
+506471f0645. The caller doc pins actual structured provider results/trusted setup
+and leaves NX bootstrap and remote signing open. A nearby historical pagination
+summary now explicitly supersedes its old Binance error-plus-empty-success
+contract rather than continuing to recommend it. Fresh focused native/strict
+checks, integration reviews and exact-head CI run from this dependency before
+the separate final guard/merge.
