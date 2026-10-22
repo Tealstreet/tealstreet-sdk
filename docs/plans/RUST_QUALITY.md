@@ -271,3 +271,12 @@ single-page fills, 50/100 page caps and final sorting/limits remain. First-page
 failure rejects typed; later failure returns accepted pages with owned
 incompleteness, excluding staged failed-page prefixes. Signing preparation
 refusal stays strict notSent. No engine API extension or universal fan-out claim.
+
+
+Metadata/settings freshness draft: `engine::metadata` plus Store now own bounded
+per-symbol command joining, sticky write restrictions, background issue ordering
+and validated atomic publication, adopted by WEEX and BingX. Native codecs and
+financial position fences remain adapter facts. This removes those two families'
+local metadata ownership policy, not all-family duplication. Physical scheduler
+release/deadline integration is still blocked on actual #1741 and is not
+reimplemented in venues. [Scope and proof](RUST_METADATA_FRESHNESS.md).

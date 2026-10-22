@@ -3441,3 +3441,29 @@ not change. B11's request-scoped incomplete-query ingestion/coverage and typed
 rejection handling remain required; this slice adds no mandatory NX handler and
 does not close the remaining history fan-out.
 [Owner contract and scope](RUST_OWNED_HISTORY.md).
+
+
+## Shared metadata/settings owner: WEEX and BingX (draft)
+
+Concurrent same-symbol `fetchLeverageForSymbol`/metadata calls at the same
+eligible settings revision now share one native logical read: WEEX one config
+request; BingX one leverage request followed by one margin request. Each command
+still receives its own exactly-once result or typed failure, with existing result
+shapes. Later sequential calls remain fresh. A settings mutation, pending write
+or changed eligibility prevents joining an obsolete attempt. Reads admitted
+during a pending write remain nonpublishing after it finishes; overlap itself
+still returns usable cached rails with the existing native fallback policy.
+
+The shared engine/Store boundary validates before atomic settings publication
+and fences old account/config reads. WEEX updates its native config cache before
+notifying callers; BingX retains its positions fence and superseded-margin
+discard rule. Secondary GET credentials, prepared native WEEX explicit reads,
+SDK public-only/nonready automatic-hook skips and pending-start handling remain.
+Callers must still handle ordinary native/parse failures; no new NX constructor,
+argument or handler migration is introduced by this draft.
+
+This section describes the draft implementation, not a landed or deployed
+contract. Physical request/release leases and scheduler admission await #1741;
+no queue-time lease or per-venue substitute is introduced. Other-family metadata
+fan-out and final native/WASM/replay proof remain open. See
+[RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).

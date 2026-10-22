@@ -1,6 +1,8 @@
 # Engine-owned metadata reads and settings freshness
 
-Status: plan first; no implementation or runtime closure claimed.
+Status: shared core and WEEX/BingX adapters implemented; draft pending #1741
+physical-release integration and final CI/proof. No universal fan-out or runtime
+deployment closure claimed.
 
 Owner assignment: architecture audit §G, rank 13. Start from actual
 `ecc84a798163c9f61ea9439e90001a98bb07b907`; retain the later decision-only merge
@@ -162,5 +164,58 @@ adapter compile and fail because two same-revision commands emit two reads
 instead of one. They cover success and error fan-out; BingX expects one request
 per native leg, not one request total. The pre-existing 69 BingX account and 41
 WEEX trading tests still pass with only these four new controls excluded.
-Implementation has not begun; this evidence does not prove the other planned
-freshness/cleanup boundaries yet.
+That checkpoint precedes implementation. The four controls now pass through the
+shared owner; they do not alone prove the other freshness/cleanup boundaries.
+
+
+## Implemented core and two-family checkpoint
+
+`engine::metadata` owns bounded attempts (256), joined command waiters (64 per
+attempt), symbols (4096), opaque monotonic tokens, pending-write reservations
+and freshness. Store owns validated publication: explicit complete proposals
+commit together, while background settings observations reject older issue
+stamps or later mutations. Native partial hedge observations validate every
+supplied rail but cannot satisfy a complete metadata proposal. Generic Store
+settings mutations also invalidate the shared owner. Observation issue order
+is separate from publication revision, so a valid older account read can still
+supersede pending metadata, but cannot overwrite completed newer metadata.
+
+WEEX uses one config read and atomically replaces its native config cache before
+owner notifications. Its complete-triplet fallback, prepared native calls without
+start, secondary-only GET selection and last-valid duplicate config selection
+remain. BingX stages leverage then margin, discarding a superseded margin leg
+before parsing it and retaining independent validated rail fallback. Its approved
+metadata publication still bumps the native positions fence. Settings write
+issue/completion and background/event settings sources feed the same engine
+boundary. Neither adapter keeps a second metadata generation/pending-write map.
+
+Four original-RED native controls are now GREEN. Sixteen direct core tests cover
+joining, errors, stale/duplicate tokens, finite/partial validation, fallback
+policies, independent symbols, scoped/sticky writes, background issue/completion
+order, bounded capacity and cleanup. Native controls additionally exercise old
+background config versus completed metadata, refused-write stickiness, native
+cache/Store agreement, secondary-only credentials and duplicate config rows.
+Existing BingX race/malformed/snapshot and WEEX settings/financial controls stay.
+The prior BingX newer-query race control now expects eligible queries to join;
+its pending-write assertions remain. A baseline hedge-setting fixture is seeded
+before issuing its snapshot, since a Store mutation after issue now fences it.
+
+Post-integration focused engine/WEEX/BingX/Binance checks pass 990 native tests,
+strict all-target Clippy and targeted fmt. Forty existing SDK runtime capability
+and metadata-hook controls pass. No local release WASM or replay matrix ran.
+
+Correctness and adversarial reviews are clean after fixing validated observation
+admission, secondary-only WEEX credentials and duplicate-row cache coherence.
+Architecture gate: **one shared engine/Store ownership and publication core,
+not per-venue implementations of a cross-cutting concern**. Actual #1744
+`2c5c5f6987f35cafc0e272282e54da37c0a66d4f` (including #1742) is integrated;
+all nonshared owned/incoming blobs and both added README row sequences were
+verified preserved.
+
+Physical RequestContext/Scheduler release admission remains deliberately
+unwired until actual #1741. No lease starts at queue time, and no new local
+retry/pause algorithm substitutes for the pending shared seam. The draft cannot
+claim per-leg physical-release deadline enforcement, completed scheduler
+adoption, final replay equivalence or production readiness. The actual merged
+API, lease/denial controls and final shipped-artifact/replay CI proof are still
+required before readiness. Other families remain future adoption.

@@ -1709,3 +1709,15 @@ App stop payloads accepted; amend stricter than TS.
   order type, multi-leg order) rejects the whole snapshot
   (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`)~~ (such rows are
   skipped and logged; off-catalogue position margin still counts).
+
+
+## Metadata/settings freshness core (draft, two references)
+
+WEEX and BingX now adopt one engine/Store owner for same-revision coalescing,
+command fan-out, settings-write invalidation and staged atomic publication.
+Background proposals carry shared observation stamps; stale callbacks cannot
+replace newer settings/native caches. Existing per-family fallback/error codecs
+and financial revision fences remain. Four original-RED native controls pass;
+this is not a claim of all-family adoption or cutover completion. Actual #1741
+physical-release integration, lease/denial controls and final integrated CI/proof
+remain open. [Implementation and limits](RUST_METADATA_FRESHNESS.md).
