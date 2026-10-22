@@ -1379,11 +1379,21 @@ Normal inputs send the same requests as TS; the risk is resilience.
 
 ### WEEX
 
-- ~~WEEX's five query-associated omissions~~ now carry the actual income query
-  command before retained-row completion or failure, including lifetime/chunk
-  budgets, opaque cursors and read errors. Native ownership/order regressions
-  and a native-verified fixture through host/worker overlapping-client isolation
-  cover the fix; range continuation and failure policy remain intact.
+Owned-list follow-on: ~~a later fill-window/algo failure discards already valid
+history~~ now returns accepted rows with shared command-owned incompleteness.
+Missing fill identities and explicit algo hasMore facts are admitted only after
+whole-response validation; the engine publishes coverage once before success.
+First/zero-accepted failure rejects typed, preparation remains strict notSent,
+and native mapping, sequencing, pause and dedupe are preserved. This completes
+WEEX general-history owner adoption, not all-family or B11/deployment closure.
+
+- ~~WEEX's five query-associated omissions~~ now flow through the shared income
+  owner. First/zero-accepted failures reject typed without a coverage marker;
+  later failures immediately retain only accepted pages with one command-owned
+  marker before success. Valid opaque-cursor gaps and lifetime/chunk budgets
+  retain the first coverage cause until final success. The old failed-chunk
+  continuation policy is superseded. Native-backed host/worker fixture proof now
+  uses accepted-page/later-failure success; fills/orders remain a later slice.
 
 - High: ~~one `null` numeric field in a public row stops the venue, private start
   gated on tickers (`weex/src/wire.rs:73`, `lib.rs:671,727`); one unparsable
@@ -1417,6 +1427,13 @@ Normal inputs send the same requests as TS; the risk is resilience.
   can mislabel value.
 
 ### Coinbase (already defaults to Rust)
+- Owned-history follow-up: Advanced Trade fills/orders/public trades now share
+  the engine CursorHistory owner, including CFM-to-Spot reads. Later actual
+  page failures retain only admitted pages with command-owned incomplete coverage;
+  zero-admitted failures reject typed, while native continuation/proof and
+  queued signing refusals remain strict. Native mapping, requests and account
+  state are unchanged; Starbase and NX B11 coverage are not closed. See
+  [RUST_OWNED_HISTORY.md](RUST_OWNED_HISTORY.md).
 - High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
   site) rejects every snapshot and blocks all trading incl. cancel
   (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed
@@ -1445,6 +1462,14 @@ Normal inputs send the same requests as TS; the risk is resilience.
 ### Lighter
 
 Signing, integer scaling, tx encoding and nonces match TS.
+
+Owned-history follow-up: ~~later page failure discards validated earlier history~~
+now retains accepted pages with one command-owned incomplete marker through the
+shared engine owner, including trade-to-funding income. Failed prefixes remain
+excluded; first/zero-accepted failures reject typed. Native cursor/saturation
+proof and synchronous auth preparation stay strict; account reconciliation,
+signing arithmetic and the remaining cross-family history fan-out are unchanged.
+
 
 - High: ~~position `initial_margin_fraction` ("20.00" = 5x) read in basis points
   (`lighter/src/account.rs:424,877`), so leverage reads as the market max and a
@@ -1491,7 +1516,16 @@ Signing, integer scaling, tx encoding and nonces match TS.
   a reliable reference. Readback confirmation remains required.
 
 ### AsterDEX
-No confirmed highs.
+No open confirmed highs.
+- High: ~~negative cumulative execution observations consumed bounded ledger
+  slots as zero-valued entries, evicting a valid fill anchor and allowing its
+  identical replay to deliver the fill again after10,000 distinct malformed
+  observations.~~ Existing engine `ObservedProgress` now validates and caps
+  before observation admission; typed native commit keeps the10,000-entry
+  bound and accepted quiet observations. One original native assertion RED
+  proves the duplicate `(102,0.5)`; ten original compatibility controls and
+  all11 fixed controls pass, including initial REST seed, later-read isolation
+  and authoritative direct-ID independence. No new engine policy or raw-ID change.
 - Medium: ~~failed position-mode read silently leaves one-way, never retried, and
   orders can go before it lands (`asterdex/src/account.rs:566`); order events
   with unmapped types (e.g. `LIQUIDATION`) dropped with their fills
