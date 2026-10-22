@@ -1202,3 +1202,64 @@ preintegration of reviewed Bybit #1728 head31035f3f09a71e5fb29d1083c217512972e5f
 which includes actual #1746 build policy3f0e3e450b2, for parallel CI. Actual
 Bybit ancestry, all actual shared predecessors, final exact-head CI/replay and
 separate guard/merge remain required; no landing/deployment claim.
+
+## Next cursor fan-out: Hyperliquid inclusive account histories
+
+Plan first on fresh `feat/rust-owned-history-hyperliquid` from actual
+`9bf754a01149d373c522728edbebb46abc5ae5b2` (2026-10-23). Adopt the existing
+boxed CursorHistory/Completion owner for perp fills, closed orders, income and
+public trades. Preserve spot behavior and client-ID lookup as their separate
+paths. No signer, account reducer, dispatch, Context, Store, clock, metadata,
+remote wire or capability changes; keep OKX/Bitget/BingX work untouched.
+
+Replace accepted-output vectors/maps with staged typed native output in the
+shared owner. Fully validate a page before admission; terminal actual
+HTTP/stream/decode/transport failure before eligible accepted output rejects typed,
+while a later failure returns only accepted pages with one command-owned
+history.incomplete Warn before success, including Error-only logging. The shared
+Internal fallback is honest for multiplexed callbacks. Filtered native rows and
+failed-page prefixes must not authorize partial recovery. No history row may
+mutate live Store. Admission and lookup errors retain their separate behavior.
+
+Preserve inclusive userFillsByTime/userFunding request bounds and the additional
+empty/duplicate terminal probe even after a short successful page. Native progress
+counts include validated deduped rows before output filters; retain native ID
+facts separately from accepted output. CursorWalk owns page-budget/repeat policy;
+its internal cursor may bind native timestamp plus identity progress, since a
+same-timestamp page with new native IDs must not be rejected as a repeated physical
+time bound. Keep physical request bytes and existing 200-page per-stage bound,
+with caps 2000 fills and 500 funding used only for full-page missing-coverage
+facts. Short all-duplicate pages end the stage; full pages with no new identity
+carry an owned gap. General cap/stall termination retains admitted output and
+owned incompleteness rather than discarding it. Stage reset and first-gap retention
+must use the existing shared restart_stage API, never a second local Completion.
+For mixed income retain fill-derived PnL/fee rows through the funding stage and
+retain the same owner even if a prior stage ends incomplete.
+
+Orders remain one historicalOrders response: fold native transitions by ID in the
+final admitted-row encoder, preserving latest status timestamp and closed/canceled
+rank tie precedence before creation-time/symbol filtering. Feed rolling-retention
+coverage (raw count at least 2000) through shared admission/completion instead of
+emitting a venue-local marker. Public trades remain one response with native
+dedupe and descending sort. Keep exact timestamp units, large native IDs, gross
+historical PnL, rebate/commission signs, builder revenue metadata, vault/master
+identity, fee assets, native sort/tie order, output limits (fills default/clamp),
+weight accounting, no-I/O admission and endpoint/body shapes. Do not infer a
+new retry or signing policy.
+
+Commit original-source failing-first controls before implementation: typed first
+and zero-eligible failure, later HTTP/malformed/stream failure with prefix exclusion,
+concurrent owners at Error-only logging, mixed-income funding failure retaining
+only accepted fill rows, same-time distinct-ID continuation, full inclusive stall
+and real 200-page/no-next-request cap. Keep all existing native history controls,
+including rolling retention ownership, order transition ties, lookup and spot
+behavior. Add no engine API unless a real native fact cannot use current shared
+CursorHistory; coordinate any lower-core change with other history/RequestContext
+owners first. Independent plan/correctness/adversarial reviews must answer the
+architecture gate: shared owner/pager/marker adoption, with native endpoint facts
+only. Focused engine/Hyperliquid/Binance tests, strict Clippy/fmt/bans with four Cargo
+jobs; no local release-WASM, replay sweep or timing matrix. Update caller/audit/
+quality evidence, publish draft CI and keep all existing watches. Final current
+landing integration, authenticated full raw/package proof, independent reviews,
+announcement, separate guard and separate merge remain required. B11/runtime/
+cutover claims stay open.
