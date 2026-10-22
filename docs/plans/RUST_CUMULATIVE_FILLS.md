@@ -104,3 +104,40 @@ shared dependencies before proof; use trial only under normal dependency rules.
 Fresh fail-closed revert guard and merge are separate calls, followed by actual
 parents/tree/owned-and-incoming blob audit and Aimux actual-pin report. No live
 capture, local release build or local full replay/load/timing sweep.
+
+Independent plan review at a542ab579a0 CLEAN to start native assertion-RED tests;
+architecture YES. Before implementation, make quantity/price pairing structural:
+cumulative quote differences are only valid with the corresponding cumulative
+quantity interval, never with an authoritative last amount. Validate seed
+average-times-quantity and decimal scale/division overflow; failed seeding must
+not silently become zero bootstrap progress. Review late direct-fill cursor
+behavior separately: existing Bitget overwrites supplied cumulative progress even
+when older. A native newer [.4,.8] execution then late [0,.4] and cumulative .8
+catch-up control must demonstrate whether prefix rewind re-emits a delivered
+interval; any intentional repair needs explicit evidence/scope report.
+
+Three initial native tests compile on unchanged production source and fail at
+financial assertions: Hyro corrected .4/value40 emits nothing; Bitget emits a
+negative-price Fill; Bitget unpriced observation advances display but suppresses
+its same-quantity corrected Fill. Logs /tmp/codex-cumulative-{bybit,bitget}-original-red.log.
+No production code has changed at this evidence point.
+
+Owner approved the fourth demonstrated financial correction: direct last fills
+still deliver after identity/dedup admission, but a supplied cumulative anchor
+becomes max(previous, supplied); absent cumulative uses checked previous+last.
+Keep quote only when its quantity anchor stays unchanged, otherwise clear it
+unless new matching quote evidence exists. Add duplicate and genuinely higher
+cumulative controls. All four defects are real fill-correctness bugs on current
+landing (Hyro/Bitget), to be recorded explicitly in the PR/cutover evidence, not
+described as behavior-preserving migration. No production code changed before
+this approval. Each has its own original-RED/core-GREEN native regression.
+
+Concrete API refinement: `Report::Cumulative { quantity, price }` accepts
+`CumulativePrice::Value { cumulative, fallback }` or `Direct(price)`;
+`Report::Last { amount, cumulative, price }` only accepts direct price. Thus a
+cumulative quote delta cannot divide by an unrelated authoritative last amount.
+`Cursor::seed_with_average` validates quantity/value and fallback multiplication;
+invalid bootstrap must reject rather than silently default to zero. Native
+financial decoding, bootstrap source selection and lifecycle remain native.
+Actual signer #1714 ad0e6fa1e42df883b8fe947e6b4c04eda0da2f7d will be integrated
+before implementation and final proof, with all incoming files preserved.

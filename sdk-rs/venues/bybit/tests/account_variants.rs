@@ -368,6 +368,26 @@ fn hyro_order_fill_deltas_use_executed_value_and_ignore_duplicates() {
 }
 
 #[test]
+fn cumulative_preparation_hyro_unpriced_report_keeps_corrected_fill_eligible() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    emitted_fills(&mut h);
+    let unpriced = hyro_fill_frame("PartiallyFilled", "0.4", "0")
+        .replace("\"price\":\"120\"", "\"price\":\"0\"")
+        .replace("\"avgPrice\":\"106\"", "\"avgPrice\":\"0\"");
+    h.message("/v5/private", &unpriced);
+    assert!(emitted_fills(&mut h).is_empty());
+    let corrected = hyro_fill_frame("PartiallyFilled", "0.4", "40");
+    h.message("/v5/private", &corrected);
+    assert_eq!(emitted_fills(&mut h), vec![(100.0, 0.4)]);
+    h.message("/v5/private", &corrected);
+    assert!(emitted_fills(&mut h).is_empty());
+    h.message("/v5/private", &hyro_fill_frame("Filled", "1", "106"));
+    assert_eq!(emitted_fills(&mut h), vec![(110.0, 0.6)]);
+}
+
+#[test]
 fn hyro_reconnect_snapshot_seeds_prior_fills_without_reemitting() {
     let mut h = startup(Variant::Hyrotrader);
     handshake(&mut h);
