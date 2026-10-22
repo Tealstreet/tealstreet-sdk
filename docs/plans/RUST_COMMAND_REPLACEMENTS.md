@@ -277,3 +277,11 @@ checked allocator exhaustion. This is not the completed registry phase: real
 Engine prepare/bind/final-claim controls and final independent audit remain
 pending. No ordinary Bybit production edit, push or PR; its original gateway
 regression remains intentionally RED. Priority switches to #1741 as #1757 lands.
+
+Independent checkpoint audit found no concrete production blocker; architecture
+No (shared registry/journal). Remaining tests must combine the same root and
+physical parent with expired-handle cleanup, modified/foreign root authority and
+reused command generations, absent/wrong current Delivery and Never-policy
+parent. Add full atomicity snapshots and real Engine old-preparation/permit/
+callback fences before claiming the registry phase complete. Private unit
+Delivery construction is not a substitute for engine-scoped attempt generation.
