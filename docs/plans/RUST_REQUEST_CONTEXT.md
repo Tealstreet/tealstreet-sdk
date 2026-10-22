@@ -1037,3 +1037,20 @@ cutover blockers. Preserve generation-bound preflight/delay roots and typed
 native retry evidence in that plan. Binance history/session-token sites stay
 explicitly legacy under the existing bridge-empty cutover gate; shared managed
 Completion remains history-lane work. No additional reference fanout in #1741.
+
+Reference-proof correction, owner-approved before implementation: the same
+known-partial-effects gap exists in Binance DELETE batch ACKs. New native RED
+control proves one ACK cancels order12 and sibling -2011 refuses13, but current
+journal projects whole Rejected. Pull only WriteResult::KnownPartial(VenueError)
+into #1741. It requires a released attempt, forbids effects-free retry/success,
+and seals outcome=None unless another sent attempt/ID overflow is unresolved.
+No IDs are invented to encode cancellation effects. Preserve native error/text/
+report ordering and the existing single evidence budget, including exact-ID and
+text bounds. Include it in representative-error and rejection-report selection.
+Binance confirm_cancel supplies a callback-local native known-effects fact for
+validated successful batch cancellations; gateway/malformed/uncertain failures
+remain Unknown and existing Store/ownership/quantified-fill guards are unchanged.
+Test no-ID partial, retry refusal, required release, unknown sibling, bounded
+text/IDs and actual mixed cancel ACK with both Store assertions. A compiled
+misclassification control must fail. Replacement groups/ordinary Bybit/Hyro
+extensions stay out of this PR under the owner's narrowed scope.
