@@ -63,3 +63,20 @@ signing endpoint, venue class dependency, provider queue or secret escape.
 Architecture gate: a shared encoding/presentation extension used by OKX and
 Bitget, not a per-venue implementation of credential custody or signing.
 This plan does not enable either family or claim cutover completion.
+
+## First implementation checkpoint (actual #1757)
+
+The plan branch now genuinely integrates #1757 at
+`e6382b5cfc038612a15b4e4eade8542a62f2e1e5`. First add shared declared
+signature encoding and passphrase-header presentation using existing atomic
+Present/Sign values and setup-owned passphrase refs. Registry/capture tests for
+OKX and Bitget exercise this common work/format path; Binance/Bybit remain exact
+controls. The extension does not change SignResult fields, managed HTTP claims,
+RequestContext deadlines, or runtime family admission. Actual SDK/WASM hosted
+admission remains a subsequent gate with each family adapter, after both its
+native recipe and this extension exist; a pure probe is not startup evidence.
+
+Before final CI/proof, integrate the actual #1759 freshness core and any newer
+shared inputs under the normal lane rules. Keep its readonly Store/auth trait
+changes intact. Every implementation checkpoint receives independent correctness
+and adversarial architecture review before commit/readiness.
