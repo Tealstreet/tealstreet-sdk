@@ -3276,10 +3276,11 @@ next delivery progress are validated before native dedupe/progress commits.
 An unpriced Hyro observation no longer consumes a later corrected cumulative
 fill; an invalid/unpriced Classic observation neither emits a negative-price
 fill nor consumes the corrected report's execution eligibility. Late authoritative
-Classic fills no longer rewind the cumulative anchor and allow a subsequent
-cumulative catch-up to re-emit an already delivered interval. Hyro's zero average
-means unavailable quote evidence, preserving its authorized fallback price
-instead of deriving an inflated price from a fabricated zero-value seed.
+Classic fills retain the cumulative anchor, preventing a subsequent cumulative
+catch-up from re-emitting an already delivered interval. When cumulative quote
+is missing, Hyro's zero average remains unavailable quote evidence, preserving
+its authorized fallback instead of deriving an inflated price from a fabricated
+zero-value seed. An explicitly supplied cumulative quote of zero stays distinct.
 
 These five repairs intentionally change notifications on the demonstrated bad /
 corrected / late report paths; they are not merely internal refactoring. Existing
