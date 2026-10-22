@@ -241,7 +241,12 @@ impl<V: Venue> Engine<V> {
             .io
             .request_contexts
             .validate(managed.lifecycle.context(), now)
-            .and_then(|()| managed.lifecycle.prepared(token, prepared));
+            .and_then(|()| {
+                if prepared.expires_at.is_some_and(|at| at <= now) {
+                    return Err(Error::TimedOut);
+                }
+                managed.lifecycle.prepared(token, prepared)
+            });
         if prepared_result.is_ok()
             && let Some(attempt) = managed.signing_attempt
         {
@@ -1360,6 +1365,35 @@ mod tests {
             engine.claim_http(3., second),
             Ok(Claim::Released(_))
         ));
+    }
+
+    #[test]
+    fn already_expired_readiness_settles_without_repreparation_or_signing() {
+        for signed in [false, true] {
+            let (mut engine, tokens) = start(Probe {
+                count: 1,
+                signed,
+                ..Probe::default()
+            });
+            engine.http_prepared(
+                10.,
+                tokens[0],
+                Prepared {
+                    id: 1,
+                    expires_at: Some(10.),
+                },
+            );
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert!(actions.iter().all(|action| !matches!(action, Action::Sign { .. }) &&
+                !matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(),
+                    HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
+            assert_eq!(
+                engine.venue().failures,
+                [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+            );
+            assert!(engine.venue().releases.is_empty());
+            assert!(!engine.http_preparation_pending(tokens[0]));
+        }
     }
 
     #[test]

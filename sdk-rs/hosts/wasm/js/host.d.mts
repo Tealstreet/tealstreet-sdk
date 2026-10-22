@@ -16,6 +16,11 @@ export interface HttpResponse {
   body: Uint8Array | AsyncIterable<Uint8Array>;
 }
 
+export class HttpPreparationError extends Error {
+  readonly code: string;
+  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network');
+}
+
 export interface HttpPacket {
   /** Required for managed requests; absent on older transport callers. */
   request?: number;

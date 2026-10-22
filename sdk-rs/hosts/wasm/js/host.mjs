@@ -1,4 +1,5 @@
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
+export { HttpPreparationError } from './managed-http.mjs';
 
 // Return only the closed numeric record; never serialize arbitrary provider data.
 function signingReceipt(value) {

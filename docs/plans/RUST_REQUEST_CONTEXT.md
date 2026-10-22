@@ -349,3 +349,24 @@ original deadlines, cancellation/disposal while parked or reading, and concurren
 peer requests. Existing transport/Workers/legacy tests remain intact. Files are
 SDK transport/tealstreet types and tests, existing HOW adapter/socket and docs;
 no venue signing/remote wire or scheduler algorithm changes.
+
+
+The SDK/HOW checkpoint finishes route authorization and tunnel readiness before
+binding, chooses routing from explicit credential intent (including POST reads),
+and invokes the existing raw fetch/WS executor synchronously at final dispatch.
+Managed HOW preserves request/response string bytes regardless of legacy parser
+selection; legacy Axios parsing/simulation and routing remain opaque. Custom
+managed providers require valid preparation and bound-resource interfaces, with
+no legacy-send fallback. Original deadlines, raw resource expiry, connection/auth
+epochs, signed header conflicts, cancellation and peer isolation are checked
+before release. Bound/prepared cleanup is idempotent even after response cleanup
+or synchronous cancellation during bind. Already-expired readiness settles rather
+than beginning signing or an immediate reprepare cycle.
+
+Phase checks: 367 SDK transport controls, 54 HOW tests, 168 JS host tests and 357
+engine tests, package type/lint checks and strict engine Clippy/bans. The review
+found and corrected dropped expiry, signed site-header overwrite, managed body
+parsing, malformed-resource legacy fallback, provider-route mutation and resource
+cleanup gaps, each with focused regression coverage. This is checkpoint evidence;
+command ledger/reconciliation, Binance/Bybit migrations, the legacy ratchet and
+complete final integrated CI/replay proof remain open.

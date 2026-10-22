@@ -1,3 +1,21 @@
+/** Closed transport preparation errors; arbitrary provider text never crosses the wire. */
+export class HttpPreparationError extends Error {
+  constructor(reason) {
+    super(reason === 'timedOut' ? 'HTTP transport request timed out' : 'HTTP transport preparation failed');
+    this.code = `HTTP_PREPARATION_${reason.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`;
+  }
+}
+function preparationReason(error, fallback) {
+  switch (error?.code) {
+    case 'HTTP_PREPARATION_UNSUPPORTED': return 'unsupported';
+    case 'HTTP_PREPARATION_TIMED_OUT': return 'timedOut';
+    case 'HTTP_PREPARATION_STALE': return 'stale';
+    case 'HTTP_PREPARATION_INVALID': return 'invalid';
+    case 'HTTP_PREPARATION_NETWORK': return 'network';
+    default: return fallback;
+  }
+}
+
 // Host-owned route resources. Engine tokens remain strings through every hop.
 // No asynchronous work is allowed between claim and bound.dispatch().
 export class ManagedHttp {
@@ -58,7 +76,7 @@ export class ManagedHttp {
       resource.bound = resource.prepared.bind({ ...action.packet, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
       if (!resource.bound || typeof resource.bound.ready !== 'function' || typeof resource.bound.dispatch !== 'function') throw new Error('Invalid bound HTTP resource');
       resource.phase = 'bound';
-    } catch { this.fail(token, resource, 'invalid'); return; }
+    } catch (error) { this.fail(token, resource, preparationReason(error, 'invalid')); return; }
     this.claim(token, resource, action.permit, action.packet.request);
   }
 
@@ -83,7 +101,7 @@ export class ManagedHttp {
       resource.phase = 'prepared';
       const id = String(++this.next);
       host.run(host.invoke(host.engine.httpPrepared, token, id, prepared.expiresAt, host.transport.now()));
-    } catch { this.fail(token, resource, 'network'); }
+    } catch (error) { this.fail(token, resource, preparationReason(error, 'network')); }
   }
 
   claim(token, resource, permit, request) {
@@ -110,11 +128,11 @@ export class ManagedHttp {
       }
       resource.phase = 'released';
       response = resource.bound.dispatch(); // Synchronous transport API handoff.
-    } catch {
+    } catch (error) {
       if (resource.phase === 'released' && this.live(token, resource)) {
         this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
         this.cancel(token);
-      } else this.fail(token, resource, 'invalid');
+      } else this.fail(token, resource, preparationReason(error, 'invalid'));
       return;
     }
     // Attach rejection handling before a diagnostic listener can throw.
@@ -147,7 +165,7 @@ export class ManagedHttp {
 /** Fetch has no asynchronous route setup. Bind validates/builds before claim. */
 export function prepareFetch(request, fetcher = globalThis.fetch) {
   if (request.route === 'publicCors') throw new Error('Public CORS request routing is not configured');
-  if (request.intent === 'secondary') throw new Error('Secondary request routing is not configured');
+  if (request.intent === 'secondary' && request.route !== 'direct') throw new HttpPreparationError('unsupported');
   const original = new URL(request.url);
   const deadline = Date.now() + (request.timeoutMs ?? 20_000);
   let bound = false;
