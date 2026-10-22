@@ -422,3 +422,11 @@ New engine controls cover all three policies, capacity reset before duplicate
 lookup, independent unbounded mode, borrowed lookup and host-filtered health.
 Grouped/deferred reporting and the remaining persistent consumer fan-out stay
 explicit follow-ups; see [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
+
+KuCoin owner-adoption regression plan (unmerged): original-source controls pin
+initial typed rejects, accepted-only later recovery, failed-page/retry identity
+isolation, strict ledger/funding/census proofs, concurrent owner attribution and
+complete-empty reads; spot single-response fills never publishes a malformed
+prefix. Existing unit/request-sequence/funding/spot checks remain compatibility
+coverage. The engine owns completion and marker policy; no new venue pager or
+signing implementation is introduced.

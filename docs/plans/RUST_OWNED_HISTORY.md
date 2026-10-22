@@ -1535,3 +1535,19 @@ must be integrated before final CI/proof.
    Binance tests, strict touched all-target Clippy/fmt/bans/diff locally with
    four Cargo jobs; no local release WASM/full replay/size/timing. Update caller
    impact and open a draft with CI watch, no cutover/B11/runtime closure claim.
+
+KuCoin plan-audit clarification: malformed metadata decoding follows failed-page
+owner policy; well-formed census values and missing/nondecreasing native cursors
+remain strict proof refusals. Funding cursor proof still precedes the output cap,
+while ledger cursor proof is checked only when continuation is actually needed.
+Raw census/cursor facts include filtered/duplicate rows; output admission does not.
+
+KuCoin local adoption checkpoint: exact final 17 controls on original source
+`90dc6637d6e` produce 14 assertion RED / 3 compatibility GREEN; the implementation
+makes all 17 GREEN. Original comparison saves/restores only this slice's three
+source files byte-for-byte, with test/source hashes recorded locally. The full
+focused engine/KuCoin (spot)/Binance native suite passes 957 tests; strict touched
+all-target Clippy/fmt/bans/diff checks pass. Independent plan, correctness,
+adversarial source/delta and final tests/docs reviews are CLEAN. Actual #1741
+must be genuinely integrated before draft/final CI; none of these local receipts
+claims new shared-core compatibility or deployed runtime coverage.
