@@ -895,3 +895,19 @@ Canonical sorted-JSON SHA256 of the Coinbase old/new maps:
 WEEX old/new:
 `28fb5096b49ad5e340d77654b9b7b0bc4b5922b4dc58af5cff5fcfdff2161327` /
 `477c91d6c2d026dea59a81d4dc539b56985dadf3606bdb7eae5b4ed505936163`.
+
+Next reference slice: migrate Binance identity and candle commands first, without
+touching shared history Completion ownership. Carry an issued root read Context
+in their existing Pending variants; finish/error through done_context/fail_context.
+Identity uses the existing explicit secondary-read-or-primary provider identity;
+candles are explicitly public reads. Queue unsigned/signed managed requests and
+attach the existing streaming collector after successful queueing. Both keep the
+original 20-second raw deadline, never inferred from method or renewed on callback.
+Pre-I/O validation failures retain their current numeric path only when no
+managed owner was created. Once issued, every failure retains context authority;
+queue rejection returns the continuation and finalizes exactly that owner.
+Do not add a numeric fallback when managed completion fails. Test parked route
+and signer, typed failure, streamed result, duplicate/late callback and same-ID
+reuse, preserving provider slot/signature, query bytes and ordinary result schema.
+Account/background helpers and history follow in separate slices; their current
+legacy sites stay inventoried and receive no managed behavior claim yet.
