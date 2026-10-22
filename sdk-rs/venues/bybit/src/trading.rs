@@ -100,6 +100,7 @@ struct Job {
     continue_on_error: bool,
     ids: Vec<String>,
     error: Option<String>,
+    signing_error: Option<VenueError>,
     /// A write may have taken effect without a definitive answer.
     unknown: bool,
     /// The unknown answer was a lost request.
@@ -814,6 +815,8 @@ impl BybitLinear {
                                 Some(code) => error.venue_code(code.to_string()),
                                 None => error,
                             }
+                        } else if !job.effective && job.ids.is_empty() {
+                            job.signing_error.unwrap_or(error)
                         } else {
                             error
                         };
@@ -836,6 +839,40 @@ impl BybitLinear {
                 *command
             });
         if let Some(command) = due {
+            self.advance(cx, command);
+        }
+    }
+
+    /// The failed request never left dispatch. Retain earlier ACK/ambiguity evidence.
+    pub(crate) fn on_trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        let Request { command, call, .. } = request;
+        match call {
+            Call::Hyro(request) => {
+                self.on_hyro_sign_failed(cx, request, error);
+                return;
+            }
+            Call::ResolveMode { .. } => {
+                cx.command_error(command, error.message.clone());
+                cx.fail(command, error);
+                return;
+            }
+            _ => {}
+        }
+        let Some(job) = self.trading.jobs.get_mut(&command) else {
+            return;
+        };
+        cx.command_error(command, error.message.clone());
+        if job.error.is_none() {
+            job.error = Some(error.message.clone());
+            job.signing_error = Some(error);
+        }
+        job.outstanding = job.outstanding.saturating_sub(1);
+        if job.outstanding == 0 {
             self.advance(cx, command);
         }
     }
@@ -1207,11 +1244,14 @@ impl BybitLinear {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
+        // A native response retires provider-only NotSent metadata even when
+        // its HTTP failure has no native refusal envelope.
+        job.signing_error = None;
         if let Some(first) = errors.into_iter().next() {
-            if job.error.is_none() {
-                // Per-order refusals in a 2xx answer carry no single retCode.
-                job.refused = refused.or(item_refusals.then_some(None));
-            }
+            // Aggregate venue evidence is independent of the first diagnostic:
+            // a later native refusal disproves an earlier provider-only NotSent.
+            // Per-order refusals in a 2xx answer carry no single retCode.
+            job.refused = job.refused.or(refused.or(item_refusals.then_some(None)));
             job.error.get_or_insert(first);
         } else if succeeded {
             job.effective = true;

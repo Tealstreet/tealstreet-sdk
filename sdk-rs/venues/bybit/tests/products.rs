@@ -4,8 +4,9 @@ use safe_cex_engine::model::{
     OptionChainQuery, OptionRight, OrderSide, OrderType, PlaceOrderOpts, ProductKind,
 };
 use safe_cex_engine::{Command, Event, Query};
-use safe_cex_venue_bybit::{Options, Variant};
+use safe_cex_venue_bybit::Variant;
 use support::Harness;
+use support::Options;
 
 const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
 const OPTION: &str = "BTC-25DEC26-100000-C-USDT";

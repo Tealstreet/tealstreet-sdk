@@ -1695,20 +1695,19 @@ impl BybitLinear {
             self.account.handshake_timer = Some(cx.set_timer(10_000.0));
         }
         if let Some(credentials) = &self.credentials {
-            let auth = credentials.ws_auth(cx.protocol_stamp_ms());
-            let auth = if self.variant.is_hyro() {
-                auth.replacen(
-                    "{",
-                    &format!(
-                        "{{\"req_id\":\"hyro-{}-auth\",",
-                        self.account.session_version
-                    ),
-                    1,
-                )
-            } else {
-                auth
-            };
-            cx.send(socket, auth);
+            let request_id = self
+                .variant
+                .is_hyro()
+                .then(|| format!("hyro-{}-auth", self.account.session_version));
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(crate::sign::WsAuth::new(
+                    credentials.clone(),
+                    request_id,
+                    self.paths.private_ws.clone(),
+                )),
+            );
         }
     }
 
