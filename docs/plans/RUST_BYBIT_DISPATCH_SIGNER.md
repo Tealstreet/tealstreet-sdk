@@ -61,12 +61,15 @@ Its supported owned-read and static WS paths are exercised by venue regressions.
 Focused SDK 18 tests, typecheck, lint, strict Bybit/standalone registry Clippy pass.
 Independent source review and CI/replay evidence are still required.
 
-Current owner sequence: actual #1731 provider seam, then #1734 Aster profile
-rollback, then this migration. Actual #1726 stamp
+Current owner sequence: actual #1734 Aster profile rollback, #1736 financial,
+#1735 background coverage, then this migration and #1739 Kraken financial. Actual #1726 stamp
 `e09e34486259f4efb44cc04c84a9eec6f37c5974`, #1727 history
 `361a4ccafadcf0385d0f708d124596601da83402`, #1729 financial
 `6e10b0e8a23dbb8d34f761e8199a83c6068fadb1` and #1731 are integrated.
-#1734 is pending and must be integrated before final CI/proof.
+Actual #1734 `b95cad5a1003d57cdc89bfa117c92b47d3a4c61f`, #1736
+`288155e8d5be4e63ebcc77f4916514dd14e01df5` and #1735
+`b1dfdb43291d5a6de7dd8808b486adddda4cb118` are now real-integrated.
+All final CI/replay evidence must use this actual dependency tree.
 RequestContext remains a later shared fan-out, not a gate on this Bybit
 migration; the existing legacy bridge stays explicit until that adoption.
 
@@ -89,7 +92,7 @@ mutation is sent and planned identity/body stay immutable. Precise native
 Rejected versus transport Unknown provenance remains RequestContext work.
 These cases compiled and failed before the change; all thirteen groups pass now.
 
-Integration checkpoint: actual landing through #1731 is merged by porcelain.
+Integration checkpoint: actual landing through #1735 is merged by porcelain.
 Generic provider gates are now unchanged from landing. Conflicts involved two
 feature comments and appended host tests; both intents are retained. The shared
 negative injection/public-host controls move from newly migrated Bybit to
@@ -98,5 +101,6 @@ same, and a positive Bybit primary/secondary identity-read case verifies exact
 headers, MAC and venue userID/inviterID mapping.
 
 Historical pre-extraction validation was 1,025 focused engine/Binance/Bybit/
-registry/host tests plus strict checks. Final integration tests, actual-WASM CI
+registry/host tests plus strict checks; post-seam validation was 1,035 focused
+native tests, 16 SDK tests, SDK typecheck/lint and Rust strict Clippy/fmt/bans. Final integration tests, actual-WASM CI
 and authenticated replay proof are pending; no final signature-equality claim.
