@@ -67,3 +67,29 @@ deferred output as unproven, never positive dispatch. Native fixture data may be
 venue-specific codec/state data but must not duplicate capability expectations.
 The MEXC mutation proof must rebuild the isolated feature graph and retain normal
 artifact proof; a combined artifact is not a substitute.
+
+
+## First implementation slice
+
+The existing family checks are routed through one shared catalogue/verifier.
+Three original-red controls reproduce the old accepted constructor error,
+returned unsupported failure and coded unsupported event; corrected focused tests
+pass. Each actual command probe gets a fresh engine, and every alias/profile must
+construct. Capability fields/types/enums are closed; policy-only fields are
+classified rather than mapped to invented operations. Ingress evidence is
+reported as precondition, terminal, request or deferred, never universal handler
+proof. Combined artifacts use the same checker.
+
+The native registry fixture selects REST-book claims from each engine's actual
+record, seeds a valid market and requires exactly one outbound request without
+transport dispatch. All eight current positive claims pass. This proves request
+handler dispatch, not endpoint reply parsing or the venue's retry/completion
+policy; those remain covered by the existing venue suites. No duplicate list of
+expected venue capabilities is introduced. Other advertised commands' positive
+valid-state handler coverage remains open.
+
+The MEXC missing-feature control runs only in CI in a disposable detached tree.
+It removes exactly the command-order-book opt-in, rebuilds the isolated MEXC
+family, verifies the flag remains true and requires specifically the unknown
+fetchOrderBook variant error. Build/constructor/entropy failures do not count.
+The mutant never overwrites normal pkg artifacts or tracked manifests.
