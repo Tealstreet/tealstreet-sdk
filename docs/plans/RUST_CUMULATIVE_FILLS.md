@@ -798,3 +798,31 @@ top-level metrics, ordered status/failure/fixer arrays and exact matching CI
 package fingerprints/hashes. No fixture, allowance, comparator, signing/clock,
 history, metadata API or FILLS layout change. Fresh separate guard, separate
 merge and actual parents/tree/preservation report remain required.
+
+#### BingX original-source evidence and reviewed API
+
+On original production source at ce04209c3ae, regression-only 99491884a17
+produced four native assertion failures: selected zero/negative price emitted
+an invalid Fill; corrected same-ID/same-cumulative evidence lost delivery;
+and an invalid terminal execution advanced stored partial state. Two controls
+pass on original source: unused negative last price retains a valid fallback,
+and accepted zero-growth evidence still consumes its native trade identity.
+The production-prefix SHA is unchanged in the original-source receipt.
+
+Concrete API reviewed independently before implementation:
+`ObservedProgress::prepare_capped(self, last: Option<f64>, price: f64)` returns
+`Result<Option<PreparedObserved>, Rejection>`. It validates last evidence, caps
+it by positive cumulative growth when cumulative exists, uses full growth if
+last is absent, and delegates the selected quantity to the existing pure
+prepare path with a cursor seeded at previous observation. Missing cumulative
+uses checked addition. Existing authoritative Last/prepare semantics remain
+unchanged. Some(0) expresses native duplicate/lifecycle suppression; accepted
+None still permits native identity and quiet observation bookkeeping.
+
+The adapter first looks up identity without insertion, prepares selected
+financial evidence, then admits identity/progress/terminal/Fill effects.
+An error returns before even the order revision bump. Native price selection,
+coverage, terminal suppression, retained identities and liquidation/future-kind
+execution handling remain in the adapter. Generic tests cover growth caps,
+blind gaps, quiet observations, absent cumulative overflow and invalid price;
+independent API review is CLEAN (architecture YES, engine extension first).
