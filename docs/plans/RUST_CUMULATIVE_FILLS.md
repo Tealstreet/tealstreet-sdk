@@ -876,3 +876,54 @@ No source, fixture, allowance or comparator changes accompany this refresh.
 Independent six-file preservation review and fresh normal separate guard
 against actual landing remain required; no predecessor-stack exception is
 needed now that both actual dependency merges are real ancestors.
+
+### Phase 6: AsterDEX observed cumulative adoption (plan first)
+
+Fresh branch begins at actual BingX #1749
+`c189ec6e7b326daaa411a7ef8c7b666c88f7ea52`. Architecture gate: YES,
+Aster's no-execution-ID last-quantity cap is the same cross-cutting policy as
+BingX. Reuse existing `engine::execution::ObservedProgress::prepare_capped`;
+no second local cumulative subtraction/minimum policy. Scope is Aster account
+execution bookkeeping and native account controls, plus existing audit/quality/
+caller/plan sections if behavior is proven to change. Signing/calibration,
+listen-key lifecycle, REST reconciliation and history remain native.
+
+Before production edits, run compatibility controls on original source for
+last quantity below/above growth, blind gaps and full observed anchors, equal/
+regressing cumulative reports, explicit IDs and their duplicates, absent
+cumulative evidence, invalid-price retry, legacy flat executionReport and
+unknown order kinds. Preserve existing explicit-ID authoritative last fills
+in full, including reordered/late unique events independently of displayed
+order state. Valid explicit-ID events INCLUDING duplicates must still advance
+the independent observation ledger; REST/display seeds are not delivery.
+No-ID delivery still requires native cumulative evidence; do not enable the
+BingX absent-cumulative fallback there. Preserve positive native price
+precedence and separate 10,000-entry execution-ID/observed-order retention.
+
+Concrete API to review before implementation: derive the previous observation
+without mutation, construct `ObservedProgress::new(previous, Some(filled))`,
+use `prepare_capped(Some(last), selected_price)` for the no-ID branch, and
+commit the accepted full observed quantity through the native bounded map.
+Explicit-ID delivery admission remains independent; do not gate a valid direct
+last fill on an unusable cumulative/display field. The shared helper owns
+subtraction/capping/monotonic quantity, while Aster owns identity, storage and
+retention. Accepted zero-growth evidence must preserve native bookkeeping.
+
+Investigate negative cumulative observations consuming bounded ledger slots
+as a source hypothesis, not a defect claim. Any same-contract financial fix
+requires an assertion RED against original production code and GREEN through
+the existing shared helper, preserving direct last-fill independence and
+healthy peers. The owner has standing approval for proven helper-contract
+financial defects; document each in PR/AUDITS. Do not silently clamp malformed
+financial evidence or change quiet/retention semantics without proof. If the
+existing helper cannot express a proven native policy, review an engine
+extension before any per-venue workaround.
+
+Run focused engine/AsterDEX/Binance native tests, strict Clippy/fmt/bans and
+root checks. Independent code/adversarial/caller review follows. No local
+WASM build/replay/size/timing run. Integrate newer shared dependencies before
+final exact-head CI/full authenticated replay evidence, with raw IDs/requests/
+receipts/checkpoints and ordered gates intact except top-level metrics.
+The current history sequence #1748/#1750/#1754/#1751/#1752 has merge priority;
+this slice does not jump it. Fresh separate guard and separate match-head
+merge, actual parents/tree/preservation audit and overseer report are required.
