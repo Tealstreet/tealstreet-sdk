@@ -134,6 +134,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Replay evidence | Retained plan/evidence | Checking strict reports, fixture provenance, declarations or repeatability proofs. | [RUST_PORT_WIRE_SWEEP_RECEIPTS.md](RUST_PORT_WIRE_SWEEP_RECEIPTS.md) |
 | Repository policy | Process evidence | Branch-history secret scanning and exact fixture exemptions. | [BRANCH_SECRET_SCAN.md](BRANCH_SECRET_SCAN.md) |
 | Restore KuCoin Spot family throughput profile | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_KUCOIN_SPOT_THROUGHPUT.md](RUST_KUCOIN_SPOT_THROUGHPUT.md) |
+| Rollback and cutover | Recommendation / owner decision pending | Choosing engine selection, TS reachability, rollback or soak/deletion policy. | [RUST_ROLLBACK.md](RUST_ROLLBACK.md) |
 | Security and signing | Retained plan/evidence | Changing credential handling, entropy, signing or transport security. | [RUST_APEXOMNI_SIGNING.md](RUST_APEXOMNI_SIGNING.md) |
 | Security and signing | Retained plan/evidence | Changing credential handling, entropy, signing or transport security. | [RUST_HOST_ENTROPY.md](RUST_HOST_ENTROPY.md) |
 | Security and signing | Retained plan/evidence | Changing credential handling, entropy, signing or transport security. | [RUST_SECURITY_FIXES.md](RUST_SECURITY_FIXES.md) |
