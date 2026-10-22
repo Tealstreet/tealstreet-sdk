@@ -466,6 +466,78 @@ fn final_trade_and_filled_lifecycle_in_one_batch_emit_one_execution() {
         assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 0);
     }
 }
+fn prepared_fill_values(frame: &[u8]) -> Vec<(f64, f64)> {
+    let mut at = 16;
+    while at + 8 <= frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let size = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            let payload = &frame[at + 8..at + 8 + size];
+            let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+            let values = (4 + 12 * count + 7) & !7;
+            return (0..count)
+                .map(|i| {
+                    let offset = values + i * 16;
+                    (
+                        f64::from_le_bytes(payload[offset..offset + 8].try_into().unwrap()),
+                        f64::from_le_bytes(payload[offset + 8..offset + 16].try_into().unwrap()),
+                    )
+                })
+                .collect();
+        }
+        at += 8 + size;
+    }
+    Vec::new()
+}
+
+#[test]
+fn rejected_price_cumulative_trade_keeps_same_quantity_correction_eligible() {
+    for price in [0., -1.] {
+        let (mut e, _, private) = ready(false);
+        let socket = private.unwrap();
+        e.take_frame(NOW);
+        let bad = format!(
+            r#"{{"channel":"executions","type":"update","data":[{{"order_id":"O-100","exec_type":"trade","cum_qty":1,"last_price":{price},"avg_price":100,"exec_id":"T-correctable","timestamp":"2023-11-14T22:13:21Z"}}]}}"#
+        );
+        message(&mut e, socket, &bad);
+        assert!(prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])).is_empty());
+        let corrected = r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","exec_type":"trade","cum_qty":1,"last_price":100,"exec_id":"T-correctable","timestamp":"2023-11-14T22:13:21Z"}]}"#;
+        message(&mut e, socket, corrected);
+        assert_eq!(
+            prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])),
+            vec![(100., 0.5)],
+            "same-quantity correction after rejected price {price}"
+        );
+        message(&mut e, socket, corrected);
+        assert!(prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])).is_empty());
+    }
+}
+
+#[test]
+fn rejected_trade_keeps_row_time_terminal_and_provenance_while_peer_commits() {
+    let (mut e, _, private) = ready(false);
+    let socket = private.unwrap();
+    e.take_frame(NOW);
+    let bad = r#"{"order_id":"O-100","order_type":"market","exec_type":"trade","cum_qty":2,"last_price":0,"exec_id":"T-bad-final","timestamp":"2023-11-14T22:13:22Z"}"#;
+    let peer = r#"{"order_id":"O-200","symbol":"ETH/USD","side":"sell","order_type":"limit","exec_type":"trade","order_qty":1,"cum_qty":0.5,"last_qty":0.5,"last_price":60,"exec_id":"T-good","timestamp":"2023-11-14T22:13:21Z"}"#;
+    message(
+        &mut e,
+        socket,
+        &format!(r#"{{"channel":"executions","type":"update","data":[{bad},{peer}]}}"#),
+    );
+    let order = e.store().order("O-100").unwrap();
+    assert_eq!(
+        (order.filled, order.status, order.kind),
+        (0.5, OrderStatus::Open, safe_cex_engine::model::OrderType::Limit)
+    );
+    assert_eq!(e.store().order("O-200").unwrap().filled, 0.5);
+    assert_eq!(prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])), vec![(60., 0.5)]);
+    let corrected = r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","exec_type":"trade","cum_qty":1,"last_price":100,"exec_id":"T-bad-final","timestamp":"2023-11-14T22:13:21Z"}]}"#;
+    message(&mut e, socket, corrected);
+    assert_eq!(prepared_fill_values(e.take_frame(NOW).unwrap_or(&[])), vec![(100., 0.5)]);
+    assert_eq!(e.store().order("O-100").unwrap().kind, safe_cex_engine::model::OrderType::Limit);
+}
+
 #[test]
 fn cumulative_fallback_progress_uses_the_previous_row_in_the_same_batch() {
     let (mut e, _, private) = ready(false);
