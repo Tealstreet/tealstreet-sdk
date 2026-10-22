@@ -271,3 +271,13 @@ single-page fills, 50/100 page caps and final sorting/limits remain. First-page
 failure rejects typed; later failure returns accepted pages with owned
 incompleteness, excluding staged failed-page prefixes. Signing preparation
 refusal stays strict notSent. No engine API extension or universal fan-out claim.
+
+
+WEEX income now adopts RangeHistory for bounded reads and CursorHistory for
+single-page/equal-bound reads. The shared core admits validated native coverage
+gaps and enforces an optional lifetime request budget using the existing walker
+count. Five local income marker emitters are gone; only successful finalization
+can publish one owned gap. First/zero-accepted failure rejects; later actual
+failure stops and retains accepted pages. Fills/order/public-trade lists and their
+remaining native completeness fact still need conversion; this is not universal
+history enforcement or B11/deployment closure.

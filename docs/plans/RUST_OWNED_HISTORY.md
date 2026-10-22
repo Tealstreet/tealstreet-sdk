@@ -770,3 +770,25 @@ command-1 success under the new contract; regenerate only its exact event and
 adjust linked host/worker test message assertions if pinned. No host runtime or
 protocol edit. Small engine tests cover exact/over budget, lifecycle misuse and
 first-cause retention; existing native lifetime cap covers 10,000 selections.
+
+
+WEEX implementation receipt: baseline23 native history controls pass; original
+four added behavior groups fail by assertion (untyped/early-marker first failure,
+continuation after empty prior coverage, discarded accepted rows, early repeated
+cursor-gap publication). Regression-only commit12e0585321e precedes production.
+The corrected final30 history tests pass, including seven failure modes,
+concurrent owner isolation, equal-bound/native-row preservation and resumption of
+the same selected range after a shared IP pause. Existing10,000-selection native
+cap still passes. Three new engine groups cover exact/over/invalid/late budget,
+first-cause retention, valid empty gaps, invalid pending/finished admission and
+encoder failure. An off-by-one budget mutation failed its assertion and exact
+source bytes were restored before corrected GREEN.
+
+Plan/correctness/adversarial source reviews are CLEAN. Focused engine/WEEX/Binance
+820 tests and strict all-target Clippy pass; final touched-history controls and
+Clippy/fmt/bans pass after test refinements. The native-backed fixture is now
+produced by command1's accepted-page/later-failure success, with two focused
+host/worker ownership tests passing through corepack. No host runtime/protocol,
+financial reducer, scheduler/release or signing edits. All remaining actual
+shared/build dependencies, exact-head CI/replay proof and owner hold/queue still
+apply before merge; no deployed caller completion claim.
