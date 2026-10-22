@@ -473,3 +473,13 @@ The updated legacy unit tests, package typecheck and lint pass locally; CI must
 run the updated actual-WASM tests before readiness. Owner queue places this PR
 after the AsterDEX financial-fix window (#1756). Final replay proof uses that
 actual landing, followed by independent evidence review and a separate guard.
+
+The updated run 39786263884 at 50fcacdaf2b passed all 603 SDK actual-WASM
+tests, 11 server, 9 MCP and 2 CLI tests. It then exposed a real mobile import
+regression: delegated-provider module initialization constructed UTF-8 codecs
+before native-registry startup installed them. Initialize codecs lazily at
+provider work, keeping strict UTF-8, BOM and size validation unchanged. A new
+focused regression reproduces the original import failure, then signs exact
+Unicode bytes after host installation. Keep the existing real native-registry
+WASM fixture unchanged as the end-to-end acceptance gate. This failed workflow
+is historical evidence, not final replay proof.

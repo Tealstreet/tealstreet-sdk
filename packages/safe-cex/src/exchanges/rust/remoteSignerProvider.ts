@@ -26,8 +26,13 @@ export type RemoteSignerResult = SignResult & { headers?: [string, string][] };
 const MAX_PAYLOAD = 1_048_576;
 const MAX_OPERATIONS = 32;
 const MAX_PARTS = 256;
-const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+// Native hosts can import the registry before installing their runtime codecs.
+// Only actual provider work requires UTF-8; importing the SDK does not.
+let encoder: TextEncoder | undefined;
+let decoder: TextDecoder | undefined;
+const encodeUtf8 = (value: string) => (encoder ??= new TextEncoder()).encode(value);
+const decodeUtf8 = (value: Uint8Array) =>
+  (decoder ??= new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })).decode(value);
 const refused = () => new Error('Remote signing request refused');
 const canceled = () => new Error('Remote signing canceled');
 const unavailable = () => new Error('Remote signer unavailable');
@@ -36,8 +41,8 @@ const record = (value: unknown): value is Record<string, unknown> =>
 
 function utf8(value: string): Uint8Array {
   if (value.length > MAX_PAYLOAD) throw refused();
-  const bytes = encoder.encode(value);
-  if (bytes.length > MAX_PAYLOAD || decoder.decode(bytes) !== value) throw refused();
+  const bytes = encodeUtf8(value);
+  if (bytes.length > MAX_PAYLOAD || decodeUtf8(bytes) !== value) throw refused();
   return bytes;
 }
 
@@ -234,7 +239,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         const payload = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
         let offset = 0;
         for (const part of parts) { payload.set(part, offset); offset += part.length; }
-        const text = decoder.decode(payload);
+        const text = decodeUtf8(payload);
         const credentialDelimited = operation.payload.length === 3 && operation.payload[1].kind === 'credential';
         const extraData = remoteSigner ? wsMetadata(wire?.extraData, text, entry.identity.publicCredential, receipt, credentialDelimited) : undefined;
         return { kind: 'sign' as const, entry, payload: text, extraData };

@@ -105,6 +105,9 @@ comes from prepared receipt/payload structure, never a new wall clock or advisor
 context; HTTP remains distinct even when its query matches WS preimage grammar.
 Signing-only HTTP captures accept only their trusted declared header policy;
 WS and credential captures retain default deny.
+The delegated provider initializes UTF-8 codecs only when provider work begins.
+Importing the native registry before its host installs TextEncoder/TextDecoder
+must remain supported; signing and frame I/O require those runtime codecs.
 
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and
