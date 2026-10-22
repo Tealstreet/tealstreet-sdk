@@ -210,3 +210,14 @@ and parent/child freshness metadata are unchanged. 628 Bitget/Orderly/Binance
 native tests, strict touched-crate Clippy/fmt/bans and 44 root typecheck/28 lint
 tasks pass. Full current-head CI and all 184 raw outputs remain pending; these
 local results do not establish complete migration of Orderly WS or other venues.
+
+Phase-2 dependency refresh: history #1710 landed at actual
+`1910baa65a3fa78d3c69a0b726727a96f87438bf` during the original final guard.
+No merge was attempted on the old proof. A clean porcelain integration preserves
+all incoming history/source/tests/caller/index blobs and both independent
+quality-doc hunks, with exactly the four phase-2 paths against landing.
+Original head `5b824f2df30` had 43 green checks and184 equal complete outputs;
+that evidence is historical. Fresh integrated-head CI/raw comparison is required
+against source-equivalent #1710 CI `39710315859` (head `8dce0521f7e`). The owner
+granted #1711 a source priority window through this refresh; release on actual
+verified merge. This changes sequencing/evidence only, not row behavior.
