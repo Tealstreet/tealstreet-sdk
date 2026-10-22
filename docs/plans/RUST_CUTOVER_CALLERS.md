@@ -3312,3 +3312,57 @@ providers must sign the supplied canonical bytes rather than substitute their
 own wall-clock stamp. This calibration complements #1709's shared SDK ingress;
 it does not restore the retired hostClock capability.
 [Clock domains and regressions](RUST_ENGINE_CLOCK.md).
+
+
+### Binance general histories: shared range admission and completion
+
+The Binance reference adapts fills, orders, income and public trades to the
+engine's accepted-page owner; ranged income uses `RangeHistory` for bounds,
+identity selection and missing-coverage decisions. An HTTP/native/transport or
+whole-array parse failure before selected rows are accepted rejects typed.
+Previously fills/orders/single income could report an error then return `[]`,
+public trades could silently return empty or a malformed prefix, and ranged
+income could continue past a failed chunk. Those paths no longer prove complete
+empty coverage. After accepted rows, an actual page failure finishes only prior
+accepted rows with one command-owned Warn `history.incomplete` before the result,
+including at Error-only logging. A failed page's valid-looking prefix is excluded.
+Signing refusal/timeout remains a strict typed rejection (`notSent`) rather than
+partial success, even after accepted rows.
+
+Successful request limits, fill-window order/output duplicates, ranged-income
+compound identity and sorting, two-second chunk pacing, single-income/native
+trade order, missing-symbol/keyless no-I/O and unsupported profile boundaries
+remain. Client-order lookup stays separate, retaining primary credential routing,
+identity validation and definitive-miss proof. No SDK method argument or mandatory
+NX handler migration is added; B11's incomplete-query coverage and typed rejection
+handling remain required. Other histories and background notices still need
+fan-out; this reference does not claim universal enforcement.
+
+
+## Shared signer prerequisites: provider result and trusted setup (#1721)
+
+Actual merge `802e9c8c6e9` extends the shared provider contract; Binance remains
+the reference, with no additional family or remote HTTP/WS wire migration.
+Custom Rust and JS/Workers signing providers must return `SignResult { values,
+receipt }`, echoing `request.receipt` exactly; old bare arrays reject. `values`
+contains the same ordered operation bytes. Optional `stampMs`/`expiryMs` are
+canonical protocol UTC safe integer milliseconds, not a provider's replacement
+wall clock; either field can be absent. Engine release validates receipt,
+calibration revision, expiry and the original host-time deadline. The receipt
+callback is final engine-release evidence, never network delivery or venue ACK;
+unknown writes still require reconciliation rather than replay.
+
+Native `LocalSigner::from_setup` now returns `Result`. Trusted setup supports
+passphrases (missing and empty stay distinct), explicit secret encoding and
+credential trimming; opaque identities can carry caller-assigned stable IDs.
+SDK `ExchangeOptions.localSigner.{primary,secondary}` exposes `stableId`,
+`secretEncoding` (`utf8|base64|hex|pem`) and `trimCredential`. Credentials,
+passphrases and metadata are consumed by the one-use setup channel and removed
+from retained generic options. Default UTF-8 Binance setup needs no new argument;
+raw WASM constructor argument 3 and #1714's required NX trusted worker/hosted
+bootstrap separation remain. Unmigrated Rust venues reject this metadata as
+unsupported/notSent. Assign stable IDs consistently across engines/slots sharing
+a nonce domain; this does not itself implement a new venue identity or migrate
+persisted MEXC key-derived user IDs. Those mappings are later cutover work.
+
+[Provider contract and prerequisites](RUST_SIGNER_PREREQUISITES.md).

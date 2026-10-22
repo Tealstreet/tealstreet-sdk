@@ -28,6 +28,7 @@ pub struct Harness {
     /// Logs at `Level::Error`, also present in `logs`.
     pub errors: Vec<String>,
     pub command_errors: Vec<(u32, String)>,
+    pub events: Vec<safe_cex_engine::log::LogEvent>,
     pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
     pub progress_at_request: Vec<(RequestId, usize)>,
@@ -54,6 +55,10 @@ impl Harness {
     pub fn started_with_policy(options: Options, policy: PublicFeedPolicy) -> Self {
         let mut engine = engine(options);
         engine.set_public_feed_policy(policy).unwrap();
+        Self::from_engine(engine)
+    }
+
+    pub fn from_engine(engine: Engine<BinanceFutures>) -> Self {
         let mut harness = Self {
             engine,
             now: 1_000.0,
@@ -68,6 +73,7 @@ impl Harness {
             errors: Vec::new(),
             command_errors: Vec::new(),
             command_notices: Vec::new(),
+            events: Vec::new(),
             progress: Vec::new(),
             progress_at_request: Vec::new(),
         };
@@ -122,6 +128,7 @@ impl Harness {
                     self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.command_notices.push((command, "failed"));
                     self.done.push((command, Err(error.legacy_text())));
                     self.failures.push((command, error));
                 }
@@ -129,6 +136,16 @@ impl Harness {
                     panic!("unexpected Binance startup failure: {error}")
                 }
                 Action::Notice(Notice::Event(event)) => {
+                    if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE {
+                        for (key, value) in &event.fields {
+                            if *key == "command"
+                                && let safe_cex_engine::Value::Num(command) = value
+                            {
+                                self.command_notices.push((*command as u32, "incomplete"));
+                            }
+                        }
+                    }
+                    self.events.push(event.clone());
                     if event.level == safe_cex_engine::Level::Error {
                         self.errors.push(event.message.clone());
                     }

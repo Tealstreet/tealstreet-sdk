@@ -83,6 +83,12 @@ hand-roll windows, cursors and pages in their `history.rs`. History reads only.
 - Batch 5: Binance fills windows use the shared tiling, which also covers the
   final millisecond the old split dropped when a range ended one past a window
   boundary (regression failed first). A failed fills window keeps landing's
-  bridge contract (a command error before an empty success, pinned in
-  `queries_variants.rs`). WEEX's per-window truncation warnings and AsterDEX /
-  Phemex single reads are unchanged.
+  bridge contract at that historical merge (a command error before an empty
+  success, then pinned in `queries_variants.rs`). The later
+  [owned-history migration](RUST_OWNED_HISTORY.md) supersedes that failure
+  contract: before accepted rows reject typed; an actual later-page failure
+  retains only accepted rows with command-owned incompleteness. The old
+  empty-success assertions are replaced by regression-backed owner policy.
+  WEEX's per-window truncation warnings and AsterDEX / Phemex single reads remain
+  pending the owned-completion fan-out; this historical refactor is not the final
+  cross-cutting enforcement boundary.

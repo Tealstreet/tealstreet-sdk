@@ -235,5 +235,8 @@ checks. Bybit and OKX closed positions now use this owner too, with shared stage
 and initial cursor support. Bybit general histories now use shared contextual
 finalization for accepted rows, sorting/dedupe/caps and strict policy refusal;
 actual later-page failures recover with owned incompleteness. Missing list data
-never proves empty complete coverage. Other general histories remain to migrate;
+never proves empty complete coverage. Binance general histories now use shared
+accepted-page completion and `RangeHistory` owns income bounds, dedupe selection,
+coverage and finalization; failed prefixes are not accepted, and signing failures
+stay strict. Other general histories remain to migrate;
 this does not close the cross-venue enforcement work. See [the plan](RUST_OWNED_HISTORY.md).
