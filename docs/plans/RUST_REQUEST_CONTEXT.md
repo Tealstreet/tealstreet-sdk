@@ -537,3 +537,14 @@ prepare/bind/claim contract, retaining fail-closed unsupported cases. Then actua
 Bybit uses the same journal instead of refused/effective/unknown/resent inference.
 Legacy session-token work remains its explicitly tracked later WS-auth core;
 the exact caller ratchet freezes every remaining opaque site and may only shrink.
+
+
+Reference prerequisite in the same activation checkpoint: add
+Cx.http_leg_context(&parent, Policy) -> Result<Context, Error>. Validate the live
+issuer/generation-bearing parent first, keep its owner, and cap the child's exact
+f64 raw deadline at min(parent.deadline, now + requested timeout). Do not round
+remaining time upward into a new timeout. No new owner generation, permission or
+timer is created on invalid/expired/foreign parent. References retain the original
+command authority; HTTP children may shorten its bound, never extend it. Tests
+cover fractional now/deadlines, sibling expiry, foreign/retired parent and command
+ID reuse. This extends the engine issuer once, not per-venue deadline arithmetic.
