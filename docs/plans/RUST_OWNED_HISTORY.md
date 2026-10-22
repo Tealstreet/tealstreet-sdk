@@ -1381,3 +1381,17 @@ landing, integrate actual shared predecessors, obtain exact-head green CI and
 authenticated post-#1762 full raw/package/gate proof, announce the guard window,
 then run a fresh separate porcelain guard and a separate match-head merge. B11
 NX ingestion/coverage and deployed cutover proof remain open.
+
+Backpack plan review refinement: owner More can occur at most forty-nine times
+before the fifty-page cap, so the existing offset helper cannot reach its own
+budget. Treat any unexpected non-More helper result as a strict invariant
+failure; never let it independently finish or authorize a request. Insert page
+fingerprints only when continuation is required, matching the old repeat set,
+and do not stall on zero eligible identities. Preserve the current validation/
+filter order and eager non-fill command_error diagnostic. Keep separate staged
+skipped-fill facts and the admitted cumulative row.skipped message, emitted once
+on successful completion, including retained partial success. Add controls for
+a failed skipped prefix, an admitted skip followed by actual failure, all-skipped
+valid coverage, malformed non-fill after an accepted page, public dedupe/limit,
+and raw offset displacement across spot and malformed-fill neighbors. Strict
+synchronous setup failure must suppress both partial output and owned markers.
