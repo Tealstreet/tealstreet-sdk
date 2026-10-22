@@ -236,5 +236,8 @@ live together in the engine. It stages each page until validation: failures befo
 accepted rows reject, later failures retain accepted rows with owned incompleteness;
 encoding and lifecycle invariant failures still reject. Shared cursor policy owns its budget/dedupe/end
 checks. Bybit and OKX closed positions now use this owner too, with shared stage reset
-and initial cursor support. General histories remain to migrate; this does not
-close the cross-venue enforcement work. See [the plan](RUST_OWNED_HISTORY.md).
+and initial cursor support. Bybit general histories now use shared contextual
+finalization for accepted rows, sorting/dedupe/caps and strict policy refusal;
+actual later-page failures recover with owned incompleteness. Missing list data
+never proves empty complete coverage. Other general histories remain to migrate;
+this does not close the cross-venue enforcement work. See [the plan](RUST_OWNED_HISTORY.md).
