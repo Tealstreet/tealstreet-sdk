@@ -2927,3 +2927,125 @@ fn owned_history_missing_required_list_never_proves_empty_complete_coverage() {
         }
     }
 }
+
+#[test]
+fn unsupported_reports_wait_for_admitted_join_and_never_rearm_on_clean_rows() {
+    let mut h = ready();
+    let mut unsupported = snapshot_rows(OPEN_ORDERS).remove(0);
+    unsupported["orderType"] = serde_json::json!("FutureType");
+    let mut healthy = snapshot_rows(OPEN_ORDERS).remove(0);
+    healthy["orderId"] = serde_json::json!("healthy-report-peer");
+    let rows = [unsupported, healthy];
+    let expected =
+        format!("Bybit order {ORDER_ID} has an unsupported type; its last known state is kept");
+    let reports = |h: &Harness| {
+        h.logs
+            .iter()
+            .filter(|s| s.contains("unsupported type"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    h.message("/v5/private", r#"{"success":true,"op":"subscribe"}"#);
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        &snapshot_page(&rows),
+    );
+    assert!(
+        reports(&h).is_empty(),
+        "first settle-coin page cannot report yet"
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        r#"{"retCode":0,"result":{}}"#,
+    );
+    assert!(
+        reports(&h).is_empty(),
+        "whole failed join cannot consume memory"
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    for clean in [false, true, false] {
+        h.advance(15_000.0);
+        let page = if clean {
+            OPEN_ORDERS.replace(
+                "page_args%3Dfd4300ae-7847-404e-b947-b46980a4d140%26symbol%3D6%26",
+                "",
+            )
+        } else {
+            snapshot_page(&rows)
+        };
+        let previous = reports(&h);
+        h.respond(
+            "/v5/order/realtime?category=linear&settleCoin=USDT",
+            200,
+            &page,
+        );
+        assert_eq!(reports(&h), previous, "incomplete join cannot add reports");
+        h.respond(
+            "/v5/order/realtime?category=linear&settleCoin=USDC",
+            200,
+            EMPTY_LIST,
+        );
+        assert_eq!(reports(&h).as_slice(), std::slice::from_ref(&expected));
+        assert!(
+            h.engine.store().order(ORDER_ID).is_some(),
+            "suppression cannot skip known-copy restoration"
+        );
+        if !clean {
+            assert!(h.engine.store().order("healthy-report-peer").is_some());
+        }
+    }
+}
+
+#[test]
+fn stale_join_discards_staged_unsupported_diagnostics_without_consuming_memory() {
+    let mut h = ready();
+    h.message("/v5/private", r#"{"success":true,"op":"subscribe"}"#);
+    let mut row = snapshot_rows(OPEN_ORDERS).remove(0);
+    row["orderId"] = serde_json::json!("staged-unsupported");
+    row["orderType"] = serde_json::json!("FutureType");
+    let page = snapshot_page(&[row]);
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        &page,
+    );
+    h.command(Command::CancelOrders {
+        command: 901,
+        ids: vec![ORDER_ID.into()],
+    });
+    h.respond("/v5/order/cancel-batch", 200,
+        &format!(r#"{{"retCode":0,"result":{{"list":[{{"category":"linear","symbol":"ETHUSDT","orderId":"{ORDER_ID}"}}]}},"retExtInfo":{{"list":[{{"code":0,"msg":"OK"}}]}}}}"#));
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Canceled
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert!(
+        !h.logs.iter().any(|m| m.contains("staged-unsupported")),
+        "old join cannot flush staged diagnostics after terminal ACK"
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        &page,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert_eq!(
+        h.logs
+            .iter()
+            .filter(|m| m.as_str()
+                == "Bybit order staged-unsupported has an unsupported type and is not shown")
+            .count(),
+        1
+    );
+}

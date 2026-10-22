@@ -1653,3 +1653,57 @@ fn skipped_summary_repeats_on_text_change_and_rearms_on_clean_positions() {
         ]
     );
 }
+
+#[test]
+fn grouped_positions_count_unique_ids_and_each_anonymous_row_keep_cached_exposure() {
+    let mut markets: serde_json::Value = serde_json::from_str(MARKETS).unwrap();
+    let mut eth = markets["rows"][1].clone();
+    eth["symbol"] = serde_json::json!("PERP_ETH_USDT");
+    markets["rows"].as_array_mut().unwrap().push(eth);
+    let (mut e, _, mut reads, timer) = start_with(&markets.to_string());
+    assert!(e.store().market("ETHUSDT").is_some());
+    load(&mut e, &mut reads);
+    let before = e.store().positions().to_vec();
+    assert_eq!(before.len(), 1);
+    e.drain_actions().for_each(drop);
+    let health = e.health().rows_skipped;
+    e.handle(2020.0, Event::TimerFired { timer });
+    let mut reads = requests(&mut e);
+    let r = take(&mut reads, "/v3/positions");
+    let bad = POS.replace("\"leverage\":10", "\"leverage\":0");
+    let row = bad
+        .split("\"positions\":[")
+        .nth(1)
+        .unwrap()
+        .strip_suffix("]}}")
+        .unwrap();
+    let eth = row.replace("PERP_BTC_USDT", "PERP_ETH_USDT");
+    response(
+        &mut e,
+        &r,
+        2025.0,
+        &format!(
+            r#"{{"success":true,"data":{{"positions":[{eth},{row},{eth},{{}},{{"symbol":""}}]}}}}"#
+        ),
+    );
+    let reports: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.message.starts_with("WOO positions: skipped") =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].level, safe_cex_engine::Level::Warn);
+    assert_eq!(reports[0].code, safe_cex_engine::log::code::ROW_SKIPPED);
+    assert_eq!(
+        reports[0].message,
+        "WOO positions: skipped 4 unmappable row(s) [ETHUSDT, BTCUSDT]"
+    );
+    assert_eq!(e.health().rows_skipped - health, 1);
+    assert_eq!(e.store().positions(), before);
+}
