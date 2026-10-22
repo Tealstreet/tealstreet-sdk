@@ -47,3 +47,28 @@ ID rejection; it does not claim a source or runtime change until implemented.
 Architecture gate: engine resource allocation and host serialization are one
 shared choke point; this is not a per-venue lifecycle fix. No socket policy,
 command outcome aggregation, clock calibration or provider custody changes.
+
+## Concrete allocation seam for review
+
+`pub const MAX_RESOURCE_ID: u64 = (1_u64 << 53) - 1` is the single numeric
+wire bound. `reserve_engine_ids(next: &mut u64, count: u64) -> Option<Range<u64>>`
+checks a nonzero count and checked exclusive end at most MAX_RESOURCE_ID + 1,
+advancing next only on success. Exhausted next is an internal sentinel only; it
+is never emitted. Io exposes `reserve_ids(count)` over that helper. Managed HTTP
+reserves three IDs before constructing/staging any child and maps None to its
+existing `(pending, Error::Capacity)` return. Callers consume request, generation,
+and timer from that exact reserved range. The separate signing-attempt counter
+uses the same checked bound and never wraps.
+
+Existing infallible legacy Io/poll helpers keep their call contracts, calling
+checked reservation and explicitly failing closed at impossible exhaustion
+instead of returning an alias or dummy. This backstop needs review separately
+from the typed managed admission path; no capacity error may become an ordinary
+transport retry or fabricated unsent result after a previous release.
+
+WASM numeric ingress takes f64, validates finite/integral/in-range before u64
+conversion and reports a typed JS error on invalid data. Zero remains available
+for the existing shared-public socket identity; allocated IDs start at one.
+Command IDs and milliseconds remain u32. All outbound resource fields become
+u64 bounded numeric JSON, with no wasm-bindgen u64/BigInt export. Preparation
+and final-claim token strings retain their unchanged u64 decimal codec.
