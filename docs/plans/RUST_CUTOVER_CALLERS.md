@@ -3931,7 +3931,7 @@ No SDK arguments/results, order/position/FILLS publication or caller migration
 is added. This slice does not complete grouped/deferred reporting or the other
 consumer migrations; those remain in [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
 
-### KuCoin futures and spot owned history (unmerged)
+### KuCoin futures and spot owned history
 
 This slice moves the implemented KuCoin query reads to the existing engine
 history owner. Futures fills, orders, transaction ledger and symbol-scoped

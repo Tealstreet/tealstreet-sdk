@@ -1891,7 +1891,7 @@ plus anonymous rows), Bybit deferred reporting, and remaining persistent copies
 remain open in [the reporting plan](RUST_ROW_ADMISSION.md). No all-venue closure
 or new live capture/parity claim is made by this first slice.
 
-KuCoin owned-history follow-on (unmerged): futures history/funding and spot fills
+KuCoin owned-history follow-on: futures history/funding and spot fills
 adopt the existing engine query owner. Initial page failures become typed
 Internal rejects; later futures/funding failures return only validated eligible
 rows with command-owned incompleteness. Native continuation/census/safety proofs

@@ -423,7 +423,7 @@ lookup, independent unbounded mode, borrowed lookup and host-filtered health.
 Grouped/deferred reporting and the remaining persistent consumer fan-out stay
 explicit follow-ups; see [RUST_ROW_ADMISSION.md](RUST_ROW_ADMISSION.md).
 
-KuCoin owner-adoption regression plan (unmerged): original-source controls pin
+KuCoin owner-adoption regression plan: original-source controls pin
 initial typed rejects, accepted-only later recovery, failed-page/retry identity
 isolation, strict ledger/funding/census proofs, concurrent owner attribution and
 complete-empty reads; spot single-response fills never publishes a malformed
