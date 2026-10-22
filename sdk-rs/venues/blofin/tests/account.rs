@@ -2058,3 +2058,48 @@ fn kept_attached_tpsl_leg_is_not_duplicated_by_its_parent() {
     poll_lists(&mut h, 30_000.0, POSITION, parent, "");
     assert_eq!(legs(&h), ["X__take_profit"]);
 }
+
+fn prefix_overflow_event(quantity: &str, average: &str) -> String {
+    order_event("prefix-overflow", quantity, "partially_filled").replace(
+        "\"averagePrice\":\"100\"",
+        &format!("\"averagePrice\":\"{average}\""),
+    )
+}
+
+fn known_live_prefix_for_price_overflow() -> Harness {
+    let mut h = Harness::new();
+    h.seed();
+    h.e.take_frame(0.0);
+    h.ws(&prefix_overflow_event("1", "1"));
+    assert_eq!(executions(h.e.take_frame(1.0).unwrap()), [(1.0, 0.001)]);
+    h
+}
+
+#[test]
+fn incremental_price_overflow_emits_no_invalid_financial_receipt() {
+    let mut h = known_live_prefix_for_price_overflow();
+    // The cumulative quote is finite (1.5e308), but /0.5 overflows.
+    h.ws(&prefix_overflow_event("1.5", "1e308"));
+    let fills = h.e.take_frame(1.0).map(executions).unwrap_or_default();
+    assert!(
+        fills.is_empty(),
+        "invalid incremental price must be rejected before delivery: {fills:?}"
+    );
+}
+
+#[test]
+fn incremental_price_overflow_keeps_the_same_quantity_correction_eligible() {
+    let mut h = known_live_prefix_for_price_overflow();
+    h.ws(&prefix_overflow_event("1.5", "1e308"));
+    // Drain any old-code invalid receipt to isolate consumed eligibility.
+    h.e.take_frame(1.0);
+    let corrected = prefix_overflow_event("1.5", "100");
+    h.ws(&corrected);
+    h.ws(&corrected);
+    let fills = h.e.take_frame(1.0).map(executions).unwrap_or_default();
+    assert_eq!(
+        fills,
+        [(298.0, 0.0005)],
+        "corrected suffix uses the last proven q1/value1 exactly once"
+    );
+}
