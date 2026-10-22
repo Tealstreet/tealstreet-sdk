@@ -311,3 +311,56 @@ Independent plan, code/adversarial, preservation and final raw-evidence reviews
 answer architecture YES/engine-first. Full green exact head, actual dependency
 integration, fresh fail-closed guard and separate merge remain mandatory, then
 actual parents/tree/owned-and-incoming blob audit and immediate Aimux report.
+
+### Phase 1 concrete API checkpoint and original-source evidence
+
+Actual clock #1722 d3e34e6e105 integrated cleanly at7474c644132 before new source
+changes, preserving all ten incoming files. Three native assertion controls fail
+on unchanged production: WOO zero-last and negative-last same-ID correction each
+lose .001@59000 while display remains .006/position .01; Bitrue after10@100 and
+REST30/average110, an average1e308 observation replaces quote3300 with infinity,
+then suppresses the valid10@130 suffix from40/average115. Logs are
+/tmp/codex-cumulative-fanout-{woo,bitrue}-original-red.log; unchanged source hashes
+recorded in /tmp/codex-cumulative-fanout-native-original-receipt.json. Owner
+explicitly approves WOO and grants standing approval for proven same-contract
+financial defects in this helper fan-out; record each actual fix in PR/AUDITS.
+
+Concrete engine API before implementation:
+
+- ObservedProgress::new(previous, cumulative) validates observation evidence;
+  quantity() exposes its monotone observed next quantity. delivery_start(delivered)
+  owns the observed-versus-delivered conditional. prepare(delivered Cursor, native
+  last Option, direct price) returns an optional PreparedObserved with independent
+  validated delivery/next cursor, observed next and optimistic position amount.
+  Invalid/zero delivery never consumes a delivered anchor; valid native display
+  observation can still commit. A missing cumulative with last uses checked sums.
+- QuantityInterval::new(start,end) / suffix(end,last,rounding) validate quantities
+  and exact endpoint construction. length() supplies the checked native evidence
+  coverage bound. PricedInterval::uniform(interval,price,rounding) authorizes
+  clipping; PricedInterval::quotes(from Cursor,to Cursor,rounding) binds quote
+  endpoints to its full interval and refuses partial clipping with uncovered
+  quantities. A fully duplicated report remains an admitted no-delivery proof.
+- IntervalHistory::new(floor,limit) validates its initial floor/cap. prepare takes
+  &mut self and a validated priced interval, scans without mutation or cloning,
+  and returns a small PreparedInterval holding that exclusive mutable borrow.
+  Its consuming commit merges/compacts the existing Vec and returns optional
+  validated delivery. The borrow makes stale/reused proposals unrepresentable;
+  abandoning the proposal has no effect. Native identity/status/side admission
+  precedes prepare, commit precedes Fill, no host I/O between them. This replaces
+  a runtime basis check, not a general snapshot freshness token.
+- ExecutionRounding::{Binary,Significant15} preserves exact native financial
+  output rounding locations. scaled_quantity validates quantity/scale/product
+  then rounds before interval identity. Cursor::direct_suffix derives a checked
+  quote endpoint from an existing known quote (zero only at quantity zero);
+  seed_with_average already checks cumulative products. Cursor::value exposes
+  only validated quote evidence. Move Bitrue's exact format .14e routine into
+  num with its wrapper retained for unrelated mappings. No full quote ledger.
+
+Bitrue native code selects protocol evidence, quote-map source, last-quantity
+coverage and delivery status. Engine owns scale/average/suffix math, quote/price
+validation and interval subtraction/rounding/union/floor/cap. Native outer500
+order eviction, display/terminal timestamps and quote-map retention stay native.
+WOO native order observation/ID selection and refresh/position application remain
+native; all delivery derivation goes through ObservedProgress. Add partial-
+overlap aggregate-VWAP rejection control plus exact direct-price overlap/late/
+bridge/floor/cap, abandoned proposal, checked overflow and correction controls.
