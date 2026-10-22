@@ -546,3 +546,19 @@ Response-proof plan audit refinements (before production source):
 Independent correctness/adversarial plan review CLEAN after these refinements;
 architecture No. The implementation must establish the owner-bound native plan
 cleanup shape before source adoption; no mutable-Cx compatibility escape.
+
+
+First response-proof regression checkpoint (tests only): extend existing Probe
+with one default-false hostile-reducer flag; only the new control enables it.
+The normal on_response then cancels seeded orderone, while the already-existing
+late reconcile hook cancels one/two on bodyok. Exercise real mutation context,
+Prepare/Bind/Claim and direct versus split response custody at statuses408,
+500,503,600,65535, alongside the unchanged200 positive. Gather all observations
+before the final table assertion so every status/path executes on original
+source. Require no ordinary/late callback, no Store cancellation, exactly one
+Unknown terminal result and no live pending/managed work for unproven replies;
+200 still follows the original successful callback. Late controls first seal
+through existing fail_context, then verify no callback, patch or reopened result.
+No test-only status predicate, native fallback, timer or original assertion
+changes. Compile separately, run compiled tests under15s runtime timeout, retain
+assertion-RED logs, then independent source/RED review before production work.
