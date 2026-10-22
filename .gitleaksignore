@@ -73,3 +73,8 @@ a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbas
 # Exact historical fingerprints only; all future source/credential changes scan.
 11455d16800a4927fc06f0c8577152072531c1ec:sdk-rs/registry/tests/hosted_signing.rs:generic-api-key:220
 11455d16800a4927fc06f0c8577152072531c1ec:sdk-rs/registry/tests/hosted_signing.rs:generic-api-key:221
+
+# Public plan prose ("token inventory" followed by slash-separated freshness
+# adjectives), verified not a credential; owner approved this one historical
+# commit/file/rule/line fingerprint. Current prose is reworded; no path/rule bypass.
+1a72d442724332d247511dc58fd81f77e5bd2e19:docs/plans/RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md:generic-api-key:83

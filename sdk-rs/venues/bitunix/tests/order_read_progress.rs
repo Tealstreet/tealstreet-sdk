@@ -880,3 +880,62 @@ fn owned_read_crossing_partial_cancel_ack_neither_publishes_stale_rows_nor_appro
     );
     assert_eq!(e.store().order("B").unwrap().price, 200.0);
 }
+
+#[test]
+fn exhaustion_between_initial_halves_never_publishes_native_or_store_snapshot_rows() {
+    for first_tpsl in [false, true] {
+        let (mut e, socket, mut halves) = initial_halves();
+        halves.sort_by_key(|r| r.url.contains("/tpsl/") != first_tpsl);
+        let first = halves.remove(0);
+        let regular_rows = regular_seed();
+        let protection_rows = protection_seed();
+        answer(
+            &mut e,
+            first.id,
+            100.0,
+            &body(
+                if first_tpsl {
+                    &protection_rows
+                } else {
+                    &regular_rows
+                },
+                first_tpsl,
+            ),
+        );
+        assert!(!e.store().loaded().orders);
+        safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
+        e.drain_actions().for_each(drop);
+        let second = halves.remove(0);
+        answer(
+            &mut e,
+            second.id,
+            200.0,
+            &body(
+                if first_tpsl {
+                    &regular_rows
+                } else {
+                    &protection_rows
+                },
+                !first_tpsl,
+            ),
+        );
+        assert!(!e.store().loaded().orders);
+        assert!(e.store().orders().is_empty());
+        assert!(!e.drain_actions().any(|action| matches!(
+            action,
+            Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+        )));
+        ws(
+            &mut e,
+            socket,
+            300.0,
+            "order",
+            r#"{"event":"UPDATE","symbol":"BTCUSDT","orderId":"A","side":"SELL","price":"100","qty":"3","dealAmount":"2"}"#,
+        );
+        assert_eq!(
+            observed_fills(&mut e),
+            vec![(1, 100.0, 2.0)],
+            "rejected snapshot must not consume the native cumulative baseline"
+        );
+    }
+}

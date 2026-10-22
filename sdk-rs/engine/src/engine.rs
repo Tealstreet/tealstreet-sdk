@@ -869,10 +869,11 @@ fn observe_account_auth<V: Venue>(
     response: &Response<'_>,
     expected_list_present: bool,
     now: f64,
+    store: &Store,
     actions: &mut Vec<Action>,
 ) {
     let Some(auth) = pending.auth else { return };
-    let Some(outcome) = venue.account_auth_outcome(&pending.value, response, now) else {
+    let Some(outcome) = venue.account_auth_outcome(&pending.value, response, now, store) else {
         return;
     };
     if outcome == AuthOutcome::Accepted && !expected_list_present {
@@ -1942,6 +1943,7 @@ pub trait Venue {
         _pending: &Self::Pending,
         _response: &Response<'_>,
         _now: f64,
+        _store: &Store,
     ) -> Option<AuthOutcome> {
         None
     }
@@ -2997,6 +2999,7 @@ impl<V: Venue> Engine<V> {
                         &response,
                         false,
                         now,
+                        cx.store,
                         &mut cx.io.actions,
                     );
                     self.venue.on_stream_error(&mut cx, pending.value, response);
@@ -3037,6 +3040,7 @@ impl<V: Venue> Engine<V> {
                 &response,
                 true,
                 now,
+                cx.store,
                 &mut cx.io.actions,
             );
             self.venue.on_response(&mut cx, pending.value, response);
@@ -3055,6 +3059,7 @@ impl<V: Venue> Engine<V> {
                     &response,
                     true,
                     now,
+                    cx.store,
                     &mut cx.io.actions,
                 );
                 self.venue.on_response(&mut cx, pending.value, response);
