@@ -2392,6 +2392,17 @@ but the final write-plan root starts only when the native write steps are fixed.
 No arbitrary whole-preflight or 120-second product cap is added. A finite redo
 limit would change caller-visible liveness policy and needs a separate decision.
 
+## Shared ticker lookup CPU headroom
+
+A named WASM profile identifies indirect symbol comparisons in Store::ticker_index
+as a substantial public-data cost. The shared Store now uses the existing
+HashMap<Box<str>,u32> index representation for borrowed symbol lookup, rebuilding
+in input order and releasing obsolete keys/capacity on replacement. This applies
+to every venue using symbol lookup; WOO's cached-index WS reducer remains outside
+that hot path. No authority policy, codec, venue-specific shortcut or legacy-site
+exemption changes. Exact paired CI performance and family memory/size gates remain
+separate evidence from diagnostic profiles.
+
 ### Paradex public-trades Read history bridge adoption
 
 Unsigned single-page public trades now use a dedicated Context-bearing history
