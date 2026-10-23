@@ -130,10 +130,11 @@ fn candles_carry_a_native_window_that_expires_as_a_timeout() {
 fn candle_refusals_before_any_request_are_typed_not_sent() {
     // An enabled option product reaches the venue's own option refusal; a
     // disabled product is refused before dispatch.
-    for (command, options, symbol, interval) in [
-        (42, true, "BTC-27MAR26-100000-C", Interval::M1),
-        (43, false, "BTCUSD", Interval::M1),
-        (44, false, "BTCUSDT", Interval::S1),
+    for (command, options, symbol, interval, kind) in [
+        (42, true, "BTC-27MAR26-100000-C", Interval::M1, ErrorKind::Unsupported),
+        // A disabled product is the account's configuration, not a missing command.
+        (43, false, "BTCUSD", Interval::M1, ErrorKind::InvalidInput),
+        (44, false, "BTCUSDT", Interval::S1, ErrorKind::Unsupported),
     ] {
         let mut h = ready_with(options);
         h.requests.clear();
@@ -141,7 +142,7 @@ fn candle_refusals_before_any_request_are_typed_not_sent() {
         assert!(h.requests.is_empty(), "{symbol}: nothing is sent");
         let error = failure(&h, command);
         assert_eq!(error.outcome, Some(Outcome::NotSent), "{symbol}");
-        assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{symbol}");
+        assert_eq!(error.kind, Some(kind), "{symbol}");
     }
 }
 
