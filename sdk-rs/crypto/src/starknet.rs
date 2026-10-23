@@ -5,6 +5,11 @@ pub fn public_key(private_key: &Felt) -> Felt {
     starknet_crypto::get_public_key(private_key)
 }
 
+/// Verify r, s over a field-element message hash against a Stark public key.
+pub fn verify(message_hash: &Felt, public_key: &Felt, r: &Felt, s: &Felt) -> bool {
+    starknet_crypto::verify(public_key, message_hash, r, s).unwrap_or(false)
+}
+
 /// Deterministic RFC6979 signing, matching the Starknet JS SDK.
 pub fn sign(message_hash: &Felt, private_key: &Felt) -> Result<(Felt, Felt), String> {
     if *private_key == Felt::ZERO {
@@ -27,6 +32,17 @@ pub fn sign(message_hash: &Felt, private_key: &Felt) -> Result<(Felt, Felt), Str
 mod tests {
     use super::*;
     use serde::Deserialize;
+
+    #[test]
+    fn verify_accepts_only_the_signing_key_and_hash() {
+        let key = Felt::from(5u8);
+        let hash = Felt::from(0x1234u32);
+        let (r, s) = sign(&hash, &key).unwrap();
+        assert!(verify(&hash, &public_key(&key), &r, &s));
+        assert!(!verify(&(hash + Felt::ONE), &public_key(&key), &r, &s));
+        assert!(!verify(&hash, &public_key(&Felt::from(6u8)), &r, &s));
+        assert!(!verify(&hash, &public_key(&key), &r, &(s + Felt::ONE)));
+    }
 
     #[derive(Deserialize)]
     struct Fixture<T> {

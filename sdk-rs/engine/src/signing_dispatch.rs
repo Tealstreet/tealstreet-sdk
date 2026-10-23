@@ -78,6 +78,8 @@ pub(crate) struct Pending {
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
     header_policy: ResultHeaderPolicy,
+    /// Sign-op index and bound payload when the step's remote op verifies.
+    remote_check: Option<(usize, Vec<u8>)>,
 }
 impl Pending {
     fn receipt_expired(&self, raw_now: f64) -> bool {
@@ -276,6 +278,7 @@ impl Dispatch {
                 receipt: Default::default(),
                 prepared_protocol_at: None,
                 header_policy,
+                remote_check: None,
             },
         );
         Ok(deadline)
@@ -373,6 +376,31 @@ impl Dispatch {
             .remote()
             .map(|op| op.bind(&work).map(Box::new))
             .transpose()?;
+        p.remote_check = p
+            .step
+            .remote()
+            .filter(|op| op.verify.is_some())
+            .and_then(|_| {
+                work.operations
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, op)| match op {
+                        crate::signing::Operation::Sign { payload, .. } => Some((
+                            index,
+                            payload
+                                .iter()
+                                .flat_map(|part| match part {
+                                    crate::signing::PayloadPart::Bytes { bytes } => {
+                                        bytes.as_slice()
+                                    }
+                                    _ => &[],
+                                })
+                                .copied()
+                                .collect(),
+                        )),
+                        _ => None,
+                    })
+            });
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work
@@ -431,6 +459,16 @@ impl Dispatch {
         }
         if p.receipt_expired(now) || now - p.prepared_at.unwrap() >= p.step.freshness_ms() {
             return Some(Completion::Stale(p));
+        }
+        if let Some((index, payload)) = &p.remote_check {
+            let verified = p
+                .step
+                .remote()
+                .and_then(|op| op.verify.as_ref())
+                .is_some_and(|verify| verify(payload, &result.values[*index]));
+            if !verified {
+                return Some(Completion::Failed(p, SignError::InvalidResult));
+            }
         }
         if let Err(error) = p.step.apply(&mut p.outbound, &result) {
             wipe(&mut p.outbound);

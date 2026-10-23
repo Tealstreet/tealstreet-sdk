@@ -1709,10 +1709,10 @@ static QTY: QtyRecipe = QtyRecipe;
 struct RemoteStep(crate::signing_remote::RemoteOp);
 impl RemoteStep {
     fn new(qty: u64) -> Self {
-        Self(crate::signing_remote::RemoteOp {
-            recipe: &QTY,
-            inputs: serde_json::json!({ "qty": qty }),
-        })
+        Self(crate::signing_remote::RemoteOp::new(
+            &QTY,
+            serde_json::json!({ "qty": qty }),
+        ))
     }
 }
 impl crate::SignStep for RemoteStep {
@@ -1806,4 +1806,42 @@ fn ordinary_steps_carry_no_remote_description() {
         Action::Sign { remote, .. } => remote.is_none(),
         _ => true,
     }));
+}
+
+fn verified_release(accept: bool) -> (Vec<Action>, Engine<TestVenue>) {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_signer(Some(std::sync::Arc::new(Ready))).unwrap();
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/order".into(),
+        vec![],
+        None,
+        (),
+    );
+    let mut step = RemoteStep::new(7);
+    step.0.verify = Some(Box::new(move |payload: &[u8], signature: &[u8]| {
+        payload == b"qty:7" && (signature == [0; 32]) == accept
+    }));
+    cx.sign_http(request, Box::new(step));
+    let actions = engine.drain_actions().collect();
+    (actions, engine)
+}
+
+#[test]
+fn declared_verification_key_gates_release_of_a_remote_signature() {
+    let (actions, engine) = verified_release(true);
+    assert!(actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(engine.venue.failed, 0);
+    let (actions, engine) = verified_release(false);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(engine.venue.failed, 1);
+    assert_eq!(
+        engine.venue.last_sign_error.as_deref(),
+        Some(SignError::InvalidResult.venue_error().message.as_str())
+    );
 }

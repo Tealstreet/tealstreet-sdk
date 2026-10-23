@@ -2,9 +2,23 @@
 //! RFC 6979 nonces are deterministic; WebCrypto's random nonce choice produces
 //! different valid signatures. No JWT, PEM normalization or host entropy lives here.
 use p256::{
-    ecdsa::{Signature, SigningKey, signature::Signer},
+    ecdsa::{
+        Signature, SigningKey, VerifyingKey,
+        signature::{Signer, Verifier},
+    },
     pkcs8::DecodePrivateKey,
 };
+
+/// Verify a fixed-width r||s P-256/SHA-256 signature against a SEC1 public key.
+pub fn verify(payload: &[u8], public_key: &[u8], signature: &[u8]) -> bool {
+    let (Ok(key), Ok(signature)) = (
+        VerifyingKey::from_sec1_bytes(public_key),
+        Signature::from_slice(signature),
+    ) else {
+        return false;
+    };
+    key.verify(payload, &signature).is_ok()
+}
 
 /// Imported, validated P-256 key. Keep this behind an Rc when caching CryptoKeys;
 /// it intentionally exposes no serialization, debug output or private-key export.
@@ -33,7 +47,24 @@ impl Es256SigningKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p256::ecdsa::{VerifyingKey, signature::Verifier};
+
+    #[test]
+    fn verify_accepts_only_the_exact_payload_key_and_signature() {
+        let key = SigningKey::from_slice(&[7; 32]).unwrap();
+        let signature: Signature = key.sign(b"payload");
+        let signature = signature.to_bytes();
+        for compressed in [false, true] {
+            let public = VerifyingKey::from(&key).to_encoded_point(compressed);
+            assert!(verify(b"payload", public.as_bytes(), &signature));
+            assert!(!verify(b"payload!", public.as_bytes(), &signature));
+        }
+        let other =
+            VerifyingKey::from(&SigningKey::from_slice(&[8; 32]).unwrap()).to_encoded_point(false);
+        assert!(!verify(b"payload", other.as_bytes(), &signature));
+        let public = VerifyingKey::from(&key).to_encoded_point(false);
+        assert!(!verify(b"payload", public.as_bytes(), &signature[..63]));
+        assert!(!verify(b"payload", &public.as_bytes()[..10], &signature));
+    }
 
     #[test]
     fn signs_deterministically_and_verifies() {

@@ -18,10 +18,30 @@ pub trait RemoteRecipe: Sync {
     fn canonicalize(&self, inputs: &serde_json::Value) -> Result<Vec<u8>, SignError>;
 }
 
+/// Checks a signature over the bound payload against the account's declared
+/// public key. Venues build it from non-secret config; the engine has no crypto.
+pub type RemoteVerifier = Box<dyn Fn(&[u8], &[u8]) -> bool + Send>;
+
 /// The step-side remote description of one prepared `SignRequest`.
 pub struct RemoteOp {
     pub recipe: &'static dyn RemoteRecipe,
     pub inputs: serde_json::Value,
+    /// When present, every result is verified before release; families with no
+    /// verification key (Coinbase, Lighter) rely on venue rejection instead.
+    pub verify: Option<RemoteVerifier>,
+}
+impl RemoteOp {
+    pub fn new(recipe: &'static dyn RemoteRecipe, inputs: serde_json::Value) -> Self {
+        Self {
+            recipe,
+            inputs,
+            verify: None,
+        }
+    }
+    pub fn verified_by(mut self, verify: RemoteVerifier) -> Self {
+        self.verify = Some(verify);
+        self
+    }
 }
 
 /// What crosses to a host provider beside the unchanged `SignRequest`.
@@ -106,10 +126,7 @@ mod tests {
     static ORDER: Order = Order;
 
     fn op(qty: serde_json::Value) -> RemoteOp {
-        RemoteOp {
-            recipe: &ORDER,
-            inputs: serde_json::json!({ "qty": qty }),
-        }
+        RemoteOp::new(&ORDER, serde_json::json!({ "qty": qty }))
     }
     fn sign(algorithm: Algorithm, payload: Vec<PayloadPart>) -> Operation {
         Operation::Sign {
@@ -190,10 +207,10 @@ mod tests {
         // The recipe's own allowlist refusal is a designed refusal, not a bug.
         let over = request(vec![sign(Algorithm::Ed25519, vec![bytes("order:101")])]);
         assert_eq!(op(101.into()).bind(&over), Err(SignError::Refused));
-        let huge = RemoteOp {
-            recipe: &ORDER,
-            inputs: serde_json::json!({ "qty": 7, "pad": "x".repeat(MAX_REMOTE_INPUT_BYTES) }),
-        };
+        let huge = RemoteOp::new(
+            &ORDER,
+            serde_json::json!({ "qty": 7, "pad": "x".repeat(MAX_REMOTE_INPUT_BYTES) }),
+        );
         assert_eq!(
             huge.bind(&request(vec![matching()])),
             Err(SignError::InvalidRequest)
