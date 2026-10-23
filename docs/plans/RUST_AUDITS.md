@@ -2108,6 +2108,43 @@ later duplicate invalidation. No product-RED, all-venue closure or private parit
 claim. Remaining queued integrations, current-head CI and authenticated complete
 raw/ordered-gate proof remain required before merge.
 
+
+## Lighter candle request ownership
+
+Command candle reads and subscription REST fallbacks use the existing managed
+HTTP lifecycle. Commands use Context finalizers and the exact read-delivery
+validator; background reads use engine delivery admission plus native
+subscription generation/revision fences against stale candle publication.
+Typed preparation failures retain engine-provided metadata; terminal background
+paths retire their handle before freshness exits and release only their own
+in-flight generation. No venue admission, retry or outcome algorithm is added.
+
+The four removed lexical occurrences shrink Lighter51->47 and its lib10->6.
+One existing numeric failure remains solely when Context issuance itself refuses
+before returning authority; its removal belongs to the shared pre-authority
+failure seam. All other venue maps remain exact. This closes this candle area
+only, not the remaining public/private/history/signing inventory or master gate.
+
+## Paradex independent startup authority
+
+~~Paradex public catalog and ticker seeds bypass managed HTTP authority and can
+remain pending without an engine-owned original deadline.~~ Independent background
+Read Contexts now own preparation, release and each 20-second attempt. Native
+staging commits only on successful validated delivery; refusal, expiry and
+transport failure retire authority before the existing startup Backoff runs.
+Candle fallback, authenticated/account/history and joined startup work remain in
+their previously committed inventory; this closes only public_seed's send site.
+
+## Hyperliquid perps candle Context authority
+
+Perps candles use actual shared command admission, unsigned static-header ingress,
+exact read delivery validation and Context terminals. Native row parsing, body
+geometry and the existing single HTTP status codec remain. Spot candles preserve
+their legacy protocol branch; no signer, retry, deadline or classification core
+is implemented in the adapter. All 52 inventory occurrences (41 fingerprints)
+remain because spot and other paths still use every shared lexical site. This
+runtime area makes no inventory deletion or all-family closure claim.
+
 ## MEXC initial Plan credential refusal audit closure
 
 ~~The initial plan-list read retries a parsed terminal credential refusal after

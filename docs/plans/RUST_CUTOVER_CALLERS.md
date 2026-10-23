@@ -4656,6 +4656,116 @@ admission and whole-memory recovery only for an admitted clean read. Existing
 rows, financial calculations, snapshot authority, signing and HTTP/WS lifecycle
 retain their native contracts.
 
+### BingX native dispatch signing and refusal ownership
+
+BingX HTTP signing and listen-key API-key presentation use the shared
+host-injected provider. Venue options retain
+opaque primary/secondary refs; generic engine/SDK options retain no signing
+secret. Ordinary GET work uses the secondary identity when present, while writes
+and listen-key creation/renewal select primary. Native sorted query bytes,
+integer protocol stamps, typed POST parameters and API-key/source headers stay
+unchanged. Worker or custom-host callers must provision the shared provider
+where the engine executes; secrets are not copied back into venue objects.
+
+Provider refusal is not a venue authentication response or a signature rejection.
+Identity/history/metadata commands preserve the original typed failure; failed
+history preparation discards buffered results rather than returning success.
+Background read cleanup releases only its captured in-flight reservation, while
+obsolete listen-key epochs cannot retire a replacement session. Existing read
+backoff, metadata publication and private socket ownership policies remain.
+
+A first refused write is `notSent`. After an earlier write or signature retry
+reached the venue, a later refused signer cannot make the whole operation
+`notSent`; uncertain prior effects require reconciliation. Accepted IDs remain
+in the existing partial result, including when another leg fails before send.
+BingX hosted/keyless admission is disabled. Hosted callers use their existing
+supported runtime route. Native provider signing uses hex HMAC and API-key
+presentation; WebSocket session ownership remains separate.
+
+## BingX managed single-owner reads
+
+Credentialed startup quotes, account identity, candle commands and recurring
+private snapshot reads prepare their route before provider signing, using the same native primary
+or secondary credential selection and exact header/query/body bytes. A read keeps
+its original raw 20s deadline through route/provider delays and its existing
+one-signature retry; identity retains its native no-retry behavior. Identity and candle
+success and failures complete through generation-bearing Context authority.
+Provider or route refusal stays typed and does not become native account-auth
+evidence. Account snapshot, revision, settings and stale-owner publication fences
+remain native and unchanged.
+
+Candle rows keep native time sorting and seconds conversion. Refused response
+rows and decode status are discarded before a signature retry; they cannot
+appear in or poison its successful response. Provider, route, malformed-stream
+and deadline failures settle the command once, and late responses cannot revive
+it. Unsigned public candles retain their existing request path.
+
+Session upkeep and history retain their explicit legacy ownership and existing
+native retry/completion contracts. Hosted admission is disabled. These read
+adapters require no new caller option or persisted identity mapping.
+
+
+### Lighter managed candle reads
+
+For both `lighter` and `lighter-robinhood`, Rust `fetchOHLCV` and the REST
+fallback behind `listenOHLCV` use the engine managed preparation/binding/final
+claim path. Custom worker/hosted HTTP transports must implement `prepareHttp`;
+legacy `request()` alone cannot service these candle reads. Report route denial
+and preparation failure through the existing typed error path, without a legacy
+send fallback. Typed pre-send failures retain their kind and `notSent` outcome.
+
+A candle read has one original 20,000 ms raw upper bound including route
+preparation; a shorter host request timeout can shorten it. Streaming progress
+does not renew that bound. Expired/retired replies cannot complete a reused
+command ID or publish candles to a new subscription. Background failure retires
+its read, clears only the matching generation's in-flight flag, emits no command
+result and allows later fallback polling. Command failure rejects the existing
+OHLCV promise. Candle shapes, seconds timestamps, sorted results, interval/range
+validation and recovered-stream dominance remain unchanged.
+
+Chart callers and custom `RestTransportContext` adapters consuming
+`RustEngineExchange` must preserve typed failure propagation and cancellation
+through their existing worker/hosted round trip. This requires no caller method
+signature or chart data-shape change. Private Lighter requests, other public
+reads and native Schnorr/nonce ownership are separate migrations; this behavior
+does not establish NX adoption, deployment or live private connectivity.
+
+## Paradex independent public startup Read Contexts
+
+Paradex catalog `/markets` and ticker `/markets/summary?market=ALL` GETs use the
+shared managed preparation and final claim protocol. Custom transports must
+complete that handshake before delivering a response. Each independent startup
+attempt has one original 20-second bound covering preparation and HTTP; expiry,
+preparation denial and transport failure retire the attempt, preserve the current
+Store and schedule the existing startup Backoff. Late callbacks cannot publish.
+These background reads emit Warn diagnostics and no command result.
+
+Catalog publication still starts private initialization without waiting for the
+ticker seed. Native metadata/ticker shapes, row filtering, live ticker dominance,
+public feed policy and successful startup publication retain their contracts.
+The standard hosts already implement managed preparation. The tealstreet-next
+venue setup/load consumers continue reading the same Store events and fields;
+custom raw-HTTP transport adapters must implement the shared handoff.
+
+## Hyperliquid perps candle command ownership
+
+Perps FetchCandles, including HIP-3 markets and perps on an account with merged
+spot markets, enters shared command admission before interval, market or range
+validation. At exhausted capacity it receives the engine's correlated Internal
+failure with no financial outcome; it cannot retire another owner. With capacity,
+native validation messages and unclassified metadata remain. Standalone and
+merged spot candle commands retain their existing path in this area.
+
+The unsigned JSON POST keeps its native REST route, Content-Type, raw coin,
+field order, limit/time geometry and encounter-order candle output. Its original
+20-second deadline includes preparation and stream progress cannot extend it.
+Preparation failures preserve shared typed metadata (NotSent); released network
+or deadline failures retain Network/Timeout with no financial outcome. Native
+HTTP and malformed candle response errors remain unclassified. Failed stream
+prefixes never become a partial result, and stale or duplicate delivery cannot
+complete a reused command ID. SDK command/result shapes are unchanged; transport
+fixtures execute the existing shared Prepare/Bind/Claim contract.
+
 ## MEXC initial plan-list credential refusal
 
 An initial Plan snapshot with an existing parsed native credential refusal now

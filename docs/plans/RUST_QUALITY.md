@@ -611,6 +611,45 @@ choke point. No signing, transport, history, snapshot authority or financial
 arithmetic change. Current-head CI/raw proof and queue ordering still apply;
 this entry does not close the remaining reporter inventory.
 
+
+## Lighter managed candle area
+
+Lighter and Robinhood candle requests share the engine preparation/claim,
+original-deadline and generation-bearing completion paths. Typed preparation
+failures are passed intact; failed streamed rows never become a successful
+result. Background retirement precedes stale subscription/revision returns and
+preserves later fallback polling. Existing candle source-order assertions stay
+intact while their fixture uses the shared prepared-action helper. An additional
+within-deadline resubscription control distinguishes the venue generation fence
+from expiry. No signer, nonce, paging, row-admission or retry policy is copied.
+
+The exact request ratchet removes four Lighter lib occurrences only. The
+pre-authority issuance refusal remains explicitly counted until its shared
+engine prerequisite; this does not claim all Lighter or cross-venue closure.
+
+## Paradex managed startup GET proof
+
+Four real-venue assertion-RED controls require managed public catalog/ticker
+preparation, exact live/testnet empty-header GET bytes, preclaim callback silence,
+original deadline before/after claim, typed preparation denial, stale-attempt
+suppression, native publication and failed-stream-prefix atomicity. Existing
+startup resilience and shared fixture drivers perform the shared readiness/claim
+handshake while retaining original payloads, clocks, timers and assertions.
+Independent source/adversarial, caller and full-map reviews accompany the slice;
+no per-venue lifecycle, retry implementation or transport workaround is added.
+
+## Hyperliquid perps candle lifecycle controls
+
+Ten native controls retain the original three failing-first assertions and cover
+public exact-header release, preclaim/stale/reused identities, preparation refusal,
+parked/released original expiry, failed incremental prefixes, progress at the
+deadline, capacity-before-validation and peer isolation. Native zero/default/capped
+limits, ignored from-time geometry, HIP-3 spelling, unclassified response errors
+and merged spot/perps separation are pinned. The checkpoint compiled with nine
+legacy-dispatch assertion failures and one native compatibility pass before the
+adapter move; all ten pass after it. Existing public candle assertions retain
+their exact payload checks through the shared prepared-actions test executor.
+
 ## MEXC initial Plan refusal regressions
 
 Separate original-source tests reproduce two failures: no typed initial Plan
