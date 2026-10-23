@@ -26,49 +26,65 @@ walks keep paging after the caller has given up; nothing cancels them.
 
 ## Contract
 
+Revised after uufub4's API-fit review (2026-10-24).
+
 1. **Wire.** For every command that expects a reply, the WASM host adds the
    *effective* wait to the envelope: `{...command, command: id, timeoutMs}`.
    Effective means the per-call override if given, else the configured default;
    it is the same number the host arms its own timer with, validated by the
-   same `commandTimeout()` bounds (positive safe integer, at most
-   2,147,482,647). No-reply controls (`setPollScale`, subscriptions,
-   `publicFeedUpdate`, `setTickerSymbols`) send no field.
-2. **Decode.** `decode_host_input` reads an optional `timeoutMs` from the
-   command header and returns `HostInput::Command { command, timeout_ms:
-   Option<u32> }`. A present but non-integer, zero, negative or out-of-range
-   value is a decode error, matching the host's own validation. `decode_command`
-   (used by tests and tools) keeps ignoring it. The cold-subscription decoder
-   is unchanged, since subscriptions carry no reply.
-3. **Engine.** A new `Engine::handle_command(now, command, timeout_ms)` stamps
-   the command's absolute caller deadline, `now + timeout_ms`, keyed by its
-   completion id, then dispatches `Event::Command` exactly as `handle` does
-   today. `handle(now, Event::Command(..))` is unchanged and records no
-   deadline, so native hosts and existing tests keep their behaviour.
-   - The stamp survives deferred re-dispatch, such as held cancels released
-     later, so a re-entry sees the remaining time, not a fresh wait.
-   - It is removed when the command's terminal is emitted (the shared
-     `finish_sealed_command` path).
-     Storage is bounded by the number of commands awaiting a reply; a
-     duplicate live id keeps its first stamp.
-4. **API.** `Cx::command_timeout_ms() -> Option<u32>` is read-only and grants no
-   send, completion or retry right.
-   - It answers only inside the current command's genuine entry callback (the
-     same custody as `admit_http_command`), and is `None` anywhere else (timer,
-     socket, HTTP or other callbacks).
-   - Inside the entry it returns the remaining whole milliseconds to the
-     caller's deadline (at least 1), or `120_000` from receipt when the host
-     sent none. `120_000` is the documented SDK default
-     (`DEFAULT_COMMAND_TIMEOUT_MS`), the same value the host would have used.
-   - A deadline already passed returns `Some(1)`: the venue's own admission
-     then fails at once, under the normal timeout path.
-5. **No other effect.** Nothing in the engine enforces this deadline by
-   itself. Venues opt in by using it as a root `Policy.timeout_ms`. The host's
-   own timer and its `COMMAND_TIMEOUT` result are unchanged.
+   host's `commandTimeout()` (positive safe integer, at most 2,147,483,647).
+   No-reply controls (`setPollScale`, subscriptions, `publicFeedUpdate`,
+   `setTickerSymbols`) send no field.
+2. **Decode.** `decode_host_input` returns `HostInput::Command { command,
+   timeout_ms: Option<u32> }`.
+   - An absent `timeoutMs` is `None`.
+   - A present `null`, non-integer, zero, negative or > 2,147,483,647 value is
+     a decode error, matching the host's own validation.
+   - `decode_command` (tests and tools) keeps ignoring the field.
+   - The cold-subscription decoder is unchanged, since subscriptions have no
+     reply.
+3. **Receipt stamp.** Every *externally received* reply command gets one
+   absolute caller deadline at receipt: `now + timeout_ms`, or `now + 120_000`
+   when absent.
+   - Receipt means the public `Engine::handle(now, Event::Command(..))`
+     (native hosts and tests) and the new `Engine::handle_command(now,
+     command, timeout_ms: Option<u32>)` (the WASM host). `handle_command`
+     itself refuses a non-finite `now` or an out-of-range `timeout_ms` with a
+     typed error and dispatches nothing.
+   - Internal re-dispatch (`handle_event` for held commands) stamps nothing.
+     It reuses the live stamp, so a deferred entry sees the remaining time
+     from the original receipt, default included.
+   - The stamp is keyed by command id with a receipt sequence, its exact
+     receipt identity. A receipt whose id already has a live stamp (a
+     duplicate live command) does not replace it. That entry has no stamp of
+     its own and the getter answers `None`.
+   - The stamp is removed on the command's terminal through either emitter:
+     the shared `finish_sealed_command`, or the typed initial rejection in
+     `with_command_entry` (direct `CommandFailed`). A reused id after either
+     starts fresh.
+   - Storage is bounded by the commands awaiting a reply.
+4. **API.** `Cx::command_wait() -> Option<CommandWait>`, with `enum
+   CommandWait { Remaining(u32), Expired }`. It is observation only: it
+   grants no send, completion or retry right and never renews anything.
+   - It answers only for the current genuine command entry, whose own receipt
+     stamp is live, in states Fresh (before admission), Bound or Legacy.
+   - It is `None` in every borrowed callback: timer, socket, HTTP delivery,
+     plan readiness, another command's entry, a rejected or spent entry, or a
+     duplicate entry without its own stamp.
+   - `Remaining(ms)` is the whole milliseconds strictly before the deadline.
+     `Expired` means `now >= deadline`.
+   - On `Expired` a venue must not admit or start work. It finishes the
+     command with a typed `Timeout`/`NotSent` failure through the entry's
+     existing numeric-terminal custody, with zero HTTP, timer or Store
+     effects.
+5. **No other effect.** The engine does not enforce the deadline by itself.
+   Venues opt in by using `Remaining` as a root `Policy.timeout_ms`. The
+   host's own timer and its `COMMAND_TIMEOUT` result are unchanged.
 
 ## Consumers
 
-Hyperliquid history (next slice) sets its original Read root to
-`command_timeout_ms()` and mints each 20 s page child at queue dequeue. No
+Hyperliquid history (next slice) sets its original Read root to the
+`Remaining` wait (failing typed Timeout with zero work on `Expired`) and mints each 20 s page child at queue dequeue. No
 other venue changes here. The CALLERS entry distinguishes:
 
 - **Caller abandonment:** the host timer rejects the promise, and the engine
@@ -83,7 +99,7 @@ It also states the 120000 default for hosts that send no wait.
 - `sdk-rs/engine/src/command.rs`: header field and the `HostInput::Command`
   shape.
 - `sdk-rs/engine/src/engine.rs`: `handle_command` and the deadline stamp.
-- `sdk-rs/engine/src/request_context_entry.rs`: `command_timeout_ms` beside
+- `sdk-rs/engine/src/request_context_entry.rs`: `command_wait` beside
   the entry custody it reuses.
 - `sdk-rs/hosts/wasm/src/lib.rs`: passes `timeout_ms` from `HostInput` to
   `handle_command`.
@@ -97,24 +113,34 @@ There are no venue changes and no request-site inventory changes.
 
 ## Original REDs (after plan review)
 
-Engine, through real decode and dispatch:
+Engine, through real decode and dispatch (a probe venue records
+`command_wait()` in its entry callbacks):
 
-1. An envelope with `timeoutMs: 300000` yields 300000 from
-   `command_timeout_ms()` inside that command's `on_venue_action` or
-   `on_command`. Without the field the answer is 120000. RED today, because
-   the field is dropped (the control routes the value through a probe venue).
-2. A held command released 40 s after receipt sees about 260000, not 300000.
-3. `None` in timer, HTTP response and socket callbacks, and for a different
-   command's entry.
-4. Invalid `timeoutMs` (0, -1, 1.5, "1", 2147482648) is a decode error. An
-   absent field and a present null are distinct; null is refused.
-5. The stamp is gone after the terminal; a reused command id starts fresh.
+1. An envelope with `timeoutMs: 300000` gives `Remaining(300000)` in that
+   command's Fresh entry, before any admission. Without the field it gives
+   120000. RED today, because the field is dropped and no API exists (the
+   adapter returns `None`).
+2. A held command released 40 s after receipt gives about 260000, both with
+   an explicit wait and with the default, so the default is stamped at
+   receipt.
+3. `None` in timer, HTTP response, socket and plan-readiness callbacks, and in
+   another command's entry.
+4. A released entry at or past its deadline gives `Expired`. The probe's
+   typed Timeout terminal then makes zero HTTP, timer or Store effects.
+5. A duplicate live id: the second receipt neither replaces nor reads the
+   first stamp, and the first keeps its deadline.
+6. Cleanup and reuse: after a typed initial rejection (`CommandFailed` from
+   `with_command_entry`) and after a normal terminal, a reused id gets a
+   fresh stamp.
+7. Decode: absent is `None`; `null`, 0, -1, 1.5, "1" and 2147483648 are
+   errors; 2147483647 is accepted. `handle_command` refuses a non-finite
+   `now` and an out-of-range wait with no dispatch.
 
 Host:
 
-6. `host.mjs` sends `timeoutMs` equal to the per-call override, else the
+8. `host.mjs` sends `timeoutMs` equal to the per-call override, else the
    configured default, for reply commands only.
-7. Existing host deadline tests are unchanged.
+9. Existing host deadline tests are unchanged.
 
 ## Gates
 
