@@ -4261,3 +4261,24 @@ Required caller controls cover 503 with native timeout and rejection codes,
 malformed/mismatched identity evidence. Retain Store/ownership and physical-send
 assertions. This reference does not migrate Hyro, history/session work or any
 legacy-provenance request and does not establish NX integration or cutover.
+
+## Managed paired-read publication and companion authority
+
+Rust adapters can use `Cx.validate_read_http_delivery(root, leg)` before
+synchronously publishing a paired-read response. It binds the exact original
+command root and delivered live read leg, including issuer, generation and the
+original raw deadline. A live sibling Context or an unrelated socket callback
+cannot lend this authority. Native status/body validation and Store/native-cache
+freshness checks remain required before applying any response data; a failure
+callback proves ownership only. The check allocates no request or retry rights.
+
+`validate_read_completion_context` lets the shared completion owner validate
+read-only companion events before publishing them and calling `done_context`
+synchronously. A command that has declared a mutation or a write journal cannot
+use that read completion path. Existing generic completion APIs retain their
+contract. `validate_http_context` checks live issuance without borrowing the
+completion path's existing expiry tolerance. No SDK signature, result shape or
+transport contract changes. NX adapters that adopt these helpers keep the exact
+root/leg handles, publish and complete without yielding, and discard invalid
+or stale callback data rather than falling back to numeric command completion.
+Joined-read execution/observer ownership remains a separate shared capability.

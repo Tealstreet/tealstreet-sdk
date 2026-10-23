@@ -56,3 +56,15 @@ Respect #1784's landing priority and integrate whatever lands before final proof
 
 Architecture gate: No. Response and completion authority stay with the existing
 engine registry; consumers receive no numeric fallback, allocator or ledger.
+
+## Extracted checkpoint
+
+The three method bodies, two registry tests and dedicated five-test module are
+byte-exact extractions of the reviewed local child. Seven new test functions
+include the sixteen-case issuer/generation/root/expiry/nonmutation matrix and
+the real managed final-handoff controls above. All548 all-feature engine tests,
+69 BingX account tests and22 Binance request-context tests pass. Strict all-target
+all-feature engine/Binance/BingX Clippy, fmt, bans and13 ratchet controls pass.
+Independent plan/extraction/source/caller audits are clean. These checks prove
+the opt-in seam, not native adoption or joined-observer completion. Final CI and
+proof follow the current landing queue, preserving #1784's profile work.
