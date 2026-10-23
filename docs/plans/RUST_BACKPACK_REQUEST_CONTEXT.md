@@ -332,7 +332,10 @@ or shared source belonging to another open PR is replaced.
 
 1. Begin genuine mutation Preflight before native preflight terminals. Admit
    one immutable serial Plan from the final native steps, Primary credentials,
-   no retry and the existing engine HTTP timeout. Empty work uses the engine's
+   no retry and an explicit 20-second managed attempt policy. Legacy opaque
+   HTTP declares `timeout_ms: None`; this adds a bounded managed lifetime, not
+   a claim that native commands already had a 20-second root. The checked Plan
+   root is the declared serial attempt span, never a venue timer. Empty work uses the engine's
    explicit empty-plan completion. Every pending foreground call retains its
    exact Plan/Slot/Context; Plan-ready drives only that job. No queued owner is
    activated through another job's delivery.
