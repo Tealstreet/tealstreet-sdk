@@ -1361,7 +1361,9 @@ mod tests {
         type Pending = ();
         fn start(&mut self, _: &mut Cx<'_, ()>) {}
         fn on_open(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
-            cx.done(socket.0, "[]".into());
+            let command =
+                u32::try_from(socket.0).expect("fixture carries a command ID in its socket slot");
+            cx.done(command, "[]".into());
         }
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
             if text == "auth" {

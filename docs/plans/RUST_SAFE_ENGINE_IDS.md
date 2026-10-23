@@ -227,3 +227,13 @@ regressions fail because startup and drain traps currently escape the host task
 instead of closing resources and emitting one typed terminal StartupFailed.
 Native/Workers lifecycle completion, all-host checks and current-input CI proof
 remain required before a ready PR.
+
+
+Native original-RED checkpoint: two real host startup/drain controls induce the
+same sticky resource-fatal state through unsafe IDs; they fail only the assertion
+that the task returns via a typed terminal channel. Four compatibility controls
+pass, including unrelated callback-panic propagation and ordinary venue
+StartupFailed remaining nonterminal. Tests require no frame or HTTP escape and
+closed transport ingress before exactly one Internal/Unknown terminal notice.
+Two independent reviews confirmed the RED paths; active-resource and FrameServer
+pending-write disposal controls are required alongside the implementation.

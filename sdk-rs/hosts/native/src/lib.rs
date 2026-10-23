@@ -491,6 +491,160 @@ mod timer_tests {
         assert_eq!(*order.borrow(), ["progress", "http"]);
     }
 
+    struct NeverStep;
+    impl safe_cex_engine::SignStep for NeverStep {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &safe_cex_engine::DispatchContext<'_>,
+        ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError>
+        {
+            panic!("unsafe socket must fail before recipe preparation")
+        }
+        fn apply(
+            &mut self,
+            _: &mut Action,
+            _: &safe_cex_engine::signing::SignResult,
+        ) -> Result<(), safe_cex_engine::signing::SignError> {
+            unreachable!()
+        }
+        fn freshness_ms(&self) -> f64 {
+            1_000.
+        }
+    }
+
+    async fn native_fatal_control(during_start: bool) {
+        use std::sync::{Arc, Mutex};
+        let venue =
+            safe_cex_engine::test_support::ProbeVenue::new(TimerVenue::default(), move |_, cx| {
+                cx.request(
+                    Method::Get,
+                    "https://venue.test/unsent".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+                let unsafe_socket = SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1);
+                if during_start {
+                    cx.send_signed(unsafe_socket, "".into(), Box::new(NeverStep));
+                } else {
+                    cx.send(unsafe_socket, "");
+                }
+            });
+        let host = Host::new(
+            safe_cex_engine::test_support::seeded_engine(venue),
+            NoNetwork,
+        );
+        let events = host.event_sender();
+        let notices = Arc::new(Mutex::new(Vec::new()));
+        let captured = notices.clone();
+        let (commands, inbox) = mpsc::unbounded_channel();
+        drop(commands);
+        let event_check = events.clone();
+        let result = tokio::spawn(async move {
+            host.run(
+                inbox,
+                Duration::from_millis(100),
+                |_| panic!("fatal engine cannot publish a frame"),
+                move |notice| {
+                    assert!(
+                        event_check.is_closed(),
+                        "resources must retire before terminal notification"
+                    );
+                    captured.lock().unwrap().push(notice);
+                },
+            )
+            .await
+        })
+        .await;
+        assert!(
+            result.is_ok(),
+            "sticky engine failure must use the typed terminal channel"
+        );
+        assert!(result.unwrap().failed());
+        assert!(events.is_closed());
+        let notices = notices.lock().unwrap();
+        assert_eq!(notices.len(), 1);
+        assert!(matches!(&notices[0], Notice::StartupFailed { error }
+            if error.kind == Some(safe_cex_engine::ErrorKind::Internal)
+            && error.outcome == Some(safe_cex_engine::Outcome::Unknown)));
+    }
+
+    #[tokio::test]
+    async fn resource_failure_during_start_is_a_typed_terminal_native_failure() {
+        native_fatal_control(true).await;
+    }
+
+    #[tokio::test]
+    async fn unsafe_output_batch_is_a_typed_terminal_native_failure_without_partial_io() {
+        native_fatal_control(false).await;
+    }
+
+    #[tokio::test]
+    async fn ordinary_venue_startup_failure_does_not_latch_terminal_failure() {
+        let venue =
+            safe_cex_engine::test_support::ProbeVenue::new(TimerVenue::default(), |_, cx| {
+                cx.startup_failed(safe_cex_engine::VenueError::new("fixture startup refusal"));
+            });
+        let host = Host::new(
+            safe_cex_engine::test_support::seeded_engine(venue),
+            NoNetwork,
+        );
+        let events = host.event_sender();
+        let (commands, inbox) = mpsc::unbounded_channel();
+        drop(commands);
+        let mut notices = Vec::new();
+        let engine = host
+            .run(
+                inbox,
+                Duration::from_millis(100),
+                |_| {},
+                |notice| {
+                    assert!(
+                        !events.is_closed(),
+                        "ordinary startup refusal preserves host lifecycle"
+                    );
+                    notices.push(notice);
+                },
+            )
+            .await;
+        assert!(!engine.failed());
+        assert_eq!(notices.len(), 1);
+        assert!(
+            matches!(&notices[0], Notice::StartupFailed { error } if error.message == "fixture startup refusal")
+        );
+    }
+
+    #[tokio::test]
+    async fn unrelated_callback_panic_is_not_a_terminal_engine_failure() {
+        let venue =
+            safe_cex_engine::test_support::ProbeVenue::new(TimerVenue::default(), |_, _| {
+                panic!("unrelated fixture callback panic");
+            });
+        let host = Host::new(
+            safe_cex_engine::test_support::seeded_engine(venue),
+            NoNetwork,
+        );
+        let (commands, inbox) = mpsc::unbounded_channel();
+        drop(commands);
+        let result = tokio::spawn(async move {
+            host.run(
+                inbox,
+                Duration::from_millis(100),
+                |_| {},
+                |_| panic!("unrelated panic cannot become terminal notice"),
+            )
+            .await
+        })
+        .await;
+        let error = result.err().expect("unrelated callback must still panic");
+        assert!(error.is_panic());
+        assert_eq!(
+            error.into_panic().downcast_ref::<&str>(),
+            Some(&"unrelated fixture callback panic")
+        );
+    }
+
     #[tokio::test(start_paused = true)]
     async fn huge_future_timer_stays_alive_until_cleared_then_normal_timers_fire() {
         let mut host = Host::new(
