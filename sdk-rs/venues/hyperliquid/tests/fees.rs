@@ -246,7 +246,7 @@ fn anonymous_public_fee_fallback_still_loads_markets_without_private_reads() {
         },
     ] {
         let h = Fees::start(options, 422);
-        assert_eq!(h.subjects("userFees"), [""]);
+        assert!(h.subjects("userFees").is_empty());
         assert!(h.subjects("userRole").is_empty());
         assert!(h.subjects("userAbstraction").is_empty());
         assert!(h.engine.store().loaded().markets);

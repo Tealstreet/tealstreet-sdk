@@ -2269,3 +2269,117 @@ retire. Exact KuCoin inventory shrinks84 to80 occurrences and74 to70 hash rows;
 Spot mod shrinks20 to16. The shared Account failure hash stays at count2.
 No other venue prune or exemption is introduced. Private/HMAC, account/history,
 trading, bullet sessions and futures retain the committed full-map prerequisites.
+
+## MEXC initial Plan credential refusal audit closure
+
+~~The initial plan-list read retries a parsed terminal credential refusal after
+MODE succeeds.~~ Re-verified on actual #1786: the old general statement that a
+refused key fails startup covered MODE but missed the streamed Plan path. Both
+normal Plan envelopes and complete error envelopes without data now reuse the
+existing native refusal helper and engine StartupFailed authority. Terminal
+cleanup discards the initial staged join and prevents late sibling pagination,
+private-login refresh, account poll and asset refresh from resuming account HTTP.
+The existing transient public/private startup policies and post-startup behavior
+remain. This closure does not migrate signing, request ownership or classification.
+Architecture gate: No; existing native facts and shared startup publication are
+reused. Account/history ownership remains separate from #1793.
+
+## Phemex unsigned candle lifecycle authority
+
+~~An unsigned candle command bypasses prepared request ownership and can publish
+an expired result through numeric completion.~~ When both constructed credential
+containers are absent, the native adapter now consumes genuine engine command
+entry, managed HTTP and a Context-bearing continuation. Shared lifecycle fences
+route waiting, release and response delivery before result or pause effects;
+setup/network/deadline failures retain typed causes. Existing native codec and
+error handling remain shared with the signed branch. Optional primary/secondary
+signing stays on its existing path pending the signer/selection migration.
+No legacy-site removal is claimed: every old site still serves credentialed
+candles or another family, and incoming inventory remains exact. Architecture
+No: shared engine custody and lifecycle are consumed without another executor,
+classifier, retry timer or credential-selection policy. Claimed history files
+from #1790/#1795/#1796/#1797 remain excluded.
+
+## MEXC standalone book lifecycle adoption
+
+~~An unsigned book command bypasses prepared custody, so an expired response can
+publish success or apply a depth/account pause through numeric completion.~~
+The native adapter now borrows genuine command entry and carries its Context
+with captured scaling/limit through managed HTTP and typed completion. Shared
+lifecycle fences prevent stale decode/pause effects before native callbacks.
+The native snapshot decoder, totals-before-truncation, status/code510 codec and
+live cooldown remain unchanged. Exact pruning removes8 occurrences/7 entries;
+there is no signer migration, local timer/classifier, retry executor or numeric
+Context lookup. Architecture No: existing shared custody and lifecycle are
+consumed. The separate reviewed startup fix is retained as a stack dependency.
+
+### Snapshot-token fan-out: Backpack and Paradex
+
+At actual848924, only Binance and Bitunix used the engine's financial snapshot
+admission token. The complete27-crate inventory (including nested Spot adapters)
+is in RUST_FINANCIAL_SNAPSHOT_FRESHNESS. Backpack and Paradex now use that same
+Store boundary for whole-read admission, native caches and row replacement;
+per-ID timestamps, terminal state, amend evidence and other domain clocks remain.
+This is engine-consumer fan-out, not another per-venue freshness counter.
+
+Two Backpack defects were independently reproduced on unchanged production:
+
+- A stale streamed order read, or a failed current streamed read, could erase an
+  accepted unpriced trigger's pending relabel bookkeeping before final snapshot
+  admission. When the ticker seed arrived, the retained take-profit stayed
+  classified as StopLoss. Mapping-time insert/remove decisions are now staged
+  and applied only after token admission; the two independent controls fail on
+  original code and pass after adoption.
+- A fully accepted native Pair ACK did not advance the order-read fence. An older
+  empty read could remove a retained order, or an older nonempty read could
+  inject a row into an empty Store after that ACK. The accepted, fully validated
+  identity set now invalidates shared snapshot authority. Both original-RED
+  controls pass after adoption; a malformed-identity negative retains its old
+  behavior and command correlation/result shape.
+
+Four native assertion REDs cover these two classes. Exact final fixture/source/
+log bindings are sealed in receipt
+`95ebc65eecbd8e231407715231058a93bd6662737d124f3e2eeae3ead5b2f2af`.
+Paradex's native amend-ACK compatibility control passes original code; its two
+Store-invalidation/exhaustion controls exercise the newly adopted API and are
+not claimed as production defects. Capture exhaustion admits no unfenced read
+and preserves native account-cycle progress. Final current-head CI, actual queued
+integration and full authenticated raw proof remain separate merge gates.
+
+### Lighter cached reads: remove legacy numeric completion
+
+The cached FetchLeverage and FetchAccountTier branches consume shared initial
+Read admission and Context terminals. This closes their capacity/invalid-clock
+admission bypass without fabricating HTTP or financial evidence. Rejected and
+revoked entries return without numeric fallback; cache data and native errors
+remain unchanged after admission. Exactly three lexical sites are removed:
+Lighter46→43, lib5→3, limits6→5. SetAccountTier's separate identical numeric fail
+fingerprint remains counted. No held trading or engine source is changed.
+
+## WOO family ticker decoding compiler policy
+
+The WOO family retained shared speed defaults, while its explicit venue package
+profile still used opt-level z. A names-preserved profile identified generated
+Tick deserialization as the main sampled ingress cost. The existing family build
+mechanism now overrides only the WOO venue package to opt-level3; no second
+parser, Store lookup, numeric codec or engine policy is introduced. Original
+regression evidence is the reported landing CPU miss at28.838ms versus27.68ms.
+Interleaved unchanged-source artifacts show a local median23.105→18.957ms;
+exact-head CI's fixed public/private, CPU, memory and size gates remain acceptance
+requirements. [Scope, raw evidence and limitations](RUST_WOO_PUBLIC_CPU.md).
+
+## SDK master Hyperliquid/Lighter parity
+
+~~Public or unresolved Hyperliquid startup asks userFees with an absent subject,
+and an empty vault masks a configured trading account.~~ The existing identity
+selector now follows master's nonempty vault/applicationId precedence; public or
+unresolved fees retain metadata defaults without HTTP. Actual agent discovery
+still establishes identity before private reads.
+
+~~Robinhood placements omit the newly configured integrator47296, and the
+instance client-order-index allocator wraps after its positive48-bit maximum.~~
+Robinhood uses its configured native builder and existing approval preflights.
+Each existing per-leg mint reservation considers the current candidate and
+retains monotonic state; exhaustion refuses without wrap. No transaction nonce,
+managed ownership, retry or outcome policy is introduced. No legacy inventory
+site changes; all incoming maps and the #1869 TS reference/harness remain exact.

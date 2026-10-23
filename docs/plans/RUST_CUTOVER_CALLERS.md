@@ -5152,3 +5152,157 @@ native query order, flooring/u64 casts, default500/cap1500, unknown-symbol HTTP,
 candle codec, duplicate timestamps, oversized results and ascending sorting are
 preserved. Private credentials, successful setting no-ops and capability policy
 retain their existing behavior.
+
+## MEXC initial plan-list credential refusal
+
+An initial Plan snapshot with an existing parsed native credential refusal now
+rejects startup with AuthInvalid, AuthExpired or AuthPermission, matching the
+initial position-mode read. Native venueCode and venueMessage are preserved,
+including complete error envelopes without a data list. A primary-key AuthInvalid rejection
+still deactivates; secondary-key refusal retains the existing non-deactivation
+policy. Startup publishes one terminal failure and cannot initialize orders or
+resume account polling, snapshot pages or asset refreshes through late callbacks.
+
+Transient failures, bare HTTP401/403 without a parsed native refusal, successful
+envelopes missing their list and refusals after initial orders loaded retain
+their existing retry behavior. No caller option or credential migration is
+required; callers awaiting startup receive the existing typed rejection.
+
+## Phemex unsigned candle command transport
+
+Phemex FetchCandles uses prepared managed HTTP when neither its constructed
+primary nor secondary credential container exists. Custom transports prepare,
+bind and synchronously claim that public request; no legacy send fallback is
+used in this branch. The original issued20-second Read deadline covers route
+waiting and released HTTP. Initial admission rejection is typed, exactly once
+and has no write outcome; released Network/Timeout failures declare the public
+read NotSent. Late or duplicate callbacks cannot finish a reused command ID,
+change account credentials or pause a later read.
+
+Credentialed public candles retain their existing native signed request path,
+including primary/secondary GET selection even with public_data_only. This
+partial change does not migrate signing or require credential transfer. Native
+host selection, symbol mapping/encoding, interval and limit/from/to rules,
+data.rows mapping, sorted results, errors and current rate-limit pause remain.
+
+## MEXC standalone book command authority
+
+MEXC FetchOrderBook uses one public Read Context through prepared route binding,
+final synchronous release and completion. Custom transports must prepare, bind
+and claim; legacy request dispatch is not a fallback. The issued20-second bound
+includes route waiting and released HTTP. Initial engine rejection publishes
+one typed terminal without a write outcome; issued public failures retain their
+NotSent declaration and typed setup/Network/Timeout causes. Late/duplicate
+replies cannot complete a reused owner or extend the depth/account cooldown.
+
+The unsigned native depth URL, captured contract size and limit1..1000/default100,
+sorted base amounts and totals, zero quantities and exact u64 version string
+remain. Numeric overflow in rows beyond the requested output limit still rejects the
+whole snapshot. Native status/code510 classification, code/message and bounded retry
+hint remain; live rate limits pause depth and account reads without resending.
+Results never change subscribed books, account state or credential health.
+
+## Backpack and Paradex order snapshot freshness
+
+Backpack and Paradex publish order snapshots through the engine's shared
+freshness token. Reads invalidated by native writes cannot replace Store orders
+or their native signing, terminal or trigger metadata. Existing per-order venue
+timestamps, terminal retention and Paradex amend-evidence checks still protect
+against lagging server data. Backpack keeps its newer-read-wins behavior; repair
+requests start only after an accepted snapshot.
+
+Backpack retains pending trigger relabeling when a stale or failed read is
+discarded, so a retained take-profit receives its correct kind when the ticker
+seed arrives. Fully validated native Pair acknowledgements also fence older
+reads, including when no row is stored locally; malformed response identities
+keep their existing rejection behavior. Command IDs, receipts, completion shapes,
+fill quantities and signing payloads retain their native contracts.
+
+If snapshot authority is permanently exhausted, these families emit an Error
+snapshot-discard notice and issue no order read. Account cycles continue through
+their ordinary next stage and poll schedule; accepted native writes and stream
+updates remain usable. Existing SDK callers need no new option or state migration.
+
+### Lighter cached leverage and account-tier Read ownership
+
+`fetchLeverage` and the `FetchAccountTier` extension now admit the engine's genuine
+current Read command before consulting their synchronous caches. Finite admitted
+calls retain leverage JSON, native missing-setting errors and tier string/null;
+tier fetch remains cache-only and does not trigger accountLimits refresh.
+
+At shared owner capacity or with a non-finite clock, these calls now produce one
+typed engine Read refusal (no financial outcome) rather than bypassing admission.
+They allocate no HTTP, preparation, signer, socket or timer and need no new
+transport hook or external caller signature. Duplicate IDs cannot replace a live
+owner, and immediate completion releases capacity for the next call. SetAccountTier,
+account refresh cadence, signing and all other commands keep their native paths.
+
+## Script adapter batch failures retain SDK-reported IDs
+
+`createCoreAdapter.placeOrders` rejects with the exported `ScriptBatchOrderError`
+when its SDK failure contains a nonempty string array of `partialOrderIds`. Its
+message is the original SDK message, and `cause` retains the original failure.
+The error owns a frozen copy of those IDs and preserves a valid `outcome`
+(`notSent`, `rejected` or `unknown`) exactly; a missing outcome stays absent. Valid
+nonnegative integer `partialOrderCount` and `totalOrderCount` remain available.
+Other allowlisted SDK fields and reporting state remain on the rejected error
+through the canonical `serializeCommandError` validator; arbitrary cause fields
+are not promoted. Ordinary failures and local validation errors retain their
+original identity.
+
+The failed host write event stays `ok: false` with its existing error string,
+and carries the same partial IDs, outcome and valid counts. It does not expose
+them as successful `orderIds`. The successful batch result remains unchanged.
+Web, CLI and mobile host bindings share this adapter contract.
+
+Scripts catching the rejected batch and hosts consuming `HostWriteEvent` can
+reconcile the reported IDs separately. A partial failure is never whole-batch
+success or permission to retry the entire batch. An `unknown` outcome remains
+uncertain evidence; callers must not upgrade it to confirmed placement. An
+uncaught `runScript` failure still has a string-only `RunScriptResult.error`, so
+Agent/automation hosts must retain the failed write event for these details.
+
+## WOO family WASM venue throughput
+
+Standalone WOO family builds compile the WOO venue crate at opt-level3. This
+applies to public and private WOO execution in browser/Worker and Node family
+artifacts. Callers download a larger module within the existing fixed size cap;
+SDK construction, endpoints, signing, transports, row shapes and errors retain
+their contracts. Combined/native builds continue using the package size profile;
+this supersedes the earlier package-profile description for the WOO family only.
+[Profile and controls](RUST_WOO_PUBLIC_CPU.md).
+
+## SDK master fee subjects and Lighter placement identities
+
+Hyperliquid fee reads use the nonempty vault, then nonempty applicationId trading
+account, never the API-agent key. Empty identity strings are absent in the same
+existing account selector used for other account reads; an empty vault no longer
+masks a configured master. Agent discovery finishes before fee/private bootstrap.
+Public-only and unresolved startup retain default taker0.00045/maker0.00015 with
+no userFees request. Configured private accounts retain their native fee response
+and fallback behavior.
+
+Robinhood Lighter defaults to integrator47296 on both deployments, with maker0 /
+taker250 attribution. An explicit integrator override wins; ordinary Lighter's
+mainnet158385 and testnet no-default behavior is unchanged. Existing tier and
+builder-approval preflights run before nonce allocation/submission. A parsed
+missing, expired or insufficient approval blocks, as do existing405/429 handling;
+malformed responses and other lookup/transport failures retain the adapter's
+existing best-effort continuation. This parity change does not tighten that
+failure policy. Callers must approve the Robinhood partner identity for attributed
+placements to be accepted by the venue.
+Every prepared lot, bracket leg, single and batch reserves a positive48-bit
+client-order index from the existing instance namespace. Current time/entropy is
+reconsidered for every reservation; a backward clock or failed/unknown send never
+releases its prior index. Exhaustion rejects before submission rather than
+wrapping to a reused identity. Transaction nonces and signer authority are separate.
+
+## Robinhood master-parity fixture provenance
+
+The real-WASM boundary fixture now supplies an approved test integrator matching
+the alias or explicit override, and asserts the signed Robinhood47296 attributes.
+Production approval refusal, signer indices, slippage, settings and tier behavior
+remain unchanged. The two private replay tape identities reflect the authorized
+master/harness integrator change; their eleven existing diagnostics each and all
+public declarations are unchanged. Raw replay reports remain FAIL with known
+failures; this content-hash refresh does not establish complete venue parity.
