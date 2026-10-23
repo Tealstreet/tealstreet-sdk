@@ -280,7 +280,7 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
 6. **Credential conditions (claude-m26ps4, 2026-10-23).**
    - **Slot.** Import installs refs only for the slot whose L1 identity
      derived them (primary today). The derived refs form a session identity
-     bound to its `ImportScope` beside the L1 identity, never overwriting
+     bound to its `ImportAuthority` beside the L1 identity, never overwriting
      it. Venues reach it only by selecting that slot, with no new selector.
      Secondary import is refused.
    - **Subject.** Echoed non-secret fields (address, funder, API-key id)
@@ -340,7 +340,8 @@ create fallback, and this plan adds none.
 **Proof:**
 - the venue never observes body, secret or passphrase bytes (a canary
   assertion on every venue callback);
-- refs bound to the `ImportScope` are dropped on retirement;
+- refs bound to an `ImportAuthority` are dropped by its `ImportScope` on
+  retirement;
 - a stale-generation recipe refuses;
 - malformed, oversized and duplicate-field bodies fail closed;
 - import is refused when the provider lacks it;
