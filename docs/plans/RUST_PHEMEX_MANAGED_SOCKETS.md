@@ -294,3 +294,32 @@ synthetic high-entropy credential still produces one finding. An initial detecto
 probe with a TEST_ONLY prefix was ignored by the scanner's existing default
 fixture policy, so it was replaced by this independently working control. No
 runtime, test assertion, signature value, rule or path-wide allowance changed.
+
+
+## Standalone WASM trusted-setup closure
+
+Fresh Rust40040839630/Phemexjob120711292156 exposed a real standalone
+construction failure: the private tape reached the unchanged venue refusal
+"Phemex credentials belong in signer setup, not engine options". Public replay's
+748 diagnostics are already declared; they are not new failures or reclassified.
+
+The Phemex registry feature enabled dispatch signing, but the WASM host's Phemex
+feature omitted its own dispatch-signing edge. Rust dependency feature unification
+does not enable a parent crate cfg. Therefore WasmEngine::new compiled out the
+existing prepare_local_signer_for compatibility path used by BingX/WEEX. Add only
+that host family edge: existing replay input now enters the same trusted setup
+and the venue refusal remains unchanged. No harness, tape, reference, predicate,
+threshold, recipe or reducer change is needed. The signer owner independently
+confirmed the cause and cleared this feature-edge shape.
+
+Actual standalone WASM before the edge reproduces the constructor refusal.
+After rebuilding the same family with the edge, the identical24-record private
+tape completes with zero protocol errors, unserved reads, missing/unused writes
+and invalid signatures; both scripted commands complete. The first local replay
+command omitted its required --out argument and failed at report writing; the
+corrected invocation completes. The complete TS/Rust private comparison retains
+strict FAIL33, and the unchanged assessGateReport/manifest classifies all33 as
+known diagnostics with zero unexpected errors and zero resolved declarations.
+This closes the construction/report absence, not the declared parity gaps.
+Local wasm-opt is unavailable; no local size/public performance claim follows.
+Fresh CI must certify the rebuilt standalone family and private case coverage.
