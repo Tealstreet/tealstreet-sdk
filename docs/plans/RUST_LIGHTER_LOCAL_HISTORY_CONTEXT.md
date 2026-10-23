@@ -116,3 +116,33 @@ strict touched-crate Clippy/scoped fmt, bans and both request-context checks.
 CI owns WASM/replay/size/timing. Open a separate draft PR into feat/rust-rewrite,
 keep one120s CI watcher, then ask for a venue train slot only when green and
 reviews clear. Separate exact full-map/revert guard precedes a head-matched merge.
+
+## Original RED and implementation checkpoint
+
+Plan847bb52ae7a independently source/caller/full-map CLEAR. Test-only checkpoint
+5a0303c6633 ran19tests on unchanged actual production:4GREEN/15assertionRED/
+0ignored. Seven capacity and seven clock controls fail at the first shared entry
+assertion; the additional RED is the local capacity assertion after all four
+native remote-deployment wire/schema prefixes. Positive native precedence,
+invalid bounds before index/market, duplicate-owner retirement/reuse and2800
+immediate completions pass. Initial fixture constants for testnet host and clock
+message were corrected to actual native/shared values before the frozen run;
+no compile failures count as RED proof. Target strict Clippy passes. Independent
+source and caller reviewers cleared the test checkpoint without re-execution.
+
+Implementation replaces only seven direct local terminals with direct shared
+Read admission/terminal calls. The original test target is byte-exact5a0303 and
+all19 nowPASS, including suffix recovery/clock variants previously behind REDs.
+Only the seven approved singleton hashes are pruned; history10F/10O ->3F/3O and
+family39F/41O ->32F/34O. No remote source, old test, lib, account, signing, query
+codec, checker predicate or foreign manifest bytes change. Full native/strict
+checks, final independent reviews and exact-head CI remain gates.
+
+Final candidate checks: all243Lighter and305Binance native tests PASS (548total),
+strict Lighter all-target/all-feature Clippy PASS, scoped fmt and whitespace PASS,
+request scanner/15negative tests and bans PASS. Original new test remains exact
+5a0303. Independent source/adversarial, caller and full-map implementation reviews
+CLEAR; token inverse proves only one import and seven direct admission/terminal
+moves, while history_request and every following byte remain exact actual. All
+foreign manifest bytes and old tests are preserved. CI/replay/size/timing and a
+future authorized venue window remain separate gates.

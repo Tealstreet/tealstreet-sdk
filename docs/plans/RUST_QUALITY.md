@@ -1345,3 +1345,11 @@ venue admission or numeric fallback. Exact managed delivery is checked before
 native response decoding/publication. Local config precedence and 20s/Never
 remain native; typed transport/refusal errors keep checked diagnostic ordering.
 Only identity.rs loses two legacy terminal occurrences; other inventory is intact.
+
+### Lighter local history Read evidence
+
+Genuine256peer roots exercise seven local terminal capacity refusals, slot/ID
+reuse and invalid-clock recovery. Native result/error precedence, all four
+Lighter/Robinhood deployments, duplicate custody, repeated immediate completion
+and saturated remote byte/schema controls remain covered. All19 focused tests
+PASS after original4GREEN/15RED. No shared policy, timer, wrapper or scanner change.

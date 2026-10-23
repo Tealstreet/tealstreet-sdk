@@ -2735,3 +2735,11 @@ and admission-error fallback. Its two identity terminal fingerprints are removed
 family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
 typed Network/Timeout assertions pass alongside native wire/config/codec controls.
 The generic managed helper and all other family callers remain with their owners.
+
+### Lighter local history command authority
+
+Seven synchronous legacy history terminals now consume genuine shared Read roots.
+Original test-only5a0303:4GREEN/15assertionRED/0ignored; all19 nowPASS. Native
+validation and credential-presence precedence remain unchanged; shared entry
+refusal owns capacity/clock failure without numeric fallback. Exact inventory
+history10->3, Lighter41->34occurrences; remote paging/auth/source untouched.

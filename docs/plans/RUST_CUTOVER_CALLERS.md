@@ -6283,3 +6283,14 @@ The exact GET/query/header bytes and userId codec are preserved. Rare identity
 reads leave live account state unchanged. Network/Timeout metadata now survives
 with the native correlated diagnostic before the single terminal. No history,
 account-poll, trading or socket caller is migrated by this slice.
+
+## Lighter synchronous history Read custody
+
+The seven native local history replies (unsupported client ID/income category,
+invalid bounds/native index/market, empty keyless history and unavailable private
+identity) retain native precedence, JSON and messages. They now borrow genuine
+shared Read command admission before publishing, so invalid clocks, full owner
+capacity and reused ownership produce one engine refusal without a financial
+outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
+Remote history requests, pagination, authentication and byte-level query/codec
+behavior are unchanged; this slice issues no remote-fallthrough Context.
