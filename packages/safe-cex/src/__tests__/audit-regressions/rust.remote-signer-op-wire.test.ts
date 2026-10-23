@@ -30,14 +30,14 @@ const work = (signing = primary.signing, present = true): SignRequest => ({
   ],
 });
 const provider = (remoteSigner?: RemoteSigner, payloadSigner?: PayloadSigner) => createRemoteSignerProvider({
-  exchangeName: 'orderly', identities: { primary, secondary }, remoteSigner, payloadSigner,
+  exchangeName: 'woofi', identities: { primary, secondary }, remoteSigner, payloadSigner,
 });
 
 it('an advertised recipe crosses as one exact v2 op and returns the raw signature in place', async () => {
   const requests: RemoteSignerRequest[] = [];
   const result = await provider(signer(requests, ['paradex.order.1', 'orderly.rest.1']))(work(), { signal: signal(), remote });
   expect(JSON.stringify(requests)).toBe(JSON.stringify([{
-    id: 'fixed-op-id', type: 'op', v: 2, exchangeName: 'orderly', accountName: 'owned-account',
+    id: 'fixed-op-id', type: 'op', v: 2, exchangeName: 'woofi', accountName: 'owned-account',
     op: { recipe: 'orderly.rest.1', inputs: remote.inputs },
   }]));
   expect(result.values).toEqual([Array.from(new TextEncoder().encode('ed25519:PUBLIC')), Array(64).fill(10)]);
