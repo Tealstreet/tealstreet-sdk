@@ -112,3 +112,60 @@ fn pair(missing: bool) {
         Action::Notice(Notice::CommandDone { command: 712, .. })
     )));
 }
+
+#[test]
+#[ignore = "original RED: Backpack managed write adoption owner codex-hcmq3f; optional child journal #1880"]
+fn p0_write_optional_child_failure_keeps_both_ids_and_fails_once() {
+    let (mut e, _) = ready();
+    e.handle(2000.0, Event::Command(Command::PlaceOrders {
+        command: 713,
+        orders: serde_json::from_str(r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}]"#).unwrap(),
+    }));
+    let entry = requests(&mut e).pop().unwrap();
+    assert!(!entry.body.as_deref().unwrap().contains("TriggerPrice"));
+    reply(&mut e, &entry, 200, r#"{"id":"entry"}"#);
+    let tp = requests(&mut e).pop().unwrap();
+    let body = tp.body.as_deref().unwrap();
+    assert!(body.contains("\"side\":\"Ask\""));
+    assert!(body.contains("\"triggerPrice\":\"150.00\""));
+    assert!(body.contains("\"triggerBy\":\"MarkPrice\""));
+    reply(&mut e, &tp, 400, r#"{"message":"rejected"}"#);
+    let after_failure: Vec<_> = e.drain_actions().collect();
+    assert!(after_failure.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
+    )));
+    let sl = after_failure
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .expect("native optional continuation still sends SL");
+    assert!(
+        sl.body
+            .as_deref()
+            .unwrap()
+            .contains("\"triggerPrice\":\"130.00\"")
+    );
+    reply(&mut e, &sl, 200, r#"{"id":"stop"}"#);
+    let out: Vec<_> = e.drain_actions().collect();
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: 713,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].partial.as_ref().unwrap().order_ids,
+        ["entry", "stop"]
+    );
+    assert!(!out.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 713, .. }) | Action::Http(_)
+    )));
+}
