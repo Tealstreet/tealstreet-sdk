@@ -5303,3 +5303,38 @@ SDK construction, endpoints, signing, transports, row shapes and errors retain
 their contracts. Combined/native builds continue using the package size profile;
 this supersedes the earlier package-profile description for the WOO family only.
 [Profile and controls](RUST_WOO_PUBLIC_CPU.md).
+
+## SDK master fee subjects and Lighter placement identities
+
+Hyperliquid fee reads use the nonempty vault, then nonempty applicationId trading
+account, never the API-agent key. Empty identity strings are absent in the same
+existing account selector used for other account reads; an empty vault no longer
+masks a configured master. Agent discovery finishes before fee/private bootstrap.
+Public-only and unresolved startup retain default taker0.00045/maker0.00015 with
+no userFees request. Configured private accounts retain their native fee response
+and fallback behavior.
+
+Robinhood Lighter defaults to integrator47296 on both deployments, with maker0 /
+taker250 attribution. An explicit integrator override wins; ordinary Lighter's
+mainnet158385 and testnet no-default behavior is unchanged. Existing tier and
+builder-approval preflights run before nonce allocation/submission. A parsed
+missing, expired or insufficient approval blocks, as do existing405/429 handling;
+malformed responses and other lookup/transport failures retain the adapter's
+existing best-effort continuation. This parity change does not tighten that
+failure policy. Callers must approve the Robinhood partner identity for attributed
+placements to be accepted by the venue.
+Every prepared lot, bracket leg, single and batch reserves a positive48-bit
+client-order index from the existing instance namespace. Current time/entropy is
+reconsidered for every reservation; a backward clock or failed/unknown send never
+releases its prior index. Exhaustion rejects before submission rather than
+wrapping to a reused identity. Transaction nonces and signer authority are separate.
+
+## Robinhood master-parity fixture provenance
+
+The real-WASM boundary fixture now supplies an approved test integrator matching
+the alias or explicit override, and asserts the signed Robinhood47296 attributes.
+Production approval refusal, signer indices, slippage, settings and tier behavior
+remain unchanged. The two private replay tape identities reflect the authorized
+master/harness integrator change; their eleven existing diagnostics each and all
+public declarations are unchanged. Raw replay reports remain FAIL with known
+failures; this content-hash refresh does not establish complete venue parity.
