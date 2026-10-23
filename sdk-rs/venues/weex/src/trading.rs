@@ -35,12 +35,15 @@ struct Job {
     effective: bool,
 }
 impl Job {
-    /// The first failure names the error; any unproven one makes it unknown.
+    /// The first failure names the error; any unproven one makes it unknown,
+    /// and a later step that reached the venue means the job was not unsent.
     fn record(&mut self, error: VenueError) {
-        let unknown = error.outcome == Some(Outcome::Unknown);
+        let outcome = error.outcome;
         let recorded = self.error.get_or_insert(error);
-        if unknown {
+        if outcome == Some(Outcome::Unknown) {
             recorded.outcome = Some(Outcome::Unknown);
+        } else if recorded.outcome == Some(Outcome::NotSent) && outcome != Some(Outcome::NotSent) {
+            recorded.outcome = outcome;
         }
     }
 }
@@ -1105,7 +1108,7 @@ impl WeexFutures {
                 return None;
             }
         };
-        if !steps.is_empty() && self.credentials.is_none() {
+        if !steps.is_empty() && self.credentials.primary.is_none() {
             reject(
                 cx,
                 id,
@@ -1222,7 +1225,11 @@ impl WeexFutures {
                 self.refresh_account(cx);
             }
             if let Some(mut error) = job.error {
-                if job.effective && error.outcome == Some(Outcome::Rejected) {
+                // An earlier accepted step means the command as a whole was neither
+                // rejected nor unsent; a later refusal cannot claim either outcome.
+                if job.effective
+                    && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                {
                     error.outcome = None;
                 }
                 reject(cx, command, error);
