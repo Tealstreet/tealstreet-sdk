@@ -360,3 +360,30 @@ reading `ExchangeError` fields will see (`opts.classified`, `isUnknownOutcome`,
 
 Each PR lists its exact deltas under [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALLERS.md)
 "Error strings that must move to codes".
+
+## Progress
+
+- 2026-10-23, phase 2a (core plus the Binance proof):
+  - `engine/src/classify.rs` provides the precedence, the tables, strict
+    decoding, the batch projection, header-only Retry-After and credentialed
+    auth evidence.
+  - The `Cx` entries `http_write_failure`, `http_write_unproven`,
+    `http_write_batch` and `http_resend_context` are added.
+  - Resends need an engine `ResendGrant`, one per logical leg, and
+    `http_retry_context` refuses write evidence.
+  - The Binance `failure()` match becomes the `BINANCE` table with documented
+    status rows (#36 closed for Binance).
+- Deferred to phase 2b ("write fact authority"):
+  - narrowing `http_write_result` to `Accepted`;
+  - binding intent and expected count at leg registration;
+  - classifying from the engine-delivered response;
+  - `http_write_not_sent`;
+  - `http_read_failure`/`ReadRetry`;
+  - the credentialed `account_auth_outcome` argument;
+  - the rule 5 deferral, `reconcile_uncertain` and Satisfied reconcile marking;
+  - the cancel-echo check;
+  - Binance's move to `http_write_batch`, and its read-side `venue_error`.
+- A batch whose only effects are `Satisfied` items records `KnownPartial`
+  without partial counts. The journal already treats that as known effects
+  without IDs.
+
