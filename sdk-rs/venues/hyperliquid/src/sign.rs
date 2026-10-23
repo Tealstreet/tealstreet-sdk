@@ -49,7 +49,10 @@ pub fn sign(
 }
 
 /// Reserve the agent's nonce in the domain Hyperliquid shares with TxFlow.
-pub fn agent_nonce<P>(cx: &safe_cex_engine::Cx<'_, P>, secret: &str) -> Result<u64, String> {
+pub fn reserve_agent_nonce<P>(
+    cx: &safe_cex_engine::Cx<'_, P>,
+    secret: &str,
+) -> Result<u64, String> {
     let address = ethereum::private_key_address(secret)?;
     cx.reserve_nonce(
         &safe_cex_engine::nonce::HYPERLIQUID_AGENT,

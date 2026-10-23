@@ -271,7 +271,7 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
   (name, raw/protocol clock floor and scale, limit); `HYPERLIQUID_AGENT` is the
   first. `Cx::reserve_nonce(&domain, &key)` computes the floor with exact
   integer arithmetic.
-- Hyperliquid and TxFlow reserve through one `agent_nonce` helper.
+- Hyperliquid and TxFlow reserve through one `reserve_agent_nonce` helper.
   `crypto::nonce::ethereum_agent` is removed.
 - Still to come:
   - Lighter `VenueCounter`;

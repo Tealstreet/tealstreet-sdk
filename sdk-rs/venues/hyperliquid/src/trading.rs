@@ -638,8 +638,10 @@ impl Hyperliquid {
             self.pump_trades(cx);
             return;
         }
-        let nonce = match crate::sign::agent_nonce(cx, self.options.secret.as_deref().unwrap_or(""))
-        {
+        let nonce = match crate::sign::reserve_agent_nonce(
+            cx,
+            self.options.secret.as_deref().unwrap_or(""),
+        ) {
             Ok(nonce) => nonce,
             Err(error) => {
                 self.restore_cancel(cx, &effect);

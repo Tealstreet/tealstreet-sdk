@@ -878,7 +878,7 @@ Known nonce limits (owner decision: document only; no production change):
 `engine/src/nonce.rs` `reserve` keeps signer-domain history and allocates
 `max(floor(now), previous + 1)`. The `hyperliquid-agent` domain keys that history
 by the signer's public-address digest (`NonceKey::ethereum_address`); Hyperliquid and TxFlow writes reserve through
-`venues/hyperliquid/src/sign.rs` `agent_nonce`. Engine recreation and backward clock
+`venues/hyperliquid/src/sign.rs` `reserve_agent_nonce`. Engine recreation and backward clock
 resynchronization within the same native process or Wasm memory preserve that
 history. The synchronized SDK clock is passed at
 `packages/safe-cex/src/exchanges/rust/rust.exchange.ts:892,917`; it can move
