@@ -64,3 +64,25 @@ behavior and re-review. Execute KuCoin+Binance all-feature native tests, scoped
 strict Clippy/fmt, bans and both request-context checks. CI owns WASM/replay gates.
 Only the overseer's merge train/window plus fresh separate guard may merge; use
 current landing, keep all incoming doc text/prunes, and record executed evidence.
+
+## Independent plan refinements
+
+Caller/adversarial review distinguishes error timelines: decoded short/malformed
+candle rows reject with exactly "invalid KuCoin Spot candles" and no correlated
+error companion, just like unsupported preflight. Envelope, transport and stream
+failures retain the companion before rejection. Tests must pin both timelines;
+do not route every failure through one companion-emitting adapter.
+
+Native compatibility controls explicitly retain duplicate timestamps, oversized
+responses, volume column5 despite extra columns, and HTTP for unknown symbols.
+No new range validation or local limit is permitted. Add separate genuine
+initial registry-capacity and non-finite-clock refusal controls: initial Read
+rejection has no outcome and no companion. Add immediate managed-queue refusal
+with NotSent, its existing error companion and fixed-clock recovery. Fill genuine
+background roots/queued reads in an earlier no-ID callback, never inside the
+command entry being tested; explicitly retire them before recovery.
+
+All four fingerprints and the full map were independently verified CLEAN. The
+shared Account failure hash remains at count2. HMAC owner confirmed the committed
+plan does not overlap its private regions. No production edit or native receipt
+is claimed by this plan.
