@@ -5369,3 +5369,16 @@ treat successful local fallback as proof that cache or Store state was refreshed
 A satisfied native cancel may prove a subset without creating IDs. That proof
 still leaves any unresolved targets Unknown; a successful subset never cleans up
 the remainder or extends its deadline.
+
+## Explicit request egress (#1833) and Plan/preflight issuance
+
+#1833 captures explicit egress (`Primary`, `PublicCors`, `Direct`) when a
+context is issued through `issue_with_egress` / `Cx::http_context_with_egress`.
+Legs, replacements and retries inherit it. Plan and preflight contexts from
+#1873 are minted directly with `Context::new`, so they have no explicit-egress
+admission. Without one, they derive routing from the credential: no credential
+routes Public, the primary slot Primary, and the secondary slot Secondary.
+Callers must not treat #1873 together with #1833 as Plan-egress support, for
+example for WOO or TxFlow entry. The additive seam (explicit egress on
+Plan/preflight issuance) is owned by claude-m26ps4, plan first after #1833
+lands, with codex-uufub4 reviewing API fit.
