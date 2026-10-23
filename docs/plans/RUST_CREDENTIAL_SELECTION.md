@@ -188,6 +188,21 @@ slot/ref never implies equal account.
   Generalizes Coinbase's runtime drop; other families adopt it only
   explicitly, listed per PR.
 
+### C1 as built (Phase 2a: core, hosts, Binance)
+
+- `Public` is not a role (an unsigned request has nothing to select), and
+  `NoPrimary` is not policy: `select` returns `CredentialUnavailable::Missing`
+  and the venue keeps its existing presentation (silent skip, typed failure,
+  KuCoin's unsigned fallback). Only `secondary_requires_primary` is family data.
+- `RequestRoute::Secondary` exists; `Selection::bind` declares it on
+  non-managed requests. Native and TS hosts honour the declared route, and they
+  reject a Secondary route with a non-secondary managed intent. The legacy
+  GET/header inference stays for unadopted venues and is deleted with the last
+  adopter.
+- Secondary-epoch evidence gating and `retire_secondary` adoption land with
+  Coinbase (Phase 2b), the only family that retires a read key today. The C4
+  checker is a separate Phase 2 PR.
+
 ### C2. Account subject (decided by Sam 2026-10-23)
 
 `AccountSubject { signer, trading_account, fee_subject, public_id }` per slot,
