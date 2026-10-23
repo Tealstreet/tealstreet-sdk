@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "kind": "temporary-native-socket-diagnostic",
+  "cases": [
+    {
+      "role": "landing",
+      "head": "7641650e7b1fc54c55593880ac16299171f60a90",
+      "tree": "c83f4bc5feb9a474d1436b9074e677658a203cee",
+      "workspaceLockSha256": "8b98912f655ecde1b8116bfbd5828955cfe35d04af696c9112166351995b3bfc"
+    },
+    {
+      "role": "before",
+      "head": "a31c3ff2a07a527f689901762acd86d5538ca94f",
+      "tree": "294d40ab0721e7e3252a850c2133456be78a55b9",
+      "workspaceLockSha256": "8b98912f655ecde1b8116bfbd5828955cfe35d04af696c9112166351995b3bfc"
+    },
+    {
+      "role": "current",
+      "head": "d8dcb8e6e62a1a2a0b253b2a3944dab38024e7ec",
+      "tree": "1765ef081304b8b8f8a101446d69d4b3eddc79c6",
+      "workspaceLockSha256": "8b98912f655ecde1b8116bfbd5828955cfe35d04af696c9112166351995b3bfc"
+    }
+  ],
+  "protocol": {
+    "order": [
+      "landing",
+      "before",
+      "before",
+      "landing",
+      "landing",
+      "current",
+      "current",
+      "landing"
+    ],
+    "durationSeconds": 40,
+    "profileSeconds": 20,
+    "frequencyHz": 999,
+    "warmups": 3
+  },
+  "toolchain": "1.99.0",
+  "driverSha256": "5df34bc671ac3d1e229dff1048ef29f66473067cdfe51dd6ae2eaef9f213141e",
+  "lockSha256": "1fa23d0f431827adf32474bbf7ddf6f8c6fd4ff7bf15771d1936264e188a299d",
+  "gzipTapeSha256": "ce90d66d52e9b59a00950e4250f0a5bdfb2916f5d4456f481f8f0bf65b96b812",
+  "rawTapeSha256": "6bd02fdd741bff53015fcea52a19492ca1bf1af5dc7e2b9def3bd3b1dac042ac",
+  "facts": [
+    "848829d3bd74fa0d6b76abba825d8e3cb38b5296e97efe6c679ace9026d0f755",
+    28687,
+    89,
+    51834
+  ]
+}
