@@ -213,3 +213,29 @@ The final signer ruling supersedes the earlier additive proposal: no partial
 injected signer/bootstrap arm ships; dispatchSigning stays off. All signed
 history waits for uufub4's uncapped raw-expiry seam and zs5e83's full Phemex
 signer cutover. This unsigned path consumes neither prerequisite.
+
+## Unsigned implementation verification
+
+The selected original-source checkpoint fc1b87973fa compiles thirteen controls
+on unchanged15bd production: eight assertion REDs and five native passes. The
+implementation at512618a649e makes those controls pass and adds invalid-entry
+and typed route-refusal controls. Independent source review found a missed
+native non-2xx response check. Separate test-only391db24787e reproduces that
+regression;43608a7c90b restores the exact native rejection before decoding.
+The sixteen-control target now passes, including valid rows at100/199/300/302/399
+being rejected and the same command id completing a fresh200 request afterward.
+
+Current landing4b1edb5619e is genuinely integrated at3218a5c7be9. The three
+shared-document conflicts retain incoming bytes followed by the own suffix
+once; incoming WEEX pruning is preserved. Independent source/adversarial,
+caller and full-map reviews are CLEAR at43608a7c90b. The architecture gate is
+No: the adapter consumes shared Read lifecycle, guarded rows and completion,
+without a venue-local retry, classification or signing implementation.
+
+On that integrated source, all508 Phemex/Binance native tests pass across40
+targets, with zero failures or ignored tests. Strict Phemex all-target/all-feature
+Clippy, scoped rustfmt, both request-context checks (including15 checker
+controls), and diff checks pass. The exact map is34 fingerprints/38 occurrences,
+with only the declared f913 singleton removed and every unowned map preserved.
+CI replay, size, retained-memory and CPU certification remain pending. No
+performance or merge-readiness claim follows from these local checks.
