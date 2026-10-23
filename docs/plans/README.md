@@ -228,3 +228,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Lighter RequestContext adoption | Inventory and phased plan | Before migrating Lighter or Robinhood HTTP/completion sites; single-request candles first, shared multi-request/signing prerequisites later. | [RUST_LIGHTER_REQUEST_CONTEXT.md](RUST_LIGHTER_REQUEST_CONTEXT.md) |
 | Paradex startup Read Contexts | Planned | Independent public catalog/ticker GET adoption and proof | [RUST_PARADEX_SEED_CONTEXT.md](RUST_PARADEX_SEED_CONTEXT.md) |
 | BloFin candle command entry | Focused adoption plan | Before removing the candle pre-Context numeric refusal or changing initial command ownership. | [RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md](RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md) |
+| WEEX dispatch signing | Planned after BingX/shared headers | Before WEEX private managed builders, provider custody or persisted identity cutover. | [RUST_WEEX_DISPATCH_SIGNER.md](RUST_WEEX_DISPATCH_SIGNER.md) |

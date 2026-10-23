@@ -428,9 +428,10 @@ SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e1
                                 '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
                                 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1})}
 
-# Owner-approved temporary BingX staging site (6cf35cca, sign_http) for legacy-owned
-# history and listen-key work. Delete once cxxyqr's history bridge (#1848) and the
-# session Context (#1832/#1842) own them. No other BingX additions.
+# Owner-approved temporary staging sites (6cf35cca, sign_http), exactly one per family:
+# BingX legacy history and listen-key work, until cxxyqr's history bridge (#1848) and the
+# session Context (#1832/#1842) own them; WEEX account cycle, trading and history, until
+# the shared Plan/execution-group API and the history bridge own them. No other additions.
 STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
  '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 2,
  'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
@@ -445,7 +446,41 @@ STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aee
  'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
  'ca1a695870588abe078efa57b2d1e6f789b219044369ce2f8d1119a9c10664b7': 1,
+ 'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1}),
+ 'venues/weex/src/lib.rs': ({'067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1': 1,
+ '0d6bbb8e01da4f9bc9a177c0e8ca9d0d015c922780050cfeda6b33807cac8e78': 1,
+ '1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
+ '1805af84e51e32d19a267749aeea1b85d4e801cb4df04d796274edac35db929d': 1,
+ '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 1,
+ '43cf91072f928d61f9f061f65a83f846ce5b37f7a7328105f8f2c390ba4ccf62': 1,
+ '497d185372b077e0511e2f21fa2b9b14522eab0cd1c71ac0f7a65741155d0a23': 1,
+ '61034a5650efd3373a0ab46c4948145e4c4022d60a9c7f0898563e273d100159': 1,
+ '6f0b47296411f75eb3a85b182bf43c08378b387a1a584d8848b0e811f29b01f9': 1,
+ '869f03854972431807651e3f560b5dbb7232088a7fcc89705e7a58f747bb3e2a': 1,
+ '93e77dda58930ad87b59e2334bedbf6fbbef499f277e47697e979bc8e474f9e3': 1,
+ 'a40239e5961362c920c8e84905898477b16673e64c7d94eacaa5b51ba63a1152': 1,
+ 'ab3206b428125b95aea7df47c71c9bfb8cef1809ff9c4432ba4ab8f34db5bac9': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 3,
+ 'cd66da21afeeef22b98026c1d44238cf77b537c7b5ea67ee5d4fb4464905d893': 1,
+ 'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1},
+    {'067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1': 1,
+ '0d6bbb8e01da4f9bc9a177c0e8ca9d0d015c922780050cfeda6b33807cac8e78': 1,
+ '1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
+ '1805af84e51e32d19a267749aeea1b85d4e801cb4df04d796274edac35db929d': 1,
+ '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 1,
+ '43cf91072f928d61f9f061f65a83f846ce5b37f7a7328105f8f2c390ba4ccf62': 1,
+ '61034a5650efd3373a0ab46c4948145e4c4022d60a9c7f0898563e273d100159': 1,
+ '6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219': 1,
+ '6f0b47296411f75eb3a85b182bf43c08378b387a1a584d8848b0e811f29b01f9': 1,
+ '869f03854972431807651e3f560b5dbb7232088a7fcc89705e7a58f747bb3e2a': 1,
+ '93e77dda58930ad87b59e2334bedbf6fbbef499f277e47697e979bc8e474f9e3': 1,
+ 'a40239e5961362c920c8e84905898477b16673e64c7d94eacaa5b51ba63a1152': 1,
+ 'ab3206b428125b95aea7df47c71c9bfb8cef1809ff9c4432ba4ab8f34db5bac9': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
+ 'cd66da21afeeef22b98026c1d44238cf77b537c7b5ea67ee5d4fb4464905d893': 1,
  'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1})}
+
 
 
 def subset(counts, baseline):

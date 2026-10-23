@@ -4804,6 +4804,56 @@ fallback. A duplicate entry leaves the original preparation and completion
 authority intact. Existing market-before-interval validation, native candle
 request bytes, result sorting and preparation/release/expiry behavior remain.
 
+## WEEX trusted passphrase setup and managed header declaration
+
+WEEX's trusted signer setup requires a passphrase for a complete private primary
+identity. An absent or JSON-null secondary passphrase inherits the opaque primary
+passphrase reference; an explicit empty secondary passphrase rejects instead of
+inheriting. Public mode bypasses only the primary requirement and still validates
+a supplied secondary identity. Secret and passphrase bytes and caller-assigned
+stable IDs remain literal, without trimming or automatic secret decoding.
+
+The opaque WEEX HTTP recipe declares Content-Type and User-Agent from the same
+static data as its unsigned renderer, so managed transport preparation sees those
+public headers before signing. API-key, signature and passphrase headers remain
+provider-owned. Provider injection is enabled by the dispatch cutover below;
+hosted signing stays disabled.
+
+### WEEX dispatch signing cutover
+
+WEEX signs every private request at dispatch through the shared host-injected
+provider. Venue and engine options hold only opaque primary/secondary identities.
+Raw `key`/`secret`/`passphrase`/`readCredentials` in engine options are refused
+whenever signer identities are supplied. Legacy raw native/WASM input still goes
+through trusted setup. Worker and custom-host callers must provision the provider
+where the engine runs. GET reads select the secondary identity when provisioned;
+POST requests and the private WebSocket upgrade select the primary. Wire bytes are
+unchanged: header order, literal secret bytes, sorted native queries, Base64 MAC.
+
+A missing required passphrase is now refused synchronously by trusted setup with
+the shared `Invalid local signer setup` message, replacing `WEEX requires a
+passphrase`. A provider-supplied primary identity without a usable
+key/signing/passphrase ref still deactivates with CONFIG_INVALID rather than
+publishing an empty account. An unusable secondary identity stops startup before
+any I/O. Read credentials no longer stand in for an unusable primary identity.
+
+**FetchAccount identity changes.** The returned `userId` is the trusted
+`primary.stableId`. It is no longer `weex:` plus the lowercase hex of the first
+12 SHA-256 bytes of the primary public key. Without a stableId the command fails
+typed (`unsupported`, `notSent`) before any I/O. NX already holds the public key,
+so it can compute each account's old ID once at cutover and map stored records
+to the stableId it provisions. The SDK and engine never compute it.
+
+Identity and FetchLeverage run as managed engine-owned Read commands. Provider,
+route and lifecycle refusals are typed and are never venue-auth evidence. The
+joined account cycle, trading and history keep their native owners, signed
+through one temporary staging site until the shared Plan/execution-group API and
+history Completion bridge own them. A provider refusal leaves an unsent write
+`notSent`. Once an earlier step was accepted, the command's outcome is neither
+`notSent` nor `rejected`. History refusals complete strictly. Hosted
+`signHttpRequest`/`signWsAuth` for WEEX refuse until hosted admission passes its
+own gates; only explicit `engine: 'rust'` accounts are affected.
+
 ## Backpack and Paradex order snapshot freshness
 
 Backpack and Paradex publish order snapshots through the engine's shared
