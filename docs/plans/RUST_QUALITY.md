@@ -797,3 +797,20 @@ validation, one terminal/no resource allocation, peer completion, freed-slot
 reuse and NaN/positive-infinity/negative-infinity admission followed by a finite
 command. The adapter uses shared command entry only for its genuine command
 caller; background generation cleanup and native query/stream behavior remain.
+
+## KuCoin Spot candle managed-read controls
+
+Tests-first controls distinguish unreleased, bound-but-unclaimed and claimed
+responses, timer-first and response-first exact-deadline expiry, typed preparation
+and transport failures, initial admission refusal and immediate physical queue
+refusal. Genuine saturation fixtures assert256 separate background roots or256
+queued physical requests under one background root in a prior no-ID callback, then explicitly retire them and recover at
+one clock. Fixed-clock repetition pins preflight and success retirement, duplicate
+command preservation and stale-generation rejection.
+
+Native compatibility controls preserve complete candle fields, both timestamp
+units, duplicate timestamps, oversized responses, volume column5 with extra columns, permissive
+unknown symbols, exact headers/query calculations and separate malformed-row
+versus envelope error timelines. Corrected native fixtures ran unchanged source
+with eleven RED and three compatibility GREEN controls before the managed source
+made all fourteen GREEN.
