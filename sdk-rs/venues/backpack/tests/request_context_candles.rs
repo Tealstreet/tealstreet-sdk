@@ -399,7 +399,7 @@ fn initial_capacity_refusal_preserves_old_owner_and_reuses_freed_capacity() {
 }
 
 #[test]
-fn native_rows_keep_server_order_duplicates_and_ignored_limit_and_bounds() {
+fn native_rows_keep_order_duplicates_and_ignored_limit_without_local_bound_filtering() {
     let mut engine = engine();
     let actions = query(&mut engine, 7, 100.);
     let (token, _) = preparation(&actions);
