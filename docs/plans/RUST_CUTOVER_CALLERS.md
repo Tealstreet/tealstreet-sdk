@@ -5126,5 +5126,7 @@ Caller-visible changes:
 - **Read agent errors fail closed.** An empty read secret, or a V3 read secret
   that is not hex, refuses setup instead of failing only the signed reads.
 - **`fetchAccount().userId`.** Without an `accountAlias`, V3 falls back to the
-  public signer address. V1 previously fell back to the API key and now returns
-  an empty string, because the venue no longer holds the key.
+  public signer address, as before. V1 previously fell back to the API key; it
+  now uses the trusted primary `localSigner.primary.stableId` (WEEX precedent)
+  and otherwise fails typed (`unsupported`). It is never the key and never
+  empty.

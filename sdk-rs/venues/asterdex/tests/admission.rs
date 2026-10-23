@@ -220,3 +220,89 @@ fn public_data_only_keeps_signing_reads_with_the_read_identity() {
     let expected = identity("secondary.credential", "secondary.signing");
     assert_eq!(replay(&provider, read, expected, &signer), read.url);
 }
+
+/// FetchAccount over V1 or V3 with the given account body; returns the result.
+fn account_user_id(options: Options, body: &str) -> Result<String, String> {
+    let (venue, provider) = options.build();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+    engine.set_signer(Some(provider)).unwrap();
+    engine.start(NOW);
+    engine.handle(NOW, Event::Command(Command::FetchAccount { command: 1 }));
+    let mut pending: Vec<_> = prepared_actions(&mut engine, NOW);
+    for _ in 0..32 {
+        let Some(action) = pending.pop() else { break };
+        match action {
+            Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result }) => {
+                return Ok(
+                    serde_json::from_str::<serde_json::Value>(&result).unwrap()["userId"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                );
+            }
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 1, error }) => {
+                return Err(error.message);
+            }
+            Action::Http(request) => {
+                let reply = if request.url.ends_with("/time") {
+                    r#"{"serverTime":1700000000000}"#
+                } else if request.url.contains("/exchangeInfo") {
+                    MARKETS
+                } else if request.url.contains("/account?") {
+                    body
+                } else {
+                    "[]"
+                };
+                engine.handle(
+                    NOW,
+                    Event::HttpResponse {
+                        request: request.id,
+                        response: Response {
+                            status: 200,
+                            headers: "",
+                            body: reply,
+                        },
+                    },
+                );
+                pending.extend(prepared_actions(&mut engine, NOW));
+            }
+            _ => {}
+        }
+    }
+    panic!("account command did not finish");
+}
+
+#[test]
+fn account_identity_never_falls_back_to_the_api_key() {
+    let v1 = |stable_id: Option<&str>| Options {
+        key: Some("v1-api-key".into()),
+        secret: Some("v1-api-secret".into()),
+        stable_id: stable_id.map(str::to_owned),
+        ..Options::default()
+    };
+    assert_eq!(
+        account_user_id(v1(None), r#"{"accountAlias":"alias-7"}"#),
+        Ok("alias-7".into())
+    );
+    assert_eq!(
+        account_user_id(v1(Some("account/aster-1")), r#"{"accountAlias":""}"#),
+        Ok("account/aster-1".into())
+    );
+    let error = account_user_id(v1(None), "{}").unwrap_err();
+    assert!(error.contains("trusted primary stableId"), "{error}");
+    assert!(!error.contains("v1-api-key"));
+    // V3 keys are public wallet addresses, so the signer address remains the fallback.
+    let (key, signer) = wallet(0x34);
+    assert_eq!(
+        account_user_id(
+            Options {
+                key: Some(signer.clone()),
+                secret: Some(key),
+                application_id: Some(USER.into()),
+                ..Options::default()
+            },
+            "{}"
+        ),
+        Ok(signer)
+    );
+}

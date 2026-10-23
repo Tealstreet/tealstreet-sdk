@@ -143,8 +143,10 @@ the current hosted and remote shape.
   unchanged `signed_streamed`.
 - **Checker.** `check-signing.py` now bans the Aster sign module like Binance
   and Bybit; only the `cfg(test)` oracle and test literals are frozen.
-- **`userId`.** The V1 fallback to the API key is gone (empty string). V3 falls
-  back to the public signer address. Recorded in RUST_CUTOVER_CALLERS.
+- **`userId`.** Per claude-ddi2il, following the WEEX precedent: after
+  `accountAlias`, V3 falls back to the public signer address, V1 to the trusted
+  primary `stableId`, else a typed `unsupported` error. Never the API key and
+  never empty. Recorded in RUST_CUTOVER_CALLERS.
 - **Review decisions.**
   - A malformed read secret (V3 non-hex) or an empty read secret now refuses
     setup, as every admitted family does for incomplete secondary credentials;

@@ -11,7 +11,9 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId, num};
+use safe_cex_engine::{
+    Cx, ErrorKind, Fill, Method, Response, SocketChannel, SocketId, TimerId, VenueError, num,
+};
 use safe_cex_venue_binance::wire::{self, ListenKey, OpenOrder, OrderUpdateEvent};
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -695,20 +697,36 @@ impl AsterDex {
                 struct Output {
                     user_id: String,
                 }
+                // Without an alias: V3's public signer address, else the trusted
+                // primary stableId; never the API key (WEEX precedent).
+                let fallback = match self.version {
+                    crate::sign::Version::V3 => self.options.signer_address.clone(),
+                    crate::sign::Version::V1 => None,
+                }
+                .or_else(|| {
+                    self.options
+                        .credentials
+                        .as_ref()
+                        .and_then(|id| id.stable_id.clone())
+                });
                 let result = if let Some(error) = &error {
-                    Err(error.clone())
+                    Err(VenueError::new(error.clone()))
                 } else {
                     serde_json::from_str::<Info>(body)
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| VenueError::new(e.to_string()))
                         .and_then(|info| {
-                            serde_json::to_string(&Output {
-                                user_id: info
-                                    .account_alias
-                                    .filter(|x| !x.is_empty())
-                                    .or_else(|| self.options.signer_address.clone())
-                                    .unwrap_or_default(),
-                            })
-                            .map_err(|e| e.to_string())
+                            let user_id = info
+                                .account_alias
+                                .filter(|x| !x.is_empty())
+                                .or(fallback)
+                                .ok_or_else(|| {
+                                    VenueError::new(
+                                        "Aster account identity requires an account alias or a trusted primary stableId",
+                                    )
+                                    .kind(ErrorKind::Unsupported)
+                                })?;
+                            serde_json::to_string(&Output { user_id })
+                                .map_err(|e| VenueError::new(e.to_string()))
                         })
                 };
                 match result {

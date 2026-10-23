@@ -17,6 +17,8 @@ pub struct Options {
     pub auth_signer_address: Option<String>,
     pub auth_private_key: Option<String>,
     pub api_version: Option<Version>,
+    /// Caller-assigned primary account identity.
+    pub stable_id: Option<String>,
     pub read_key: Option<String>,
     pub read_secret: Option<String>,
     pub builder_address: Option<String>,
@@ -54,6 +56,7 @@ impl Options {
             key: Secret::new(self.key.clone().unwrap_or_default()),
             secret: Secret::new(primary_secret.unwrap_or_default()),
             secret_encoding: encoding,
+            stable_id: self.stable_id.clone(),
             ..Default::default()
         });
         let alias = version == Version::V3 && nonempty(&self.auth_private_key).is_some();
