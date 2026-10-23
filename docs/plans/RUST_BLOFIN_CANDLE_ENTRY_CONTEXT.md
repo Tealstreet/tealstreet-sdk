@@ -14,7 +14,13 @@ the existing failed http_context candle-entry branch constructs Pending::Candles
 and routes to the numeric legacy failure callback. Replace initial issuance with
 cx.admit_http_command(Self::read_policy()); any Err returns immediately because
 Rejected already emitted the genuine entry denial and Revoked grants no owner.
-No numeric ID argument, fabricated Context or new fallback is allowed.
+No numeric ID argument, fabricated Context or new fallback is allowed. Remove
+the now-unreachable bare Pending::Candles numeric failure branch too; the counted
+fingerprint is there, not at the initial issuance call. Candle pending values
+remain inside Managed, whose Context already owns every physical callback and
+terminal. Remove the now-unused numeric command field from Pending::Candles.
+The remaining discovery fallback handles only Markets/Tickers; a bare candle
+payload carries no completion authority.
 
 All other23 occurrences stay unchanged: account7, closed1, history7 and trading8
 retain their original map and signer/Plan/classifier prerequisites. No exemptions
@@ -22,7 +28,7 @@ or other-venue prunes. Expect24->23 only after the actual scanner proves removal
 
 Preserve the existing20-second Public/Read/Never policy, exact candle GET/query,
 market/interval preflight errors, preparation/error hooks, native candle rows and
-result sorting/filtering. Context rejection now uses the shared typed reason and
+result sorting. Context rejection now uses the shared typed reason and
 read outcome convention. Duplicate command entry must neither allocate another
 HTTP preparation nor retire the original owner. No per-venue retry, classification,
 clock, admission or finalization policy is introduced; architecture answer No.
@@ -41,5 +47,13 @@ expiry controls run unchanged.
 Implement only the initial candle admission seam, prune the one proven own entry,
 append actual caller/audit/quality behavior and execute BloFin+Binance tests, scoped
 strict Clippy/fmt, bans and both request-context checks. Re-review source/caller/map.
-Integrate actual1857 once before fresh CI in the stable venue phase. No merge
+The stable venue phase is pinned to actual1854; actual1857 was deferred,
+so fresh CI requires no new engine integration. No merge
 until clean reviews, green CI and an overseer window with a fresh separate guard.
+
+Caller/full-map reviews located the exact numeric branch and require its explicit
+removal for the prune. All three independent plan reviews otherwise pass. The
+updated source scope above is re-reviewed before production. New own draft1865
+claims lib.rs for frozen PublicTrades callback hooks; report that whole-file
+collision and await overseer authorization before the separate candle source
+edit. Tests-first in unclaimed managed_public.rs can proceed independently.
