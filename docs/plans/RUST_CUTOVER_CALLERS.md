@@ -5306,3 +5306,18 @@ remain unchanged. The two private replay tape identities reflect the authorized
 master/harness integrator change; their eleven existing diagnostics each and all
 public declarations are unchanged. Raw replay reports remain FAIL with known
 failures; this content-hash refresh does not establish complete venue parity.
+
+## Remote signing wire v2: versioned recipe ops (P8)
+
+Additive. HMAC `http` and `ws-auth` requests are byte-identical, and no family
+becomes keyless in P8: `construction-rules.json` `remoteSigning` and the
+keyless refusal are unchanged until each family's adoption PR
+(RUST_SIGNER_REMOTE_WIRE_AND_IMPORT.md, proof scope table).
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| `RemoteSigner.signOps?: { recipes }` | exchange-server `remote-signer.ts:513-693` (the server-side `RemoteSigner`) | no capability field | advertise the exact versioned recipe ids the paired browser executes (e.g. `orderly.rest.1`); absent means none, and an unadvertised or version-skewed id is refused before any request | add when a family adopts |
+| `RemoteSignerRequest.type: 'op'`, `v: 2`, `op: { recipe, inputs }`; response `opSignature` (lowercase hex) | web `signingHost.ts:74-191`, `exchangeAccountController.ts:3029` (browser dispatch by request type) | `http` → `signHttpRequest`, `ws-auth` → `signWsAuth` | route `op` to `exchange.signOperation(request)`; the browser rebuilds the bytes from `inputs` with the recipe and signs with its own account key | add |
+| `Exchange.signOperation(request)` | same | n/a | `RustEngineExchange` runs the hosted recipe executor; every other exchange answers `{ error }` | add |
+| `EngineHostOptions.signer` context gains `remote?: { recipe, role?, inputs }` | custom JS signers only | `(request, { signal })` | an engine-bound recipe description for remote signers; local signers ignore it | none |
+| `HostedSigningInput` gains `{ kind: 'op', recipe, inputs }` | none outside the SDK | n/a | same-family recipes only, with the recipe's allowlist and the role-bound key | none |
