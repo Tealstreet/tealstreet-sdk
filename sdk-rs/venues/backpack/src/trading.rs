@@ -608,7 +608,7 @@ impl Backpack {
                 return;
             }
             Step::Cancel { symbol, id, .. } => {
-                self.account.orders_revision += 1;
+                cx.store.invalidate_order_snapshots();
                 previous = cx.store.order(id).map(|o| o.status);
                 if let Some(order) = cx.store.order(id) {
                     targets.push((id.clone(), self.order_stream_time(id)));
@@ -638,7 +638,7 @@ impl Backpack {
                 )
             }
             Step::CancelAll { symbol } => {
-                self.account.orders_revision += 1;
+                cx.store.invalidate_order_snapshots();
                 targets = cx
                     .store
                     .orders()
@@ -727,7 +727,7 @@ impl Backpack {
                     if row.id.trim().is_empty() {
                         return Err("Backpack placement missing order ID".into());
                     }
-                    self.account.orders_revision += 1;
+                    cx.store.invalidate_order_snapshots();
                     if let Some(job) = self.trading.jobs.get_mut(&request.command) {
                         job.ids.push(row.id.into());
                         if let Some(old_id) = job.replaces.as_deref() {
@@ -780,6 +780,8 @@ impl Backpack {
                             return Err("Backpack invalid batch response identity".into());
                         }
                     }
+                    // Only a fully validated batch acknowledgement supersedes reads.
+                    cx.store.invalidate_order_snapshots();
                     if let Some(job) = self.trading.jobs.get_mut(&request.command) {
                         for o in orders {
                             job.ids.push(ids.remove(&o.client_id.unwrap()).unwrap());
@@ -853,7 +855,7 @@ impl Backpack {
                             }
                         }
                     }
-                    self.account.orders_revision += 1;
+                    cx.store.invalidate_order_snapshots();
                     self.finish_cancel(id);
                     let unchanged = request
                         .targets
@@ -868,7 +870,7 @@ impl Backpack {
                     });
                 }
                 Step::CancelAll { .. } => {
-                    self.account.orders_revision += 1;
+                    cx.store.invalidate_order_snapshots();
                     for (id, stamp) in &request.targets {
                         let unchanged = self.order_stream_time(id) == *stamp;
                         cx.store.update_order(id, |o| {
