@@ -25,6 +25,7 @@ struct Harness {
     engine: Engine<Bingx>,
     local: Provider,
     routes: HashMap<safe_cex_engine::RequestId, Preparation>,
+    preparing: HashMap<safe_cex_engine::RequestId, HttpRequest>,
     signs: Vec<(safe_cex_engine::RequestId, SignRequest)>,
     http: Vec<HttpRequest>,
     errors: Vec<VenueError>,
@@ -56,6 +57,7 @@ impl Harness {
             engine,
             local,
             routes: HashMap::new(),
+            preparing: HashMap::new(),
             signs: vec![],
             http: vec![],
             errors: vec![],
@@ -76,6 +78,7 @@ impl Harness {
                         ..
                     } => {
                         assert!(self.routes.insert(request.id, preparation).is_none());
+                        assert!(self.preparing.insert(request.id, request.clone()).is_none());
                         self.engine.http_prepared(
                             1_000.,
                             preparation,
@@ -91,6 +94,7 @@ impl Harness {
                         request,
                     } => {
                         assert_eq!(self.routes.remove(&request.id), Some(preparation));
+                        self.preparing.remove(&request.id);
                         if matches!(
                             self.engine.claim_http(1_000., permit),
                             Ok(Claim::Released(_))
@@ -102,6 +106,7 @@ impl Harness {
                         let request = preparation.attempt().request;
                         if self.routes.get(&request) == Some(&preparation) {
                             self.routes.remove(&request);
+                            self.preparing.remove(&request);
                         }
                     }
                 },
@@ -186,7 +191,18 @@ impl Harness {
             ids: vec!["one".into(), "two".into()],
         });
     }
-    fn error(&self) -> &VenueError {
+    fn error(&mut self) -> &VenueError {
+        if !self.signs.is_empty() {
+            assert_eq!(self.signs.len(), 1);
+            assert_eq!(self.preparing.len(), 1);
+            let read = self.preparing.values().next().unwrap();
+            assert_eq!(read.method, safe_cex_engine::Method::Get);
+            assert!(
+                read.url.contains("/trade/openOrders"),
+                "only the required fresh reconciliation may follow uncertainty"
+            );
+            self.refuse(SignError::Refused);
+        }
         assert_eq!(self.errors.len(), 1);
         assert!(self.done.is_empty());
         assert!(self.signs.is_empty() && self.http.is_empty());

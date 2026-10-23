@@ -4,11 +4,10 @@ Caller owner: codex-uufub4. Recipe, credential and staging-removal review:
 claude-4yjlw0. Native audit parent:
 `53a906fd934db2194e3b183fb219f5f9f84c8c4a`.
 
-This slice is plan and original-test controls first. No production adoption,
-ratchet prune, completed review or green implementation is claimed here. Actual
-integration of the current landing and independent review precede production
-source changes. Test expectations below must be reproduced before being called
-original REDs; compile failures are not adoption controls.
+The plan and compiling original controls were committed before the runtime.
+The implementation starts at actual landing a828ede7ebb and composes frozen
+#1939 c1512d147e9 for independent cancel batches. Source review and exact-head CI
+remain merge gates; this branch is not an actual landing or a zero-site claim.
 
 ## Scope and native inventory
 
@@ -257,3 +256,49 @@ orders_reconciled; an older read must not clear the fence. The absent response
 never publishes Cancelled. This is required caller adoption, not a claim that
 the shared hook alone clears native state. Test classify::assert_table(&BINGX),
 status/code separation, scope negatives and the fresh-owner fence behavior.
+
+
+## Runtime and native evidence
+
+Every ordinary command now enters genuine Preflight and admits its complete
+native serial Step list before physical preparation. The unchanged family Http
+recipe signs every mutation with its primary identity. The journal records each
+native request separately; BingX's native adapter sends one order per request,
+so the caller's batch prefix consists of per-leg facts. There is no aggregate
+Failed fact replacing successful earlier items. A future wire batch endpoint
+must use the shared per-item batch classifier rather than this single-call codec.
+
+The official [Swap V2 common-code documentation](https://bingx-api.github.io/docs/#/en-us/swapV2/base-info.html)
+serves 80014 as Invalid parameter and 80016 as Order does not exist in its
+[documentation asset](https://bingx-api.github.io/docs/static/js/app.4dcba784df17c52faa47.js).
+The official [error-code reference](https://raw.githubusercontent.com/BingX-API/api-ai-skills/main/skills/references/error-codes.md)
+describes gateway signature refusal 100001, routing refusal 100400, rate refusal
+100410 and insufficient placement margin 101204. The table preserves these
+native diagnostics; 80012 and unlisted codes remain uncertain. No HTTP status
+rows are declared. HTTP 408/5xx proof takes precedence over parsed native codes.
+
+Ordinary CancelOrders alone preserves native continue_on_error by opting into
+independent_calls. Typed provider/transport/gateway failure settles only the
+original call in on_http_failed and advances the sibling without retry. All
+other native jobs retain stop-on-error. The final journal projects Unknown or
+KnownPartial with the proven prefix; native_ids is output ordering only, never
+an outcome or settlement ledger. A replacement's effect-bearing IDs or confirmed
+cancellation weaken any refusal to Unknown and cannot mint a resend.
+
+Satisfied(Cancel) never publishes Cancelled. The shared hook creates a fresh
+Background managed order read even when an earlier order read is pending. A
+forced read advances the native revision; only its wholly admitted complete
+snapshot calls orders_reconciled. Older responses/failures cannot clear its
+reservation, overwrite its Store projection or restart an already applied read.
+Malformed, expired and partial snapshots do not clear the uncertainty fence.
+ACK objects keep one deserializer depth budget and reject tuple-shaped aliases,
+contradictory failed cancellation lists and incomplete order identities.
+
+At the implementation parent the original target ran 10 assertion REDs and
+7 compatibility controls, all unignored. Review controls additionally cover
+stale snapshot ordering, replacement identity evidence, rejected and duplicate
+entry effects, contradictory absent cancellation, and bounded nested decoding.
+The exact shrink is trading.rs 7 fingerprints/7 occurrences to 2/2: five removed.
+The two remaining conservative fingerprints are native data-field references,
+not physical request or numeric completion calls. Other BingX paths and shared
+staging funnels keep their exact inventory until their own callers migrate.

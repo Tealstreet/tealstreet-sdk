@@ -627,3 +627,152 @@ fn refused_envelope_with_an_id_is_unproven_evidence_and_never_a_clean_refusal() 
         ["possible-effect"]
     );
 }
+
+#[test]
+fn tuple_shaped_acknowledgements_never_prove_a_placement() {
+    for body in [
+        r#"[0,"",{"orderId":"tuple"}]"#,
+        r#"{"code":0,"data":["tuple"]}"#,
+        r#"{"code":0,"data":{"order":["tuple"]}}"#,
+    ] {
+        assert_uncertain_response_never_resends(200, body);
+    }
+}
+
+#[test]
+fn forced_reconciliation_never_reuses_or_is_cleared_by_an_older_snapshot() {
+    for old_first in [true, false] {
+        for old_failed in [true, false] {
+            let mut e = engine();
+            e.store_mut()
+                .set_orders(vec![open_order("old-a"), open_order("old-b")]);
+            e.handle(
+                START,
+                Event::Command(Command::CancelOrders {
+                    command: COMMAND,
+                    ids: vec!["old-a".into()],
+                }),
+            );
+            let first = cancel_packet(&collect(&mut e, START));
+            let actions = respond(
+                &mut e,
+                &first,
+                START + 1.,
+                200,
+                r#"{"code":80016,"msg":"order not exist"}"#,
+            );
+            let old = order_reads(&actions).remove(0);
+            e.handle(
+                START + 2.,
+                Event::Command(Command::CancelOrders {
+                    command: COMMAND + 1,
+                    ids: vec!["old-b".into()],
+                }),
+            );
+            let second = cancel_packet(&collect(&mut e, START + 2.));
+            let actions = respond(
+                &mut e,
+                &second,
+                START + 3.,
+                200,
+                r#"{"code":80016,"msg":"order not exist"}"#,
+            );
+            let fresh = order_reads(&actions);
+            assert_eq!(
+                fresh.len(),
+                1,
+                "an in-flight old read must not suppress a fresh owner"
+            );
+            assert_ne!(fresh[0].id, old.id);
+            let complete_old = |e: &mut Engine<Bingx>, now: f64| {
+                if old_failed {
+                    e.handle(
+                        now,
+                        Event::HttpFailed {
+                            request: old.id,
+                            error: "old read lost",
+                        },
+                    );
+                    collect(e, now)
+                } else {
+                    respond(
+                        e,
+                        &old,
+                        now,
+                        200,
+                        r#"{"code":0,"data":{"orders":[{"orderId":"old-a","symbol":"BTC-USDT","type":"LIMIT","side":"BUY","status":"NEW","origQty":"0.01","executedQty":"0","price":"69000","positionSide":"BOTH","timeInForce":"GTC"}]}}"#,
+                    )
+                }
+            };
+            if old_first {
+                let stale = complete_old(&mut e, START + 4.);
+                assert!(
+                    order_reads(&stale).is_empty(),
+                    "stale completion must keep the newer reservation"
+                );
+            }
+            let done = respond(
+                &mut e,
+                &fresh[0],
+                START + 5.,
+                200,
+                r#"{"code":0,"data":{"orders":[]}}"#,
+            );
+            assert!(order_reads(&done).is_empty());
+            assert!(e.store().orders().is_empty());
+            if !old_first {
+                let stale = complete_old(&mut e, START + 6.);
+                assert!(order_reads(&stale).is_empty());
+                assert!(
+                    e.store().orders().is_empty(),
+                    "old snapshot resurrected a cancelled/absent row"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_absent_code_with_a_failed_cancel_list_is_not_satisfied() {
+    let mut e = engine();
+    e.store_mut().set_orders(vec![open_order("old")]);
+    e.handle(
+        START,
+        Event::Command(Command::CancelOrders {
+            command: COMMAND,
+            ids: vec!["old".into()],
+        }),
+    );
+    let r = cancel_packet(&collect(&mut e, START));
+    let actions = respond(
+        &mut e,
+        &r,
+        START + 1.,
+        200,
+        r#"{"code":80016,"msg":"order not exist","data":{"failed":["old"]}}"#,
+    );
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        e.store().order("old").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+}
+
+#[test]
+fn deeply_nested_object_acknowledgements_keep_the_parser_depth_limit() {
+    let mut e = engine();
+    place(&mut e, 1);
+    let r = packet(&collect(&mut e, START));
+    let nested = format!(
+        "{}{}{}",
+        "{\"order\":".repeat(140),
+        r#"{"orderId":"too-deep"}"#,
+        "}".repeat(140)
+    );
+    let body = format!(r#"{{"code":0,"data":{nested}}}"#);
+    let actions = respond(&mut e, &r, START + 1., 200, &body);
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+    assert!(writes(&actions).is_empty());
+}
