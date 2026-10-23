@@ -3146,4 +3146,80 @@ fn a_reconcile_during_an_in_flight_order_read_issues_its_own_read() {
         2 * per_read,
         "the second seal does not wait on or join the older read"
     );
+    // The abandoned older pages answer late; their rows never publish.
+    let stale = r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"symbol":"BTCUSDT","orderId":"abandoned-order","side":"Buy","orderType":"Limit","orderStatus":"New","qty":"0.01","price":"90000","positionIdx":0}],"nextPageCursor":""}}"#;
+    let older: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .take(per_read)
+        .map(|r| r.id)
+        .collect();
+    for id in older {
+        h.reply(id, 200, stale);
+    }
+    assert!(h.engine.store().order("abandoned-order").is_none());
+}
+
+/// A refused snapshot page is re-read once, re-signed with Bybit's corrected
+/// clock, through the classifier (a streamed refusal carries no list).
+#[test]
+fn a_refused_order_page_is_re_read_with_the_corrected_clock() {
+    let mut h = log_safe_engine();
+    place(
+        &mut h,
+        33,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let batch = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: batch,
+        error: "connection reset",
+    });
+    h.advance(5000.0);
+    let page = h.take("/v5/order/realtime");
+    let refusal = serde_json::json!({"retCode":10002,"retMsg":format!("recv_window req_timestamp[6000],server_timestamp[9000], origin_string[{LOG_SECRET}] {SIGNED_URL}"),"result":{}}).to_string();
+    h.reply(page.id, 200, &refusal);
+    let retry = h
+        .requests
+        .iter()
+        .find(|r| r.url == page.url)
+        .expect("the same page is re-read once")
+        .clone();
+    assert_eq!(
+        Harness::header(&retry, "X-BAPI-TIMESTAMP").as_deref(),
+        Some("9000")
+    );
+    assert_private_notices_are_safe(&h);
+}
+
+/// A second signature refusal of a page fails without leaking its signed origin.
+#[test]
+fn a_twice_refused_order_page_never_leaks_its_signed_origin() {
+    let mut h = log_safe_engine();
+    place(
+        &mut h,
+        34,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let batch = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: batch,
+        error: "connection reset",
+    });
+    let page = h.take("/v5/order/realtime");
+    h.reply(page.id, 200, &rejected_signed_origin(10004));
+    let retry = h
+        .requests
+        .iter()
+        .position(|r| r.url == page.url)
+        .map(|i| h.requests.remove(i))
+        .expect("re-read once");
+    h.reply(retry.id, 200, &rejected_signed_origin(10004));
+    assert!(
+        !h.requests.iter().any(|r| r.url == page.url),
+        "no third read"
+    );
+    assert_private_notices_are_safe(&h);
+    assert!(h.logs.iter().all(|line| !line.contains(LOG_SECRET)));
 }

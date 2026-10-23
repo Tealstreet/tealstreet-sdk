@@ -5,7 +5,6 @@ mod support;
 use support::{Harness, INSTRUMENTS, Options, PRELAUNCH, TICKERS};
 
 const WINDOW: Option<u32> = Some(20_000);
-const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
 
 fn private() -> Harness {
     Harness::started(Options {
@@ -55,9 +54,18 @@ fn only_a_native_timestamp_refusal_resends_an_account_read() {
         !h.has_request("/v5/account/wallet-balance"),
         "a text-only match never resends"
     );
-    while h.has_request("/v5/order/realtime") {
-        h.respond("/v5/order/realtime", 200, EMPTY);
-    }
+    // A native 10002 on the next wallet read is re-read once.
+    h.advance(20_000.);
+    let wallet = h.take("/v5/account/wallet-balance");
+    h.reply(
+        wallet.id,
+        200,
+        r#"{"retCode":10002,"retMsg":"invalid request, please check your server timestamp or recv_window param. req_timestamp[1],server_timestamp[2],recv_window[5000]","result":{}}"#,
+    );
+    assert!(
+        h.has_request("/v5/account/wallet-balance"),
+        "a native refusal re-reads once"
+    );
 }
 
 /// A5: an expired fee read keeps its native contract: a warning and empty

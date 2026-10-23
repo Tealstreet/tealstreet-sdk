@@ -2538,6 +2538,14 @@ impl Venue for BybitLinear {
             }
             return;
         }
+        // A signed managed read's signature/timestamp refusal carries no list:
+        // classify it (one re-read) and fail with the sanitized message.
+        if pending.rest.signed
+            && pending.read.is_some()
+            && matches!(venue_error(&response), Some((10002 | 10004, _)))
+        {
+            return self.on_response(cx, pending, response);
+        }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still
         // requires its streamed list.

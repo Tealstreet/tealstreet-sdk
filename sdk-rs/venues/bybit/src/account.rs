@@ -1135,8 +1135,7 @@ impl BybitLinear {
             self.account.session_version += 1;
             self.account.orders_generation += 1;
             self.account.positions_generation += 1;
-            self.account.orders = None;
-            self.account.positions = None;
+            self.drop_account_reads(cx);
             self.account.orders_follow_up = false;
             self.account.positions_follow_up = false;
             self.account.orders_stale = true;
@@ -1148,8 +1147,7 @@ impl BybitLinear {
         self.account.ready = false;
         self.account.handshake = None;
         self.account.snapshot = None;
-        self.account.orders = None;
-        self.account.positions = None;
+        self.drop_account_reads(cx);
         self.account.wallet_in_flight = false;
         if let Some(timer) = self.account.tick_timer.take() {
             cx.clear_timer(timer);
@@ -1177,8 +1175,7 @@ impl BybitLinear {
             // Orphan this snapshot's other reads so they cannot fill the next one.
             self.account.snapshot = None;
             self.account.snapshot_guard = Default::default();
-            self.account.orders = None;
-            self.account.positions = None;
+            self.drop_account_reads(cx);
             self.account.orders_generation += 1;
             self.account.positions_generation += 1;
             self.account.wallet_in_flight = false;
@@ -1484,6 +1481,16 @@ impl BybitLinear {
         match leg {
             Some(leg) => self.queue_read(cx, leg, rest, then),
             None => self.on_public_response(cx, then, Err("Bybit account read was not admitted")),
+        }
+    }
+
+    /// Drop the in-flight snapshots, releasing their read authority.
+    fn drop_account_reads(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(join) = self.account.orders.take() {
+            Self::finish_read_root(cx, join.root);
+        }
+        if let Some(join) = self.account.positions.take() {
+            Self::finish_read_root(cx, join.root);
         }
     }
 
