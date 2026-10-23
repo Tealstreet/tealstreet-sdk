@@ -92,7 +92,13 @@ impl Venue for Issuer {
         for issue in self.0.drain(..) {
             match issue {
                 Issue::Http(method, path, body, step) => {
-                    let id = cx.request(method, format!("{ORIGIN}{path}"), vec![], body, ());
+                    // A full URL issues to another host; a path issues to Coinbase.
+                    let url = if path.starts_with("https://") {
+                        path
+                    } else {
+                        format!("{ORIGIN}{path}")
+                    };
+                    let id = cx.request(method, url, vec![], body, ());
                     cx.sign_http(id, step);
                 }
                 Issue::Ws(step) => {
@@ -409,6 +415,21 @@ fn wrong_request_key_slot_or_algorithm_never_releases() {
         assert!(https(&actions).is_empty(), "{label}");
         assert_eq!(failures().len(), 1, "{label}");
     }
+    // Same path, another host: the recipe binds the exact Coinbase origin.
+    let actions = run(vec![Issue::Http(
+        Method::Post,
+        format!("https://evil.test{path}"),
+        Some("{}".into()),
+        Box::new(sign::Http::new(
+            trading,
+            KEY,
+            JwtAlgorithm::Es256,
+            Method::Post,
+            path,
+        )),
+    )]);
+    assert!(https(&actions).is_empty(), "host");
+    assert_eq!(failures().len(), 1, "host");
 }
 
 /// Never answers; the test delivers the signed result itself.
@@ -420,7 +441,10 @@ impl Signer for Pending {
 }
 
 #[test]
-fn a_result_after_the_jwt_expiry_is_never_released_under_the_old_token() {
+/// Proves the receipt declares exp as its expiry, and that a result delivered
+/// after it is not released (here the 5 s freshness/deadline gate refuses it
+/// first, since freshness sits well inside the 120 s token).
+fn receipt_declares_jwt_expiry_and_a_late_result_is_never_released() {
     let (_, ids) = provider();
     let path = "/api/v3/brokerage/orders";
     let mut engine = Engine::new(

@@ -85,9 +85,11 @@ remote half (P8 #1926 already carries `coinbase.restJwt*.1`).
 ## Tests
 
 - Real engine dispatch with a `LocalSigner` holding an ES256 PKCS8 key and
-  an Ed25519 seed. The released `Authorization` JWT is byte-equal to the
-  legacy `Credentials` JWT built with the same entropy draw, and verifies
-  under the public key (ES256 via `p256`, Ed25519 via RFC 8032).
+  an Ed25519 keypair. The released JWT's header and claims match an
+  independent literal expectation and the legacy `Credentials` JWT apart
+  from the nonce (the engine's entropy draw is not reproducible from a
+  venue test), and the signature verifies under the public key (ES256 via
+  `p256`, Ed25519 via RFC 8032).
 - GET with a query (the `uri` claim keeps only the pathname), POST, and the
   WS subscribe frame for both channels.
 - Refusals before any HTTP: a different host or path, a key-name mismatch
