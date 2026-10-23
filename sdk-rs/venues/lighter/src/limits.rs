@@ -1,5 +1,6 @@
 //! Account-tier reads share TS's five-minute cache and one-minute retry cooldown.
 use crate::{Lighter, Pending, account};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{CommandId, Cx, Method, Response, VenueAction, unsupported_venue_action};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -167,12 +168,21 @@ impl Lighter {
     ) {
         match action {
             VenueAction::FetchAccountTier => {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
                 // Cached only: the limits read keeps its own cadence (none at startup).
                 let tier = self
                     .limits
                     .tier
                     .map_or_else(|| "null".into(), |t| format!("\"{}\"", t.label()));
-                cx.done(command, tier);
+                let _ = cx.done_context(&context, tier);
             }
             VenueAction::SetAccountTier { tier } => {
                 let result = (|| {

@@ -831,6 +831,72 @@ Verification on the integrated startup fix passes456 MEXC+Binance tests across
 40 targets, including all44 account tests. Scoped fmt/strict all-target Clippy
 and both ratchets (14 controls) pass. Three independent reviews are clean;
 architecture No. Source/test files held by history #1793 remain untouched.
+
+## Phemex unsigned candle request regressions
+
+Committed plan05988416603 precedes separate original-source tests2a1a008bc7c:
+six lifecycle regressions fail and primary/secondary/dual signing compatibility
+already passes. Controls cover preparation/binding/one release, parked and
+released expiry, stale callbacks with ID reuse, typed setup/network failures,
+genuine invalid-time admission and native sorted output. Additional native
+error/malformed-row/missing-list comparisons match the credentialed path, and
+an expired429 reply cannot pause another read. Existing public assertions are
+retained with the shared prepared fixture; only the daily response clock moves
+forward to its command's timestamp. No scanner/manifest change or credentialed
+signer migration is included.
+
+## MEXC managed book regressions
+
+Plan531195b3a8c precedes separate original-source RED0213bd8e13a: all7 lifecycle
+controls fail on original production and pass with Context custody. They cover
+prepared binding/one release, parked and released expiry, setup metadata, claim
+at deadline, stale callbacks with command-ID reuse, genuine invalid-clock entry
+and expired429 non-interference with both depth and account cooldowns.
+Native result/auth assertions retain payloads and expected values while using
+the shared prepared fixture and forward response/WS clocks. Successful dispatch
+asserts exactly one engine20s deadline and no retry timer/socket send; immediate
+input/cooldown refusals still forbid timers and managed dispatch. Native decoder,
+large IDs, scaling, overflow beyond limit, code510 and live cooldown controls
+remain independently exercised. Inventory shrinks by exactly8 occurrences and
+7 entries, with no unowned map or scanner change.
+
+### Shared order-snapshot admission: Backpack/Paradex
+
+Both families replace whole-order snapshot counters with the existing opaque
+Store token. Backpack preserves newer-read supersession by invalidating before
+capture. Paradex keeps single-read busy ownership and all lagging-replica,
+terminal and amend-evidence semantics. Native cache changes and Store rows now
+publish under one admission boundary; repair HTTP actions remain outside the
+callback and run only after acceptance. Other domain and per-ID clocks stay
+native. Permanent exhaustion performs no order GET and does not strand either
+family's account continuation.
+
+The original four-crate baseline passes1157 tests; final native controls include
+four original Backpack assertion REDs across two proven defects, native malformed
+Pair and Paradex ACK compatibility positives, and distinct token API/exhaustion
+controls. The inventory ratchet keeps1253 sites: only the existing Paradex order
+request's pending-field hash rebinds10-to-10, with exact whole-map substitution,
+source/hash pins and growth/unrelated/pruned-parent negative controls. No rule,
+path or site-kind allowlist is added. Architecture gate: YES, consumers adopt the
+existing engine choke point. No all-venue completion or private parity claim.
+
+### Lighter synchronous cached Read Context controls
+
+Plan2a093966518 precedes original RED commit ffef6eaf580. Against actual732cf8
+production, five assertions fail: capacity for present/missing leverage and tier,
+plus invalid-clock leverage/tier; three compatibility controls pass. After the
+shared admission/terminal move all eight pass, retaining duplicate-owner isolation,
+all aliases/networks, finite recovery, no-I/O/no-Store publication, slot reuse and
+300 immediate completions without owner accumulation. Existing account_limits
+controls remain unchanged, including cached standard tier and SetAccountTier.
+Independent plan source/adversarial, caller and full-map reviews are CLEAN;
+architecture gate No: no new local capacity, clock, retry or completion mechanism.
+
+Cached-slice verification passes504 Lighter+Binance native tests (48 result groups),
+strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both request
+checks/14 controls. Actual e233cb05dfb is genuinely integrated; its incoming
+KuCoin/MEXC source and prunes are preserved. CI owns WASM/replay/size/timing;
+native success alone does not claim these broad gates or whole-venue closure.
 ## Draft Engine socket lifecycle references
 
 OKX adopt one Engine registry/driver for epoch admission, typed auth,
