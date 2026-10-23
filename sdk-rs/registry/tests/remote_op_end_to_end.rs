@@ -141,9 +141,12 @@ struct Family {
 /// Runs both halves; `tamper` flips the returned signature before the server sees it.
 fn run(family: Family, tamper: bool) -> (Option<String>, Vec<String>, Vec<u8>) {
     let recipe = safe_cex_venues::remote_recipe(family.recipe).unwrap();
-    let mut op = RemoteOp::new(recipe, family.inputs.clone());
+    let mut op = RemoteOp::new(recipe, family.inputs.to_string());
     op.verify = family.verify;
-    let present = recipe.bound_credential_field().is_some();
+    let present = recipe
+        .bound_credential(&family.inputs.to_string())
+        .unwrap()
+        .is_some();
     let mut engine = safe_cex_engine::test_support::seeded_engine(Proof {
         step: Some(RecipeStep { op, present }),
         failed: vec![],
@@ -166,10 +169,10 @@ fn run(family: Family, tamper: bool) -> (Option<String>, Vec<String>, Vec<u8>) {
     // Browser half: only the recipe id and inputs cross, never bytes or refs.
     let (signer, identities) = browser(family.credential, family.key);
     let input: Input = serde_json::from_value(serde_json::json!({
-        "kind": "op", "recipe": remote.recipe, "inputs": remote.inputs
+        "kind": "op", "recipe": remote.recipe, "inputs": remote.inputs.get()
     }))
     .unwrap();
-    let stamp = recipe.stamp_ms(&remote.inputs).unwrap();
+    let stamp = recipe.stamp_ms(remote.inputs.get()).unwrap();
     assert!(
         hosted_signing::op_timeout_ms(&input, stamp + 1.)
             .unwrap()
@@ -363,7 +366,7 @@ fn every_format_signs_remotely_verifies_and_releases_the_exact_bytes() {
         assert_eq!(recipe.algorithm(), algorithm, "{venue}");
         if venue == "coinbase" {
             // No verification key: the venue's own check is the backstop.
-            let message = recipe.canonicalize(&inputs).unwrap();
+            let message = recipe.canonicalize(&inputs.to_string()).unwrap();
             assert!(safe_cex_crypto::ed25519::verify(&message, &ED_PUBLIC, &signature).unwrap());
         }
         if venue == "asterdex" {
@@ -388,7 +391,7 @@ fn every_format_signs_remotely_verifies_and_releases_the_exact_bytes() {
         Some(safe_cex_crypto::hex(&signature).as_str())
     );
     let recipe = safe_cex_venues::remote_recipe("coinbase.restJwtEs256.1").unwrap();
-    let message = recipe.canonicalize(&inputs).unwrap();
+    let message = recipe.canonicalize(&inputs.to_string()).unwrap();
     assert!(safe_cex_crypto::es256::verify(
         &message, &public, &signature
     ));

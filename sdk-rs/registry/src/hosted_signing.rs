@@ -34,10 +34,12 @@ pub enum Input {
         to_sign: String,
         output_format: OutputFormat,
     },
-    /// P8 versioned recipe: non-secret inputs the recipe canonicalizes itself.
+    /// P8 versioned recipe: non-secret inputs as JSON text the recipe parses
+    /// itself (text, because tagged enums cannot carry raw JSON values).
+    #[cfg(feature = "remote-recipes")]
     Op {
         recipe: String,
-        inputs: serde_json::Value,
+        inputs: String,
     },
 }
 
@@ -114,6 +116,7 @@ pub fn prepare(
         method: "HOSTED".into(),
         ..Default::default()
     };
+    #[cfg(feature = "remote-recipes")]
     if let Input::Op { recipe, inputs } = input {
         return op_work(venue, identity, context, &recipe, &inputs);
     }
@@ -177,6 +180,7 @@ pub fn prepare(
                 OutputKind::WsAuth(output_format),
             ))
         }
+        #[cfg(feature = "remote-recipes")]
         Input::Op { .. } => unreachable!("handled before HMAC admission"),
     }
 }
@@ -186,6 +190,17 @@ pub fn prepare(
 /// `REMOTE_FRESHNESS_MS` old and `MAX_REMOTE_LEAD_MS` ahead. Returns the
 /// remaining window, which bounds the provider deadline.
 pub fn op_timeout_ms(input: &Input, protocol_now: f64) -> Result<Option<u32>, SignError> {
+    #[cfg(not(feature = "remote-recipes"))]
+    {
+        let _ = (input, protocol_now);
+        Ok(None)
+    }
+    #[cfg(feature = "remote-recipes")]
+    op_window(input, protocol_now)
+}
+
+#[cfg(feature = "remote-recipes")]
+fn op_window(input: &Input, protocol_now: f64) -> Result<Option<u32>, SignError> {
     use safe_cex_engine::signing_remote::{MAX_REMOTE_LEAD_MS, REMOTE_FRESHNESS_MS};
     let Input::Op { recipe, inputs } = input else {
         return Ok(None);
@@ -204,12 +219,13 @@ pub fn op_timeout_ms(input: &Input, protocol_now: f64) -> Result<Option<u32>, Si
 
 /// The browser half of P8: only the account's own family, the recipe's own
 /// allowlist (defence in depth beside the server guard) and its role-bound key.
+#[cfg(feature = "remote-recipes")]
 fn op_work(
     venue: &str,
     identity: &Identity,
     context: Context,
     recipe: &str,
-    inputs: &serde_json::Value,
+    inputs: &str,
 ) -> Result<(SignRequest, OutputKind), SignError> {
     let recipe = crate::remote_recipe(recipe)
         .filter(|recipe| {
@@ -217,9 +233,7 @@ fn op_work(
                 .is_some_and(|family| recipe.id().split('.').next() == Some(family))
         })
         .ok_or(SignError::Unsupported)?;
-    if serde_json::to_vec(inputs).map_or(true, |bytes| {
-        bytes.len() > safe_cex_engine::signing_remote::MAX_REMOTE_INPUT_BYTES
-    }) {
+    if inputs.len() > safe_cex_engine::signing_remote::MAX_REMOTE_INPUT_BYTES {
         return Err(SignError::InvalidRequest);
     }
     let payload = recipe.canonicalize(inputs)?;
@@ -232,15 +246,8 @@ fn op_work(
             .ok_or(SignError::Unavailable)?,
     };
     let bound = recipe
-        .bound_credential_field()
-        .map(|field| {
-            inputs
-                .get(field)
-                .and_then(serde_json::Value::as_str)
-                .map(|value| safe_cex_crypto::sha256(value.as_bytes()))
-                .ok_or(SignError::Refused)
-        })
-        .transpose()?;
+        .bound_credential(inputs)?
+        .map(|value| safe_cex_crypto::sha256(value.as_bytes()));
     let mut operations = Vec::with_capacity(2);
     if bound.is_some() {
         operations.push(Operation::Present {

@@ -2,24 +2,38 @@
 use super::{code_digest, encode_standard_payload};
 use safe_cex_crypto::ethereum;
 use safe_cex_engine::signing::{Algorithm, ExtraKey, SignError};
-use safe_cex_engine::signing_remote::RemoteRecipe;
+use safe_cex_engine::signing_remote::{RemoteRecipe, parse_inputs};
 use std::collections::BTreeMap;
 
-fn address(value: Option<&serde_json::Value>) -> Result<&str, SignError> {
-    value
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| super::is_address(value))
+fn address(value: &str) -> Result<&str, SignError> {
+    super::is_address(value)
+        .then_some(value)
         .ok_or(SignError::Refused)
 }
 
-fn nonce(value: Option<&serde_json::Value>) -> Result<u64, SignError> {
-    value
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| {
-            !value.is_empty() && value.len() <= 20 && value.bytes().all(|b| b.is_ascii_digit())
-        })
-        .and_then(|value| value.parse().ok())
+fn nonce(value: &str) -> Result<u64, SignError> {
+    (!value.is_empty() && value.len() <= 20 && value.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| value.parse().ok())
+        .flatten()
         .ok_or(SignError::Refused)
+}
+
+/// `asterdex.v3.1` inputs; any other field is refused.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StandardInputs {
+    payload: String,
+    user: String,
+    signer: String,
+    nonce: String,
+}
+
+/// `asterdex.code.1` inputs; any other field is refused.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CodeInputs {
+    query: String,
+    testnet: bool,
 }
 
 /// Business params a wallet key may sign: orders, cancels, leverage, margin
@@ -63,14 +77,6 @@ const SIGNED_PARAMS: &[&str] = &[
     "feeRate",
 ];
 
-fn only(inputs: &serde_json::Value, fields: &[&str]) -> Result<(), SignError> {
-    let object = inputs.as_object().ok_or(SignError::Refused)?;
-    if object.keys().any(|key| !fields.contains(&key.as_str())) {
-        return Err(SignError::Refused);
-    }
-    Ok(())
-}
-
 /// `asterdex.v3.1`: the EIP-191 digest of `abi(payload, user, signer, nonce)`,
 /// where `payload` is the key-sorted JSON of the request's string params.
 pub struct Standard;
@@ -84,12 +90,9 @@ impl RemoteRecipe for Standard {
     fn role(&self) -> Option<ExtraKey> {
         None
     }
-    fn canonicalize(&self, inputs: &serde_json::Value) -> Result<Vec<u8>, SignError> {
-        only(inputs, &["payload", "user", "signer", "nonce"])?;
-        let payload = inputs
-            .get("payload")
-            .and_then(serde_json::Value::as_str)
-            .ok_or(SignError::Refused)?;
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, SignError> {
+        let inputs: StandardInputs = parse_inputs(inputs)?;
+        let payload = inputs.payload.as_str();
         // The payload must already be the canonical sorted form, with the
         // freshness fields every standard V3 request carries.
         let params: BTreeMap<String, String> =
@@ -109,20 +112,17 @@ impl RemoteRecipe for Standard {
         }
         let encoded = encode_standard_payload(
             payload,
-            address(inputs.get("user"))?,
-            address(inputs.get("signer"))?,
-            nonce(inputs.get("nonce"))?,
+            address(&inputs.user)?,
+            address(&inputs.signer)?,
+            nonce(&inputs.nonce)?,
         )
         .map_err(|_| SignError::Refused)?;
         Ok(ethereum::ethereum_message_hash(&ethereum::keccak256(&encoded)).to_vec())
     }
-    fn stamp_ms(&self, inputs: &serde_json::Value) -> Result<f64, SignError> {
-        let payload = inputs
-            .get("payload")
-            .and_then(serde_json::Value::as_str)
-            .ok_or(SignError::Refused)?;
+    fn stamp_ms(&self, inputs: &str) -> Result<f64, SignError> {
+        let inputs: StandardInputs = parse_inputs(inputs)?;
         let params: BTreeMap<String, String> =
-            serde_json::from_str(payload).map_err(|_| SignError::Refused)?;
+            serde_json::from_str(&inputs.payload).map_err(|_| SignError::Refused)?;
         params
             .get("timestamp")
             .and_then(|stamp| stamp.parse::<u64>().ok())
@@ -144,16 +144,9 @@ impl RemoteRecipe for Code {
     fn role(&self) -> Option<ExtraKey> {
         None
     }
-    fn canonicalize(&self, inputs: &serde_json::Value) -> Result<Vec<u8>, SignError> {
-        only(inputs, &["query", "testnet"])?;
-        let query = inputs
-            .get("query")
-            .and_then(serde_json::Value::as_str)
-            .ok_or(SignError::Refused)?;
-        let testnet = inputs
-            .get("testnet")
-            .and_then(serde_json::Value::as_bool)
-            .ok_or(SignError::Refused)?;
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, SignError> {
+        let CodeInputs { query, testnet } = parse_inputs(inputs)?;
+        let query = query.as_str();
         // Raw business values may contain '&', so only the fixed tail the venue
         // appends last is parsed: asterChain, user, signer, nonce.
         let mut tail = query.rsplitn(5, '&');
@@ -170,9 +163,9 @@ impl RemoteRecipe for Code {
         if chain != if testnet { "Testnet" } else { "Mainnet" } {
             return Err(SignError::Refused);
         }
-        address(Some(&serde_json::Value::from(user)))?;
-        address(Some(&serde_json::Value::from(signer)))?;
-        nonce(Some(&serde_json::Value::from(nonce_text)))?;
+        address(user)?;
+        address(signer)?;
+        nonce(nonce_text)?;
         // The business part before the tail is only allowlisted key=value pairs,
         // each key once, so no reserved or fund-moving key hides in a value.
         let business = tail.next();
@@ -188,18 +181,15 @@ impl RemoteRecipe for Code {
         }
         Ok(code_digest(query, testnet).to_vec())
     }
-    fn stamp_ms(&self, inputs: &serde_json::Value) -> Result<f64, SignError> {
+    fn stamp_ms(&self, inputs: &str) -> Result<f64, SignError> {
         // The Code nonce is milliseconds x1000 plus a sequence (sign.rs next_nonce).
-        let query = inputs
-            .get("query")
-            .and_then(serde_json::Value::as_str)
-            .ok_or(SignError::Refused)?;
+        let CodeInputs { query, .. } = parse_inputs(inputs)?;
         let text = query
             .rsplit_once("&nonce=")
             .map(|(_, nonce)| nonce)
             .or_else(|| query.strip_prefix("nonce="))
             .ok_or(SignError::Refused)?;
-        Ok((nonce(Some(&serde_json::Value::from(text)))? / 1000) as f64)
+        Ok((nonce(text)? / 1000) as f64)
     }
 }
 
@@ -267,16 +257,25 @@ mod tests {
                     "payload": case.payload, "user": case.user,
                     "signer": case.signer, "nonce": case.nonce
                 });
-                assert_eq!(STANDARD.canonicalize(&standard), Err(SignError::Refused));
+                assert_eq!(
+                    STANDARD.canonicalize(&standard.to_string()),
+                    Err(SignError::Refused)
+                );
                 let code = serde_json::json!({ "query": case.code_query, "testnet": case.testnet });
-                assert_eq!(CODE.canonicalize(&code), Err(SignError::Refused));
+                assert_eq!(
+                    CODE.canonicalize(&code.to_string()),
+                    Err(SignError::Refused)
+                );
                 continue;
             }
             let standard = STANDARD
-                .canonicalize(&serde_json::json!({
-                    "payload": case.payload, "user": case.user,
-                    "signer": case.signer, "nonce": case.nonce
-                }))
+                .canonicalize(
+                    &serde_json::json!({
+                        "payload": case.payload, "user": case.user,
+                        "signer": case.signer, "nonce": case.nonce
+                    })
+                    .to_string(),
+                )
                 .unwrap();
             assert_eq!(
                 format!("0x{}", safe_cex_crypto::hex(&standard)),
@@ -286,7 +285,8 @@ mod tests {
             );
             let code = CODE
                 .canonicalize(
-                    &serde_json::json!({ "query": case.code_query, "testnet": case.testnet }),
+                    &serde_json::json!({ "query": case.code_query, "testnet": case.testnet })
+                        .to_string(),
                 )
                 .unwrap();
             assert_eq!(
@@ -303,10 +303,13 @@ mod tests {
     fn remote_verifier_recovers_the_configured_signer() {
         let case = corpus().remove(0);
         let digest = STANDARD
-            .canonicalize(&serde_json::json!({
-                "payload": case.payload, "user": case.user,
-                "signer": case.signer, "nonce": case.nonce
-            }))
+            .canonicalize(
+                &serde_json::json!({
+                    "payload": case.payload, "user": case.user,
+                    "signer": case.signer, "nonce": case.nonce
+                })
+                .to_string(),
+            )
             .unwrap();
         // Wire signatures are 0x r||s||v with v 27/28; providers return v 0/1.
         let hex = case.signature.trim_start_matches("0x");
@@ -352,7 +355,7 @@ mod tests {
             let mut inputs = standard.clone();
             inputs[field] = value;
             assert_eq!(
-                STANDARD.canonicalize(&inputs),
+                STANDARD.canonicalize(&inputs.to_string()),
                 Err(SignError::Refused),
                 "{field}"
             );
@@ -382,14 +385,17 @@ mod tests {
             let mut inputs = code.clone();
             inputs[field] = value;
             assert_eq!(
-                CODE.canonicalize(&inputs),
+                CODE.canonicalize(&inputs.to_string()),
                 Err(SignError::Refused),
                 "{field}"
             );
         }
-        assert_eq!(STANDARD.stamp_ms(&standard), Ok(case_stamp(&case.payload)));
         assert_eq!(
-            CODE.stamp_ms(&code),
+            STANDARD.stamp_ms(&standard.to_string()),
+            Ok(case_stamp(&case.payload))
+        );
+        assert_eq!(
+            CODE.stamp_ms(&code.to_string()),
             Ok((case.nonce.parse::<u64>().unwrap() / 1000) as f64)
         );
         assert_eq!(

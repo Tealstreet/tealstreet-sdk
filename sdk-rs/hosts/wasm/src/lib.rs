@@ -1314,7 +1314,10 @@ mod tests {
             safe_cex_engine::signing_remote::RemoteWire {
                 recipe: "orderly.rest.1",
                 role: None,
-                inputs: serde_json::json!({ "path": "/v1/positions" }),
+                inputs: serde_json::value::RawValue::from_string(
+                    r#"{"path":"/v1/positions"}"#.into(),
+                )
+                .unwrap(),
             },
         )))]);
         assert_eq!(

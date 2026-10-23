@@ -108,6 +108,20 @@ fn signed_path(path: &str) -> bool {
 }
 
 /// `orderly.rest.1`: ed25519 over `timestamp ‖ METHOD ‖ path?query ‖ body`.
+/// `orderly.rest.1` inputs; any other field is refused.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RestInputs<'a> {
+    #[serde(borrow)]
+    timestamp: std::borrow::Cow<'a, str>,
+    #[serde(borrow)]
+    method: std::borrow::Cow<'a, str>,
+    #[serde(borrow)]
+    path: std::borrow::Cow<'a, str>,
+    #[serde(borrow, default)]
+    body: std::borrow::Cow<'a, str>,
+}
+
 pub struct Rest;
 impl safe_cex_engine::signing_remote::RemoteRecipe for Rest {
     fn id(&self) -> &'static str {
@@ -119,47 +133,36 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for Rest {
     fn role(&self) -> Option<safe_cex_engine::signing::ExtraKey> {
         None
     }
-    fn canonicalize(
-        &self,
-        inputs: &serde_json::Value,
-    ) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
         use safe_cex_engine::signing::SignError::Refused;
-        let field = |name| inputs.get(name).and_then(serde_json::Value::as_str);
-        let object = inputs.as_object().ok_or(Refused)?;
-        if object
-            .keys()
-            .any(|key| !matches!(key.as_str(), "timestamp" | "method" | "path" | "body"))
+        let inputs: RestInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
+        if !matches!(&*inputs.method, "GET" | "POST" | "PUT" | "DELETE")
+            || inputs.timestamp.is_empty()
+            || inputs.timestamp.len() > 16
+            || !inputs.timestamp.bytes().all(|b| b.is_ascii_digit())
+            || !signed_path(&inputs.path)
+            || inputs
+                .path
+                .bytes()
+                .any(|b| b.is_ascii_control() || b == b'#')
         {
             return Err(Refused);
         }
-        let timestamp = field("timestamp").ok_or(Refused)?;
-        let method = field("method").ok_or(Refused)?;
-        let path = field("path").ok_or(Refused)?;
-        let body = match inputs.get("body") {
-            None => "",
-            Some(body) => body.as_str().ok_or(Refused)?,
-        };
-        if timestamp.is_empty()
-            || timestamp.len() > 16
-            || !timestamp.bytes().all(|b| b.is_ascii_digit())
-            || !matches!(method, "GET" | "POST" | "PUT" | "DELETE")
-            || !signed_path(path)
-            || path.bytes().any(|b| b.is_ascii_control() || b == b'#')
-        {
-            return Err(Refused);
-        }
-        Ok(canonical_text(timestamp, method, path, body).into_bytes())
+        Ok(canonical_text(
+            &inputs.timestamp,
+            &inputs.method,
+            &inputs.path,
+            &inputs.body,
+        )
+        .into_bytes())
     }
-    fn stamp_ms(
-        &self,
-        inputs: &serde_json::Value,
-    ) -> Result<f64, safe_cex_engine::signing::SignError> {
+    fn stamp_ms(&self, inputs: &str) -> Result<f64, safe_cex_engine::signing::SignError> {
+        let inputs: RestInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
         inputs
-            .get("timestamp")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|stamp| stamp.parse::<u64>().ok())
+            .timestamp
+            .parse::<u64>()
             .map(|stamp| stamp as f64)
-            .ok_or(safe_cex_engine::signing::SignError::Refused)
+            .map_err(|_| safe_cex_engine::signing::SignError::Refused)
     }
 }
 pub static REST: Rest = Rest;
@@ -213,9 +216,12 @@ mod tests {
             .unwrap();
         let header = |name: &str| h.iter().find(|(k, _)| *k == name).unwrap().1.clone();
         let bytes = REST
-            .canonicalize(&serde_json::json!({
-                "timestamp": "1234", "method": "POST", "path": "/v1/order", "body": body
-            }))
+            .canonicalize(
+                &serde_json::json!({
+                    "timestamp": "1234", "method": "POST", "path": "/v1/order", "body": body
+                })
+                .to_string(),
+            )
             .unwrap();
         assert_eq!(bytes, header("orderly-textsign").into_bytes());
         assert_eq!(
@@ -223,9 +229,12 @@ mod tests {
             header("orderly-signature")
         );
         let read = REST
-            .canonicalize(&serde_json::json!({
-                "timestamp": "1", "method": "GET", "path": "/v1/order/123/trades"
-            }))
+            .canonicalize(
+                &serde_json::json!({
+                    "timestamp": "1", "method": "GET", "path": "/v1/order/123/trades"
+                })
+                .to_string(),
+            )
             .unwrap();
         assert_eq!(read, b"1GET/v1/order/123/trades");
     }
@@ -261,7 +270,7 @@ mod tests {
         use safe_cex_engine::signing::SignError::Refused;
         use safe_cex_engine::signing_remote::RemoteRecipe;
         let ok = serde_json::json!({ "timestamp": "1", "method": "GET", "path": "/v1/positions" });
-        assert!(REST.canonicalize(&ok).is_ok());
+        assert!(REST.canonicalize(&ok.to_string()).is_ok());
         for (field, value) in [
             ("path", serde_json::json!("/v1/withdraw")),
             ("path", serde_json::json!("/v1/order/../withdraw/trades")),
@@ -275,7 +284,11 @@ mod tests {
         ] {
             let mut inputs = ok.clone();
             inputs[field] = value;
-            assert_eq!(REST.canonicalize(&inputs), Err(Refused), "{field}");
+            assert_eq!(
+                REST.canonicalize(&inputs.to_string()),
+                Err(Refused),
+                "{field}"
+            );
         }
         assert_eq!(REMOTE_RECIPES.len(), 1);
         assert_eq!(REMOTE_RECIPES[0].id(), "orderly.rest.1");

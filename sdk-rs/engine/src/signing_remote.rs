@@ -1,7 +1,9 @@
 //! Versioned remote-signing recipes (P8). A recipe turns non-secret inputs into
 //! the exact bytes one `Sign` operation covers, so a remote signer can rebuild
-//! and check the preimage instead of signing opaque bytes.
+//! and check the preimage instead of signing opaque bytes. Inputs are JSON text;
+//! each recipe parses them into its own typed form.
 use crate::signing::{Algorithm, ExtraKey, Operation, PayloadPart, SignError, SignRequest};
+use serde_json::value::RawValue;
 
 /// Serialized `inputs` limit, separate from the 1 MiB payload bound.
 pub const MAX_REMOTE_INPUT_BYTES: usize = 64 * 1024;
@@ -20,15 +22,24 @@ pub trait RemoteRecipe: Sync {
     fn algorithm(&self) -> Algorithm;
     /// `None` signs with the identity's ordinary signing ref.
     fn role(&self) -> Option<ExtraKey>;
-    fn canonicalize(&self, inputs: &serde_json::Value) -> Result<Vec<u8>, SignError>;
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, SignError>;
     /// The protocol time (ms) the signed bytes carry; every recipe has one so
     /// the executor can refuse stale or future-dated work.
-    fn stamp_ms(&self, inputs: &serde_json::Value) -> Result<f64, SignError>;
-    /// An input field that must equal the executing account's own presented
+    fn stamp_ms(&self, inputs: &str) -> Result<f64, SignError>;
+    /// An input value that must equal the executing account's own presented
     /// credential (e.g. a JWT `kid`), so a recipe cannot sign for another key.
-    fn bound_credential_field(&self) -> Option<&'static str> {
-        None
+    fn bound_credential(&self, _inputs: &str) -> Result<Option<String>, SignError> {
+        Ok(None)
     }
+}
+
+/// Parses recipe inputs into the recipe's typed form; any shape it does not
+/// declare (unknown fields included, via `deny_unknown_fields`) is refused.
+pub fn parse_inputs<'a, T: serde::Deserialize<'a>>(inputs: &'a str) -> Result<T, SignError> {
+    if inputs.len() > MAX_REMOTE_INPUT_BYTES {
+        return Err(SignError::InvalidRequest);
+    }
+    serde_json::from_str(inputs).map_err(|_| SignError::Refused)
 }
 
 /// Checks a signature over the bound payload against the account's declared
@@ -38,13 +49,14 @@ pub type RemoteVerifier = Box<dyn Fn(&[u8], &[u8]) -> bool + Send>;
 /// The step-side remote description of one prepared `SignRequest`.
 pub struct RemoteOp {
     pub recipe: &'static dyn RemoteRecipe,
-    pub inputs: serde_json::Value,
+    /// JSON text the recipe canonicalizes.
+    pub inputs: String,
     /// When present, every result is verified before release; families with no
     /// verification key (Coinbase, Lighter) rely on venue rejection instead.
     pub verify: Option<RemoteVerifier>,
 }
 impl RemoteOp {
-    pub fn new(recipe: &'static dyn RemoteRecipe, inputs: serde_json::Value) -> Self {
+    pub fn new(recipe: &'static dyn RemoteRecipe, inputs: String) -> Self {
         Self {
             recipe,
             inputs,
@@ -58,13 +70,20 @@ impl RemoteOp {
 }
 
 /// What crosses to a host provider beside the unchanged `SignRequest`.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteWire {
     pub recipe: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<ExtraKey>,
-    pub inputs: serde_json::Value,
+    pub inputs: Box<RawValue>,
+}
+impl PartialEq for RemoteWire {
+    fn eq(&self, other: &Self) -> bool {
+        self.recipe == other.recipe
+            && self.role == other.role
+            && self.inputs.get() == other.inputs.get()
+    }
 }
 
 impl RemoteOp {
@@ -72,12 +91,11 @@ impl RemoteOp {
     /// recipe's algorithm whose literal bytes are the recipe's canonical bytes,
     /// beside `Present` operations only. Anything else never leaves.
     pub fn bind(&self, request: &SignRequest) -> Result<RemoteWire, SignError> {
-        let size = serde_json::to_vec(&self.inputs)
-            .map_err(|_| SignError::InvalidRequest)?
-            .len();
-        if size > MAX_REMOTE_INPUT_BYTES {
+        if self.inputs.len() > MAX_REMOTE_INPUT_BYTES {
             return Err(SignError::InvalidRequest);
         }
+        let inputs =
+            RawValue::from_string(self.inputs.clone()).map_err(|_| SignError::InvalidRequest)?;
         let mut signed = None;
         for operation in &request.operations {
             match operation {
@@ -106,7 +124,7 @@ impl RemoteOp {
         Ok(RemoteWire {
             recipe: self.recipe.id(),
             role: self.recipe.role(),
-            inputs: self.inputs.clone(),
+            inputs,
         })
     }
 }
@@ -128,21 +146,26 @@ mod tests {
         fn role(&self) -> Option<ExtraKey> {
             None
         }
-        fn canonicalize(&self, inputs: &serde_json::Value) -> Result<Vec<u8>, SignError> {
-            let qty = inputs["qty"].as_u64().ok_or(SignError::Refused)?;
+        fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, SignError> {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Inputs {
+                qty: u64,
+            }
+            let Inputs { qty } = parse_inputs(inputs)?;
             if qty > 100 {
                 return Err(SignError::Refused);
             }
             Ok(format!("order:{qty}").into_bytes())
         }
-        fn stamp_ms(&self, _: &serde_json::Value) -> Result<f64, SignError> {
+        fn stamp_ms(&self, _: &str) -> Result<f64, SignError> {
             Ok(0.)
         }
     }
     static ORDER: Order = Order;
 
-    fn op(qty: serde_json::Value) -> RemoteOp {
-        RemoteOp::new(&ORDER, serde_json::json!({ "qty": qty }))
+    fn op(qty: u64) -> RemoteOp {
+        RemoteOp::new(&ORDER, format!(r#"{{"qty":{qty}}}"#))
     }
     fn sign(algorithm: Algorithm, payload: Vec<PayloadPart>) -> Operation {
         Operation::Sign {
@@ -173,11 +196,11 @@ mod tests {
             sign(Algorithm::Ed25519, vec![bytes("order:"), bytes("7")]),
         ]);
         assert_eq!(
-            op(7.into()).bind(&work),
+            op(7).bind(&work),
             Ok(RemoteWire {
                 recipe: "test.order.1",
                 role: None,
-                inputs: serde_json::json!({ "qty": 7 }),
+                inputs: RawValue::from_string(r#"{"qty":7}"#.into()).unwrap(),
             })
         );
     }
@@ -218,14 +241,23 @@ mod tests {
                 SignError::InvalidRequest,
             ),
         ] {
-            assert_eq!(op(7.into()).bind(&request(operations)), Err(expected));
+            assert_eq!(op(7).bind(&request(operations)), Err(expected));
         }
         // The recipe's own allowlist refusal is a designed refusal, not a bug.
         let over = request(vec![sign(Algorithm::Ed25519, vec![bytes("order:101")])]);
-        assert_eq!(op(101.into()).bind(&over), Err(SignError::Refused));
+        assert_eq!(op(101).bind(&over), Err(SignError::Refused));
         let huge = RemoteOp::new(
             &ORDER,
-            serde_json::json!({ "qty": 7, "pad": "x".repeat(MAX_REMOTE_INPUT_BYTES) }),
+            format!(
+                r#"{{"qty":7,"pad":"{}"}}"#,
+                "x".repeat(MAX_REMOTE_INPUT_BYTES)
+            ),
+        );
+        // Unknown fields are refused by the typed parse, not ignored.
+        let extra = request(vec![matching()]);
+        assert_eq!(
+            RemoteOp::new(&ORDER, r#"{"qty":7,"to":"x"}"#.into()).bind(&extra),
+            Err(SignError::Refused)
         );
         assert_eq!(
             huge.bind(&request(vec![matching()])),
@@ -235,7 +267,7 @@ mod tests {
 
     #[test]
     fn wire_omits_an_absent_role() {
-        let wire = op(7.into())
+        let wire = op(7)
             .bind(&request(vec![sign(
                 Algorithm::Ed25519,
                 vec![bytes("order:7")],

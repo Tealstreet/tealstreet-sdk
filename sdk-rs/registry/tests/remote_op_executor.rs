@@ -42,8 +42,10 @@ fn account(credential: &str) -> (LocalSigner, Identities) {
 }
 
 fn op(recipe: &str, inputs: serde_json::Value) -> Input {
-    serde_json::from_value(serde_json::json!({ "kind": "op", "recipe": recipe, "inputs": inputs }))
-        .unwrap()
+    serde_json::from_value(serde_json::json!({
+        "kind": "op", "recipe": recipe, "inputs": inputs.to_string()
+    }))
+    .unwrap()
 }
 
 /// Runs the executor end to end and returns the raw signature bytes.
@@ -130,8 +132,7 @@ fn executor_refuses_stale_and_future_dated_recipe_stamps() {
         hosted_signing::op_timeout_ms(&op("orderly.rest.9", orderly_inputs()), stamp),
         Err(SignError::Unsupported)
     );
-    let credential: Input =
-        serde_json::from_value(serde_json::json!({ "kind": "credential" })).unwrap();
+    let credential: Input = serde_json::from_str(r#"{"kind":"credential"}"#).unwrap();
     assert_eq!(hosted_signing::op_timeout_ms(&credential, stamp), Ok(None));
 }
 
@@ -150,7 +151,7 @@ fn coinbase_jwt_recipe_binds_kid_to_the_accounts_own_key_name() {
     )
     .unwrap();
     let recipe = safe_cex_venues::remote_recipe("coinbase.restJwtEd25519.1").unwrap();
-    let message = recipe.canonicalize(&inputs(KID)).unwrap();
+    let message = recipe.canonicalize(&inputs(KID).to_string()).unwrap();
     assert!(safe_cex_crypto::ed25519::verify(&message, &PUBLIC, &signature).unwrap());
     // Another account's key name is refused even though the recipe accepts it.
     let other = "organizations/org-id/apiKeys/someone-else";

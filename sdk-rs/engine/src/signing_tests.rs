@@ -1697,24 +1697,34 @@ impl crate::signing_remote::RemoteRecipe for QtyRecipe {
     fn role(&self) -> Option<crate::signing::ExtraKey> {
         None
     }
-    fn canonicalize(&self, inputs: &serde_json::Value) -> Result<Vec<u8>, SignError> {
-        match inputs["qty"].as_u64() {
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, SignError> {
+        match qty_of(inputs) {
             Some(qty) if qty <= 100 => Ok(format!("qty:{qty}").into_bytes()),
             _ => Err(SignError::Refused),
         }
     }
-    fn stamp_ms(&self, _: &serde_json::Value) -> Result<f64, SignError> {
+    fn stamp_ms(&self, _: &str) -> Result<f64, SignError> {
         Ok(0.)
     }
 }
 static QTY: QtyRecipe = QtyRecipe;
+fn qty_of(inputs: &str) -> Option<u64> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Inputs {
+        qty: u64,
+    }
+    crate::signing_remote::parse_inputs::<Inputs>(inputs)
+        .ok()
+        .map(|inputs| inputs.qty)
+}
 /// Builds its payload and its remote description from the same quantity.
 struct RemoteStep(crate::signing_remote::RemoteOp);
 impl RemoteStep {
     fn new(qty: u64) -> Self {
         Self(crate::signing_remote::RemoteOp::new(
             &QTY,
-            serde_json::json!({ "qty": qty }),
+            format!(r#"{{"qty":{qty}}}"#),
         ))
     }
 }
@@ -1724,7 +1734,7 @@ impl crate::SignStep for RemoteStep {
         _: &mut Action,
         _: &crate::DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
-        let qty = self.0.inputs["qty"].as_u64().unwrap();
+        let qty = qty_of(&self.0.inputs).unwrap();
         Ok(SignRequest {
             receipt: Default::default(),
             context: Context::default(),
@@ -1781,7 +1791,7 @@ fn bound_remote_op_travels_with_host_sign_work() {
         Some(Box::new(crate::signing_remote::RemoteWire {
             recipe: "test.qty.1",
             role: None,
-            inputs: serde_json::json!({ "qty": 7 }),
+            inputs: serde_json::value::RawValue::from_string(r#"{"qty":7}"#.into()).unwrap(),
         }))
     );
 }

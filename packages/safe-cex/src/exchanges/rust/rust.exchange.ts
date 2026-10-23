@@ -434,7 +434,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     try {
       await this.ensureHost();
-      const output = await this.host!.hostedSigning({ kind: 'op', recipe: op.recipe, inputs: op.inputs });
+      const output = await this.host!.hostedSigning({ kind: 'op', recipe: op.recipe, inputs: JSON.stringify(op.inputs) });
       if (typeof output.signature !== 'string' || !output.signature) throw new Error('missing signature');
       return { id: request.id, opSignature: output.signature };
     } catch {

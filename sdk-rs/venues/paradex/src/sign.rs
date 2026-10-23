@@ -354,6 +354,23 @@ const ORDER_TYPES: &[&str] = &[
 
 /// `paradex.order.1`: Stark signature over the `Order`/`ModifyOrder` typed-data
 /// hash, carried as the 32-byte big-endian digest. Auth requests are not covered.
+/// `paradex.order.1` inputs; any other field is refused.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct OrderInputs {
+    chain_id: String,
+    account: String,
+    timestamp: String,
+    market: String,
+    side: String,
+    order_type: String,
+    size: String,
+    #[serde(default)]
+    price: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
+}
+
 pub struct OrderRecipe;
 impl safe_cex_engine::signing_remote::RemoteRecipe for OrderRecipe {
     fn id(&self) -> &'static str {
@@ -365,62 +382,47 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for OrderRecipe {
     fn role(&self) -> Option<safe_cex_engine::signing::ExtraKey> {
         None
     }
-    fn canonicalize(
-        &self,
-        inputs: &serde_json::Value,
-    ) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
         use safe_cex_engine::signing::SignError::Refused;
-        let object = inputs.as_object().ok_or(Refused)?;
-        const FIELDS: &[&str] = &[
-            "chainId",
-            "account",
-            "timestamp",
-            "market",
-            "side",
-            "orderType",
-            "size",
-            "price",
-            "id",
-        ];
-        if object.keys().any(|key| !FIELDS.contains(&key.as_str())) {
-            return Err(Refused);
+        let inputs: OrderInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
+        let required = |value: &str| (!value.is_empty()).then_some(()).ok_or(Refused);
+        for value in [
+            &inputs.chain_id,
+            &inputs.account,
+            &inputs.timestamp,
+            &inputs.market,
+            &inputs.side,
+            &inputs.order_type,
+            &inputs.size,
+        ] {
+            required(value)?;
         }
-        let text = |name: &str| match object.get(name) {
-            None => Ok(None),
-            Some(value) => value.as_str().map(Some).ok_or(Refused),
-        };
-        let required = |name: &str| text(name)?.filter(|v| !v.is_empty()).ok_or(Refused);
-        let timestamp = required("timestamp")?;
-        if timestamp.len() > 16 || !timestamp.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(Refused);
-        }
-        let order_type = required("orderType")?;
-        if !ORDER_TYPES.contains(&order_type) {
-            return Err(Refused);
-        }
-        let market = required("market")?;
-        if !market
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        if inputs.timestamp.len() > 16
+            || !inputs.timestamp.bytes().all(|b| b.is_ascii_digit())
+            || !ORDER_TYPES.contains(&inputs.order_type.as_str())
+            || !inputs
+                .market
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         {
             return Err(Refused);
         }
-        let account = felt(required("account")?).map_err(|_| Refused)?;
+        let account = felt(&inputs.account).map_err(|_| Refused)?;
         if account == Felt::ZERO {
             return Err(Refused);
         }
         let (definition, values) = order_message(
-            timestamp.parse().map_err(|_| Refused)?,
-            market,
-            required("side")?,
-            order_type,
-            required("size")?,
-            text("price")?,
-            text("id")?,
+            inputs.timestamp.parse().map_err(|_| Refused)?,
+            &inputs.market,
+            &inputs.side,
+            &inputs.order_type,
+            &inputs.size,
+            inputs.price.as_deref(),
+            inputs.id.as_deref(),
         )
         .map_err(|_| Refused)?;
         let hash = typed_hash(
-            chain_id(required("chainId")?).map_err(|_| Refused)?,
+            chain_id(&inputs.chain_id).map_err(|_| Refused)?,
             account,
             definition,
             &values,
@@ -428,16 +430,13 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for OrderRecipe {
         .map_err(|_| Refused)?;
         Ok(hash.to_bytes_be().to_vec())
     }
-    fn stamp_ms(
-        &self,
-        inputs: &serde_json::Value,
-    ) -> Result<f64, safe_cex_engine::signing::SignError> {
+    fn stamp_ms(&self, inputs: &str) -> Result<f64, safe_cex_engine::signing::SignError> {
+        let inputs: OrderInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
         inputs
-            .get("timestamp")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|stamp| stamp.parse::<u64>().ok())
+            .timestamp
+            .parse::<u64>()
             .map(|stamp| stamp as f64)
-            .ok_or(safe_cex_engine::signing::SignError::Refused)
+            .map_err(|_| safe_cex_engine::signing::SignError::Refused)
     }
 }
 pub static ORDER: OrderRecipe = OrderRecipe;
@@ -659,16 +658,19 @@ mod tests {
         }
     }
     const ACCOUNT: &str = "0x0129f5ed7e7e3b5a8c9a3e2f1d0c4b6a7e8f9d0c1b2a39485766554433221100";
-    fn recipe_inputs(id: Option<&str>) -> serde_json::Value {
-        let mut inputs = serde_json::json!({
-            "chainId": "PRIVATE_SN_POTC_SEPOLIA", "account": ACCOUNT, "timestamp": "1700000000123",
-            "market": "BTC-USD-PERP", "side": "BUY", "orderType": "LIMIT",
-            "size": "0.25", "price": "64000.5"
-        });
-        if let Some(id) = id {
-            inputs["id"] = id.into();
-        }
-        inputs
+    /// Inputs JSON for the fixed order (a macro so no tree type is named here).
+    macro_rules! recipe_inputs {
+        ($id:expr) => {{
+            let mut inputs = serde_json::json!({
+                "chainId": "PRIVATE_SN_POTC_SEPOLIA", "account": ACCOUNT, "timestamp": "1700000000123",
+                "market": "BTC-USD-PERP", "side": "BUY", "orderType": "LIMIT",
+                "size": "0.25", "price": "64000.5"
+            });
+            if let Some(id) = $id {
+                inputs["id"] = id.into();
+            }
+            inputs
+        }};
     }
 
     #[test]
@@ -698,7 +700,7 @@ mod tests {
             }
             .unwrap()
             .signature;
-            let digest = ORDER.canonicalize(&recipe_inputs(id)).unwrap();
+            let digest = ORDER.canonicalize(&recipe_inputs!(id).to_string()).unwrap();
             assert_eq!(digest.len(), 32);
             assert_eq!(
                 format!("{:#x}", Felt::from_bytes_be_slice(&digest)),
@@ -719,7 +721,9 @@ mod tests {
             )
             .unwrap()
             .signature;
-        let digest = ORDER.canonicalize(&recipe_inputs(None)).unwrap();
+        let digest = ORDER
+            .canonicalize(&recipe_inputs!(None::<&str>).to_string())
+            .unwrap();
         let (r, s) =
             starknet::sign(&Felt::from_bytes_be_slice(&digest), &felt(&key).unwrap()).unwrap();
         assert_eq!(
@@ -735,7 +739,9 @@ mod tests {
     #[test]
     fn remote_verifier_checks_the_stark_public_key() {
         use safe_cex_engine::signing_remote::RemoteRecipe;
-        let digest = ORDER.canonicalize(&recipe_inputs(None)).unwrap();
+        let digest = ORDER
+            .canonicalize(&recipe_inputs!(None::<&str>).to_string())
+            .unwrap();
         let key = Felt::from(5u8);
         let (r, s) = starknet::sign(&Felt::from_bytes_be_slice(&digest), &key).unwrap();
         let mut signature = r.to_bytes_be().to_vec();
@@ -766,9 +772,13 @@ mod tests {
             ("price", serde_json::json!(1)),
             ("subject", serde_json::json!("0x3")),
         ] {
-            let mut inputs = recipe_inputs(None);
+            let mut inputs = recipe_inputs!(None::<&str>);
             inputs[field] = value;
-            assert_eq!(ORDER.canonicalize(&inputs), Err(Refused), "{field}");
+            assert_eq!(
+                ORDER.canonicalize(&inputs.to_string()),
+                Err(Refused),
+                "{field}"
+            );
         }
         assert_eq!(REMOTE_RECIPES[0].id(), "paradex.order.1");
     }

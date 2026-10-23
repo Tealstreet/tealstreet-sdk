@@ -314,6 +314,17 @@ fn signed_uri(uri: &str) -> bool {
 
 /// `coinbase.restJwt*.1`: the JWS signing input from non-secret claims. The
 /// header nonce comes from engine signing entropy; `exp - nbf` is fixed at 120 s.
+/// `coinbase.restJwt*.1` inputs; any other field is refused.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JwtInputs {
+    kid: String,
+    nonce: String,
+    nbf: u64,
+    #[serde(default)]
+    uri: Option<String>,
+}
+
 pub struct RestJwt(JwtKind);
 impl safe_cex_engine::signing_remote::RemoteRecipe for RestJwt {
     fn id(&self) -> &'static str {
@@ -331,53 +342,36 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for RestJwt {
     fn role(&self) -> Option<safe_cex_engine::signing::ExtraKey> {
         None
     }
-    fn bound_credential_field(&self) -> Option<&'static str> {
-        Some("kid")
-    }
-    fn canonicalize(
+    fn bound_credential(
         &self,
-        inputs: &serde_json::Value,
-    ) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
+        inputs: &str,
+    ) -> Result<Option<String>, safe_cex_engine::signing::SignError> {
+        let inputs: JwtInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
+        Ok(Some(inputs.kid))
+    }
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
         use safe_cex_engine::signing::SignError::Refused;
-        let object = inputs.as_object().ok_or(Refused)?;
-        if object
-            .keys()
-            .any(|key| !matches!(key.as_str(), "kid" | "nonce" | "nbf" | "uri"))
+        let inputs: JwtInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
+        if inputs.uri.as_deref().is_some_and(|uri| !signed_uri(uri))
+            || !valid_key_name(&inputs.kid)
+            || inputs.nbf > u64::MAX / 2
         {
             return Err(Refused);
         }
-        let kid = object
-            .get("kid")
-            .and_then(serde_json::Value::as_str)
-            .ok_or(Refused)?;
-        let nonce = object
-            .get("nonce")
-            .and_then(serde_json::Value::as_str)
-            .ok_or(Refused)?;
-        let nbf = object
-            .get("nbf")
-            .and_then(serde_json::Value::as_u64)
-            .ok_or(Refused)?;
-        let uri = match object.get("uri") {
-            None => None,
-            Some(uri) => Some(uri.as_str().filter(|uri| signed_uri(uri)).ok_or(Refused)?),
-        };
-        if !valid_key_name(kid) || nbf > u64::MAX / 2 {
-            return Err(Refused);
-        }
-        signing_input(self.0, kid, nonce, nbf, uri)
-            .map(String::into_bytes)
-            .map_err(|_| Refused)
+        signing_input(
+            self.0,
+            &inputs.kid,
+            &inputs.nonce,
+            inputs.nbf,
+            inputs.uri.as_deref(),
+        )
+        .map(String::into_bytes)
+        .map_err(|_| Refused)
     }
-    fn stamp_ms(
-        &self,
-        inputs: &serde_json::Value,
-    ) -> Result<f64, safe_cex_engine::signing::SignError> {
-        inputs
-            .get("nbf")
-            .and_then(serde_json::Value::as_u64)
-            .filter(|nbf| *nbf <= u64::MAX / 2000)
-            .map(|nbf| (nbf * 1000) as f64)
+    fn stamp_ms(&self, inputs: &str) -> Result<f64, safe_cex_engine::signing::SignError> {
+        let inputs: JwtInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
+        (inputs.nbf <= u64::MAX / 2000)
+            .then(|| (inputs.nbf * 1000) as f64)
             .ok_or(safe_cex_engine::signing::SignError::Refused)
     }
 }
@@ -535,7 +529,10 @@ mod tests {
                 if let Some(uri) = uri {
                     inputs["uri"] = uri.into();
                 }
-                assert_eq!(recipe.canonicalize(&inputs).unwrap(), input.into_bytes());
+                assert_eq!(
+                    recipe.canonicalize(&inputs.to_string()).unwrap(),
+                    input.into_bytes()
+                );
             }
         }
         assert_eq!(
@@ -552,7 +549,7 @@ mod tests {
             "kid": KEY, "nonce": "n", "nbf": 1,
             "uri": "GET api.coinbase.com/api/v3/brokerage/orders/historical/0b9e2c4a-1f3d-4c5e-8a7b-6d5c4b3a2f10"
         });
-        assert!(REST_JWT_ES256.canonicalize(&ok).is_ok());
+        assert!(REST_JWT_ES256.canonicalize(&ok.to_string()).is_ok());
         for (field, value) in [
             (
                 "uri",
@@ -590,7 +587,7 @@ mod tests {
             let mut inputs = ok.clone();
             inputs[field] = value;
             assert_eq!(
-                REST_JWT_ES256.canonicalize(&inputs),
+                REST_JWT_ES256.canonicalize(&inputs.to_string()),
                 Err(Refused),
                 "{field}"
             );

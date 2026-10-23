@@ -10,6 +10,9 @@ description = "Every Rust venue, constructed by name from one options shape"
 # signing compiles the provider), keeping other family WASM builds free of it.
 # Additive provider bootstrap; at least one venue feature is still required.
 dispatch-signing = ["dep:safe-cex-crypto"]
+# Versioned P8 recipe lookup and the hosted recipe executor; only families
+# that export recipes enable it, so other family builds stay lean.
+remote-recipes = []
 default = [
     "bitunix",
     "grvt",
@@ -42,13 +45,13 @@ default = [
 ]
 grvt = ["dep:safe-cex-venue-grvt"]
 polymarket = ["dep:safe-cex-venue-polymarket"]
-coinbase = ["dep:safe-cex-venue-coinbase", "safe-cex-crypto?/ed25519", "safe-cex-crypto?/es256"]
+coinbase = ["dep:safe-cex-venue-coinbase", "safe-cex-crypto?/ed25519", "safe-cex-crypto?/es256", "remote-recipes"]
 breakoutprop = ["dep:safe-cex-venue-breakoutprop"]
-paradex = ["dep:safe-cex-venue-paradex", "safe-cex-crypto?/stark"]
+paradex = ["dep:safe-cex-venue-paradex", "safe-cex-crypto?/stark", "remote-recipes"]
 apexomni = ["dep:safe-cex-venue-apexomni"]
 txflow = ["dep:safe-cex-venue-txflow"]
 kraken = ["dep:safe-cex-venue-kraken"]
-asterdex = ["dep:safe-cex-venue-asterdex", "safe-cex-crypto?/secp256k1"]
+asterdex = ["dep:safe-cex-venue-asterdex", "safe-cex-crypto?/secp256k1", "remote-recipes"]
 lighter = ["dep:safe-cex-venue-lighter"]
 woo = ["dep:safe-cex-venue-woo"]
 bitrue = ["dep:safe-cex-venue-bitrue"]
@@ -67,7 +70,7 @@ kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
 bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 okx = ["dep:safe-cex-venue-okx"]
-orderly = ["dep:safe-cex-venue-orderly", "safe-cex-crypto?/ed25519"]
+orderly = ["dep:safe-cex-venue-orderly", "safe-cex-crypto?/ed25519", "remote-recipes"]
 
 [dependencies]
 safe-cex-crypto = { workspace = true, optional = true }
