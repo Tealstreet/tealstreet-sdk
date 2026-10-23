@@ -452,16 +452,17 @@ pub(super) fn capture_ids(
         client_order_id: Option<String>,
         client_algo_id: Option<String>,
     }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
-        return;
+    let rows = if body.trim_start().starts_with('[') {
+        serde_json::from_str::<Vec<&serde_json::value::RawValue>>(body)
+    } else {
+        serde_json::from_str::<&serde_json::value::RawValue>(body).map(|row| vec![row])
     };
-    let rows = match value {
-        serde_json::Value::Array(rows) => rows,
-        row => vec![row],
+    let Ok(rows) = rows else {
+        return;
     };
     let mut seen = HashSet::new();
     for row in rows {
-        let Ok(row) = serde_json::from_value::<IdentityRow>(row) else {
+        let Ok(row) = serde_json::from_str::<IdentityRow>(row.get()) else {
             continue;
         };
         for (id, client) in [

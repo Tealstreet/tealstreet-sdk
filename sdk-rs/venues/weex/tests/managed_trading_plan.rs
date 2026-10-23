@@ -751,3 +751,25 @@ fn contradictory_rate_limit_preserves_the_native_read_cooldown() {
             .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==START+3001.))
     );
 }
+
+#[test]
+fn malformed_batch_rows_do_not_erase_other_correlated_identity_evidence() {
+    let mut engine = engine();
+    place(&mut engine, 3);
+    let request = packet(&collect(&mut engine, START));
+    let actions = respond(
+        &mut engine,
+        &request,
+        START + 1.,
+        200,
+        r#"[{"success":true,"clientOrderId":"plan-0","orderId":"9000"},7,{"success":true,"clientOrderId":"plan-2","orderId":"9002"}]"#,
+    );
+    assert_eq!(failures(&actions).len(), 1);
+    let error = failures(&actions)[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        vec!["9000", "9002"]
+    );
+    assert!(engine.store().orders().is_empty());
+}

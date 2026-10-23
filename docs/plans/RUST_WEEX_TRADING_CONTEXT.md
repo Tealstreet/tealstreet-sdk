@@ -237,8 +237,8 @@ Independent source review found ACK contradictions, lost IDs from truncated
 batches, and a lost trading rate cooldown. Native controls reproduced each;
 corrections keep conflicting aliases/codes Unknown, retain only correlated native
 IDs under shared evidence budgets, and preserve native read cooldown from shared
-rate classification. The bounded correction review is CLEAR. Twenty managed
-controls pass; the root-first expiry control below deliberately remains RED.
+rate classification. The bounded correction review is CLEAR. At checkpoint 57948baf852, twenty managed
+controls pass and the root-first expiry control below deliberately remains RED.
 
 `root_expiry_cleans_provisional_rows_before_late_ack` reproduces a shared
 Plan-core defect: firing the Plan timer at the root bound seals the owner and
@@ -248,3 +248,19 @@ authority and must keep that restriction. The overseer assigned uufub4 a separat
 engine fix routing outstanding calls through existing typed cleanup before
 retirement, preserving expired-root send denial. This WEEX checkpoint is blocked
 on that fix; it is not merge-ready and the RED must not be ignored or weakened.
+
+
+## Reviewed cleanup prerequisite consumed
+
+The native root-first control is GREEN after genuinely integrating reviewed
+engine PR #1932 at 627b387a9a2 (WEEX merge e549f693c16). Engine files are byte-exact
+incoming; the shared CALLERS append preserved incoming first and the WEEX section
+once. All 218 existing/current WEEX native tests pass, including all21 managed
+controls with none ignored. One additional malformed-row compatibility control
+covers retaining correlated IDs around an invalid array item. Identity capture
+uses typed borrowed raw rows, not an untyped JSON tree.
+
+The original root-expiry RED stays unchanged; WEEX lands only after #1932.
+Strict/fmt/bans and fresh CI are required for the published head. Independent
+source correction and signer/identity/no-retry plan reviews are CLEAR. No generic
+sender staging removal or whole-family-zero claim is made.
