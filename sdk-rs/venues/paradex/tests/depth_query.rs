@@ -19,7 +19,26 @@ fn ask(e: &mut Engine<Paradex>, command: u32, symbol: &str, limit: Option<u32>) 
             limit,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let mut deadline = None;
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_actions(e, 1000.0)
+        .into_iter()
+        .filter(|action| {
+            if let Action::SetTimer { timer, at_ms } = action {
+                assert_eq!(*at_ms, 21_000.0);
+                assert!(
+                    deadline.replace(*timer).is_none(),
+                    "one original read deadline"
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    assert!(
+        deadline.is_some(),
+        "managed read retains its original deadline"
+    );
     assert_eq!(
         actions.len(),
         1,
