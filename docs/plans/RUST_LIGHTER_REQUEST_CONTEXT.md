@@ -669,3 +669,18 @@ bans and both inventory checks/15controls; three independent plan then implement
 reviews, architecture No (existing shared Context/managed HTTP), draft/background
 CI at120s and serialized train slot only when green. No catalog/private/signing
 or whole-family-zero claim.
+
+Ticker execution receipt: original six compiled admission assertions are RED at
+85eec6c0675; all six pass on managed source. Driver-only24a7c15952e first passes
+all10 candle Context controls with legacy ticker source. Full native verification
+identified five fixture targets still relying on immediate ticker transport:
+public-review and public_feed now use shared prepared drains at their original
+clocks; shared support restores the startup ticker before trading protection
+assertions. Two depth-capacity controls first settle the genuine public ticker
+before filling all256 command-owner slots, preserving the original depth/free-slot
+and WS-revision assertions. The supervision driver completes empty ticker reads
+and counts actual TimerFired deliveries (exact300 polls), rather than counting
+created-but-cancelled Context deadline timers as fires. All original supervision
+assertions and timestamps remain. The five affected targets now pass; production
+trading/account, catalog and engine code are unchanged. Full final native/strict,
+legacy-driver compatibility, ratchet and independent review gates follow.

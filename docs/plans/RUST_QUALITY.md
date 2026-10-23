@@ -997,3 +997,16 @@ groups), strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both
 request checks/15 controls. Held request_context_candles.rs and trading.rs remain
 byte-exact to actualdb32; ticker/catalog runtime remains unchanged. Independent
 implementation review and CI do not derive readiness solely from native tests.
+
+### Lighter ticker managed-entry controls
+
+Committed plan and six compiled assertion REDs precede managed ticker source.
+The previously held candle deadline driver was corrected first: every captured
+same-deadline timer fires at its original raw timestamp; all ten candle controls
+pass on legacy ticker source with every original assertion retained. Ticker
+controls preserve native fields/aliases/partial-row semantics and symbol-specific
+WS precedence through actual prepare/bind/claim, reject preclaim publication,
+discard failed prefixes, and prove failure/capacity recovery and300 Background
+retirements without completing unrelated commands. Existing fixture drains use
+shared preparation at original event times only where the new ticker requires it.
+No runtime timer/retry policy or production ordering workaround is introduced.

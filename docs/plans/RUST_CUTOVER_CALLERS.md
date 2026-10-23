@@ -5492,3 +5492,15 @@ in-flight latch and use existing background recovery, never a user's command
 terminal. Ticker/catalog/private/trading paths stay native. No caller signature
 or financial-outcome contract changes; transports need managed preparation for
 this additional background read.
+
+### Lighter public ticker seed uses managed Background Read
+
+The public `/api/v1/exchangeStats` GET now requires prepare/bind/claim support in
+custom transports, with its original20s bound covering preparation and streamed
+response together. Empty headers/body, all six native list-envelope aliases,
+field conversion, usable partial rows, per-symbol WebSocket precedence and poll/
+startup Backoff behavior remain the same. Invalid envelopes discard staged rows;
+queued, expired or late responses cannot publish ticker changes. Admission failure
+keeps recovery on the existing startup Backoff and completes no user command.
+Successful data and SDK method signatures are unchanged for both Lighter aliases
+and networks; private credentials, trading and catalog fallback stay native.

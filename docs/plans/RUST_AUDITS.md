@@ -2426,3 +2426,15 @@ matching-generation native cleanup cannot release a replacement's latch.
 Exactly one sender is removed (Lighter43→42, lib3→2). Ticker adoption is deferred
 because #1877 holds its interfering candle timer fixture; no timing/order or
 source-ownership workaround is introduced. No held signing/trading/test edits.
+
+### Lighter ticker seed Background custody
+
+The exchangeStats physical read now carries a mandatory managed Background Read
+Context. Shared ownership gates staging/publication and retires on success,
+strict stream failure, preparation/network denial and original deadline expiry.
+Native partial-row acceptance and per-symbol WS revision dominance are retained.
+Six original legacy-dispatch assertion REDs precede the move; controls cover four
+deployments/six envelopes, early response/stream fencing, malformed prefixes,
+route/transport/expiry recovery, capacity peer isolation and300 retirements.
+Only2bbebb…:1 is pruned (Lighter42→41/lib2→1); catalog remains counted.
+Architecture No: existing shared Context/HTTP authority and startup Backoff.
