@@ -2346,3 +2346,84 @@ proves a pure nine-to-six MEXC history prune, every other map/checker unchanged.
 This is local evidence, with independent exact-head review and source-bound
 current CI/final artifact proof tracked in the draft PR. No new native capability
 is implied for the documented Spot/Breakout stubs.
+
+## Phemex bounded non-income history owner (2026-10-23)
+
+Plan-first from actual #1784 `ab1ab29ec3d9babb684b4e9b8c35d7abcd538577`.
+Scope: phemex/src/history.rs and existing history integration tests, exact legacy
+inventory pruning if sites disappear, and OWNED_HISTORY/AUDITS/QUALITY/CALLERS
+appendices. Reporter #1786 owns account.rs/account controls and confirmed these
+history files clear. No account, lib, signing, income, request recipe, shared
+engine, SDK, host, workflow or dependency source changes. Polymarket's historical
+query axes are unsupported; its book/account code is not an implemented history
+pager to migrate and remains outside this slice.
+
+Non-income Phemex histories are bounded one-response reads: private fills/orders
+request offset0 and clamp limit1..200; public trades retain the native snapshot
+and 1000-row defensive cap. Adopt existing HistoryRows<T>/Completion for the
+three typed result variants. Keep lookup's distinct native Vec/legacy finalizer
+and its is_lookup routing/primary credential selection unchanged. Income
+continues delegating to the already-shared RangeHistory owner unchanged.
+
+Eligible decoded rows stage until the entire HTTP/body/required-list/native row
+validation succeeds. Only then accept one page and finish through the owner,
+with the original stable time sort/truncate and exact JSON shape. HTTP, transport,
+decode, malformed/oversized response and native request preparation failure
+reject Internal rather than the previous unclassified error, with the same
+message and no added write outcome. No partial result or incomplete marker is
+possible: this bounded adapter has no accepted earlier page. A failed streamed
+prefix cannot escape. No new pager, REST capability, request or synthetic gap.
+
+Preserve all pre-owner admission errors, unknown-market nondefinitive lookup,
+lookup exact client ID/version/one-row validation and definitive-absence rules,
+16-active-command admission/duplicate refusal, shared rate-pause deferral/timers,
+request/header/signature bytes and identity slots, textual enum/stop/trailing
+mapping, exact nanosecond conversion, time/order-ID/symbol filtering, native
+identity dedupe, equal public-tuple occurrence IDs, fee and quantity units, zero
+Store publication, private/public-only gating and cleanup/re-admission after
+success/error. Keep numeric Completion explicitly legacy, never managed fallback.
+
+Commit original-RED controls before source edits: typed first HTTP/transport/
+malformed and oversized failures on fills/orders/public trades, valid streamed
+prefix followed by malformed/non-2xx failure with no output/marker, and slot
+cleanup/re-admission. Compatibility controls pin valid empty one-shot completion,
+stable equal-time ordering, exact limits/no continuation, concurrent command
+isolation and unchanged lookup/income behavior. Existing controls run first.
+
+Plan self-audit: the shared row owner has stage/accept/finish_with methods and
+supports native generic encoding. Request retains numeric command solely for
+active-set bookkeeping and lookup's existing legacy completion, while each
+history variant owns its single finalizer. Native builder and codecs should be
+byte-identical except stage instead of Vec push; no shared API extension needed.
+Run focused engine/Phemex tests, strict all-target Clippy/fmt/bans/checker (four
+Cargo jobs), source and adversarial/caller reviews, then a draft. Corepack Yarn
+only, never bare/Volta yarn, npx or account-policy. No local release WASM/full
+replay/timing sweep. Respect #1792 then #1789 priority and real-integrate actual
+shared/build inputs before final CI/proof/announced separate guard and merge.
+
+Phemex checkpoint: original 28 controls PASS. Regression-only commit
+`c3c98778f79` adds four assertion-RED groups (missing Internal classification)
+and three compatibility GREEN controls. The wrapper intercepts non-2xx before
+the history response handler; the HTTP-message fixture was corrected to its
+existing `HTTP 503: unavailable` text, without changing production behavior.
+A fresh original-source rerun with that corrected fixture still reports exactly
+31 PASS/4 expected assertion failures. Implementation uses existing boxed
+HistoryRows variants, native seen/count/filter facts and a shared native shaping
+helper; lookup keeps its original numeric finalizers. Whole response validation
+precedes the only accept_page. Failed prefixes have no admitted earlier page.
+
+The request-context inventory change is a single exact prune: Phemex history
+17->16, removing only the direct malformed/oversized cx.fail site now delegated
+to history_failed. Lookup still uses the other finalizer sites, so they remain
+in inventory. No added fingerprints, bootstrap, checker change or other map
+edit. No account/lib/signing/income/shared-engine production change.
+
+Corrected local validation: 770 engine/Phemex native tests PASS, including
+all 35 history controls. Strict all-target/all-feature Clippy, formatting, bans,
+request-context checker plus all 13 checker controls and diff checks PASS.
+Source self-audit confirms the native builder, income, lookup codec, filtering,
+units and row mapping are unchanged; only the three normal row sinks stage into
+the shared owner and final stable shaping moves behind page admission. No local
+release WASM or full replay run. Independent source/caller/full-map review and
+fresh CI remain draft/final-proof gates; actual #1792/#1789 inputs are required
+before landing.
