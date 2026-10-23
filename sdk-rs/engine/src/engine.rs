@@ -27,11 +27,11 @@ pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct SocketId(pub u32);
+pub struct SocketId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct RequestId(pub u32);
+pub struct RequestId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct TimerId(pub u32);
+pub struct TimerId(pub u64);
 /// Explicit limits on a periodic poll, separate from its fallback cadence.
 #[derive(Clone, Copy, Debug)]
 pub struct PollTimerBounds {
@@ -661,6 +661,25 @@ pub enum Command {
 }
 
 impl Command {
+    /// The logical intent a write under this command serves. Venue actions
+    /// classify conservatively as placements.
+    pub(crate) fn write_intent(&self) -> crate::classify::Intent {
+        use crate::classify::Intent;
+        match self {
+            Self::PlaceOrders { .. } => Intent::Place,
+            Self::CancelOrders { .. }
+            | Self::CancelOrdersWithSymbols { .. }
+            | Self::CancelSymbolOrders { .. } => Intent::Cancel,
+            Self::AmendOrder { .. } | Self::AmendOrderWithSymbol { .. } => Intent::Amend,
+            Self::SetLeverage { .. }
+            | Self::SetMarginType { .. }
+            | Self::SetPositionMode { .. }
+            | Self::SetStpMode { .. } => Intent::Setting,
+            Self::Venue { .. } => Intent::Place,
+            _ => Intent::Read,
+        }
+    }
+
     pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
@@ -818,6 +837,13 @@ impl std::fmt::Debug for Event<'_> {
     }
 }
 
+#[path = "request_context_entry.rs"]
+mod command_entry;
+
+#[cfg(test)]
+#[path = "request_context_entry_tests.rs"]
+mod command_entry_tests;
+
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
     pub now: f64,
@@ -863,6 +889,20 @@ mod request_context_registry;
 #[path = "http_lifecycle.rs"]
 mod http_lifecycle;
 
+#[path = "execution_cx.rs"]
+mod execution_cx;
+
+#[cfg(test)]
+#[path = "execution_cx_tests.rs"]
+mod execution_cx_tests;
+pub use execution_cx::{ExecutionHandle, Joined, Window};
+
+/// A delivered response whose bytes the engine cannot hand to a codec. The
+/// venue answered, so this is never transport loss.
+fn malformed_body(message: &str) -> VenueError {
+    VenueError::new(message).kind(ErrorKind::Internal)
+}
+
 fn observe_account_auth<V: Venue>(
     venue: &V,
     pending: &PendingHttp<V::Pending>,
@@ -898,15 +938,331 @@ struct Polls {
 
 /// The engine timer state a poll change writes to.
 struct TimerSink<'a> {
-    next_id: &'a mut u32,
+    next_id: &'a mut crate::resource_ids::ResourceIds,
     timers: &'a mut HashMap<TimerId, ()>,
     actions: &'a mut Vec<Action>,
 }
 
-fn next_engine_id(next_id: &mut u32) -> u32 {
-    let id = *next_id;
-    *next_id = next_id.wrapping_add(1).max(1);
-    id
+fn next_engine_id(next_id: &mut crate::resource_ids::ResourceIds) -> u64 {
+    next_id.next_or_fatal()
+}
+
+#[cfg(test)]
+mod resource_identity_regressions {
+    use super::*;
+
+    #[test]
+    fn physical_engine_allocation_crosses_u32_without_wrapping() {
+        let mut next = crate::resource_ids::ResourceIds::starting_at(u64::from(u32::MAX));
+        assert_eq!(next_engine_id(&mut next), u64::from(u32::MAX));
+        assert_eq!(next_engine_id(&mut next), 1_u64 << 32);
+        assert_eq!(next_engine_id(&mut next), (1_u64 << 32) + 1);
+    }
+
+    #[test]
+    fn later_allocations_never_reissue_a_retired_socket_identity() {
+        let retired = SocketId(1);
+        let mut next = crate::resource_ids::ResourceIds::starting_at(u64::from(u32::MAX - 3));
+        let later: Vec<_> = (0..32)
+            .map(|_| SocketId(next_engine_id(&mut next)))
+            .collect();
+        assert!(
+            !later.contains(&retired),
+            "retired socket identity was reissued"
+        );
+        assert!(later.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    }
+
+    #[derive(Default)]
+    struct Probe {
+        socket: Option<SocketId>,
+        received: usize,
+        exhaust: bool,
+        catch_sign_failure: bool,
+        caught: bool,
+    }
+    struct Refused;
+    impl crate::SignStep for Refused {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &crate::DispatchContext<'_>,
+        ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+            Err(crate::signing::SignError::Refused)
+        }
+        fn apply(
+            &mut self,
+            _: &mut Action,
+            _: &crate::signing::SignResult,
+        ) -> Result<(), crate::signing::SignError> {
+            unreachable!()
+        }
+        fn freshness_ms(&self) -> f64 {
+            1_000.
+        }
+    }
+    impl Venue for Probe {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            if self.catch_sign_failure {
+                let request = cx.request(
+                    Method::Get,
+                    "https://venue.test/read".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+                cx.sign_http(request, Box::new(Refused));
+                return;
+            }
+            self.socket = Some(cx.connect("wss://venue.test/private".to_owned()));
+            if self.exhaust {
+                cx.set_timer(1.);
+            }
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, socket: SocketId, _: &str) {
+            if self.socket == Some(socket) {
+                self.received += 1;
+            }
+        }
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_sign_error(&mut self, cx: &mut Cx<'_, ()>, _: (), _: VenueError) {
+            use std::panic::{AssertUnwindSafe, catch_unwind};
+            cx.request(
+                Method::Get,
+                "https://venue.test/recover".into(),
+                vec![],
+                None,
+                (),
+            );
+            self.caught = catch_unwind(AssertUnwindSafe(|| cx.set_timer(1.))).is_err();
+        }
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[test]
+    fn retired_socket_ingress_cannot_alias_after_crossing_old_counter_boundary() {
+        let mut engine = crate::test_support::seeded_engine(Probe::default());
+        engine.start(0.);
+        let retired = engine.venue.socket.unwrap();
+        engine.drain_actions().for_each(drop);
+        // Simulate the long-lived allocation count without a load test.
+        engine.io.next_id = crate::resource_ids::ResourceIds::starting_at(u64::from(u32::MAX - 3));
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        cx.close(retired);
+        for _ in 0..4 {
+            cx.set_timer(1.);
+        }
+        engine.venue.socket = Some(cx.connect("wss://venue.test/private".to_owned()));
+        assert_ne!(engine.venue.socket, Some(retired));
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: retired,
+                text: "old",
+            },
+        );
+        assert_eq!(engine.venue.received, 0);
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: engine.venue.socket.unwrap(),
+                text: "new",
+            },
+        );
+        assert_eq!(engine.venue.received, 1);
+    }
+
+    #[test]
+    fn fatal_legacy_exhaustion_prevents_partial_callback_actions_from_draining() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut engine = crate::test_support::seeded_engine(Probe {
+            exhaust: true,
+            ..Probe::default()
+        });
+        engine.io.next_id = crate::resource_ids::ResourceIds::with_ceiling(1);
+        assert!(catch_unwind(AssertUnwindSafe(|| engine.start(0.))).is_err());
+        assert!(engine.failed());
+        assert!(
+            !engine.io.actions.is_empty(),
+            "callback queued an action before exhaustion"
+        );
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                engine.drain_actions().for_each(drop);
+            }))
+            .is_err()
+        );
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| engine.handle(
+                1.,
+                Event::WsMessage {
+                    socket: SocketId(1),
+                    text: "stale"
+                }
+            )))
+            .is_err()
+        );
+        assert_eq!(engine.venue.received, 0);
+    }
+
+    #[test]
+    fn finite_poll_reserves_logical_and_physical_ids_before_registration() {
+        use crate::resource_ids::{MAX_RESOURCE_ID, ResourceIds};
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut polls = Polls::default();
+        let mut ids = ResourceIds::starting_at(MAX_RESOURCE_ID);
+        let mut timers = HashMap::new();
+        let mut actions = Vec::new();
+        let mut sink = TimerSink {
+            next_id: &mut ids,
+            timers: &mut timers,
+            actions: &mut actions,
+        };
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| polls.register(
+                0.,
+                1_000.,
+                PollTimerBounds::default(),
+                &mut sink
+            )))
+            .is_err()
+        );
+        assert!(polls.entries.is_empty());
+        assert!(timers.is_empty() && actions.is_empty());
+        assert!(ids.failed());
+    }
+
+    #[test]
+    fn paused_poll_uses_only_its_last_available_logical_id() {
+        use crate::resource_ids::{MAX_RESOURCE_ID, ResourceIds};
+        let mut polls = Polls {
+            scale: Some(f64::INFINITY),
+            ..Polls::default()
+        };
+        let mut ids = ResourceIds::starting_at(MAX_RESOURCE_ID);
+        let mut timers = HashMap::new();
+        let mut actions = Vec::new();
+        let mut sink = TimerSink {
+            next_id: &mut ids,
+            timers: &mut timers,
+            actions: &mut actions,
+        };
+        assert_eq!(
+            polls.register(0., 1_000., PollTimerBounds::default(), &mut sink),
+            TimerId(MAX_RESOURCE_ID)
+        );
+        assert_eq!(polls.entries.len(), 1);
+        assert!(timers.is_empty() && actions.is_empty());
+        assert!(!ids.failed());
+        assert!(!ids.available(1));
+    }
+
+    fn assert_unsafe_batch_retires(unsafe_action: Action) {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut engine = crate::test_support::seeded_engine(Probe::default());
+        // A valid first packet must not escape before the unsafe later action.
+        engine.io.actions.push(Action::Http(HttpRequest {
+            id: RequestId(4),
+            method: Method::Get,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.test/read".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        }));
+        engine.io.actions.push(unsafe_action);
+        let mut exposed = 0;
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                for _ in engine.drain_actions() {
+                    exposed += 1;
+                }
+            }))
+            .is_err()
+        );
+        assert_eq!(
+            exposed, 0,
+            "the entire batch must be checked before yielding its first action"
+        );
+        assert!(
+            engine.failed(),
+            "unsafe output must use the sticky terminal path"
+        );
+    }
+
+    #[test]
+    fn unsafe_timer_id_retires_whole_batch_before_any_packet_is_exposed() {
+        assert_unsafe_batch_retires(Action::SetTimer {
+            timer: TimerId(crate::resource_ids::MAX_RESOURCE_ID + 1),
+            at_ms: 1.,
+        });
+    }
+
+    #[test]
+    fn unsafe_held_outbound_id_is_validated_before_dispatch_can_discard_it() {
+        assert_unsafe_batch_retires(Action::SignedOutbound {
+            attempt: RequestId(1),
+            outbound: Box::new(Action::WsSend {
+                socket: SocketId(crate::resource_ids::MAX_RESOURCE_ID + 1),
+                text: "".into(),
+            }),
+        });
+    }
+
+    #[test]
+    fn unsafe_managed_cancel_signing_id_uses_the_same_terminal_boundary() {
+        assert_unsafe_batch_retires(Action::ManagedHttp(Box::new(
+            crate::request_context::HttpAction::Cancel {
+                preparation: crate::request_context::Preparation::from_wire("p1:1:1:0").unwrap(),
+                signing: Some(RequestId(crate::resource_ids::MAX_RESOURCE_ID + 1)),
+            },
+        )));
+    }
+
+    #[test]
+    fn callback_catching_allocation_panic_cannot_publish_its_normal_return_actions() {
+        use crate::resource_ids::{MAX_RESOURCE_ID, ResourceIds};
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut engine = crate::test_support::seeded_engine(Probe {
+            catch_sign_failure: true,
+            ..Probe::default()
+        });
+        engine.start(0.);
+        // A failure callback may queue one valid final request, then catch an
+        // exhausted timer allocation itself instead of propagating the panic.
+        engine.io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
+        let mut exposed = 0;
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                for _ in engine.drain_actions() {
+                    exposed += 1;
+                }
+            }))
+            .is_err()
+        );
+        assert!(
+            engine.venue.caught,
+            "the callback returned normally after catching exhaustion"
+        );
+        assert!(engine.failed());
+        assert_eq!(exposed, 0);
+    }
 }
 
 impl TimerSink<'_> {
@@ -957,26 +1313,37 @@ impl Polls {
         )
     }
 
-    fn arm(&mut self, now: f64, index: usize, sink: &mut TimerSink<'_>) {
-        let interval = self.interval(self.entries[index].default_interval_ms);
-        let poll = &mut self.entries[index];
-        // Never hand an infinite/invalid deadline to a host. Infinity policy
-        // retains the registration so a finite update can resume it.
+    fn deadline(&self, now: f64, interval: f64, bounds: PollTimerBounds) -> Option<f64> {
         if !interval.is_finite()
             || interval <= 0.
-            || !poll.bounds.minimum_interval_ms.is_finite()
-            || poll.bounds.minimum_interval_ms < 0.
-            || poll.bounds.not_before_ms.is_nan()
+            || !bounds.minimum_interval_ms.is_finite()
+            || bounds.minimum_interval_ms < 0.
+            || bounds.not_before_ms.is_nan()
         {
-            return;
+            return None;
         }
-        let at_ms =
-            (now + interval.max(poll.bounds.minimum_interval_ms)).max(poll.bounds.not_before_ms);
-        if !at_ms.is_finite() {
+        let at = (now + interval.max(bounds.minimum_interval_ms)).max(bounds.not_before_ms);
+        at.is_finite().then_some(at)
+    }
+
+    fn arm(&mut self, now: f64, index: usize, sink: &mut TimerSink<'_>) {
+        let poll = &self.entries[index];
+        let Some(at_ms) = self.deadline(now, self.interval(poll.default_interval_ms), poll.bounds)
+        else {
             return;
-        }
+        };
         let physical = TimerId(next_engine_id(sink.next_id));
-        poll.physical = Some(physical);
+        self.arm_reserved(index, physical, at_ms, sink);
+    }
+
+    fn arm_reserved(
+        &mut self,
+        index: usize,
+        physical: TimerId,
+        at_ms: f64,
+        sink: &mut TimerSink<'_>,
+    ) {
+        self.entries[index].physical = Some(physical);
         sink.timers.insert(physical, ());
         sink.actions.push(Action::SetTimer {
             timer: physical,
@@ -991,14 +1358,20 @@ impl Polls {
         bounds: PollTimerBounds,
         sink: &mut TimerSink<'_>,
     ) -> TimerId {
-        let logical = TimerId(next_engine_id(sink.next_id));
+        let deadline = self.deadline(now, self.interval(default_interval_ms), bounds);
+        let ids = sink
+            .next_id
+            .reserve_or_fatal(if deadline.is_some() { 2 } else { 1 });
+        let logical = TimerId(ids.start);
         self.entries.push(PollTimer {
             logical,
             default_interval_ms,
             bounds,
             physical: None,
         });
-        self.arm(now, self.entries.len() - 1, sink);
+        if let Some(at_ms) = deadline {
+            self.arm_reserved(self.entries.len() - 1, TimerId(ids.start + 1), at_ms, sink);
+        }
         logical
     }
 
@@ -1061,6 +1434,12 @@ impl Polls {
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
+    // Typed cause of the HttpFailed being delivered: Network from the host,
+    // Timeout when the engine expires a released request at its deadline.
+    http_failure_kind: ErrorKind,
+    // Status and headers of the managed write reply being delivered.
+    http_write_reply: Option<(u16, String)>,
+    command_entry: Option<command_entry::Entry>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
@@ -1076,6 +1455,8 @@ struct Io<P> {
     order_response_token: Option<u64>,
     actions: Vec<Action>,
     placement_acks: crate::placement_acks::PlacementAcks,
+    /// One engine timer for the earliest execution-group deadline.
+    execution_timer: Option<(TimerId, f64)>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
@@ -1089,7 +1470,7 @@ struct Io<P> {
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
     polls: Polls,
-    next_id: u32,
+    next_id: crate::resource_ids::ResourceIds,
     /// Retained symbol buffers; only the active prefix belongs to the next frame.
     changed_books: Vec<String>,
     changed_books_active: usize,
@@ -1111,6 +1492,9 @@ impl<P> Default for Io<P> {
         Self {
             request_contexts: Default::default(),
             http_delivery: None,
+            http_failure_kind: ErrorKind::Network,
+            http_write_reply: None,
+            command_entry: None,
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: HashMap::new(),
@@ -1126,6 +1510,7 @@ impl<P> Default for Io<P> {
             order_response_token: None,
             actions: Vec::new(),
             placement_acks: Default::default(),
+            execution_timer: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
@@ -1139,7 +1524,7 @@ impl<P> Default for Io<P> {
             incoming: HashMap::new(),
             timers: HashMap::new(),
             polls: Polls::default(),
-            next_id: 1,
+            next_id: Default::default(),
             changed_books: Vec::new(),
             changed_books_active: 0,
             candles: Vec::new(),
@@ -1160,8 +1545,40 @@ impl<P> Io<P> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
         Some(self.signatures.swap_remove(index).1)
     }
-    fn next(&mut self) -> u32 {
+    fn next(&mut self) -> u64 {
         next_engine_id(&mut self.next_id)
+    }
+
+    fn reserve_ids(&mut self, count: u64) -> Option<std::ops::Range<u64>> {
+        self.next_id.reserve(count)
+    }
+
+    fn assert_action_safe(&mut self, action: &Action) {
+        assert!(
+            !self.next_id.failed() && !self.signing.failed(),
+            "engine resource identities exhausted"
+        );
+        if !crate::resource_ids::action_ids_safe(action) {
+            self.next_id.invalidate();
+        }
+    }
+
+    fn assert_actions_safe(&mut self) {
+        assert!(
+            !self.next_id.failed() && !self.signing.failed(),
+            "engine resource identities exhausted"
+        );
+        if self
+            .actions
+            .iter()
+            .any(|a| !crate::resource_ids::action_ids_safe(a))
+            || self
+                .signing_admission
+                .iter()
+                .any(|(a, _)| !crate::resource_ids::action_ids_safe(a))
+        {
+            self.next_id.invalidate();
+        }
     }
 
     /// Splits the poll registry from the timer state it writes to.
@@ -1263,6 +1680,7 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
+        self.io.opaque_entry_activity();
         let action = Action::WsSend {
             socket,
             text: text.into(),
@@ -1282,6 +1700,7 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
+        self.io.opaque_entry_activity();
         for timer in self.io.signing.close_socket(socket) {
             if timer.0 != 0 {
                 self.io.actions.push(Action::ClearTimer { timer });
@@ -1353,6 +1772,7 @@ impl<P> Cx<'_, P> {
         payload: PayloadSignRequest,
         target: SignatureTarget,
     ) -> Result<(), P> {
+        self.io.opaque_entry_activity();
         let Some(index) = self
             .io
             .actions
@@ -1430,6 +1850,8 @@ impl<P> Cx<'_, P> {
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        self.io.opaque_entry_activity();
+        self.io.assert_action_safe(&outbound);
         let attempt = self.io.signing.next_id();
         // Exhaustion is handled through the same asynchronous failure event.
         let timer = if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
@@ -1743,17 +2165,34 @@ impl<P> Cx<'_, P> {
         result: Result<String, VenueError>,
         authority: Option<&crate::request_context::Context>,
     ) -> Result<(), crate::request_context::Error> {
+        self.finish_command_as(command, result, authority, false)
+    }
+
+    fn finish_command_as(
+        &mut self,
+        command: CommandId,
+        result: Result<String, VenueError>,
+        authority: Option<&crate::request_context::Context>,
+        observer: bool,
+    ) -> Result<(), crate::request_context::Error> {
+        if authority.is_none() && !self.io.numeric_entry_completion_allowed(command) {
+            return Err(crate::request_context::Error::Revoked);
+        }
         let (success, error) = match result {
             Ok(result) => (Some(result), None),
             Err(error) => (None, Some(error)),
         };
         let mut write_sealed = false;
-        let result = match self.io.request_contexts.seal(
-            command,
-            self.io.http_delivery.as_ref(),
-            authority,
-            error,
-        ) {
+        let delivery = if observer {
+            None
+        } else {
+            self.io.http_delivery.as_ref()
+        };
+        let result = match self
+            .io
+            .request_contexts
+            .seal_as(command, delivery, authority, error, observer)
+        {
             request_context_registry::Seal::Stale => {
                 return Err(crate::request_context::Error::Revoked);
             }
@@ -1795,6 +2234,7 @@ impl<P> Cx<'_, P> {
                 Notice::CommandFailed { command, error }
             }
         };
+        self.io.entry_completed(command);
         self.io.actions.push(Action::Notice(notice));
         Ok(())
     }
@@ -2043,6 +2483,19 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
+    /// A request that may have reached the venue failed without a usable
+    /// response. `error.kind` is `Timeout` for engine deadline expiry,
+    /// `Internal` for a whole delivered body (or managed write reply) the engine
+    /// cannot decode, else `Network`. Streams that break mid-array still use
+    /// `on_stream_malformed`.
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_request_failed(cx, pending, &error.message);
+    }
     fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
@@ -2267,6 +2720,7 @@ impl<V: Venue> Engine<V> {
         now: f64,
         update: PublicFeedUpdate,
     ) -> Result<(), &'static str> {
+        self.assert_live();
         if self.public_feed_policy() != PublicFeedPolicy::Shared {
             return Err("publicFeedUpdate requires shared public feed policy");
         }
@@ -2386,6 +2840,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.assert_command_entry_safe();
         if self.public_feed_policy() == PublicFeedPolicy::Shared {
             Box::new(
                 self.shared_books
@@ -2406,6 +2861,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn venue(&self) -> &V {
+        self.assert_command_entry_safe();
         &self.venue
     }
 
@@ -2413,6 +2869,7 @@ impl<V: Venue> Engine<V> {
     /// books by default. Switching modes starts a fresh full-book baseline.
     #[cfg(feature = "book-deltas")]
     pub fn set_book_deltas(&mut self, enabled: bool) {
+        self.assert_command_entry_safe();
         if self.book_deltas != enabled {
             self.book_deltas = enabled;
             self.book_baselines.clear();
@@ -2428,6 +2885,7 @@ impl<V: Venue> Engine<V> {
     /// joins an existing upstream subscription.
     #[cfg(feature = "book-deltas")]
     pub fn request_book_resync(&mut self, symbol: &str) {
+        self.assert_live();
         self.book_baselines.remove(symbol);
         let mut cx = Cx {
             now: 0.0,
@@ -2444,10 +2902,12 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn capabilities(&self) -> Capabilities {
+        self.assert_command_entry_safe();
         self.venue.capabilities()
     }
 
     pub fn start(&mut self, now: f64) {
+        self.assert_live();
         self.io.dispatch_now = now;
         if std::mem::replace(&mut self.started, true) {
             return;
@@ -2463,12 +2923,26 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        self.assert_live();
         self.io.dispatch_now = now;
         self.io.http_responses.prune(now);
+        // Expired observers detach before any delivery can project to them.
+        self.sweep_executions(now);
         if self.expire_http_timer(now, &event) {
+            self.sweep_executions(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            return;
+        }
+        if let Event::TimerFired { timer } = &event
+            && self
+                .io
+                .execution_timer
+                .is_some_and(|(own, _)| own == *timer)
+        {
+            self.io.execution_timer = None;
+            self.sweep_executions(now);
             return;
         }
         let admitted = self.admit_http_event(now, &event);
@@ -2517,7 +2991,17 @@ impl<V: Venue> Engine<V> {
         }
         if let Some(request) = completed_http {
             self.settle_http_event(request);
+            self.sweep_executions(now);
         }
+    }
+
+    fn sweep_executions(&mut self, now: f64) {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.sweep_executions();
     }
 
     /// Dispatch held cancellations whose acknowledged ids are now stored, or
@@ -2569,7 +3053,7 @@ impl<V: Venue> Engine<V> {
             let _ = self.io.request_contexts.result(
                 delivery,
                 crate::request_context::WriteResult::Failed(
-                    VenueError::new(*error).kind(ErrorKind::Network),
+                    VenueError::new(*error).kind(self.io.http_failure_kind),
                 ),
             );
         }
@@ -2785,7 +3269,8 @@ impl<V: Venue> Engine<V> {
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
                     cx.io.health.count(log_code::HTTP_FAILED);
-                    self.venue.on_request_failed(&mut cx, pending.value, error);
+                    let failure = VenueError::new(error).kind(cx.io.http_failure_kind);
+                    self.venue.on_http_failed(&mut cx, pending.value, failure);
                 }
             }
             Event::TimerFired { timer } => {
@@ -2795,7 +3280,11 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Event::Command(Command::Venue { command, action }) => {
+                cx.io.begin_command_entry(Some(command));
+                cx.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.request_contexts.dispatch = None;
+                cx.io.end_command_entry();
             }
             Event::Command(Command::FetchAccount { command })
                 if self.venue.capabilities().account == AccountLookup::Unsupported =>
@@ -2873,7 +3362,15 @@ impl<V: Venue> Engine<V> {
                         return;
                     }
                 }
+                cx.io.begin_command_entry(command.completion_id());
+                // The classifier takes intent from the command, never the venue
+                // (an amend's cancel leg is still an amend).
+                cx.io.request_contexts.dispatch = command
+                    .completion_id()
+                    .map(|id| (id, command.write_intent()));
                 self.venue.on_command(&mut cx, command);
+                cx.io.request_contexts.dispatch = None;
+                cx.io.end_command_entry();
             }
         }
         self.finish_event_scope(now);
@@ -3035,11 +3532,8 @@ impl<V: Venue> Engine<V> {
             let body = match std::str::from_utf8(outside) {
                 Ok(body) => body,
                 Err(_) => {
-                    self.venue.on_request_failed(
-                        &mut cx,
-                        pending.value,
-                        "stream envelope is not UTF-8",
-                    );
+                    let failure = malformed_body("stream envelope is not UTF-8");
+                    self.venue.on_http_failed(&mut cx, pending.value, failure);
                     return;
                 }
             };
@@ -3079,8 +3573,8 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_response(&mut cx, pending.value, response);
             }
             Err(_) => {
-                self.venue
-                    .on_request_failed(&mut cx, pending.value, "response body is not UTF-8")
+                let failure = malformed_body("response body is not UTF-8");
+                self.venue.on_http_failed(&mut cx, pending.value, failure);
             }
         }
     }
@@ -3179,11 +3673,29 @@ impl<V: Venue> Engine<V> {
     /// delayed drain. Normal event-driven drains use the current event time.
     /// Provider work may have been drained before its owner was retired.
     /// Hosts check this before starting any delayed primitive operation.
+    /// A fatal allocator failure permanently retires this engine.
+    pub fn failed(&self) -> bool {
+        self.io.command_entry.is_some() || self.io.next_id.failed() || self.io.signing.failed()
+    }
+
+    fn assert_command_entry_safe(&self) {
+        assert!(
+            self.io.command_entry.is_none(),
+            "engine command callback did not return"
+        );
+    }
+
+    fn assert_live(&self) {
+        self.assert_command_entry_safe();
+        assert!(!self.failed(), "engine resource identities exhausted");
+    }
+
     pub fn signing_pending(&self, attempt: RequestId) -> bool {
-        self.io.signing.signature_pending(attempt)
+        !self.failed() && self.io.signing.signature_pending(attempt)
     }
 
     pub fn prepare_dispatch(&mut self, now: f64) {
+        self.assert_live();
         self.io.dispatch_now = now;
     }
 
@@ -3194,6 +3706,7 @@ impl<V: Venue> Engine<V> {
         queued: &mut std::collections::VecDeque<Action>,
         emitted: usize,
     ) {
+        self.assert_live();
         for action in self.io.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
@@ -3203,10 +3716,13 @@ impl<V: Venue> Engine<V> {
         use crate::signing_dispatch::Completion;
         for (outbound, error) in std::mem::take(&mut self.io.signing_admission) {
             self.sign_failed(now, outbound, error);
+            self.assert_live();
         }
         let mut queued = std::collections::VecDeque::from(std::mem::take(&mut self.io.actions));
         loop {
+            self.assert_live();
             while let Some(action) = queued.pop_front() {
+                self.io.assert_action_safe(&action);
                 match action {
                     Action::SignedOutbound { attempt, outbound } => {
                         match self.io.signing.release(
@@ -3322,6 +3838,7 @@ impl<V: Venue> Engine<V> {
                     action => self.io.actions.push(action),
                 }
             }
+            self.assert_live();
             if let Some(action) = self.io.signing.take_plain() {
                 queued.push_back(action);
                 continue;
@@ -3344,6 +3861,8 @@ impl<V: Venue> Engine<V> {
 
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
+        self.assert_live();
+        self.io.assert_actions_safe();
         self.dispatch_actions(self.io.dispatch_now);
         if self.store.take_rejected_empty_catalogue() {
             push_event(
@@ -3358,6 +3877,7 @@ impl<V: Venue> Engine<V> {
                 },
             );
         }
+        self.io.assert_actions_safe();
         self.io.actions.drain(..)
     }
 
@@ -3370,6 +3890,7 @@ impl<V: Venue> Engine<V> {
 
     /// The venue's synchronized book for `symbol`, if any.
     pub fn book(&self, symbol: &str) -> Option<&Book> {
+        self.assert_command_entry_safe();
         if self.public_feed_policy() == PublicFeedPolicy::Shared {
             self.shared_books.get(symbol)
         } else {
@@ -3383,6 +3904,7 @@ impl<V: Venue> Engine<V> {
     /// hosts must flush their existing stream before snapshotting a new client;
     /// this method deliberately leaves the stream's baseline untouched.
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
+        self.assert_live();
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
@@ -3405,6 +3927,7 @@ impl<V: Venue> Engine<V> {
     /// Full private sections and any unflushed market catalog, without consuming
     /// changes, queued events or public stream baselines.
     pub fn account_snapshot_frame(&mut self, now: f64) -> &[u8] {
+        self.assert_live();
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut writer = FrameWriter::new(buffer, now);
         self.store
@@ -3418,6 +3941,7 @@ impl<V: Venue> Engine<V> {
     /// Write everything that changed since the previous call as one flush
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
+        self.assert_live();
         self.write_frame(now, true)
     }
 
@@ -3426,6 +3950,7 @@ impl<V: Venue> Engine<V> {
     /// sections wait for the next full frame unless fills are pending, which
     /// travel with the orders they belong to.
     pub fn take_market_frame(&mut self, now: f64) -> Option<&[u8]> {
+        self.assert_live();
         self.write_frame(now, false)
     }
 

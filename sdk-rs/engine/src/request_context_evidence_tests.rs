@@ -3,8 +3,8 @@ use super::*;
 fn accepted(ids: Vec<String>) -> WriteResult {
     WriteResult::Accepted { order_ids: ids }
 }
-fn released(writes: &mut CommandWrites, id: u32) {
-    writes.register(RequestId(id), u64::from(id)).unwrap();
+fn released(writes: &mut CommandWrites, id: u64) {
+    writes.register(RequestId(id), id).unwrap();
     writes.released(RequestId(id)).unwrap();
 }
 
@@ -77,6 +77,7 @@ fn overflow_cannot_be_hidden_by_an_ordinary_rejection_or_retry() {
             ),
         )
         .unwrap();
+    let _ = writes.grant_resend(RequestId(2));
     assert_eq!(
         writes.retry(RequestId(2), RequestId(3)),
         Err(Error::RetryForbidden)
@@ -300,6 +301,7 @@ fn historical_refusal_retries_share_text_budget_with_terminal_attempt() {
     writes.register(RequestId(1), 1).unwrap();
     for id in 1..=32 {
         if id > 1 {
+            let _ = writes.grant_resend(RequestId(id - 1));
             writes.retry(RequestId(id - 1), RequestId(id)).unwrap();
         }
         writes.released(RequestId(id)).unwrap();
@@ -340,6 +342,7 @@ fn known_partial_effects_share_text_and_exact_identity_overflow_bounds() {
             ])),
         )
         .unwrap();
+    let _ = writes.grant_resend(RequestId(2));
     assert_eq!(
         writes.retry(RequestId(2), RequestId(3)),
         Err(Error::RetryForbidden)

@@ -9,10 +9,15 @@ use crate::request_context::{
 #[path = "http_unsigned_headers_tests.rs"]
 mod unsigned_headers_tests;
 
+enum ManagedRecipe {
+    Unsigned(&'static [(&'static str, &'static str)]),
+    Signed(Box<dyn crate::SignStep>),
+}
+
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
-    timer: TimerId,
+    pub(super) timer: TimerId,
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
@@ -39,7 +44,36 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
-        self.queue_managed(context, method, url, body, None, pending)
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Unsigned(&[]),
+            pending,
+        )
+    }
+
+    /// Queue unsigned HTTP with static public codec headers. The existing
+    /// managed boundary validates and snapshots them before allocating IDs.
+    /// Credential-bearing contexts still require the signed entry point.
+    pub fn request_managed_with_headers(
+        &mut self,
+        context: Context,
+        method: Method,
+        url: String,
+        headers: &'static [(&'static str, &'static str)],
+        body: Option<String>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Unsigned(headers),
+            pending,
+        )
     }
 
     /// Retain an unsigned recipe at creation; canonicalisation waits for route
@@ -54,7 +88,14 @@ impl<P> Cx<'_, P> {
         step: Box<dyn crate::SignStep>,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
-        self.queue_managed(context, method, url, body, Some(step), pending)
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Signed(step),
+            pending,
+        )
     }
 
     fn queue_managed(
@@ -63,9 +104,13 @@ impl<P> Cx<'_, P> {
         method: Method,
         url: String,
         body: Option<String>,
-        step: Option<Box<dyn crate::SignStep>>,
+        recipe: ManagedRecipe,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        let (step, public_headers) = match recipe {
+            ManagedRecipe::Unsigned(headers) => (None, headers),
+            ManagedRecipe::Signed(step) => (Some(step), &[][..]),
+        };
         if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
             return Err((pending, error));
         }
@@ -79,7 +124,7 @@ impl<P> Cx<'_, P> {
         // bytes before allocating IDs or publishing any preparation resource.
         let headers = step
             .as_ref()
-            .map_or(&[][..], |step| step.unsigned_http_headers());
+            .map_or(public_headers, |step| step.unsigned_http_headers());
         if crate::signing_headers::validate_unsigned(headers).is_err() {
             return Err((pending, Error::Invalid));
         }
@@ -87,9 +132,15 @@ impl<P> Cx<'_, P> {
             .iter()
             .map(|&(name, value)| (name, value.to_owned()))
             .collect();
-        let request = RequestId(self.io.next());
-        let generation = u64::from(self.io.next());
-        let timer = TimerId(self.io.next());
+        // Preflight both namespaces before committing either. An admission
+        // refusal must not partially allocate a request, generation or timer.
+        if !self.io.next_id.available(3) || (step.is_some() && !self.io.signing.available_id()) {
+            return Err((pending, Error::Capacity));
+        }
+        let ids = self.io.reserve_ids(3).expect("preflighted HTTP identities");
+        let request = RequestId(ids.start);
+        let generation = ids.start + 1;
+        let timer = TimerId(ids.start + 2);
         let http = HttpRequest {
             id: request,
             method,
@@ -165,6 +216,8 @@ impl<P> Cx<'_, P> {
             timer,
             at_ms: deadline,
         });
+        // A leg in flight owns the execution deadline through its own timer.
+        self.io.rearm_execution_timer();
         self.io
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
@@ -222,10 +275,32 @@ impl<P> Io<P> {
         }
     }
 
+    /// Unsent legs of an execution with no live owner get no send right.
+    pub(super) fn revoke_unsent_execution_legs(&mut self) {
+        let revoked = self
+            .managed_http
+            .iter()
+            .filter(|(_, managed)| {
+                matches!(
+                    managed.lifecycle.context().owner(),
+                    crate::request_context::Owner::Execution { .. }
+                ) && managed.lifecycle.release().is_none()
+                    && !self
+                        .request_contexts
+                        .execution_live(managed.lifecycle.context())
+            })
+            .map(|(request, _)| *request)
+            .collect::<Vec<_>>();
+        for request in revoked {
+            self.discard_managed(request);
+        }
+    }
+
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
             .retire_attempt(managed.lifecycle.context());
+        self.rearm_execution_timer();
         self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
         self.actions.push(Action::ClearTimer {
@@ -260,6 +335,9 @@ impl<V: Venue> Engine<V> {
     /// Hosts check this before inserting an asynchronous prepared resource.
     /// A duplicate/late completion must not overwrite its replacement.
     pub fn http_preparation_pending(&self, token: Preparation) -> bool {
+        if self.failed() {
+            return false;
+        }
         self.io
             .managed_http
             .get(&token.attempt().request)
@@ -268,6 +346,7 @@ impl<V: Venue> Engine<V> {
 
     /// Preparation is a host resource, never evidence of transport dispatch.
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
+        self.assert_live();
         self.io.dispatch_now = now;
         let request = token.attempt().request;
         let Some(managed) = self.io.managed_http.get_mut(&request) else {
@@ -407,6 +486,7 @@ impl<V: Venue> Engine<V> {
         reason: Error,
         mut error: VenueError,
     ) {
+        self.assert_live();
         self.io.dispatch_now = now;
         let request = token.attempt().request;
         let Some(managed) = self.io.managed_http.get(&request) else {
@@ -422,13 +502,7 @@ impl<V: Venue> Engine<V> {
         let delivery = managed.delivery();
         error.outcome = Some(crate::Outcome::NotSent);
         if error.kind.is_none() {
-            error.kind = Some(match reason {
-                Error::TimedOut => ErrorKind::Timeout,
-                Error::Invalid | Error::Revoked | Error::Duplicate | Error::RetryForbidden => {
-                    ErrorKind::InvalidInput
-                }
-                _ => ErrorKind::Internal,
-            });
+            error.kind = Some(reason.kind());
         }
         if delivery.context.operation() == Operation::Mutation {
             let _ = self.io.request_contexts.result(
@@ -454,6 +528,7 @@ impl<V: Venue> Engine<V> {
         }
         self.io.request_contexts.exit_delivery(&delivery);
         self.finish_event_scope(now);
+        self.sweep_executions(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }
@@ -462,6 +537,7 @@ impl<V: Venue> Engine<V> {
     /// The host checks its bound resource, calls this, and immediately invokes
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
+        self.assert_live();
         self.io.dispatch_now = now;
         let request = permit.attempt().request;
         let managed = self
@@ -535,6 +611,9 @@ impl<V: Venue> Engine<V> {
             if let Some(released) = release_flag {
                 *released = true;
             }
+            self.io
+                .request_contexts
+                .execution_leg_released(managed.lifecycle.context());
             managed.recipe = None;
             managed.signing_attempt = None;
             if mutation {
@@ -591,6 +670,17 @@ impl<V: Venue> Engine<V> {
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
             return;
         }
+        // Do not advance a lifecycle generation or take its retained recipe
+        // unless a fresh signing attempt can also be allocated.
+        if managed.signing_attempt.is_some() && !self.io.signing.available_id() {
+            self.http_preparation_failed(
+                now,
+                token,
+                Error::Capacity,
+                VenueError::new("HTTP signing identity capacity exhausted"),
+            );
+            return;
+        }
         let next = self
             .io
             .request_contexts
@@ -639,6 +729,9 @@ impl<V: Venue> Engine<V> {
     /// Admission metadata for a host resource or reducer. Reading it grants no
     /// permission to send and does not renew any response lease.
     pub fn http_release(&self, request: RequestId) -> Option<HttpRelease> {
+        if self.failed() {
+            return None;
+        }
         self.io.managed_http.get(&request)?.lifecycle.release()
     }
 
@@ -663,6 +756,7 @@ impl<V: Venue> Engine<V> {
             return true;
         }
         if managed.lifecycle.release().is_some() {
+            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -670,6 +764,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP request timed out",
                 },
             );
+            self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
         } else {
             self.http_preparation_failed(
@@ -851,6 +946,7 @@ impl<V: Venue> Engine<V> {
                     &self.store,
                     &mut self.io.actions,
                 );
+                self.io.http_write_reply = Some((response.status, response.headers.to_owned()));
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -860,6 +956,7 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
+                self.io.http_write_reply = None;
             }
             self.io.http_delivery = previous;
             self.io.request_contexts.exit_delivery(&delivery);
@@ -881,6 +978,8 @@ impl<V: Venue> Engine<V> {
     fn fail_write_collection(&mut self, now: f64, request: RequestId, _reason: Error) {
         self.io.http_responses.remove(request);
         if self.io.managed_http.contains_key(&request) {
+            // The venue answered (non-UTF-8 or oversize reply): never transport loss.
+            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Internal);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -888,6 +987,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP mutation response failed integrity bounds",
                 },
             );
+            self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
@@ -1072,19 +1172,31 @@ mod tests {
                     "write cannot inherit a prior read fence"
                 );
                 if self.retry_refusal && self.responses == 1 {
-                    cx.http_write_result(
-                        &pending.0,
-                        crate::request_context::WriteResult::Rejected(
-                            VenueError::new("native timestamp refusal").venue_code("10002"),
-                        ),
-                    )
-                    .unwrap();
-                    let context = cx
-                        .http_retry_context(
+                    use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+                    const TIMESTAMP: CodeTable = CodeTable {
+                        rows: &[Row {
+                            key: Key::Int(10002),
+                            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+                            only: None,
+                        }],
+                        success: &[],
+                        unlisted: Verdict::Unknown(None),
+                        status: &[],
+                    };
+                    let native = Native {
+                        code: NativeCode::Int(10002),
+                        message: "invalid timestamp",
+                    };
+                    let (_, grant) = cx
+                        .http_write_failure(
                             &pending.0,
-                            crate::request_context::RetryEvidence::DefinitiveRefusal,
+                            &TIMESTAMP,
+                            Some(&native),
+                            "native timestamp refusal",
+                            None,
                         )
                         .unwrap();
+                    let context = cx.http_resend_context(&pending.0, grant.unwrap()).unwrap();
                     cx.request_signed_managed(
                         context.clone(),
                         Method::Post,
@@ -1219,7 +1331,7 @@ mod tests {
             at,
             token,
             Prepared {
-                id: u64::from(token.attempt().request.0),
+                id: token.attempt().request.0,
                 expires_at: None,
             },
         );
@@ -1691,7 +1803,7 @@ mod tests {
             at,
             token,
             Prepared {
-                id: u64::from(token.attempt().request.0),
+                id: token.attempt().request.0,
                 expires_at: None,
             },
         );
@@ -1727,6 +1839,8 @@ mod tests {
         } else {
             RetryPolicy::Never
         };
+        // Issued as if dispatched from a placement command.
+        engine.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
         let mut cx = Cx {
             now: at,
             store: &mut engine.store,
@@ -1747,6 +1861,7 @@ mod tests {
                 },
             )
             .unwrap();
+        cx.io.request_contexts.dispatch = None;
         let request = if signed {
             cx.request_signed_managed(
                 context.clone(),
@@ -2697,7 +2812,7 @@ mod tests {
             },
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
-        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown) && error.kind == Some(ErrorKind::Internal))).count(), 1);
         assert_eq!(engine.venue.responses, 0);
         assert!(engine.io.pending.is_empty());
         assert!(engine.io.managed_http.is_empty());

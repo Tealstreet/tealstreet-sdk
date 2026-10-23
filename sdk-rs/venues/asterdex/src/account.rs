@@ -3,7 +3,7 @@ use crate::sign::Query;
 use crate::{AsterDex, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -15,8 +15,6 @@ use safe_cex_venue_binance::wire::{self, ListenKey, OpenOrder, OrderUpdateEvent}
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
-
-const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Default)]
 pub struct AccountState {
@@ -57,7 +55,7 @@ pub struct AccountState {
     mode_failures: u32,
     order_position_sides: HashMap<String, PositionSide>,
     /// Position ids, symbols or empty (unidentified) whose skipped row was already logged.
-    skip_logged: HashSet<String>,
+    skip_logged: RowReports<String>,
 }
 
 /// Hedge routing depends on the account mode; placements wait for its first read.
@@ -232,7 +230,7 @@ fn side(ps: &str, amount: f64) -> PositionSide {
 /// Every caller's row is owned or of unreadable size, so one with no stored copy is an error.
 fn reject_position(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut RowReports<String>,
     rows: &mut SnapshotBuilder<String, Position>,
     symbol: &str,
     position_side: Option<&str>,
@@ -261,17 +259,12 @@ fn reject_position(
 /// Logs a skipped position once per `key` until it maps again; polls would otherwise repeat it.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut RowReports<String>,
     key: &str,
     level: Level,
     message: impl Into<String>,
 ) {
-    if logged.len() >= SKIP_LOG_LIMIT {
-        logged.clear();
-    }
-    if logged.insert(key.to_owned()) {
-        cx.notice(level, code::ROW_SKIPPED, message);
-    }
+    logged.report(cx, key.to_owned(), level, message);
 }
 fn hedge_side(text: Option<&str>) -> Option<PositionSide> {
     match text {
@@ -646,7 +639,7 @@ impl AsterDex {
                 };
                 let side = side(&r.position_side, amount);
                 let id = position_id(&r.symbol, side, mode);
-                self.account.skip_logged.remove(&id);
+                self.account.skip_logged.forget(&id);
                 rows.push(Position {
                     id: id.clone(),
                     symbol: r.symbol.to_string(),

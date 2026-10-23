@@ -6,9 +6,10 @@ mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryEvidence, RetryPolicy};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
+    VenueError,
     book::{Book, BookSide},
     model::*,
     socket::{Config, Supervisor, Tick},
@@ -27,7 +28,7 @@ pub enum Pending {
         retries: u8,
     },
     Candles {
-        command: CommandId,
+        context: Context,
         params: String,
         retries: u8,
     },
@@ -80,7 +81,6 @@ pub struct KrakenSpot {
     /// Bases whose USD route the last catalogue read rejected as malformed.
     rejected_routes: HashSet<String>,
     ticker_reseed: bool,
-    retries: Vec<(TimerId, Pending)>,
 }
 impl KrakenSpot {
     pub fn new(options: Options) -> Self {
@@ -116,7 +116,6 @@ impl KrakenSpot {
             tickers_in_flight: false,
             rejected_routes: HashSet::new(),
             ticker_reseed: false,
-            retries: vec![],
         }
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -130,7 +129,9 @@ impl KrakenSpot {
                 self.ticker_reseed = false;
                 self.discovery.failed(cx, true);
             }
-            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Candles { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::Private(_) => unreachable!(),
         }
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
@@ -144,6 +145,34 @@ impl KrakenSpot {
             pending,
         );
         cx.request_timeout(id, 20_000);
+    }
+    fn candle_request(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+        let Pending::Candles {
+            context, params, ..
+        } = &pending
+        else {
+            unreachable!()
+        };
+        if let Err((pending, error)) = cx.request_managed(
+            context.clone(),
+            Method::Get,
+            format!("https://api.kraken.com/0/public/OHLC{params}"),
+            None,
+            pending,
+        ) {
+            self.candle_preparation_failed(cx, pending, error.venue_error());
+        }
+    }
+    fn candle_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: VenueError,
+    ) {
+        let Pending::Candles { context, .. } = pending else {
+            unreachable!()
+        };
+        let _ = cx.fail_context(&context, error);
     }
     fn markets(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.markets_in_flight {
@@ -639,6 +668,12 @@ impl Venue for KrakenSpot {
             self.private_response(cx, request, response);
             return;
         }
+        if let Pending::Candles { context, .. } = &pending
+            && let Err(error) = cx.validate_read_http_delivery(context, context)
+        {
+            let _ = cx.fail_context(context, error.venue_error());
+            return;
+        }
         let r = result(response).and_then(|text| match pending.clone() {
             Pending::Private(_) => unreachable!(),
             Pending::Markets { .. } => {
@@ -650,7 +685,7 @@ impl Venue for KrakenSpot {
                 self.ticker_reseed = false;
                 self.tickers_response(cx, text)
             }
-            Pending::Candles { command, .. } => {
+            Pending::Candles { context, .. } => {
                 let mut rows = vec![];
                 let mut failed = false;
                 map_each::<&serde_json::value::RawValue>(text, |key, raw| {
@@ -700,8 +735,12 @@ impl Venue for KrakenSpot {
                     let result: Result<String, String> =
                         serde_json::to_string(&rows).map_err(|e| e.to_string());
                     match result {
-                        Ok(data) => cx.done(command, data),
-                        Err(error) => cx.fail(command, error),
+                        Ok(data) => {
+                            let _ = cx.done_context(&context, data);
+                        }
+                        Err(error) => {
+                            let _ = cx.fail_context(&context, error);
+                        }
                     }
                 };
                 Ok(())
@@ -711,24 +750,57 @@ impl Venue for KrakenSpot {
             self.public_failed(cx, pending, &e);
         }
     }
-    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
-        match &mut pending {
-            Pending::Private(_) => {
-                let Pending::Private(r) = pending else {
-                    unreachable!()
-                };
-                self.private_network_failed(cx, r, error);
-                return;
-            }
-            Pending::Candles { retries, .. } if *retries < 3 => {
-                *retries += 1;
-                let timer = cx.set_timer(0.);
-                self.retries.push((timer, pending));
-                return;
-            }
-            _ => {}
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: VenueError,
+    ) {
+        if matches!(&pending, Pending::Candles { .. }) {
+            self.candle_preparation_failed(cx, pending, error);
+        } else {
+            self.on_sign_error(cx, pending, error);
         }
-        self.public_failed(cx, pending, error);
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut pending: Pending,
+        error: VenueError,
+    ) {
+        let Pending::Candles {
+            context, retries, ..
+        } = &mut pending
+        else {
+            self.on_request_failed(cx, pending, &error.message);
+            return;
+        };
+        if let Err(reason) = cx.validate_http_context(context) {
+            self.candle_preparation_failed(cx, pending, reason.venue_error());
+            return;
+        }
+        if *retries < 3 {
+            match cx.http_retry_context(context, RetryEvidence::ReadFailure) {
+                Ok(next) => {
+                    *context = next;
+                    *retries += 1;
+                    self.candle_request(cx, pending);
+                }
+                Err(reason) => self.candle_preparation_failed(cx, pending, reason.venue_error()),
+            }
+        } else {
+            let message = error.message.clone();
+            self.candle_preparation_failed(cx, pending, error);
+            cx.notice(Level::Warn, code::REQUEST_FAILED, message);
+        }
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Private(request) = pending {
+            self.private_network_failed(cx, request, error);
+        } else {
+            self.public_failed(cx, pending, error);
+        }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(tickers) = self.discovery.on_timer(timer) {
@@ -739,20 +811,6 @@ impl Venue for KrakenSpot {
             }
             return;
         }
-        if let Some(i) = self.retries.iter().position(|(t, _)| *t == timer) {
-            let (_, p) = self.retries.remove(i);
-            match &p {
-                Pending::Markets { .. } => self.read(cx, "AssetPairs", "", p),
-                Pending::Tickers { .. } => self.read(cx, "Ticker", "", p),
-                Pending::Candles { params, .. } => {
-                    let params = params.clone();
-                    self.read(cx, "OHLC", &params, p)
-                }
-                _ => unreachable!(),
-            }
-            return;
-        }
-
         if self.private_timer(cx, timer) {
             return;
         }
@@ -862,13 +920,20 @@ impl Venue for KrakenSpot {
                     if let Some(s) = from_ms {
                         p.push_str(&format!("&since={}", (s / 1000.).floor()));
                     }
-                    self.read(
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::ReadFailure,
+                    }) else {
+                        return;
+                    };
+                    self.candle_request(
                         cx,
-                        "OHLC",
-                        &p,
                         Pending::Candles {
-                            command,
-                            params: p.clone(),
+                            context,
+                            params: p,
                             retries: 0,
                         },
                     );

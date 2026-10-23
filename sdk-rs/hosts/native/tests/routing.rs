@@ -29,7 +29,7 @@ fn tokens() -> ProxyTokenProvider {
     Arc::new(|| Box::pin(async { Ok("account-token".into()) }))
 }
 
-fn http_request(id: u32, url: String) -> HttpRequest {
+fn http_request(id: u64, url: String) -> HttpRequest {
     HttpRequest {
         id: RequestId(id),
         method: Method::Post,
