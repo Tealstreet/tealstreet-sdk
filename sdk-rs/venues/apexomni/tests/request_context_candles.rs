@@ -274,6 +274,39 @@ fn signature_and_transport_read_retries_have_separate_budgets_and_one_deadline()
 }
 
 #[test]
+fn undecodable_http_replies_keep_typed_internal_after_read_retry_exhaustion() {
+    let mut engine = engine();
+    let mut actions = query(&mut engine, 7, 100.);
+    for attempt in 0..4 {
+        let (token, _) = preparation(&actions);
+        deadline(&actions);
+        let now = 200. + f64::from(attempt) * 100.;
+        let packet = release(&mut engine, token, now);
+        engine.handle(
+            now + 1.,
+            Event::HttpStart {
+                request: packet.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        engine.handle(
+            now + 2.,
+            Event::HttpChunk {
+                request: packet.id,
+                data: &[0xff],
+            },
+        );
+        engine.handle(now + 3., Event::HttpEnd { request: packet.id });
+        actions = engine.drain_actions().collect();
+    }
+    let error = failure(&actions, 7);
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.outcome, None);
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(_))));
+}
+
+#[test]
 fn retry_cannot_renew_its_root_or_complete_a_reused_command() {
     let mut engine = engine();
     let initial = query(&mut engine, 7, 100.);
