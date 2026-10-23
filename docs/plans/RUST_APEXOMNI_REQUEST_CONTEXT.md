@@ -624,6 +624,7 @@ trading selects those declarations without a local algorithm policy.
 Verification: the full ApeX and Binance suites passed 478 tests with only the
 two directed P8 placement ignores. After the recipe declaration extraction,
 the focused trading suite passed 41 tests with the same two ignores. Strict
-ApeX Clippy/fmt and both request-context checks are required on the published
-head. The signer owner independently approved the native delegated HMAC proof;
+ApeX Clippy/fmt, bans and both request-context checks passed locally.
+Incoming Bitrue/Bitunix inventory drift was resolved by integrating their actual
+landings through ae64150c89a, preserving their prunes. The signer owner independently approved the native delegated HMAC proof;
 source/adversarial, caller and full-map reviews found no remaining source blocker.
