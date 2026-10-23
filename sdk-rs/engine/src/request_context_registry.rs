@@ -11,7 +11,7 @@ use std::collections::HashMap;
 const CAPACITY: usize = 256;
 
 #[path = "session_context.rs"]
-mod session;
+pub(super) mod session;
 
 #[cfg(test)]
 #[path = "request_context_replacement_registry_tests.rs"]
@@ -433,6 +433,18 @@ impl ContextRegistry {
             .ok_or(Error::State)?
             .release_flag(request)
             .map(Some)
+    }
+
+    pub(super) fn resend_blocked(&self, context: &Context) -> bool {
+        let Owner::Command { id, .. } = context.owner() else {
+            return false;
+        };
+        context.operation() == Operation::Mutation
+            && self
+                .commands
+                .get(&id)
+                .and_then(|owner| owner.writes.as_ref())
+                .is_some_and(|writes| writes.resend_blocked(context.leg()))
     }
 
     /// Session writes record release separately: they have no command journal.

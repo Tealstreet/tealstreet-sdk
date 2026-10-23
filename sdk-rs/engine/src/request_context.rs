@@ -105,6 +105,14 @@ impl Session {
     }
 }
 
+/// A continuation parked behind a session, returned when the venue drains it.
+#[derive(Debug)]
+pub enum Waiter<P> {
+    Ready(Context, P),
+    /// Nothing was sent for this owner; the error's outcome is NotSent.
+    Failed(Context, P, VenueError),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionPolicy {
     /// Every context issued for the session must use exactly this credential.
@@ -1107,6 +1115,19 @@ impl CommandWrites {
                 None => return false,
             }
         }
+    }
+
+    /// A released attempt without a definitive effects-free refusal cannot be
+    /// re-sent, so its owner must not park waiting to re-send it.
+    pub(crate) fn resend_blocked(&self, leg: u64) -> bool {
+        let Some(latest) = self.latest(leg) else {
+            return false;
+        };
+        self.attempts.iter().any(|attempt| {
+            attempt.id == latest
+                && attempt.released
+                && !matches!(&attempt.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+        })
     }
 
     pub(crate) fn latest(&self, leg: u64) -> Option<RequestId> {

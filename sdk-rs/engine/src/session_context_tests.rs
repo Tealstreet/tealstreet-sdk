@@ -2,7 +2,7 @@ use super::super::super::*;
 use super::SESSIONS;
 use crate::request_context::{
     Credential, Error, HttpAction, Operation, Owner, Policy, Preparation, Prepared, RetryPolicy,
-    Scope, Session, SessionPolicy, WriteResult,
+    Scope, Session, SessionPolicy, Waiter, WriteResult,
 };
 
 #[derive(Debug)]
@@ -18,6 +18,7 @@ enum Fact {
 struct Probe {
     fact: Fact,
     fact_on_failure: Fact,
+    command_fact: Fact,
     finish_first: bool,
     retire_in_response: Option<Session>,
     facts: Vec<Result<(), Error>>,
@@ -31,6 +32,7 @@ impl Default for Probe {
         Self {
             fact: Fact::None,
             fact_on_failure: Fact::None,
+            command_fact: Fact::None,
             finish_first: false,
             retire_in_response: None,
             facts: vec![],
@@ -80,6 +82,12 @@ impl Venue for Probe {
         if pending.0.operation() == Operation::Mutation
             && session
             && let Some(fact) = fact(self.fact)
+        {
+            self.facts.push(cx.http_write_result(&pending.0, fact));
+        }
+        if matches!(pending.0.owner(), Owner::Command { .. })
+            && pending.0.operation() == Operation::Mutation
+            && let Some(fact) = fact(self.command_fact)
         {
             self.facts.push(cx.http_write_result(&pending.0, fact));
         }
@@ -338,8 +346,8 @@ fn retired_and_foreign_sessions_issue_nothing() {
         Err(Error::Revoked)
     );
     assert_eq!(
-        with(&mut engine, 0., |cx| cx.retire_session(&foreign)),
-        Err(Error::Revoked)
+        with(&mut engine, 0., |cx| cx.retire_session(&foreign)).err(),
+        Some(Error::Revoked)
     );
     let session = open(&mut engine, true);
     let context = with(&mut engine, 1., |cx| {
@@ -798,4 +806,232 @@ fn queued_session_packets_redact_the_listen_key() {
     .unwrap();
     let debug = format!("{:?}", engine.drain_actions().collect::<Vec<_>>());
     assert!(!debug.contains("secret-key"), "{debug}");
+}
+
+fn owner(
+    engine: &mut Engine<Probe>,
+    scope: Scope,
+    timeout_ms: u32,
+    now: f64,
+) -> crate::request_context::Context {
+    with(engine, now, |cx| {
+        cx.http_context(
+            scope,
+            Policy {
+                timeout_ms,
+                ..policy(Operation::Read)
+            },
+        )
+    })
+    .unwrap()
+}
+
+fn wait(
+    engine: &mut Engine<Probe>,
+    session: &Session,
+    owner: &crate::request_context::Context,
+    now: f64,
+) -> Result<(), Error> {
+    with(engine, now, |cx| {
+        cx.session_wait(session, owner, Pending(owner.clone()))
+    })
+    .map_err(|(pending, error)| {
+        assert_eq!(&pending.0, owner, "refusal returns the continuation");
+        error
+    })
+}
+
+fn timers(engine: &mut Engine<Probe>) -> Vec<Action> {
+    engine
+        .drain_actions()
+        .filter(|action| matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect()
+}
+
+#[test]
+fn ready_returns_live_waiters_in_arrival_order_and_clears_their_timers() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let owners = [
+        owner(&mut engine, Scope::Background, 20_000, 1.),
+        owner(&mut engine, Scope::Command(7), 20_000, 1.),
+        owner(&mut engine, Scope::Background, 20_000, 1.),
+    ];
+    for owner in &owners {
+        wait(&mut engine, &session, owner, 1.).unwrap();
+    }
+    let armed = timers(&mut engine);
+    assert_eq!(armed.len(), 3);
+    assert!(armed.iter().all(|action| matches!(action,
+        Action::SetTimer { at_ms, .. } if *at_ms == owners[0].deadline())));
+    let ready = with(&mut engine, 2., |cx| cx.session_ready(&session));
+    let order = ready
+        .into_iter()
+        .map(|waiter| match waiter {
+            Waiter::Ready(context, pending) => {
+                assert_eq!(pending.0, context);
+                context
+            }
+            Waiter::Failed(..) => panic!("live owner failed"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(order, owners);
+    assert_eq!(
+        timers(&mut engine)
+            .iter()
+            .filter(|action| matches!(action, Action::ClearTimer { .. }))
+            .count(),
+        3
+    );
+    assert!(with(&mut engine, 3., |cx| cx.session_ready(&session)).is_empty());
+}
+
+#[test]
+fn an_expired_waiter_fails_alone_at_its_unchanged_deadline() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let short = owner(&mut engine, Scope::Background, 1_000, 1.);
+    let long = owner(&mut engine, Scope::Background, 20_000, 1.);
+    wait(&mut engine, &session, &short, 1.).unwrap();
+    wait(&mut engine, &session, &long, 1.).unwrap();
+    let timer = timers(&mut engine)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if at_ms == short.deadline() => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(500., Event::TimerFired { timer });
+    assert_eq!(
+        timers(&mut engine),
+        [Action::SetTimer {
+            timer,
+            at_ms: short.deadline()
+        }],
+        "early delivery re-arms without extending the bound"
+    );
+    assert!(engine.venue.preparation_failures.is_empty());
+    engine.handle(short.deadline(), Event::TimerFired { timer });
+    assert_eq!(
+        engine.venue.preparation_failures,
+        [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+    );
+    let ready = with(&mut engine, short.deadline(), |cx| {
+        cx.session_ready(&session)
+    });
+    assert!(matches!(ready.as_slice(), [Waiter::Ready(context, _)] if *context == long));
+}
+
+#[test]
+fn prerequisite_failure_and_retirement_fan_out_not_sent() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let first = owner(&mut engine, Scope::Background, 20_000, 1.);
+    let second = owner(&mut engine, Scope::Command(7), 20_000, 1.);
+    wait(&mut engine, &session, &first, 1.).unwrap();
+    wait(&mut engine, &session, &second, 1.).unwrap();
+    let failed = with(&mut engine, 2., |cx| {
+        cx.session_failed(
+            &session,
+            VenueError::new("login refused").kind(crate::ErrorKind::AuthInvalid),
+        )
+    });
+    assert_eq!(failed.len(), 2);
+    for (_, _, error) in &failed {
+        assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
+        assert_eq!(error.kind, Some(crate::ErrorKind::AuthInvalid));
+    }
+    wait(&mut engine, &session, &first, 3.).unwrap();
+    let retired = with(&mut engine, 4., |cx| cx.retire_session(&session)).unwrap();
+    assert!(matches!(retired.as_slice(), [(context, _, error)]
+        if *context == first && error.outcome == Some(crate::Outcome::NotSent)));
+}
+
+#[test]
+fn expired_or_revoked_owners_come_back_failed_never_dropped() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let expired = owner(&mut engine, Scope::Background, 1_000, 1.);
+    let finished = owner(&mut engine, Scope::Background, 20_000, 1.);
+    wait(&mut engine, &session, &expired, 1.).unwrap();
+    wait(&mut engine, &session, &finished, 1.).unwrap();
+    with(&mut engine, 2., |cx| cx.finish_http_context(&finished)).unwrap();
+    let ready = with(&mut engine, expired.deadline() + 1., |cx| {
+        cx.session_ready(&session)
+    });
+    let kinds = ready
+        .iter()
+        .map(|waiter| match waiter {
+            Waiter::Failed(_, _, error) => {
+                assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
+                error.kind
+            }
+            Waiter::Ready(..) => panic!("inactive owner re-dispatched"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        [
+            Some(crate::ErrorKind::Timeout),
+            Some(crate::ErrorKind::InvalidInput)
+        ]
+    );
+}
+
+#[test]
+fn waits_refuse_invalid_owners_and_return_the_continuation() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let own = with(&mut engine, 1., |cx| {
+        cx.session_context(&session, policy(Operation::Read))
+    })
+    .unwrap();
+    assert_eq!(wait(&mut engine, &session, &own, 1.), Err(Error::Invalid));
+    let background = owner(&mut engine, Scope::Background, 1_000, 1.);
+    wait(&mut engine, &session, &background, 1.).unwrap();
+    assert_eq!(
+        wait(&mut engine, &session, &background, 1.),
+        Err(Error::Duplicate)
+    );
+    let late = owner(&mut engine, Scope::Background, 1_000, 1.);
+    assert_eq!(
+        wait(&mut engine, &session, &late, late.deadline()),
+        Err(Error::TimedOut)
+    );
+    let mut other = self::engine();
+    let foreign = open(&mut other, true);
+    let fresh = owner(&mut engine, Scope::Background, 20_000, 1.);
+    assert_eq!(wait(&mut engine, &foreign, &fresh, 1.), Err(Error::Revoked));
+    let retired = open(&mut engine, true);
+    let _ = with(&mut engine, 1., |cx| cx.retire_session(&retired)).unwrap();
+    assert_eq!(wait(&mut engine, &retired, &fresh, 1.), Err(Error::Revoked));
+}
+
+#[test]
+fn a_write_with_an_unproven_release_cannot_park_for_a_resend() {
+    for (lost, fact, parks) in [
+        (true, Fact::None, false),
+        (false, Fact::Accepted, false),
+        (false, Fact::Rejected, true),
+    ] {
+        let mut engine = engine();
+        engine.venue.command_fact = fact;
+        let session = open(&mut engine, false);
+        let write = with(&mut engine, 1., |cx| {
+            cx.http_context(Scope::Command(7), policy(Operation::Mutation))
+        })
+        .unwrap();
+        let token = queue(&mut engine, &write, 1.);
+        let request = release(&mut engine, token, 2.);
+        if lost {
+            lose(&mut engine, request, 3.);
+        } else {
+            respond(&mut engine, request, 3., "{\"code\":401}");
+        }
+        assert_eq!(
+            wait(&mut engine, &session, &write, 4.).is_ok(),
+            parks,
+            "lost={lost}"
+        );
+    }
 }
