@@ -873,3 +873,11 @@ tape, clocks, budgets, comparison rules and runtime/shared paths are unchanged.
 Local medians and sparse overlapping profiles do not establish the TS/Rust1.10x
 CI target or private runtime proof. The exact-head CI build and replay gates
 remain required. [Reproduction and evidence](RUST_WOO_PUBLIC_CPU.md).
+
+Production WOO CI at f564c7b50f1 (run39977265913, job120495031043) passes the
+nine-pair public gate at reported TS15.8ms/Rust8.9ms steady CPU,1.78x. Its actual
+CI WASM is1,197,465bytes within the unchanged1,343,488 ceiling; manifest hashes
+and the CI checkout tree match the tested head. Strict verification records one
+public PASS, one existing declared known-private FAIL and zero unexpected
+failures. This does not establish private authenticated lifecycle parity. Whole
+PR CI and the merge window remain pending; the fixed gates/policies are unchanged.
