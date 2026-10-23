@@ -4,8 +4,8 @@ Owner: codex-cxxyqr. Reviewers: codex-uufub4 (Plan core) and
 claude-fe7lgm (#1945 receipt custody). Assigned as a separate engine PR after
 #1945. Initial plan base: actual `a828ede7ebb`. Current stack genuinely includes
 #1945's frozen `15df705c0b5`, announced by fe7/overseer, after the authorized
-source-cleared `f7550a0c6d0` checkpoint. Status: plan and original assertion
-controls; no receipt-cap runtime implementation yet. The only merge conflicts
+source-cleared `f7550a0c6d0` checkpoint. Status: receipt-cap implementation and original assertion controls; independent
+source review and dependency refresh remain required. The only merge conflicts
 were shared CALLERS appends/order: frozen incoming text retains all prior lines
 once. Engine/host/receipt runtime is byte-identical to frozen #1945.
 
@@ -45,8 +45,8 @@ caller-minted token. It refuses a WriteAfterReads policy in this first slice.
 The existing native-envelope preflight mode is a separate declared contract,
 not a fallback when receipt capture fails.
 
-The exact public signature and whether the mode belongs on the existing entry
-operation are review gates. Do not add two issuers or a second Plan allocator.
+The cleared public signature is
+`begin_preflight_with_command_wait(policy) -> Result<Preflight, CommandEntryError>`. Do not add two issuers or a second Plan allocator.
 A missing, foreign, duplicate or expired receipt must never silently select the
 uncapped mode or a fresh 120-second default. #1945 owns default stamping once at
 external receipt and Fresh-only `reject_expired_command(Operation)`.
@@ -278,3 +278,41 @@ are being coordinated with fe7; neither a second emitter nor a local fallback
 belongs here. This source gate supersedes the earlier blanket no-emitter
 statement for those receipt-failure causes. Context root-expiry funnel ownership
 is being clarified separately; this checkpoint changes no lifecycle source.
+
+## Receipt-cap implementation checkpoint
+
+The explicit Read-only entry now captures the exact receipt through the same
+private raw lookup as `command_wait`. Missing receipt in untouched Fresh entry
+uses `with_command_entry` and its canonical Read error projection, once; an
+exhausted sequence selects Capacity, other missing provenance selects Revoked.
+Borrowed/non-Fresh/resource-spent and unsupported WriteAfterReads remain pure
+Revoked. Own Expired capture also stays Fresh and emits nothing; the caller
+uses the existing `reject_expired_command(Read)`. No numeric/default fallback.
+
+Private receipt sequence/deadline data lives on the validated Preflight owner
+and moves into the Plan body. The existing `admit_declared_plan` checks raw
+expiry before reservations and applies the minimum deadline without changing
+Schedule geometry. Admission refuses with TimedOut while leaving preflight
+failure custody valid. Plan handle validation keeps its receipt cap immutable.
+
+The original seven timing assertions are unchanged and now pass. The old pure
+Revoked expectation for missing receipt, committed separately in `e5e4f148c20`,
+was explicitly superseded by the owner-approved cause-aware typed rejection.
+That control now requires one complete engine Read error and no new default.
+The earlier one-action expiry assertion was unreachable on the RED path; its
+GREEN path explicitly allows prerequisite ClearTimer/managed Cancel cleanup,
+while still rejecting new timers, Prepare/Bind, HTTP or extra terminals.
+
+The fixture now uses actual `Error::read_venue_error`; no local outcome stripping
+remains. Nine error tests preserve generic mutation projections and check the
+Read conversion's kind/text/outcome. Five additional custody controls verify
+unchanged ids/contexts/owners/credits/plans/timers/pending resources on refusal,
+sequence-exhausted typed failure, legacy duplicate stamp/request survival,
+borrowed no-terminal refusal and reused-id/retired-preflight isolation.
+Ten integration controls and all five custody controls pass on this source.
+These are engine proofs, not native history adoption receipts.
+
+Context Read-root expiry belongs to fe7's separate #1945 follow-up. #1949 adds
+no such timer/funnel. #1945's frozen dependency must be refreshed once its owner
+publishes the successor fixing decode/bans, feature-fixture and WASM gates; no
+unowned fixes are copied here. Full CI/merge readiness is not claimed.

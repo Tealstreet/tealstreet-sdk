@@ -1,4 +1,4 @@
-//! Original receipt-cap reproductions; the adapter below uses native-only entry.
+//! Receipt-cap controls retaining the original timing assertions.
 #![cfg(all(feature = "http-plans", feature = "test-support"))]
 mod support;
 
@@ -10,14 +10,13 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{
-    Action, Command, CommandWait, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Query,
-    Response, SocketId, Venue,
+    Action, Command, CommandWait, Cx, Engine, Event, HttpRequest, Method, Notice, Query, Response,
+    SocketId, Venue,
 };
 
-// Original negative seam: the opt-in receipt-capped entry does not exist yet.
-// Only this adapter changes at cutover; no deadline is fabricated in the test.
+// This adapter is the only cutover from the original native-only entry.
 fn receipt_preflight<P>(cx: &mut Cx<'_, P>) -> Result<Preflight, CommandEntryError> {
-    cx.begin_preflight(preflight_policy())
+    cx.begin_preflight_with_command_wait(preflight_policy())
 }
 
 fn preflight_policy() -> PreflightPolicy {
@@ -188,11 +187,8 @@ impl Venue for Probe {
                     }
                     Err(error) => {
                         self.admission = Some(Err(error));
-                        // Original adapter projection, not engine Read normalization.
-                        let mut cause = error.venue_error();
-                        assert_eq!(cause.outcome, Some(safe_cex_engine::Outcome::NotSent));
-                        cause.outcome = None;
-                        cx.fail_preflight(&preflight, cause).unwrap();
+                        cx.fail_preflight(&preflight, error.read_venue_error())
+                            .unwrap();
                     }
                 }
             }
@@ -334,15 +330,24 @@ fn assert_expired_handoff(at: f64) {
     );
     assert_eq!(engine.venue().selected_slots, 0);
     let actions: Vec<_> = engine.drain_actions().collect();
-    assert_eq!(
-        actions.len(),
-        1,
-        "only the preflight's typed failure may remain"
-    );
-    assert!(
-        matches!(&actions[0], Action::Notice(Notice::CommandFailed { command: 7, error })
-        if error.kind == Some(ErrorKind::Timeout) && error.outcome.is_none())
-    );
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            Action::ClearTimer { .. } => None,
+            Action::ManagedHttp(action)
+                if matches!(
+                    **action,
+                    safe_cex_engine::request_context::HttpAction::Cancel { .. }
+                ) =>
+            {
+                None
+            }
+            other => panic!("unexpected effect after rejected Plan admission: {other:?}"),
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(*failures[0], Error::TimedOut.read_venue_error());
 }
 
 #[test]
@@ -416,16 +421,24 @@ fn unstamped_nonadvancing_receipt_cannot_fall_back_to_an_uncapped_preflight() {
     );
     assert_eq!(engine.venue().entry_wait, None);
     let actions: Vec<_> = engine.drain_actions().collect();
-    assert!(
-        actions.iter().all(|action| matches!(action,
-            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::STARTUP_INCOMPLETE)),
-        "only the unrelated startup deadline notice is allowed: {actions:?}; capture {:?}",
-        engine.venue().capture
-    );
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::STARTUP_INCOMPLETE =>
+            {
+                None
+            }
+            other => panic!("unexpected receipt-refusal effect: {other:?}"),
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(*failures[0], Error::Revoked.read_venue_error());
     assert!(!engine.venue().handoff_validated);
     assert_eq!(engine.venue().selected_slots, 0);
     assert_eq!(
         engine.venue().capture,
-        Some(Err(CommandEntryError::Revoked))
+        Some(Err(CommandEntryError::Rejected(Error::Revoked)))
     );
 }

@@ -17,6 +17,10 @@ use std::collections::VecDeque;
 const CAPACITY: usize = 256;
 
 #[cfg(all(test, feature = "http-plans"))]
+#[path = "plan_receipt_cap_tests.rs"]
+mod receipt_cap_tests;
+
+#[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_tests.rs"]
 mod preflight_tests;
 
