@@ -5420,3 +5420,5 @@ orders make the command `Unknown`; this proves nothing about them.
 | A kline read has its own 20 s native window | `timeout` when it expires; a late answer is ignored | None. |
 | A kline stream that breaks mid-list | `internal`; nothing is published | None. |
 | `fetchBalanceInfo` and a disabled-product refusal go through command admission | A full command table refuses them once with the shared `internal` capacity error; otherwise unchanged | None. |
+| Kline failure text | Native refusals keep `Bybit klines: <retMsg>` with the classified kind and `venueCode`; transport loss and expiry now carry the engine's typed error text (`network` / `timeout`) without that prefix; a success with no list is `internal` | Branch on `kind`, not text. |
+| Invalid Bybit options (`config_error`) | `fetchOHLCV` now fails `NotSent` / `invalidInput` instead of never answering | None. |

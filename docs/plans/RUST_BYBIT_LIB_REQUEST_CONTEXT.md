@@ -74,7 +74,7 @@ That is a small engine change with its own tests. Ownership: proposed to this la
 
 ## Phases (one PR per sub-slice, each plan-reviewed first)
 
-1. **1a CANDLE + CACHED + REFUSED** (smallest): 8 `lib.rs` sites (5 candles, balance info, the product-not-enabled fail, and the `fetch_candles` `send` call). No engine change.
+1. **1a CANDLE + CACHED + REFUSED** (smallest): 7 `lib.rs` occurrences (5 candles, balance info, the product-not-enabled fail). The `fetch_candles` call of `send` is the shared chokepoint and stays. No engine change.
 2. **1b PROBE**: 2 sites.
 3. **1c DISCOVERY**: the instruments and tickers callers; no lexical prune until `send` retires.
 4. **1d ACCOUNT**: the fee read and `account.rs` reads, after the engine prerequisite.

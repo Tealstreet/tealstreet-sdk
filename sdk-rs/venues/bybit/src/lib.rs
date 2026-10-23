@@ -2516,7 +2516,15 @@ impl Venue for BybitLinear {
             };
             if id.is_some() {
                 // A refusal before any I/O still needs this command's authority.
-                if let Ok(context) = cx.admit_http_command(candles::read_policy()) {
+                let operation = if matches!(
+                    command,
+                    Command::FetchCandles { .. } | Command::Query { .. }
+                ) {
+                    safe_cex_engine::request_context::Operation::Read
+                } else {
+                    safe_cex_engine::request_context::Operation::Mutation
+                };
+                if let Ok(context) = cx.admit_http_command(candles::entry_policy(operation)) {
                     let error = safe_cex_engine::VenueError::new("Bybit product is not enabled")
                         .kind(ErrorKind::Unsupported)
                         .outcome(safe_cex_engine::Outcome::NotSent);

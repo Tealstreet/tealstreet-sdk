@@ -19,8 +19,14 @@ pub struct Read {
 
 /// A public read answered once, inside its native window.
 pub(crate) fn read_policy() -> Policy {
+    entry_policy(Operation::Read)
+}
+
+/// Command authority for an answer or refusal with no I/O. A write command's
+/// refusal keeps its NotSent outcome even when admission itself is refused.
+pub(crate) fn entry_policy(operation: Operation) -> Policy {
     Policy {
-        operation: Operation::Read,
+        operation,
         credential: None,
         timeout_ms: 20_000,
         pacing: None,
@@ -46,12 +52,17 @@ impl BybitLinear {
         let Ok(context) = cx.admit_http_command(read_policy()) else {
             return;
         };
-        if self.category_for(symbol) == Category::Option {
-            let _ = cx.fail_context(&context, refused("Bybit has no candles for options"));
+        // Invalid options send nothing; the read fails instead of hanging.
+        if let Some(error) = self.config_error.clone() {
+            let error = VenueError::new(error)
+                .kind(ErrorKind::InvalidInput)
+                .outcome(Outcome::NotSent);
+            let _ = cx.fail_context(&context, error);
             return;
         }
-        if !self.category_enabled(self.category_for(symbol)) {
-            let _ = cx.fail_context(&context, refused("Bybit product is not enabled"));
+        // `on_command` has already refused a disabled product.
+        if self.category_for(symbol) == Category::Option {
+            let _ = cx.fail_context(&context, refused("Bybit has no candles for options"));
             return;
         }
         let Some(code) = interval_code(interval) else {

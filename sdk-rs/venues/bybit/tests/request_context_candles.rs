@@ -9,10 +9,15 @@ use support::{Harness, Options};
 const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
 
 fn ready() -> Harness {
+    ready_with(false)
+}
+
+fn ready_with(enable_option_markets: bool) -> Harness {
     let mut h = Harness::started(Options {
         variant: Variant::Linear,
         key: Some("key".into()),
         secret: Some("secret".into()),
+        enable_option_markets,
         ..Options::default()
     });
     for path in [
@@ -123,17 +128,20 @@ fn candles_carry_a_native_window_that_expires_as_a_timeout() {
 
 #[test]
 fn candle_refusals_before_any_request_are_typed_not_sent() {
-    for (command, symbol, interval) in [
-        (42, "BTC-27MAR26-100000-C", Interval::M1),
-        (43, "BTCUSD", Interval::M1),
-        (44, "BTCUSDT", Interval::S1),
+    // An enabled option product reaches the venue's own option refusal; a
+    // disabled product is refused before dispatch.
+    for (command, options, symbol, interval) in [
+        (42, true, "BTC-27MAR26-100000-C", Interval::M1),
+        (43, false, "BTCUSD", Interval::M1),
+        (44, false, "BTCUSDT", Interval::S1),
     ] {
-        let mut h = ready();
+        let mut h = ready_with(options);
+        h.requests.clear();
         candles(&mut h, command, symbol, interval);
         assert!(h.requests.is_empty(), "{symbol}: nothing is sent");
         let error = failure(&h, command);
         assert_eq!(error.outcome, Some(Outcome::NotSent), "{symbol}");
-        assert!(error.kind.is_some(), "{symbol}: typed refusal");
+        assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{symbol}");
     }
 }
 
@@ -178,7 +186,15 @@ fn cached_balance_info_and_disabled_product_refusals_need_command_authority() {
             limit: Some(1),
         },
     });
-    for command in [46, 47] {
+    // A write command's refusal stays NotSent even when admission is refused.
+    h.command(Command::SetLeverage {
+        command: 49,
+        symbol: "BTC-27MAR26-100000-C".into(),
+        leverage: 2.0,
+        side: None,
+    });
+    assert_eq!(failure(&h, 49).outcome, Some(Outcome::NotSent));
+    for command in [46, 47, 49] {
         let error = failure(&h, command);
         assert_eq!(
             error.kind,
@@ -195,10 +211,48 @@ fn cached_balance_info_and_disabled_product_refusals_need_command_authority() {
     let read = reads.into_iter().next().unwrap();
     h.reply(read.id, 200, r#"{"retCode":10001,"retMsg":"params error"}"#);
     h.requests.clear();
+    let timers = h.timers.len();
+    let orders = h.engine.store().orders().len();
     h.command(Command::Venue {
         command: 48,
         action: VenueAction::FetchBalanceInfo,
     });
     assert_eq!(h.result(48), Some(&Ok("null".to_owned())));
     assert!(h.requests.is_empty());
+    assert_eq!(h.timers.len(), timers, "no timer");
+    assert_eq!(h.engine.store().orders().len(), orders, "no Store activity");
+}
+
+#[test]
+fn kline_failures_keep_native_and_transport_evidence() {
+    // A native retCode refusal is classified from the one code table.
+    let mut h = ready();
+    candles(&mut h, 50, "BTCUSDT", Interval::M1);
+    let kline = h.take("/v5/market/kline");
+    h.reply(
+        kline.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"params error"}"#,
+    );
+    let error = failure(&h, 50);
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(error.venue_code.as_deref(), Some("10001"));
+    assert!(error.message.starts_with("Bybit klines: "));
+    // A bare gateway error carries no native code.
+    let mut h = ready();
+    candles(&mut h, 51, "BTCUSDT", Interval::M1);
+    let kline = h.take("/v5/market/kline");
+    h.reply(kline.id, 503, "<html>unavailable</html>");
+    let error = failure(&h, 51);
+    assert!(error.kind.is_some());
+    assert_eq!(error.venue_code, None);
+    // Transport loss is Network.
+    let mut h = ready();
+    candles(&mut h, 52, "BTCUSDT", Interval::M1);
+    let kline = h.take("/v5/market/kline");
+    h.event(Event::HttpFailed {
+        request: kline.id,
+        error: "connection reset",
+    });
+    assert_eq!(failure(&h, 52).kind, Some(ErrorKind::Network));
 }
