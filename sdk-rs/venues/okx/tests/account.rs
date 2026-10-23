@@ -17,13 +17,13 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
         ..Default::default()
     });
     e.start(0.);
-    let market = actions(&mut e).remove(0);
+    let market = prepared(&mut e, 0.).remove(0);
     reply(&mut e, &market, &envelope(MARKET), 1.);
     // Account config is requested alongside the ticker seed once markets load.
-    let mut initial = actions(&mut e);
+    let mut initial = prepared(&mut e, 1.);
     let ticker = initial.remove(0);
     reply(&mut e, &ticker, &envelope(TICKER), 2.);
-    initial.extend(actions(&mut e));
+    initial.extend(prepared(&mut e, 2.));
     let config = initial
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
@@ -34,7 +34,7 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.,
     );
-    let pending = actions(&mut e);
+    let pending = prepared(&mut e, 3.);
     let timer = pending
         .iter()
         .find_map(|a| match a {
@@ -46,7 +46,7 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
     let expected = e.store().balance().clone();
     for scale in [f64::INFINITY, 15., 0.25] {
         e.handle(100., Event::PollScaleChanged { scale });
-        assert!(actions(&mut e).is_empty());
+        assert!(prepared(&mut e, 100.).is_empty());
     }
     e.handle(
         100.,
@@ -57,7 +57,7 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
     e.store_mut().set_balance(Default::default());
     e.handle(2003., Event::TimerFired { timer });
     assert_eq!(e.store().balance(), &expected);
-    let after = actions(&mut e);
+    let after = prepared(&mut e, 2003.);
     assert!(!after.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         after
@@ -80,12 +80,12 @@ fn startup() -> (
     };
     let mut e = crate::support::engine(opts);
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 0.0).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let mut initial = actions(&mut e);
+    let mut initial = prepared(&mut e, 1.0);
     let a = initial.remove(0);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
-    initial.extend(actions(&mut e));
+    initial.extend(prepared(&mut e, 2.0));
     let business = initial
         .iter()
         .find_map(|a| match a {
@@ -103,7 +103,7 @@ fn startup() -> (
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let pending = actions(&mut e);
+    let pending = prepared(&mut e, 3.0);
     let private = pending
         .iter()
         .find_map(|a| match a {
@@ -113,10 +113,10 @@ fn startup() -> (
         .unwrap();
     for socket in [private, business] {
         e.handle(4.0, Event::WsOpened { socket });
-        let sent = actions(&mut e);
+        let sent = prepared(&mut e, 4.0);
         assert!(sent.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains("\"op\":\"login\"") && text.contains("test-passphrase"))));
         ws(&mut e, socket, r#"{"event":"login","code":"0","msg":""}"#);
-        let subscriptions = actions(&mut e);
+        let subscriptions = prepared(&mut e, 4.0);
         assert!(subscriptions.iter().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains(if socket == business { "orders-algo" } else { "positions" }))));
     }
     (
@@ -815,10 +815,10 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 0.0).remove(0);
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
     // Private startup begins once markets load, alongside the ticker read.
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1.0);
     let tickers = out
         .iter()
         .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
@@ -835,7 +835,7 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let joined = actions(&mut e);
+    let joined = prepared(&mut e, 3.0);
     let positions = joined
         .iter()
         .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
@@ -853,7 +853,7 @@ fn reports_exposure_on_malformed_instrument(bad: &str) {
         )),
         4.0,
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 4.0);
     assert!(out.iter().any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::Event(event))
@@ -884,10 +884,10 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 0.0).remove(0);
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
     assert!(e.store().loaded().markets);
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1.0);
     assert_eq!(
         out.iter()
             .filter(|a| is_get(a, "/api/v5/account/config"))
@@ -896,7 +896,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
     );
     let retry = retry_timer(&out, 1.0, 1_000.0).expect("partial catalogue schedules a re-read");
     e.handle(1001.0, Event::TimerFired { timer: retry });
-    let reread = actions(&mut e)
+    let reread = prepared(&mut e, 1001.0)
         .into_iter()
         .find(|a| is_get(a, "/api/v5/public/instruments?instType=SWAP"))
         .unwrap();
@@ -907,7 +907,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         1002.0,
     );
     assert!(e.store().market("ETHUSDT").is_some());
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1002.0);
     assert!(!out.iter().any(|a| is_get(a, "/api/v5/account/config")));
     // The complete re-read clears the retry instead of scheduling another.
     assert!(retry_timer(&out, 1002.0, 2_000.0).is_none());
@@ -980,14 +980,14 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
             ..Options::default()
         });
         e.start(0.0);
-        let a = actions(&mut e).remove(0);
+        let a = prepared(&mut e, 0.0).remove(0);
         reply(
             &mut e,
             &a,
             &envelope(&format!("{MARKET},{bad_market}")),
             1.0,
         );
-        let out = actions(&mut e);
+        let out = prepared(&mut e, 1.0);
         let tickers = out
             .iter()
             .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
@@ -1003,7 +1003,7 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
             &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
             3.0,
         );
-        let mut pending = actions(&mut e);
+        let mut pending = prepared(&mut e, 3.0);
         let mut logs = vec![];
         while let Some(a) = pending.pop() {
             match &a {
@@ -1016,7 +1016,7 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
                         envelope("")
                     };
                     reply(&mut e, &a, &body, 4.0);
-                    pending.extend(actions(&mut e));
+                    pending.extend(prepared(&mut e, 4.0));
                 }
                 Action::Notice(Notice::Event(event)) => logs.push(event.message.clone()),
                 _ => {}

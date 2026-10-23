@@ -26,10 +26,11 @@ struct Rig {
     deactivated: usize,
 }
 impl Rig {
-    /// Records timers and startup notices; returns the remaining actions.
-    fn take(&mut self, engine: &mut Engine<Okx>) -> Vec<Action> {
+    /// Records timers and startup notices from actions released at `now`;
+    /// returns the remaining actions.
+    fn take(&mut self, engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
         let mut rest = Vec::new();
-        for action in actions(engine) {
+        for action in prepared(engine, now) {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
@@ -48,7 +49,7 @@ impl Rig {
         }
         let (timer, at) = self.timers.remove(0);
         engine.handle(at, Event::TimerFired { timer });
-        Some((at, self.take(engine)))
+        Some((at, self.take(engine, at)))
     }
     /// Fires timers until `pick` finds a request; returns when it was sent.
     fn until(
@@ -112,9 +113,9 @@ fn is_config(action: &Action) -> bool {
 /// Loads the catalogue and returns the first account config read.
 fn to_config(engine: &mut Engine<Okx>, rig: &mut Rig) -> Action {
     engine.start(0.);
-    let catalogue = rig.take(engine).remove(0);
+    let catalogue = rig.take(engine, 0.).remove(0);
     reply(engine, &catalogue, &envelope(MARKET), 1.);
-    rig.take(engine).into_iter().find(is_config).unwrap()
+    rig.take(engine, 1.).into_iter().find(is_config).unwrap()
 }
 
 fn connected(out: &[Action], suffix: &str) -> Option<SocketId> {
@@ -148,7 +149,7 @@ fn transient_config_failures_back_off_and_the_account_still_loads() {
     let mut delays = Vec::new();
     for (status, body) in failures {
         respond(&mut engine, &config, status, body, sent);
-        let rest = rig.take(&mut engine);
+        let rest = rig.take(&mut engine, sent);
         assert!(!rest.iter().any(is_config), "no immediate resend");
         let (at, next) = rig.until(&mut engine, is_config).expect("config retried");
         delays.push(at - sent);
@@ -169,7 +170,7 @@ fn transient_config_failures_back_off_and_the_account_still_loads() {
         sent,
     );
     let mut pending: Vec<_> = rig
-        .take(&mut engine)
+        .take(&mut engine, sent)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade")))
         .collect();
@@ -180,7 +181,7 @@ fn transient_config_failures_back_off_and_the_account_still_loads() {
             envelope("")
         };
         reply(&mut engine, &a, &body, sent + 1.);
-        pending.extend(rig.take(&mut engine).into_iter().filter(|a| {
+        pending.extend(rig.take(&mut engine, sent + 1.).into_iter().filter(|a| {
             matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade"))
         }));
     }
@@ -204,9 +205,33 @@ fn transport_failure_of_config_is_retried() {
             error: "timed out",
         },
     );
-    rig.take(&mut engine);
+    rig.take(&mut engine, 2.);
     assert!(rig.until(&mut engine, is_config).is_some());
     assert!(rig.failures.is_empty());
+}
+
+#[test]
+fn unanswered_config_read_times_out_into_startup_backoff() {
+    let mut engine = crate::support::engine(keyed());
+    let mut rig = Rig::default();
+    // The config read is sent at 1 ms; its 20 s shared deadline is 20_001 ms.
+    to_config(&mut engine, &mut rig);
+    let early = rig.run(&mut engine, 20_000.);
+    assert!(
+        !early.iter().any(is_config),
+        "no resend before the shared deadline"
+    );
+    let resent = rig.until(&mut engine, is_config);
+    assert!(
+        resent.is_some(),
+        "an unanswered config read must time out into the startup backoff and be re-sent"
+    );
+    let (at, _) = resent.unwrap();
+    assert!(
+        jittered(at - 20_001., 1_000.),
+        "re-sent at {at}, not one first backoff step after the deadline"
+    );
+    assert!(rig.failures.is_empty() && rig.deactivated == 0);
 }
 
 #[test]
@@ -221,7 +246,7 @@ fn rejected_key_fails_startup_once_and_stops_retrying() {
         r#"{"code":"50111","msg":"Invalid OK-ACCESS-KEY","data":[]}"#,
         2.,
     );
-    let out = rig.take(&mut engine);
+    let out = rig.take(&mut engine, 2.);
     let later = rig.run(&mut engine, 600_000.);
     assert!(!out.iter().chain(&later).any(is_config));
     assert!(connected(&later, "/private").is_none());
@@ -240,11 +265,11 @@ fn invalid_signature_is_final_only_after_one_re_signed_resend() {
     let config = to_config(&mut engine, &mut rig);
     let sign = r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#;
     respond(&mut engine, &config, 401, sign, 2.);
-    rig.take(&mut engine);
+    rig.take(&mut engine, 2.);
     assert!(rig.failures.is_empty());
     let (at, config) = rig.until(&mut engine, is_config).unwrap();
     respond(&mut engine, &config, 401, sign, at);
-    rig.take(&mut engine);
+    rig.take(&mut engine, at);
     assert!(rig.run(&mut engine, 600_000.).iter().all(|a| !is_config(a)));
     assert_eq!(rig.failures.len(), 1);
     assert_eq!(rig.failures[0].venue_code.as_deref(), Some("50113"));
@@ -260,7 +285,7 @@ fn invalid_signature_counts_only_consecutive_answers() {
     let mut sent = 2.;
     for interruption in [Some((200, busy)), Some((503, "<html>down</html>")), None] {
         respond(&mut engine, &config, 401, sign, sent);
-        rig.take(&mut engine);
+        rig.take(&mut engine, sent);
         let (at, next) = rig.until(&mut engine, is_config).expect("re-signed");
         match interruption {
             Some((status, body)) => respond(&mut engine, &next, status, body, at),
@@ -277,11 +302,11 @@ fn invalid_signature_counts_only_consecutive_answers() {
                 );
             }
         }
-        rig.take(&mut engine);
+        rig.take(&mut engine, at);
         (sent, config) = rig.until(&mut engine, is_config).expect("retried");
     }
     respond(&mut engine, &config, 401, sign, sent);
-    rig.take(&mut engine);
+    rig.take(&mut engine, sent);
     assert!(rig.until(&mut engine, is_config).is_some(), "re-signed");
     assert!(rig.failures.is_empty() && rig.deactivated == 0);
 }
@@ -305,7 +330,7 @@ fn rejected_read_only_key_fails_startup_without_deactivating() {
         r#"{"code":"50120","msg":"API key doesn't have permission","data":[]}"#,
         2.,
     );
-    rig.take(&mut engine);
+    rig.take(&mut engine, 2.);
     rig.run(&mut engine, 600_000.);
     assert_eq!(rig.failures.len(), 1);
     assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthPermission));
@@ -325,7 +350,7 @@ fn invalid_read_only_credentials_fail_startup() {
     });
     let mut rig = Rig::default();
     engine.start(0.);
-    let out = rig.take(&mut engine);
+    let out = rig.take(&mut engine, 0.);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(rig.failures.len(), 1);
     assert_eq!(rig.failures[0].kind, Some(ErrorKind::InvalidInput));
@@ -341,9 +366,9 @@ fn to_private_login(engine: &mut Engine<Okx>, rig: &mut Rig) -> SocketId {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         2.,
     );
-    let private = connected(&rig.take(engine), "/private").expect("private socket");
+    let private = connected(&rig.take(engine, 2.), "/private").expect("private socket");
     engine.handle(3., Event::WsOpened { socket: private });
-    rig.take(engine);
+    rig.take(engine, 3.);
     private
 }
 
@@ -357,7 +382,7 @@ fn rejected_socket_login_fails_startup_and_stops_reconnecting() {
         private,
         r#"{"event":"error","code":"60024","msg":"Wrong passphrase"}"#,
     );
-    rig.take(&mut engine);
+    rig.take(&mut engine, 4.);
     let later = rig.run(&mut engine, 600_000.);
     assert!(connected(&later, "/private").is_none(), "no reconnect");
     assert_eq!(rig.failures.len(), 1);
@@ -375,7 +400,7 @@ fn transient_socket_login_failure_reconnects() {
         private,
         r#"{"event":"error","code":"60014","msg":"Requests too frequent"}"#,
     );
-    rig.take(&mut engine);
+    rig.take(&mut engine, 4.);
     assert!(
         rig.until(
             &mut engine,
@@ -405,7 +430,7 @@ fn rate_limited_config_read_waits_out_the_rate_limit_window() {
             "Too Many Requests",
             1.,
         );
-        let mut early = rig.take(&mut engine);
+        let mut early = rig.take(&mut engine, 1.);
         early.extend(rig.run(&mut engine, wait));
         assert!(
             !early.iter().any(is_config),
@@ -428,7 +453,7 @@ fn only_current_documented_key_or_passphrase_socket_codes_end_startup() {
             private,
             &format!(r#"{{"event":"error","code":"{code}","msg":"refused"}}"#),
         );
-        rig.take(&mut engine);
+        rig.take(&mut engine, 4.);
         assert_eq!(rig.failures.len(), 1, "{code}");
         assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthInvalid));
         assert_eq!(rig.failures[0].venue_code.as_deref(), Some(code));
@@ -448,7 +473,7 @@ fn only_current_documented_key_or_passphrase_socket_codes_end_startup() {
             private,
             &format!(r#"{{"event":"error","code":"{code}","msg":"retryable or unknown"}}"#),
         );
-        rig.take(&mut engine);
+        rig.take(&mut engine, 4.);
         assert!(
             rig.until(
                 &mut engine,

@@ -35,6 +35,11 @@ pub fn actions(engine: &mut Engine<Okx>) -> Vec<Action> {
         })
         .collect()
 }
+/// Actions released through the engine's managed-HTTP fixture handshake at
+/// `now`, the time of the event that produced them. Legacy actions pass through.
+pub fn prepared(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
+    safe_cex_engine::test_support::prepared_actions(engine, now)
+}
 pub fn reply(engine: &mut Engine<Okx>, action: &Action, body: &str, now: f64) {
     let Action::Http(r) = action else {
         panic!("expected request")
@@ -104,20 +109,31 @@ pub fn trading_engine() -> Engine<Okx> {
 }
 
 pub fn trading_engine_configure(configure: impl FnOnce(&mut Engine<Okx>)) -> Engine<Okx> {
-    let mut e = engine(Options {
-        key: Some("test-key".into()),
-        secret: Some("test-secret".into()),
-        passphrase: Some("test-passphrase".into()),
-        ..Options::default()
-    });
+    trading_engine_with(
+        Options {
+            key: Some("test-key".into()),
+            secret: Some("test-secret".into()),
+            passphrase: Some("test-passphrase".into()),
+            ..Options::default()
+        },
+        configure,
+    )
+}
+
+/// A ready private account from explicit credentials, e.g. with read keys.
+pub fn trading_engine_with(
+    options: Options,
+    configure: impl FnOnce(&mut Engine<Okx>),
+) -> Engine<Okx> {
+    let mut e = engine(options);
     configure(&mut e);
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 0.0).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let mut out = actions(&mut e);
+    let mut out = prepared(&mut e, 1.0);
     let a = out.remove(0);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
-    out.extend(actions(&mut e));
+    out.extend(prepared(&mut e, 2.0));
     let a = out
         .iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
@@ -128,7 +144,7 @@ pub fn trading_engine_configure(configure: impl FnOnce(&mut Engine<Okx>)) -> Eng
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    let mut pending: Vec<_> = actions(&mut e)
+    let mut pending: Vec<_> = prepared(&mut e, 3.0)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(_)))
         .collect();
@@ -140,7 +156,7 @@ pub fn trading_engine_configure(configure: impl FnOnce(&mut Engine<Okx>)) -> Eng
         };
         reply(&mut e, &a, &body, 4.0);
         pending.extend(
-            actions(&mut e)
+            prepared(&mut e, 4.0)
                 .into_iter()
                 .filter(|a| matches!(a, Action::Http(_))),
         );

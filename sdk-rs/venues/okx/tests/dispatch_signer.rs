@@ -8,7 +8,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use support::{actions, envelope, reply, trading_engine_configure};
+use support::{actions, envelope, prepared, reply, trading_engine_configure};
 
 struct Gate {
     provider: Provider,
@@ -255,5 +255,60 @@ fn delayed_real_write_reprepares_stamp_without_changing_intent_or_route() {
             format!("1970-01-01T00:00:06.006ZPOST/api/v5/trade/batch-orders{body}").as_bytes(),
             safe_cex_crypto::Encoding::Base64
         )
+    );
+}
+
+/// Refuses synchronously, so both legacy and managed preparation see it.
+struct Refusing {
+    provider: Provider,
+    refuse: Arc<AtomicBool>,
+}
+impl Signer for Refusing {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.provider.sign(request)
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if self.refuse.load(Ordering::SeqCst) {
+            Some(Err(SignError::Refused))
+        } else {
+            self.provider.sign_ready(request)
+        }
+    }
+}
+
+#[test]
+fn leverage_read_provider_refusal_is_one_not_sent_failure_without_http() {
+    let refuse = Arc::new(AtomicBool::new(false));
+    let mut engine = trading_engine_configure(|engine| {
+        let provider = engine.signer().unwrap();
+        engine
+            .set_signer(Some(Arc::new(Refusing {
+                provider,
+                refuse: refuse.clone(),
+            })))
+            .unwrap();
+    });
+    refuse.store(true, Ordering::SeqCst);
+    engine.handle(
+        5.,
+        Event::Command(Command::FetchLeverage {
+            command: 43,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = prepared(&mut engine, 5.);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    let terminals: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 43, error }) => Some(Some(error)),
+            Action::Notice(Notice::CommandDone { command: 43, .. }) => Some(None),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(terminals.len(), 1);
+    assert_eq!(
+        terminals[0].expect("refusal is a failure").outcome,
+        Some(Outcome::NotSent)
     );
 }

@@ -20,9 +20,9 @@ fn startup(market: &str, shared: bool) -> (Engine<Okx>, Action, SocketId, Vec<Ac
             .unwrap();
     }
     engine.start(0.0);
-    let catalogue = actions(&mut engine).remove(0);
+    let catalogue = prepared(&mut engine, 0.0).remove(0);
     reply(&mut engine, &catalogue, &envelope(market), 1.0);
-    let out = actions(&mut engine);
+    let out = prepared(&mut engine, 1.0);
     let ticker = out
         .iter()
         .find(|a| is_get(a, "tickers?instType=SWAP"))
@@ -38,7 +38,7 @@ fn startup(market: &str, shared: bool) -> (Engine<Okx>, Action, SocketId, Vec<Ac
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         2.0,
     );
-    let pending = actions(&mut engine);
+    let pending = prepared(&mut engine, 2.0);
     let private = pending
         .iter()
         .find_map(|a| match a {
@@ -47,9 +47,9 @@ fn startup(market: &str, shared: bool) -> (Engine<Okx>, Action, SocketId, Vec<Ac
         })
         .unwrap();
     engine.handle(3.0, Event::WsOpened { socket: private });
-    actions(&mut engine);
+    prepared(&mut engine, 3.0);
     ws(&mut engine, private, r#"{"event":"login","code":"0"}"#);
-    actions(&mut engine);
+    prepared(&mut engine, 4.0);
     (
         engine,
         ticker,
