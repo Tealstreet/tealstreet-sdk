@@ -198,8 +198,9 @@ impl VenueError {
     }
 }
 
-/// Pre-dispatch request-lifecycle refusals. The new attempt was never released;
-/// a managed command join still keeps any earlier attempt's release evidence.
+/// Pre-dispatch request-lifecycle refusals: the new attempt was never released.
+/// A mutation command join still recomputes the outcome from earlier releases;
+/// read and legacy commands pass this through, which is harmless for reads.
 impl crate::request_context::Error {
     pub fn kind(self) -> ErrorKind {
         match self {
