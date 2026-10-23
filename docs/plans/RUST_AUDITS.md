@@ -2616,3 +2616,9 @@ two identity singletons; no held helper, dispatch, account or trading code moves
 Pre-integration native504WEEX/Binance tests and strict WEEX Clippy/fmt pass.
 Whole-map provenance is blocked by newer Aster inventory shrink in origin;
 actual integration and fresh gates follow, with no foreign manifest edits.
+
+Actual integration e336f67b7de genuinely includes15bd7821b52; all unowned incoming
+blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
+full bans and both request-context checks (15tests) PASS. Three independent
+implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
+prune is verified; the parallel #1951 history prune is not credited here.

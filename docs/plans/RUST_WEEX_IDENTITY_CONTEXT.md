@@ -195,3 +195,20 @@ stopped on incoming Aster inventory shrink at newer origin15bd7821b52; no Aster
 entry was changed locally. Genuine landing integration and fresh native/strict/
 ratchet checks are required before PR certification; no full bans PASS claimed
 for this pre-integration checkpoint.
+
+## Actual integration and reviewed verification
+
+Genuine porcelain integration `e336f67b7de` includes actual15bd7821b52.
+The sole CALLERS append conflict kept the complete incoming file first plus the
+exact own743-byte suffix. Own identity source remains byte-identical to d933;
+the original test remains byte-identical to902335. Eight own paths only; every
+unowned incoming mode/type/blob and every foreign manifest prune is preserved.
+Three independent final source/adversarial, caller and full-map reviews are
+CLEAN; architecture gate No. Independent scan confirms40F/49O and identity0/0.
+
+Fresh integrated WEEX/Binance native run passes504tests,0failed/ignored, across
+40result targets (including empty doctests). Strict WEEX all-target/all-feature
+Clippy, scoped rustfmt, full bans, request-context scanner and all15checker tests
+PASS with CARGO_BUILD_JOBS=2. This resolves the historical pre-integration Aster
+ratchet failure through the actual incoming source/map, without exemptions.
+CI and an authorized train slot remain separate; no merge permission is claimed.
