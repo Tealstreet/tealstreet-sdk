@@ -43,3 +43,18 @@ actual #1820 `2b1e35e50b2095c6651344fc5ffe0553ad456f35`.
   standalone artifact-provenance audit is required. Retain all real failures.
 - No landing guard, merge or change to original #1771 until the owner chooses
   this option and grants a window. Report CI results even if the option fails.
+
+## Actual command-entry integration correction
+
+The first bounded ordering review found that old managed `Cx::close` returned
+before actual #1830's `opaque_entry_activity` mark. Newly introduced no-ID socket
+registration, one-shot staging, interest proposals, retirement and stop likewise
+could change existing state without spending a fresh command-entry loan. Before
+CI freeze, add seven genuine Engine command-callback regression cases, prove
+assertion RED against the imported source, then use the existing shared mark at
+these managed side-effect entry points (and before the managed close branch).
+No new entry state, ID allocator, HTTP root, retry permission or per-venue fix.
+These new APIs conservatively spend fresh entry before attempted side effects;
+existing suppressed legacy behavior and all incoming HTTP guards stay intact.
+Native baseline checks before this correction are preservation only, not final
+CI qualification. Integrate actual #1837 before the new frozen CI run.

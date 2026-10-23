@@ -4533,3 +4533,27 @@ Credential-bearing contexts still require the signed entry point and trusted
 provider. Static headers grant no additional routing, retry, command, publication
 or financial authority. Original Context deadlines and atomic resource admission
 apply; host, WASM and SDK transport schemas are unchanged.
+
+## Engine socket lifecycle: OKX
+
+OKX authentication state, socket epochs, reconnect permission, subscription
+replay and retirement use the shared Engine lifecycle. Native venue codecs
+provide login/subscription payloads and Store invalidation through the existing
+socket actions and events. Retired or expired frames and timers cannot restore
+authentication, replay interests, advance private health or publish a parked
+signing result. Permanent OKX private/business credential refusal revokes both
+retry authorities before callbacks; reconnectable loss retains native recovery.
+
+Current desired book/candle interests survive reconnect. Retirement clears only
+the retiring feed's owned public depth before retry; account/history/settings
+freshness fences remain unchanged. Physical IDs retain the shared host-safe
+integer boundary and signing/remote-signing wire contracts remain unchanged.
+
+Bitunix and all other venue families retain their existing socket adapters.
+Bitunix keeps its native pre-ACK reads, first-pong idle activation and shard
+pacing. The temporary managed-sockets feature remains until every legacy family
+has adopted the shared lifecycle; its inventory includes Bitunix explicitly.
+
+Initial HTTP command admission precedes any managed socket side effect. Socket
+registration, retirement, closure and queued work spend a fresh command-entry
+loan even when no new transport identity is allocated.

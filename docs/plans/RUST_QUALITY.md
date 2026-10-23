@@ -576,3 +576,16 @@ query bounds, tail/zero/no-limit results, atomic malformed-column rejection,
 HTTP/native envelope errors, and live versus stale HTTP429 depth/account pauses.
 The original 1000-row no-limit fixture retains its payload/result assertions and
 uses only the shared prepared-actions executor for this command.
+## Draft Engine socket lifecycle references
+
+OKX adopt one Engine registry/driver for epoch admission, typed auth,
+shared Supervisor deadlines/backoff, transactional complete interests, replay,
+retirement and required Store invalidation. Native codecs retain venue payloads
+and role policies. Original runtime controls pin retired open/close rejection
+and expiry-before-late-pong; shared controls cover bounded queues, health,
+retry revocation, signed-output retirement and transactional same-interest book
+repair. This is a OKX-only preparation, using the landed physical-ID seam; final CI evidence is separate; other families remain open.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.

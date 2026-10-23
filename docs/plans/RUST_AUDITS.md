@@ -2068,3 +2068,16 @@ unprepared dispatch, parked/released expiry, stale owner delivery and HTTP429
 side-effect authority. Native mapping/decoding/status/pause policy is retained.
 This closes only this command's lifecycle sites; startup, history, account,
 signing and background subscription repair remain separately inventoried.
+## Draft socket lifecycle architecture adoption
+
+The shared Supervisor alone did not own current epochs, auth acceptance,
+subscription coverage or invalidation. The draft Engine socket lifecycle now
+owns those boundaries for OKX and rejects late ingress before health
+or native mutation. Review found and corrected inactive retry-stop ownership,
+unexpected-close accounting, per-event health reset, silent callback errors and
+cleanup loss on queue exhaustion. Safe-integer physical IDs use the landed shared allocator; full family adoption and deployed cutover
+proof remain open. No allocator change is included in this socket draft.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.
