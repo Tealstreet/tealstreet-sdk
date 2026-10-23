@@ -75,3 +75,7 @@ remain merge gates.
 Architecture gate: No per-venue cross-cutting implementation. This uses existing
 shared genuine entry and Context failure; keyless successful settings and private
 signing remain gated on their separately owned shared/adoption work.
+
+Plan reviews: source/adversarial, caller and independent scanner/full-map are
+CLEAR at af731bfc50e. trade_command returns bool: admission refusal and completed
+local failure must both return true, so lib cannot redispatch a handled command.
