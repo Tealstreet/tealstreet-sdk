@@ -4879,13 +4879,22 @@ authority. The call shape and success value (`null`) are unchanged.
   refresh timed out` to `Execution deadline expired`. The outcome is unset
   (read). Each joined caller gets this once.
 - Capacity: one walk serves at most 64 callers. A 65th concurrent call fails
-  at once with message `Too many requests in flight`, kind `internal`,
+  at once with message `Engine request capacity reached`, kind `internal`,
   outcome `notSent`. The running walk and its 64 callers are unaffected, and a
   call after the walk ends starts a new one.
 - Founder departure: the walk is not owned by the first caller. If that
   caller's observer is detached, the walk continues for the remaining callers.
   Bybit itself has no caller-side cancellation for this call today, so this is
   an engine guarantee rather than an SDK-visible action.
+
+Engine capacity refusal text: every engine request-context capacity refusal
+(execution-group joins above, Binance command entry, Hyperliquid candle reads
+and any other `Capacity` refusal) now reads `Engine request capacity reached`
+instead of `Too many requests in flight`; kind `internal` and outcome
+`notSent` are unchanged. The old text matched the `rate_limit` health
+pattern (`/too.*many.*request/i`), so NX showed a rate-limit toast and a false
+rate-limit health signal for a local engine bound. The new text matches no
+`errorPatterns.ts` category.
 - Unchanged: shared-feed refusal, `Bybit market catalogue is not loaded`
   (`invalidInput`) and the discovery rate-limit refusal (`rateLimited` with
   `retryAfterMs`); request URLs, query and the `X-Referer` broker header; the
@@ -5135,7 +5144,7 @@ listener/chart migration, NX deployment or live private connectivity.
 Lighter and Robinhood command candle reads borrow their genuine engine callback's
 initial Read owner through shared `admit_http_command`, before validation or
 outbound work. When capacity is exhausted, callers receive exactly one correlated
-`CommandFailed` with `Too many requests in flight`, Internal kind and no financial
+`CommandFailed` with `Engine request capacity reached`, Internal kind and no financial
 outcome. Invalid clock/deadline admission instead returns `Invalid request
 context`, InvalidInput kind and no outcome. These replace the adapter's generic
 lifecycle-unavailable/Internal refusal. No caller retry or special transport path
@@ -5396,3 +5405,116 @@ and new maps coexist. Ten similarly sized independent Stores therefore add about
 The cost occurs per Store, not per message, and grows with symbol count/string
 length and hash-table capacity steps. These are native index-only measurements;
 actual process/browser/WASM costs include allocator and memory-page effects.
+
+## Engine socket lifecycle: OKX
+
+OKX authentication state, socket epochs, reconnect permission, subscription
+replay and retirement use the shared Engine lifecycle. Native venue codecs
+provide login/subscription payloads and Store invalidation through the existing
+socket actions and events. Retired or expired frames and timers cannot restore
+authentication, replay interests, advance private health or publish a parked
+signing result. Permanent OKX private/business credential refusal revokes both
+retry authorities before callbacks; reconnectable loss retains native recovery.
+
+Current desired book/candle interests survive reconnect. Retirement clears only
+the retiring feed's owned public depth before retry; account/history/settings
+freshness fences remain unchanged. Physical IDs retain the shared host-safe
+integer boundary and signing/remote-signing wire contracts remain unchanged.
+
+Bitunix and all other venue families retain their existing socket adapters.
+Bitunix keeps its native pre-ACK reads, first-pong idle activation and shard
+pacing. The temporary managed-sockets feature remains until every legacy family
+has adopted the shared lifecycle; its inventory includes Bitunix explicitly.
+
+Initial HTTP command admission precedes any managed socket side effect. Socket
+registration, retirement, closure and queued work spend a fresh command-entry
+loan even when no new transport identity is allocated.
+
+
+## Declared mutation terminal API (#1894)
+
+An opted-in engine Plan may declare a native conditional terminal before any
+release. `done_mutation_plan_after_data` consumes only its exact current
+released DATA anchor and retires unissued remainder; it does not manufacture
+Accepted facts or renew the native root. A valid terminal whose earlier writes
+are uncertain still emits the common journal's failure projection with known
+IDs retained. An undeclared anchor, Read Plan, foreign/old/expired delivery or
+another issued call refuses without consuming current authority.
+
+The shared seal prepares projection/report storage before commit and keeps one
+Cx terminal funnel for the forthcoming execution-observer integration. Native
+codecs still prove when their conditional native work is finished. ApeX #1891
+is a separate consumer obligation; this engine API alone does not migrate its
+writes, provider presentation, remote zkLink, startup or session paths. No TS
+caller shape or native result bytes change until an adapter adopts it.
+
+
+## Context-owned history completion and admission
+
+For adapters using `ReadCompletion` and the `Read*History` types, the history
+owner retains the original engine-issued command Read root across pages and
+composite stages. Legacy numeric owners keep their existing lifecycle; each
+venue's adoption carries its own caller contract. Bind the matching command/root once; a page
+leg, foreign issuer, stale generation, background owner or mutation owner cannot
+substitute for that root. `ReadCompletion::from_context` validates that binding
+without reserving exclusive completion; only the first valid context terminal
+can complete the owner. Read ownership does not become numeric completion
+authority when a lifecycle check refuses it. Plan and joined-observer ownership
+use their own explicit APIs.
+
+Native adapters use the borrowed admission guard for row staging, identities,
+accepted output and coverage. The guard checks the exact current HTTP leg and
+physical attempt; native response validation and publication freshness are
+separate requirements.
+Scope the guard around admission, drop it before mutable Cx diagnostics or Store
+publication, and re-admit if more staging follows. Native cache/Store effects
+outside the history owner require the same synchronous root/leg check.
+Read cursor identities stay page-local until admission, so a discarded failed
+prefix cannot suppress those rows in a later retry. Discard the failed staged
+page before retry admission; a different physical attempt is refused until that
+binding and its unvalidated rows and identities are cleared.
+
+Migrate a venue's owner to the Read type as a whole. Handle or deliberately
+ignore a Context ownership error; never unwrap it or retry through numeric
+done/fail. Stale or mixed-mutation ownership cannot run a captured finalizer,
+publish a history.incomplete companion, or consume the proper command owner's
+terminal authority. Preparation/policy refusals reject strictly; actual later
+page failures can return previously accepted rows with one command-scoped
+incomplete Warn. Native strict endpoint-policy refusals remain strict.
+
+SDK/NX callers keep the incomplete fact correlated to the command and treat
+its returned rows as partial coverage. An absent or refused managed result does
+not establish complete history. Existing native row shapes and result shaping
+remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
+and [owned history](RUST_OWNED_HISTORY.md).
+
+### Lighter public order-book seed uses managed Background Read
+
+The independent `orderBookOrders?market_id={id}&limit=100` snapshot now waits for
+prepare/bind/final claim in custom worker/hosted transports. It remains unsigned
+GET with empty headers/body. SDK subscriptions, snapshot decoding, level units,
+book/nonce validation, WS revision/generation precedence and native2s recovery
+remain unchanged. This does not establish WS nonce continuity from REST.
+
+Preparation shares the original20s bound with response handling. Expired or
+unreleased work cannot publish; failures release only the matching subscription's
+in-flight latch and use existing background recovery, never a user's command
+terminal. Ticker/catalog/private/trading paths stay native. No caller signature
+or financial-outcome contract changes; transports need managed preparation for
+this additional background read.
+
+## KuCoin futures local history/funding terminals
+
+Synchronous history/funding preflight errors and zero-limit empty results now
+borrow the engine's genuine initial Read authority and complete it in the same
+callback. Native validation order, error messages, empty arrays and companion-free
+timelines remain. Unsupported client lookup gains Unsupported/NotSent metadata;
+local input/absent credential failures gain InvalidInput/NotSent. There is no
+transport or private remote read on these branches, so their policy declares no
+credential. Valid signed paging continues through its existing separate path.
+
+Initial shared admission refusal emits exactly one engine-owned failure and no
+adapter fallback or result. Capacity refusal uses the shared Internal error;
+invalid raw clock admission uses InvalidInput, both without a Read financial
+outcome. Repeated commands can recover when unrelated roots retire. Callers need
+no new endpoint, retry or history marker handling for this local-only slice.
