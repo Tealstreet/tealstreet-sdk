@@ -1225,7 +1225,7 @@ mod owned_bounded {
                     errors[0].message,
                     match failure {
                         0 => "connection lost",
-                        1 => "Phemex history HTTP 503",
+                        1 => "HTTP 503: unavailable",
                         _ => "Malformed or oversized Phemex history response",
                     }
                 );
