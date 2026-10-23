@@ -343,28 +343,18 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
 
 - **The root.** Each perps history command (fills, order history, both income
   forms, public trades and the REST client-ID lookup) admits ONE original Read
-  root in its genuine Fresh entry. Its `timeout_ms` is the caller's
-  `command_wait()` `Remaining(ms)`: the configured `rustCommandTimeoutMs`, the
-  per-call override, or the SDK default 120000.
-- **Expired or absent.**
-  - `Expired` ends through `reject_expired_command(Read)`: one typed Timeout,
-    no outcome, zero HTTP, timer or Store effects.
-  - `None` in the genuine Fresh entry means the receipt has no stamp of its
-    own. That happens for an unstampable clock, a duplicate of another live
-    legacy id, or an exhausted receipt sequence. (Rejected, spent and borrowed
-    states cannot occur at the first call of a Fresh entry.) It is a refusal
-    with zero effects, never a fresh deadline:
-    - no 120 s fallback and no `Remaining(0)`;
-    - no HTTP, timer or Store effect;
-    - exactly one typed terminal.
-
-    The exact route is an engine-fit decision for codex-uufub4, and REDs pin
-    whichever is ruled. The proposed route: admit the root under
-    `DEFAULT_COMMAND_WAIT_MS` solely to own the terminal, then immediately
-    `fail_context` with InvalidInput "caller wait unavailable" and no outcome,
-    before any page or timer. A bad clock is refused by admission first, with
-    its existing typed InvalidInput. The alternative is a post-#1945 engine
-    refusal for an unstamped entry.
+  root in its genuine Fresh entry. It uses `admit_caller_read_root` from the
+  #1945 follow-up (`RUST_READ_ROOT_EXPIRY.md`). The root deadline is the
+  caller's exact receipt deadline, as a raw f64: the configured
+  `rustCommandTimeoutMs`, the per-call override, or the SDK default 120000
+  stamped at receipt. The root is tracked for engine-owned expiry.
+- **Admission outcomes** (all owned by the engine API):
+  - **Expired** gives Revoked with no effect. The venue then calls
+    `reject_expired_command(Read)`: one typed Timeout, no outcome, zero HTTP,
+    timer or Store effects.
+  - **A missing receipt** (unstampable clock, duplicate of a live legacy id,
+    or exhausted sequence) is refused by the admission itself: one typed Read
+    failure with outcome None, no fallback and no new deadline.
 - **Never renewed.** The root is immutable across pages, the fill-to-funding
   stage restart and retries. Nothing renews it, and the venue never casts a
   Plan or a physical leg as a root.
@@ -413,52 +403,16 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
     `finish_with(Err)` publishes accepted rows with one INCOMPLETE marker, or a
     strict typed failure when nothing was accepted. The failed page's staging
     never enters the output.
-  - **Root expiry** (parked, in flight, or on the last page) publishes no
-    rows, no marker and no native finalizer. It ends through
-    `history.reject(Timeout)`, which is strict even after accepted pages, never
-    `finish_with(Err)`.
-  - **No engine funnel.** Engine facts at `15df705c0b5`:
-    - A plain `admit_http_command` root has no engine expiry timer or sweep.
-      Only per-leg timers exist (`http_lifecycle.rs:316`).
-    - Completion validation has no deadline check, so `finish_with(Err)` on an
-      expired root would still publish accepted rows.
-    - `fail_context` on the expired root is valid exactly once
-      (`request_context_entry_retention_tests.rs:48`).
-
-    So the venue owns the single expiry terminal.
-  - **Root timer.** At admission the venue arms one root timer at the root
-    deadline, keyed in a venue map by timer to command and root. When it fires
-    for a still-parked query, the venue removes that query from the read queue
-    and calls `reject(Timeout)`.
-  - **Root expiry with a leg in flight.** The owner travels inside the managed
-    request's `Pending`, so the venue cannot end it from the root timer. The
-    root timer callback therefore only consumes its map entry. Ending the query
-    is left to the leg, whose deadline is capped at the root's: its engine
-    timer always delivers the owner back as one of these:
-    - `on_request_failed`, kind Timeout, after release;
-    - `on_http_preparation_failed(TimedOut)` before release. The
-      `Pending::History` arm is added there if the default does not forward
-      it.
-
-    The venue then checks `validate_http_context(root)`:
-    - `TimedOut` means root expiry: strict `reject(Timeout)`.
-    - A live root means a leg-only timeout: an ordinary page failure, with
-      accepted-only recovery.
-  - **Arrival order.** The rule holds for both orders of same-deadline
-    callbacks:
-    - **Root timer first:** a no-op, then the leg failure gives a strict
-      Timeout.
-    - **Leg first:** a strict Timeout, which clears the root timer.
-    - **Late DATA** after the leg deadline is engine-routed as a failed
-      delivery, so it stages nothing.
-    - **Reused id:** the stale timer's stored root differs from the live one,
-      so it does nothing.
-
-    Each case ends in exactly one strict Timeout, with no rows, marker or
-    finalizer.
-  - **Timer cleanup.** The timer is cleared on every terminal. A stale timer
-    whose command was finished or reused matches no live entry and does
-    nothing.
+  - **Root expiry** (parked, in flight, or on the last page) belongs to the
+    engine funnel: one strict Timeout with outcome None, and no rows, marker or
+    native finalizer. Hyperliquid owns no root timer and no root map.
+    - The venue's failure callbacks still receive their `Pending`, but every
+      terminal attempt through the expired root is inert.
+    - Hyperliquid implements `read_root_retired(owner)` with no Cx. It drops
+      that owner's queued `ReadContinuation::History` entries from
+      `account.reads`, and only those.
+  - **A leg-only timeout with the root live** stays an ordinary page failure,
+    with accepted-only recovery.
 - **Lookup.** The REST client-ID lookup completes through `done_context` or
   `fail_context` on its root, not numeric `done`/`fail`.
 - **No-I/O branches.** Missing identity, an invalid range and an unknown
@@ -476,19 +430,13 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
      `entry_context_allowed` is true and minting needs no delivery. Every
      refusal ends the query strictly through its own owner's `reject`, never
      `finish_with`, so a preparation or policy refusal can never publish an
-     accepted prefix. No weight is charged and no Prepare is emitted. The
-     mapping is:
-     - `TimedOut`, or `State` (the entry-owned root is at or past its
-       deadline): Timeout.
-     - `Capacity`: Internal "Hyperliquid history leg capacity".
-     - `Invalid`: Internal.
-     - `Revoked`: `reject` is still called. Its own completion validation
-       denies it if the owner is really gone, and emits otherwise, so a live
-       owner is never stranded.
-
-     Every refusal also removes the query's queue entry and root timer. Only
-     authority proven revoked (the denied `reject`) may drop the query without
-     a terminal.
+     accepted prefix. No weight is charged and no Prepare is emitted.
+     - An expired root never reaches this point: the engine sweep retires it
+       first and the hook removes its queue entry.
+     - Other refusals: `Capacity` gives Internal "Hyperliquid history leg
+       capacity", and `Invalid` gives Internal.
+     - `Revoked` still calls `reject`, which completion validation denies if
+       the owner is gone.
 
      A `request_managed_with_headers` refusal returns its `Pending` and takes
      the same strict route with `error.venue_error()`.
@@ -501,23 +449,15 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
 - **Unchanged.** The Account branch, its weights, the FIFO order and the
   shared budget are unchanged.
 
-### Held pending a ruling
+### Rulings applied
 
-claude-ddi2il prefers an engine-owned expiry funnel for Context Read roots over
-per-venue root timers, because five history venues need the same thing.
-codex-uufub4 is ruling whether it belongs in #1945's successor or in #1949. The
-root-timer design above, and REDs 3, 6c and the timer half of 6, are on hold
-until then.
-
-If the venue timer stands, codex-uufub4's correction applies: the owner lives in
-a venue map keyed by the exact root, and `Pending::History` carries only that
-key. A root timer that fires first while the query is in flight then strictly
-rejects once and clears the queue and active state. The later leg callback
-finds no owner and stays inert. Tests bind the exact root and timer generation,
-never the numeric id alone.
-
-The None disposition (a missing receipt) also awaits a ruled, cause-aware
-refusal. No new default is minted for an unknown cap.
+- **Root expiry.** It is ENGINE-owned, per the overseer and codex-uufub4. It
+  lives in the #1945 follow-up, `RUST_READ_ROOT_EXPIRY.md`.
+- **Missing receipt.** The engine's cause-aware refusal handles it, and no
+  default is ever minted.
+- **Production dependency.** This slice's production waits for that
+  follow-up as well as #1945. The REDs below assert behaviour only through
+  engine events and wire actions, so they compile today.
 
 ### Original REDs (assertions on existing behaviour; fail before source)
 
@@ -531,10 +471,10 @@ refusal. No new default is minted for an unknown cap.
      (its child deadline is the dequeue time plus 20000, capped at the root);
    - no weight is charged and nothing is prepared for a read whose root has
      expired.
-3. **Root expiry.**
-   - **While parked:** the root timer fires and gives one Timeout terminal
-     (kind Timeout, no outcome), with no rows, no marker and no Prepare after
-     expiry. The queue does not need to pump for this to happen.
+3. **Root expiry** (engine funnel behaviour).
+   - **While parked:** at the root deadline, one Timeout terminal (kind
+     Timeout, no outcome), with no rows, no marker, and no Prepare or weight
+     afterwards. The queue does not need to pump for this to happen.
    - **During page 2 in flight, after page 1 was accepted:** one Timeout
      terminal with no partial rows and no marker. Late page-2 DATA is inert.
    - **On the last page:** the same inert result.
@@ -548,14 +488,13 @@ refusal. No new default is minted for an unknown cap.
    - A read-timer wake after the root is retired (command reused after a
      terminal) issues nothing for the old query.
    - A reused command id gets a fresh root.
-6b. **Unstamped entry.** A plain `handle` at `f64::MAX` (no default stamp) and
-   an exhausted receipt sequence each give `command_wait() == None`. The query
-   then follows the ruled refusal: one typed terminal, no HTTP, no timer and
-   no 120 s root.
+6b. **Unstamped entry.** A plain `handle` at `f64::MAX` (no default stamp)
+   gives exactly one typed Read failure with outcome None, no HTTP, no timer
+   and no 120 s root.
 6c. **Same-deadline ordering.** With the root and the leg at one deadline,
-   deliver the root timer first and then the leg failure, then the reverse.
-   Each order, plus late DATA and command-id reuse, gives exactly one strict
-   Timeout with no rows or marker.
+   page 1 accepted and page 2 in flight, deliver the leg timer and the
+   deadline event in both orders. Each order, plus late DATA and command-id
+   reuse, gives exactly one strict Timeout with no rows or marker.
 6d. **Dequeue refusals.** At dequeue, a refused leg mint (forced Capacity,
    and expiry) gives a strict typed terminal, never an accepted prefix, with
    no weight and no Prepare.
