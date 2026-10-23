@@ -885,3 +885,45 @@ fn a_classified_session_refusal_resolves_the_operation_without_a_resend_grant() 
         );
     }
 }
+
+fn prepared_intent(
+    engine: &mut Engine<Probe>,
+    context: &crate::request_context::Context,
+) -> crate::request_context::RoutingIntent {
+    with(engine, 1., |cx| {
+        cx.request_managed(
+            context.clone(),
+            Method::Post,
+            "https://venue.test/login".into(),
+            Some("{\"apiKey\":\"body-key\"}".into()),
+            Pending(context.clone()),
+        )
+    })
+    .unwrap();
+    engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { intent, .. } => Some(intent),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("prepared login")
+}
+
+#[test]
+#[ignore = "original RED: keyless session login routes Public until session-scoped egress lands"]
+fn a_keyless_login_carrying_credentials_in_its_body_must_not_route_public() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let login = with(&mut engine, 1., |cx| {
+        cx.session_context(&session, policy(Operation::Mutation))
+    })
+    .unwrap();
+    assert_eq!(
+        prepared_intent(&mut engine, &login),
+        crate::request_context::RoutingIntent::Primary,
+        "the body carries the API key; Public/CORS egress would leak it"
+    );
+}

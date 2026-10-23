@@ -197,6 +197,49 @@ owns *when* to acquire and retire, and the import primitive owns
   and #1842. The retire-all-on-dispose and `drop_imported` calls are owned
   here.
 
+### Unsigned private egress (owner assignment, 2026-10-23)
+
+**Problem.** A Context's routing intent comes only from its credential:
+keyless means `RoutingIntent::Public`, which the SDK may send via the
+public/CORS route. Three flows are unsigned yet must use the account's private
+egress:
+- GRVT `/auth/api_key/login` carries the API key in its body.
+- BreakoutProp `/login` carries the account login fields in its body, and
+  later requests carry the DXtrade session token in a header.
+- KuCoin keyless `bullet-public` must keep forced Primary egress.
+
+Moving any of them onto managed HTTP today would route them Public. RED
+(`a_keyless_login_carrying_credentials_in_its_body_must_not_route_public`):
+a keyless session login is prepared with `Public`.
+
+**API (agreed with claude-m26ps4; codex-uufub4 reviews the rule).** The
+seam reuses #1833's issuance-time egress (`Context.egress`,
+`Cx::http_context_with_egress`, `ContextRegistry::issue_with_egress`). Legs,
+replacements and retries inherit it, and it is projected to `Prepare`. There
+is no second Context field.
+- **New variant (#1833, claude-m26ps4):** `Egress::Session(CredentialSlot)`
+  is an unsigned request carrying a session token minted from that slot. It
+  is allowed for Read and Mutation, unlike Primary/PublicCors/Direct, which
+  stay unsigned-Read-only.
+  - The credential stays `None`: no `KeyRef`, no signer, and the
+    signer-iff-credential rule is untouched.
+  - `routing_intent()` is the slot's intent, and `route()` is `None`.
+  - The slot comes from credential selection
+    (`Selection::session_egress()`), never written by the venue.
+  - A credentialed child under it must use the same slot. It never mixes
+    with PublicCors/Direct.
+- **Session side (this lane):**
+  - `SessionPolicy` carries an `Option<Egress>`.
+  - `session_context` issues through `issue_with_egress`, so a session's
+    contexts and legs inherit it in the same transaction.
+  - The RED above becomes the regression on top of #1833.
+- **Not included:** no inference from method, URL or body, and no fallback
+  to Public when the private route is unavailable (preparation fails typed).
+
+**Adoptions (stacked):** GRVT login (codex-zs5e83) and BreakoutProp login
+(codex-hcmq3f) as session Mutations behind the #1842 gate. Then KuCoin
+`bullet-public` as a session Read (codex-9czdjh, after its header use).
+
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
 The keepalive interval, failure backoff and expiry-driven recreation are
