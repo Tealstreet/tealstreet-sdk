@@ -36,8 +36,11 @@ pin before adapters consume them. Existing Context APIs retain their behavior.
   opaque owner and the one shared Call state machine.
 - `admit_plan(&Preflight, &[StepBound], PlanPolicy) -> Result<Plan, Error>`:
   atomically changes the same command generation from Preflight to Planned.
-- `plan_slots`, `plan_leg_context`, `validate_plan_delivery`,
-  `finish_plan_call`, and `plan_retry_context` operate on opaque Plan-bound slots.
+- `plan_slots`, `plan_leg_context`, `plan_leg_context_with_intent`,
+  `validate_plan_delivery`, `finish_plan_call`, `plan_retry_context` and
+  `plan_resend_context` operate on opaque Plan-bound slots. The resend operation
+  accepts only the existing classified `ResendGrant`; generic retry rejects a
+  definitive write refusal.
 - `done_preflight` / `fail_preflight`, `done_plan` / `fail_plan`, and validated
   empty-plan completion seal through existing engine completion and journal
   authority. They do not accept numeric command authority.
@@ -169,7 +172,9 @@ held signing resources and transport drain under the existing fatal policy.
 1. Commit and independently audit this plan before production edits. Preserve the
    old combined checkpoint unchanged. Compose the authorized #1830 retention,
    field/query guards and typed-failure resolutions locally, preserving incoming
-   authority and tests. Any new source conflict goes to the maintainer.
+   authority and tests. Under the standing Plan composition authorization, keep
+   both mechanisms, forward incoming data unchanged and retain the owned wrapper;
+   semantic choices still go to the maintainer.
 2. Add genuine-entry Preflight and one shared Call owner. Adapt fixtures through
    real Engine command callbacks; compile/fixture corrections are not product RED.
    Verify mutual exclusion with initial Context admission and cached terminal use.
@@ -332,3 +337,26 @@ Per-leg intent must be narrowed before the first journal registration, using
 one shared engine validation table. Admission reserves the intent vector along
 with journal, Context and ID backing. Do not relax the incoming registered-leg
 refusal or move journal enrollment after queue/preparation failures.
+
+## Deferred boundary audit corrections
+
+Plan readiness is engine-owned work. During `on_http_plan_ready`, mask the exact
+outer `order_response_token` as well as excluding HTTP/entry custody, then
+restore the token unchanged after normal return. A caught callback panic keeps
+the existing poison fence. A due readiness callback after an unrelated real
+order read must never reconcile that read's uncertainty fence; the original read
+callback retains its own authority.
+
+Root-timer expiry and readiness queue refusal can seal a placement and release
+its lock. Run the existing deferred-command bookkeeping at that boundary without
+requiring another external event. Extract one shared deferred-work routine and
+invoke it after the readiness loop has returned from every callback; do not call
+`finish_event_scope` recursively inside readiness or duplicate its order-lock
+policy. Deferred callbacks receive no outer HTTP delivery, command entry or
+order-read token, and the saved outer values are restored unchanged.
+
+Add genuine response/timer regressions before the fix: an accepted order read
+makes a delayed Plan ready but leaves uncertainty fenced; a valid read callback
+can still reconcile; a Place Plan with a queued cancel completes that cancel at
+root expiry and at readiness queue refusal without another event. Preserve all
+prior readiness, panic, observer and deferred-command assertions.
