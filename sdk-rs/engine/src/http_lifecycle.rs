@@ -5,6 +5,10 @@ use crate::request_context::{
     Preparation, Prepared, ReleaseTime,
 };
 
+#[cfg(test)]
+#[path = "http_unsigned_headers_tests.rs"]
+mod unsigned_headers_tests;
+
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
@@ -71,16 +75,34 @@ impl<P> Cx<'_, P> {
         if self.io.managed_http.len() >= 256 {
             return Err((pending, Error::Capacity));
         }
-        let request = RequestId(self.io.next());
-        let generation = u64::from(self.io.next());
-        let timer = TimerId(self.io.next());
+        // Public codec declarations are captured exactly once. Validate borrowed
+        // bytes before allocating IDs or publishing any preparation resource.
+        let headers = step
+            .as_ref()
+            .map_or(&[][..], |step| step.unsigned_http_headers());
+        if crate::signing_headers::validate_unsigned(headers).is_err() {
+            return Err((pending, Error::Invalid));
+        }
+        let headers = headers
+            .iter()
+            .map(|&(name, value)| (name, value.to_owned()))
+            .collect();
+        // Preflight both namespaces before committing either. An admission
+        // refusal must not partially allocate a request, generation or timer.
+        if !self.io.next_id.available(3) || (step.is_some() && !self.io.signing.available_id()) {
+            return Err((pending, Error::Capacity));
+        }
+        let ids = self.io.reserve_ids(3).expect("preflighted HTTP identities");
+        let request = RequestId(ids.start);
+        let generation = ids.start + 1;
+        let timer = TimerId(ids.start + 2);
         let http = HttpRequest {
             id: request,
             method,
             route: None,
             timeout_ms: Some((context.deadline() - self.now).ceil().max(1.) as u32),
             url,
-            headers: vec![],
+            headers,
             signer_headers: vec![],
             body,
         };
@@ -244,6 +266,9 @@ impl<V: Venue> Engine<V> {
     /// Hosts check this before inserting an asynchronous prepared resource.
     /// A duplicate/late completion must not overwrite its replacement.
     pub fn http_preparation_pending(&self, token: Preparation) -> bool {
+        if self.failed() {
+            return false;
+        }
         self.io
             .managed_http
             .get(&token.attempt().request)
@@ -252,6 +277,7 @@ impl<V: Venue> Engine<V> {
 
     /// Preparation is a host resource, never evidence of transport dispatch.
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
+        self.assert_live();
         self.io.dispatch_now = now;
         let request = token.attempt().request;
         let Some(managed) = self.io.managed_http.get_mut(&request) else {
@@ -391,6 +417,7 @@ impl<V: Venue> Engine<V> {
         reason: Error,
         mut error: VenueError,
     ) {
+        self.assert_live();
         self.io.dispatch_now = now;
         let request = token.attempt().request;
         let Some(managed) = self.io.managed_http.get(&request) else {
@@ -446,6 +473,7 @@ impl<V: Venue> Engine<V> {
     /// The host checks its bound resource, calls this, and immediately invokes
     /// its transport API on Released, with no intervening await or actor hop.
     pub fn claim_http(&mut self, now: f64, permit: Permit) -> Result<Claim, Error> {
+        self.assert_live();
         self.io.dispatch_now = now;
         let request = permit.attempt().request;
         let managed = self
@@ -575,6 +603,17 @@ impl<V: Venue> Engine<V> {
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
             return;
         }
+        // Do not advance a lifecycle generation or take its retained recipe
+        // unless a fresh signing attempt can also be allocated.
+        if managed.signing_attempt.is_some() && !self.io.signing.available_id() {
+            self.http_preparation_failed(
+                now,
+                token,
+                Error::Capacity,
+                VenueError::new("HTTP signing identity capacity exhausted"),
+            );
+            return;
+        }
         let next = self
             .io
             .request_contexts
@@ -623,6 +662,9 @@ impl<V: Venue> Engine<V> {
     /// Admission metadata for a host resource or reducer. Reading it grants no
     /// permission to send and does not renew any response lease.
     pub fn http_release(&self, request: RequestId) -> Option<HttpRelease> {
+        if self.failed() {
+            return None;
+        }
         self.io.managed_http.get(&request)?.lifecycle.release()
     }
 
@@ -1126,7 +1168,7 @@ mod tests {
             at,
             token,
             Prepared {
-                id: u64::from(token.attempt().request.0),
+                id: token.attempt().request.0,
                 expires_at: None,
             },
         );
@@ -1598,7 +1640,7 @@ mod tests {
             at,
             token,
             Prepared {
-                id: u64::from(token.attempt().request.0),
+                id: token.attempt().request.0,
                 expires_at: None,
             },
         );

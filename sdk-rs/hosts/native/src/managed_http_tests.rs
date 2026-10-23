@@ -101,7 +101,14 @@ impl Venue for Probe {
     fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {
         panic!("engine-owned timer leaked");
     }
-    fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if matches!(command, Command::FetchLeverage { symbol, .. } if symbol == "fatal-resource") {
+            cx.send(
+                SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1),
+                "unsafe",
+            );
+        }
+    }
     fn book(&self, _: &str) -> Option<&Book> {
         None
     }
@@ -485,6 +492,15 @@ async fn parked_primitive_provider_fast_ack_and_second_provider_keep_450ms_physi
 
 #[tokio::test(start_paused = true)]
 async fn stopping_native_host_aborts_parked_signers_and_prepared_routes_without_sending() {
+    parked_resources_stop_control(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn fatal_native_host_aborts_parked_signers_and_prepared_routes_without_sending() {
+    parked_resources_stop_control(true).await;
+}
+
+async fn parked_resources_stop_control(fatal: bool) {
     let (route1, route_rx1) = oneshot::channel();
     let (route2, route_rx2) = oneshot::channel();
     let (_provider1, provider_rx1) = oneshot::channel();
@@ -520,7 +536,22 @@ async fn stopping_native_host_aborts_parked_signers_and_prepared_routes_without_
     tokio::task::yield_now().await;
     assert_eq!(signer.started.load(Ordering::SeqCst), 2);
     assert_eq!(host.signing_tasks.len(), 2);
-    host.stop();
+    if fatal {
+        host.engine.handle(
+            0.,
+            Event::Command(Command::FetchLeverage {
+                command: 80,
+                symbol: "fatal-resource".into(),
+            }),
+        );
+        host.execute(&mut |_| panic!("terminal report is delivered by the host owner"));
+        assert!(host.engine.failed());
+        assert!(host.events.is_closed());
+        // Delayed events cannot restart either provider or reach a claim.
+        host.dispatch(HostEvent::Timer(TimerId(80)));
+    } else {
+        host.stop();
+    }
     tokio::task::yield_now().await;
     assert_eq!(signer.dropped.load(Ordering::SeqCst), 2);
     assert!(host.signing_tasks.is_empty());

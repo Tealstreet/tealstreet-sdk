@@ -3976,11 +3976,11 @@ NX migration tests; this docs-only backfill does not execute or close them.
 The engine/host contract and remaining legacy gate are detailed in
 [RUST_REQUEST_CONTEXT.md](RUST_REQUEST_CONTEXT.md).
 
-## Selected RemoteSigner runtime mode (proposed shared correction)
+## Selected RemoteSigner runtime mode
 
 When both `remoteSigner` and `payloadSigner` are configured on an admitted Rust
-account, RemoteSigner remains the selected provider. The proposed shared setup
-fix also uses that selection for private PayloadSigner admission and the native
+account, RemoteSigner remains the selected provider. Shared setup
+also uses that selection for private PayloadSigner admission and the native
 feed flag. It restores normal private streaming for Binance's four aliases and
 Bybit's five aliases (including Hyro), instead of incorrectly treating the unused
 PayloadSigner as a REST-only account. Hyro accepts the selected RemoteSigner;
@@ -3994,8 +3994,8 @@ explicit callback shapes still reject, including an invalid unused callback.
 Unavailable, refused or malformed RemoteSigner work cannot fall back to the
 PayloadSigner or a local secret. Caller input, callback receiver custody and the
 external sign-request/sign-response wire do not change. No new caller option or
-persisted identity mapping is required. The fix is queued after #1741; actual
-merge and final CI/proof remain pending. See [RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md).
+persisted identity mapping is required. See
+[RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md).
 
 ### Hyperliquid perp histories: shared inclusive-page ownership
 
@@ -4026,6 +4026,210 @@ lookup's scalar completion and admission errors. No SDK argument or history row
 shape changes. Existing B11 request-scoped incomplete ingestion/coverage and typed
 rejection handling remain required; this native/shared-owner scope does not close
 B11, managed Context migration or deployed runtime proof. [Scope](RUST_OWNED_HISTORY.md).
+
+
+## Grouped and deferred row-reporting compatibility
+
+Crypto.com and WOO skipped-row groups use shared engine collectors while keeping
+native summary level/code/text/order, first-label/count rules and cached-state
+retention. WOO clean groups re-arm only that summary kind. Bybit unsupported-order
+diagnostics retain unbounded per-product Once memory at accepted joined reads;
+a failed/noncurrent/incomplete whole join cannot consume it, an admitted partial
+join still reports, and clean/mapped rows never re-arm it. Known unsupported
+orders are restored independently of whether their diagnostic was suppressed.
+No SDK argument/result, remote/header/signing contract, order/position/FILLS wire
+shape, caller migration or financial/snapshot authority changes. Remaining
+persistent reporter consumers stay open in RUST_ROW_ADMISSION.md.
+
+
+## BloFin and Kraken row-reporting adoption (2026-10-23)
+
+BloFin, Kraken futures and Kraken Spot use the existing engine reporter instead
+of five account-owned suppression collections. Caller-visible diagnostic text,
+severity, ordering and repeat/re-arm timing remain native. BloFin retains its
+separate position/order bounded Once memories, decode-time per-key forgetting
+and existing accepted-read clear sites. Kraken futures retains bounded
+Warn-to-Error upgrade memory and separate unbounded Once unlisted-symbol memory;
+unlisted mapping still reports before snapshot admission, zero-quantity unknown
+positions stay silent, and reconnect never rearms that memory. Kraken Spot
+retains bounded Once, coin/order namespaces (including empty order identity),
+admitted-versus-rejected stale balance behavior and the different REST/WS mapped
+identity filters. No SDK call/result, order/position/FILLS shape, health policy,
+financial or snapshot authority, signing, HTTP/WS lifecycle or caller migration
+changes. The 126 final native account compatibility tests pass on unchanged
+pre-migration production, including eleven new controls; this is no defect-RED
+claim. Full CI and a fresh current-head raw proof remain the merge gates.
+## Static public headers during managed HTTP preparation
+
+Trusted Rust `SignStep` implementations can declare static noncredential HTTP
+headers through `unsigned_http_headers`; the default remains empty. The engine
+validates and snapshots this declaration once before managed preparation or
+request/attempt/timer allocation, preserving native order through route/signing
+refresh. Invalid declarations return the original pending value and typed
+`Invalid`, without publishing preparation, timers or signing work. Credential,
+passphrase and signature headers remain provider/apply-owned; this declaration
+does not grant callback-header authority or change the external signing wire.
+
+BingX's public SOURCE/Content-Type declaration is shared with its existing
+legacy renderer, whose signed order remains SOURCE, APIKEY, Content-Type.
+The declaration supplies public headers; private signing, provider construction
+and hosted signing still follow the family's separate admission policy. Semantic
+Context ownership is unchanged. Existing SDK callers need no
+new option, credential transfer or persisted identity mapping for this additive
+header seam. [Contract and scope](RUST_UNSIGNED_HTTP_HEADERS.md).
+
+
+### Kraken futures histories: admitted pages with strict native proof refusals
+
+Fills, closed orders, ledger and public trades now use the existing engine
+CursorHistory/Completion owner. Actual HTTP/native-envelope/stream/decode/row
+failure before eligible output was admitted rejects typed; later actual loss
+returns only earlier admitted rows with one command-owned history.incomplete
+Warn before Done, visible at Error-only logging. Failed-page prefixes, including
+a newer terminal update to an admitted native order, never enter the result.
+Terminal orders fold across admitted rows only, preserving strict latest-time
+selection and first encounter on equal timestamps.
+
+Native continuation-proof refusal remains strict even after earlier pages:
+missing token on a saturated order page, conflicting decoded body/header tokens,
+repeated/empty/no-fresh continuations and fifty-page exhaustion return no partial
+result or success marker. A terminal fiftieth page completes without a fifty-first
+request. The ledger's validated since-only coverage gap now goes through the
+engine marker owner with its existing message, native predicate precedence and
+eligible-output-limit suppression. Valid filtered-empty coverage may still be
+explicitly incomplete; filtered rows cannot authorize actual-failure recovery.
+
+Shared owner finalization supplies kind internal for formerly unclassified
+actual-page errors and strict cursor/proof/budget refusals, affecting typed
+caller handling and telemetry categories. Existing range admission, explicit
+unsupported client-ID lookup and consuming signed-setup refusal retain their
+separate paths/classification; no notSent/unknown outcome is invented. Exact
+ISO/opaque/since cursor request bytes, native IDs, output fields/units, final
+sort/limits, cash/position ledger filtering, public unsigned dispatch and live
+Store isolation are preserved. Kraken Spot is separate and unchanged.
+
+SDK arguments and row shapes are unchanged. Numeric Completion uses legacy
+authority rather than managed Context completion. Callers must ingest command-scoped
+incomplete-query warnings, gate coverage accordingly and handle typed rejection
+as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+### KuCoin futures and spot owned history
+
+This slice moves the implemented KuCoin query reads to the existing engine
+history owner. Futures fills, orders, transaction ledger and symbol-scoped
+funding retain one owner across native pages and time windows. A terminal
+HTTP/envelope/metadata-decode/row failure before any eligible page rows were accepted rejects
+with kind `internal`; after accepted rows, it resolves those rows plus one
+command-owned Warn `history.incomplete`. A failed page's streamed prefix is
+excluded. Filters do not authorize partial success, and retries do not poison
+accepted identities. Transport and decode failures share callbacks, so they
+retain the shared Internal fallback rather than a blanket Network label.
+
+Well-formed but inconsistent page census, ledger offset and funding same-timestamp continuation
+proofs, clipped ranges and the retry-inclusive request safety bound remain
+strict rejections, even after accepted rows. These refusals now carry the
+shared `internal` kind where legacy string errors had no kind; telemetry tags
+can change. Time/identity sorting, native units, filters and the output-limit
+exception for explicitly ranged income/funding remain unchanged. One owner
+spans every window; no venue emits its own completeness marker.
+
+Futures public trades also gains typed Internal failures through the owner; it
+remains a single-response public read with unchanged header selection.
+
+Spot fills remains a single HF response with the existing schema/defaults and
+no invented continuation. Its whole response is validated before admission;
+malformed/HTTP/transport errors reject `internal` rather than an unclassified
+string failure. The existing command-error diagnostic on request failure stays.
+Spot lookup and disabled order-history/income stubs remain unchanged, and public
+trades remains unsupported. No signing helper, credential selection, constructor
+argument, capability or NX bootstrap changes are included. Callers must ingest
+command-scoped incomplete-query warnings, gate coverage accordingly and handle
+typed query rejection as unavailable history.
+
+### Bitrue single-page fills: shared admission and completion owner
+
+Bitrue's bounded native `/fapi/v2/myTrades` result now uses the existing engine
+HistoryRows/Completion owner. Rows stay staged until HTTP/envelope, required
+array, every row, the 1000-row guard and endpoint coverage proof validate.
+Terminal native/decode/transport failures and the existing strict full-page
+coverage refusal now report the shared `internal` kind where they previously
+had no kind. Their messages remain; no write outcome is invented. Typed-error
+consumers and telemetry should use that classification. Admission, unsupported
+history, public WS trades and client-ID lookup retain their separate behavior.
+
+A full native page that leaves fewer eligible unique fills than the requested
+limit still rejects, even with a valid prefix. This one-page endpoint has no
+previously accepted page: failures never return a partial or emit an incomplete
+marker. A valid empty array succeeds; a missing or malformed array rejects.
+This does not claim full backward venue coverage or a complete PnL ledger.
+
+The original owner survives the single signature resend and three eligible GET
+retries. Reset drops only the unvalidated page and its native attempt identities;
+retry budgets, timestamp advancement, exact URLs, quantities/IDs, filtering,
+final descending sort/limit and no live Store writes are preserved. No SDK
+argument/result shape or new NX handler is added. Numeric completion uses legacy
+authority rather than managed Context completion. Callers must handle typed query
+rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+### Backpack histories: shared owner with native offset requests
+
+Fills, closed orders, funding income and single-page public trades now use the
+engine CursorHistory/Completion owner. An actual HTTP/stream/decode failure
+before eligible rows were accepted rejects typed with the shared `internal`
+fallback where legacy failures previously had no kind; resulting error-kind
+telemetry changes accordingly. The shared callback multiplexes transport and
+decode origins, so this does not classify all failures as Network. A later
+actual failure returns only earlier validated pages with one command-owned Warn
+`history.incomplete` before success, also at Error-only logging. Failed-page
+prefixes and pages containing only filtered output cannot authorize recovery.
+
+A repeated raw page or the existing fifty-page limit now resolves admitted rows
+with owned incompleteness instead of rejecting the whole query. Valid coverage
+may therefore return incomplete [] when no rows passed local filters; this never
+proves coverage complete. Malformed fills still skip without hiding healthy
+peers, but admitted skips now also supply an owned coverage gap. The existing
+row.skipped summary includes only admitted pages, once per successful result;
+failed-page skips cannot replace an earlier gap or enter the summary. Non-fill
+invalid rows still invalidate the entire page and retain their existing eager
+CommandError diagnostic, even when earlier valid pages subsequently resolve.
+
+Native request offsets still count all raw rows, including filtered/skipped
+neighbors. Query limits, page sizes, native row order, ID/quantity/fee/time units,
+fractional bounds, filtering and unsigned public trades stay unchanged. Setup
+refusal in the existing consuming signed helper stays strict and separate;
+client-ID lookup and unsupported-ledger/time/market admission are unchanged.
+There is no history Store publication or new SDK argument/row shape. Callers must
+ingest command-scoped incomplete-query warnings, gate coverage accordingly and
+handle typed rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+## Host-safe physical engine resource IDs
+
+Physical socket, HTTP request, signing-attempt and timer IDs use exact numeric
+identities through `2^53 - 1`, without wrapping at the former u32 boundary.
+Host integrations must preserve the complete integer and must not truncate it to
+32 bits. Command IDs, millisecond durations and lossless decimal managed
+preparation/permit tokens retain their existing contracts. Resource identities
+are opaque correlation values, not permission to send or publish state.
+
+Managed admission reserves complete resource groups atomically and reports typed
+capacity refusal without partial preparation or I/O. A fatal legacy allocation
+exhaustion permanently retires the engine: hosts report a terminal engine failure,
+dispose it and require reconstruction. No partially queued callback actions or
+previously bound HTTP permit can release after that retirement. Prior-sent write
+uncertainty remains subject to the existing reconciliation contract; terminal
+engine failure never proves that a write was not sent.
+
+
+WASM resource-ID ingress rejects nonfinite, negative, fractional and unsafe
+integers before parsing a response or advancing clocks. Zero remains the shared
+public-socket identity. Custom host adapters preserve numbers above `2^32` without
+bitwise coercion. Workers retire flush intervals and notify connected clients
+through typed `startupFailed` on terminal failure. Already-owned write errors
+retain unknown-outcome/reconciliation text even across host replacement; stale
+successes and diagnostics stay suppressed. Native account streams settle owned
+waiters as Internal/Unknown once and answer later joins with the terminal notice
+without constructing a snapshot from the failed engine. Recreate the engine to
+resume work; neither adapter restarts it automatically.
 ## Draft Engine socket lifecycle: OKX and Bitunix
 
 The two reference families move authentication state, socket epochs, reconnect

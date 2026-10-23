@@ -52,7 +52,7 @@ impl ContextRegistry {
 
     fn issue(
         &mut self,
-        identity: u32,
+        identity: u64,
         scope: Scope,
         policy: Policy,
         now: f64,
@@ -62,7 +62,7 @@ impl ContextRegistry {
 
     fn issue_bound(
         &mut self,
-        identity: u32,
+        identity: u64,
         scope: Scope,
         policy: Policy,
         now: f64,
@@ -93,7 +93,6 @@ impl ContextRegistry {
         {
             return Err(Error::State);
         }
-        let identity = u64::from(identity);
         let owner = match parent.map(Context::owner) {
             Some(owner) => owner,
             None => match scope {
@@ -417,7 +416,7 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         parent: Option<&Context>,
     ) -> Result<Context, Error> {
-        let identity = self.io.next();
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = if let Some(parent) = parent {
             self.io
                 .request_contexts
@@ -806,7 +805,9 @@ mod tests {
         assert!(registry.contexts.is_empty());
         assert!(registry.commands.is_empty());
         for id in 1..=CAPACITY as u32 {
-            registry.issue(id, Scope::Background, policy(), 0.).unwrap();
+            registry
+                .issue(u64::from(id), Scope::Background, policy(), 0.)
+                .unwrap();
         }
         assert_eq!(
             registry.issue(300, Scope::Command(7), policy(), 1.),
@@ -905,7 +906,7 @@ mod tests {
         let mut registry = ContextRegistry::default();
         for id in 1..=CAPACITY as u32 {
             registry
-                .issue(id, Scope::Command(id), policy(), 0.)
+                .issue(u64::from(id), Scope::Command(id), policy(), 0.)
                 .unwrap();
         }
         assert_eq!(registry.commands.len(), CAPACITY);
@@ -1058,12 +1059,12 @@ mod write_tests {
             retry: crate::request_context::RetryPolicy::DefinitiveRefusal,
         }
     }
-    fn delivery(context: &Context, id: u32) -> Delivery {
+    fn delivery(context: &Context, id: u64) -> Delivery {
         Delivery {
             context: context.clone(),
             attempt: Attempt {
                 request: RequestId(id),
-                generation: u64::from(id),
+                generation: id,
             },
         }
     }
@@ -1602,7 +1603,7 @@ mod write_tests {
         let mut registry = ContextRegistry::default();
         for id in 1..=CAPACITY as u32 {
             registry
-                .issue(id, Scope::Command(id), policy(), 0.)
+                .issue(u64::from(id), Scope::Command(id), policy(), 0.)
                 .unwrap();
         }
         assert_eq!(registry.commands.len(), CAPACITY);

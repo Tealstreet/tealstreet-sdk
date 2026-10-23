@@ -431,6 +431,83 @@ and retains only accepted output. Inclusive timestamp/native-identity progress
 and final order-transition folding preserve native behavior; mixed income keeps
 its first gap through funding. Spot and lookup remain separate legacy paths;
 other families, managed completion and B11/deployment proof remain open.
+
+
+## Grouped and deferred row-reporting compatibility
+
+Shared `RowCount` and `RowKeys` keep the two native grouping contracts explicit.
+Crypto.com counts every rejection; WOO preserves ordered unique known IDs and
+every anonymous rejection, including its move-based order-pagination progress.
+An emitted summary increments health exactly once at the original site,
+regardless of group size or host filtering; absent or repeat-suppressed summaries
+do not. The shared optional-summary reporter
+forgets only its key on None; Some(empty text) remains an observable report.
+Bybit deferred Once memory is unbounded, separate per product, never re-armed by
+clean rows, and flushed only at accepted joined-read publication after native
+cached-row restoration. Partial admitted joins still report unsupported rows.
+Original native compatibility controls cover failed/incomplete/stale joins,
+terminal-ACK invalidation, retained exposure and account swapping; no defect RED
+or complete persistent-reporter fan-out claim. See RUST_ROW_ADMISSION.md.
+
+
+### BloFin/Kraken native reporting boundaries (2026-10-23)
+
+Five reporter collections now consume existing engine reporting policy across
+BloFin and both Kraken modes. Original-GREEN controls pin all three BloFin order
+aliases, decoded per-key forgetting before later failures while unrelated
+anonymous memory remains, held position snapshots, and Once remaining quiet
+when a kept position disappears. Kraken controls pin unlisted symbols across
+feeds/reconnect (with a fresh-symbol positive), silent zero quantity, reporting
+before failed/stale REST admission, rejected-identity duplicate protection,
+stale WS no-rearm followed by current-clean positive re-arm, coin/order/empty
+identity isolation, rejected versus admitted stale balance reads, and Spot's
+native unfiltered REST versus filtered WS duplicate re-arm. All126 original
+account tests pass before migration. No new engine API, financial/admission
+policy change, local replay/timing run, threshold, budget or manifest change.
+Full green CI, current artifacts and independent source/caller/data reviews
+remain required; this slice does not close the remaining reporter inventory.
+
+Migrated focused suites pass1253 native tests; strict all-target Clippy, scoped
+fmt, bans and root checks pass. Both independent implementation reviews confirm
+that only reporter memory/adapters changed in the three production files.
+
+Kraken futures histories now adopt existing CursorHistory for staged admission,
+identity/cursor progress, fifty-page bounds and query-owned completion/coverage.
+No venue-local HISTORY_INCOMPLETE emitter or accepted-row owner remains. Actual
+first/zero-eligible failure rejects typed; later actual loss returns admitted
+rows only. Missing/conflicting continuation proof, repeated/empty/no-fresh
+continuations and cap exhaustion stay strict; a terminal fiftieth page completes.
+Closed-order folds cannot admit a failed newer prefix. Ledger since-only gap
+precedence, eligible limit suppression, exact native units/IDs/request sequences
+and strict consuming setup are preserved. Other adapters, B11/runtime proof and
+managed Context completion remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+KuCoin owner-adoption regression plan: original-source controls pin
+initial typed rejects, accepted-only later recovery, failed-page/retry identity
+isolation, strict ledger/funding/census proofs, concurrent owner attribution and
+complete-empty reads; spot single-response fills never publishes a malformed
+prefix. Existing unit/request-sequence/funding/spot checks remain compatibility
+coverage. The engine owns completion and marker policy; no new venue pager or
+signing implementation is introduced.
+
+## Bitrue shared single-page owner adoption
+
+Bitrue fills reuse engine HistoryRows/Completion without a fake cursor walk or a
+new engine API. Four original-source assertion-RED groups pin the shared typed
+Internal fallback on terminal native/malformed/exhausted-transport failures and
+strict endpoint coverage refusal. Compatibility controls pin per-attempt row
+rollback, same-ID economics after retries, independent signature/GET budgets,
+strict timestamp increments, 1000/1001 admission, native duplicate/filter order,
+missing-array versus empty success, concurrent owners and Store isolation.
+The adapter retains endpoint facts, not another completion or pager policy.
+
+Backpack fills/orders/funding/public trades now adopt the existing CursorHistory
+owner for staged admission, typed first failure, accepted-only later recovery and
+command-owned repeat/cap/skipped-fill coverage. The existing engine offset helper
+only computes raw displacement after owner More; no second pagination authority
+or venue marker emitter is introduced. Original-source assertion RED controls
+cover the changed contracts; native shape/filter/units/request order, eager
+non-fill diagnostics and strict setup remain. NX coverage/runtime proof stay open.
 ## Draft Engine socket lifecycle references
 
 OKX and Bitunix adopt one Engine registry/driver for epoch admission, typed auth,

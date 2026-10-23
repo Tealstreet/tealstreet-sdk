@@ -5,12 +5,12 @@ use crate::sign::Params;
 use crate::wire::*;
 use crate::{Backpack, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
-use safe_cex_engine::paging::{OffsetStep, OffsetWalk};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, OffsetStep, OffsetWalk, Stall};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Query, Response, VenueError};
 use serde::Serialize;
-use std::collections::HashSet;
 
 /// Requests per read before paging that still reports more is incomplete.
 const MAX_PAGES: u32 = 50;
@@ -23,7 +23,7 @@ enum Kind {
     Trades,
 }
 pub struct Request {
-    pub command: CommandId,
+    owner: Box<CursorHistory<Row>>,
     kind: Kind,
     symbol: Option<String>,
     order_id: Option<String>,
@@ -34,12 +34,10 @@ pub struct Request {
     walk: OffsetWalk,
     page_count: usize,
     oldest: f64,
-    rows: Vec<Row>,
-    seen: HashSet<String>,
     page_fresh: usize,
     page_hash: u64,
-    pages: HashSet<u64>,
     skipped_fills: Vec<String>,
+    page_skipped_fills: Vec<String>,
     invalid: bool,
 }
 #[derive(Serialize)]
@@ -109,6 +107,9 @@ fn side_name(text: &str) -> &'static str {
     if text == "Bid" { "buy" } else { "sell" }
 }
 impl Request {
+    pub(crate) fn command(&self) -> CommandId {
+        self.owner.command()
+    }
     fn accepts(&self, symbol: &str, time: f64) -> bool {
         self.symbol.as_ref().is_none_or(|s| s == symbol)
             && self.from.is_none_or(|t| time >= t)
@@ -122,13 +123,19 @@ impl Request {
     }
     fn append(&mut self, id: String, time: f64, row: Row) {
         self.oldest = self.oldest.min(time);
-        if self.seen.insert(id) {
+        if self.owner.fresh(id) {
             self.page_fresh += 1;
-            if self.rows.len() < self.limit {
-                self.rows.push(row);
+            if self.owner.accepted_len() + self.owner.staged_len() < self.limit {
+                self.owner.stage(row);
             }
         }
     }
+}
+fn encode_rows(rows: &[Row]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
+}
+fn stalled_page(_: Stall) -> String {
+    "Backpack history is incomplete: paging made no progress".into()
 }
 impl Backpack {
     pub(crate) fn history_command(
@@ -229,7 +236,12 @@ impl Backpack {
         self.history_request(
             cx,
             Request {
-                command,
+                owner: Box::new(CursorHistory::new(
+                    Completion::new(command),
+                    CursorWalk::new(MAX_PAGES),
+                    stalled_page,
+                    encode_rows,
+                )),
                 kind,
                 symbol,
                 order_id,
@@ -240,12 +252,10 @@ impl Backpack {
                 walk: OffsetWalk::new(MAX_PAGES),
                 page_count: 0,
                 oldest: f64::INFINITY,
-                rows: vec![],
-                seen: HashSet::new(),
                 page_fresh: 0,
                 page_hash: 14695981039346656037,
-                pages: HashSet::new(),
                 skipped_fills: vec![],
+                page_skipped_fills: vec![],
                 invalid: false,
             },
         );
@@ -279,7 +289,7 @@ impl Backpack {
             if request.walk.offset() > 0 {
                 params.insert("offset".into(), request.walk.offset().to_string());
             }
-            let command = request.command;
+            let command = request.command();
             if let Err(e) = self.signed(
                 cx,
                 Method::Get,
@@ -432,14 +442,14 @@ impl Backpack {
                 struct Id {
                     trade_id: u64,
                 }
-                r.skipped_fills.push(
+                r.page_skipped_fills.push(
                     serde_json::from_str::<Id>(item)
                         .map_or_else(|_| "unknown".into(), |d| d.trade_id.to_string()),
                 );
             }
             Err(e) => {
                 r.invalid = true;
-                cx.command_error(r.command, e);
+                cx.command_error(r.command(), e);
             }
             Ok(()) => {}
         }
@@ -451,24 +461,42 @@ impl Backpack {
         response: Response<'_>,
     ) {
         if !(200..300).contains(&response.status) || r.invalid {
-            cx.fail(
-                r.command,
-                format!("Backpack history read failed: HTTP {}", response.status),
+            self.history_failed(
+                cx,
+                r,
+                &format!("Backpack history read failed: HTTP {}", response.status),
             );
             return;
         }
         let more = r.kind != Kind::Trades
             && r.page_count >= r.page_size
-            && r.rows.len() < r.limit
+            && r.owner.accepted_len() + r.owner.staged_len() < r.limit
             && !r.from.is_some_and(|from| r.oldest < from);
-        // A page identical to one already read cannot advance the offset.
-        let progressed = !more || r.pages.insert(r.page_hash);
-        let step = r.walk.advance(r.page_count, r.page_count, more);
-        if more {
-            if !progressed || !matches!(step, OffsetStep::More(_)) {
-                cx.fail(
-                    r.command,
-                    "Backpack history is incomplete: paging made no progress",
+        let gap = (!r.page_skipped_fills.is_empty())
+            .then(|| "Backpack history is incomplete: malformed fill rows were skipped".into());
+        r.skipped_fills.append(&mut r.page_skipped_fills);
+        // Native page identity, not an increasing offset, proves progress.
+        let step = r.owner.advance_with_coverage(
+            CursorPage {
+                next: more.then(|| r.page_hash.to_string()),
+                rows: r.page_count,
+                fresh: r.page_fresh,
+                want_more: more,
+            },
+            gap,
+        );
+        if matches!(step, CursorStep::More(_)) {
+            // Only the owner can authorize continuation. This existing helper
+            // supplies raw-row offset arithmetic after that decision; at most
+            // 49 calls occur before the owner's 50-page cap.
+            if !matches!(
+                r.walk.advance(r.page_count, r.page_count, true),
+                OffsetStep::More(_)
+            ) {
+                r.owner.reject(
+                    cx,
+                    VenueError::new("Backpack history offset invariant failed")
+                        .kind(ErrorKind::Internal),
                 );
                 return;
             }
@@ -478,18 +506,24 @@ impl Backpack {
             r.oldest = f64::INFINITY;
             self.history_request(cx, r);
         } else {
-            if !r.skipped_fills.is_empty() {
-                cx.notice(
-                    Level::Warn,
-                    code::ROW_SKIPPED,
-                    format!(
-                        "Skipped {} malformed Backpack fill rows: {}",
-                        r.skipped_fills.len(),
-                        r.skipped_fills.join(", ")
-                    ),
-                );
-            }
-            cx.done(r.command, serde_json::to_string(&r.rows).unwrap());
+            Self::history_finish(cx, r, Ok(()));
         }
+    }
+    fn history_finish(cx: &mut Cx<'_, Pending>, r: Request, result: Result<(), VenueError>) {
+        if (result.is_ok() || r.owner.accepted_len() > 0) && !r.skipped_fills.is_empty() {
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
+                format!(
+                    "Skipped {} malformed Backpack fill rows: {}",
+                    r.skipped_fills.len(),
+                    r.skipped_fills.join(", ")
+                ),
+            );
+        }
+        r.owner.finish(cx, result);
+    }
+    pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
+        Self::history_finish(cx, r, Err(VenueError::new(error)));
     }
 }

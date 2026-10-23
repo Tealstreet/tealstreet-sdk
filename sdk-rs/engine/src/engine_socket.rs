@@ -216,14 +216,18 @@ impl<V: Venue> Engine<V> {
         now: f64,
         f: impl FnOnce(&mut Driver, &mut Cx<'_, V::Pending>) -> R,
     ) -> R {
+        self.assert_live();
         let mut cx = Cx {
             now,
             store: &mut self.store,
             io: &mut self.io,
         };
-        cx.with_socket_driver(f)
+        let result = cx.with_socket_driver(f);
+        self.assert_live();
+        result
     }
     fn socket_native(&mut self, now: f64, event: LifecycleEvent) -> Result<(), SocketError> {
+        self.assert_live();
         // Lifecycle work is independent of the HTTP codec that queued it.
         let delivery = self.io.http_delivery.take();
         let mut cx = Cx {
@@ -232,6 +236,9 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         let result = self.venue.on_socket_event(&mut cx, event);
+        // A venue may catch an allocation panic. It cannot grant another
+        // callback or hide invalid output behind a socket-retirement filter.
+        self.io.assert_actions_safe();
         self.io.http_delivery = delivery;
         result
     }
@@ -276,11 +283,13 @@ impl<V: Venue> Engine<V> {
             })
     }
     pub(super) fn process_socket_work(&mut self, now: f64) {
+        self.assert_live();
         if !self.io.managed_sockets {
             return;
         }
         let mut processed = 0usize;
         loop {
+            self.assert_live();
             if processed >= MAX_EFFECTS && !self.io.socket_failed {
                 self.io.socket_failed = true;
                 self.io
@@ -644,6 +653,8 @@ mod tests {
         refuse_retirement: bool,
         receipts: usize,
         borrowed_http_delivery: bool,
+        catch_fatal_on_ping: bool,
+        caught_fatal: bool,
     }
     fn policy() -> FeedPolicy {
         FeedPolicy {
@@ -671,6 +682,21 @@ mod tests {
         ) -> Result<(), SocketError> {
             self.borrowed_http_delivery |= cx.io.http_delivery.is_some();
             self.events.push(event.clone());
+            if self.catch_fatal_on_ping
+                && !self.caught_fatal
+                && matches!(event, LifecycleEvent::Ping(_))
+            {
+                cx.request(
+                    Method::Get,
+                    "https://socket.test/withheld".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+                let trapped =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cx.set_timer(1.)));
+                self.caught_fatal = trapped.is_err();
+            }
             match event {
                 LifecycleEvent::Reconnect(feed) => {
                     cx.connect_socket(feed, "wss://socket.test")?;
@@ -752,6 +778,39 @@ mod tests {
         };
         cx.stop_socket_feed(feed);
     }
+    #[test]
+    fn caught_fatal_socket_callback_stops_all_later_callbacks_and_output() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.venue.events.clear();
+        e.venue.catch_fatal_on_ping = true;
+        let epoch =
+            e.io.socket_driver
+                .state
+                .epoch(e.venue.feed.unwrap())
+                .unwrap();
+        // One last unique HTTP identity is available; the following timer
+        // allocation latches fatal without wrapping or aliasing a live socket.
+        e.io.next_id =
+            crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID);
+        e.io.socket_effects
+            .extend([Effect::Ping(epoch), Effect::Ping(epoch)]);
+        let mut yielded = 0;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            e.drain_actions().for_each(|_| yielded += 1);
+        }));
+        assert!(result.is_err());
+        assert!(e.failed());
+        assert!(e.venue.caught_fatal);
+        assert_eq!(
+            e.venue.events.len(),
+            1,
+            "no callback may run after a swallowed fatal allocation"
+        );
+        assert_eq!(yielded, 0, "no partial callback output may escape");
+    }
+
     #[test]
     fn socket_callback_cannot_borrow_http_delivery_and_restores_outer_scope() {
         use crate::request_context::{Attempt, Context, Operation, Owner};
