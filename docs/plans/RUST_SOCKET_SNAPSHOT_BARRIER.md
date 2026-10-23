@@ -114,7 +114,9 @@ which currently calls Supervisor::authenticated. Positions/accounts-only
 snapshots do not discharge it. An accepted orders snapshot with
 `safe_snapshot=false` from a newer order_revision DOES discharge it while
 preserving the newer financial state; do not require revision equality. At
-that accepted orders-snapshot commit boundary, before affected Store mutation where practical,
+that accepted orders-snapshot commit boundary, strictly BEFORE ANY affected
+Store publication (all fallible validation/preparation first, followed by the
+infallible native commit),
 call complete_socket_snapshot and retain the existing financial outcomes.
 If it refuses, do not publish or grant stream authority. No independent parser
 or inferred success from a snapshot label alone. Existing sequence, revision,
@@ -182,3 +184,17 @@ fail to close at20s; malformed native snapshot also leaves the bound discharged.
 Positives: login releases one AOP frame without snapshot; current valid native
 snapshot reaches commit; retired epoch cannot enter the decoder. These shared
 controls complement the native Phemex12-control6RED/6GREEN receiptc8812e4e85a.
+
+## API-review pins before runtime
+
+Uufub4 bounded API/custody direction CLEAR, with these required pins: native
+completion occurs strictly after the one reducer prepared/validated acceptance
+and before ANY affected Store publication, never merely where practical.
+Login auth permission must still release the native AOP subscription/handoff
+needed to obtain that snapshot; the outstanding barrier constrains expiry and
+financial commit, not permission to request the snapshot. Every release path
+still checks the same original absolute bound. Default registration semantics
+remain equivalent; private message proof is cleared across HTTP, Plan expiry
+and continuation nesting. Preflight deadline representation and all required
+timer/resource IDs before state mutation; preserve existing fatal-first rules.
+No reuse after in-callback retirement. Runtime/source review remains separate.
