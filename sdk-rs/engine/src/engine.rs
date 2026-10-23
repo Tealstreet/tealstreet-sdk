@@ -78,6 +78,8 @@ impl Method {
 pub enum RequestRoute {
     /// A primary-account read must not use the secondary read identity/egress.
     Primary,
+    /// A read signed by the secondary key uses the read identity's egress.
+    Secondary,
     Direct,
     PublicCors,
 }
@@ -85,6 +87,7 @@ impl RequestRoute {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Primary => "primary",
+            Self::Secondary => "secondary",
             Self::Direct => "direct",
             Self::PublicCors => "publicCors",
         }
@@ -1431,6 +1434,10 @@ impl Polls {
     }
 }
 
+#[cfg(feature = "managed-sockets")]
+#[path = "engine_socket.rs"]
+mod managed_sockets;
+
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
@@ -1439,9 +1446,15 @@ struct Io<P> {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    // Reconcile reads the engine owes the venue, one per uncertain seal: the
+    // symbols (`None` = all) and the earliest time to ask.
+    #[cfg(feature = "order-locks")]
+    reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
     #[cfg(feature = "http-plans")]
     http_plan_ready: Option<crate::request_context::Plan>,
+    #[cfg(feature = "http-plans")]
+    http_plan_expiring: Option<crate::request_context::Plan>,
     http_owner_poison: bool,
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
@@ -1491,6 +1504,22 @@ struct Io<P> {
     auth_failure_counted: bool,
     /// Each retried read's latest Error time and digit-normalised text, by call site.
     retried_failures: HashMap<&'static str, (f64, String)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_driver: crate::socket_driver::Driver,
+    #[cfg(feature = "managed-sockets")]
+    managed_sockets: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_failed: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
+    #[cfg(feature = "managed-sockets")]
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal>,
+    #[cfg(feature = "managed-sockets")]
+    socket_proposal_bytes: usize,
+    #[cfg(feature = "managed-sockets")]
+    socket_proposal_next: u64,
+    #[cfg(feature = "managed-sockets")]
+    socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
 }
 
 impl<P> Default for Io<P> {
@@ -1500,9 +1529,13 @@ impl<P> Default for Io<P> {
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_due: Vec::new(),
             command_entry: None,
             #[cfg(feature = "http-plans")]
             http_plan_ready: None,
+            #[cfg(feature = "http-plans")]
+            http_plan_expiring: None,
             http_owner_poison: false,
             #[cfg(feature = "http-plans")]
             http_plan_poison: false,
@@ -1548,11 +1581,57 @@ impl<P> Default for Io<P> {
             sockets: SocketRoles::default(),
             auth_failure_counted: false,
             retried_failures: HashMap::new(),
+            #[cfg(feature = "managed-sockets")]
+            socket_driver: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            managed_sockets: false,
+            #[cfg(feature = "managed-sockets")]
+            socket_failed: false,
+            #[cfg(feature = "managed-sockets")]
+            socket_effects: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_proposals: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_proposal_bytes: 0,
+            #[cfg(feature = "managed-sockets")]
+            socket_proposal_next: 0,
+            #[cfg(feature = "managed-sockets")]
+            socket_after: Default::default(),
         }
     }
 }
 
 impl<P> Io<P> {
+    /// Bounded: past the cap, coalesce into one full read that waits for the
+    /// latest merged deadline, so no rate or credential wait is cut short.
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
+        const RECONCILE_QUEUE: usize = 64;
+        // A seal at a non-finite clock is due at the next drain.
+        let at = if at.is_finite() { at } else { 0. };
+        if self.reconcile_due.len() < RECONCILE_QUEUE {
+            self.reconcile_due.push((symbols, at));
+            return;
+        }
+        let latest = self
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .fold(at, f64::max);
+        self.reconcile_due = vec![(None, latest)];
+    }
+
+    fn managed_socket_active(&self) -> bool {
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.managed_sockets
+        }
+        #[cfg(not(feature = "managed-sockets"))]
+        {
+            false
+        }
+    }
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
         Some(self.signatures.swap_remove(index).1)
@@ -1607,6 +1686,10 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    #[cfg(not(feature = "managed-sockets"))]
+    fn managed_send_allowed(&self, _socket: SocketId) -> bool {
+        true
+    }
     /// Calibrated venue UTC for outbound timestamps, absolute expiry and
     /// time-based nonces. Timers, deadlines and emitted data retain `self.now`.
     pub fn protocol_now(&self) -> f64 {
@@ -1634,20 +1717,25 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
+        let spec = spec.into();
+        if self.io.managed_socket_active()
+            || spec.channel == Some(SocketChannel::Public)
+                && self.io.public_feed_policy != PublicFeedPolicy::Direct
+        {
+            return SocketId(0);
+        }
+        let socket = SocketId(self.io.next());
+        self.queue_socket_transport(socket, spec);
+        socket
+    }
+    fn queue_socket_transport(&mut self, socket: SocketId, spec: SocketSpec) {
         let SocketSpec {
             url,
             channel,
             context,
             headers,
             binary,
-        } = spec.into();
-        if channel == Some(SocketChannel::Public)
-            && self.io.public_feed_policy != PublicFeedPolicy::Direct
-        {
-            // Socket zero is reserved for suppressed feeds; it never reaches a host.
-            return SocketId(0);
-        }
-        let socket = SocketId(self.io.next());
+        } = spec;
         if let Some(channel) = &channel {
             self.io
                 .sockets
@@ -1661,7 +1749,6 @@ impl<P> Cx<'_, P> {
             channel,
             context,
         });
-        socket
     }
 
     /// Create an unsigned upgrade and stage it through the shared signing queue.
@@ -1675,6 +1762,10 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 {
             return socket;
         }
+        self.sign_socket_upgrade(socket, step);
+        socket
+    }
+    fn sign_socket_upgrade(&mut self, socket: SocketId, step: Box<dyn crate::SignStep>) {
         let index = self
             .io
             .actions
@@ -1685,10 +1776,12 @@ impl<P> Cx<'_, P> {
             .expect("connect queued its upgrade");
         let outbound = self.io.actions.remove(index);
         self.stage_signed(index, outbound, step);
-        socket
     }
 
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
+        if !self.managed_send_allowed(socket) {
+            return;
+        }
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
@@ -1709,6 +1802,21 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn close(&mut self, socket: SocketId) {
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
+            self.io.opaque_entry_activity();
+            if let Some(epoch) = self.io.socket_driver.state.socket_epoch(socket) {
+                self.retire_socket(epoch.feed(), crate::socket_lifecycle::RetireReason::Stopped);
+            }
+            return;
+        }
+        self.close_socket_transport(socket);
+    }
+
+    /// Physical close and signing cancellation only. Managed lifecycle effects
+    /// use this after revoking the epoch, before native invalidation; public
+    /// close can then enter retirement without recursively invoking itself.
+    fn close_socket_transport(&mut self, socket: SocketId) {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
@@ -1857,6 +1965,9 @@ impl<P> Cx<'_, P> {
 
     /// WS authentication uses the same deadline/freshness/generation service.
     pub fn send_signed(&mut self, socket: SocketId, text: String, step: Box<dyn crate::SignStep>) {
+        if !self.managed_send_allowed(socket) {
+            return;
+        }
         let index = self.io.actions.len();
         self.stage_signed(index, Action::WsSend { socket, text }, step);
     }
@@ -2234,6 +2345,8 @@ impl<P> Cx<'_, P> {
                 Err(error)
             }
         };
+        // A credential-free route's auth-kind refusal is no credential evidence.
+        let credential_evidence = self.io.request_contexts.owner_credentialed(command);
         self.io.retire_http_command(command);
         if !self.io.request_contexts.finish(command) {
             self.io.http_owner_poison = true;
@@ -2249,7 +2362,33 @@ impl<P> Cx<'_, P> {
             {
                 self.io.order_locks.managed_resolved(command);
             }
-            self.io.order_locks.finish(command, result.is_err());
+            let scope = self.io.order_locks.reconcile_scope(command);
+            let absent = self.io.order_locks.absent_pending(command);
+            let marked = self.io.order_locks.finish(command, result.is_err());
+            let unknown = result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.outcome == Some(crate::Outcome::Unknown));
+            // Every uncertain seal asks again, even for an already-uncertain
+            // symbol: an earlier in-flight read may predate this write.
+            // A managed write the lock never held still reconciles: a full read.
+            let scope = scope.or_else(|| (write_sealed && unknown).then_some(None));
+            if let Some(scope) = scope.filter(|_| unknown || absent || !marked.is_empty()) {
+                // A rate limit or credential refusal must not fan out reads now.
+                let delay = match result.as_ref().err().and_then(|error| error.kind) {
+                    Some(ErrorKind::RateLimited) => result
+                        .as_ref()
+                        .err()
+                        .and_then(|error| error.retry_after_ms)
+                        .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS),
+                    Some(
+                        ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission,
+                    ) => crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
+                    _ => 0.,
+                };
+                let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+                self.io.queue_reconcile(scope, self.now + delay);
+            }
             self.io.active_commands.remove(&command);
         }
         #[cfg(not(feature = "order-locks"))]
@@ -2257,7 +2396,9 @@ impl<P> Cx<'_, P> {
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
-                count_auth_failure(self.io, Some(&error));
+                if credential_evidence {
+                    count_auth_failure(self.io, Some(&error));
+                }
                 Notice::CommandFailed { command, error }
             }
         };
@@ -2406,6 +2547,16 @@ pub trait Venue {
         self.on_sign_error(cx, pending, error);
     }
 
+    /// Reconcile writes whose outcome is unknown: issue a fresh order read for
+    /// these symbols (`None`: all) and report it through `orders_reconciled`.
+    /// The engine asks once per uncertain seal, after any rate-limit wait.
+    fn reconcile_uncertain(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _symbols: Option<&[String]>,
+    ) {
+    }
+
     /// A session waiter reached its owner's original deadline before the venue
     /// drained it. Nothing was sent for that owner.
     fn on_session_wait_expired(
@@ -2487,6 +2638,41 @@ pub trait Venue {
         self.on_request_failed(cx, pending, error);
     }
 
+    #[cfg(feature = "managed-sockets")]
+    fn socket_control(
+        &self,
+        _store: &Store,
+        _feed: crate::socket_lifecycle::FeedId,
+        _authenticated: bool,
+        _text: &str,
+    ) -> crate::socket_lifecycle::Control {
+        crate::socket_lifecycle::Control::Other
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn socket_startup_ready(&self, _store: &Store) -> bool {
+        false
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_socket_event(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _event: crate::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn encode_socket_interests(
+        &self,
+        _store: &Store,
+        _feed: crate::socket_lifecycle::FeedId,
+        _subscribe: bool,
+        _items: &[crate::socket_lifecycle::Interest],
+        _emit: &mut dyn FnMut(
+            crate::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), crate::socket_lifecycle::SocketError>,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
@@ -2533,7 +2719,9 @@ pub trait Venue {
         _headers: &str,
         error: &str,
     ) {
-        self.on_request_failed(cx, pending, error);
+        // The venue answered but the stream broke (or is not UTF-8): a
+        // malformed reply, never transport loss. Defaults reach on_request_failed.
+        self.on_http_failed(cx, pending, malformed_body(error));
     }
     fn on_request_failed(
         &mut self,
@@ -2543,9 +2731,9 @@ pub trait Venue {
     );
     /// A request that may have reached the venue failed without a usable
     /// response. `error.kind` is `Timeout` for engine deadline expiry,
-    /// `Internal` for a whole delivered body (or managed write reply) the engine
-    /// cannot decode, else `Network`. Streams that break mid-array still use
-    /// `on_stream_malformed`.
+    /// `Internal` for a delivered body (or managed write reply) the engine cannot
+    /// decode, including a stream that breaks mid-array (the default
+    /// `on_stream_malformed` forwards here), else `Network`.
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -2622,6 +2810,8 @@ pub struct Engine<V: Venue> {
     startup_watch_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
+    #[cfg(feature = "order-locks")]
+    reconcile_timer: Option<(TimerId, f64)>,
     /// Set while dispatching released commands, which must not be held again.
     releasing: bool,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
@@ -2668,6 +2858,8 @@ impl<V: Venue> Engine<V> {
             started: false,
             startup_watch_at: None,
             ack_timer: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_timer: None,
             releasing: false,
             account_startup: false,
             shared_books: HashMap::new(),
@@ -2981,6 +3173,7 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
+        self.process_socket_work(now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
@@ -2991,6 +3184,7 @@ impl<V: Venue> Engine<V> {
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
         self.io.dispatch_now = now;
+        self.process_socket_work(now);
         self.io.http_responses.prune(now);
         // Expired observers detach before any delivery can project to them.
         self.sweep_executions(now);
@@ -3037,12 +3231,29 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
             && let Some((_, pending)) = self.io.signing.expire(*timer)
         {
             self.sign_failed(now, pending.outbound, crate::signing::SignError::TimedOut);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
+            return;
+        }
+        #[cfg(feature = "order-locks")]
+        if let Event::TimerFired { timer } = &event
+            && self.reconcile_timer.is_some_and(|(own, _)| own == *timer)
+        {
+            self.reconcile_timer = None;
+            // The full end-of-event path: deferred commands, the reconcile
+            // drain itself and shared tickers.
+            self.finish_event_scope(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
@@ -3101,6 +3312,18 @@ impl<V: Venue> Engine<V> {
             self.io.actions.push(Action::SetTimer { timer, at_ms });
             self.ack_timer = Some((timer, at_ms));
         }
+    }
+
+    // Managed and legacy text use the same native callback boundary.
+    #[cfg(feature = "managed-sockets")]
+    #[inline(never)]
+    fn deliver_socket_message(
+        venue: &mut V,
+        cx: &mut Cx<'_, V::Pending>,
+        socket: SocketId,
+        text: &str,
+    ) {
+        venue.on_message(cx, socket, text);
     }
 
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
@@ -3234,6 +3457,20 @@ impl<V: Venue> Engine<V> {
             self.startup_watch_at =
                 watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
         }
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
+            // Managed ingress shares the ordinary event prelude and epilogue.
+            // In particular health accounting is reset once per host event.
+            if self.handle_managed_socket(now, &event) {
+                self.finish_event_scope(now);
+                return;
+            }
+        }
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
         match event {
             Event::PollScaleChanged { scale } => {
                 if scale.is_nan() || scale <= 0. {
@@ -3260,7 +3497,10 @@ impl<V: Venue> Engine<V> {
             }
             Event::WsMessage { socket, text } => {
                 cx.io.sockets.received(socket, now, &mut cx.io.health);
-                self.venue.on_message(&mut cx, socket, text)
+                #[cfg(feature = "managed-sockets")]
+                Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+                #[cfg(not(feature = "managed-sockets"))]
+                self.venue.on_message(&mut cx, socket, text);
             }
             Event::WsClosed { socket, code } => {
                 for timer in cx.io.signing.close_socket(socket) {
@@ -3507,11 +3747,77 @@ impl<V: Venue> Engine<V> {
                 self.handle(now, Event::Command(command));
             }
         }
+        self.process_socket_work(now);
         self.io.http_delivery = delivery;
         self.io.command_entry = entry;
         #[cfg(feature = "order-locks")]
         {
             self.io.order_response_token = order_response;
+        }
+        #[cfg(feature = "order-locks")]
+        self.reconcile_uncertain(now);
+        self.restore_shared_tickers(false, now);
+    }
+
+    /// Ask the venue once for each due uncertain-write reconcile read, then
+    /// re-arm one wake-up for deferred ones. A fresh read the venue reports
+    /// through `orders_reconciled` clears the order-lock fence as before.
+    // Out of line: its callers share one copy (wasm size budget).
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn reconcile_uncertain(&mut self, now: f64) {
+        // Never inside a command entry; the hook runs with no HTTP delivery
+        // or order-read authority of its own.
+        if self.io.command_entry.is_some() {
+            return;
+        }
+        let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
+        self.io.reconcile_due.retain_mut(|(scope, at)| {
+            if *at > now && now.is_finite() {
+                return true;
+            }
+            any = true;
+            match scope.take() {
+                None => all = true,
+                Some(scope) => {
+                    for symbol in scope {
+                        if !symbols.contains(&symbol) {
+                            symbols.push(symbol);
+                        }
+                    }
+                }
+            }
+            false
+        });
+        if any {
+            let delivery = self.io.http_delivery.take();
+            let token = self.io.order_response_token.take();
+            let mut cx = Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            };
+            self.venue
+                .reconcile_uncertain(&mut cx, (!all).then_some(symbols.as_slice()));
+            self.io.http_delivery = delivery;
+            self.io.order_response_token = token;
+        }
+        let next = self
+            .io
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp);
+        if self.reconcile_timer.map(|(_, at)| at) == next {
+            return;
+        }
+        if let Some((timer, _)) = self.reconcile_timer.take() {
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        if let Some(at_ms) = next {
+            let timer = TimerId(self.io.next());
+            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.reconcile_timer = Some((timer, at_ms));
         }
     }
 
@@ -3718,8 +4024,12 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
-                cx.close(socket);
-                self.venue.on_close(&mut cx, socket, 1006);
+                if cx.io.managed_socket_active() {
+                    cx.close(socket);
+                } else {
+                    cx.close(socket);
+                    self.venue.on_close(&mut cx, socket, 1006);
+                }
             }
             _ => {}
         }
@@ -3733,6 +4043,12 @@ impl<V: Venue> Engine<V> {
         result: Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
         use crate::signing_dispatch::Completion;
+        #[cfg(feature = "managed-sockets")]
+        if let Some((socket, connect)) = self.io.signing.outbound_socket(attempt)
+            && !self.socket_gate(now, socket, connect)
+        {
+            return;
+        }
         let Some(completion) =
             self.io
                 .signing
@@ -3870,6 +4186,7 @@ impl<V: Venue> Engine<V> {
         if !now.is_finite()
             || self.io.http_delivery.is_some()
             || self.io.http_plan_ready.is_some()
+            || self.io.http_plan_expiring.is_some()
             || !self.io.request_contexts.plan_scope_clear()
         {
             return;
@@ -3878,6 +4195,7 @@ impl<V: Venue> Engine<V> {
         while let Some(plan) = self.io.request_contexts.next_plan_ready(now) {
             advanced = true;
             if now >= plan.deadline() {
+                self.expire_plan_calls(now, &plan);
                 Cx {
                     now,
                     store: &mut self.store,
@@ -3989,7 +4307,20 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
+        self.assert_live();
+        if self.io.actions.is_empty()
+            && self.io.signing_admission.is_empty()
+            && self.io.signing.is_empty()
+        {
+            return;
+        }
+        self.dispatch_queued_actions(now);
+    }
+
+    #[inline(never)]
+    fn dispatch_queued_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
         for (outbound, error) in std::mem::take(&mut self.io.signing_admission) {
             self.sign_failed(now, outbound, error);
@@ -4000,6 +4331,29 @@ impl<V: Venue> Engine<V> {
             self.assert_live();
             while let Some(action) = queued.pop_front() {
                 self.io.assert_action_safe(&action);
+                let emitted = self.io.actions.len();
+                #[cfg(not(feature = "managed-sockets"))]
+                let live = true;
+                #[cfg(feature = "managed-sockets")]
+                let live = if !self.io.managed_socket_active() {
+                    true
+                } else {
+                    match &action {
+                        Action::Sign { attempt, .. } => {
+                            self.io.signing.outbound_socket(*attempt).is_none_or(
+                                |(socket, connect)| self.socket_gate(now, socket, connect),
+                            )
+                        }
+                        Action::SignedOutbound { outbound, .. } => {
+                            self.gate_socket_action(now, outbound)
+                        }
+                        _ => self.gate_socket_action(now, &action),
+                    }
+                };
+                self.queue_dispatch_callback_actions(&mut queued, emitted);
+                if !live {
+                    continue;
+                }
                 match action {
                     Action::SignedOutbound { attempt, outbound } => {
                         match self.io.signing.release(
@@ -4136,13 +4490,32 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    #[cfg(not(feature = "managed-sockets"))]
+    fn process_socket_work(&mut self, _now: f64) {}
+    #[cfg(not(feature = "managed-sockets"))]
+    fn has_socket_work(&self) -> bool {
+        false
+    }
+
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         self.assert_live();
         self.flush_http_plans(self.io.dispatch_now);
         self.flush_http_owner_retirements();
         self.io.assert_actions_safe();
+        self.process_socket_work(self.io.dispatch_now);
+        self.io.assert_actions_safe();
         self.dispatch_actions(self.io.dispatch_now);
+        self.process_socket_work(self.io.dispatch_now);
+        #[cfg(feature = "managed-sockets")]
+        if self.io.managed_socket_active() {
+            self.fence_socket_actions(self.io.dispatch_now);
+            self.dispatch_actions(self.io.dispatch_now);
+            self.drain_socket_frames(self.io.dispatch_now);
+            self.process_socket_work(self.io.dispatch_now);
+            self.dispatch_actions(self.io.dispatch_now);
+            self.fence_socket_actions(self.io.dispatch_now);
+        }
         if self.store.take_rejected_empty_catalogue() {
             push_event(
                 &mut self.io.actions,
@@ -4165,6 +4538,7 @@ impl<V: Venue> Engine<V> {
     pub fn has_actions(&self) -> bool {
         !self.io.actions.is_empty()
             || !self.io.signing_admission.is_empty()
+            || self.has_socket_work()
             || self.io.signing.next_work().is_some()
             || self.store.rejected_empty_catalogue()
     }
@@ -7999,3 +8373,7 @@ mod dispatch_signing_tests;
 #[cfg(all(test, feature = "order-locks", feature = "http-plans"))]
 #[path = "http_plan_boundary_tests.rs"]
 mod http_plan_boundary_tests;
+
+#[cfg(feature = "http-plans")]
+#[path = "http_plan_expiry.rs"]
+mod http_plan_expiry;
