@@ -331,3 +331,13 @@ is boxed to satisfy strict Clippy without adding a success-path allocation or
 weakening custody: `Result<(Self,T), Box<RetryRefusal<T>>>`. The boxed error still
 owns the identical wrapper and continuation. This signature refinement requires
 source/API re-review; no lint exemption is added.
+
+Before command admission, consumers of the reviewed command-timeout seam call
+command_wait: Expired goes through reject_expired_command without admission;
+Remaining(ms) supplies the explicit root ReadPolicy timeout. Do not guess a
+fixed 120s root. This standalone helper does not itself consume that unlanded
+seam. Multi-page history additionally needs a reviewed child-leg method retaining
+the root's exact selection and immutable caller bound, with each page minted
+from the original root at dequeue and a native physical timeout. Re-selection
+per page and misuse of retry are forbidden. This is a separate follow-up gate
+for OKX/Bitget/BloFin/Bitunix history, not supplied by the current single-leg API.
