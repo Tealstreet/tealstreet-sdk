@@ -241,6 +241,11 @@ impl AsterDex {
         let path = &request.path;
         let url = format!("{}{path}", self.urls.rest);
         if request.listen_key() {
+            // The reducer ignores a closed stream's create or keepalive, and
+            // sending it would rotate the current stream's session.
+            if !self.listen_key_current(&request.pending) {
+                return false;
+            }
             let credential = selection.credential(slot.identity.credential.clone());
             return self.listen_key_session_write(cx, request, url, credential, recipe);
         }

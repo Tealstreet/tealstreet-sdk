@@ -91,6 +91,16 @@ impl H {
             },
         });
     }
+    fn answer(&mut self, request: &HttpRequest, status: u16, body: &str) {
+        self.event(Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        });
+    }
     fn keys(&self) -> Vec<&HttpRequest> {
         self.requests
             .iter()
@@ -162,4 +172,37 @@ fn a_hung_keepalive_is_retried_at_its_bound() {
     );
     assert!(h.keys().iter().all(|r| r.method == Method::Put));
     assert!(!h.closed.contains(&socket), "the private stream stays up");
+}
+
+#[test]
+fn a_closed_streams_create_retry_cannot_rotate_the_current_session() {
+    let mut h = H::started();
+    let socket = h.open_private();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let start = h.now;
+    h.run_until(start + 5_000., |h| !h.keys().is_empty());
+    let first = h.take(KEY);
+    let created = h.now;
+    h.answer(&first, 503, "{}");
+    h.run_until(created + 1_500., |h| !h.keys().is_empty());
+    let retry = h.take(KEY);
+    h.answer(&retry, 503, "{}");
+    h.run_until(created + 3_500., |h| !h.keys().is_empty());
+    let second = h.take(KEY);
+    // This 503 lands just before the 10 s connect watchdog closes the stream,
+    // so the last retry (3 s) is due after the reconnect's new create.
+    h.now = created + 9_900.;
+    h.answer(&second, 503, "{}");
+    h.run_until(created + 12_500., |h| !h.keys().is_empty());
+    let current = h.take(KEY);
+    assert_eq!(current.method, Method::Post, "the reconnect's create");
+    h.run_until(created + 14_000., |_| false);
+    assert!(h.keys().is_empty(), "the closed stream's retry is not sent");
+    let sockets = h.sockets.len();
+    h.answer(&current, 200, r#"{"listenKey":"current"}"#);
+    assert_eq!(
+        h.sockets.len(),
+        sockets + 1,
+        "the current create opens the stream"
+    );
 }

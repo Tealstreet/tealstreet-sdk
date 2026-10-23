@@ -969,6 +969,13 @@ impl AsterDex {
         }
         self.account.supervisor.retry(cx);
     }
+    pub(crate) fn listen_key_current(&self, pending: &Pending) -> bool {
+        matches!(
+            pending,
+            Pending::Account(Request::ListenKey { epoch } | Request::Keepalive { epoch })
+                if *epoch == self.account.key_epoch
+        )
+    }
     /// Each create opens a new generation; keepalives reuse the live one.
     pub(crate) fn listen_key_session(
         &mut self,
