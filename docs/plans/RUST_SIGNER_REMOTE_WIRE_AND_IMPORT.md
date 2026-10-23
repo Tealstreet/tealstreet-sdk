@@ -36,7 +36,7 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
 
 1. **Request shape.** A new request type keeps `t` as the first JSON key, so
    the browser's `{"t":"sign-req"` fast path still sees it:
-   `{t:'sign-req', d:{id, type:'op', v:2, exchangeName, accountName, op}}`.
+   `{t:'sign-req', d:{id, type:'op', v:2, exchangeName, accountName, op | ops}}`.
    - `op` = `{recipe, slot: 'primary', inputs, receipt}`.
      - `recipe` is a closed per-family recipe id, such as
        `hyperliquid.order` or `coinbase.restJwt`.
@@ -62,18 +62,21 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
    Widths are validated per algorithm (`SignRequest::validate_result`). A v2
    request answered without `v: 2` is an error.
 3. **Capability negotiation.** The browser advertises
-   `signOps: {v: 2, algorithms: [...], slots: [...]}` in `InitPayload`, which
-   is included in `getInitFingerprint`.
-   - The server sends `type: 'op'` only to a session that advertised that
-     algorithm. Otherwise the Rust provider refuses before sending
-     (`unsupported` / `notSent`). That refusal never reaches the wire, so it
-     cannot feed the fatal streak.
+   `signOps: {v: 2, recipes: [...], slots: [...]}` in `InitPayload`, which is
+   included in `getInitFingerprint`.
+   - `recipes` lists the recipe ids from the venue features compiled into
+     that browser's WASM build. It is not a list of algorithms: a browser can
+     support `es256` without the Coinbase recipe.
+   - The server sends an `op` only for a recipe that session advertised.
+     Otherwise the Rust provider refuses before sending (`unsupported` /
+     `notSent`). That refusal never reaches the wire, so it cannot feed the
+     fatal streak.
    - An old server forwards `signOps` into its `getInitFingerprint`
      (stringified), so a change rebuilds the account. It does not act on it.
      An old browser never advertises, so it never receives v2.
    - Capability is captured per account at construction, never latched per
      session.
-   - If init lacks the family's required algorithms, keyless construction is
+   - If init lacks any recipe the family requires, keyless construction is
      refused, extending today's `rust.exchange.ts:826` refusal. The account
      never runs half-broken with per-request refusals.
    - Mobile WebView, CLI and custom-script sandbox clients never advertise,
@@ -103,9 +106,9 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
 5. **Algorithms.** `ed25519`, `es256`, `secp256k1Digest`, `starkDigest`,
    `zkLinkContract` (after #1839/#1844 land), and Lighter Schnorr after P3.
    - `Sha256SecretSuffix` (Bitunix) and `HmacSha512` (Kraken) have no remote
-     mapping yet, so keyless Rust Bitunix and Kraken stay unsupported. Each family's adoption
-   enables only its own algorithms in `construction-rules.json`
-   `remoteSigning`.
+     mapping yet, so keyless Rust Bitunix and Kraken stay unsupported.
+   - Each family's adoption enables only its own recipes in
+     `construction-rules.json` `remoteSigning`.
    - Coinbase's existing `coinbase-jwt` path stays for TS-hosted accounts
      until its Rust family adopts `es256` ops.
 6. **Failure semantics.**
@@ -128,7 +131,8 @@ algorithm is opaque: every op names a family recipe, the browser recomputes
 the signed bytes with the shared canonicalizer, and it applies that family's
 content allowlist before signing.
 - **Wallet and L2 keys** (secp256k1, Stark, zkLink, Lighter Schnorr) sign
-  only orders, cancels, leverage, margin and auth logins. They refuse
+  only orders, cancels, leverage, margin and auth logins. Polymarket
+  ClobAuth is not an auth login for this purpose (see below). They refuse
   withdraw, transfer, approveAgent, permit, approval, vault moves and L2
   transfers.
 - **Polymarket ClobAuth is refused on the remote path.** A ClobAuth signature
@@ -186,10 +190,19 @@ Consequences for this plan:
 
 Both halves need tests for each adopting family:
 - **Server half:** a keyless Rust account with an injected fake
-  `remoteSigner` that records `op` requests. Assert the exact payload bytes
-  and refusal when the capability is not advertised.
+  `remoteSigner` that records `op` requests. Assert the exact recipe inputs,
+  and refusal when the recipe is not advertised.
 - **Browser half:** WASM `signOperation` with a local setup. Assert exact
   vectors.
+- **Content allowlist refusals:**
+  - withdraw, transfer, approveAgent, permit and approval are refused;
+  - ClobAuth is refused remotely;
+  - a Hyperliquid main-wallet key is refused;
+  - Coinbase claim bounds and denied `uri` paths are refused;
+  - a Backpack withdraw instruction is refused;
+  - an unadvertised recipe is refused before sending.
+- **Shared canonicalizer:** the server recipe and the browser produce
+  identical signed bytes for the same inputs.
 
 Cross-half tests replay recorded requests. Compatibility tests cover an old
 browser with a new server (never sent), and a new browser with an old server
@@ -257,8 +270,8 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
        until a separately reviewed path exists for device-side import and
        ownership of the derive HTTP request. Only then would the derived key
        live on the device.
-   - Injected JS and Workers providers implement `import` and `drop_imported`
-     together or not at all.
+   - Injected JS and Workers providers implement `import` and receive the
+     drop as `Action::DropImported` (section 7), together or not at all.
 6. **Credential conditions (claude-m26ps4, 2026-10-23).**
    - **Slot.** Import installs refs only for the slot whose L1 identity
      derived them (primary today). The derived refs form a session identity
