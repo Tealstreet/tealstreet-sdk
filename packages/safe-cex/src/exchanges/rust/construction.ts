@@ -26,12 +26,17 @@ type Rule = {
   canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string;
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
+  /** Family-specific trusted setup mapping, declared rather than name-matched. */
+  setupMapping?: 'asterdex';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 
 /** Trusted setup policy; unspecified fields retain explicit caller metadata. */
 export const deriveSignerSetupPolicy = (name: ExchangeName): CredentialSetupPolicy =>
   (rules.venues as Record<string, Rule>)[name]?.signerSetup ?? {};
+
+export const deriveSignerSetupMapping = (name: ExchangeName): Rule['setupMapping'] =>
+  (rules.venues as Record<string, Rule>)[name]?.setupMapping;
 
 export const deriveRemoteSigningPolicy = (name: ExchangeName): RemoteSigningPolicy | undefined =>
   (rules.venues as Record<string, Rule>)[name]?.remoteSigning;
