@@ -1252,11 +1252,35 @@ fn rest_query_success_and_failure_leave_sbe_book_sequence_and_account_unchanged(
         ),
     ] {
         h.actions.clear();
-        h.command(Command::FetchOrderBook {
-            command,
-            symbol: BTC.into(),
-            limit: Some(5),
-        });
+        h.e.handle(
+            h.now,
+            Event::Command(Command::FetchOrderBook {
+                command,
+                symbol: BTC.into(),
+                limit: Some(5),
+            }),
+        );
+        let mut deadline = None;
+        for action in safe_cex_engine::test_support::prepared_actions(&mut h.e, h.now) {
+            match action {
+                Action::SetTimer { timer, at_ms } => {
+                    assert_eq!(at_ms, h.now + 20_000.0);
+                    assert!(
+                        deadline.replace(timer).is_none(),
+                        "one original read deadline"
+                    );
+                }
+                Action::Http(request) => {
+                    h.receipt_trace.push(ReceiptTrace::Http(request.id));
+                    h.pending.push(request);
+                }
+                action => h.actions.push(action),
+            }
+        }
+        assert!(
+            deadline.is_some(),
+            "managed query retains its original deadline"
+        );
         assert_eq!(h.pending.len(), 1);
         let request = h.take("/orderbook/");
         assert!(request.headers.is_empty());
