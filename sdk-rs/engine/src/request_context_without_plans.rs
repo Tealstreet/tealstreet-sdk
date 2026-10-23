@@ -23,6 +23,13 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    pub(in crate::engine) fn validate_preflight_ready_owner(
+        &self,
+        _owner: Owner,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
     pub(in super::super) fn with_owned_read_failure(
         &mut self,
         _error: impl FnOnce() -> VenueError,
@@ -37,4 +44,8 @@ impl<P> Cx<'_, P> {
         _error: VenueError,
     ) {
     }
+}
+
+impl<V: crate::Venue> super::super::Engine<V> {
+    pub(in crate::engine) fn flush_preflight_readiness(&mut self, _now: f64) {}
 }

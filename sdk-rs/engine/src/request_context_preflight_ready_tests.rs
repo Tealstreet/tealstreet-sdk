@@ -1,0 +1,441 @@
+use super::*;
+use crate::engine::*;
+use crate::engine::{ExecutionHandle, Window};
+use crate::request_context::{
+    Context, Error, Operation, Plan, PlanPolicy, Policy, Preflight, PreflightPolicy,
+    PreflightPurpose, RetryPolicy, Scope,
+    plan::{CallBound, RetryWindow, Slot, StepBound},
+};
+
+#[derive(Clone, Copy, Default)]
+enum ForeignKind {
+    #[default]
+    Context,
+    Plan,
+    Execution,
+}
+#[derive(Default)]
+struct ScopeProbe {
+    kind: ForeignKind,
+    root: Option<Context>,
+    leg: Option<Context>,
+    plan: Option<Plan>,
+    slot: Option<Slot>,
+    execution: Option<ExecutionHandle>,
+    parked: Option<Preflight>,
+    ready: usize,
+    responses: usize,
+    retired: usize,
+    hold_parked: bool,
+    last_refusal: Option<Error>,
+}
+fn policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 100,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+fn preflight_policy() -> PreflightPolicy {
+    PreflightPolicy {
+        purpose: PreflightPurpose::ReadOnly,
+        read_credential: None,
+        write_credential: None,
+    }
+}
+impl Venue for ScopeProbe {
+    type Pending = Context;
+    fn start(&mut self, _: &mut Cx<'_, Context>) {}
+    fn on_command(&mut self, cx: &mut Cx<'_, Context>, command: Command) {
+        let id = command.completion_id().unwrap();
+        if id == 20 || self.hold_parked {
+            let parked = match cx.begin_preflight(preflight_policy()) {
+                Ok(handle) => handle,
+                Err(crate::request_context::CommandEntryError::Rejected(reason)) => {
+                    self.last_refusal = Some(reason);
+                    return;
+                }
+                Err(other) => panic!("unexpected {other:?}"),
+            };
+            assert_eq!(cx.request_preflight_ready(&parked), Err(Error::Revoked));
+            cx.park_preflight(&parked).unwrap();
+            if !self.hold_parked {
+                cx.request_preflight_ready(&parked).unwrap();
+                cx.request_preflight_ready(&parked).unwrap();
+            }
+            self.parked = Some(parked);
+            return;
+        }
+        let leg = match self.kind {
+            ForeignKind::Context => {
+                let root = cx.admit_http_command(policy()).unwrap();
+                self.root = Some(root.clone());
+                root
+            }
+            ForeignKind::Execution => {
+                let root = cx.admit_http_command(policy()).unwrap();
+                let execution = cx
+                    .begin_execution(&root, policy(), Window::UntilTerminal, "foreign")
+                    .unwrap();
+                let leg = cx.http_leg_context(execution.context(), policy()).unwrap();
+                self.root = Some(root);
+                self.execution = Some(execution);
+                leg
+            }
+            ForeignKind::Plan => {
+                let preflight = cx.begin_preflight(preflight_policy()).unwrap();
+                let calls = [CallBound {
+                    timeout_ms: 100,
+                    attempts: 1,
+                    retry_window: RetryWindow::Shared,
+                    after_refusal: &[],
+                }];
+                let plan = cx
+                    .admit_plan(
+                        &preflight,
+                        &[StepBound {
+                            wait_ms: 0,
+                            calls: &calls,
+                        }],
+                        PlanPolicy {
+                            operation: Operation::Read,
+                            credential: None,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                let slot = cx.plan_slots(&plan).unwrap().remove(0);
+                let leg = cx.plan_leg_context(&plan, &slot).unwrap();
+                self.plan = Some(plan);
+                self.slot = Some(slot);
+                leg
+            }
+        };
+        self.leg = Some(leg.clone());
+        cx.request_managed(
+            leg.clone(),
+            Method::Get,
+            "https://read.test/current".into(),
+            None,
+            leg,
+        )
+        .unwrap();
+    }
+    fn on_http_preflight_ready(&mut self, cx: &mut Cx<'_, Context>, preflight: &Preflight) {
+        self.ready += 1;
+        assert!(cx.io.command_entry.is_none());
+        assert!(cx.io.http_delivery.is_none());
+        #[cfg(feature = "order-locks")]
+        assert!(cx.io.order_response_token.is_none());
+        if let Some(leg) = self.leg.as_ref() {
+            cx.io.request_contexts.validate(leg, cx.now).unwrap();
+            let ids = cx.io.next_id;
+            let requests = cx.io.managed_http.len();
+            let mutation = Policy {
+                operation: Operation::Mutation,
+                ..policy()
+            };
+            assert_eq!(cx.http_leg_context(leg, mutation), Err(Error::Revoked));
+            assert_eq!(
+                cx.http_context(Scope::Command(10), policy()),
+                Err(Error::Revoked)
+            );
+            assert_eq!(cx.finish_http_context(leg), Err(Error::Revoked));
+            assert_eq!(
+                cx.request_managed(
+                    leg.clone(),
+                    Method::Get,
+                    "https://read.test/borrowed".into(),
+                    None,
+                    leg.clone()
+                )
+                .unwrap_err()
+                .1,
+                Error::Revoked
+            );
+            if let Some(plan) = self.plan.as_ref() {
+                assert_eq!(cx.fail_plan(plan, "borrowed"), Err(Error::Revoked));
+                assert_eq!(cx.done_plan(plan, "borrowed".into()), Err(Error::Revoked));
+            }
+            if let Some(root) = self.root.as_ref() {
+                assert_eq!(cx.fail_context(root, "borrowed"), Err(Error::Revoked));
+                assert_eq!(
+                    cx.done_context(root, "borrowed".into()),
+                    Err(Error::Revoked)
+                );
+                cx.fail(10, "numeric borrowed");
+                cx.done(10, "numeric borrowed".into());
+                if let Some(execution) = self.execution.as_ref() {
+                    assert_eq!(
+                        cx.abort_execution(execution, "borrowed"),
+                        Err(Error::Revoked)
+                    );
+                    assert_eq!(
+                        cx.detach_execution_observer(root, "borrowed"),
+                        Err(Error::Revoked)
+                    );
+                }
+            }
+            assert_eq!(cx.io.next_id, ids);
+            assert_eq!(cx.io.managed_http.len(), requests);
+            cx.io.request_contexts.validate(leg, cx.now).unwrap();
+        }
+        cx.done_preflight(preflight, "cached".into()).unwrap();
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: Response<'_>) {
+        self.responses += 1;
+        match self.kind {
+            ForeignKind::Context => {
+                cx.validate_read_http_delivery(self.root.as_ref().unwrap(), &context)
+                    .unwrap();
+                cx.done_context(self.root.as_ref().unwrap(), "foreign intact".into())
+                    .unwrap();
+            }
+            ForeignKind::Plan => {
+                let plan = self.plan.as_ref().unwrap();
+                cx.validate_plan_delivery(plan, &context).unwrap();
+                cx.finish_plan_call(plan, self.slot.as_ref().unwrap(), &context)
+                    .unwrap();
+                cx.done_plan(plan, "foreign intact".into()).unwrap();
+            }
+            ForeignKind::Execution => {
+                let execution = self.execution.as_ref().unwrap();
+                cx.validate_execution_read_delivery(execution, &context)
+                    .unwrap();
+                cx.complete_execution(execution, |_| Ok("foreign intact".into()))
+                    .unwrap();
+            }
+        }
+    }
+    fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
+        self.retired += 1;
+    }
+    fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, error: &str) {
+        panic!("unexpected {error}");
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, Context>, _: SocketId) {}
+    fn on_message(&mut self, _: &mut Cx<'_, Context>, _: SocketId, _: &str) {}
+    fn on_close(&mut self, _: &mut Cx<'_, Context>, _: SocketId, _: u16) {}
+    fn on_timer(&mut self, _: &mut Cx<'_, Context>, _: TimerId) {}
+    fn book(&self, _: &str) -> Option<&Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+fn command(e: &mut Engine<ScopeProbe>, id: CommandId, at: f64) {
+    e.handle(
+        at,
+        Event::Command(Command::CancelOrders {
+            command: id,
+            ids: vec![],
+        }),
+    );
+}
+fn terminal(actions: &[Action], id: CommandId) -> usize {
+    actions.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandDone{command,..}|Notice::CommandFailed{command,..}) if *command==id)).count()
+}
+#[test]
+fn ready_cannot_mutate_a_foreign_legacy_plan_or_execution_owner() {
+    for kind in [
+        ForeignKind::Context,
+        ForeignKind::Plan,
+        ForeignKind::Execution,
+    ] {
+        let mut e = crate::test_support::seeded_engine(ScopeProbe {
+            kind,
+            ..Default::default()
+        });
+        command(&mut e, 10, 0.);
+        let initial = crate::test_support::prepared_actions(&mut e, 0.);
+        let request = initial
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.id),
+                _ => None,
+            })
+            .unwrap();
+        command(&mut e, 20, 1.);
+        let ready = crate::test_support::prepared_actions(&mut e, 1.);
+        assert_eq!(terminal(&ready, 20), 1);
+        assert_eq!(terminal(&ready, 10), 0);
+        assert_eq!(e.venue.ready, 1);
+        e.handle(
+            2.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "ok",
+                },
+            },
+        );
+        let intact = crate::test_support::prepared_actions(&mut e, 2.);
+        assert_eq!(e.venue.responses, 1);
+        assert_eq!(terminal(&intact, 10), 1);
+        assert!(intact.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:10,result}) if result=="foreign intact")));
+    }
+}
+#[test]
+fn retired_and_wrong_issuer_wakes_cannot_reach_a_reused_numeric_id() {
+    let mut e = crate::test_support::seeded_engine(ScopeProbe::default());
+    command(&mut e, 20, 0.);
+    let old = e.venue.parked.clone().unwrap();
+    assert_eq!(
+        terminal(&crate::test_support::prepared_actions(&mut e, 0.), 20),
+        1
+    );
+    command(&mut e, 20, 1.);
+    let new = e.venue.parked.clone().unwrap();
+    assert_ne!(old.owner(), new.owner());
+    let mut foreign = crate::test_support::seeded_engine(ScopeProbe::default());
+    command(&mut foreign, 20, 0.);
+    let wrong = foreign.venue.parked.clone().unwrap();
+    let before = e.io.next_id;
+    assert_eq!(
+        e.io.request_contexts.queue_preflight_ready(&old),
+        Err(Error::Revoked)
+    );
+    assert_eq!(
+        e.io.request_contexts.queue_preflight_ready(&wrong),
+        Err(Error::Revoked)
+    );
+    assert_eq!(e.io.next_id, before);
+    assert_eq!(e.venue.ready, 2);
+    e.flush_preflight_readiness(2.);
+    assert_eq!(e.venue.ready, 2);
+}
+
+fn with_cx<R>(e: &mut Engine<ScopeProbe>, at: f64, f: impl FnOnce(&mut Cx<'_, Context>) -> R) -> R {
+    f(&mut Cx {
+        now: at,
+        store: &mut e.store,
+        io: &mut e.io,
+    })
+}
+#[test]
+fn queue_reservations_precede_ids_and_waking_never_allocates_or_renews() {
+    let mut e = crate::test_support::seeded_engine(ScopeProbe {
+        hold_parked: true,
+        ..Default::default()
+    });
+    for id in 1..=CAPACITY as u32 {
+        command(&mut e, id, 0.);
+    }
+    let ids = e.io.next_id;
+    assert_eq!(e.io.request_contexts.commands.len(), CAPACITY);
+    let ready_capacity = e.io.request_contexts.preflight_ready.capacity();
+    let initial_capacity = e.io.request_contexts.preflight_initial.capacity();
+    assert!(ready_capacity >= CAPACITY);
+    assert!(initial_capacity >= CAPACITY);
+    command(&mut e, 999, 0.);
+    assert_eq!(e.venue.last_refusal, Some(Error::Capacity));
+    assert_eq!(e.io.next_id, ids);
+    let handle = e.venue.parked.clone().unwrap();
+    for at in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            with_cx(&mut e, at, |cx| cx.request_preflight_ready(&handle)),
+            Err(Error::Invalid)
+        );
+        assert!(e.io.request_contexts.preflight_ready.is_empty());
+    }
+    with_cx(&mut e, 1., |cx| {
+        cx.request_preflight_ready(&handle).unwrap();
+        cx.request_preflight_ready(&handle).unwrap();
+        assert_eq!(cx.park_preflight(&handle), Err(Error::Revoked));
+        assert_eq!(
+            cx.done_preflight(&handle, "borrowed".into()),
+            Err(Error::Revoked)
+        );
+    });
+    assert_eq!(e.io.request_contexts.preflight_ready.len(), 1);
+    assert_eq!(
+        e.io.request_contexts.preflight_ready.capacity(),
+        ready_capacity
+    );
+    assert_eq!(
+        e.io.request_contexts.preflight_initial.capacity(),
+        initial_capacity
+    );
+    assert_eq!(e.io.next_id, ids);
+    e.prepare_dispatch(1.);
+    assert_eq!(e.venue.ready, 1);
+    assert_eq!(e.io.next_id, ids);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(terminal(&actions, CAPACITY as u32), 1);
+    assert_eq!(terminal(&actions, 999), 1);
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::ManagedHttp(_) | Action::SetTimer { .. }
+    )));
+}
+#[test]
+fn retirement_clears_queued_wake_before_generation_reuse_and_rejects_live_foreign_output() {
+    let mut e = crate::test_support::seeded_engine(ScopeProbe {
+        hold_parked: true,
+        ..Default::default()
+    });
+    let mut foreign = crate::test_support::seeded_engine(ScopeProbe {
+        hold_parked: true,
+        ..Default::default()
+    });
+    command(&mut e, 20, 0.);
+    command(&mut foreign, 20, 0.);
+    let old = e.venue.parked.clone().unwrap();
+    let wrong = foreign.venue.parked.clone().unwrap();
+    assert_eq!(wrong.owner(), old.owner());
+    assert_eq!(
+        e.io.request_contexts.queue_preflight_ready(&wrong),
+        Err(Error::Revoked)
+    );
+    with_cx(&mut e, 1., |cx| {
+        cx.request_preflight_ready(&old).unwrap();
+        cx.fail_preflight(&old, "cancelled before activation")
+            .unwrap();
+    });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(terminal(&actions, 20), 1);
+    assert_eq!(e.venue.ready, 0);
+    assert!(e.io.request_contexts.preflight_ready.is_empty());
+    command(&mut e, 20, 2.);
+    let new = e.venue.parked.clone().unwrap();
+    assert_ne!(old.owner(), new.owner());
+    let ids = e.io.next_id;
+    assert_eq!(
+        e.io.request_contexts.queue_preflight_ready(&old),
+        Err(Error::Revoked)
+    );
+    assert_eq!(e.io.next_id, ids);
+    e.prepare_dispatch(2.);
+    assert_eq!(e.venue.ready, 0);
+    with_cx(&mut e, 3., |cx| cx.request_preflight_ready(&new)).unwrap();
+    e.prepare_dispatch(3.);
+    assert_eq!(e.venue.ready, 1);
+    assert_eq!(terminal(&e.drain_actions().collect::<Vec<_>>(), 20), 1);
+}
+#[test]
+fn an_empty_readiness_index_never_visits_live_legacy_or_execution_owners() {
+    for kind in [ForeignKind::Context, ForeignKind::Execution] {
+        let mut e = crate::test_support::seeded_engine(ScopeProbe {
+            kind,
+            ..Default::default()
+        });
+        command(&mut e, 10, 0.);
+        crate::test_support::prepared_actions(&mut e, 0.);
+        let ids = e.io.next_id;
+        let plans = e.io.request_contexts.plan_scan_visits.get();
+        for _ in 0..8 {
+            e.flush_preflight_readiness(1.);
+        }
+        assert_eq!(e.io.next_id, ids);
+        assert_eq!(e.io.request_contexts.plan_scan_visits.get(), plans);
+        assert_eq!(e.venue.ready, 0);
+        assert!(e.io.request_contexts.preflight_initial.is_empty());
+        assert!(e.io.actions.is_empty());
+    }
+}

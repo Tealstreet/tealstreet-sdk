@@ -214,6 +214,10 @@ impl ContextRegistry {
         (prepared.id, seal)
     }
 
+    pub(super) fn initial_plan_custody(&self, handle: &Plan) -> Result<bool, Error> {
+        Ok(self.plan_body(handle)?.initial_custody)
+    }
+
     fn plan_body(&self, handle: &Plan) -> Result<&Body, Error> {
         if !handle.issued_by(&self.issuer) {
             return Err(Error::Revoked);
@@ -525,7 +529,12 @@ impl<P> Cx<'_, P> {
                 .is_some_and(|delivery| body.handoff.as_ref() == Some(delivery))
                 || (body.initial_custody
                     && self.io.http_delivery.is_none()
-                    && self.io.http_plan_ready.is_none())
+                    && self.io.http_plan_ready.is_none()
+                    && self
+                        .io
+                        .http_preflight_ready
+                        .as_ref()
+                        .is_none_or(|ready| ready.owner() == plan.owner()))
                 || (self.io.http_delivery.is_none()
                     && self
                         .io
@@ -756,6 +765,7 @@ impl<P> Cx<'_, P> {
     /// Only a structurally complete plan may request success. Journal facts
     /// convert known-partial, refused or unresolved writes into terminal failure.
     pub fn done_plan(&mut self, plan: &Plan, result: String) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(plan.owner())?;
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
         if !body.schedule.is_complete() {
             return Err(Error::State);
@@ -818,6 +828,7 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         error: Option<VenueError>,
     ) -> Result<conditional::PreparedPlanSeal, Error> {
+        self.validate_preflight_ready_owner(plan.owner())?;
         self.io.request_contexts.prepare_plan_seal(
             plan,
             self.now,
