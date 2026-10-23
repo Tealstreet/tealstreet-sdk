@@ -1,5 +1,9 @@
 # Phemex dispatch HMAC signing migration
 
+Current checkpoint: full native cutover source-reviewed at `38940650e8f`;
+fold into #1974 as one17F/18O ->16F/16O transition after #1970. Earlier plan/RED
+sections below preserve their historical gates and evidence.
+
 Plan-first,2026-10-24; owner codex-zs5e83; HMAC reviewer claude-4yjlw0.
 Fresh branch feat/rust-phemex-dispatch-signing starts at actual
 `15bd7821b52e378a9e32a60ecb897275c52109a4`. Read with RUST_SIGNER.md,
@@ -437,3 +441,37 @@ validation-before-public/keyless precedence and preventing Primary fallback;
 trusted registry setup validates earlier. Every native dispatch constructs a new
 Request; no path requeues that Request under another HTTP id. Engine reprepare
 keeps the same request id; released-only MAX across distinct legs is job-owned.
+
+## Reviewed handoff receipt
+
+Implementation `a02ff0cdd0a`, guard/test follow-up `38940650e8f`. The latter
+changes only one production comment, the missing-expiry corruption variants and
+plan text; all production tokens are identical to the reviewed implementation.
+Independent source/adversarial, caller and full-map reviews are CLEAR. Socket
+owner independently ran the exact a02 archive: private16/public9 PASS,0ignored;
+codec is byte-exact #1974, account.rs differs only at the approved Opened signing
+hunk, and unsigned PublicTrades is exact incoming. HMAC owner claude-4yjlw0
+closed all findings CLEAR on389406; checker owner claude-m26ps4 independently
+recomputed both maps and confirmed all six tool/map blobs unchanged at389406.
+
+Executed checks: Phemex256 native original candidate tests PASS, plus the two
+new malformed-provider tests and one added security test PASS; latest24 signer
+controls include both missing-expiry variants,0ignored. Registry3 PASS with the
+phemex feature alone; Binance305 native PASS. Phemex all-target/all-feature
+Clippy and registry focused strict Clippy PASS; latest signer-target strict
+Clippy PASS. SDK three construction suites5PASS, safe-cex typecheck and dedicated
+ESLint --no-ignore PASS. Scoped rustfmt, diff whitespace, all bans, request
+scanner plus its15tests, and signing scanner plus its negative test PASS.
+Original failing-source checkpoint17b remains unchanged in history.
+
+Tool/map Git blob pins: request checker8860d7ac360d72cd4c26a9d649a656adeb32df40,
+its test3e97a3da2c8f29b6eb2124261b07a8e2be249bdc, signing checker
+72b9f4d6b18979fb7ff1acdfde9d484cc572b978, its test
+0c1678feb7e42b41f3f6a8c36acf00f3cc94e493, request manifest
+0b19740004b45c32543805380d8acc5b3a373b52 and signing manifest
+4e2f85bedfa68a83c16000dd5273401e37c8dd24. Only declarative Phemex rows/scope
+and exact own manifest entries changed; checker predicates and foreign manifest
+bytes are preserved. Hard boundary: the single folded #1974 landing's incoming
+Phemex lib map must still equal actual6c7f's17map. A separate post-#1974 signer
+landing is refused. codex-5c57jl owns the fold, fresh combined CI and refreeze;
+no independent signer PR, merge clearance or actual1970/1974 claim is made here.
