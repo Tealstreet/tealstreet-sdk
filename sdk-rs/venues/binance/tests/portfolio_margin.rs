@@ -354,3 +354,66 @@ fn pm_strategy_receipt_uses_final_renamed_identity_before_write() {
         1
     );
 }
+
+#[test]
+fn unproven_pm_ids_require_the_native_client_identity_echo() {
+    let mut observations = Vec::new();
+    for algo in [false, true] {
+        for echo in [0, 1, 2] {
+            let mut h = ready();
+            let mut input = limit(1., 100.);
+            input.client_order_id = Some("caller_1".into());
+            if algo {
+                input.kind = OrderType::StopLoss;
+                input.client_order_id = None;
+            }
+            let before = h.engine.store().orders().to_vec();
+            h.event(Event::Command(Command::PlaceOrders {
+                command: 722,
+                orders: vec![input],
+            }));
+            let request = h.take(if algo {
+                "/papi/v1/um/conditional/order"
+            } else {
+                "/papi/v1/um/order"
+            });
+            let expected = param(
+                &request.url,
+                if algo {
+                    "newClientStrategyId"
+                } else {
+                    "newClientOrderId"
+                },
+            )
+            .unwrap();
+            let (native, field) = if algo {
+                ("strategyId", "newClientStrategyId")
+            } else {
+                ("orderId", "clientOrderId")
+            };
+            let body = match echo {
+                0 => format!(r#"{{"{native}":12}}"#),
+                1 => format!(r#"{{"{native}":12,"{field}":"other"}}"#),
+                _ => format!(r#"{{"{native}":12,"{field}":"{expected}"}}"#),
+            };
+            h.reply(request.id, 503, "", &body);
+            let failure = &h.failures.iter().find(|(id, _)| *id == 722).unwrap().1;
+            assert_eq!(failure.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            let ids = failure
+                .partial
+                .as_ref()
+                .map(|p| p.order_ids.clone())
+                .unwrap_or_default();
+            assert_eq!(h.engine.store().orders(), before);
+            observations.push((
+                algo,
+                echo,
+                ids,
+                if echo == 2 { vec![expected] } else { vec![] },
+            ));
+        }
+    }
+    for (algo, echo, ids, expected) in observations {
+        assert_eq!(ids, expected, "algo={algo} echo={echo}");
+    }
+}
