@@ -275,15 +275,15 @@ V1-only Aster PR) before its migrated construction path is enabled.
 | 2 | AsterDEX | codex-ih35js | P2 secp256k1, P5; P8 for keyless V3 | protocol stamp; none | V1, standard and Code migrate together. Keep the codec distinctions, native query/preimage bytes, the GET secondary, primary writes, shared stamps/nonces, auth inference and builder attribution. Source in `sign.rs`/`request.rs`; `account.rs` belongs to #1785-1788 and `lib.rs`/`tests/trading.rs` to #1799. |
 | 3 | Bitunix | codex-9czdjh | none | wire stamp; none | Fits today as `Sha256(Credential)` → `Sha256SecretSuffix(Result hex)`, tested at `crypto/src/signer.rs:870-905`. WS login is staged with #1771's socket core. Move the unmigrated controls to another family. |
 | 4 | Crypto.com | codex-ih35js | none | ms nonce; none | Fits today as HMAC with credential interpolation, plus `Present` into the body. Keep the ms nonce and `id`. #1788 owns account/trading files. |
-| 5 | Orderly | TBC | P1 base58, P2 Ed25519, P8 | wire stamp; none | Retire the TS-hosted Orderly kept path only after the Rust positives pass. |
-| 6 | Backpack | TBC | P2 Ed25519, P8 | wire stamp; none (window is a duration, as with Binance `recvWindow`) | |
-| 7 | Coinbase | TBC | P1 CDP JSON, P2 Es256/Ed25519, P8 | `nbf`; `exp` = +120 s (local and half-1 provider; today's `coinbase-jwt` remote path picks its own claims) | The JWT is built at release with the entropy nonce. Retire the TS-hosted Coinbase path only after the positives pass. |
-| 8 | Hyperliquid + TxFlow | codex-zs5e83 (HL only); TxFlow venue lane TBC, coordinated for the joint nonce/action-hash proof | P2, P4, P5, P8 | nonce stamp; none | Digest recipes; the nonce is drawn at preparation. |
+| 5 | Orderly | codex-hcmq3f | P1 base58, P2 Ed25519, P8 | wire stamp; none | Retire the TS-hosted Orderly kept path only after the Rust positives pass. |
+| 6 | Backpack | codex-hcmq3f | P2 Ed25519, P8 | wire stamp; none (window is a duration, as with Binance `recvWindow`) | |
+| 7 | Coinbase | codex-hcmq3f | P1 CDP JSON, P2 Es256/Ed25519, P8 | `nbf`; `exp` = +120 s (local and half-1 provider; today's `coinbase-jwt` remote path picks its own claims) | The JWT is built at release with the entropy nonce. Retire the TS-hosted Coinbase path only after the positives pass. |
+| 8 | Hyperliquid + TxFlow | codex-zs5e83 (HL); codex-hcmq3f (TxFlow), coordinating the joint nonce/action-hash proof | P2, P4, P5, P8 | nonce stamp; none | Digest recipes; the nonce is drawn at preparation. |
 | 9 | GRVT | codex-zs5e83 | P2, P4, P6, P8 | none; +1 h | Signs at release, including amend replacements. Re-login re-prepares and never resends the stale signed body. #1785-1788 own `account.rs`. |
 | 10 | Paradex | codex-zs5e83 | P2 Stark, P4, P6 | auth `exp` +300 s; order ms stamp (half 2 on the existing `stark` payloadSigner) | Map the payloadSigner contract onto the shared provider and hosted adapter. Delete the Paradex-only engine path (`Cx::sign_request`, `PendingSignature`, `SignatureTarget`, `engine.rs:145-155,1715`) in the same PR. #1787 owns account/trading files. |
 | 11 | Lighter | codex-zs5e83 | P3 Schnorr, P4, P5, P8 | none; auth +60 s, tx +10 min | The auth token is minted per use at release. Nonce reuse follows the P5 rule. |
-| 12 | Polymarket | — | P0, P1, P2, P4, P6b, P8 | L2 seconds; none | Blocked on the P6b owner decision. The raw-credential WS frame becomes `Present` fields. |
-| 13 | BreakoutProp | — | P6 | none | Password `Present` into the login body; the token follows P6. |
+| 12 | Polymarket | codex-hcmq3f | P0, P1, P2, P4, P6b, P8 | L2 seconds; none | Blocked on the P6b owner decision. The raw-credential WS frame becomes `Present` fields. |
+| 13 | BreakoutProp | codex-hcmq3f | P6 | none | Password `Present` into the login body; the token follows P6. |
 
 Rows 3 and 4 need no shared prerequisite. They can proceed alongside ApeX's
 shared PR once their RequestContext owners agree file windows.
