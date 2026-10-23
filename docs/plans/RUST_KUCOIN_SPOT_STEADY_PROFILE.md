@@ -1,0 +1,118 @@
+# KuCoin Spot public steady CPU investigation
+
+Owner: codex-9czdjh; requested by claude-ddi2il. Profiling only before a reviewed
+profile and follow-on implementation plan; no performance code or merge authority.
+
+## Pinned evidence and objective
+
+Investigate landing `258c880656f9714f14b498e046b8ee52658e702a`. Its SDK and
+safe-cex source are byte-identical to `6741c1c6609437e32090c76745a56ca6c2262445`;
+the intervening landing change is documentation. Use that actual landing's CI
+KuCoin Spot package, run39947696291, artifact ci-wasm-kucoinspot. Verify build.json
+sourceHead and JS/WASM hashes before profiling; no local release WASM rebuild.
+The shipped optimized module strips names, so anonymous function samples must be
+reported honestly rather than assigned guessed Rust symbols.
+
+The same run's strict-replay-kucoinspot artifact contains nine public pairs.
+Median steady CPU is TS335.311 ms / Rust302.091 ms: TS/Rust1.10997, just outside
+the ten-percent gate. Rust main CPU609.717 ms versus TS1052.121 ms; steady CPU is
+the narrow objective. The owner's target is **at least1.20x median**: at the
+recorded TS median Rust must reach at most279.426 ms (22.665 ms /7.50% lower).
+Local profiles diagnose cost; CI interleaved paired medians decide restoration.
+No timing threshold, tape, codec behavior, safety check or gate is relaxed.
+
+## Measurement sequence
+
+1. Profile one actual public replay using the frozen optimized CI artifact and
+   Node22 through corepack yarn. Use CPU sampling and retain the JSON result,
+   artifact hashes and command. Keep sampling separate from timing pass claims.
+   Do not run local replay matrices or load sweeps.
+2. Enumerate events and distinguish startup from the last75% steady window used
+   by Tape.play. The tape has26,426 WS records:26,094 ticker,326 depth, three ack,
+   two pong and one welcome; there are no command records. Correlate sampled
+   host/wasm/codec/Store/frame/GC costs with real event counts.
+3. Attribute the three requested shared seams using source call paths and
+   measurements: #1830 command-entry, #1837 classifier and #1854 execution groups.
+   Prove when entry/classification are or are not reached by these events; inspect
+   shared per-event sweeps even with empty command/execution registries. Do not
+   infer overhead merely from a merge-date correlation.
+4. If stripped WASM samples cannot identify a shared callee, supplement with a
+   temporary symbolized native diagnostic driver over the recorded payload corpus
+   and unchanged landing dependencies. Keep it outside repository source, use two
+   Cargo jobs, and distinguish native attribution from browser/WASM timing. Report
+   unresolved attribution rather than inventing precision.
+5. Send the overseer the committed plan, measured profile, per-event attribution,
+   limitations and proposed shared owner/scope before performance code changes.
+
+## Follow-on criteria
+
+Measured engine overhead must be fixed in its shared choke point for every venue,
+coordinated with its owner and open PR claims. No KuCoin-local skip, capability or
+credential shortcut, or weakening exact delivery, expiry, command retention or
+observer completion. A shared fast path needs adversarial empty/nonempty/expired/
+queued-group controls and source preservation review. If native codec/Store/host
+work dominates instead, report that evidence and request the appropriate scope.
+No merge until a new window is granted. Existing venue PRs and Bitunix work stay
+separate; their evidence does not establish this performance objective.
+
+## Initial measured profile (before performance code)
+
+Executed on the unchanged source above; no engine/venue/host/harness source was
+edited. Raw evidence is under `/tmp/codex-9czdjh-kcs-profile/`:
+`landing-rust.cpuprofile` (whole replay), `steady-rust.cpuprofile` (warm-mark
+to measure capture, with boundary instrumentation overhead), replay JSONs, `native-sample.txt`, `native-run.log`, native
+build log and machine-readable `attribution.json`. The temporary native driver
+and corpus are under `/tmp/codex-9czdjh-kcs-native-profile/`.
+
+The single optimized-WASM steady capture uses Node22's inspector at100us sampling,
+started by a preload at Tape.play's warm-mark threadCpuUsage call and stopped at
+the first measurement thread-CPU call, just before its steady-delta read. Starting
+precedes the recorded warm CPU baseline; this is an approximate window with
+instrumentation overhead. The preload does not alter tape/engine/host code.
+Its518.625ms sampled interval includes301.454ms idle and26ms inspector setup;
+WASM leaf samples account for49.217ms. Main self costs outside WASM include
+socketFor14.294ms, active11.870ms, querystring unescape9.416ms and URL parameter
+parse8.663ms. These are weighted sampling intervals, not additive exact CPU
+measurements. Inspector overhead and stripped WASM names prevent an exact
+per-Rust-function WASM attribution; local profile metrics are not a gate result.
+
+The supplemental native release driver uses unchanged landing engine/KuCoin
+dependencies, opt3/fat LTO/one codegen unit plus symbols, two build jobs, the real
+968-market startup and the recorded final19,820 WS payloads. One12-second profile
+processed15,142,480 repeated events, averaging793.32ns/event of elapsed wall
+time. macOS sample captured eight seconds within that twelve-second driver run,
+collecting5,872 main-thread samples:
+
+| Requested shared seam | Steady path and measured evidence |
+| --- | --- |
+| #1830 command entry | Admission, begin/end loan and command-owner lookup are not reached by ticker/depth events. Ambient custody assertions in assert_live/failed still execute; they inline into generic handle/drain work, so this profile does not isolate their incremental cost. No claim of zero instructions or zero code-layout effect. |
+| #1837 classifier | No read/write classifier or command write-intent call on these WS events; there are no HTTP write deliveries or command records. Changed layout/codegen effects remain unisolated. |
+| #1854 execution groups | One unconditional sweep per ordinary WS event. Its empty-root expiry/managed-leg revocation/timer work totals60/5,872 samples, about1.02% native time (roughly8ns/event by wall-time-weighted sample allocation, not a separate CPU timing measurement). The sweep still scans managed HTTP state and recomputes the next group deadline when no group exists. |
+
+Native self samples are dominated by JSON string scanning16.54%, memcmp14.63%,
+shared `num::parse_decimal`10.51%, Price deserialization8.84%, and JSON parse_str
+6.85%. Price/Store ticker lookup is also a substantial inclusive branch. These
+are source-attribution measurements, not WASM speed predictions: the driver omits
+JS host/frame costs, fixes raw time at100ms, discards timer actions, repeats the
+corpus, and older depth snapshots are rejected
+after the first cycle. Sampling proportions have ordinary statistical error.
+
+#1835 discovery has no new steady ticker/depth work: its managed discovery
+Context checks and retirement are in startup item/response callbacks, separate
+from on_message. The source review confirms this path distinction; it does not
+rule out compiler/code-layout effects from a larger module.
+
+## Disposition and proposed next measurement
+
+The profile identifies a shared empty-group sweep opportunity, but its roughly1%
+native share does not justify claiming the required7.50% overall CPU reduction.
+Do not optimize that path speculatively or disable custody checks. Coordinate any
+shared execution-group optimization with its owner; an empty-root shortcut must
+still revoke abandoned unsent execution legs and preserve deadline/observer
+semantics. The larger observed shared numeric-parser/ticker-lookup and generic
+codec costs warrant targeted source attribution next. Anonymous WASM indices
+must first gain a trustworthy symbol mapping or equivalent controlled evidence
+before assigning their costs to those native hotspots.
+
+Plan and initial profile are sent to the overseer before performance code. The
+1.20x median target remains unproven. No merge window is requested for code yet.
