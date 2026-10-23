@@ -160,33 +160,35 @@ passes):
    - numeric `done`/`fail` for the id, refused while the owner is retained.
 
    This includes children selected before the mark.
-4. **Barrier.** At one sweep boundary:
-   1. Mark ALL due roots first, before the first cleanup step. Cleanup for
-      root A therefore can never publish for a due root B.
-   2. Then, per root, run an engine-owned cleanup scope (analogous to #1932's
-      plan sweep and `ExpiryScope`).
-5. **Cleanup** has no venue Cx and no borrowed entry, Plan, socket, order or
-   Read-transport proof. Per root, in order:
-   1. **Reserve first.** Before marking or removing anything, count the
-      owner's outstanding managed requests by exact id and generation, and
-      `try_reserve` the move-only `Vec<Pending>` for that count plus the
-      Cancel actions. A reservation failure poisons the engine, which is the
-      existing no-half-state rule for engine-owned sweeps. It never runs a
+4. **Sweep phases**, in one order at one sweep boundary. None of them uses a
+   venue Cx or borrows any entry, Plan, socket, order or Read-transport proof.
+   1. **Prepare.** For every due root, count its outstanding managed requests
+      by exact id and generation, and `try_reserve` the move-only
+      `Vec<Pending>` for that count plus the Cancel actions. Nothing is marked
+      or removed yet. A reservation failure poisons the engine, which is the
+      existing no-half-state rule for engine-owned sweeps; there is never a
       partial cleanup.
-   2. **Discard.** `discard_managed` runs for each such request. It cancels
-      that exact generation's signing state, preparation, streams, response
-      buffers and leg timer, emits `HttpAction::Cancel`, and moves the
-      `Pending` into the reserved vector. Any sent evidence is retained by the
-      existing reconciliation capture; a Read has no write journal. Nothing is
-      re-admitted, retried or completed.
-   2. `venue.read_root_retired(owner, pending)` hands back those `Pending`s
-      plus the owner, with no Cx. The venue drops native state and queued
-      continuations. It cannot send, complete or touch the Store.
-   3. Seal once with a private engine capability: a `RootExpirySeal` token,
-      constructed only inside the sweep and bound to the exact issuer, root
-      and generation. It is never lent to a venue. `finish_sealed_command`
-      then emits `CommandFailed { kind: Timeout, outcome: None }` with
-      `http_delivery == None`, and removes the owner and the index entry.
+   2. **Mark ALL due roots** expired before any cleanup. Cleanup for root A
+      therefore can never publish or send for a due root B.
+   3. **Per root, in order:**
+      1. **Discard.** `discard_managed` runs for each request. It cancels that
+         exact generation's signing state, preparation, streams, response
+         buffers and leg timer, emits `HttpAction::Cancel`, and moves the
+         `Pending` into the reserved vector. Any sent evidence is retained by
+         the existing reconciliation capture; a Read has no write journal.
+         Nothing is re-admitted, retried or completed.
+      2. **Hook.** `venue.read_root_retired(owner, pending)` hands back those
+         `Pending`s plus the owner, with no Cx. The venue drops native state
+         and queued continuations. It cannot send, complete or touch the
+         Store.
+      3. **Seal** once with a private engine capability: a `RootExpirySeal`
+         token, constructed only inside the sweep and bound to the exact
+         issuer, root and generation. It is never lent to a venue.
+         `finish_sealed_command` then emits
+         `CommandFailed { kind: Timeout, outcome: None }` with
+         `http_delivery == None`, and removes the owner and the index entry.
+5. **Engine-owned scope.** The sweep is analogous to #1932's plan sweep and
+   `ExpiryScope`.
 6. **Panics.** The whole sweep, covering marking, every root's discard, hook
    and seal, runs in one poison scope. An unwind poisons the engine, so a
    half-retired owner can never survive.
