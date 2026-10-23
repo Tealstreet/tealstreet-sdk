@@ -212,27 +212,38 @@ Moving any of them onto managed HTTP today would route them Public. RED
 (`a_keyless_login_carrying_credentials_in_its_body_must_not_route_public`):
 a keyless session login is prepared with `Public`.
 
-**API (agreed with claude-m26ps4; codex-uufub4 reviews the rule).** The
-seam reuses #1833's issuance-time egress (`Context.egress`,
-`Cx::http_context_with_egress`, `ContextRegistry::issue_with_egress`). Legs,
-replacements and retries inherit it, and it is projected to `Prepare`. There
-is no second Context field.
-- **New variant (#1833, claude-m26ps4):** `Egress::Session(CredentialSlot)`
-  is an unsigned request carrying a session token minted from that slot. It
-  is allowed for Read and Mutation, unlike Primary/PublicCors/Direct, which
-  stay unsigned-Read-only.
-  - The credential stays `None`: no `KeyRef`, no signer, and the
-    signer-iff-credential rule is untouched.
+**API (agreed with claude-m26ps4; ruled by claude-ddi2il; codex-uufub4
+reviews the rule).** The seam reuses #1833's issuance-time egress
+(`Context.egress`, `ContextRegistry::issue_with_egress`). Legs, replacements
+and retries inherit it. There is no second Context field.
+- **`Egress::Session(SessionEgress)`** is an unsigned request carrying a
+  session's login or token on that slot's private egress.
+  - `SessionEgress {slot, generation}` is opaque: the session core alone mints
+    it. `http_context_with_egress` refuses it, so a venue cannot forge one.
+  - Allowed for Read and Mutation, only with no credential: no `KeyRef`, no
+    signer, and the signer-iff-credential rule is untouched.
+    Primary/PublicCors/Direct stay unsigned-Read-only.
   - `routing_intent()` is the slot's intent, and `route()` is `None`.
-  - The slot comes from credential selection
-    (`Selection::session_egress()`), never written by the venue.
-  - A credentialed child under it must use the same slot. It never mixes
-    with PublicCors/Direct.
-- **Session side (this lane):**
-  - `SessionPolicy` carries an `Option<Egress>`.
-  - `session_context` issues through `issue_with_egress`, so a session's
-    contexts and legs inherit it in the same transaction.
-  - The RED above becomes the regression on top of #1833.
+  - It is routing only. It never grants write, signing or session authority:
+    a Background mutation is still refused.
+- **Session side:**
+  - `SessionPolicy.private_egress: Option<CredentialSlot>`. Only a keyless
+    session may declare it; venues pass the slot of their `SessionAuth`
+    selection.
+  - `session_context` stamps the egress on every session context and leg.
+  - `session_scoped_context(&session, scope, policy)` lets command or
+    background work that carries the session token ride the same egress,
+    under its own owner.
+- **Retirement fence.** `validate` refuses a context whose session generation
+  is retired, so no issuance, leg or send happens after retirement; a
+  prepared send fails typed. Delivery facts of a write sent earlier stay
+  recordable, so a sent write's outcome is never lost.
+- **Regressions** (`session_context_tests.rs`):
+  - The original RED now passes.
+  - Negative controls: forged egress, a foreign session, a stale generation,
+    Background mutation, signed work, and a signed session declaring egress
+    are all refused.
+  - Keyless sessions without declared egress still route Public.
 - **Not included:** no inference from method, URL or body, and no fallback
   to Public when the private route is unavailable (preparation fails typed).
 

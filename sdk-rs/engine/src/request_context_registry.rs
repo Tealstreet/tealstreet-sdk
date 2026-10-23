@@ -151,6 +151,11 @@ impl ContextRegistry {
             (Some(own), Some(inherited)) if own != inherited => return Err(Error::Invalid),
             (own, inherited) => own.or(inherited),
         };
+        if let Some(Egress::Session(session)) = egress
+            && !self.sessions.live(session.generation())
+        {
+            return Err(Error::Revoked);
+        }
         if scope == Scope::Background && policy.operation == Operation::Mutation {
             return Err(Error::Invalid);
         }
@@ -199,7 +204,7 @@ impl ContextRegistry {
                 Scope::Execution => return Err(Error::Invalid),
             },
         };
-        self.commit(owner, identity, policy, now, parent)
+        self.commit(owner, identity, policy, now, parent, egress)
     }
 
     fn issue_session(
@@ -222,7 +227,15 @@ impl ContextRegistry {
         self.sessions.admit(generation, &policy)?;
         self.contexts.retain(|_, old| old.deadline() > now);
         self.sessions.prune(&self.contexts);
-        self.commit(Owner::Session { generation }, identity, policy, now, parent)
+        let egress = self.sessions.egress(generation);
+        self.commit(
+            Owner::Session { generation },
+            identity,
+            policy,
+            now,
+            parent,
+            egress,
+        )
     }
 
     fn commit(
@@ -232,6 +245,7 @@ impl ContextRegistry {
         policy: Policy,
         now: f64,
         parent: Option<&Context>,
+        egress: Option<Egress>,
     ) -> Result<Context, Error> {
         let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
             parent.deadline().min(now + f64::from(policy.timeout_ms))
@@ -414,6 +428,12 @@ impl ContextRegistry {
         }
         self.validate_handle(context)?;
         if self.superseded(context) {
+            return Err(Error::Revoked);
+        }
+        // Send-time fence only: delivery facts of a sent write stay recordable.
+        if let Some(Egress::Session(session)) = context.egress()
+            && !self.sessions.live(session.generation())
+        {
             return Err(Error::Revoked);
         }
         Ok(())
@@ -811,6 +831,10 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         egress: Egress,
     ) -> Result<Context, Error> {
+        // Session egress is minted only from a live session.
+        if matches!(egress, Egress::Session(_)) {
+            return Err(Error::Invalid);
+        }
         self.make_http_context(scope, policy, None, Some(egress))
     }
 

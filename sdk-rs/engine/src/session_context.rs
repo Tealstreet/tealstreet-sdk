@@ -1,9 +1,10 @@
 //! Background-session ownership: listen keys, WS tokens and session logins.
 //! Sessions are engine-issued owners beside commands. They join no command
 //! journal, change no orders and hold no key or token value.
-use super::{ContextRegistry, Cx, RequestId};
+use super::{ContextRegistry, Cx, RequestId, Scope};
 use crate::request_context::{
-    Context, Error, Operation, Owner, Policy, Session, SessionPolicy, WriteResult,
+    Context, Egress, Error, Operation, Owner, Policy, Session, SessionEgress, SessionPolicy,
+    WriteResult,
 };
 use std::collections::HashMap;
 
@@ -40,6 +41,10 @@ impl Sessions {
         {
             return Err(Error::Invalid);
         }
+        // Signer iff credential: a signed session needs no unsigned egress.
+        if policy.private_egress.is_some() && policy.credential.is_some() {
+            return Err(Error::Invalid);
+        }
         if self.live.len() >= SESSIONS {
             return Err(Error::Capacity);
         }
@@ -59,6 +64,11 @@ impl Sessions {
 
     pub(super) fn live(&self, generation: u64) -> bool {
         self.live.contains_key(&generation)
+    }
+
+    pub(super) fn egress(&self, generation: u64) -> Option<Egress> {
+        let slot = self.live.get(&generation)?.policy.private_egress?;
+        Some(Egress::Session(SessionEgress::new(slot, generation)))
     }
 
     pub(super) fn retire(&mut self, generation: u64) -> bool {
@@ -218,6 +228,25 @@ impl<P> Cx<'_, P> {
         self.io
             .request_contexts
             .issue_session(identity, generation, policy, self.now, None)
+    }
+
+    /// Work owned by a command or the background that carries this session's
+    /// login or token: it rides the session's private egress, and retirement
+    /// fences its sends. Routing only: the scope still decides write authority.
+    pub fn session_scoped_context(
+        &mut self,
+        session: &Session,
+        scope: Scope,
+        policy: Policy,
+    ) -> Result<Context, Error> {
+        let generation = self.io.request_contexts.validate_session(session)?;
+        let egress = self
+            .io
+            .request_contexts
+            .sessions
+            .egress(generation)
+            .ok_or(Error::Invalid)?;
+        self.make_http_context(scope, policy, None, Some(egress))
     }
 
     /// Discard the session's work and revoke it, with no venue callback in

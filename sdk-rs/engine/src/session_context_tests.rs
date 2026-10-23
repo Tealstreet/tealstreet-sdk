@@ -1,3 +1,5 @@
+// The probe pending is a whole Context, returned by refused managed requests.
+#![allow(clippy::result_large_err)]
 use super::super::super::*;
 use super::SESSIONS;
 use crate::request_context::{
@@ -183,6 +185,7 @@ fn open(engine: &mut Engine<Probe>, repeat_safe: bool) -> Session {
         cx.open_session(SessionPolicy {
             credential: None,
             repeat_safe,
+            private_egress: None,
         })
     })
     .unwrap()
@@ -545,6 +548,7 @@ fn session_contexts_require_the_session_credential_and_keep_their_owner() {
         cx.open_session(SessionPolicy {
             credential: Some(credential.clone()),
             repeat_safe: true,
+            private_egress: None,
         })
     })
     .unwrap();
@@ -594,6 +598,7 @@ fn bounded_sessions_and_operation_records() {
         with(&mut engine, 0., |cx| cx.open_session(SessionPolicy {
             credential: None,
             repeat_safe: true,
+            private_egress: None,
         })),
         Err(Error::Capacity)
     );
@@ -630,6 +635,7 @@ fn session_handles_carry_no_credential_material() {
                 reference: crate::signing::KeyRef("primary".into()),
             }),
             repeat_safe: true,
+            private_egress: None,
         })
     })
     .unwrap();
@@ -912,18 +918,221 @@ fn prepared_intent(
         .expect("prepared login")
 }
 
+fn open_private(engine: &mut Engine<Probe>) -> Session {
+    with(engine, 0., |cx| {
+        cx.open_session(SessionPolicy {
+            credential: None,
+            repeat_safe: true,
+            private_egress: Some(CredentialSlot::Primary),
+        })
+    })
+    .unwrap()
+}
+
 #[test]
-#[ignore = "original RED: keyless session login routes Public until session-scoped egress lands"]
 fn a_keyless_login_carrying_credentials_in_its_body_must_not_route_public() {
     let mut engine = engine();
-    let session = open(&mut engine, true);
+    let session = open_private(&mut engine);
     let login = with(&mut engine, 1., |cx| {
         cx.session_context(&session, policy(Operation::Mutation))
     })
     .unwrap();
+    assert_eq!((login.credential(), login.route()), (None, None));
     assert_eq!(
         prepared_intent(&mut engine, &login),
         crate::request_context::RoutingIntent::Primary,
         "the body carries the API key; Public/CORS egress would leak it"
+    );
+    let leg = with(&mut engine, 2., |cx| {
+        cx.http_leg_context(&login, policy(Operation::Mutation))
+    })
+    .unwrap();
+    assert_eq!(
+        leg.egress(),
+        login.egress(),
+        "legs inherit the session egress"
+    );
+}
+
+#[test]
+fn a_keyless_session_without_private_egress_still_routes_public() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let bullet = with(&mut engine, 1., |cx| {
+        cx.session_context(&session, policy(Operation::Read))
+    })
+    .unwrap();
+    assert_eq!(
+        prepared_intent(&mut engine, &bullet),
+        crate::request_context::RoutingIntent::Public,
+        "egress is declared, never inferred from method, URL or body"
+    );
+    assert_eq!(
+        with(&mut engine, 1., |cx| cx.session_scoped_context(
+            &session,
+            Scope::Command(7),
+            policy(Operation::Read)
+        )),
+        Err(Error::Invalid),
+        "no private egress to scope"
+    );
+}
+
+#[test]
+fn work_carrying_a_session_token_rides_its_egress_without_gaining_authority() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    for (scope, operation) in [
+        (Scope::Command(7), Operation::Mutation),
+        (Scope::Command(8), Operation::Read),
+        (Scope::Background, Operation::Read),
+    ] {
+        let context = with(&mut engine, 1., |cx| {
+            cx.session_scoped_context(&session, scope, policy(operation))
+        })
+        .unwrap();
+        assert_ne!(context.owner(), session.owner(), "routing, not ownership");
+        assert_eq!(
+            prepared_intent(&mut engine, &context),
+            crate::request_context::RoutingIntent::Primary
+        );
+    }
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx.session_scoped_context(
+            &session,
+            Scope::Background,
+            policy(Operation::Mutation)
+        )),
+        Err(Error::Invalid),
+        "session egress cannot authorize a write the scope does not own"
+    );
+    let signed = Policy {
+        credential: Some(Credential {
+            slot: CredentialSlot::Primary,
+            reference: crate::signing::KeyRef("primary".into()),
+        }),
+        ..policy(Operation::Read)
+    };
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx.session_scoped_context(
+            &session,
+            Scope::Command(9),
+            signed.clone()
+        )),
+        Err(Error::Invalid),
+        "signed work keeps its credential's egress"
+    );
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx.open_session(SessionPolicy {
+            credential: signed.credential.clone(),
+            repeat_safe: true,
+            private_egress: Some(CredentialSlot::Primary),
+        })),
+        Err(Error::Invalid),
+        "a signed session declares no unsigned egress"
+    );
+}
+
+#[test]
+fn forged_and_foreign_session_egress_is_refused() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let Owner::Session { generation } = session.owner() else {
+        unreachable!()
+    };
+    let forged = crate::request_context::Egress::Session(
+        crate::request_context::SessionEgress::new(CredentialSlot::Primary, generation),
+    );
+    for operation in [Operation::Read, Operation::Mutation] {
+        assert_eq!(
+            with(&mut engine, 1., |cx| cx.http_context_with_egress(
+                Scope::Command(7),
+                policy(operation),
+                forged
+            )),
+            Err(Error::Invalid),
+            "only the session core mints session egress"
+        );
+    }
+    let mut other = self::engine();
+    let foreign = open_private(&mut other);
+    assert_eq!(
+        with(&mut engine, 1., |cx| cx.session_scoped_context(
+            &foreign,
+            Scope::Command(7),
+            policy(Operation::Read)
+        )),
+        Err(Error::Revoked)
+    );
+}
+
+#[test]
+fn retirement_fences_sends_on_its_egress_but_not_sent_write_outcomes() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let scoped = |engine: &mut Engine<Probe>, id| {
+        with(engine, 1., |cx| {
+            cx.session_scoped_context(&session, Scope::Command(id), policy(Operation::Mutation))
+        })
+        .unwrap()
+    };
+    let sent = scoped(&mut engine, 7);
+    let sent = {
+        let token = queue(&mut engine, &sent, 1.);
+        release(&mut engine, token, 2.)
+    };
+    let issued = scoped(&mut engine, 8);
+    let prepared = scoped(&mut engine, 9);
+    let prepared = queue(&mut engine, &prepared, 2.);
+    with(&mut engine, 3., |cx| cx.retire_session(&session)).unwrap();
+
+    // Stale generation: neither new work nor a leg may use the old egress.
+    assert_eq!(
+        with(&mut engine, 3., |cx| cx.session_scoped_context(
+            &session,
+            Scope::Command(10),
+            policy(Operation::Read)
+        )),
+        Err(Error::Revoked)
+    );
+    assert_eq!(
+        with(&mut engine, 3., |cx| cx
+            .http_leg_context(&issued, policy(Operation::Mutation))),
+        Err(Error::Revoked)
+    );
+    let queued = with(&mut engine, 3., |cx| {
+        cx.request_managed(
+            issued.clone(),
+            Method::Post,
+            "https://venue.test/order".into(),
+            None,
+            Pending(issued.clone()),
+        )
+    });
+    assert!(matches!(queued, Err((_, Error::Revoked))));
+    engine.http_prepared(
+        4.,
+        prepared,
+        Prepared {
+            id: prepared.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    assert!(engine.drain_actions().all(|action| !matches!(action,
+        Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Bind { .. }))));
+    assert_eq!(
+        engine.venue.preparation_failures.len(),
+        1,
+        "the fenced command learns its write was never sent"
+    );
+
+    respond(&mut engine, sent, 5., "{\"orderId\":1}");
+    assert!(
+        engine
+            .venue
+            .responses
+            .iter()
+            .any(|(owner, _)| matches!(owner, Owner::Command { id: 7, .. })),
+        "a write sent before retirement still delivers its outcome"
     );
 }
