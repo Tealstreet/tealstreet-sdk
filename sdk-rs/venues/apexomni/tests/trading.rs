@@ -5,20 +5,29 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use std::collections::HashMap;
+use std::sync::Arc;
+use safe_cex_crypto::signer::{LocalExtra, LocalExtras, LocalIdentity, LocalSetup, LocalSigner, Secret};
+use safe_cex_engine::signing::{Algorithm, Capability, CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, Identities, IdentitySetupPolicy, KeyEncoding, KeyRef, SignFuture, SignRequest, Signer};
+
 use support::*;
 
 const NOW: f64 = 1_700_000_000_123.0;
 fn ready() -> TestEngine {
     ready_with_socket().0
 }
-fn ready_with_socket() -> (TestEngine, SocketId) {
+fn ready_with_socket() -> (TestEngine, SocketId) { ready_with_provider(false) }
+fn ready_with_provider(hmac_only: bool) -> (TestEngine, SocketId) {
+    let (provider, identities) = write_provider(hmac_only);
     let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("api-key".into()),
         secret: Some("mysecret".into()),
         passphrase: Some("pass".into()),
         omni_key_seed: Some(format!("{}1b", "01".repeat(64))),
+        identity: identities.primary.clone(),
         ..Options::default()
     }));
+    e.set_identities(identities).unwrap();
+    e.set_signer(Some(provider)).unwrap();
     e.start(NOW);
     let symbols = requests(&mut e).remove(0);
     response(&mut e, &symbols, NOW + 1.0, MARKETS);
@@ -1045,4 +1054,54 @@ fn managed_hmac_setting_unlisted_code_is_unknown_with_native_evidence() {
         r#"{"code":987654,"msg":"unlisted native failure"}"#,
         "987654",
     );
+}
+
+struct HmacOnly(Arc<LocalSigner>);
+impl Signer for HmacOnly {
+    fn sign(&self, work: SignRequest) -> SignFuture { self.0.sign(work) }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        if algorithm == Algorithm::HmacSha256 { self.0.can_sign(key, algorithm) }
+        else { Capability::Unsupported }
+    }
+}
+fn write_provider(hmac_only: bool) -> (Arc<dyn Signer>, Identities) {
+    let mut extra=LocalExtras::default();
+    extra.0.insert(ExtraKey::ZklinkSeed, LocalExtra {
+        value:Secret::new(format!("{}1b","01".repeat(64))), encoding:KeyEncoding::Hex });
+    let (signer, ids)=LocalSigner::from_setup_with_policy(LocalSetup {
+        primary:Some(LocalIdentity {key:Secret::new("api-key".into()),secret:Secret::new("mysecret".into()),
+            passphrase:Some(Secret::new("pass".into())),extra,..Default::default()}),secondary:None },
+        CredentialSetupPolicy {primary:Some(IdentitySetupPolicy {secret_encoding:Some(KeyEncoding::Base64Text),
+            extra:Some(ExtraKeyPolicy{key:ExtraKey::ZklinkSeed,field:ExtraFieldPolicy::RequiredForPrivate,
+                encoding:Some(KeyEncoding::Hex)}),..Default::default()}),secondary:None}).unwrap();
+    let signer=Arc::new(signer);
+    (if hmac_only {Arc::new(HmacOnly(signer))} else {signer},ids)
+}
+#[test]
+fn managed_provider_cancel_stages_prepare_before_any_signed_http() {
+    let mut e=ready();
+    e.handle(NOW+10.,Event::Command(hmac_cancel()));
+    let staged=e.drain_actions().collect::<Vec<_>>();
+    assert!(staged.iter().any(|a|matches!(a,Action::ManagedHttp(_))),"cancel must enter trusted preparation before signing");
+    assert!(!staged.iter().any(|a|matches!(a,Action::Http(_)|Action::Sign{..})),"no eager HTTP or provider work before Prepare");
+}
+#[test]
+fn managed_provider_without_zklink_refuses_place_before_foreground_io() {
+    let (mut e,_)=ready_with_provider(true);
+    let actions=place(&mut e,vec![order(serde_json::json!({}))]);
+    assert!(!actions.iter().any(|a|matches!(a,Action::Http(_)|Action::ManagedHttp(_)|Action::Sign{..})),"unsupported placement must refuse before foreground I/O");
+    assert_eq!(actions.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:42,error})
+        if error.kind==Some(safe_cex_engine::ErrorKind::Unsupported) && error.outcome==Some(safe_cex_engine::Outcome::NotSent))).count(),1);
+}
+#[test]
+fn managed_provider_without_zklink_refuses_entire_amend_before_cancel() {
+    let (mut e,socket)=ready_with_provider(true);
+    parent_update(&mut e,socket,NOW+5.,6.,"OPEN",true);
+    e.drain_actions().for_each(drop);
+    e.handle(NOW+10.,Event::Command(Command::AmendOrder{command:99,id:"parent".into(),price:Some(59000.),amount:None}));
+    let actions=e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a|matches!(a,Action::Http(_)|Action::ManagedHttp(_)|Action::Sign{..})),"whole-command capability must precede the amend cancel");
+    assert_eq!(actions.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:99,error})
+        if error.kind==Some(safe_cex_engine::ErrorKind::Unsupported) && error.outcome==Some(safe_cex_engine::Outcome::NotSent))).count(),1);
+    assert_eq!(e.store().order("parent").unwrap().status,safe_cex_engine::model::OrderStatus::Open);
 }
