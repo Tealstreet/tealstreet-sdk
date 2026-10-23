@@ -1308,8 +1308,8 @@ mod tests {
             ..Default::default()
         }));
         e.start(0.);
-        let id = e
-            .drain_actions()
+        let id = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     Some(r.id)
@@ -1337,8 +1337,8 @@ mod tests {
                 ..Default::default()
             }));
         failed.start(0.);
-        let id = failed
-            .drain_actions()
+        let id = safe_cex_engine::test_support::prepared_actions(&mut failed, 0.)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     Some(r.id)

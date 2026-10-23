@@ -63,3 +63,14 @@ all-target Paradex Clippy, scoped fmt, bans, ratchet and 13 checker controls pas
 Complete Paradex + Binance suites and CI are required before ready/merge.
 A test assertion was corrected to permit managed Cancel cleanup while continuing
 to reject any new Prepare/Bind/HTTP before startup Backoff fires.
+
+Full-suite follow-up: all Binance suites passed (293 tests / 24 suites). The
+Paradex price-band unit fixture inside `public.rs` also selected only legacy
+HTTP. Its two drains now use the same shared preparation helper; original
+payloads, price-band normalization and valid-row assertions remain unchanged.
+Complete Paradex verification continues on the corrected fixture.
+
+Final local proof: Paradex 192 tests / 13 suites and Binance 293 tests / 24
+suites pass (485 tests total), including all four new lifecycle controls.
+Strict all-target Paradex Clippy and scoped fmt pass after the unit-fixture
+correction; both request-context checks still pass. CI remains the merge gate.
