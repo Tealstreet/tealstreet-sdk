@@ -459,7 +459,7 @@ pub fn prepare_local_signer_for(
     let public_data_only = construction::signer_setup_public_data_only(options);
     let policy = construction::signer_setup_policy(venue);
     #[cfg(feature = "asterdex")]
-    if venue == "asterdex" {
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Asterdex) {
         let setup = asterdex_setup::local_setup(options, public_data_only)?;
         return local_signer_from_setup(setup, policy, public_data_only);
     }
