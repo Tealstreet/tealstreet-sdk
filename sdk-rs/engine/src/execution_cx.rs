@@ -18,7 +18,12 @@ impl ExecutionHandle {
 
 impl<P> Io<P> {
     pub(super) fn rearm_execution_timer(&mut self) {
-        let next = self.request_contexts.next_execution_deadline();
+        // Called on every HTTP completion; skip the scan when no group exists.
+        let next = if self.request_contexts.has_executions() {
+            self.request_contexts.next_execution_deadline()
+        } else {
+            None
+        };
         if self.execution_timer.map(|(_, at)| at) == next {
             return;
         }
@@ -198,6 +203,10 @@ impl<P> Cx<'_, P> {
 
     /// Engine-owned expiry and post-callback sweep; one terminal path.
     pub(super) fn sweep_executions(&mut self) {
+        if !self.io.request_contexts.has_executions() {
+            self.io.request_contexts.clear_retired_roots();
+            return;
+        }
         let sealed = self.io.request_contexts.expire_executions(self.now);
         self.finish_sealed(sealed);
     }
@@ -228,7 +237,7 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .prepare_planned_execution(founder, key)?;
         let shared = policy.clone();
-        let (plan, moved) = self.admit_plan_owned(preflight, steps, policy, true)?;
+        let (plan, moved) = self.admit_physical_plan(preflight, steps, policy)?;
         let (_, founder_root) = moved.expect("physical admission");
         let root = self
             .io
@@ -241,8 +250,8 @@ impl<P> Cx<'_, P> {
 
     /// Retire a sealed physical Plan owner. It has no command: no notice,
     /// order lock or entry completion; observers are sealed separately.
-    pub(super) fn finish_physical_plan(&mut self, owner: Owner) {
-        self.io.retire_http_owner(owner);
+    pub(super) fn finish_physical_plan(&mut self, owner: Owner, retired: Vec<RequestId>) {
+        self.io.retire_http_owner(owner, retired);
         if !self.io.request_contexts.finish_physical(owner) {
             self.io.http_owner_poison = true;
             panic!("HTTP physical owner retirement bookkeeping failed");
@@ -250,27 +259,20 @@ impl<P> Cx<'_, P> {
     }
 
     /// Called once from the Plan seal: every surviving observer receives the
-    /// Plan's projection and rejection reports. Observers past their own
-    /// bound time out first.
+    /// terminal and reports prepared for it before the seal (observers past
+    /// their own bound already timed out then).
     pub(super) fn seal_planned_execution(
         &mut self,
         plan: &crate::request_context::Plan,
-        projection: Result<String, VenueError>,
-        reports: &[String],
+        mut fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
+        mut sealed: Vec<Sealed>,
     ) {
-        if !matches!(plan.owner(), Owner::Execution { .. }) {
-            return;
-        }
-        self.sweep_executions();
-        let sealed = self
-            .io
+        self.io
             .request_contexts
-            .seal_planned_execution(plan, &projection);
-        if projection.is_err() {
-            for seal in &sealed {
-                for report in reports {
-                    self.command_error(seal.command, report.clone());
-                }
+            .seal_planned_execution(plan, &mut fanout, &mut sealed);
+        for (seal, (_, reports)) in sealed.iter().zip(fanout) {
+            for report in reports {
+                self.command_error(seal.command, report);
             }
         }
         self.finish_sealed(sealed);

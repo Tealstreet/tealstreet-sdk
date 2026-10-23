@@ -464,12 +464,21 @@ policy; its controls were kept and extended.
   join with their own genuine entry root. A member's only physical work is
   the Plan's: `register_attempt` refuses any member's own root (also #1910 on
   the landing). Each observer expires or detaches on its own bound.
-- **Terminal:** `Cx::seal_plan` is the one funnel (`done_plan`,
-  `done_read_plan_after_data`, `fail_plan`, expiry, failed delivery). A
-  physical seal retires the physical owner with no notice, then seals the
-  group once: every surviving observer gets the journal's projection
-  verbatim through `seal_projected`, with its rejection reports. This hook
-  moves into hcmq3f's `commit_plan_terminal` when #1894 lands.
+- **Terminal:** #1894's `prepare_plan_terminal`/`commit_plan_terminal` is
+  the one funnel (`done_plan`, `done_read_plan_after_data`, `fail_plan`,
+  expiry, failed delivery and declared conditional terminals). For a
+  physical Plan, `prepare_plan_terminal` first sweeps observers past their
+  bound against the live journal; `commit_plan_terminal` then retires the
+  physical owner with no notice and seals the group once: every surviving
+  observer gets the journal's projection verbatim through `seal_projected`,
+  with its rejection reports. `PreparedPlanSeal` carries the Plan's `Owner`.
+  Before the seal, preparation also clones one terminal and report set per
+  surviving observer, reserves the `Sealed` storage, the notice actions and
+  the physical owner's request list with its cleanup actions; after the seal
+  the observer fan-out only moves (`Groups::complete_into`). The claim is
+  narrow: shared cleanup (`take_managed`'s boxed Cancel, late-ACK custody)
+  still allocates as on the command path, and a deep clone during
+  preparation follows #1894's OOM-abort model.
 - **Orphans:** when the last observer leaves, unsent slots are revoked
   (`revoke_unsent_execution_legs`), `validate_plan_delivery` refuses before
   any codec, and the event-boundary sweep fails the Plan (journal facts kept:

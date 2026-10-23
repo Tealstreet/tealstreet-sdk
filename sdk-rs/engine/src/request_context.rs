@@ -948,6 +948,22 @@ pub struct CommandWrites {
     report_messages: usize,
     evidence: evidence::EvidenceBudget,
 }
+// Private synchronous terminal preparation. Never exposed as a venue grant.
+#[cfg(feature = "http-plans")]
+pub(crate) struct PreparedWriteSeal {
+    failure: Option<VenueError>,
+    evidence: evidence::EvidenceBudget,
+}
+#[cfg(feature = "http-plans")]
+impl PreparedWriteSeal {
+    pub(crate) fn is_failure(&self) -> bool {
+        self.failure.is_some()
+    }
+
+    pub(crate) fn failure(&self) -> Option<&VenueError> {
+        self.failure.as_ref()
+    }
+}
 impl CommandWrites {
     /// Prepare the full declared journal before plan admission. Logical legs
     /// include unselected fallback branches; neither registration nor retry
@@ -1455,6 +1471,12 @@ impl CommandWrites {
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.
     pub fn succeed(&mut self) -> Result<(), Error> {
+        self.validate_success()?;
+        self.sealed = true;
+        Ok(())
+    }
+
+    fn validate_success(&self) -> Result<(), Error> {
         if self.sealed || self.attempts.is_empty() || self.attempts.iter().any(|a| a.id_overflow) {
             return Err(Error::State);
         }
@@ -1468,7 +1490,6 @@ impl CommandWrites {
         if !accepted {
             return Err(Error::State);
         }
-        self.sealed = true;
         Ok(())
     }
 
@@ -1600,6 +1621,35 @@ impl CommandWrites {
             evidence::mark_id_overflow(&mut error);
         }
         Ok((error, projected_budget))
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn prepare_seal(
+        &self,
+        error: Option<VenueError>,
+    ) -> Result<PreparedWriteSeal, Error> {
+        if error.is_none() && self.validate_success().is_ok() {
+            return Ok(PreparedWriteSeal {
+                failure: None,
+                evidence: self.evidence,
+            });
+        }
+        let (error, evidence) =
+            self.failure_projection(error.unwrap_or_else(|| {
+                VenueError::new("Command writes are not all confirmed accepted")
+            }))?;
+        Ok(PreparedWriteSeal {
+            failure: Some(error),
+            evidence,
+        })
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn commit_seal(&mut self, prepared: PreparedWriteSeal) -> Option<VenueError> {
+        assert!(!self.sealed, "prepared journal seals exactly once");
+        self.sealed = true;
+        self.evidence = prepared.evidence;
+        prepared.failure
     }
 
     /// Retain each terminal logical-leg refusal for the existing reporting path.

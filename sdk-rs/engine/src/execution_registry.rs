@@ -12,6 +12,25 @@ pub(super) struct Executions {
 }
 
 impl ContextRegistry {
+    /// Cheap per-event guard: most engines never hold an execution.
+    /// Every expirable owner, queued owner, leg count and deadline lives in a
+    /// group, so an empty group map means nothing can expire or be revoked.
+    pub(in crate::engine) fn has_executions(&self) -> bool {
+        !self.executions.groups.is_empty()
+    }
+
+    /// With no group left every root is stale; drop them without a scan.
+    pub(in crate::engine) fn clear_retired_roots(&mut self) {
+        if self.executions.groups.is_empty() && !self.executions.roots.is_empty() {
+            self.executions.roots.clear();
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::engine) fn root_count(&self) -> usize {
+        self.executions.roots.len()
+    }
+
     pub(in crate::engine) fn is_observer(&self, command: CommandId) -> bool {
         self.executions.observers.contains_key(&command)
     }
@@ -248,11 +267,10 @@ impl ContextRegistry {
 
     pub(in crate::engine) fn expire_executions(&mut self, now: f64) -> Vec<Sealed> {
         let mut sealed = Vec::new();
-        // Deterministic notice order across executions expiring together.
-        let mut roots = self.executions.roots.iter().collect::<Vec<_>>();
-        roots.sort_unstable_by_key(|(identity, _)| **identity);
-        for (_, execution) in roots {
-            sealed.extend(self.executions.groups.expire(*execution, now));
+        // Iterate the groups themselves, in issue order, so expiry cannot
+        // depend on root bookkeeping.
+        for execution in self.executions.groups.executions() {
+            sealed.extend(self.executions.groups.expire(execution, now));
         }
         for seal in &mut sealed {
             self.project_early(seal);
@@ -265,11 +283,7 @@ impl ContextRegistry {
     }
 
     pub(in crate::engine) fn next_execution_deadline(&self) -> Option<f64> {
-        self.executions
-            .roots
-            .values()
-            .filter_map(|execution| self.executions.groups.timer(*execution))
-            .min_by(f64::total_cmp)
+        self.executions.groups.next_timer()
     }
 
     /// The observer's own completion root, only for its sealed generation.
@@ -389,22 +403,47 @@ impl ContextRegistry {
     pub(in crate::engine) fn seal_planned_execution(
         &mut self,
         plan: &crate::request_context::Plan,
-        projection: &Result<String, VenueError>,
-    ) -> Vec<Sealed> {
+        fanout: &mut [(Result<String, VenueError>, Vec<String>)],
+        sealed: &mut Vec<Sealed>,
+    ) {
         let Owner::Execution {
             generation: identity,
         } = plan.owner()
         else {
-            return Vec::new();
+            return;
         };
         self.contexts.remove(&identity);
         let Some(execution) = self.executions.roots.get(&identity).copied() else {
-            return Vec::new();
+            return;
         };
-        self.executions
-            .groups
-            .complete(execution, |_| projection.clone())
-            .unwrap_or_default()
+        let mut prepared = fanout.iter_mut();
+        let _ = self.executions.groups.complete_into(
+            execution,
+            |_| {
+                let (terminal, _) = prepared
+                    .next()
+                    .expect("one prepared terminal per surviving observer");
+                std::mem::replace(terminal, Ok(String::new()))
+            },
+            sealed,
+        );
+    }
+
+    /// Surviving observers of a physical Plan's execution, for preparation.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn planned_observer_count(
+        &self,
+        plan: &crate::request_context::Plan,
+    ) -> usize {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
+            return 0;
+        };
+        self.executions.roots.get(&identity).map_or(0, |execution| {
+            self.executions.groups.observer_count(*execution)
+        })
     }
 
     /// A live physical Plan whose execution has no observer left; the engine
@@ -441,3 +480,62 @@ mod plan_capacity_tests;
 #[cfg(all(test, feature = "http-plans"))]
 #[path = "execution_plan_composition_tests.rs"]
 mod plan_composition_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution_group::Joined;
+
+    fn member(command: CommandId, deadline: f64) -> Member {
+        Member {
+            command,
+            generation: 1,
+            operation: Operation::Read,
+            deadline,
+            key: String::new(),
+        }
+    }
+
+    /// Seed a group directly, with no registry root, so the sweep cannot
+    /// lean on root bookkeeping.
+    fn orphan(registry: &mut ContextRegistry) -> Execution {
+        let (execution, _) = registry
+            .executions
+            .groups
+            .begin(
+                Root::Background { deadline: 1_000. },
+                Operation::Read,
+                Window::BeforeRelease,
+                1_000,
+                0.,
+            )
+            .unwrap();
+        assert!(registry.executions.roots.is_empty());
+        execution
+    }
+
+    #[test]
+    fn rootless_observers_queued_owners_and_legs_still_expire() {
+        let mut registry = ContextRegistry::default();
+        assert!(!registry.has_executions());
+        let execution = orphan(&mut registry);
+        let groups = &mut registry.executions.groups;
+        groups.join(execution, member(1, 100.), 1.).unwrap();
+        groups.leg_issued(execution).unwrap();
+        groups.leg_released(execution).unwrap();
+        let (_, queued) = groups.join(execution, member(2, 200.), 2.).unwrap();
+        assert_eq!(queued, Joined::Pending);
+        assert!(registry.has_executions());
+        assert_eq!(registry.next_execution_deadline(), Some(100.));
+        let sealed = registry.expire_executions(100.);
+        assert_eq!(sealed.iter().map(|s| s.command).collect::<Vec<_>>(), [1]);
+        assert_eq!(registry.next_execution_deadline(), Some(200.));
+        let sealed = registry.expire_executions(200.);
+        assert_eq!(sealed.iter().map(|s| s.command).collect::<Vec<_>>(), [2]);
+        // The leg still holds the group, and the execution bound still fires.
+        assert!(registry.has_executions());
+        assert!(registry.expire_executions(1_000.).is_empty());
+        registry.executions.groups.leg_retired(execution).unwrap();
+        assert!(!registry.has_executions());
+    }
+}

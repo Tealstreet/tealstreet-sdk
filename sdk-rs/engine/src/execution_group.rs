@@ -387,6 +387,25 @@ impl Groups {
         Ok((observer, Joined::Live(group.progress.clone())))
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+
+    /// Earliest timer across every held execution, without allocating.
+    pub(crate) fn next_timer(&self) -> Option<f64> {
+        self.groups
+            .keys()
+            .filter_map(|id| self.timer(Execution(*id)))
+            .min_by(f64::total_cmp)
+    }
+
+    /// Every held execution in issue order, retired or not.
+    pub(crate) fn executions(&self) -> Vec<Execution> {
+        let mut ids = self.groups.keys().copied().collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids.into_iter().map(Execution).collect()
+    }
+
     pub(crate) fn deadline(&self, execution: Execution) -> Option<f64> {
         self.group(execution).ok().map(|group| group.deadline)
     }
@@ -435,6 +454,15 @@ impl Groups {
             return Err(Error::Capacity);
         }
         Ok(())
+    }
+
+    /// Live observers of one execution; none once it is terminal.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    pub(crate) fn observer_count(&self, execution: Execution) -> usize {
+        self.groups
+            .get(&execution.0)
+            .filter(|group| !group.terminal)
+            .map_or(0, |group| group.observers.len())
     }
 
     /// Live observer commands of one execution, in join order.
@@ -551,33 +579,43 @@ impl Groups {
     pub(crate) fn complete(
         &mut self,
         execution: Execution,
-        mut project: impl FnMut(&str) -> Result<String, VenueError>,
+        project: impl FnMut(&str) -> Result<String, VenueError>,
     ) -> Result<Vec<Sealed>, Error> {
+        let mut sealed = Vec::new();
+        self.complete_into(execution, project, &mut sealed)?;
+        Ok(sealed)
+    }
+
+    /// `complete` into caller-reserved storage: with capacity for every live
+    /// observer, sealing moves values and allocates nothing.
+    pub(crate) fn complete_into(
+        &mut self,
+        execution: Execution,
+        mut project: impl FnMut(&str) -> Result<String, VenueError>,
+        sealed: &mut Vec<Sealed>,
+    ) -> Result<(), Error> {
         let group = self.open(execution).map_err(|_| Error::Stale)?;
         group.terminal = true;
-        let entries = std::mem::take(&mut group.observers);
-        let sealed: Vec<_> = entries
-            .into_iter()
-            .map(|entry| {
-                let result = project(&entry.key);
-                if group.planned {
-                    // The Plan journal's own projection, verbatim.
-                    Sealed {
-                        command: entry.command,
-                        generation: entry.generation,
-                        result,
-                        journal: group.operation == Operation::Mutation,
-                        projected: true,
-                        early: None,
-                    }
-                } else {
-                    group.seal(entry, result, true)
+        let start = sealed.len();
+        for entry in std::mem::take(&mut group.observers) {
+            let result = project(&entry.key);
+            sealed.push(if group.planned {
+                // The Plan journal's own projection, verbatim.
+                Sealed {
+                    command: entry.command,
+                    generation: entry.generation,
+                    result,
+                    journal: group.operation == Operation::Mutation,
+                    projected: true,
+                    early: None,
                 }
-            })
-            .collect();
-        self.release_members(&sealed);
+            } else {
+                group.seal(entry, result, true)
+            });
+        }
+        self.release_members(&sealed[start..]);
         self.retire(execution.0);
-        Ok(sealed)
+        Ok(())
     }
 
     #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
