@@ -650,6 +650,18 @@ legacy-dispatch assertion failures and one native compatibility pass before the
 adapter move; all ten pass after it. Existing public candle assertions retain
 their exact payload checks through the shared prepared-actions test executor.
 
+## BloFin candle command-entry regression proof
+
+Two original-source assertion failures pin typed invalid-clock and registry
+capacity rejection before Context issuance. The capacity fixture fills genuine
+background roots in an earlier no-ID callback, repeats270 refusals at one clock,
+explicitly retires the roots and successfully reuses the command ID without
+expiry. Duplicate parked entry preserves the original preparation and one
+completion. Another fixed-clock control runs270 market refusals,270 interval
+refusals and270 successes with stale previous-response probes. Existing native
+candle mapping, validation precedence and preparation/expiry assertions remain.
+This closes the earlier pre-Context numeric refusal gap using the shared seam.
+
 ### Shared order-snapshot admission: Backpack/Paradex
 
 Both families replace whole-order snapshot counters with the existing opaque
