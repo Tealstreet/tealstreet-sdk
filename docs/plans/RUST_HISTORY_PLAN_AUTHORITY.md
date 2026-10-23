@@ -316,3 +316,24 @@ After marker-predicate hardening, the same all-features target was rerun:
 one control passed, the accepted-prefix assertion still observed no CommandDone,
 and the stale-owner assertion still observed one terminal and one marker.
 All three test bodies and expected terminal/marker values are unchanged.
+
+## SDK outer-wait source boundary
+
+At original-evidence checkpoint 0dd2872005c, the mirror's host.mjs:81 sets
+DEFAULT_COMMAND_TIMEOUT_MS to 120,000 ms. Its command deadline at :417 rejects
+with CommandTimeoutError (code COMMAND_TIMEOUT); settleCommand at :445 removes
+only the caller's pending reply. The existing hostcommand controls for the
+default/explicit override and caller-only timeout were rerun: both pass. The
+latter proves a Read timeout has no write outcome, does not abort the transport,
+and permits late physical work to finish. This is not an engine detach.
+
+RustExchange selects options.extra.rustCommandTimeoutMs or that default at
+rust.exchange.ts:649 and passes it to EngineHost at :977. Its history wrappers
+at :2034-2114 supply no per-command override. Its worker proxy wait is the
+configured command timeout plus 1,000 ms for these single-command history
+methods (:998); base.ts:1783 removes the reply listener on that outer timeout.
+These are source facts about the SDK wrapper on this checkpoint, not a claim
+that every NX/Agent caller uses its defaults. Their additional wrappers,
+configured overrides and abandonment behavior still require consumer-owner
+confirmation and the consumer CALLERS entry. None of this work changes those
+waits or makes local promise expiry cancel an engine-owned Plan.
