@@ -232,8 +232,9 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      `apiKey → credential`, `secret → signing` (base64url, declared),
      `passphrase → passphrase`. It also names the non-secret fields to echo.
 3. **Response routing.**
-   - The managed entry and generation-liveness check runs first. A response
-     for a retired generation is zeroized and never imported.
+   - The managed entry check against the exact Context and the full
+     `ImportAuthority` runs first. A response for a retired generation, or
+     any other mismatch, is zeroized and never imported.
    - Otherwise, on a 2xx response the engine passes the body bytes straight
      to `Signer::import(ImportRequest {authority, spec, body})`, where
      `authority` is the full `ImportAuthority` tuple (issuer, identity, slot,
@@ -301,8 +302,8 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
    - **Retirement order.** `retire_session` drains waiters, then discards
      in-flight HTTP, then drops imported refs, then revokes the registry
      entry, as claude-55ao7t specified for the hunk. The
-     engine checks generation liveness immediately before routing a body to
-     `Signer::import`, so a late 2xx for a retired generation is never
+     engine checks the exact Context and the full `ImportAuthority`
+     immediately before routing a body to `Signer::import`, so a late 2xx for a retired generation is never
      imported.
    - **Host providers.** Host-injected JS and Workers providers receive
      `Action::DropImported { scope }` through the existing provider
@@ -339,7 +340,7 @@ create fallback, and this plan adds none.
 **Proof:**
 - the venue never observes body, secret or passphrase bytes (a canary
   assertion on every venue callback);
-- refs bound to the generation are dropped on retirement;
+- refs bound to the `ImportScope` are dropped on retirement;
 - a stale-generation recipe refuses;
 - malformed, oversized and duplicate-field bodies fail closed;
 - import is refused when the provider lacks it;
