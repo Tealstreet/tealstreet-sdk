@@ -43,7 +43,7 @@ impl<P> Cx<'_, P> {
         window: Window,
         key: &str,
     ) -> Result<ExecutionHandle, Error> {
-        if self.io.http_delivery.is_some() {
+        if !self.entry_callback(founder) {
             return Err(Error::Revoked);
         }
         if !self.io.next_id.available(1) {
@@ -66,7 +66,7 @@ impl<P> Cx<'_, P> {
         root: &Context,
         key: &str,
     ) -> Result<Joined, Error> {
-        if self.io.http_delivery.is_some() {
+        if !self.entry_callback(root) {
             return Err(Error::Revoked);
         }
         self.sweep_executions();
@@ -157,6 +157,13 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         self.io.request_contexts.validate(leg, self.now)
+    }
+
+    /// Begin/join run only in the observer command's own genuine callback,
+    /// in addition to the registry's exact root/issuer/generation checks.
+    fn entry_callback(&self, root: &Context) -> bool {
+        matches!(root.owner(), Owner::Command { id, .. } if self.io.entry_bound(id))
+            && self.io.http_delivery.is_none()
     }
 
     fn finish_sealed(&mut self, sealed: Vec<Sealed>) {

@@ -25,6 +25,9 @@ struct GroupProbe {
     join_errors: Vec<crate::request_context::Error>,
     independent_leg: Option<CommandId>,
     unentered: Option<CommandId>,
+    /// Admit this command's root but hold it instead of beginning or joining.
+    hold: Option<CommandId>,
+    cross_errors: Vec<crate::request_context::Error>,
 }
 
 impl Venue for GroupProbe {
@@ -41,6 +44,19 @@ impl Venue for GroupProbe {
         };
         if self.independent_leg == Some(id) {
             cx.http_leg_context(&root, read_policy(timeout)).unwrap();
+        }
+        if self.hold == Some(id) {
+            self.roots.insert(id, root);
+            return;
+        }
+        if let Some(held) = self.hold.and_then(|held| self.roots.get(&held)) {
+            // Another command's genuine callback cannot carry the held root.
+            let held = held.clone();
+            if let Err(error) =
+                cx.begin_execution(&held, read_policy(1_000), Window::UntilTerminal, "x")
+            {
+                self.cross_errors.push(error);
+            }
         }
         let key = format!("k{id}");
         if let Some(execution) = &self.execution {
@@ -430,4 +446,37 @@ fn a_detached_founder_leaves_the_shared_request_to_the_joiner() {
     run.respond(5., request);
     assert_eq!(run.done(), [(2, "\"k2\"".to_owned())]);
     assert_eq!(run.engine.venue().publications, 1);
+}
+
+#[test]
+fn begin_and_join_need_the_observer_commands_own_genuine_callback() {
+    let mut run = Run::new(GroupProbe {
+        hold: Some(1),
+        ..Default::default()
+    });
+    run.handle(1., fetch(1));
+    run.handle(2., fetch(2));
+    assert_eq!(
+        run.engine.venue().cross_errors,
+        [crate::request_context::Error::Revoked]
+    );
+    // The genuine callback of command 2 began the execution.
+    assert_eq!(run.prepares().len(), 1);
+    let held = run.engine.venue().roots[&1].clone();
+    let execution = run.engine.venue().execution.clone().unwrap();
+    // A stored valid root outside any command callback (timer, start, response).
+    let mut cx = Cx {
+        now: 3.,
+        store: &mut run.engine.store,
+        io: &mut run.engine.io,
+    };
+    assert_eq!(
+        cx.join_execution(&execution, &held, "k1"),
+        Err(crate::request_context::Error::Revoked)
+    );
+    assert_eq!(
+        cx.begin_execution(&held, read_policy(1_000), Window::UntilTerminal, "k1")
+            .map(|_| ()),
+        Err(crate::request_context::Error::Revoked)
+    );
 }
