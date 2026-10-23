@@ -2527,3 +2527,12 @@ The legacy inventory remains 24 BloFin occurrences: the shared private-history
 dispatcher and conservative query macro matches remain inventoried. This slice
 adds no exemption and makes no zero-legacy claim. Signed/private history, trading
 and the existing candle entry refusal remain separately tracked.
+
+## BloFin PublicTrades current inventory scope
+
+The actual-#1848 PublicTrades integration preserves all incoming engine and
+venue code outside its declared slice. The earlier 24-occurrence snapshot above
+predates #1867; current BloFin is 23 occurrences /19 rows /four files, unchanged
+by PublicTrades adoption. Its private dispatcher and conservative history macro
+sites remain explicit debt; neither the actual bridge nor the capacity assertion
+update claims a ratchet removal or private signer/Plan readiness.

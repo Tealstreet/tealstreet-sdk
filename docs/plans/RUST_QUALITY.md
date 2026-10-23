@@ -1130,3 +1130,13 @@ and milliseconds, numeric defaults, signed quantities and the wire-only limit.
 Malformed or refused first pages discard their streamed prefix without an
 incomplete marker. Six original-source assertion failures preceded production;
 five native compatibility controls already passed that original source.
+
+## BloFin PublicTrades actual bridge receipt
+
+The genuine actual-#1848/current-landing integration retains incoming candle
+entry and all six shared history/authority blobs. The capacity message mismatch
+is reproduced on the actual engine, then its expected text is obtained from
+Error::Capacity without weakening kind/outcome, no-I/O or retirement assertions.
+The 32 focused BloFin controls and three shared bridge controls pass; scoped
+strict Clippy/fmt and request-context checks with 15 regressions pass. The historical
+run of 501 native tests is distinct; fresh CI and a venue merge window remain gates.

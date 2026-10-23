@@ -86,3 +86,32 @@ The manifest remains unchanged at24 BloFin occurrences across20 hash rows.
 No actual1848 landing, final integration CI, merge readiness or zero-legacy claim
 is implied by this native consumer receipt. The stable venue phase is pinned to actual1854; fresh CI uses that
 integration. Actual1857 was deferred by the overseer until after this phase.
+
+## Actual bridge integration and capacity control
+
+Actual #1848 (`6872554ac85244ec7b768b79af7187013dba429a`) and current landing
+`c473342d48363a057c98c59292abb957462f3590` are genuinely integrated, most recently
+at `c0d5952a65331c99f107b9a80d41aa88e2760da9`. All six shared history/authority
+blobs are byte-exact to actual landing; this consumer edits no engine source.
+The five consumer source/test files match the bridge owner's isolated audit
+`cbfcba64f537`, except the capacity assertion now derives Error::Capacity's
+shared display text. No synthetic audit commit was merged or claimed as this
+branch's executed receipt. Incoming candle command-entry adoption is preserved.
+
+The old queue-refusal control fails on the actual engine only because it expects
+`Too many requests in flight` instead of `Engine request capacity reached`.
+Test-only commit `6212289e4e9` changes that one expected message to
+`Error::Capacity.to_string()`; its kind, NotSent outcome, no-I/O and owner-retirement
+assertions remain intact. The original six semantic REDs/five compatibility
+controls and native production logic remain unchanged.
+
+The current inventory is **23 occurrences /19 rows /four files**, unchanged by
+this PublicTrades slice. The old 24/20/five snapshot above predates separately
+landed #1867's candle-entry prune. Current manifest equals incoming exactly;
+shared private dispatch and conservative history macros remain tracked.
+
+The current focused receipt runs 32 native BloFin controls (history 12, owned 9,
+managed 11) plus three engine bridge controls. Scoped strict Clippy/fmt and both
+request-context checks (15 regressions) pass. These are scoped native receipts,
+not a fresh whole-package or performance proof. Fresh normal integration CI and
+a new venue window/guard are required before merge.
