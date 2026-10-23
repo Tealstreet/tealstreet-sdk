@@ -311,3 +311,10 @@ Backpack entries and add CALLERS then. No manifest change in this slice.
 Architecture gate: No for native Engine regressions and shared API planning.
 Future implementation gates: Backpack + Binance, scoped strict Clippy/fmt,
 bans, both ratchets, three clean independent reviews and exact-head CI.
+
+Local plan/test evidence: 3 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(137 tests, 3 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
