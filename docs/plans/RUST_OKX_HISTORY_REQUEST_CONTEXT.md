@@ -287,3 +287,20 @@ The overseer directed the next integration to #1945 `c0658f9ed97` once frozen.
 Wait for that reviewed/frozen source and its public receipt-refusal API before
 implementing None handling. Keep all original assertions, typed Read outcome
 None for initial refusal, and the no-default-substitution ruling above.
+
+## Updated composed chain checkpoint
+
+The signer owner supplied reviewed, CI-green #1942 head8e212d4f8c9, composed
+from #1938 718deab3bd0 and #1773 a805750f64d on landing fade3aa0a41.
+Plain merge8c0a5cedc55 integrates it without source conflicts. The only conflict
+is the README index: retain the incoming handoff row first and the caller-wait
+row once. All nine OKX source files are byte-exact to the incoming pin; the
+history target is byte-exact to the prior checkpoint bf94706823b.
+
+The unchanged target compiles and executes fourteen controls on this composition:
+eight expected behavioral assertion REDs, six native compatibility passes,
+zero ignored. No history production implementation or inventory prune is
+included. The composed chain's CI is dependency evidence only, not a green
+claim for this original-RED target. Missing-receipt handling remains held for
+the reviewed public refusal/root-expiry API; no default-root substitution or
+venue-local receipt shim is introduced.
