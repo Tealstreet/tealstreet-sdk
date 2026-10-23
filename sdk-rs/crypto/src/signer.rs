@@ -1771,4 +1771,53 @@ mod tests {
             }
         }
     }
+
+    // Asymmetric key typing REDs: Sign obeys the same declaration as public
+    // operations, in both directions.
+    fn sign_request(algorithm: &str, key: &KeyRef, bytes: Vec<u8>) -> SignRequest {
+        public_request(
+            serde_json::json!([{"kind": "sign", "algorithm": algorithm, "key": key,
+            "payload": [{"kind": "bytes", "bytes": bytes}]}]),
+        )
+    }
+
+    #[cfg(all(feature = "secp256k1", feature = "ed25519"))]
+    #[test]
+    fn undeclared_mac_secrets_never_sign_asymmetric_algorithms() {
+        // A 32-byte HMAC secret parses as a valid secp256k1 and Ed25519 key.
+        let (signer, ids) = LocalSigner::from_json(
+            serde_json::json!({"primary": {"key": "account", "secret": "s".repeat(32)}})
+                .to_string(),
+        )
+        .unwrap();
+        let key = ids.primary.unwrap().signing;
+        for algorithm in ["secp256k1Digest", "ed25519"] {
+            assert_eq!(
+                signer.sign_now(&sign_request(algorithm, &key, vec![7; 32])),
+                Err(SignError::InvalidRequest),
+                "{algorithm}"
+            );
+        }
+        // The same secret still MACs exactly as before.
+        assert_eq!(
+            signer
+                .sign_now(&sign_request("hmacSha256", &key, b"m".to_vec()))
+                .unwrap()
+                .values[0]
+                .len(),
+            32
+        );
+    }
+
+    #[test]
+    fn declared_wallet_keys_never_sign_mac_algorithms() {
+        let (signer, key) = public_setup("secp256k1Digest", SCALAR);
+        for algorithm in ["hmacSha256", "hmacSha512", "sha256SecretSuffix"] {
+            assert_eq!(
+                signer.sign_now(&sign_request(algorithm, &key, b"m".to_vec())),
+                Err(SignError::InvalidRequest),
+                "{algorithm}"
+            );
+        }
+    }
 }
