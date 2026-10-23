@@ -483,6 +483,7 @@ impl BybitLinear {
                 command,
                 context: context.clone(),
             }),
+            read: None,
         };
         cx.request_signed_managed(context, method, url, body, Box::new(step), pending)
             .is_ok()
