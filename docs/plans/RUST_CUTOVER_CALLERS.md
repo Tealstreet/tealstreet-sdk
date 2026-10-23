@@ -6341,7 +6341,8 @@ native failed-read path without auth evidence or deactivation. A physical
 Timeout or transport failure retains last-good snapshots and permits a later
 poll; native settings backoff still independently holds the configuration reads.
 Exact Background delivery is checked before row decode and publication, and
-stale cycle/seed deliveries have no native or credential-auth side effects.
+stale cycle/seed deliveries have no snapshot or credential-auth side effects;
+429 still preserves the native global pause for other reads.
 No command completion, metadata group, history or trading policy is changed.
 The remaining legacy shared signing helper and STAGING entry stay for their
 other callers; this semantic caller conversion has zero lexical inventory delta.

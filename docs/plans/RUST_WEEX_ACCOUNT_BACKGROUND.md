@@ -40,7 +40,9 @@ check those gates before rate/auth/native reducers, then run the native reducer 
 retained clone. Continuations retire their previous Context before next-page
 admission. Failure and sign-error
 paths release it before their existing native failure reducer, even when stale;
-stale seed/cycle deliveries have no native effects. Continuations finish the
+stale seed/cycle deliveries have no snapshot or auth effects. A 429 still
+updates the global native pause, as before, because configured identities are
+immutable and other reads must honor the same venue rate signal. Continuations finish the
 previous physical Context before admitting a fresh page. Admission/preparation
 refusal follows account_failed promptly without HTTP, retry, auth inference or
 deactivation. Provider refusal remains a pre-send failure. Transport failure and
@@ -111,3 +113,11 @@ transport failures the first recovery poll sends four account reads while the
 two settings reads remain backed off. After native cycle expiry it sends six.
 These are new-contract controls, separate from the original assertion REDs.
 Full CI, WASM/replay gates and source/preservation reviews are still pending.
+
+Native source review `08345a4910c..ea2faffbc9d` is CLEAR on custody/order.
+Its rate-signal note is folded in: stale snapshots still honor native 429 pauses,
+while snapshot/auth reducers remain fenced. The no-credential send refusal is
+unreachable through production account-cycle admission: start/poll requires a
+configured primary, GET selection then necessarily finds primary or secondary,
+and identities cannot rotate in place. The defensive refusal has no auth or
+deactivation classification; it uses the ordinary failed-cycle path.

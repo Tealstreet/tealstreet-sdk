@@ -908,14 +908,16 @@ impl Venue for WeexFutures {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, response: Response<'_>) {
         if let Task::Account(request) = p.task {
             let context = request.context.clone();
+            // A native rate-limit signal still pauses this immutable identity's
+            // other reads even when this snapshot's seed/cycle is stale.
+            if response.status == 429 {
+                self.paused_until = self
+                    .paused_until
+                    .max(cx.now + rate::delay(response, cx.now));
+            }
             if p.seed_generation == self.seed_generation
                 && self.account_delivery_current(cx, &request)
             {
-                if response.status == 429 {
-                    self.paused_until = self
-                        .paused_until
-                        .max(cx.now + rate::delay(response, cx.now));
-                }
                 if response.status >= 400 {
                     if let Some(context) = &context {
                         let _ = cx.finish_http_context(context);
