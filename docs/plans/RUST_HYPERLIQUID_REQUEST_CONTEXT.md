@@ -387,8 +387,9 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
 | Client-ID lookup | `orderStatus` | n/a | 1 | 1 |
 
 - **Weight.** A streamed page reserves 120 weight at dequeue against the shared
-  1000/minute account read budget, then settles to `ceil(rows/20)` on
-  response. An uncontended walk is therefore about 7-8 pages a minute.
+  1000/minute account read budget, then settles to `20 + ceil(rows/20)` on
+  response: `history_weight` releases 100 of the 120-weight reservation and
+  then adds `ceil(rows/20)`. An uncontended walk is therefore about 7-8 pages a minute.
 - **Duration.** A 200-page fills walk is about 25+ minutes, and combined
   income (up to 400 pages, because `restart_stage` resets the page budget) is
   about 50+ minutes. Any default or configured caller wait shorter than that
@@ -485,6 +486,10 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
        denies it if the owner is really gone, and emits otherwise, so a live
        owner is never stranded.
 
+     Every refusal also removes the query's queue entry and root timer. Only
+     authority proven revoked (the denied `reject`) may drop the query without
+     a terminal.
+
      A `request_managed_with_headers` refusal returns its `Pending` and takes
      the same strict route with `error.venue_error()`.
   2. It then charges weight and sends with
@@ -495,6 +500,24 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
   never a codec or numeric completion.
 - **Unchanged.** The Account branch, its weights, the FIFO order and the
   shared budget are unchanged.
+
+### Held pending a ruling
+
+claude-ddi2il prefers an engine-owned expiry funnel for Context Read roots over
+per-venue root timers, because five history venues need the same thing.
+codex-uufub4 is ruling whether it belongs in #1945's successor or in #1949. The
+root-timer design above, and REDs 3, 6c and the timer half of 6, are on hold
+until then.
+
+If the venue timer stands, codex-uufub4's correction applies: the owner lives in
+a venue map keyed by the exact root, and `Pending::History` carries only that
+key. A root timer that fires first while the query is in flight then strictly
+rejects once and clears the queue and active state. The later leg callback
+finds no owner and stays inert. Tests bind the exact root and timer generation,
+never the numeric id alone.
+
+The None disposition (a missing receipt) also awaits a ruled, cause-aware
+refusal. No new default is minted for an unknown cap.
 
 ### Original REDs (assertions on existing behaviour; fail before source)
 
