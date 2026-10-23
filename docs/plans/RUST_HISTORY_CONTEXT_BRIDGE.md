@@ -119,7 +119,8 @@ Legacy finalization returns `()`, as before. Read finalization returns
 result type. A venue migrates its history owner as a whole; it does not mix
 legacy and Read terminal result types through an ad-hoc generic local adapter.
 A Read terminal Err is handled or deliberately ignored as ownership denial,
-never unwrap'd and never retried through numeric done/fail. The Read constructor uses the exact shared read-root check. Every terminal
+never unwrap'd and never retried through numeric done/fail.
+The Read constructor uses the exact shared read-root check. Every terminal
 path explicitly calls validate_read_completion_context before done_context OR
 fail_context, including typed failure, strict rejection and encoder failure.
 Neither terminal API itself supplies the no-mutation read-companion check.
@@ -204,3 +205,20 @@ deleted only after both land, by whichever migration lands second. Session
 source stays outside this lane. Lighter additionally requires unchanged early
 input/keyless compatibility, strict account-auth/native-budget refusals after
 accepted rows, trade-to-funding stage baselines and zero-filtered-row failure.
+
+Admission-guard borrow discipline: scope the guard only around admission, drop
+it before `&mut Cx` diagnostics (for example ROW_SKIPPED), Store publication or
+reject/finish, and re-admit if more staging follows. The immutable Cx borrow
+prevents mutation declaration, revocation or completion between validation and
+page mutation. Add an engine control for admission -> drop -> diagnostic ->
+re-admission; document this consumer idiom in the same-PR API/CALLERS section.
+
+Original actual-source control checkpoint: three tests compile and fail by
+assertion against unchanged `7641650e7b1` history source. The fixture retains the
+real original root and current child leg through managed Prepare/Bind/Claim and
+response delivery, but its owner-construction seam still uses numeric
+Completion::new. Valid delivery loses its proper terminal; duplicate numeric
+owners cannot produce the expected single correct result; a sibling mutation
+case sees an unauthorized history companion before the proper mutation owner
+finishes. The existing four legacy history suites pass 23 controls. These REDs
+are intentional regression evidence, not a ready branch or implementation claim.
