@@ -6326,3 +6326,14 @@ distinguish the following:
 | --- | --- |
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
+
+## GRVT synchronous history Read custody
+
+Seven native local history refusals retain their original validation order and
+error messages: unsupported income, missing session, unknown market, invalid
+bounds, range/empty order ID, client-ID syntax and missing subaccount. Publication
+now requires a genuine shared Read root. Clock/capacity/custody refusal produces
+one engine terminal without a financial outcome; successful local admission keeps
+the original untyped native error. Both networks preserve the same behavior.
+Remote history queries, session setup, headers, paging, completion and codecs
+remain unchanged. This slice issues no Context on remote fallthrough.

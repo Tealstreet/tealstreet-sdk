@@ -1369,3 +1369,12 @@ regressions are committed: 5 RED with 16 working controls. The observed
 metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
 mixed socket/empty budgets and CDN credential stripping remain explicit controls.
 Routing tests cover every registered suite and reject unknown runtime names.
+
+### GRVT local history Read evidence
+
+Seven capacity controls use256 genuine retained Read peers. Invalid-clock,
+retirement/reuse, duplicate-owner and2800 immediate-terminal controls accompany
+native precision/error-precedence checks on both deployments. Saturated public
+trades retains exact legacy POST route, headers, body and nonempty output schema.
+All19 focused tests pass after15 original assertion failures. Existing source
+outside the seven branches, held fixtures and foreign inventory stay unchanged.

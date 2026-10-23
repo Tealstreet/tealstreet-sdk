@@ -91,3 +91,36 @@ touched-crate Clippy/scoped fmt, bans and both request-context checks. CI owns
 WASM/replay/size/timing. Open a separate draft PR with one >=120s watcher; request
 a venue train slot only after green CI and clean reviews. Fresh separate
 own-path/own-key preservation guard precedes any head-matched authorized merge.
+
+## Original RED checkpoint
+
+Plan9c1f69a7c70 source/adversarial, caller and full-map reviews CLEAR. Test-only
+ad695ea31c9 plus the caller-review coverage fix7b2fa480691 executes19tests on unchanged actual6a68 production:4GREEN/15assertion
+RED/0ignored. Seven capacity and seven invalid-clock controls fail at the first
+shared entry assertion; the extra RED follows both native public-trades wire/
+nonempty schema prefixes. Native finite seven-error precedence on both networks,
+precision/range/client-ID errors, duplicate peer retirement/reuse and2800 local
+completions pass. An initial unused-import compiler error was corrected before
+this executed checkpoint and is not counted as RED evidence. Recovery suffixes
+and later clock variants behind the first failure remain unexecuted until green.
+Invalid-clock lookup reaches bounds first because its to bound defaults to the
+clock; capacity/native controls separately pin the later lookup/subaccount sites.
+
+
+## Implementation checkpoint
+
+The caller reviewer requested a market/bounds collision control. Test-only
+7b2fa480691 adds the authenticated UNKNOWN-market/negative-bound/empty-ID case;
+all original assertions remain. The unchanged-source run still has four native
+controls passing and15 intended assertion REDs. The finding is independently
+closed. Original test source is frozen at7b2fa480691.
+
+Only one import and seven inline admission/terminal moves change production.
+Each selected local refusal admits Read/None/20000/Never and immediately fails
+that exact root. Both admission error variants return without a numeric fallback.
+The native variable bound error is retained verbatim. All source from history_send
+onward is byte-exact actual, and no remote path consumes an extra root. The
+manifest prunes precisely the seven planned singletons and preserves foreign
+bytes. The unchanged target now passes all19 tests, including recovery suffixes
+and later invalid-clock variants. Full native/strict checks and independent final
+reviews remain gates; no CI or merge readiness claim is made at this checkpoint.

@@ -2757,3 +2757,12 @@ two-attempt retrieval budget with socket recovery. Exact artifact size/digest,
 producer/source, archive and restored-runtime ownership are unchanged. The failed
 Bybit attempt remains failed and supplies no timing or mean; transport recovery
 creates no physical retry or third sample.
+
+### GRVT local history command authority
+
+Seven immediate history failures now consume shared Read admission and fail their
+exact original root. Original test-only checkpoint7b2fa480691 gives four native
+controls PASS and15 assertion REDs; all19 pass after adoption. Genuine retained
+owners pin capacity, reuse and duplicate custody; real login fixtures preserve
+native session/validation precedence without private-state mutation. History
+inventory11F/11O becomes4F/4O; family53F/56O becomes46F/49O. Remote source is exact.
