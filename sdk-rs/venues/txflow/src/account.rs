@@ -2,7 +2,7 @@
 //! generation/revision-matched responses. Order events never invent executions.
 use crate::{Pending, TxFlow};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -15,7 +15,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const PAGE: usize = 500;
 const FILL_CAP: usize = 100_000;
-const SKIP_LOG_LIMIT: usize = 4_096;
 
 #[derive(Default)]
 pub struct AccountState {
@@ -41,7 +40,7 @@ pub struct AccountState {
     settings: HashMap<String, MarketSetting>,
     pub(crate) order_ids: HashMap<String, String>,
     /// Leg ids, `asset N` or empty (unidentified) whose skipped position was already logged.
-    skip_logged: HashSet<String>,
+    skip_logged: RowReports<String>,
 }
 enum Skipped {
     Unidentified,
@@ -54,17 +53,12 @@ fn skip_level(harmless: bool) -> Level {
 /// Logs a skipped position once per `key` until it maps again; polls would otherwise repeat it.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut RowReports<String>,
     key: String,
     level: Level,
     message: impl Into<String>,
 ) {
-    if logged.len() >= SKIP_LOG_LIMIT {
-        logged.clear();
-    }
-    if logged.insert(key) {
-        cx.notice(level, code::ROW_SKIPPED, message);
-    }
+    logged.report(cx, key, level, message);
 }
 #[derive(Clone, Copy)]
 pub struct Fence {
@@ -681,7 +675,7 @@ impl TxFlow {
             {
                 Ok(p) => {
                     if let Some(p) = p {
-                        self.account.skip_logged.remove(&p.id);
+                        self.account.skip_logged.forget(&p.id);
                         positions.push(p);
                     }
                 }
