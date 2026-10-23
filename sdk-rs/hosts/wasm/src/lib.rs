@@ -1649,7 +1649,11 @@ mod tests {
                 ) || any(&OKX, venue),
                 fill_history: !no_history,
                 order_history: !no_orders_or_income,
-                income_history: !no_orders_or_income,
+                income_history: !no_orders_or_income
+                    && !any(
+                        &["bybitspot", "hyrotrader", "coinbase", "coinbasespot"],
+                        venue,
+                    ),
                 fills_by_order_id: venue == "grvt",
                 cancel_all: if any(
                     &[
@@ -1797,7 +1801,7 @@ mod tests {
                     }
                     _ => safe_cex_engine::FillHistoryTime::AsProvided,
                 },
-                stp_controls: venue == "asterdex",
+                stp_controls: false,
                 bybit_execution_controls: any(
                     &[
                         "bybit",

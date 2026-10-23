@@ -113,7 +113,7 @@ fn capability_profile_spot_has_no_income_ledger() {
 }
 fn assert_no_income_ledger(kind: ProductKind) {
     let mut venue = Coinbase::new(Options {
-        key: "organizations/test/apiKeys/test".into(),
+        key: "organizations/org-id/apiKeys/key-id".into(),
         secret: STANDARD.encode([7; 32]),
         spot_only: kind == ProductKind::Spot,
         ..Default::default()
