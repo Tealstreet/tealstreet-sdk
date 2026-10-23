@@ -15,11 +15,13 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Credential};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, CredentialSlot, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
+    Venue, num,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -372,21 +374,43 @@ impl Okx {
         );
     }
 
-    pub(crate) fn get(
-        &self,
+    /// Private reads prefer the read-only key; the primary key is the fallback.
+    pub(crate) fn read_credential(&self) -> Option<Credential> {
+        let (identity, slot) = match (&self.options.read_credentials, &self.credentials) {
+            (Some(read), _) => (read, CredentialSlot::Secondary),
+            (None, Some(primary)) => (primary, CredentialSlot::Primary),
+            (None, None) => return None,
+        };
+        Some(Credential {
+            slot,
+            reference: identity.credential.clone(),
+        })
+    }
+
+    /// One signed private GET under engine-issued Read authority. A queue
+    /// refusal is a pre-send failure, as a provider refusal is.
+    pub(crate) fn managed_get(
+        &mut self,
         cx: &mut Cx<'_, Pending>,
+        context: Context,
         path: &str,
-        private: bool,
         pending: Pending,
     ) {
-        let request = cx.request(
+        let identity = match context.credential().map(|c| c.slot) {
+            Some(CredentialSlot::Secondary) => self.options.read_credentials.clone(),
+            _ => self.credentials.clone(),
+        };
+        let recipe = sign::Http::new(identity, path.into()).demo(self.options.testnet);
+        if let Err((pending, error)) = cx.request_signed_managed(
+            context,
             Method::Get,
             format!("{}{path}", self.rest()),
-            self.headers(Method::Get),
             None,
+            Box::new(recipe),
             pending,
-        );
-        self.sign_request(cx, request, Method::Get, path, private, false);
+        ) {
+            self.on_sign_error(cx, pending, error.venue_error());
+        }
     }
 
     fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
@@ -1040,6 +1064,9 @@ impl Venue for Okx {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(account::Request::Config { context, .. }) = &pending {
+            let _ = cx.finish_http_context(context);
+        }
         if let Pending::Account(account::Request::Config { .. }) = &pending
             && self.config_rejected(cx, response.body)
         {
@@ -1324,15 +1351,33 @@ impl Venue for Okx {
         match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
             Pending::Closed(request) => Self::closed_sign_failed(cx, request, error),
-            Pending::Account(account::Request::Leverage { command, .. })
-            | Pending::History(history::Request { command, .. })
+            Pending::Account(account::Request::Leverage { context, .. }) => {
+                let _ = cx.fail_context(&context, error);
+            }
+            Pending::History(history::Request { command, .. })
             | Pending::Candles { command, .. } => cx.fail(command, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
 
+    /// The managed leverage read keeps the engine's typed failure, e.g. Timeout.
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Account(account::Request::Leverage { context, .. }) => {
+                let _ = cx.fail_context(&context, error);
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Account(account::Request::Config { .. }) = &pending {
+        if let Pending::Account(account::Request::Config { context, .. }) = &pending {
+            let _ = cx.finish_http_context(context);
             self.config_unanswered();
         }
         self.request_failed(cx, pending, error);
