@@ -535,8 +535,10 @@ pub enum VenueAction {
 }
 
 /// The shared rejection for a venue action the venue does not implement.
+const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
+
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
-    cx.fail(command, "This action is not supported on this venue");
+    cx.fail(command, UNSUPPORTED_VENUE_ACTION);
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3403,9 +3405,9 @@ impl<V: Venue> Engine<V> {
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
             let was_releasing = std::mem::replace(&mut self.releasing, true);
-            self.io
-                .command_waits
-                .batch(released.iter().map(|(_, receipt)| *receipt));
+            for (_, receipt) in &released {
+                self.io.command_waits.batch(*receipt);
+            }
             for (command, receipt) in released {
                 let carried = command.completion_id().map(|id| (id, receipt));
                 let outer = self.io.command_waits.carry(carried);
@@ -3721,17 +3723,15 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::FetchAccount { command })
                 if self.venue.capabilities().account == AccountLookup::Unsupported =>
             {
-                cx.refuse_before_entry(command, |cx| unsupported_venue_action(cx, command));
+                cx.refuse_before_entry(command, UNSUPPORTED_VENUE_ACTION);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.capabilities().amend_with_symbol =>
             {
-                cx.refuse_before_entry(command, |cx| {
-                    cx.fail(
-                        command,
-                        "symbol-aware amendment is unsupported by this venue",
-                    )
-                });
+                cx.refuse_before_entry(
+                    command,
+                    "symbol-aware amendment is unsupported by this venue",
+                );
             }
             Event::Command(command) => {
                 #[cfg(feature = "order-locks")]
@@ -3777,7 +3777,7 @@ impl<V: Venue> Engine<V> {
                             }
                             _ => "Order amendment or cancellation is already in flight",
                         };
-                        cx.refuse_before_entry(id, |cx| cx.fail(id, error));
+                        cx.refuse_before_entry(id, error);
                         return;
                     }
                 }
@@ -3796,9 +3796,7 @@ impl<V: Venue> Engine<V> {
                         _ => None,
                     };
                     if let Some(command) = unsupported {
-                        cx.refuse_before_entry(command, |cx| {
-                            cx.fail(command, "Options are not enabled on this account")
-                        });
+                        cx.refuse_before_entry(command, "Options are not enabled on this account");
                         return;
                     }
                 }
@@ -3855,9 +3853,9 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "order-locks")]
         let ready = self.io.order_locks.ready();
         #[cfg(feature = "order-locks")]
-        self.io
-            .command_waits
-            .batch(ready.iter().map(|(.., receipt)| *receipt));
+        for (.., receipt) in &ready {
+            self.io.command_waits.batch(*receipt);
+        }
         #[cfg(feature = "order-locks")]
         for (command, failed, receipt) in ready {
             let carried = command.completion_id().map(|id| (id, receipt));
@@ -3871,12 +3869,10 @@ impl<V: Venue> Engine<V> {
                     store: &mut self.store,
                     io: &mut self.io,
                 };
-                cx.refuse_before_entry(command, |cx| {
-                    cx.fail(
-                        command,
-                        "Placement outcome is uncertain; reconcile before cancel-all",
-                    )
-                });
+                cx.refuse_before_entry(
+                    command,
+                    "Placement outcome is uncertain; reconcile before cancel-all",
+                );
             } else {
                 if let Some(id) = command.completion_id() {
                     self.io.active_commands.remove(&id);
