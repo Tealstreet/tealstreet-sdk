@@ -2402,3 +2402,14 @@ to every venue using symbol lookup; WOO's cached-index WS reducer remains outsid
 that hot path. No authority policy, codec, venue-specific shortcut or legacy-site
 exemption changes. Exact paired CI performance and family memory/size gates remain
 separate evidence from diagnostic profiles.
+
+## Hyperliquid local lookup custody
+
+The cached-order match and invalid-client-ID/missing-identity returns now consume
+shared genuine Read entry and exact Context terminal authority. The original
+numeric returns passed through invalid clocks and exhausted Context capacity;
+six original admission REDs cover those branches, with native payload/precedence,
+owner isolation, synchronous retirement and unchanged fallthrough controls.
+Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
+history13->11). Private history/signing and spot REST capabilities stay native.
+Architecture gate: No; existing engine admission and completion choke points.

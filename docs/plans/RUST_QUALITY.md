@@ -964,3 +964,14 @@ measurement reports3860 to59603 retained bytes and7720 to119206 replacement-peak
 bytes; both release all index capacity at empty replacement. This is a measured
 memory tradeoff, not whole-venue or WASM allocation accounting. Full CI checks
 all venue memory and WASM size budgets, including Aster, and paired CPU medians.
+
+## Hyperliquid local lookup entry controls
+
+Six original REDs require clock/capacity refusal before cached or non-definitive
+local lookup success. Companion controls preserve the entire cached Order wire,
+cache precedence in perps/spot and public/private deployments, symbol/client-ID
+matching, private REST and public-only/spot fallthrough, active-owner isolation,
+finite ID reuse and 900 synchronous retirements followed by 256 real parked
+managed candle owners. No marker or Store mutation is introduced. Exact inventory
+removes only two local done sites; native/strict checks and independent reviews
+are required on the committed source before merge readiness.
