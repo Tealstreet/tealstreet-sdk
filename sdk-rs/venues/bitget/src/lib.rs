@@ -115,12 +115,6 @@ fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     )
 }
 
-/// A private send's body, or the array its streamed response decodes.
-pub(crate) enum Payload {
-    Body(Option<String>),
-    Stream(ArrayAt),
-}
-
 impl BitgetFutures {
     fn public_failed(
         &mut self,
@@ -244,15 +238,12 @@ impl BitgetFutures {
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
-        payload: Payload,
+        body: Option<String>,
         signed: bool,
         pending: Pending,
     ) {
         let url = format!("{}{path}", paths::REST);
-        let id = match payload {
-            Payload::Stream(at) => cx.request_streamed(method, url, vec![], at, pending),
-            Payload::Body(body) => cx.request(method, url, vec![], body, pending),
-        };
+        let id = cx.request(method, url, vec![], body, pending);
         if !signed {
             return;
         }
@@ -946,10 +937,7 @@ impl Venue for BitgetFutures {
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
-            Pending::History(request) => {
-                let command = request.command;
-                cx.fail(command, error)
-            }
+            Pending::History(request) => self.history_sign_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_sign_failed(cx, *request, error),
             Pending::Account {
                 generation,
@@ -964,6 +952,14 @@ impl Venue for BitgetFutures {
             }
             pending => self.on_request_failed(cx, pending, &error.message),
         }
+    }
+
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.history_root_retired(owner);
     }
 
     /// Managed candle and identity reads keep the engine's typed deadline;
@@ -1160,7 +1156,7 @@ impl Venue for BitgetFutures {
                     Err((pending, reason)) => self.on_sign_error(cx, pending, reason.venue_error()),
                 }
             }
-            Command::Query { command, query } => self.start_query(cx, command, query),
+            Command::Query { query, .. } => self.start_query(cx, query),
             trade => self.trade_command(cx, trade),
         }
     }

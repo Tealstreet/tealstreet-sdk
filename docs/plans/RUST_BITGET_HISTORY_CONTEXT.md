@@ -271,3 +271,21 @@ The four controls pass:
 - three retries, then `Bitget history incomplete:`;
 - unsigned PublicTrades.
 
+## Implementation receipt
+
+The implementation sits on reviewed root-expiry `ce54ab9357b` (merged at
+`29ac5fa54e5`). It uses `admit_caller_read_root` and the engine's root expiry
+through `Venue::read_root_retired`, which drops parked pages, instead of the
+`command_wait` plus `admit_http_command` sketch above. The leg, delivery and
+terminal rules are as planned.
+
+- **Inventory:** history.rs 11/12 and lib.rs `a921be85` and `c873db6f` are
+  pruned, taking Bitget from 24/26 to 13/14. The STAGING_BOOTSTRAPS Bitget
+  lib entry now adds only `5b44116449d0...` and `6c77d608b079...` (4 to 6),
+  with the approved checker row updated to match. `send` takes the body
+  directly, its `cx.request(...)` text is unchanged, and `Payload` is gone.
+- **Tests:** all 5 original REDs now pass and the 4 controls still pass. The
+  #1915 history provider-refusal test is ported to the managed shape: a typed
+  `notSent`, and every timer it arms is cleared. All Bitget tests and strict
+  all-target Clippy pass.
+

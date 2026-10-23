@@ -31,14 +31,8 @@ pub(crate) fn headers(
                 rows: vec![],
                 invalid: false,
             };
-            self.venue.send(
-                cx,
-                self.method,
-                &self.path,
-                Payload::Body(None),
-                true,
-                pending,
-            );
+            self.venue
+                .send(cx, self.method, &self.path, None, true, pending);
         }
         fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
         fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}

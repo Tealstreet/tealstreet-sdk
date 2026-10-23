@@ -6020,3 +6020,28 @@ shorter native declaration. No transport cancellation, original Read-root cast
 or accepted-prefix recovery permission follows from observing this cap.
 Mutation and execution-owned capped Plans are outside this first slice; native
 mutation/provider errors and their outcome projections remain unchanged.
+
+### Bitget history under the caller-wait root
+
+This covers `bitget`, `bitgetusdc` and `bitgetinverse`: fetchHistoricalFills,
+fetchHistoricalOrders, fetchIncomeHistory, fetchIncomeHistoryRange and
+fetchPublicTrades. [Plan](RUST_BITGET_HISTORY_CONTEXT.md).
+
+- **The whole query is bounded by the caller's wait.** That is the configured
+  `rustCommandTimeoutMs`, a per-call override, or the 120 s default stamped at
+  receipt. At that absolute deadline the engine retires the query. It ends
+  once with kind `timeout` and no outcome, publishes no partial rows, and
+  sends no further page. That holds whether the query is in a page, the
+  account-detection wait, page spacing or a retry delay.
+- **A command whose receipt was never stamped** fails at once with the typed
+  Read refusal and no outcome. It never falls back to a default wait.
+- **Each page has its own 20 s bound**, starting when the page is actually
+  sent, not when it was queued. An unanswered page counts as a page failure
+  and takes the native 250/500/750 ms retries, then
+  `Bitget history incomplete: ...`.
+- **A signing refusal** ends the query once, with its typed error and
+  `notSent`, and no retry.
+- **Unchanged:** entry refusal texts and order (credentials first), windows,
+  cursors, dedup, sorting, the 10 s detection text, 40085 re-detection, page
+  cap and cursor-stall texts, and unsigned public trades. Client-order-id
+  lookup is still unsupported.
