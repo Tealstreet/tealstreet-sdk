@@ -153,11 +153,14 @@ fn missing_receipt_at_finite_clock_cannot_substitute_a_default_root() {
     );
     let output: Vec<_> = engine.drain_actions().collect();
     assert_eq!(output.len(), 1, "receipt refusal has no effects");
-    assert!(matches!(
-        &output[0],
-        Action::Notice(Notice::CommandFailed { command: OWNER, error })
-            if error.kind == Some(ErrorKind::InvalidInput) && error.outcome.is_none()
-    ), "missing receipt must fail closed through typed Read entry refusal");
+    assert!(
+        matches!(
+            &output[0],
+            Action::Notice(Notice::CommandFailed { command: OWNER, error })
+                if error.kind == Some(ErrorKind::InvalidInput) && error.outcome.is_none()
+        ),
+        "missing receipt must fail closed through typed Read entry refusal"
+    );
 }
 
 #[test]

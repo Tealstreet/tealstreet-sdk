@@ -268,3 +268,22 @@ clock control uses f64::MAX, where the default receipt deadline cannot advance,
 and demands one typed Read refusal without a local empty success or I/O.
 The explicit host-boundary handle_command failure remains a separate typed Err
 with no dispatch. Implementation of None awaits the reviewed public refusal API.
+
+## Reviewed OKX chain composition
+
+claude-4yjlw0 supplied CI-green composed #1942 `0095ef76ac7`, including #1938
+`935167475e9` and #1773 `486b7c04302`, on actual15bd. Plain merge fdbdde063a3
+consumes it alongside the earlier frozen #1945 15df. There are no source
+conflicts; CALLERS retains incoming chain bytes followed by the exact #1945
+suffix. All OKX production files equal the reviewed chain. The earlier failed
+b09 composition was aborted without any shared-source guesses.
+
+The original target on this composition compiles 14 tests: eight assertion REDs,
+six compatibility passes, zero ignored. This includes the added None-receipt
+RED and passing host-boundary refusal control. Both request-context checks pass,
+including 15 checker controls. No production adoption or prune is claimed.
+
+The overseer directed the next integration to #1945 `c0658f9ed97` once frozen.
+Wait for that reviewed/frozen source and its public receipt-refusal API before
+implementing None handling. Keep all original assertions, typed Read outcome
+None for initial refusal, and the no-default-substitution ruling above.
