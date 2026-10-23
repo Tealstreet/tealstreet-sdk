@@ -49,6 +49,7 @@ describe('HyroTrader transmitted request signing', () => {
     const content = method === 'get' ? exchange.xhr.getUri(captured).split('?')[1] : captured.data;
     if (method === 'post') expect(typeof content).toBe('string');
     const headers = captured.headers;
+    if (method === 'post') expect(headers['Content-Type']).toBe('application/json');
     const signature = createHmac('sha256', 'fixture-secret')
       .update(`${headers['X-BAPI-TIMESTAMP']}fixture-key${headers['X-BAPI-RECV-WINDOW']}${content}`)
       .digest('hex');
