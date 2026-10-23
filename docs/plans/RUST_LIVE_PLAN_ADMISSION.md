@@ -427,3 +427,21 @@ queue body out of line. Share the extracted deferred-command body rather than
 inlining a copy into both terminal boundaries. These are code-generation changes
 only; preserve every callback, clear/restore, panic and timer operation in order.
 Measure size and idle CPU together in normal CI; do not infer either from source.
+
+## Public classified partial-unknown evidence
+
+The internal journal already distinguishes a validated subset with unresolved
+remainder (`PartialUnknown`) from a wholly unproven reply (`Failed`). Preserve
+that distinction at the public classifier boundary for ordinary Bybit adoption.
+A classified Unknown fact with `known_effects=true` maps to PartialUnknown. In a
+full-count, nonempty-ID batch, at least one proven Accepted or Satisfied item plus
+an Unknown item maps to PartialUnknown, retaining IDs/total/first-failed index.
+All-unknown items remain Failed. A count mismatch, empty accepted ID, or unproven
+HTTP status remains Failed with evidence-only IDs and no effect authority.
+
+Change no table/attempt/response binding, retry grant, effect budget or journal
+projection. Both forms remain Unknown/non-resendable, and neither seals success.
+Only the validated subset receives effect authority. Add original assertion REDs
+for the public fact and batch mappings, plus all-unknown/count/empty/5xx negatives,
+exact-attempt binding and final Unknown-with-proven-IDs journal projection.
+Classifier ownership reviews this exact mapping before its source pin is shared.
