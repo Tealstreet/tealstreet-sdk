@@ -335,3 +335,20 @@ byte-identical to8d; only the separately approved opposite-order positive is
 inverted. The FIFO/backlog/rate-limit fixture updates are the explicit behavior
 ruling above. No build profile, CPU/memory/size threshold, tape, harness or
 workflow changes accompany this adapter.
+
+
+## WASM fixture clock correction
+
+The first full run40038592894 passed the TxFlow replay CPU/memory gate, but the
+Binance job's shared WASM integration step failed TxFlow's private-subscription
+assertion. The test transport paired real timers with a constant receipt clock;
+a paced timer could fire in wall time while the engine still observed a time
+before its next150ms release. No timing-gate retry was used.
+
+With the same rebuilt standalone TxFlow WASM, the untouched fixture reproduces
+one assertion failure and one working control. Anchoring performance.now() to
+the same recorded epoch makes both tests pass with all HTTP, wire, financial and
+private-subscription assertions unchanged. Production source, pacing, transport
+and shared socket code are unchanged. Local build lacks wasm-opt, so these
+functional controls make no size or performance claim; fresh CI retains those
+gates and the original failed cohort.
