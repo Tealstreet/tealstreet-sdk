@@ -1230,3 +1230,60 @@ fn a_classified_session_refusal_resolves_the_operation_without_a_resend_grant() 
         );
     }
 }
+
+#[test]
+fn a_held_command_past_its_deadline_cannot_reissue_in_the_old_generation() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let parked = owner(&mut engine, Scope::Command(7), 1_000, 1.);
+    wait(&mut engine, &session, &parked, 1.).unwrap();
+    assert_eq!(
+        with(&mut engine, parked.deadline() + 1., |cx| cx
+            .http_context(Scope::Command(7), policy(Operation::Read))),
+        Err(Error::State)
+    );
+}
+
+fn entry_root(engine: &mut Engine<Probe>, command: CommandId) -> crate::request_context::Context {
+    let root = owner(engine, Scope::Command(command), 20_000, 1.);
+    engine.io.request_contexts.retain_command_entry(&root);
+    root
+}
+
+#[test]
+fn execution_observers_and_session_waiters_exclude_each_other() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let parked = entry_root(&mut engine, 7);
+    wait(&mut engine, &session, &parked, 1.).unwrap();
+    assert_eq!(
+        engine.io.request_contexts.begin_execution(
+            9_000,
+            &parked,
+            policy(Operation::Read),
+            crate::engine::Window::UntilTerminal,
+            "k",
+            2.,
+        ),
+        Err(Error::State),
+        "a parked root cannot become an execution observer"
+    );
+    let observer = entry_root(&mut engine, 8);
+    engine
+        .io
+        .request_contexts
+        .begin_execution(
+            9_001,
+            &observer,
+            policy(Operation::Read),
+            crate::engine::Window::UntilTerminal,
+            "k",
+            2.,
+        )
+        .unwrap();
+    assert_eq!(
+        wait(&mut engine, &session, &observer, 3.),
+        Err(Error::Revoked),
+        "an observer root cannot park behind a session"
+    );
+}

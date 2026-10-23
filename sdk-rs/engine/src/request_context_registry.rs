@@ -177,7 +177,7 @@ impl ContextRegistry {
                 || old.waits > 0
         });
         if matches!(scope, Scope::Command(id) if self.commands.get(&id)
-            .is_some_and(|owner| (owner.entry_owned || owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0) && now >= owner.last_deadline))
+            .is_some_and(|owner| (owner.entry_owned || owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0 || owner.waits > 0) && now >= owner.last_deadline))
         {
             return Err(Error::State);
         }
