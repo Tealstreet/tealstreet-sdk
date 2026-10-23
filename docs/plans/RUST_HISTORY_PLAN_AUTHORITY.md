@@ -427,3 +427,23 @@ resource and cannot complete or fail the caller again. No legacy request path
 is permitted by the fixture. These are executed SDK managed-host/model controls,
 not an executed NX integration or Rust native Plan-history receipt. Exact native
 accepted-prefix authority and root-expiry precedence remain separate gates.
+
+
+On the actual-c473 integration, all45 scoped host command/managed/boundary tests
+pass. The original history_plan_bridge all-features target still executes one
+GREEN and the same two assertion REDs (no accepted-prefix CommandDone; one stale
+terminal and marker). No runtime fix or native-consumer readiness is implied.
+Independent review of 669917dc45e/3af1f555d3c is CLEAN for scope, preservation and
+the three managed-host controls.
+
+Lifecycle API fit additionally requires after_transport to borrow or consume a
+sealed AcceptedPrefix witness derived only from nonempty accepted output.
+Strings, caller booleans and mutable staging rows cannot grant recovery. The
+history guard keeps exclusive mutable Cx custody and private non-Clone tokens;
+all row/identity/coverage/output/marker resources are prepared before commit.
+The Io-scoped transport proof is cleared with delivery custody for unrelated
+readiness/socket/nested callbacks. A root-drain path can call physical expiry,
+but even that proof must fail live-root validation at root expiry. A physically
+expired call can use dedicated transport-failure validation only while its Plan
+root remains live. No Mutation-only independence callback mints a Read proof.
+Exact implementation signatures remain under lifecycle review.
