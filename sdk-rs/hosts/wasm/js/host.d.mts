@@ -384,6 +384,8 @@ export interface EngineConstruction {
 }
 
 export interface WasmEngineLike {
+  /** Sticky native fatal state; absent only on older or test engines. */
+  failed?(): boolean;
   /** Optional native allocation cleanup; managed EngineHosts opt into ownership. */
   free?(): void;
   /** Configure before startup; optional only for older/fake engines without injection. */

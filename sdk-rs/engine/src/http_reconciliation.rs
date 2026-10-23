@@ -259,7 +259,7 @@ mod tests {
 
     fn record(id: u32, data: usize) -> Record {
         let attempt = Attempt {
-            request: RequestId(id),
+            request: RequestId(u64::from(id)),
             generation: 1,
         };
         Record::new(
@@ -343,11 +343,14 @@ mod tests {
         let body = vec![b'x'; BODY_LIMIT];
         for id in 0..16 {
             table.insert(record(id, DATA_LIMIT), 1.).unwrap();
-            table.start(RequestId(id), 200, "").unwrap();
+            table.start(RequestId(u64::from(id)), 200, "").unwrap();
             if id == 15 {
-                assert_eq!(table.chunk(RequestId(id), &body), Err(Error::Capacity));
+                assert_eq!(
+                    table.chunk(RequestId(u64::from(id)), &body),
+                    Err(Error::Capacity)
+                );
             } else {
-                table.chunk(RequestId(id), &body).unwrap();
+                table.chunk(RequestId(u64::from(id)), &body).unwrap();
             }
         }
         assert!(table.bytes <= TOTAL_LIMIT);
