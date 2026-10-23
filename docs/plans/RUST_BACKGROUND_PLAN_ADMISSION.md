@@ -271,3 +271,20 @@ admissions/1s/2s across full retirements, not a recycled450-call envelope. Sessi
 owner claude-55ao7t approved the lifetime shape and identified the explicit gate,
 issuer, parent cascade, 64-anchor capacity and cleanup notification requirements
 above. These are design reviews, not runtime clearance or a frozen API claim.
+
+## Original-source controls
+
+On unchanged a828 source, background_plan compiles and proves two Context legs
+can span real 20 s windows under a 40 s parent. Genuine command Preflight is
+refused in start and unrelated timer callbacks, without any synthetic terminal.
+Two assertions nevertheless fail through real Prepare/Bind/Claim: the unrelated
+timer can borrow a live background handle to release extra HTTP, and a completed
+two-call cycle retains authority to release a third call. This is evidence of
+the missing finite Plan/task custody, not a defect claim against the documented
+legacy Context API. Fixture admission/selection will move to G1 while keeping
+those wire assertions; no venue counter or fabricated command enforces them.
+
+These two original REDs are ignored under codex-hcmq3f's G1 runtime adoption.
+Session cascade, the #1842 non-Command phase hole and retired-child cleanup
+notification need additional controls on the integrated Session API, which is
+not present on this baseline. A missing method/compile failure is not counted.
