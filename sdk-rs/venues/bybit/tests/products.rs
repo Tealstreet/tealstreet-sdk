@@ -1372,3 +1372,49 @@ fn an_option_chain_read_expires_as_a_timeout() {
     let error = failed(&h, 94);
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
 }
+
+const TIMESTAMP_REFUSAL: &str = r#"{"retCode":10002,"retMsg":"invalid request, please check your server timestamp or recv_window param. req_timestamp[1],server_timestamp[2],recv_window[5000]","result":{}}"#;
+const GREEKS: &str = r#"{"retCode":0,"result":{"list":[{"baseCoin":"BTC","totalDelta":"1","totalGamma":"2","totalVega":"3","totalTheta":"-4"}]}}"#;
+
+/// Greeks re-read once, re-signed, on a native timestamp refusal; a second
+/// refusal is the command's typed failure.
+#[test]
+fn greeks_re_read_once_on_a_native_timestamp_refusal() {
+    for second in [GREEKS, TIMESTAMP_REFUSAL] {
+        let mut h = ready(true);
+        h.command(Command::FetchAccountGreeks { command: 95 });
+        let first = h.take("/v5/asset/coin-greeks");
+        h.reply(first.id, 200, TIMESTAMP_REFUSAL);
+        let retry = h.take("/v5/asset/coin-greeks");
+        assert!(
+            Harness::header(&retry, "X-BAPI-SIGN").is_some(),
+            "re-signed"
+        );
+        h.reply(retry.id, 200, second);
+        assert!(!h.has_request("/v5/asset/coin-greeks"), "no third read");
+        if second == GREEKS {
+            assert!(
+                h.result(95)
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .contains("\"theta\":-4.0")
+            );
+        } else {
+            let error = failed(&h, 95);
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 95).count(), 1);
+        }
+    }
+}
+
+/// Text that merely resembles a signature refusal never re-reads.
+#[test]
+fn greeks_never_re_read_on_text_alone() {
+    let mut h = ready(true);
+    h.command(Command::FetchAccountGreeks { command: 96 });
+    let first = h.take("/v5/asset/coin-greeks");
+    h.reply(first.id, 401, "error sign: recv_window");
+    assert!(!h.has_request("/v5/asset/coin-greeks"));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 96).count(), 1);
+}

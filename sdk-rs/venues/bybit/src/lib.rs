@@ -1840,6 +1840,8 @@ impl BybitLinear {
                     }
                 }
             }
+            // Managed option reads settle in on_options_response before this
+            // public path; kept typed so no caller can leave one unanswered.
             Then::Options(request) => {
                 let response =
                     response.map_err(|error| VenueError::new(error).kind(ErrorKind::Internal));
