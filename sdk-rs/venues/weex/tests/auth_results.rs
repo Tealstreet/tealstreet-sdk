@@ -3,7 +3,9 @@ use safe_cex_engine::{
     AccountReadScope, Action, AuthOutcome, CredentialSlot, Engine, Event, HttpRequest, Notice,
     Response,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
+use support::setup::Options;
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
 fn drain(e: &mut Engine<WeexFutures>) -> Vec<Action> {
     e.drain_actions().collect()
@@ -45,7 +47,7 @@ fn auth(actions: &[Action]) -> Vec<(CredentialSlot, AccountReadScope, AuthOutcom
         .collect()
 }
 fn started(read: bool) -> (Engine<WeexFutures>, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    let mut e = support::setup::engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
@@ -55,7 +57,7 @@ fn started(read: bool) -> (Engine<WeexFutures>, Vec<Action>) {
         }),
         passphrase: Some("primary-pass".into()),
         ..Options::default()
-    }));
+    });
     e.start(1000.);
     let a = drain(&mut e);
     let r = http(&a, "exchangeInfo");
