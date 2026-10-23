@@ -1,5 +1,6 @@
 //! Sorted HMAC query signing; POST parameters retain their native JSON types.
-use safe_cex_crypto::{Encoding, hmac_sha256};
+#[path = "sign/dispatch.rs"]
+pub mod dispatch;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
 use serde::Serialize;
@@ -7,9 +8,16 @@ use std::collections::BTreeMap;
 
 #[derive(Clone)]
 pub struct Credentials {
-    pub read: Option<safe_cex_engine::ReadCredentials>,
-    pub key: String,
-    pub secret: String,
+    pub read: Option<safe_cex_engine::signing::Identity>,
+    pub primary: safe_cex_engine::signing::Identity,
+}
+impl Credentials {
+    pub fn identity(&self, method: Method) -> &safe_cex_engine::signing::Identity {
+        self.read
+            .as_ref()
+            .filter(|_| method == Method::Get)
+            .unwrap_or(&self.primary)
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -92,29 +100,14 @@ impl Params {
             .collect::<Vec<_>>()
             .join("&")
     }
-    pub fn into_request(
-        mut self,
+    /// Native wire shape, shared by legacy construction and dispatch recipes.
+    pub(crate) fn render(
+        self,
         method: Method,
         path: &str,
-        credentials: Option<&Credentials>,
-        now: f64,
+        mut headers: Vec<(&'static str, String)>,
     ) -> RequestParts {
         let public = unsigned_headers(method);
-        let mut headers = vec![(public[0].0, public[0].1.into())];
-        if let Some(c) = credentials {
-            let read = c.read.as_ref().filter(|_| method == Method::Get);
-            let key = read.map_or(c.key.as_str(), |r| &r.key);
-            let secret = read.map_or(c.secret.as_str(), |r| &r.secret);
-            headers.push(("X-BX-APIKEY", key.to_owned()));
-            if signs(path) {
-                self = self.num("timestamp", safe_cex_engine::time::wire_stamp_ms(now));
-                let signature =
-                    hmac_sha256(secret.as_bytes(), self.query().as_bytes(), Encoding::Hex);
-                self = self.str("signature", &signature);
-            }
-        }
-        // Retain native SOURCE, APIKEY, Content-Type order for signed legacy
-        // requests, rather than appending the credential after public headers.
         headers.push((public[1].0, public[1].1.into()));
         let url = format!("{}{path}", crate::paths::REST);
         if method == Method::Post {
@@ -139,14 +132,4 @@ impl Params {
 /// Listen-key requests carry only the API key; every other path is signed.
 pub fn signs(path: &str) -> bool {
     path != "/openApi/user/auth/userDataStream"
-}
-
-impl Drop for Credentials {
-    fn drop(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read.as_mut() {
-            read.erase_secrets();
-        }
-    }
 }
