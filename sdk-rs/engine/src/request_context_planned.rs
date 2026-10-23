@@ -136,25 +136,8 @@ impl ContextRegistry {
         delivery: Option<&Delivery>,
         error: Option<VenueError>,
     ) -> Result<conditional::PreparedPlanSeal, Error> {
-        if !now.is_finite() {
-            return Err(Error::Invalid);
-        }
-        let body = self.plan_body(plan)?;
+        self.validate_plan_seal_origin(plan, now, delivery)?;
         let owner = self.owner_entry(plan.owner()).expect("live Plan owner");
-        let admitted = delivery.is_none() && owner.deliveries == 0
-            || delivery.is_some_and(|delivery| {
-                body.handoff.as_ref() == Some(delivery)
-                    || body.entries.iter().any(|entry| {
-                        entry.call.as_ref().is_some_and(|call| {
-                            call.matches(delivery)
-                                || (matches!(call.stage, Stage::Ready)
-                                    && call.admission.predecessor.as_ref() == Some(delivery))
-                        })
-                    })
-            });
-        if !admitted {
-            return Err(Error::Revoked);
-        }
         let mut reports = Vec::new();
         let (journal, legacy) = if let Some(writes) = owner.writes.as_ref() {
             let prepared = writes.prepare_seal(error)?;
@@ -182,6 +165,34 @@ impl ContextRegistry {
             sealed: Vec::new(),
             retired: Vec::new(),
         })
+    }
+
+    fn validate_plan_seal_origin(
+        &self,
+        plan: &Plan,
+        now: f64,
+        delivery: Option<&Delivery>,
+    ) -> Result<(), Error> {
+        if !now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        let body = self.plan_body(plan)?;
+        let owner = self.owner_entry(plan.owner()).expect("live Plan owner");
+        let admitted = delivery.is_none() && owner.deliveries == 0
+            || delivery.is_some_and(|delivery| {
+                body.handoff.as_ref() == Some(delivery)
+                    || body.entries.iter().any(|entry| {
+                        entry.call.as_ref().is_some_and(|call| {
+                            call.matches(delivery)
+                                || (matches!(call.stage, Stage::Ready)
+                                    && call.admission.predecessor.as_ref() == Some(delivery))
+                        })
+                    })
+            });
+        if !admitted {
+            return Err(Error::Revoked);
+        }
+        Ok(())
     }
 
     fn commit_plan_seal(
@@ -512,6 +523,7 @@ impl<P> Cx<'_, P> {
                     last_deadline: deadline,
                     writes,
                     mutation_declared: owner.mutation_declared,
+                    credentialed: owner.credentialed,
                     pending: 0,
                     deliveries: 0,
                     intent: owner.intent,
@@ -653,7 +665,7 @@ impl<P> Cx<'_, P> {
             .owner_entry_mut(plan.owner())
             .unwrap();
         let narrowed = match intent {
-            Some(intent) if owner.prepare_leg_intent(&context, intent)? => Some(intent),
+            Some(intent) if owner.prepare_leg_intent(&context, intent, false)? => Some(intent),
             _ => None,
         };
         // Journal enrollment precedes headers, recipe preparation and all queue
@@ -876,6 +888,19 @@ impl<P> Cx<'_, P> {
 
     /// Failure-only retirement; expired authority never creates fresh sends.
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
+        if self
+            .io
+            .http_plan_expiring
+            .as_ref()
+            .is_some_and(|current| current.same_plan(plan))
+        {
+            self.io.request_contexts.validate_plan_seal_origin(
+                plan,
+                self.now,
+                self.io.http_delivery.as_ref(),
+            )?;
+            return Ok(());
+        }
         self.seal_plan(plan, None, Some(error.into()))
     }
 
