@@ -4983,3 +4983,119 @@ explicit legacy completion authority. Callers must ingest command-scoped
 incomplete warnings, gate coverage accordingly and treat typed rejection as
 unavailable history. SDK adapter work does not imply NX runtime adoption.
 [Scope](RUST_OWNED_HISTORY.md).
+
+
+### MEXC Futures history owns accepted pages across native windows
+
+Fills, order history, funding-only income and public trades complete through
+the shared engine CursorHistory/Completion owner. HTTP/native, transport, decode,
+malformed-row and funding-page failures reject with kind `internal` when no
+eligible output page was accepted. After accepted output, an actual failure
+returns only those accepted pages plus one command-scoped Warn
+`history.incomplete`; failed-page streamed prefixes are excluded. This replaces
+the previous whole-read rejection after a later page or older-window failure.
+A validated page with every row filtered out cannot authorize partial recovery.
+Malformed funding-page metadata likewise excludes that page's entire prefix.
+Transport and decode share the existing failure callback and use the Internal
+fallback, without adding write outcomes.
+
+The existing 1000-page cap remains a strict refusal, even after earlier accepted
+rows; a terminal page 1000 succeeds. Each native 90-day window retains its own
+cap, while the logical owner, accepted output, identities and global result limit
+survive window transitions. Output retains native encounter order. Exact
+newest-first window bounds and request sequence, signing/header bytes, page-size
+selection, funding metadata rules, contract units and timestamps are preserved.
+Order-specific fills and public trades stay single-request reads. Existing
+unsupported-ledger/client-ID, credential, market, time, window-count and limit
+admission errors stay unchanged; valid empty output remains complete `[]`.
+
+No history Store publication, SDK argument, row-shape or managed Context
+migration is added. Callers must ingest command-scoped incomplete-query warnings,
+gate coverage accordingly and treat typed rejection as unavailable history.
+This SDK change does not establish NX runtime adoption.
+[Scope](RUST_OWNED_HISTORY.md).
+
+## Phemex bounded fills, closed orders and public trades
+
+Fills, closed-order history and public recent trades use the shared HistoryRows
+owner. Eligible rows remain staged until the entire single response validates.
+HTTP, transport, malformed/oversized body and request-preparation failures reject
+with kind `Internal` where these errors were previously unclassified. Existing
+messages are retained, including the shared wrapper's HTTP diagnostic; these
+read failures gain no write outcome. The failure callback combines transport and
+decode paths, so `Internal` is a fallback rather than a network-only claim.
+Callers must handle typed rejection as unavailable history instead of assuming
+an empty result.
+
+These remain bounded one-response endpoints, with no continuation, earlier
+accepted page or incomplete marker. Private fills/orders keep offset zero and
+the requested limit clamped to 1..200; public trades keep the native recent
+snapshot and 1000-row defensive cap. Valid empty responses succeed as `[]`.
+Stable descending native-time sorting, final limit, output shape, filters,
+dedupe and public equal-tuple occurrence IDs are retained. Client-ID lookup,
+income, pre-request admission, signing/credential selection and rate-pause
+behavior retain their existing contracts. This owner uses legacy numeric
+completion; it does not establish managed request or NX runtime adoption.
+[Scope and controls](RUST_OWNED_HISTORY.md).
+
+## WOO shared history owner and native continuations
+
+WOO fills (v3 and legacy alternatives), closed orders, income and public trades
+share one engine history owner. A terminal HTTP/transport/decode or malformed-page
+failure rejects with `Internal` if no eligible output was previously admitted.
+A later failure returns only admitted rows, preceded by one Warn
+`history.incomplete` event whose `fields.command` identifies the read. Failed
+response prefixes and rows removed by query filters do not authorize recovery.
+Read failures gain no write outcome. The shared callback combines transport and
+decode failures, so `Internal` is the fallback classification rather than a
+network-only claim.
+
+A validated mixed page keeps its immediate per-page `row.skipped` Warn with the
+existing message and timing. It also records missing coverage in the history
+owner; terminal delivery emits one command-scoped incomplete marker, preserving
+the first gap even if subsequent pages succeed. Entirely malformed pages are
+failures, never accepted empty pages. Public trades remain one response: they
+have no earlier page to recover, although a mixed snapshot can carry coverage.
+Callers must correlate the coverage marker before consuming the result, treat
+its rows as incomplete, and handle typed rejection as unavailable history.
+
+Native census/metadata, no-progress, complete-income row-budget, range truncation
+and global 1000-attempt refusals remain strict, with no result or coverage marker.
+A terminal response at attempt 1000 succeeds; a required attempt 1001 is refused
+before sending. The one budget spans symbol alternatives, failed/empty attempts,
+legacy pages and v3 windows. Ledger continuations keep the shared 6000-ms spacing;
+resuming a timer does not consume another attempt.
+
+Unsupported client-ID lookup, pre-request admission and consuming signed-request
+setup refusal keep their legacy behavior, including unclassified setup errors.
+Native endpoints, query/header/signature bytes, symbol alternatives and fallback
+order, defaults/filters, identity and money precision, row shapes, descending
+time/id sort and final limits are preserved. History never publishes live Store
+rows or returns the live cache as complete history. This adoption retains legacy
+numeric completion and does not establish managed requests or NX runtime
+integration. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## Non-pageable history coverage: Kraken Spot, BreakoutProp and Hyperliquid Spot
+
+Fills, order-history and income queries on these adapters still return `[]`
+without a native history read. The shared history owner now emits one Warn
+`history.incomplete` event before that result, with exactly `fields.command`
+identifying the query. The marker survives Error-level filtering. An empty
+Store, missing credentials, public-only mode or live cached orders cannot prove
+history absence; these results are explicitly incomplete, never authoritative
+empty history.
+
+Callers must correlate the coverage marker with the command and gate any
+completeness-dependent use of its result. Gate unsupported polling using venue
+capabilities and deduplicate user-facing alerts rather than displaying a fresh
+alert for every poll; retain each command's coverage fact even when UI alerts are
+suppressed. The engine does not suppress or rate-limit that coverage warning.
+
+Public-trade queries keep their existing refusal text but now report
+`kind=unsupported`, `outcome=notSent`, matching the pre-I/O refusal convention:
+no request was sent. They emit no history result or incomplete marker. Client-ID
+lookup misses keep `{"found":false,"definitive":false}` and no history marker;
+Hyperliquid's existing earlier cache-hit and identity/client-ID shortcuts remain.
+Live Store/cache access stays separate from history. No REST capability, result
+wrapper, managed-request migration or NX runtime adoption is added.
+[Scope and controls](RUST_OWNED_HISTORY.md).
