@@ -1279,6 +1279,16 @@ fn p0_write_accepted_ids_survive(transport_loss: bool) {
         })
         .collect();
     assert_eq!(failures.len(), 1);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.url.ends_with("/sendorder")))
+    );
+    assert!(!matches!(
+        failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected | safe_cex_engine::Outcome::NotSent)
+    ));
     if transport_loss {
         assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
     }
@@ -1292,6 +1302,6 @@ fn p0_write_accepted_ids_survive(transport_loss: bool) {
     );
     assert!(!actions.iter().any(|action| matches!(
         action,
-        Action::Http(_) | Action::Notice(Notice::CommandDone { command: 7, .. })
+        Action::Notice(Notice::CommandDone { command: 7, .. })
     )));
 }
