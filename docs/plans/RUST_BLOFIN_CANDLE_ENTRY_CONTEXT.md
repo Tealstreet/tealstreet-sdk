@@ -4,7 +4,7 @@ Fresh branch feat/rust-blofin-candle-entry-context starts at actual1854/e2b03d55
 Use only landed1830 admission and existing1802 managed candle transport; no
 unlanded history bridge or signer API. Recheck all open PR file lists before
 source/tests. The held PublicTrades consumer is a separate branch with disjoint
-lib.rs regions; no other open PR currently claims this venue source.
+lib.rs regions; its later draft1865 creates the reported whole-file collision.
 
 Full venue inventory remains [RUST_BLOFIN_REQUEST_CONTEXT.md](RUST_BLOFIN_REQUEST_CONTEXT.md).
 Current manifest has24 BloFin occurrences in20 hash rows across5 files. This
