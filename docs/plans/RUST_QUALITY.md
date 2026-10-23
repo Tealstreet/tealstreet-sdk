@@ -978,3 +978,22 @@ repair. This is a OKX-only preparation, using the landed physical-ID seam; final
 The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
 temporary socket inventory records that deferred family. No source or gate
 claim is inherited from the historical two-family experiment.
+
+### Lighter depth Background Read controls
+
+Plan8b700d2ffc8/caf6e4cf1b3/c7a1d352046 precedes RED362e8edb77f (seven compiled
+assertion failures on native dispatch). Fixture correction6311e52cfe0 preserves
+the existing testnet REST host; all original admission assertions remain. All
+seven pass after managed adoption: exact aliases/networks, no preclaim publish,
+original deadline, strict transport/malformed cleanup, stale generation/revision,
+capacity isolation/recovery and300 retirements. All33 focused public/depth tests
+pass, with six original supervision tests and held candle fixtures unchanged.
+Unheld public drivers use shared prepared_actions at their existing event clocks,
+retaining every old data/error/continuity assertion. No local transport helper,
+retry policy or outcome mechanism is added; broad CI remains a separate gate.
+
+Depth frozen source81ac295d25a passes511 Lighter+Binance native tests (49 result
+groups), strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both
+request checks/15 controls. Held request_context_candles.rs and trading.rs remain
+byte-exact to actualdb32; ticker/catalog runtime remains unchanged. Independent
+implementation review and CI do not derive readiness solely from native tests.
