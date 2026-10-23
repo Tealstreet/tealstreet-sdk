@@ -149,7 +149,7 @@ fn aliases_and_networks_park_exact_native_public_get_until_final_claim() {
             let (token, unsigned) = preparation(&actions, true);
             let host = match (robinhood, testnet) {
                 (false, false) => "https://mainnet.zklighter.elliot.ai",
-                (false, true) => "https://testnet.zklighter.elliot.ai",
+                (false, true) => "https://testnet-api.lighter.xyz",
                 (true, false) => "https://api.rh.lighter.xyz",
                 (true, true) => "https://api.rh-testnet.lighter.xyz",
             };
