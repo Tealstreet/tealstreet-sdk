@@ -317,3 +317,8 @@ Authoritative replacement lane IDs are `claude-19pt8s` for ApeX signing and
 slice's `lib.rs`/public candle regions and will integrate its actual pin without
 reshaping the extracted native verdict helper. No private signer/session source
 is migrated by this slice.
+
+
+## Actual error-conversion integration
+
+Porcelain merge `781010fff81` integrates actual #1808 landing `73d04380dd9f21d75bdd023353e10a1ba1c5e801`, including actual #1785 and Bitget #1801. The only conflict was appended CALLERS content: all incoming sections precede the unchanged ApeX appendix, retained once verbatim. The integration guard lists exactly the nine lane-owned paths; no engine/Binance/source reversion or unexpected deletion remains. The exact ApeX-only seven-occurrence manifest prune passes the unchanged checker and all 13 controls. Scoped formatting, strict Clippy and bans pass; the full ApeX/Binance suite is rerunning on this actual tree before readiness. Fresh CI and a separately granted overseer merge window remain required.
