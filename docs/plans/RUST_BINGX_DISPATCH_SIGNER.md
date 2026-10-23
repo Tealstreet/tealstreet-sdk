@@ -349,3 +349,22 @@ legacy ownership and its single temporary provider stage remain separate.
 Write adoption is still a subsequent audit/implementation slice. Consume the
 landed command journal and shared execution-group authority; do not reproduce a
 multi-leg ledger, outcome aggregator or bounded group lifecycle in BingX.
+
+### Authorized exact read-validator stack
+
+The owner permits an exact-head stack on reviewed #1792
+71b2681bc6d286d972cd286d45a1ca99b1be3f0e for the paired-read adapter.
+Its matching actual landing remains mandatory before this family merges. This
+also genuinely integrates actual1783 and the final history chain. Private
+financial writes and joined observer groups remain gated on the owner's shared
+plan/reservation API; no authority is inferred from these read validators.
+Implement only the existing metadata leverage/margin pair described above:
+retain one40s original Read root in its native pending request, derive each20s
+child through http_leg_context, retain original child deadline on signature
+retry, validate_read_http_delivery(root,leg) before decoding/publication or
+companion completion, and use done_context/fail_context on the root. Existing
+native publication fences and current-settings fallback remain unchanged.
+Shared finish handles only child retirement after that logical stage, never
+renewing root authority. Preserve both actual-builder originalRED controls and
+add managed release/refusal/expiry/duplicate/supersession controls; keep session,
+history, writes and hosted admission explicitly at their existing boundaries.
