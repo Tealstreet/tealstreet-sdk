@@ -5261,3 +5261,13 @@ success or permission to retry the entire batch. An `unknown` outcome remains
 uncertain evidence; callers must not upgrade it to confirmed placement. An
 uncaught `runScript` failure still has a string-only `RunScriptResult.error`, so
 Agent/automation hosts must retain the failed write event for these details.
+
+## WOO family WASM venue throughput
+
+Standalone WOO family builds compile the WOO venue crate at opt-level3. This
+applies to public and private WOO execution in browser/Worker and Node family
+artifacts. Callers download a larger module within the existing fixed size cap;
+SDK construction, endpoints, signing, transports, row shapes and errors retain
+their contracts. Combined/native builds continue using the package size profile;
+this supersedes the earlier package-profile description for the WOO family only.
+[Profile and controls](RUST_WOO_PUBLIC_CPU.md).
