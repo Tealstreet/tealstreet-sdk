@@ -3,7 +3,7 @@ use crate::sign::{Credentials, Params, dispatch::Http};
 use crate::{Pending, Signed};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::request_context::{
-    Context, Credential, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
+    Context, Credential, Operation, Policy, RetryEvidence, RetryPolicy, Scope, Session,
 };
 use safe_cex_engine::{CredentialSlot, Cx, ErrorKind, Method, Outcome, RequestId, VenueError};
 
@@ -71,6 +71,50 @@ pub(crate) fn read(
             context: Some(context),
         },
     )
+}
+/// Listen-key upkeep as one session write. Shared dispatch signs at send time;
+/// listen keys present only the API key, so there is no signature resend.
+pub(crate) fn session_write(
+    cx: &mut Cx<'_, Pending>,
+    credentials: &Credentials,
+    session: &Session,
+    method: Method,
+    path: &'static str,
+    params: Params,
+    pending: Pending,
+) -> Queued {
+    let context = match cx.session_context(
+        session,
+        Policy {
+            operation: Operation::Mutation,
+            credential: Some(session_credential(credentials, method)),
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        },
+    ) {
+        Ok(context) => context,
+        Err(_) => return Err((Box::new(pending), refused())),
+    };
+    queue(
+        cx,
+        credentials,
+        Signed {
+            inner: pending,
+            method,
+            path,
+            params,
+            at: None,
+            resent: true,
+            context: Some(context),
+        },
+    )
+}
+pub(crate) fn session_credential(credentials: &Credentials, method: Method) -> Credential {
+    Credential {
+        slot: CredentialSlot::Primary,
+        reference: credentials.identity(method).credential.clone(),
+    }
 }
 pub(crate) fn retry(
     cx: &mut Cx<'_, Pending>,
