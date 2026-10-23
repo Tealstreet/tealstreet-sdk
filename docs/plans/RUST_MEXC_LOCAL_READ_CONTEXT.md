@@ -115,3 +115,36 @@ funding income/ranges and public trades through Command::Query.
    caller and full-map reviews must be clean before requesting a train slot.
    Push the PR for CI; merge only after explicit overseer GO, fresh integration,
    a separate preservation guard and a head-matched merge.
+
+## Implementation checkpoint
+
+Plan commit `91019396462` received clean independent source/adversarial, caller
+and exact-map reviews. Original tests were committed as `d900f2a81fa`, followed
+by fixture correction `273327ce332`, both before the production commit. The correction followed production WIP;
+its qualifying replay used byte-checked untouched c4e02c production in an
+isolated target. Those corrected tests compile and produce **9 assertion
+REDs / 6 passing native controls** in an isolated target directory. Eight REDs
+individually exercise the eight selected branches at full managed capacity;
+the ninth requires typed rejection for nonfinite local command clocks.
+
+The fixture correction keeps the derived from-only bound invalid through slot
+recovery and preserves the existing COMMAND_DUPLICATE diagnostic. The initial
+duplicate-diagnostic mismatch is excluded from RED evidence. An anomalous archive
+run sharing the edited tree's build target is also excluded; the qualifying
+receipt uses an isolated target and untouched source. No test is ignored, and
+no pre-existing native test/assertion was removed or changed; the new fixture
+corrections are recorded separately.
+
+On the adoption, all **15 controls pass**. Focused MEXC/Binance verification
+passes **487 tests across 42 targets**, with zero failed/ignored; strict MEXC
+all-target Clippy and formatting pass. Both request-context checks pass,
+including 15 ratchet controls. The manifest drops only the exact eight selected
+entries and occurrences, **29/29 to 21/21**; all unowned maps remain identical.
+Production changes are exactly eight local terminal substitutions and one native
+error projection calling shared admission/terminal APIs. Successful transport,
+signing, paging, reducers and callback bodies stay unchanged. Independent source,
+caller and full-map implementation review and exact-head CI are separate gates.
+
+Public SDK leverage reads enter through fetchLeverageForSymbol (native op
+fetchLeverage); its existing warning/null catch remains. updateSymbolMetadata
+still awaits its command directly. Neither call site changes in this slice.

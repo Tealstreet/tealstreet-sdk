@@ -5410,3 +5410,25 @@ has adopted the shared lifecycle; its inventory includes Bitunix explicitly.
 Initial HTTP command admission precedes any managed socket side effect. Socket
 registration, retirement, closure and queued work spend a fresh command-entry
 loan even when no new transport identity is allocated.
+
+## MEXC synchronous history and leverage command custody
+
+The five local history admission errors and three local leverage errors now use
+one genuine engine Read command-entry Context before publishing their native
+refusal. At the existing 256-owner bound, the engine publishes one typed initial
+failure instead; a nonfinite local command clock fails with InvalidInput.
+Initial Read admission failures carry no write outcome (outcome=None). An
+existing owner sharing the numeric command ID remains protected by the engine's
+duplicate-command fence. Normal finite errors retain their exact message and
+absent kind/outcome/venue metadata, with no HTTP, signer, timer, AccountAuth or
+Store publication. These local errors use no credential or remote transport.
+
+Affected callers are fetchHistoricalFills, fetchHistoricalOrders,
+fetchIncomeHistory/fetchIncomeHistoryRange, client-order-ID lookup,
+fetchPublicTrades, fetchLeverageForSymbol and updateSymbolMetadata. The public
+SDK method fetchLeverageForSymbol retains its existing warning/null catch;
+updateSymbolMetadata continues to await the command directly. SDK arguments,
+result shapes, history validation precedence and leverage pause/market/primary
+credential precedence stay the same. Valid private/public history and leverage
+reads retain their existing signed/unsigned dispatch, secondary GET selection,
+rows, accepted-page recovery, bounds, revisions and callback behavior.

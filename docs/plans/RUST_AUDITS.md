@@ -2416,3 +2416,16 @@ proof remain open. No allocator change is included in this socket draft.
 The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
 temporary socket inventory records that deferred family. No source or gate
 claim is inherited from the historical two-family experiment.
+
+## MEXC local read refusal custody
+
+Eight immediate native refusal sites now consume shared genuine command entry
+and settle through fail_context: five history admission sites and three leverage
+admission sites. They can no longer bypass the shared command-owner bound or
+nonfinite-clock rejection. Native validation precedence, full finite VenueError
+fields and all successful transport/paging/reducer paths are preserved. This
+closes exactly eight request-legacy fingerprints/occurrences, 29/29 to 21/21;
+private signing, account callbacks, discovery and valid history transport remain
+separately inventoried. The architecture gate is No: only native local error
+projection changes, with no venue-owned lifecycle, timer, credential selection,
+retry, classifier or owner registry. CI/replay/size proof remains a separate gate.
