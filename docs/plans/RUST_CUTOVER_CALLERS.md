@@ -5508,3 +5508,251 @@ adapter fallback or result. Capacity refusal uses the shared Internal error;
 invalid raw clock admission uses InvalidInput, both without a Read financial
 outcome. Repeated commands can recover when unrelated roots retire. Callers need
 no new endpoint, retry or history marker handling for this local-only slice.
+## Bitunix synchronous history Read completion
+
+Local history exits retain their original command Read authority through shared
+entry admission and Context completion. Unsupported client lookup/public trades
+retain their native text and now carry Unsupported/NotSent; nonfinite time keeps
+its text and carries InvalidInput/NotSent. These local refusals still have no
+error companion. Genuine admission refusal uses the engine's typed reason once,
+including invalid clocks and capacity, without issuing opaque work.
+
+Keyless private queries still return `[]` before time validation. Missing or
+unknown fill symbols still return `[]` before finite-time validation. Unsupported
+query checks still precede keyless handling. No range-order guard, timer or
+transport is added. Valid private history dispatch, signatures, paging and
+incompleteness behavior retain their existing contracts and remain legacy-owned.
+
+## Bitrue synchronous history refusal authority
+
+Unsupported complete order/income history and local fill preflight refusals now
+consume genuine initial Read authority and finish in the same callback. Their
+exact native messages, authentication-before-range-before-symbol precedence,
+companion-free timeline and absence of I/O/Store mutation remain. Unsupported
+kinds gain Unsupported/NotSent; local input or missing credential errors gain
+InvalidInput/NotSent. Shared admission refusal emits its one engine-owned typed
+failure, with no adapter fallback or Read financial outcome. Valid private fills,
+lookup and WS FIFO delegates keep their existing separate transport contracts.
+
+## Bitrue local leverage preflight authority
+
+FetchLeverage and FetchMaxLeverage retain unknown-market-before-credential
+validation and their exact native messages. Those four local refusals now use
+shared initial Read authority and Context completion, adding InvalidInput/NotSent
+metadata without a companion, transport or Store mutation. Admission refusal
+emits exactly one shared typed failure with no adapter fallback or Read financial
+outcome. Valid bracket requests and leverage-query joining/refresh/fan-out keep
+their existing separate contracts and remain held for shared signer/group work.
+
+## Phemex local history admission
+
+Synchronous Phemex history/income results use genuine engine command-entry
+admission before publishing their local terminal. Invalid engine time and
+exhausted managed-owner capacity produce one typed engine rejection. Finite
+admitted errors retain their native text, kind=None and outcome=None; unknown
+client-ID markets still return {"found":false,"definitive":false}.
+Native validation order, sixteen-query limits and duplicate-ID behavior remain.
+A local refusal preserves outstanding native history/income owners. Successful
+HTTP, signing, pagination and financial history completion retain their existing
+paths. Affected SDK callers are fetchHistoricalFills, fetchHistoricalOrders,
+fetchIncomeHistory/fetchIncomeHistoryRange, fetchPublicTrades and
+findOrderByClientOrderId through the Rust command bridge.
+
+## MEXC synchronous history and leverage command custody
+
+The five local history admission errors and three local leverage errors now use
+one genuine engine Read command-entry Context before publishing their native
+refusal. At the existing 256-owner bound, the engine publishes one typed initial
+failure instead; a nonfinite local command clock fails with InvalidInput.
+Initial Read admission failures carry no write outcome (outcome=None). An
+existing owner sharing the numeric command ID remains protected by the engine's
+duplicate-command fence. Normal finite errors retain their exact message and
+absent kind/outcome/venue metadata, with no HTTP, signer, timer, AccountAuth or
+Store publication. These local errors use no credential or remote transport.
+
+Affected callers are fetchHistoricalFills, fetchHistoricalOrders,
+fetchIncomeHistory/fetchIncomeHistoryRange, client-order-ID lookup,
+fetchPublicTrades, fetchLeverageForSymbol and updateSymbolMetadata. The public
+SDK method fetchLeverageForSymbol retains its existing warning/null catch;
+updateSymbolMetadata continues to await the command directly. SDK arguments,
+result shapes, history validation precedence and leverage pause/market/primary
+credential precedence stay the same. Valid private/public history and leverage
+reads retain their existing signed/unsigned dispatch, secondary GET selection,
+rows, accepted-page recovery, bounds, revisions and callback behavior.
+
+
+## Signer non-HMAC prerequisites (#1839, e4c07bbd615)
+
+Backfilled after landing (auditor). Additive schema for families that sign
+with more than one key, starting with ApeX's zkLink seed. No family's runtime
+behaviour changes until its admission PR declares the new policy.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| Rust `signing::Identity` gains `extra: BTreeMap<ExtraKey, KeyRef>` (serde: omitted when empty) | native hosts or tests that build `Identity` with a struct literal | `Identity { credential, signing, passphrase, stable_id }` | add `extra: Default::default()` to every literal; JSON without `extra` still deserializes | compile only (Rust literals) |
+| `ExtraKey` vocabulary (`zklinkSeed`) and `Algorithm::ZkLinkContract` (36-byte payload, 64-byte result) | none today | n/a | extra refs are role-bound: usable only by their own algorithm, never presented, interpolated or used as an ordinary MAC key | none |
+| TS setup policy: `secretEncoding` gains `base64Text`, plus an `extra { key, field, encoding }` signing-ref policy (`requiredForPrivate`) | `LocalSignerSetup` callers and the construction-rules `signerSetup` entries | `utf8`, `base64`, `hex`, `pem` encodings; no extra refs | `base64Text` installs the ASCII of padded base64 of the secret as the key; extras are declared per family and validated at trusted setup | add (admitted families only) |
+| `host.d.mts` `SignAlgorithm` adds `'zkLinkContract'` | custom JS host signers that switch on algorithm | previous union | handle or refuse the new member; an unhandled algorithm must refuse, never sign | add |
+| Crypto `zklink` feature (enabled by the ApeX venue only) | WASM family builds | n/a | other family builds are unchanged; a provider without it refuses `ZkLinkContract` as `Unsupported` | none
+
+### Paradex unsigned public-trades Context history consumer
+
+`fetchPublicTrades` keeps the native unsigned GET query, limit1..500/default100,
+row schema, encounter order, first-ID dedupe and truncation. The endpoint remains
+one physical page even when a valid continuation cursor is returned. A missing
+market returns admitted []. Private history, JWT and Stark signing are unchanged.
+
+The command now requires managed prepare/bind/claim support in custom transports.
+Preparation and the full response share the original20s Read bound; stale or
+reused owners cannot emit a result or history.incomplete marker. Malformed or
+failed prefixes reject strictly without returning staged rows. Typed route
+failures retain their engine metadata; released transport loss is Network and
+expiry Timeout, while native malformed/status errors retain Internal. Capacity
+admission precedes missing-market completion. Callers treat a rejected read as
+unavailable history, not an authoritative empty snapshot; no SDK signature changes.
+
+## Hyperliquid local order lookup admission
+
+Perps and spot local `OrderByClientId` results require genuine command admission.
+A cached symbol/client-ID match still returns the complete native Order, including
+optional fields, before validating the client ID or account identity. An invalid
+client ID or absent trading identity still returns exactly
+`{"found":false,"definitive":false}`. These synchronous reads emit no request,
+signing, timer, history marker or Store update.
+
+Invalid entry clocks and full shared owner capacity now return one correlated
+Read failure (`InvalidInput` / `Internal`, respectively), with no financial
+outcome. Callers must handle that failure instead of treating a local lookup as
+unconditionally successful. Reusing the command ID after completion remains valid;
+an active duplicate cannot complete or replace its existing owner. The valid-ID
+uncached spot miss, public-only perps refusal and private perps REST lookup retain
+their native behavior. The exchange-server order reconciliation caller consumes
+the same complete cached result and must retain non-definitive miss handling.
+
+## KuCoin synchronous local Read terminals
+
+Spot query credential refusal still precedes kind, cache and parameter handling.
+Missing credentials retain their message with InvalidInput/NotSent; unsupported
+Spot public trades and futures leverage retain their messages with
+Unsupported/NotSent. Keyed missing-symbol fills, order history and income still
+return[]; cached lookup preserves exact symbol/client/native-ID matching and full
+order JSON. The constant Spot leverage projection retains leverage/buy/sell1 and
+its existing unknown-symbol behavior, preserving unrelated margin settings.
+
+Shared initial Read admission now precedes these local results. Capacity/invalid
+clock refusal emits only the engine terminal; denied leverage reads leave Store
+unchanged and denied cache hits publish nothing. No credentials or route are
+borrowed for these no-I/O branches. Private fills, user-info, cache-miss paging,
+setters and successful margin/position no-ops retain native dispatch and policy.
+
+### Lighter public ticker seed uses managed Background Read
+
+The public `/api/v1/exchangeStats` GET now requires prepare/bind/claim support in
+custom transports, with its original20s bound covering preparation and streamed
+response together. Empty headers/body, all six native list-envelope aliases,
+field conversion, usable partial rows, per-symbol WebSocket precedence and poll/
+startup Backoff behavior remain the same. Invalid envelopes discard staged rows;
+queued, expired or late responses cannot publish ticker changes. Admission failure
+keeps recovery on the existing startup Backoff and completes no user command.
+Successful data and SDK method signatures are unchanged for both Lighter aliases
+and networks; private credentials, trading and catalog fallback stay native.
+
+
+
+## BloFin PublicTrades managed history
+
+PublicTrades uses prepared public HTTP and the original 20-second command Read
+owner. A response must match the released, claimed physical attempt before trade
+rows or identities enter the shared history owner. Expired, unreleased or stale
+responses cannot publish results. Preparation refusals retain their typed kind
+and notSent outcome; released transport failures retain network and expiry
+retains timeout. Failed first pages publish neither a staged prefix nor an
+incompleteness warning.
+
+The native unsigned GET, ordered query parameters, empty headers, default and
+clamped wire limit, millisecond timestamps and trade result fields are preserved.
+The wire limit does not truncate returned rows. Known cross-market rows, native
+row order, unknown-market identity consumption, numeric defaults, contract-size
+quantities and side conversion retain their existing behavior. Private history
+and signing paths keep their existing lifecycle.
+
+## WOO synchronous history refusal custody
+
+WOO local history refusals require genuine initial Read admission before the
+native terminal. Unsupported low-level remote client-ID lookup, invalid symbol/
+explicit range/limit and invalid derived range keep their existing validation
+order and native error messages at finite clocks. Invalid engine entry time now
+returns typed InvalidInput, and shared owner capacity returns Internal, each
+without a financial outcome or new HTTP/signing/timer/Store effects. Rejected
+entry is already completed by the engine; revoked entry cannot complete another
+owner. A settled local command ID remains reusable.
+
+The Rust exchange callers for executions, historical orders, income and public
+trades keep their existing rejection handling. Historical positions through
+`wooJournal` still obtain historical orders through the same API. This low-level
+unsupported lookup is separate from SDK `findOrderByClientOrderId`: with WOO
+clientOrderLookup disabled, that caller retains its existing non-definitive
+open-orders lookup. Valid public/private history keeps native unsigned/signed
+dispatch, credential selection, rows, page recovery, range budgets and pacing.
+No managed HTTP-history or signer adoption is implied.
+
+### Paradex local history results require genuine Read admission
+
+Public-only Fills, OrderHistory and Income still return exact `[]`; public-only
+OrderByClientId still returns `{"found":false,"definitive":false}`, including
+invalid private query inputs. Private-enabled invalid client IDs and explicit
+invalid history bounds retain their exact native messages and unclassified
+Read errors. Fills without a symbol still returns `[]` after bounds validation,
+before authentication. These local results now require genuine engine command
+Read admission: capacity and invalid clock policy produce one correlated typed
+engine refusal without a financial outcome. Successful admission preserves the
+native decision order and introduces no request, signer, timer, Store mutation
+or incomplete marker. PublicTrades retains its existing managed public path;
+other private history, signing, settings and REST fallthrough remain unchanged.
+
+## Exact background read delivery
+
+Adapters publishing a one-leg Background Read use
+`validate_background_read_http_delivery` synchronously in its matching managed
+HTTP callback, before retiring the Context or changing native/cache/Store state.
+Logical liveness alone does not prove that a different live Context belongs to
+that response. Command, Execution and Session owners cannot use this Background-only gate.
+
+Native response validity and publication freshness remain separate checks. A
+failure callback can have valid delivery identity without response data to
+publish. A refused gate publishes no replacement response and grants no command
+completion, retry or send authority. SDK/NX order-error handling and native result
+shapes are unchanged; adopting venue adapters retain their own caller contracts.
+## AsterDEX dispatch signing admission
+
+AsterDEX now signs only through the injected provider at dispatch
+([RUST_ASTER_SIGNER_ADMISSION.md](RUST_ASTER_SIGNER_ADMISSION.md), phases 2-3).
+Caller-visible changes:
+
+- **Setup carries the material.** `key`, `secret`, `auth.privateKey`,
+  `secondary_key` and `secondary_secret` reach the provider through the one-use
+  setup channel (raw WASM constructor argument 3, or native legacy setup). Generic
+  options and `exchange.options` keep only the public `auth.userAddress` /
+  `auth.signerAddress`. Native callers passing `asterdex.privateKey`,
+  `asterdex.readKey`, `asterdex.readSecret` or top-level key/secret beside opaque
+  `signing` refs are refused as invalid input.
+- **Setup resolves `apiVersion`.** TS and native setup resolve V1/V3 from the
+  material's shape and send it explicitly; the venue refuses a missing or
+  contradictory version instead of guessing. Keyless V3 callers should set
+  `extra.asterdexApiVersion`, since nothing inferred admits a keyless account.
+- **Encodings.** V3 wallet keys are trimmed hex, with an optional `0x`/`0X`;
+  V1 HMAC secrets stay byte-exact UTF-8. A whitespace-only key is absent.
+- **Read agent.** With an `auth.privateKey` wallet, the read agent presents its
+  own key and signs with the primary wallet's provider ref (one copy, one
+  revocation point), as before. Otherwise it signs with its own secret.
+- **Main-wallet hint.** The V1 "API Wallet keys require the Main Wallet Address"
+  refusal now happens at setup, with the same message.
+- **Read agent errors fail closed.** An empty read secret, or a V3 read secret
+  that is not hex, refuses setup instead of failing only the signed reads.
+- **`fetchAccount().userId`.** Without an `accountAlias`, V3 falls back to the
+  public signer address, as before. V1 previously fell back to the API key; it
+  now uses the trusted primary `localSigner.primary.stableId` (WEEX precedent)
+  and otherwise fails typed (`unsupported`). It is never the key and never
+  empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
+  Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
+  caller migration.
