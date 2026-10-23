@@ -219,6 +219,22 @@ class RequestContextBan(unittest.TestCase):
                                 and token.removeprefix('r#') in ban.METHODS}
                     self.assertLessEqual(kinds(source), kinds(original))
 
+    def test_bingx_staging_bootstrap_adds_only_the_approved_site_and_shrinks(self):
+        self.assertEqual(set(ban.STAGING_BOOTSTRAPS), {'venues/bingx/src/lib.rs'})
+        for path, (old_map, new_map) in ban.STAGING_BOOTSTRAPS.items():
+            added = {d for d, n in new_map.items() if n > old_map.get(d, 0)}
+            self.assertEqual(added, {'6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219'})
+            self.assertLess(sum(new_map.values()), sum(old_map.values()))
+            old, new = {path: old_map}, {path: new_map}
+            self.assertFalse(ban.check(new, new, [('landed', old)]))
+            for grown in [dict(new_map, **{'f' * 64: 1}), {**new_map, next(iter(added)): 2}]:
+                self.assertTrue(ban.check({path: grown}, {path: grown}, [('landed', old)]))
+            pruned_map = dict(new_map)
+            del pruned_map[next(iter(added))]
+            pruned = {path: pruned_map}
+            # Once the staging site is pruned, nothing can restore it.
+            self.assertTrue(ban.check(new, new, [('landed', old), ('pruned', pruned)]))
+
     def test_history_bootstraps_cannot_expand_or_override_any_newer_pruned_constraint(self):
         for path, (old_map, new_map) in ban.HISTORY_BOOTSTRAPS.items():
             with self.subTest(path=path):

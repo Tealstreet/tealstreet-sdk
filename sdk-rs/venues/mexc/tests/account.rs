@@ -1531,3 +1531,179 @@ fn fractional_socket_open_uses_integer_auth_stamp_and_matching_signature() {
         )
     );
 }
+
+const REPORTER_ASSET: &str = r#"{"currency":"USDT","availableBalance":964,"equity":1000}"#;
+
+struct ReporterHarness {
+    engine: TestEngine,
+    reads: Vec<safe_cex_engine::HttpRequest>,
+    poll: safe_cex_engine::TimerId,
+    poll_at: f64,
+    now: f64,
+    messages: Vec<String>,
+}
+impl ReporterHarness {
+    fn new() -> Self {
+        let (engine, _, reads, poll) = private_started();
+        let mut h = Self {
+            engine,
+            reads,
+            poll,
+            poll_at: 2100.,
+            now: 100.,
+            messages: Vec::new(),
+        };
+        assert!(h.collect().is_empty());
+        h.finish(REPORTER_ASSET, POSITION);
+        h
+    }
+
+    fn collect(&mut self) -> Vec<safe_cex_engine::HttpRequest> {
+        let mut reads = Vec::new();
+        for action in self.engine.drain_actions() {
+            match action {
+                Action::Http(request) => reads.push(request),
+                Action::SetTimer { timer, at_ms } if at_ms == self.now + POLL_MS => {
+                    self.poll = timer;
+                    self.poll_at = at_ms;
+                }
+                Action::Notice(Notice::Event(event))
+                    if event.message.starts_with("MEXC skipped") =>
+                {
+                    self.messages.push(event.message);
+                }
+                _ => (),
+            }
+        }
+        reads
+    }
+
+    fn finish(&mut self, assets: &str, positions: &str) {
+        assert!(self.reads.iter().any(|r| r.url.contains("assets")));
+        assert!(self.reads.iter().any(|r| r.url.contains("open_positions")));
+        for request in std::mem::take(&mut self.reads) {
+            let rows = if request.url.contains("assets") {
+                assets
+            } else if request.url.contains("open_positions") {
+                positions
+            } else {
+                ""
+            };
+            self.engine.handle(
+                self.now,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body: &format!(r#"{{"success":true,"code":0,"data":[{rows}]}}"#),
+                    },
+                },
+            );
+            assert!(self.collect().is_empty(), "no paged or recovery read");
+        }
+    }
+
+    fn cycle(&mut self, assets: &str, positions: &str) {
+        self.now = self.poll_at;
+        self.engine
+            .handle(self.now, Event::TimerFired { timer: self.poll });
+        self.reads = self.collect();
+        self.finish(assets, positions);
+    }
+
+    fn count(&self, message: &str) -> usize {
+        self.messages.iter().filter(|m| *m == message).count()
+    }
+}
+
+#[test]
+fn reporter_clean_coin_namespace_does_not_rearm_position_or_anonymous_keys() {
+    let mut h = ReporterHarness::new();
+    let bad_position = POSITION.replace("\"holdVol\":60", "\"holdVol\":\"bad\"");
+    let positions = format!("{bad_position},{{}}");
+    let bad_asset = r#"{"currency":"USDT","availableBalance":"bad"}"#;
+    let position_message = "MEXC skipped malformed BTCUSDT position row";
+    let anonymous_message = "MEXC skipped position row without a symbol";
+    let coin_message = "MEXC skipped malformed USDT asset row";
+
+    h.cycle(bad_asset, &positions);
+    assert_eq!(h.count(position_message), 1);
+    assert_eq!(h.count(anonymous_message), 1);
+    assert_eq!(h.count(coin_message), 1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.006);
+
+    h.cycle("", &positions); // Clean only the coin namespace.
+    h.cycle(bad_asset, &positions);
+    assert_eq!(h.count(coin_message), 2);
+    assert_eq!(h.count(position_message), 1);
+    assert_eq!(h.count(anonymous_message), 1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.006);
+}
+
+#[test]
+fn reporter_rejected_position_duplicate_does_not_rearm_but_partial_mapping_does() {
+    let mut h = ReporterHarness::new();
+    let bad = POSITION.replace("\"holdVol\":60", "\"holdVol\":\"bad\"");
+    let other = bad.replace("BTC_USDT", "ETH_USDT");
+    let rejected = format!("{bad},{other}");
+    let btc_message = "MEXC skipped malformed BTCUSDT position row";
+    let eth_message = "MEXC skipped malformed ETHUSDT position row";
+
+    h.cycle(REPORTER_ASSET, &rejected);
+    assert_eq!(h.count(btc_message), 1);
+    assert_eq!(h.count(eth_message), 1);
+    h.cycle(REPORTER_ASSET, &format!("{bad},{POSITION},{other}"));
+    h.cycle(REPORTER_ASSET, &rejected);
+    assert_eq!(h.count(btc_message), 1, "rejected duplicate cannot rearm");
+    assert_eq!(h.count(eth_message), 1);
+
+    // A named unrelated rejection permits BTC's exact mapped-key recovery.
+    // An anonymous rejection would protect every identity and mask this path.
+    h.cycle(REPORTER_ASSET, &format!("{POSITION},{other}"));
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.006);
+    h.cycle(REPORTER_ASSET, &rejected);
+    assert_eq!(h.count(btc_message), 2);
+    assert_eq!(h.count(eth_message), 1);
+
+    h.cycle(REPORTER_ASSET, "");
+    h.cycle(REPORTER_ASSET, &rejected);
+    assert_eq!(
+        h.count(btc_message),
+        3,
+        "clean positions rearm the namespace"
+    );
+    assert_eq!(h.count(eth_message), 2);
+}
+
+#[test]
+fn reporter_asset_duplicate_filters_rearm_while_named_partial_peer_recovers() {
+    let mut h = ReporterHarness::new();
+    let bad = r#"{"currency":"USDT","availableBalance":"bad"}"#;
+    let other = r#"{"currency":"USDC","availableBalance":"bad"}"#;
+    let rejected = format!("{bad},{other}");
+    let usdt_message = "MEXC skipped malformed USDT asset row";
+    let usdc_message = "MEXC skipped malformed USDC asset row";
+
+    h.cycle(&rejected, "");
+    assert_eq!(h.count(usdt_message), 1);
+    assert_eq!(h.count(usdc_message), 1);
+    h.cycle(&format!("{bad},{REPORTER_ASSET},{other}"), "");
+    h.cycle(&rejected, "");
+    assert_eq!(
+        h.count(usdt_message),
+        1,
+        "rejected duplicate stays remembered"
+    );
+    assert_eq!(h.count(usdc_message), 1);
+
+    h.cycle(&format!("{REPORTER_ASSET},{other}"), "");
+    assert_eq!(h.engine.store().balance().total, 1000.);
+    h.cycle(&rejected, "");
+    assert_eq!(
+        h.count(usdt_message),
+        2,
+        "mapped coin rearmed within a partial read"
+    );
+    assert_eq!(h.count(usdc_message), 1);
+}
