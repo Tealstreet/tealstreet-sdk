@@ -552,6 +552,9 @@ pub enum Claim {
     WaitUntil(f64),
 }
 
+#[path = "request_context_group_lifecycle.rs"]
+pub(crate) mod group_lifecycle;
+
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
@@ -683,10 +686,7 @@ impl Lifecycle {
         Ok(permit)
     }
 
-    /// Synchronous final claim, immediately followed by prepared transport
-    /// handoff. `admit` is called only after every other fallible check passes.
-    /// A denied/expired request consumes no pacing slot. There are no fallible
-    /// checks after admission commits; its lease must be validated beforehand.
+    /// Single requests retain their existing mutable admission hook.
     pub fn claim(
         &mut self,
         permit: Permit,
@@ -694,46 +694,18 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
-        let State::Permitted(route, expected) = self.state else {
-            return Err(Error::State);
+        let draft = match self.prepare_claim(permit, time, pacing)? {
+            group_lifecycle::ClaimPreparation::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
+            group_lifecycle::ClaimPreparation::Ready(draft) => draft,
         };
-        if permit != expected {
-            return Err(Error::Revoked);
-        }
-        let mut release = HttpRelease::new(self.attempt, time, self.signature, self.deadline)?;
-        if route.expires_at.is_some_and(|at| time.raw_ms >= at)
-            || self.signed_revision.is_some_and(|rev| rev != time.revision)
-            || time.raw_ms >= self.fresh_until
-        {
-            return Err(Error::Stale);
-        }
-        if let Some(at) = pacing.check(self.context.pacing, time.raw_ms)? {
-            return if at >= self.deadline {
-                Err(Error::TimedOut)
-            } else {
-                Ok(Claim::WaitUntil(at))
-            };
-        }
-        let admission = match admit(&release) {
-            Ok(admission) => admission,
+        let ready = match admit(draft.release()).and_then(|admission| draft.admit(admission)) {
+            Ok(ready) => ready,
             Err(error) => {
                 self.state = State::Settled(None);
                 return Err(error);
             }
         };
-        match admission {
-            Admission::Unscheduled => {}
-            Admission::Scheduled(lease) => {
-                release.response_lease = Some(release.deadline.min(lease.0))
-            }
-            Admission::Denied => {
-                self.state = State::Settled(None);
-                return Err(Error::Revoked);
-            }
-        }
-        pacing.released(self.context.pacing, time.raw_ms);
-        self.state = State::Released(release);
-        Ok(Claim::Released(release))
+        Ok(Claim::Released(self.commit_claim(ready, pacing)))
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes

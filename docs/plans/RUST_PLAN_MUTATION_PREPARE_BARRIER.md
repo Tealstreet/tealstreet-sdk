@@ -3,7 +3,8 @@
 G2b plan-first checkpoint, 2026-10-24. Owner codex-hcmq3f; first consumer
 claude-4yjlw0's BloFin hedged leverage. Core review codex-uufub4, classification
 review claude-dazzy3. Base actual a828ede7ebb54bc9c032ea61365213abac5e3dca.
-Plan and original-source REDs only; no frozen runtime API or merge permission.
+Plan, original-source REDs and a private Lifecycle extraction checkpoint;
+the group runtime remains unimplemented. No merge permission.
 G2 mixed-leg runtime stacks on this slice, not the converse.
 
 ## Native requirement and scope
@@ -373,3 +374,19 @@ route/provider completion, declaration-order entropy, stale one-member reprepare
 prior-step Partial/Unknown and duplicate/retired group permits. Then the BloFin
 native consumer proves its exact long/short wire and failure behavior. No claim
 of whole-family custody readiness or removal of legacy inventory in this slice.
+
+### First source checkpoint: single-claim extraction
+
+Actual 60d4b8cf9ebf74aa8064d1c16a5831a6707d50ab is genuinely merged. Core
+review cleared exactly the Lifecycle::claim wrapper and the private child module
+request_context_group_lifecycle.rs before editing the held source. The wrapper
+preserves validation order, mutable admission, Scheduled leases, callback errors,
+Denied settlement, pacing and release behavior. ClaimDraft finalizes admission
+into a move-only PreparedClaim; both remain internal to the synchronous call.
+The commit's debug assertion is diagnostic, not future group-token validation.
+
+Engine order-lock marking, signing receipt observation, metadata projection,
+Plan admission and host behavior are untouched. The original two barrier REDs
+remain ignored: this extraction alone does not hold or release a group. Exact
+group orchestration, coupled Lifecycle/pacing validation and host hunks still
+require separate source agreement before edits.
