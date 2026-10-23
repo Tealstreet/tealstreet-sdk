@@ -160,18 +160,24 @@ test('all installs follow restore and save cache immediately only on install suc
   assert.ok(install.indexOf('install.cjs') < install.indexOf('uses: actions/cache/save@v6'));
   assert.ok(install.includes("if: inputs.cache-hit != 'true' && inputs.cache-key != ''"));
   assert.ok(!install.includes('always()'));
-  let count = 0;
-  for (const file of ['ci.yml', 'rust.yml', 'exchange-mcp-release.yml']) {
+  const callers = {
+    'ci.yml': ['ci'],
+    'rust.yml': ['families', 'browser', 'gate', 'cpu-plan', 'cpu-certify'],
+    'exchange-mcp-release.yml': ['release'],
+  };
+  for (const [file, expected] of Object.entries(callers)) {
     const source = readFileSync(join(root, '.github/workflows', file), 'utf8');
     assert.ok(!source.includes('run: corepack yarn install'));
-    for (const job of source.split(/^  [\w-]+:\n/m).slice(1)) {
+    const jobs = source.split(/^  ([\w-]+):\n/m), installed = [];
+    for (let index = 1; index < jobs.length; index += 2) {
+      const job = jobs[index + 1];
       if (!job.includes('uses: ./.github/actions/install-yarn')) continue;
-      count++;
+      installed.push(jobs[index]);
       assert.ok(job.indexOf('uses: ./.github/actions/prepare-yarn') < job.indexOf('uses: ./.github/actions/install-yarn'));
       for (const field of ['cache-dir', 'cache-key', 'cache-hit']) assert.ok(job.includes(`${field}: \${{ steps.yarn.outputs.${field} }}`));
     }
+    assert.deepEqual(installed, expected, file);
   }
-  assert.equal(count, 5);
   const rust = readFileSync(join(root, '.github/workflows/rust.yml'), 'utf8');
   assert.equal(rust.match(/'\.github\/actions\/install-yarn\/\*\*'/g)?.length, 2);
 });
