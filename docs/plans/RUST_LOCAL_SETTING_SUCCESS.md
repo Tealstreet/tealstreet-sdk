@@ -134,3 +134,28 @@ owner, with one exact generation and no journal or Context. Only its private
 prepared completion origin can seal it. Review the phase/match-arm and terminal
 reservation diff before changing held shared files; no second registry or
 general empty-journal success is authorized by these plan pins.
+
+## Original existing-API checkpoint
+
+`engine/tests/local_setting_success.rs` uses the real command entry and an
+explicit old-API adapter: initial keyless Mutation admission, Store projection,
+then `done_context`. Only that adapter changes at cutover. It demonstrates the
+missing local-success contract, not a claim that the native numeric success was
+already broken.
+
+With optional production features off (`test-support` only), and with all
+features, each run executes 3 assertion REDs / 5 GREEN / 0 ignored:
+
+- RED: the Store projection runs, but the empty journal emits no success.
+- RED: a duplicate receipt for a legacy command still awaiting its reply can
+  reach the projection through ordinary admission.
+- RED: the old generic adapter also allows projection under a Read dispatch.
+- GREEN: original native numeric success, existing typed keyless Mutation
+  failure, exact capacity refusal before projection, managed-generation
+  duplicate protection, and timer-callback entry denial.
+
+No compile/setup failure is counted as RED. Strict all-feature Clippy on this
+target passes. The existing released-write journal control
+`write_success_seals_once_including_a_recovered_native_refusal` independently
+passes (1 test); no empty-journal or physical write rule was weakened.
+Shared engine runtime and all consumer files remain unchanged at this checkpoint.

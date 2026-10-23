@@ -1,0 +1,270 @@
+//! Original existing-API adapter; no new-method compile failures count as REDs.
+mod support;
+
+use safe_cex_engine::book::Book;
+use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy};
+use safe_cex_engine::{
+    Action, Command, CommandId, Cx, Engine, ErrorKind, Event, Notice, Outcome, Response, SocketId,
+    Store, TimerId, Venue, VenueError,
+};
+use std::sync::{Arc, Mutex};
+
+fn mutation() -> Policy {
+    Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
+// Only this adapter changes at cutover. The current truthful Mutation path
+// projects the local setting but cannot seal its empty journal as success.
+fn local_success<P>(cx: &mut Cx<'_, P>, project: impl FnOnce(&mut Store)) -> Result<(), String> {
+    let context = cx
+        .admit_http_command(mutation())
+        .map_err(|e| format!("{e:?}"))?;
+    project(cx.store);
+    cx.done_context(&context, "[]".into())
+        .map_err(|e| format!("{e:?}"))
+}
+
+#[derive(Default)]
+struct Observed {
+    projections: usize,
+    results: Vec<Result<(), String>>,
+}
+
+struct Probe {
+    legacy_success: bool,
+    roots: Vec<Context>,
+    observed: Arc<Mutex<Observed>>,
+}
+
+impl Probe {
+    fn local(&mut self, cx: &mut Cx<'_, ()>) {
+        let observed = self.observed.clone();
+        let result = local_success(cx, |store| {
+            observed.lock().unwrap().projections += 1;
+            store.set_hedged(false);
+        });
+        self.observed.lock().unwrap().results.push(result);
+    }
+}
+
+impl Venue for Probe {
+    type Pending = ();
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        cx.store.set_hedged(true);
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+        match command {
+            Command::SetPositionMode {
+                command, symbol, ..
+            } => match symbol.as_deref() {
+                Some("hold") => self.roots.push(cx.admit_http_command(mutation()).unwrap()),
+                Some("legacy-hold") => {}
+                Some("refuse") => {
+                    if let Ok(root) = cx.admit_http_command(mutation()) {
+                        cx.fail_context(
+                            &root,
+                            VenueError::new("native unsupported setting")
+                                .kind(ErrorKind::Unsupported),
+                        )
+                        .unwrap();
+                    }
+                }
+                Some("timer") => {
+                    cx.set_timer(10.);
+                }
+                _ if self.legacy_success => {
+                    self.observed.lock().unwrap().projections += 1;
+                    cx.store.set_hedged(false);
+                    cx.done(command, "[]".into());
+                }
+                _ => self.local(cx),
+            },
+            Command::FetchStpMode { .. } => self.local(cx),
+            _ => panic!("unexpected probe command"),
+        }
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, ()>, _: TimerId) {
+        self.local(cx);
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+    fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+    fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+    fn book(&self, _: &str) -> Option<&Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+
+fn engine(legacy_success: bool) -> (Engine<Probe>, Arc<Mutex<Observed>>) {
+    let observed = Arc::new(Mutex::new(Observed::default()));
+    let mut e = support::seeded_engine(Probe {
+        legacy_success,
+        roots: Vec::new(),
+        observed: observed.clone(),
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    (e, observed)
+}
+
+fn setting(command: CommandId, symbol: &str) -> Command {
+    Command::SetPositionMode {
+        command,
+        hedged: false,
+        symbol: Some(symbol.into()),
+    }
+}
+
+fn assert_no_io(actions: &[Action]) {
+    assert!(actions.iter().all(|a| matches!(a, Action::Notice(_))));
+}
+
+fn successes(actions: &[Action], id: CommandId) -> usize {
+    actions
+        .iter()
+        .filter(|a| {
+            matches!(a, Action::Notice(Notice::CommandDone { command, result })
+            if *command == id && result == "[]")
+        })
+        .count()
+}
+
+#[test]
+fn a_genuine_keyless_local_mutation_projects_and_finishes_once_without_io() {
+    let (mut e, observed) = engine(false);
+    e.handle(1., Event::Command(setting(7, "local")));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert!(!e.store().hedged());
+    assert_eq!(observed.lock().unwrap().projections, 1);
+    assert_eq!(
+        successes(&actions, 7),
+        1,
+        "empty Mutation journal currently refuses success"
+    );
+    assert_eq!(observed.lock().unwrap().results, [Ok(())]);
+}
+
+#[test]
+fn the_original_native_numeric_local_success_is_a_working_control() {
+    let (mut e, observed) = engine(true);
+    e.handle(1., Event::Command(setting(7, "local")));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert!(!e.store().hedged());
+    assert_eq!(observed.lock().unwrap().projections, 1);
+    assert_eq!(successes(&actions, 7), 1);
+}
+
+#[test]
+fn a_duplicate_of_a_live_legacy_id_cannot_project_a_new_local_setting() {
+    let (mut e, observed) = engine(false);
+    e.handle(0., Event::Command(setting(7, "legacy-hold")));
+    e.drain_actions().for_each(drop);
+    e.handle(1., Event::Command(setting(7, "local")));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert_eq!(successes(&actions, 7), 0);
+    assert!(
+        e.store().hedged(),
+        "duplicate receipt must refuse before Store projection"
+    );
+    assert_eq!(observed.lock().unwrap().projections, 0);
+}
+
+#[test]
+fn a_read_entry_cannot_borrow_local_setting_success() {
+    let (mut e, observed) = engine(false);
+    e.handle(1., Event::Command(Command::FetchStpMode { command: 7 }));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert_eq!(successes(&actions, 7), 0);
+    assert!(
+        e.store().hedged(),
+        "Read dispatch is not a local Setting entry"
+    );
+    assert_eq!(observed.lock().unwrap().projections, 0);
+}
+
+#[test]
+fn existing_managed_generation_denies_duplicate_before_projection() {
+    let (mut e, observed) = engine(false);
+    e.handle(0., Event::Command(setting(7, "hold")));
+    e.drain_actions().for_each(drop);
+    e.handle(1., Event::Command(setting(7, "local")));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert!(e.store().hedged());
+    assert_eq!(observed.lock().unwrap().projections, 0);
+}
+
+#[test]
+fn capacity_refusal_preserves_store_and_native_typed_initial_failure() {
+    let (mut e, observed) = engine(false);
+    for id in 100..356 {
+        e.handle(0., Event::Command(setting(id, "hold")));
+        e.drain_actions().for_each(drop);
+    }
+    e.handle(1., Event::Command(setting(7, "local")));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert!(e.store().hedged());
+    assert_eq!(observed.lock().unwrap().projections, 0);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 7, error })
+        if error == &Error::Capacity.venue_error()))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn native_keyless_mutation_failure_keeps_its_existing_authority_path() {
+    let (mut e, observed) = engine(false);
+    e.handle(1., Event::Command(setting(7, "refuse")));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert!(e.store().hedged());
+    assert_eq!(observed.lock().unwrap().projections, 0);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 7, error })
+        if error.kind == Some(ErrorKind::Unsupported) && error.outcome == Some(Outcome::NotSent)))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn timer_callback_cannot_project_or_finish_a_local_setting() {
+    let (mut e, observed) = engine(false);
+    e.handle(0., Event::Command(setting(7, "timer")));
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms: 10. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(10., Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_no_io(&actions);
+    assert!(e.store().hedged());
+    assert_eq!(observed.lock().unwrap().projections, 0);
+    assert_eq!(successes(&actions, 7), 0);
+}
