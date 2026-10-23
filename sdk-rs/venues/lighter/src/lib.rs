@@ -354,31 +354,31 @@ impl Lighter {
             .candles
             .get(&(symbol.clone(), interval))
             .map_or(0, |state| state.revision);
-        let context = match cx.http_context(
-            command.map_or(Scope::Background, Scope::Command),
-            Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            },
-        ) {
-            Ok(context) => context,
-            Err(_) => {
-                // Issuance refusal has no Context; this is the remaining legacy site.
-                let error = VenueError::new("Lighter candle lifecycle is unavailable")
-                    .kind(ErrorKind::Internal);
-                if let Some(c) = command {
-                    cx.fail(c, error)
-                } else if let Some(state) = self
-                    .candles
-                    .get_mut(&(symbol, interval))
-                    .filter(|state| Some(state.generation) == generation)
-                {
-                    state.in_flight = false;
-                }
+        let policy = Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let context = if command.is_some() {
+            let Ok(context) = cx.admit_http_command(policy) else {
                 return;
+            };
+            context
+        } else {
+            match cx.http_context(Scope::Background, policy) {
+                Ok(context) => context,
+                Err(_) => {
+                    if let Some(state) = self
+                        .candles
+                        .get_mut(&(symbol, interval))
+                        .filter(|state| Some(state.generation) == generation)
+                    {
+                        state.in_flight = false;
+                    }
+                    return;
+                }
             }
         };
         let result = (|| {
