@@ -258,3 +258,23 @@ and31 to28 entries; every unowned map remains identical. Final independent
 source/adversarial, caller and full-map reviews are clean, architecture No.
 Actual landing integration, fresh CI/raw/size/timing proof and the overseer's
 merge window remain separate requirements; no merge/deployment is claimed.
+
+### Canonical command-entry follow-up plan
+
+Actual #1808 landing `73d04380dd9` is integrated. Consume only reviewed composed
+#1830 `66cb32e89588e60bd736d3ff121f5ce52bfc4f3b` (already includes reviewed
+#1816/#1838); genuine ingress uses `admit_http_command(Policy)` without a numeric
+argument. Both Rejected and Revoked return without adapter completion; Rejected
+already published the one engine failure. Remove the numeric command parameter
+from the public-depth helper and its caller, and delete the last pre-Context
+`cx.fail` and obsolete Scope/CommandId imports. No source edits to shared APIs.
+
+Before this move, separately commit original-RED controls for nonfinite command
+time and the 257th owner after filling the existing 256-owner bound. Each must
+emit one typed InvalidInput/Internal initial read rejection, no write outcome,
+no transport/sign work or credential evidence; existing owners remain usable.
+The invalid-time command ID can be reused through a later valid Context. Keep
+all prior five lifecycle controls and every native depth assertion unchanged.
+Then prune only the now-empty depth_query.rs inventory map, making Crypto totals
+30 occurrences/27 entries (35/31 at the original plan pin). Original raw budget,
+public route/no-retry and read transport/expiry behavior remain unchanged.
