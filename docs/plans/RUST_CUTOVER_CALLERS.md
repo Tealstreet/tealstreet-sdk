@@ -4983,3 +4983,34 @@ explicit legacy completion authority. Callers must ingest command-scoped
 incomplete warnings, gate coverage accordingly and treat typed rejection as
 unavailable history. SDK adapter work does not imply NX runtime adoption.
 [Scope](RUST_OWNED_HISTORY.md).
+
+
+### MEXC Futures history owns accepted pages across native windows
+
+Fills, order history, funding-only income and public trades complete through
+the shared engine CursorHistory/Completion owner. HTTP/native, transport, decode,
+malformed-row and funding-page failures reject with kind `internal` when no
+eligible output page was accepted. After accepted output, an actual failure
+returns only those accepted pages plus one command-scoped Warn
+`history.incomplete`; failed-page streamed prefixes are excluded. This replaces
+the previous whole-read rejection after a later page or older-window failure.
+A validated page with every row filtered out cannot authorize partial recovery.
+Malformed funding-page metadata likewise excludes that page's entire prefix.
+Transport and decode share the existing failure callback and use the Internal
+fallback, without adding write outcomes.
+
+The existing 1000-page cap remains a strict refusal, even after earlier accepted
+rows; a terminal page 1000 succeeds. Each native 90-day window retains its own
+cap, while the logical owner, accepted output, identities and global result limit
+survive window transitions. Output retains native encounter order. Exact
+newest-first window bounds and request sequence, signing/header bytes, page-size
+selection, funding metadata rules, contract units and timestamps are preserved.
+Order-specific fills and public trades stay single-request reads. Existing
+unsupported-ledger/client-ID, credential, market, time, window-count and limit
+admission errors stay unchanged; valid empty output remains complete `[]`.
+
+No history Store publication, SDK argument, row-shape or managed Context
+migration is added. Callers must ingest command-scoped incomplete-query warnings,
+gate coverage accordingly and treat typed rejection as unavailable history.
+This SDK change does not establish NX runtime adoption.
+[Scope](RUST_OWNED_HISTORY.md).

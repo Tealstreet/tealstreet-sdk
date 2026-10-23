@@ -2181,3 +2181,16 @@ refusals remain strict. Failed streamed prefixes and filtered rows never authori
 recovery. Request builders, signing, timers, account reducers and Store are
 unchanged. Exact request inventory shrinks from thirteen to nine entries by
 removing four numeric finalizers, with no additions or checker changes.
+
+
+## MEXC accepted-page history ownership
+
+MEXC history adopts existing CursorHistory rather than owning a result vector,
+identity set and numeric finalization. Window transitions retain the same output
+owner and identity ledger while resetting the existing native per-window page
+budget. Only validated pages authorize partial recovery; failed prefixes and
+filtered rows do not. The cap stays strict. Request builder, native row mapping,
+account state and Store publication policy are unchanged. Exact request legacy
+inventory prunes nine entries to six, no additions or checker/bootstrap changes.
+Kraken Spot, BreakoutProp and Hyperliquid Spot remain explicitly classified as
+non-pageable inherited stubs, with no new native history capability.

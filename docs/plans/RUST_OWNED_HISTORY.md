@@ -2263,3 +2263,86 @@ The exact inventory is a pure thirteen-to-nine prune, every other map and the
 checker remain identical. Strict Clippy/fmt, bans and inventory controls pass.
 Final draft evidence and later dependency integrations belong in the PR body;
 no local release WASM or replay performance run is used.
+
+
+## Known non-pageable inherited history boundaries
+
+At actual `9a48b645d49c9fa7b940a5cf361a38242cae6b41`, Kraken Spot,
+BreakoutProp and Hyperliquid Spot have no native pageable history implementation.
+Their fills/orders/income paths inherit empty arrays; lookup returns an existing
+non-definitive miss (Hyperliquid can first find a stored live order), and public
+trades reject as unsupported/unimplemented. These empty legacy results do not
+prove complete native history. There is no native pager to adopt and this
+fan-out adds no REST history capability or invented completeness marker.
+Kraken Spot's current inherited-history control passes unchanged. The owner
+explicitly directed documenting and skipping these stubs.
+
+## MEXC shared history owner (2026-10-23)
+
+Plan-first from actual `9a48b645d49c9fa7b940a5cf361a38242cae6b41`.
+Scope: MEXC history.rs and its existing history integration tests, pure legacy
+inventory pruning, and OWNED_HISTORY/AUDITS/QUALITY/CALLERS additions. No account,
+lib, signing, native recipe, shared engine, host, SDK, workflow or dependency
+source changes. The account reporter owner confirmed these history regions clear.
+
+Replace Request's numeric completion, result vector and output identity set with
+one boxed CursorHistory<Row>. Native page numbers become opaque continuation
+tokens for CursorWalk(MAX_PAGES=1000). Keep the shared paging::windows-generated
+newest-first 90-day windows and optional native time parameters; a fully admitted
+window end advances Done, then restart_stage keeps the same owner/accepted rows/
+identities and resets the page budget exactly as the current native per-window
+cap does. No second pager/completion implementation, global cap change, sorting,
+range overlap/gap change or new engine API.
+
+Stage eligible rows only and admit them after HTTP/native envelope, row validity
+and funding metadata validation. Limits count accepted plus staged output.
+Actual HTTP/transport/decode/malformed-row/funding-page failures reject Internal
+before eligible accepted output; later failures return accepted prior pages with
+one owned command warning and discard the failed prefix. Filtered native rows
+cannot authorize recovery. Pagination budget and impossible owner lifecycle
+remain strict even after output. Existing unsupported-ledger, identity, market,
+range, window-count and limit admission errors stay unchanged. Numeric
+Completion stays explicitly legacy, never managed Context authority.
+
+Preserve exact request/signing builder, page-size selection, funding resultList/
+currentPage/totalPage rules, order-ID single-request fills, public-trade single
+request and ordinal identities, units/contract-size conversions, timestamps,
+order mapping, stable dedupe, encounter order, global output limit and Store
+isolation. Native repeat/no-progress behavior is unchanged (no added stall-on-
+empty/no-new flags). A terminal page 1000 succeeds; one requiring 1001 rejects.
+
+Original controls run first; commit regression-only controls before production:
+typed first-failure and filtered-only refusal, accepted-page HTTP/transport loss,
+malformed continuation-prefix exclusion, funding continuation failure, older
+window failure, identity retention across windows and exact terminal/budget
+behavior. Explicitly supersede the existing whole-read continuation rejection.
+Compatibility controls retain exact window requests, native formats, limit/
+single-page behavior, empty success and concurrent command attribution.
+
+Plan self-audit: all CursorHistory methods exist on this actual base; restart
+after a completed window retains output identities but resets native per-window
+budget; accepted+staged limits preserve prefix selection; error finish drops
+pending rows. Native builder/mapping blocks can be byte-compared independently.
+Run focused engine/MEXC native tests, strict all-target Clippy/fmt/bans and full
+request-context map/checker controls (four Cargo jobs). Corepack Yarn only; never
+bare/Volta yarn, npx or account-policy. No local release WASM/full replay/timing
+sweeps. Source and adversarial/caller review precede a draft, caller changes stay
+in the same PR, actual #1784 build input is a final-proof prerequisite, and the
+existing landing queue/announced separate guard and merge rules remain.
+
+
+MEXC local implementation receipt: plan `3a6257c19df` precedes regression-only
+`94bceed7a93`. Original ten controls pass; the five added original-source tests
+produce four assertion RED groups and one page-cap compatibility pass. Corrected
+source passes all eighteen history controls, including the additional window
+identity/order, concurrent marker and single-request/global-limit cases. The
+focused engine/MEXC run passes 746 native tests. Strict all-target Clippy/fmt,
+bans and the request-context checker plus thirteen checker controls pass.
+
+Source/native-preservation and separate adversarial/test/caller self-audits are
+CLEAN: admission/window tiling, entire request/header builder and native mapping
+blocks are byte-identical to the requested actual base. Full-map comparison
+proves a pure nine-to-six MEXC history prune, every other map/checker unchanged.
+This is local evidence, with independent exact-head review and source-bound
+current CI/final artifact proof tracked in the draft PR. No new native capability
+is implied for the documented Spot/Breakout stubs.

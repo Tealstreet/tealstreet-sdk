@@ -709,3 +709,18 @@ Existing funding spacing and delayed-timer, nested algo, canonical ID, native
 identity, empty/malformed page and final-format tests remain in the focused
 Orderly suite. Two old whole-read continuation/algo-error assertions are explicitly
 superseded by accepted-only partial output plus the shared incomplete warning.
+
+
+## MEXC history owner controls
+
+Original-source tests pin the native ten-control history baseline. New failing-
+first assertions cover typed first/filtered-only failures, accepted-page loss,
+funding page-prefix rollback and older-window failure. The original-source page-
+1000 compatibility control passes separately. Corrected controls additionally
+check identity retention across windows and native encounter order, concurrent
+command markers/empty success, single-request order fills and exact global
+limits. One old whole-read continuation refusal is explicitly superseded by
+accepted-only partial output plus the engine warning. Existing tests retain
+exact native window request sequence, units/IDs, funding and public-trade shapes,
+deduplication, and limited newest-first reads. No local release WASM/replay timing
+run substitutes for the current-head CI and final artifact proof.
