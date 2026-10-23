@@ -1,5 +1,6 @@
 //! Adversarial source ordering: a recovered stream overtakes its fallback read.
 mod support;
+use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Command, Engine, Event};
 use safe_cex_venue_lighter::{Lighter, Options};
 use support::{META, NOW, reply_at};
@@ -47,8 +48,8 @@ fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
     e.take_frame(NOW);
 
     e.handle(NOW + 120_000.0, Event::TimerFired { timer: poll });
-    let fallback = e
-        .drain_actions()
+    let fallback = prepared_actions(&mut e, NOW + 120_000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.contains("/candles?") => Some(r),
             _ => None,
@@ -127,7 +128,7 @@ fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
         subscribe(&mut e, NOW);
         e.drain_actions().for_each(drop);
         e.handle(NOW + 120_000.0, Event::TimerFired { timer: poll });
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = prepared_actions(&mut e, NOW + 120_000.0);
         let old = actions
             .iter()
             .find_map(|a| match a {
@@ -153,7 +154,7 @@ fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
         e.drain_actions().for_each(drop);
         e.take_frame(NOW + 120_002.0);
         e.handle(NOW + 240_003.0, Event::TimerFired { timer: next_poll });
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = prepared_actions(&mut e, NOW + 240_003.0);
         assert!(
             actions
                 .iter()
@@ -188,7 +189,8 @@ fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
         }
         e.handle(NOW + 250_000.0, Event::TimerFired { timer: next_poll });
         assert!(
-            !e.drain_actions()
+            !prepared_actions(&mut e, NOW + 250_000.0)
+                .into_iter()
                 .any(|a| matches!(a, Action::Http(r) if r.url.contains("/candles?"))),
             "prior response released the current fallback request"
         );

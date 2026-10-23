@@ -588,6 +588,45 @@ broker, secondary identity and socket-policy assertions retain their original
 payloads, using the shared prepared transport fixture. The real WASM boundary
 fixture explicitly supplies that same existing test transport preparation contract.
 
+## MEXC initial candle admission regressions
+
+Two separately committed original-source RED controls require initial read
+rejection to have no write outcome, no transport/signing or auth evidence, and
+exactly one typed terminal. They prove valid ID reuse after invalid time and
+continued prepare/claim/completion of an existing read after the256-owner limit.
+The nine prior candle lifecycle controls and native fixture assertions remain.
+
+### Bounded account reporter fan-out: MEXC/Phemex/Polymarket
+
+The three venues delegate persistent skip memory to existing engine bounded Once
+reporting. Thin adapters preserve native label formatting and native recovery
+boundaries; there is no policy extension or per-venue replacement implementation.
+Default constructors select the same 4096-entry clear-before-lookup behavior.
+Shared engine tests cover rollover and Once severity suppression; nine added
+native compatibility controls cover the consumers' recovery/admission differences
+and pass on unchanged production with all116 account tests. Separate permanent
+unlisted memory and direct notices remain outside this bounded slice.
+Architecture gate: YES, cross-cutting consumer fan-out through the existing engine
+choke point. No signing, transport, history, snapshot authority or financial
+arithmetic change. Current-head CI/raw proof and queue ordering still apply;
+this entry does not close the remaining reporter inventory.
+
+
+## Lighter managed candle area
+
+Lighter and Robinhood candle requests share the engine preparation/claim,
+original-deadline and generation-bearing completion paths. Typed preparation
+failures are passed intact; failed streamed rows never become a successful
+result. Background retirement precedes stale subscription/revision returns and
+preserves later fallback polling. Existing candle source-order assertions stay
+intact while their fixture uses the shared prepared-action helper. An additional
+within-deadline resubscription control distinguishes the venue generation fence
+from expiry. No signer, nonce, paging, row-admission or retry policy is copied.
+
+The exact request ratchet removes four Lighter lib occurrences only. The
+pre-authority issuance refusal remains explicitly counted until its shared
+engine prerequisite; this does not claim all Lighter or cross-venue closure.
+
 ## Paradex managed startup GET proof
 
 Four real-venue assertion-RED controls require managed public catalog/ticker
