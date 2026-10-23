@@ -174,6 +174,8 @@ describe('audit regression: exact order payload normalization', () => {
     const store = new DefaultStore();
     store.update({ markets: [market('BTCUSDT')] });
     const exchange = new BitgetExchange('bitget', options, store);
+    // This is the V2/Classic payload fixture, not the lazy account-type probe.
+    vi.spyOn(exchange as any, 'ensureAccountTypeDetected').mockResolvedValue(undefined);
     vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
     vi.spyOn(exchange as any, 'getOrderPlanTypeAndAmount').mockReturnValue(['loss_plan', 0.5]);
 

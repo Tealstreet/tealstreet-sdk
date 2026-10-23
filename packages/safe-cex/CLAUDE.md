@@ -550,6 +550,14 @@ contract documented in this CLAUDE.md tree. Tests committed to the package must
 be deterministic and must not require network access, API keys, or local secret
 files. Live probes belong outside the test runner and outside `src/exchanges/`.
 
+The shared Vitest setup denies and records unstubbed fetch, XHR send and socket
+connections. Cleanup rejects recorded attempts even when exchange code catches
+the immediate error. Supply explicit local fixture facts instead of relying on
+an endpoint response. An intentional in-process socket fixture must bind loopback
+and use the test guard's exact-port allowance, revoked in `finally`; there is no
+blanket localhost or exchange-host exception. See
+`docs/plans/TS_UNIT_TRANSPORT_ISOLATION.md` for the test-only boundary.
+
 Vitest discovers deterministic `*.test.*` files throughout `src/` and excludes
 only explicitly named `*.integration.test.*` and `*.network.test.*` suites.
 It does not blanket-exclude `src/exchanges/**`, and coverage includes that tree

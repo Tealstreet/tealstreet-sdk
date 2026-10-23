@@ -45,3 +45,30 @@ typecheck/lint and independent source/adversarial reviews precede readiness.
 If the broad sweep requires substantial fixture rewrites, report the scope and
 keep the narrow Phemex repair independently reviewable rather than widening into
 exchange behavior changes. No merge may overtake the assigned #1783/#1784 queue.
+
+## Observed fixture causes
+
+The first complete guarded sweep rejected nine cases in eight existing files.
+Some constructor/reconcile work was fire-and-forget, so its eventual transport
+attempt could be charged to a following case. The captured stack, rather than
+that following test's name, identifies the source. All repairs supply local facts
+or retire the fixture's pending work; none alters production behavior or timeouts.
+
+| Failing fixture | Original call-site cause | Local repair |
+| --- | --- | --- |
+| Engine relay binary decoding | The preceding fallback probe left a relay's dynamic constructor pending across mock reset; it could instantiate the real `RelayWebSocket`/`ws` socket in the next case. | Close all returned probe connections after checking the fallback destination. |
+| Adapter selection (reported on a following venue alias) | Constructing the Paradex fixture starts `initializeSDK` → `Config.fetchConfig` asynchronously; adapter inspection requires no remote SDK account. | Explicit null local SDK-account initializer, preserving real REST client construction and snapshots. |
+| Capability branding (two cases, attributed to BloFin/Paradex) | The same Paradex constructor-time config fetch can spill into the next capability case. | Explicit null local SDK-account initializer; capability assertions unchanged. |
+| BinancePM position sign | `ACCOUNT_UPDATE` → `throttledFetchPositions` → `executePositionFetch` → `fetchPositions` adds an unawaited REST reconcile beside the synchronous WS mapper. | Local empty reconcile result; assert it was requested, dispose before publication, drain its microtask. |
+| Bitget V2 order payload | `formatCreateOrder` → `ensureAccountTypeDetected` → `_detectAccountType` performs a private account probe. | Explicit already-selected Classic/V2 fixture branch. |
+| Hyperliquid spot order wire | `placeLimitOrder` → `getBuilderInfo` → `fetchBuilderFeeApproval` → `checkBuilderFeeApproved` fetches an unrelated wallet approval. | Explicit unapproved builder-fee account fact. |
+| Lighter OHLCV reconnect | `onOpen` → `primeTickerRestFallback` → `fetchAndApplyTickerFallback` reads market stats alongside rearming OHLCV timers. | Local empty market-stats response. |
+| Lighter channel-less error logging | `onMessage` → missing-price fallback → `fetchAndApplyTickerFallback` reads market stats beside the logging assertion. | Local empty market-stats response. |
+
+The Phemex forwarding control independently proves its missing position-mode
+stub with one assertion RED and 32 compatibility controls GREEN before repair.
+The guard also checks the shared happy-dom implementation owning `send`, because
+each window has its own subclass. A sibling-window synchronous-XHR regression
+uses a stubbed subprocess backstop so even its original RED cannot contact a
+network. Node-environment tests have no XHR global and use the fetch/socket
+boundaries instead.
