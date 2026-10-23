@@ -465,3 +465,279 @@ fn original_same_boundary_transport_failure_and_root_sweep_have_one_strict_termi
         )));
     }
 }
+
+#[test]
+fn public_preparation_auth_failures_keep_metadata_without_auth_health_evidence() {
+    use safe_cex_engine::request_context::Error;
+    for kind in [
+        ErrorKind::AuthInvalid,
+        ErrorKind::AuthExpired,
+        ErrorKind::AuthPermission,
+    ] {
+        let mut e = ready();
+        ask(&mut e, NOW, OWNER, fills(), Some(300_000));
+        let preparation = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("genuine unsigned history preparation");
+        e.http_preparation_failed(
+            NOW + 1.,
+            preparation,
+            Error::State,
+            VenueError::new("public route refusal")
+                .kind(kind)
+                .venue_code("native-code")
+                .venue_message("native detail"),
+        );
+        let output: Vec<_> = e.drain_actions().collect();
+        let error = failure(&output, OWNER);
+        assert_eq!(error.kind, Some(kind));
+        assert_eq!(error.message, "public route refusal");
+        assert_eq!(error.venue_code.as_deref(), Some("native-code"));
+        assert_eq!(error.venue_message.as_deref(), Some("native detail"));
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert!(
+            !output
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::AccountAuth { .. })))
+        );
+    }
+}
+
+#[test]
+fn refused_dequeue_discards_prefix_without_spending_another_owners_weight() {
+    use safe_cex_engine::model::Interval;
+    let mut e = ready();
+    ask(&mut e, NOW, OWNER, fills(), Some(300_000));
+    let first = read(&actions(&mut e, NOW), "userFillsByTime");
+    let mut budget = None;
+    for command in 1..=20 {
+        ask(&mut e, NOW, command, fills(), Some(300_000));
+        let output: Vec<_> = e.drain_actions().collect();
+        let sent = output.iter().any(|a| {
+            matches!(a, Action::ManagedHttp(action)
+            if matches!(action.as_ref(), HttpAction::Prepare { .. }))
+        });
+        if !sent {
+            budget = output.iter().find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms < NOW + 300_000. => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            });
+            break;
+        }
+    }
+    let (timer, at) = budget.expect("native queue actually exhausts read weight");
+    reply(&mut e, NOW + 1., &first, &format!("[{}]", fill(1)));
+    let output: Vec<_> = e.drain_actions().collect();
+    assert!(
+        output
+            .iter()
+            .any(|a| matches!(a, Action::ManagedHttp(action)
+        if matches!(action.as_ref(), HttpAction::Prepare { .. }))),
+        "settlement releases the older queued peer before the next page"
+    );
+    for command in 100..140 {
+        ask(&mut e, NOW + 2., command, fills(), Some(300_000));
+        let output: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !output
+                .iter()
+                .any(|a| matches!(a, Action::ManagedHttp(action)
+            if matches!(action.as_ref(), HttpAction::Prepare { .. })))
+        );
+    }
+    let mut peers = vec![];
+    for command in 1000..1300 {
+        e.handle(
+            at - 1.,
+            Event::Command(Command::FetchCandles {
+                command,
+                symbol: "BTC-PERP".into(),
+                interval: Interval::M1,
+                limit: Some(1),
+                from_ms: Some(0.),
+                to_ms: Some(60_000.),
+            }),
+        );
+        let output: Vec<_> = e.drain_actions().collect();
+        let prepared = output.iter().find_map(|a| match a {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        });
+        if let Some(preparation) = prepared {
+            peers.push(preparation);
+        } else {
+            assert_eq!(
+                failure(&output, command).message,
+                "Engine request capacity reached"
+            );
+            break;
+        }
+    }
+    assert!(
+        peers.len() >= 200 && peers.len() < 256,
+        "real peer roots fill the bounded registry"
+    );
+    assert!(peers.iter().all(|p| e.http_preparation_pending(*p)));
+    e.handle(at, Event::TimerFired { timer });
+    let output: Vec<_> = e.drain_actions().collect();
+    let error = failure(&output, OWNER);
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.message, "Engine request capacity reached");
+    assert!(error.outcome.is_none());
+    assert_eq!(
+        markers(&output, OWNER),
+        0,
+        "synchronous refusal cannot publish the accepted first page"
+    );
+    let dispatched = output.iter().filter(|a| matches!(a, Action::ManagedHttp(action)
+        if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if support::kind(request) == "userFillsByTime"))).count();
+    assert_eq!(
+        dispatched, 8,
+        "failed child mint spends no native weight; eight live peers fit the fresh window"
+    );
+    assert!(
+        peers.iter().all(|p| e.http_preparation_pending(*p)),
+        "strict failure cannot retire unrelated parked candle owners"
+    );
+}
+
+#[test]
+fn actual_root_and_leg_timer_orders_discard_rows_and_leave_late_data_inert() {
+    for root_first in [true, false] {
+        let mut e = ready();
+        ask(&mut e, NOW, OWNER, fills(), Some(5000));
+        let initial = actions(&mut e, NOW);
+        let root = initial
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5000. => Some(*timer),
+                _ => None,
+            })
+            .expect("root timer is declared before the physical page timer");
+        let first = read(&initial, "userFillsByTime");
+        reply(&mut e, NOW + 1., &first, &format!("[{}]", fill(1)));
+        let next = actions(&mut e, NOW + 1.);
+        let second = read(&next, "userFillsByTime");
+        let leg = next
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5000. => Some(*timer),
+                _ => None,
+            })
+            .expect("second page timer is capped at the original root");
+        assert_ne!(root, leg);
+        let mut output = vec![];
+        for timer in if root_first { [root, leg] } else { [leg, root] } {
+            e.handle(NOW + 5000., Event::TimerFired { timer });
+            output.extend(e.drain_actions());
+        }
+        timeout(&output, OWNER);
+        reply(&mut e, NOW + 5001., &second, "[]");
+        let late: Vec<_> = e.drain_actions().collect();
+        assert!(done(&late, OWNER).is_none());
+        assert_eq!(markers(&late, OWNER), 0);
+        assert!(!late.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+        )));
+    }
+}
+
+#[test]
+fn exact_owner_expiry_preserves_account_and_live_history_fifo_in_both_orders() {
+    for account_first in [true, false] {
+        let (mut e, socket) = support::ready("disabled");
+        e.drain_actions().for_each(drop);
+        let mut parked = None;
+        for command in 1..20 {
+            ask(&mut e, NOW, command, fills(), Some(5000));
+            let output: Vec<_> = e.drain_actions().collect();
+            if !output.iter().any(|a| {
+                matches!(a, Action::ManagedHttp(action)
+                if matches!(action.as_ref(), HttpAction::Prepare { .. }))
+            }) {
+                let wake = output
+                    .iter()
+                    .find_map(|a| match a {
+                        Action::SetTimer { timer, at_ms } if *at_ms > NOW + 20_000. => {
+                            Some((*timer, *at_ms))
+                        }
+                        _ => None,
+                    })
+                    .expect("genuine shared read-budget queue");
+                parked = Some((command, wake));
+                break;
+            }
+        }
+        let (old, (wake, at)) = parked.expect("native weight parks a real history root");
+        let mut next = NOW + 1.;
+        if !account_first {
+            ask(&mut e, next, OWNER, fills(), Some(300_000));
+            e.drain_actions().for_each(drop);
+            next += 1.;
+        }
+        let (_, handoff) = support::reconnect(&mut e, socket, next);
+        let refresh: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !refresh.iter().any(|a| matches!(a, Action::Http(_))),
+            "account refresh is actually behind the blocked history head"
+        );
+        if account_first {
+            ask(&mut e, handoff + 1., OWNER, fills(), Some(300_000));
+            e.drain_actions().for_each(drop);
+        }
+        e.prepare_dispatch(NOW + 5000.);
+        let expired: Vec<_> = e.drain_actions().collect();
+        timeout(&expired, old);
+        assert!(!expired.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+        )));
+        e.handle(at, Event::TimerFired { timer: wake });
+        let output = actions(&mut e, at);
+        let requests: Vec<_> = output
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        let history = requests
+            .iter()
+            .position(|r| support::kind(r) == "userFillsByTime")
+            .expect("unrelated live history root survived exact-owner cleanup");
+        let account = requests
+            .iter()
+            .position(|r| support::kind(r) == "clearinghouseState")
+            .expect("queued Account continuation survived cleanup");
+        assert_eq!(
+            account < history,
+            account_first,
+            "shared FIFO retains the actual enqueue order"
+        );
+        for request in requests {
+            let body = if support::kind(request) == "clearinghouseState" {
+                support::STATE
+            } else {
+                "[]"
+            };
+            reply(&mut e, at + 1., request, body);
+        }
+        let output: Vec<_> = e.drain_actions().collect();
+        assert_eq!(done(&output, OWNER), Some("[]"));
+        assert_eq!(e.store().balance().total, 1000.);
+        assert_eq!(e.store().positions()[0].contracts, 2.);
+    }
+}

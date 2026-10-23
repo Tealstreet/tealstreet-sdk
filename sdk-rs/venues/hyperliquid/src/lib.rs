@@ -1087,6 +1087,11 @@ impl Venue for Hyperliquid {
         {
             return;
         }
+        if let Pending::History(read) = &pending
+            && !read.valid_delivery(cx)
+        {
+            return;
+        }
         // Trade answers keep their status so a refusal can be told from a lost write.
         if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
             self.on_request_failed(
@@ -1287,7 +1292,7 @@ impl Venue for Hyperliquid {
             }
         }
     }
-    fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::SocketRefresh { .. } => {}
             Pending::SpotMeta {
@@ -1304,7 +1309,7 @@ impl Venue for Hyperliquid {
                         Ok(value) => {
                             for token in &value.tokens {
                                 if token.0.is_none() {
-                                    safe_cex_engine::startup::skipped_row(_cx);
+                                    safe_cex_engine::startup::skipped_row(cx);
                                 }
                             }
                             *meta = Some(value);
@@ -1313,16 +1318,16 @@ impl Venue for Hyperliquid {
                     },
                     1 => {
                         *valid &= meta.as_ref().is_some_and(|meta| {
-                            spot_rows(_cx, meta, item, markets, tickers, excluded)
+                            spot_rows(cx, meta, item, markets, tickers, excluded)
                         })
                     }
                     _ => *valid = false,
                 }
                 *stage = stage.saturating_add(1);
             }
-            Pending::Account(request) => self.account_item(_cx, request, item),
+            Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
-            Pending::History(request) => self.history_item(request, item),
+            Pending::History(request) => self.history_item(cx, request, item),
             Pending::Meta {
                 dex,
                 instruments,
@@ -1342,7 +1347,7 @@ impl Venue for Hyperliquid {
                                 .map(|row| {
                                     let parsed = serde_json::from_str::<Instrument>(row.get()).ok();
                                     if parsed.is_none() {
-                                        safe_cex_engine::startup::skipped_row(_cx);
+                                        safe_cex_engine::startup::skipped_row(cx);
                                     }
                                     parsed
                                 })
@@ -1352,7 +1357,7 @@ impl Venue for Hyperliquid {
                     },
                     1 => {
                         *valid &=
-                            market_rows(_cx, dex, instruments, item, markets, tickers, excluded)
+                            market_rows(cx, dex, instruments, item, markets, tickers, excluded)
                     }
                     _ => *valid = false,
                 }
@@ -1370,7 +1375,7 @@ impl Venue for Hyperliquid {
                 }
             }
             Pending::ManagedCandles(read) => {
-                if _cx
+                if cx
                     .validate_read_http_delivery(&read.context, &read.context)
                     .is_err()
                 {
@@ -1419,8 +1424,16 @@ impl Venue for Hyperliquid {
             }
         }
     }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.discard_history_owner(owner);
+    }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
+            Pending::History(read) => self.history_failed(cx, *read, error),
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
             }
@@ -1429,6 +1442,7 @@ impl Venue for Hyperliquid {
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
+            Pending::History(read) => self.history_failed(cx, *read, error),
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
             }

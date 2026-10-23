@@ -438,13 +438,13 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
      accepted prefix. No weight is charged and no Prepare is emitted.
      - An expired root never reaches this point: the engine sweep retires it
        first and the hook removes its queue entry.
-     - Other refusals: `Capacity` gives Internal "Hyperliquid history leg
-       capacity", and `Invalid` gives Internal.
+     - Other refusals use the shared `read_venue_error()` projection: Capacity
+       is Internal "Engine request capacity reached"; no venue error map is added.
      - `Revoked` still calls `reject`, which completion validation denies if
        the owner is gone.
 
      A `request_managed_with_headers` refusal returns its `Pending` and takes
-     the same strict route with `error.venue_error()`.
+     the same strict route with `error.read_venue_error()`.
   2. Submit with `request_managed_with_headers(leg, POST /info,
      Content-Type: application/json)`, charging native reservation weight only
      after Ok; a synchronous Err retains no reservation. Streamed kinds retain
@@ -648,3 +648,45 @@ claim. Local development may consume reviewed ce54 under the overseer's explicit
 rule. Before a mergeable PR or readiness claim, integrate fe7lgm's frozen
 root-expiry/public-refusal pin, then the actual landings and fresh CI. No landing
 merge without an explicit window.
+
+## Hyperliquid perps history implementation checkpoint
+
+The original-control commit04e6ee356ad precedes this source conversion. All
+sixteen original controls now pass; four additional adoption controls pin actual
+root/page timer orders, forced child-capacity refusal without spending another
+owner's weight, Account/History FIFO preservation in both enqueue orders after
+exact-owner expiry, and public Auth* metadata without private auth-health evidence.
+All20 execute, with zero ignored. The complete Hyperliquid and Binance native
+suites pass568 tests across45 targets. Independent implementation reviews, fresh
+CI and integration of the replacement frozen #1976 head remain separate gates.
+
+The already-managed cached/invalid/anonymous local lookup branches keep their
+existing20s genuine-entry scope and no-timer behavior. Standalone spot branches
+also remain unchanged. Uncached perps lookup and the remaining legacy no-I/O
+refusals enter the tracked caller root: at full capacity the public-only missing
+identity refusal now receives the canonical Internal capacity error first. When
+admitted, it retains the native untyped identity message and immediately retires
+its root (SetTimer, ClearTimer, one terminal). No default deadline is manufactured.
+This supersedes the older cached-lookup plan's full-capacity exception for that
+previously legacy uncached branch.
+
+Only history.rs loses inventory:9 fingerprints/11 lexical occurrences (six
+numeric terminal calls and five conservative macro matches). The continuation
+binding changes together with its owned managed conversion. The Account sender,
+its two fingerprints/three occurrences, and every unrelated manifest entry are
+retained. Full provenance checking currently sees the newer incoming Aster and OKX chain
+prunes on origin; no foreign maps are edited to conceal the stale composition.
+The checker unit suite passes15 controls.
+
+Existing history fixtures now prepare managed transport through test_support.
+The200/400-page geometry controls explicitly request the existing maximum caller
+wait, respond within each20s child and drive only the actual native budget wake;
+all original financial, gap, retention, dedup, cap and income assertions remain.
+The default/custom root lifetime controls live in the dedicated20-control target.
+There is no venue root timer, retry loop, issuer, classifier or finalizer.
+
+Scoped strict all-target/all-feature Clippy and rustfmt pass after removing one
+unnecessary generic-argument borrow. The scanner exactly matches the local
+manifest. Its full provenance gate currently rejects only foreign Aster/OKX
+entries already pruned on origin; those maps stay untouched pending genuine
+owner-composed dependency integration. No full ratchet PASS is claimed.
