@@ -97,8 +97,8 @@ impl Waits {
     }
 
     /// A released batch's receipts stay carried until each one's dispatch.
-    pub(super) fn batch(&mut self, receipts: impl Iterator<Item = Option<u64>>) {
-        self.batched.extend(receipts.flatten());
+    pub(super) fn batch(&mut self, receipt: Option<u64>) {
+        self.batched.extend(receipt);
     }
 
     /// Remove `command`'s stamp at its terminal. Inside its entry only that
@@ -112,8 +112,8 @@ impl Waits {
                 Some(own) => own == Some(receipt),
                 None => !carried,
             });
-        if matches {
-            self.stamps.retain(|(held, ..)| *held != command);
+        if matches && let Some(index) = self.stamps.iter().position(|(held, ..)| *held == command) {
+            self.stamps.swap_remove(index);
         }
     }
 
@@ -177,19 +177,18 @@ impl<P> Io<P> {
         let carried = self
             .command_waits
             .stamp(command)
-            .is_some_and(|(receipt, _)| self.carried_receipts().any(|held| held == receipt));
+            .is_some_and(|(receipt, _)| self.carries(receipt));
         self.command_waits.finish(command, entry, carried);
     }
 
-    /// Receipts that held cancellations and deferred cancel-alls still carry.
-    fn carried_receipts(&self) -> impl Iterator<Item = u64> + '_ {
-        let held = self
-            .placement_acks
-            .receipts()
-            .chain(self.command_waits.batched.iter().copied());
+    /// Whether a held cancellation, deferred cancel-all or released batch
+    /// still carries `receipt`.
+    fn carries(&self, receipt: u64) -> bool {
         #[cfg(feature = "order-locks")]
-        let held = held.chain(self.order_locks.receipts());
-        held
+        if self.order_locks.carries(receipt) {
+            return true;
+        }
+        self.placement_acks.carries(receipt) || self.command_waits.batched.contains(&receipt)
     }
 
     /// Stamp one external receipt; past capacity, first drop expired stamps
@@ -201,10 +200,14 @@ impl<P> Io<P> {
         now: f64,
     ) {
         if self.command_waits.stamps.len() >= WAIT_STAMPS {
-            let carried: Vec<u64> = self.carried_receipts().collect();
-            self.command_waits
-                .stamps
-                .retain(|(_, receipt, at)| *at > now || carried.contains(receipt));
+            let mut index = 0;
+            while let Some(&(_, receipt, at)) = self.command_waits.stamps.get(index) {
+                if at > now || self.carries(receipt) {
+                    index += 1;
+                } else {
+                    self.command_waits.stamps.swap_remove(index);
+                }
+            }
         }
         self.command_waits.receive(command, deadline);
     }

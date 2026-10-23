@@ -163,8 +163,8 @@ impl OrderLocks {
     }
 
     /// Caller-wait receipts the deferred commands carry.
-    pub fn receipts(&self) -> impl Iterator<Item = u64> + '_ {
-        self.waiting.iter().filter_map(|(.., receipt)| *receipt)
+    pub fn carries(&self, receipt: u64) -> bool {
+        self.waiting.iter().any(|(.., held)| *held == Some(receipt))
     }
 
     pub fn ready(&mut self) -> Vec<(Command, bool, Option<u64>)> {
