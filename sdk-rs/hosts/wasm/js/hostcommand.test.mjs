@@ -608,3 +608,18 @@ test('direct schedule ingress refuses numbers that JSON would turn into a clear'
     assert.equal(call.time, time);
   }
 });
+
+test('reply commands carry the effective caller wait into the engine envelope', () => {
+  const r = rig({ commandTimeoutMs: 20_000 });
+  r.host.command({ op: 'getAccount' });
+  r.host.command({ op: 'fetchHistoricalOrders' }, { timeoutMs: 300_000 });
+  r.host.command({ op: 'setPollScale', scale: 2 });
+  assert.deepEqual(r.calls.map((call) => [call.op, call.timeoutMs]), [
+    ['getAccount', 20_000],
+    ['fetchHistoricalOrders', 300_000],
+    ['setPollScale', undefined],
+  ]);
+  const d = rig();
+  d.host.command({ op: 'getAccount' });
+  assert.equal(d.calls[0].timeoutMs, DEFAULT_COMMAND_TIMEOUT_MS);
+});
