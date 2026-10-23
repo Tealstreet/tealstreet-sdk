@@ -638,6 +638,30 @@ handshake while retaining original payloads, clocks, timers and assertions.
 Independent source/adversarial, caller and full-map reviews accompany the slice;
 no per-venue lifecycle, retry implementation or transport workaround is added.
 
+## Hyperliquid perps candle lifecycle controls
+
+Ten native controls retain the original three failing-first assertions and cover
+public exact-header release, preclaim/stale/reused identities, preparation refusal,
+parked/released original expiry, failed incremental prefixes, progress at the
+deadline, capacity-before-validation and peer isolation. Native zero/default/capped
+limits, ignored from-time geometry, HIP-3 spelling, unclassified response errors
+and merged spot/perps separation are pinned. The checkpoint compiled with nine
+legacy-dispatch assertion failures and one native compatibility pass before the
+adapter move; all ten pass after it. Existing public candle assertions retain
+their exact payload checks through the shared prepared-actions test executor.
+
+## BloFin candle command-entry regression proof
+
+Two original-source assertion failures pin typed invalid-clock and registry
+capacity rejection before Context issuance. The capacity fixture fills genuine
+background roots in an earlier no-ID callback, repeats270 refusals at one clock,
+explicitly retires the roots and successfully reuses the command ID without
+expiry. Duplicate parked entry preserves the original preparation and one
+completion. Another fixed-clock control runs270 market refusals,270 interval
+refusals and270 successes with stale previous-response probes. Existing native
+candle mapping, validation precedence and preparation/expiry assertions remain.
+This closes the earlier pre-Context numeric refusal gap using the shared seam.
+
 ## KuCoin Spot candle managed-read controls
 
 Tests-first controls distinguish unreleased, bound-but-unclaimed and claimed
