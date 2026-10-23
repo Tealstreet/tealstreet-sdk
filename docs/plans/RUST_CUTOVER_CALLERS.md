@@ -4985,6 +4985,14 @@ unavailable history. SDK adapter work does not imply NX runtime adoption.
 [Scope](RUST_OWNED_HISTORY.md).
 ## Managed native-plan admission and preflight
 
+Rust embedders enable the engine's `http-plans` Cargo feature to use Preflight
+and Plan APIs. Bybit and BingX enable it through their venue dependencies. Other
+standalone families omit Plan state, scheduling and callbacks until their own
+adoption enables the feature; ordinary managed Context behavior is unchanged.
+A venue overriding `on_http_plan_ready` or `on_http_owner_retired` must enable
+`http-plans` in its own engine dependency; workspace feature unification does
+not establish that its standalone family configuration has opted in.
+
 Managed commands using Preflight retain one command generation while prerequisite
 reads run. Each read keeps its declared deadline and retry policy. Whole-plan
 admission starts only after the final native steps are known; it reserves the

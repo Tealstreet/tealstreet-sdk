@@ -6,8 +6,6 @@ mod call;
 pub(super) use call::State;
 
 impl ContextRegistry {
-
-
     fn prepare_preflight(
         &mut self,
         command: CommandId,

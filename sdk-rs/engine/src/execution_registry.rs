@@ -228,10 +228,10 @@ impl ContextRegistry {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http-plans"))]
 #[path = "execution_plan_capacity_tests.rs"]
 mod plan_capacity_tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http-plans"))]
 #[path = "execution_plan_composition_tests.rs"]
 mod plan_composition_tests;

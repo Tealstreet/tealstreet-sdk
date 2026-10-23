@@ -501,3 +501,17 @@ allocation or timer. Save and compare complete Cargo feature closures for all
 full engine feature-on and feature-off controls, native Bybit/BingX gates and
 strict checks, independently review the cfg boundaries, then measure normal CI
 Aster size and Bybit/Bitunix replay. No threshold, fixture or reference changes.
+
+Workspace test/clippy commands unify venue dependency features and therefore
+always enable `http-plans` once Bybit/BingX opt in. Add a dedicated native CI
+matrix entry that resolves each standalone family's actual engine feature list,
+deduplicates all combinations and runs engine clippy plus tests for each,
+including standalone Plan-enabled families without order locks. Include the
+explicit `order-locks,test-support`
+configuration and the empty feature set. Resolve enabled features with Cargo's
+`{f}` output, not only rendered feature edges, which omit root-enabled flags.
+Give the mode job a 90-minute timeout and report its measured wall time; other
+native jobs retain their 30-minute timeout. Keep the normal workspace gates.
+Document that venues
+overriding the Plan readiness/retirement hooks must opt in explicitly, even if
+a combined workspace build already enables the feature through another venue.
