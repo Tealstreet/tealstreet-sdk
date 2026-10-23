@@ -26,6 +26,8 @@ pub(super) const TABLE: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
+        // Official common-code reference: gateway refusals precede backend service dispatch.
+        // https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/error-codes.md#common-error-codes
         Row {
             key: Key::Int(100410),
             verdict: Verdict::Refused(ErrorKind::RateLimited),
@@ -64,7 +66,7 @@ impl Entry {
         if let Some(credentials) = credentials {
             let credential = Credential {
                 slot: safe_cex_engine::CredentialSlot::Primary,
-                reference: credentials.identity(Method::Post).credential.clone(),
+                reference: credentials.primary.credential.clone(),
             };
             cx.begin_preflight(PreflightPolicy {
                 purpose: PreflightPurpose::WriteAfterReads,

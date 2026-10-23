@@ -574,7 +574,7 @@ impl Trading {
             return;
         };
         let recipe = crate::sign::dispatch::Http::new(
-            credentials.identity(request.method).clone(),
+            credentials.primary.clone(),
             request.method,
             request.path,
             request.params.clone(),
