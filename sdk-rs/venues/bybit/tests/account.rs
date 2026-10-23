@@ -3105,3 +3105,44 @@ fn trading_stop_amends_treat_tpsl_not_modified_as_satisfied() {
         assert!(!h.has_request("/v5/position/trading-stop"), "{kind}");
     }
 }
+
+/// 1d-ii A3: a reconcile asked for while an older order read is still out
+/// issues its own fresh read; the older one predates the uncertain write.
+#[test]
+fn a_reconcile_during_an_in_flight_order_read_issues_its_own_read() {
+    let mut h = ready();
+    place(
+        &mut h,
+        31,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let first = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: first,
+        error: "connection reset",
+    });
+    let reads = |h: &Harness| {
+        h.requests
+            .iter()
+            .filter(|r| r.url.contains("/v5/order/realtime"))
+            .count()
+    };
+    // One page per settle coin.
+    let per_read = reads(&h);
+    assert!(per_read > 0, "the first seal's reconcile read");
+    place(
+        &mut h,
+        32,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 89000.0)],
+    );
+    let second = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: second,
+        error: "connection reset",
+    });
+    assert_eq!(
+        reads(&h),
+        2 * per_read,
+        "the second seal does not wait on or join the older read"
+    );
+}

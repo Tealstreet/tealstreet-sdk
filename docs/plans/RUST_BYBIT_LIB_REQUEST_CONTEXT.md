@@ -219,3 +219,11 @@ On unchanged source, all four fail at their own runtime assertions:
   - A1 `account_reads_go_out_signed_on_managed_windows`
   - A4 `only_a_native_timestamp_refusal_resends_an_account_read`
   - A5 `an_expired_fee_read_publishes_markets_without_fees`
+- **1d-ii original RED** (`tests/account.rs`), failing on unchanged source:
+  - A3 `a_reconcile_during_an_in_flight_order_read_issues_its_own_read`: a
+    second uncertain seal while the first reconcile read is out issues its own
+    pages instead of joining the older read.
+  - A2 (the earliest-leg mark keeping a fence across a paged refetch) is pinned
+    at the engine level by #1931's tests. The Bybit side is the
+    one-owner-per-refetch rule above.
+
