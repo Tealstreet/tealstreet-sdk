@@ -24,6 +24,7 @@ mod protocol_clock;
 pub mod public_feed;
 pub mod read_scheduler;
 pub mod request_context;
+pub mod resource_ids;
 pub mod signing;
 pub mod signing_capture;
 mod signing_dispatch;
