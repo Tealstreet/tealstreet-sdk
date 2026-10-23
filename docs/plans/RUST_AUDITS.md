@@ -2155,3 +2155,29 @@ Context. The remaining discovery error fallback accepts only Markets/Tickers.
 No venue admission policy or finalizer is introduced. The exact own inventory
 shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
 closed/private history and trading remain tracked with their original owners.
+
+
+## TxFlow indexed history ownership
+
+TxFlow now adopts existing CursorHistory for native identity observations, staged
+page admission, accepted rows and completion. The native 2000-step/200000-cap
+indexed sequence maps to shared cursor tokens with 101 pages per income stage.
+Empty/no-new continuation and cap proof refusals remain strict; actual later
+failures recover only prior accepted eligible output with one owner warning.
+Income stage restart retains the same output owner and identities. Native
+info payload, archived instrument mapping, financial codecs, full pagination
+before sorting/truncation and Store isolation remain unchanged. Exact history
+legacy inventory prunes eleven to six sites, zero additions or checker changes.
+
+
+## Orderly accepted-page history ownership
+
+Orderly history adopts the existing engine CursorHistory owner without a new
+engine API or venue-local completion implementation. The single cursor walk
+retains the total fifty-page regular/algo budget; native metadata census and
+per-stage limit remain venue facts. Actual later read failures recover only
+accepted eligible output with the owned warning, while native proof and signing
+refusals remain strict. Failed streamed prefixes and filtered rows never authorize
+recovery. Request builders, signing, timers, account reducers and Store are
+unchanged. Exact request inventory shrinks from thirteen to nine entries by
+removing four numeric finalizers, with no additions or checker changes.
