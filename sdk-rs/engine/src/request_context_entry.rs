@@ -185,6 +185,26 @@ impl<P> Cx<'_, P> {
         })
     }
 
+    /// Finish an expired Fresh entry through the shared entry rejection: one
+    /// typed Timeout terminal (outcome NotSent for a mutation, none for a
+    /// read) with no admission, Context, request or timer. `Revoked` and no
+    /// effect unless the caller's wait is `Expired` and the entry is Fresh.
+    pub fn reject_expired_command(
+        &mut self,
+        operation: Operation,
+    ) -> Result<(), CommandEntryError> {
+        if self.command_wait() != Some(CommandWait::Expired) {
+            return Err(CommandEntryError::Revoked);
+        }
+        match self.with_command_entry(operation, |_, _| {
+            Err::<(), _>(crate::request_context::Error::TimedOut)
+        }) {
+            Err(CommandEntryError::Rejected(_)) => Ok(()),
+            Err(error) => Err(error),
+            Ok(()) => unreachable!("expiry never admits"),
+        }
+    }
+
     /// Admit the first HTTP Context of this genuine engine command callback.
     /// Rejected already emitted one failure; do not finalize it a second time.
     /// This is initial admission only, never authority for siblings or retries.

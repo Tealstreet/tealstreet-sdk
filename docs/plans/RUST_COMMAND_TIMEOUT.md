@@ -80,10 +80,13 @@ Revised after uufub4's API-fit review (2026-10-24).
      always at least 1. A remainder under 1 ms is `Expired`, as is
      `now >= deadline`. `Remaining(0)` is never exposed and nothing renews.
    - On `Expired` in a **Fresh** entry (before admission or any opaque
-     effect), a venue must not admit or start work. It finishes through the
-     entry's numeric-terminal custody with a typed `Timeout` error, with zero
-     HTTP, timer or Store effects. The outcome is `NotSent` for a mutation
-     command and none (`None`) for a read.
+     effect), a venue must not admit or start work. It calls
+     `Cx::reject_expired_command(operation)`, which takes no numeric id and
+     adds no legacy site. That emits one typed `Timeout` terminal through
+     the same `with_command_entry` rejection as `admit_http_command`, with
+     zero HTTP, timer or Store effects. The outcome is `NotSent` for a
+     mutation and none (`None`) for a read. It returns `Revoked`, with no
+     effect, unless the wait is `Expired` and the entry is Fresh.
    - A **Bound** or **Legacy** entry may already own a Context, Preflight or
      Plan that has sent writes. There, `Expired` only informs the venue. It
      terminates through that existing authority and its journal projection,
@@ -104,6 +107,19 @@ other venue changes here. The CALLERS entry distinguishes:
   deadline.
 
 It also states the 120000 default for hosts that send no wait.
+
+## Plan consumers: a gap this PR does not close
+
+`admit_plan` derives a Plan's whole deadline from its declaration at
+admission (`bound.deadline(now)`). The caller's receipt deadline does not
+cap it, and a Plan consumer cannot pass `Remaining` captured earlier (after a
+JWT or preflight wait, or on a stage restart) without renewing from a later
+`now`. Plan consumers (BloFin, Bitunix and others) need a separate, checked
+"original receipt deadline" cap seam in the Plan core before they claim
+composition with the caller wait. They must never shrink native step
+geometry to fake a cap, nor cast a Plan as a Read root. Read-root consumers
+of #1848 (Hyperliquid history) are not affected: they capture the wait in
+the Fresh entry and keep that exact root.
 
 ## Files
 

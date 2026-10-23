@@ -52,6 +52,8 @@ struct Probe {
     /// Keep command 21's admitted root live (no terminal).
     hold_live: bool,
     timer: Option<TimerId>,
+    /// Finish an expired entry as a read (no outcome) instead of a mutation.
+    expire_as_read: bool,
 }
 
 impl Venue for Probe {
@@ -102,15 +104,20 @@ impl Venue for Probe {
         let observed = wait(cx);
         self.entries.push((id, observed));
         if observed == Some(Wait::Expired) {
-            // Fresh entry, before admission: typed Timeout with zero effects.
-            cx.fail(
-                id,
-                VenueError::new("Command wait expired")
-                    .kind(crate::ErrorKind::Timeout)
-                    .outcome(crate::Outcome::NotSent),
-            );
+            // Fresh entry, before admission: the shared typed expiry terminal.
+            let operation = if self.expire_as_read {
+                Operation::Read
+            } else {
+                Operation::Mutation
+            };
+            assert_eq!(cx.reject_expired_command(operation), Ok(()));
             return;
         }
+        assert_eq!(
+            cx.reject_expired_command(Operation::Read),
+            Err(crate::request_context::CommandEntryError::Revoked),
+            "only an expired wait may be rejected as expired"
+        );
         match command {
             Command::PlaceOrders { command, .. } => cx.done(command, r#"["7"]"#.into()),
             Command::CancelOrders { command: 11, .. } if self.reject => {
@@ -227,8 +234,15 @@ fn borrowed_callbacks_and_other_entries_see_no_wait() {
 
 #[test]
 fn an_expired_fresh_entry_finishes_typed_with_zero_effects() {
-    for (release_at, label) in [(1_000., "at the deadline"), (999.5, "under 1 ms before")] {
-        let mut e = engine(Probe::default());
+    for (release_at, label, read) in [
+        (1_000., "at the deadline", false),
+        (999.5, "under 1 ms before", false),
+        (1_000., "a read at the deadline", true),
+    ] {
+        let mut e = engine(Probe {
+            expire_as_read: read,
+            ..Default::default()
+        });
         deliver(
             &mut e,
             0.,
@@ -252,9 +266,27 @@ fn an_expired_fresh_entry_finishes_typed_with_zero_effects() {
             )),
             "{label}"
         );
-        assert!(actions.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandFailed { command: 2, error })
-                if error.kind == Some(crate::ErrorKind::Timeout))));
+        let outcome = if read {
+            None
+        } else {
+            Some(crate::Outcome::NotSent)
+        };
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a,
+                    Action::Notice(Notice::CommandFailed { command: 2, error })
+                        if error.kind == Some(crate::ErrorKind::Timeout)
+                            && error.outcome == outcome))
+                .count(),
+            1,
+            "{label}"
+        );
+        assert_eq!(
+            deadline(&e, 2),
+            None,
+            "{label}: the terminal cleared the stamp"
+        );
     }
 }
 
