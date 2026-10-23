@@ -1343,3 +1343,11 @@ allow only an eligible projection to schedule a second runner, and require final
 certification even after missing or failed upstream work. Declared public FAILs
 remain declared results without CPU rescue. Measurements in CI report first and
 second samples separately; this methodology makes no runtime speedup claim.
+
+The first real second-runner archive exposed a mismatched transport bound. The
+shared size validator preserves the original bound in an extraction before
+regressions are committed: 5 RED with 16 working controls. The observed
+743,167,768-byte runtime case is checked without allocating a giant buffer;
+metadata/log/ordinary bounds, 4 GiB overflow, empty response recovery/exhaustion,
+mixed socket/empty budgets and CDN credential stripping remain explicit controls.
+Routing tests cover every registered suite and reject unknown runtime names.

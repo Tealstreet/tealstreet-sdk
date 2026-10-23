@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite } from './cpu-ci.mjs';
+import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle } from './cpu-ci.mjs';
 import { GATE_SUITES, expectedGateCases } from './ci-gate-suites.mjs';
 
 const dispositions = (decision) => [{ key: 'a'.repeat(64), decision,
@@ -111,4 +111,24 @@ test('required check wrappers accept only successful complete same-run same-chec
     value => { value.results.suites.unknown = true; }, value => { value.suite = 'unknown'; }]) {
     const bad = structuredClone(args); change(bad); assert.throws(() => requireCertifiedSuite(bad));
   }
+});
+
+
+test('only a registered runtime artifact receives the runtime transport bound', async () => {
+  const exercise = async (name, expected) => {
+    const calls = [], run = { id: 1, head_sha: 'c'.repeat(40), head_branch: 'feat/cpu' };
+    const meta = { id: 2, name, expired: false, size_in_bytes: 743_167_768,
+      digest: 'sha256:' + 'd'.repeat(64), workflow_run: { ...run } };
+    const context = { runId: 1, reader: {
+      getRun: async () => run, listJobs: async () => [], listArtifacts: async () => [meta],
+      getArtifactBytes: async (id, kind) => { calls.push({ id, kind }); throw new Error('controlled download boundary'); },
+    } };
+    await assert.rejects(authenticatedBundle(context, 1, name, 'producer', 'upload', run.head_sha),
+      expected === null ? /CPU remeasurement is not enabled for suite/ : /controlled download boundary/);
+    assert.deepEqual(calls, expected === null ? [] : [{ id: 2, kind: expected }]);
+  };
+  for (const suite of GATE_SUITES) await exercise(`cpu-runtime-${suite}`, 'runtime-artifact');
+  for (const name of ['strict-replay-bybit', 'cpu-cohort-bybit', 'cpu-second-bybit', 'cpu-plan', 'cpu-final'])
+    await exercise(name, 'artifact');
+  for (const name of ['cpu-runtime-bybit-extra', 'cpu-runtime-', 'cpu-runtime-unknown']) await exercise(name, null);
 });

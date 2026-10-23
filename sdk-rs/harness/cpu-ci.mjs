@@ -86,7 +86,9 @@ async function artifact(context, runId, name, metadataOnly = false) {
   insist(meta.expired === false && meta.workflow_run?.id === runId && meta.workflow_run.head_sha === run.head_sha &&
     meta.workflow_run.head_branch === run.head_branch && /^sha256:[a-f0-9]{64}$/.test(meta.digest), 'artifact/source metadata differs');
   if (metadataOnly) return { meta };
-  const bytes = await context.reader.getArtifactBytes(meta.id);
+  const runtime = name.startsWith('cpu-runtime-');
+  if (runtime) requireCpuRemeasureSuite(name.slice('cpu-runtime-'.length));
+  const bytes = await context.reader.getArtifactBytes(meta.id, runtime ? 'runtime-artifact' : 'artifact');
   insist(bytes.length === meta.size_in_bytes && `sha256:${sha256(bytes)}` === meta.digest, 'artifact ZIP bytes differ');
   return { meta, bytes, entries: readArtifactZip(bytes, { maxBytes: 4 * 1024 * 1024 * 1024 }) };
 }

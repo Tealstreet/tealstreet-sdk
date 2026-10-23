@@ -220,7 +220,8 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
 
 export function requireGithubResponseSize(length, kind = 'metadata') {
   check(['metadata', 'log', 'artifact', 'runtime-artifact'].includes(kind), 'invalid GitHub response kind');
-  check(integer(length) && length <= 512 * 1024 * 1024, 'empty/oversized GitHub response');
+  const limit = kind === 'runtime-artifact' ? 4 * 1024 ** 3 : 512 * 1024 ** 2;
+  check(integer(length) && length <= limit, 'empty/oversized GitHub response');
 }
 
 export function createGithubReader({ repository, token, fetch: fetchImpl = globalThis.fetch }) {
@@ -228,9 +229,10 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
   check(token === undefined || typeof token === 'string', 'invalid read token');
   const snapshots = [], snapshotKeys = new Set(), logs = new Map(), logIndices = new Map();
   const immutableResponses = new Map(), completedJobs = new Set();
-  const get = async (path, binary = false, immutable = false) => {
+  const get = async (path, binary = false, immutable = false, kind = 'metadata') => {
     if (immutable && immutableResponses.has(path)) {
-      const raw = immutableResponses.get(path); return binary ? Buffer.from(raw) : parseCohortJson(raw);
+      const raw = immutableResponses.get(path); requireGithubResponseSize(raw.length, kind);
+      return binary ? Buffer.from(raw) : parseCohortJson(raw);
     }
     const url = `https://api.github.com/repos/${repository}/${path}`;
     const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
@@ -245,7 +247,12 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
           response = await fetchImpl(location.href, { method: 'GET', redirect: 'error', cache: 'no-store' });
         }
         check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
-        raw = Buffer.from(await response.arrayBuffer()); requireGithubResponseSize(raw.length);
+        raw = Buffer.from(await response.arrayBuffer());
+        if (!raw.length && immutable && ['artifact', 'runtime-artifact'].includes(kind) && attempt === 0) {
+          console.warn(`Retrying immutable artifact read after empty HTTP 200: ${path}`);
+          continue;
+        }
+        requireGithubResponseSize(raw.length, kind);
         break;
       } catch (error) {
         // Retrieval of the same immutable bytes can recover one closed socket.
@@ -288,12 +295,15 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     listJobs: async (runId) => noteJobs(await list(`actions/runs/${id(runId)}/jobs`, 'jobs', 'filter=all&')),
     listArtifacts: (runId) => list(`actions/runs/${id(runId)}/artifacts`, 'artifacts'),
     getArtifact: (artifactId) => get(`actions/artifacts/${id(artifactId)}`),
-    getArtifactBytes: (artifactId) => get(`actions/artifacts/${id(artifactId)}/zip`, true, true),
+    getArtifactBytes: (artifactId, kind = 'artifact') => {
+      check(['artifact', 'runtime-artifact'].includes(kind), 'invalid artifact response kind');
+      return get(`actions/artifacts/${id(artifactId)}/zip`, true, true, kind);
+    },
     getCommit: (commit) => { check(gitId(commit), 'invalid commit identity'); return get(`git/commits/${commit}`, false, true); },
     getTree: (tree) => { check(gitId(tree), 'invalid tree identity'); return get(`git/trees/${tree}?recursive=1`, false, true); },
     getBlob: (blob) => { check(gitId(blob), 'invalid blob identity'); return get(`git/blobs/${blob}`, false, true); },
     getLog: async (jobId) => {
-      const raw = await get(`actions/jobs/${id(jobId)}/logs`, true, completedJobs.has(jobId));
+      const raw = await get(`actions/jobs/${id(jobId)}/logs`, true, completedJobs.has(jobId), 'log');
       if (!logIndices.has(jobId)) logIndices.set(jobId, Math.max(0, snapshots.length - 1));
       logs.set(jobId, Buffer.from(raw)); return raw;
     },

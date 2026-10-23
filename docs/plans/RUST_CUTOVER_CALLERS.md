@@ -6049,7 +6049,12 @@ fails certification. Private replay workloads and existing diagnostic handling
 keep their strict policy. Build arguments, CPU thresholds and fixtures retain
 their existing contracts. [Policy and controls](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md).
 
-An immutable artifact or completed-log download retries once only when its fetch
-raises a TypeError caused by UND_ERR_SOCKET. Metadata reads, HTTP refusals and
-invalid evidence retain their failure behavior. This retrieval recovery consumes
-no additional physical measurement slot and cannot repeat a failed second run.
+An immutable artifact or completed-log download can recover one TypeError caused
+by UND_ERR_SOCKET. Immutable artifact downloads can also recover one empty HTTP
+200; both causes share exactly two retrieval attempts. Metadata/log empties,
+HTTP refusals, oversized responses and invalid evidence still fail closed.
+Only registered runtime archives use the existing 4 GiB ZIP response bound;
+metadata, logs and ordinary archives retain the 512 MiB response bound. Exact
+size, digest, producer, source, ZIP and restored-runtime checks remain required.
+This retrieval recovery adds no physical measurement and cannot repeat a failed
+second run.
