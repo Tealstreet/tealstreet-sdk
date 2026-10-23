@@ -19,6 +19,8 @@ fn p0_write_all_failed_explicit_cancels_are_not_success() {
     assert_eq!(request.method, Method::Delete);
     reply(&mut e, &request, 400, r#"{"message":"denied"}"#);
     let out: Vec<_> = e.drain_actions().collect();
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(next)
+        if next.method == request.method && next.url == request.url)));
     assert_eq!(
         out.iter()
             .filter(|action| matches!(
@@ -82,6 +84,8 @@ fn pair(missing: bool) {
         &serde_json::to_string(&rows).unwrap(),
     );
     let out: Vec<_> = e.drain_actions().collect();
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(next)
+        if next.method == request.method && next.url == request.url)));
     let failures: Vec<_> = out
         .iter()
         .filter_map(|action| match action {
