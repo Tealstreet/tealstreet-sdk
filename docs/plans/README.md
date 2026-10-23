@@ -247,3 +247,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Bitunix local history completion | Focused adoption plan | Before migrating synchronous no-I/O history terminals; preserve signed paging and #1771 ownership. | [RUST_BITUNIX_HISTORY_LOCAL_CONTEXT.md](RUST_BITUNIX_HISTORY_LOCAL_CONTEXT.md) |
 | Bitrue local history terminals | Focused adoption plan | Before converting synchronous history refusals to genuine shared Read command authority. | [RUST_BITRUE_LOCAL_HISTORY_CONTEXT.md](RUST_BITRUE_LOCAL_HISTORY_CONTEXT.md) |
 | Bitrue local leverage preflights | Focused adoption plan | Before converting synchronous unknown-market/absent-credential leverage refusals to shared command authority. | [RUST_BITRUE_LOCAL_LEVERAGE_CONTEXT.md](RUST_BITRUE_LOCAL_LEVERAGE_CONTEXT.md) |
+| Phemex local history command Contexts | Plan; original REDs next | Before changing synchronous history/income terminals or their engine admission. | [RUST_PHEMEX_LOCAL_HISTORY_CONTEXT.md](RUST_PHEMEX_LOCAL_HISTORY_CONTEXT.md) |
+| MEXC synchronous read command custody | Draft adoption; local checks pass | Before changing local history/leverage refusals, genuine command entry or the exact eight-site prune | [RUST_MEXC_LOCAL_READ_CONTEXT.md](RUST_MEXC_LOCAL_READ_CONTEXT.md) |
+
+| Paradex public-trades Read history | Consumer plan | Before migrating the native unsigned single-page public trade command through the reviewed history bridge. | [RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md](RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md) |
