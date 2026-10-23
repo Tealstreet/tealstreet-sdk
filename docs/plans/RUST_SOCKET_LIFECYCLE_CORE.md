@@ -1353,3 +1353,38 @@ Clippy, formatting, bans and shrink-only ratchets pass. No callback guard,
 Context construction, health update, expiry/HTTP/fatal/event/drain boundary or
 native codec moved. This establishes preservation only. The last isolated
 measurement and emitted-code inspection decide whether the helper is useful.
+
+### Temporary final Phase L isolated diagnostic (never merge)
+
+This is the LAST measured iteration under the owner's timebox. Source under
+test is reviewed/verified L `ab6e90d2f83db9a290cfcdbb4b1f58db6c902b3d`, tree
+`75ff14e9d71a29879a9dfc55d73135def09ae4ec`. Before remains verified J
+`1c243e48d2a3886033aa1c69b2cda6f24be366c8`, tree
+`d4166b5135430190896dbd936f46cd9cd847af79`; fixed landing remains
+`7641650e7b1fc54c55593880ac16299171f60a90`, tree
+`c83f4bc5feb9a474d1436b9074e677658a203cee`. K remains a retained failed
+experiment, not a substitute before control for this final comparison.
+
+Copy exact reviewed K diagnostic tooling/workflow from
+`29adc2cea48fd3a113f43f95192346ceb221e89d`. Change ONLY the current case's head
+and tree (two contract fields) and the helper's matching contract SHA constant.
+All five source inputs, driver/external lock, fixed gzip/raw tape/facts,
+toolchain/build flags, build-all-three-before-measuring rule and eight serial
+40s processes/3warmups/20s 999Hz callchains retain the previous protocol. No
+workflow gates, thresholds, build profiles or production code are changed by
+this diagnostic branch. It never merges and has no PR. Independently audit
+exact substitutions and run every offline negative control before dispatch.
+
+Use a fresh exact-head/run/attempt/job/artifact/log/source capture namespace and
+reviewed reader pins. Never relabel earlier artifacts or automatically select
+a passing sample. Inspect the new ELF callsites, callback/helper/parser sizes
+and complete profiles alongside all eight raw CPU/facts records. Derive report
+artifact/version labels from the new immutable evidence, not copied historical
+metadata. Retain failed or incomplete captures and audit any repair explicitly.
+Complete independent DATA reviews must bind all provenance and arithmetic.
+
+After this experiment, report the exact Rust<=0.90*TS gate math and concrete
+owner/Sam choices, including native-versus-WASM limits. Do not start another
+measured iteration, edit any threshold/profile or claim a performance pass from
+source inspection. Any shipping decision still needs the agreed same-runner
+WASM and fresh actual shared dependencies/CI/raw-output proof.
