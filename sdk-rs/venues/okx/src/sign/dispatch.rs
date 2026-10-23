@@ -66,9 +66,13 @@ fn context(origin: &str, method: &str, path: &str) -> Context {
     }
 }
 
+/// Demo aliases trade against OKX's simulated account on every request.
+pub(crate) const DEMO_HEADERS: &[(&str, &str)] = &[("x-simulated-trading", "1")];
+
 pub struct Http {
     identity: Option<Identity>,
     path: String,
+    demo: bool,
     stamp: String,
 }
 impl Http {
@@ -76,11 +80,21 @@ impl Http {
         Self {
             identity,
             path,
+            demo: false,
             stamp: String::new(),
         }
     }
+    /// Managed sends declare the demo header here; legacy callers add their own.
+    pub fn demo(mut self, demo: bool) -> Self {
+        self.demo = demo;
+        self
+    }
 }
 impl SignStep for Http {
+    fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
+        if self.demo { DEMO_HEADERS } else { &[] }
+    }
+
     fn prepare(
         &mut self,
         outbound: &mut Action,
