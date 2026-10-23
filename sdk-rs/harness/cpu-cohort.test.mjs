@@ -180,6 +180,8 @@ test('physical markers remain standalone after child diagnostics without a newli
   assert.equal(authenticateMeasurementWindow(input).stepName, 'Public data (correctness, CPU and memory)');
   assert.throws(() => authenticateMeasurementWindow({ ...input, logBytes: Buffer.from(checkout + begin + end + end) }), /missing\/duplicate/);
   assert.throws(() => formatMeasurementMarker('OTHER', key, at(8)), /invalid physical/);
+  assert.throws(() => formatMeasurementMarker('BEGIN', key, at(8) + '\n'), /invalid execution time|invalid physical marker timestamp/);
+  assert.throws(() => formatMeasurementMarker('END', key + '\n', at(12)), /invalid physical/);
 });
 
 test('reader caches only immutable Git/ZIP/completed log bytes; mutable authority endpoints refresh', async () => {
