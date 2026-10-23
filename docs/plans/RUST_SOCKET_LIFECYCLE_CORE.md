@@ -1070,3 +1070,42 @@ same driver, tape, build settings and landing binary; retain every cohort and
 report remaining gap and next self-time delta before further fixes. A large
 remaining gap still blocks fresh CI. Final performance proof remains the
 same-runner CI-WASM probe followed by fresh full CI.
+
+### Isolated native result and Phase I: empty effect publication
+
+Owner-authorized diagnostic run `39914791492`, physical job `120285805496`,
+uses one isolated Linux runner. Its two complete fixed ABBA cohorts build and
+compare landing `7641650e7b1`, original socket `a31c3ff2a07`, and Phase H
+`d8dcb8e6e62`. All eight 40-second processes receive approximately 40 seconds
+CPU; 20-second perf captures retain 159,756 samples with zero lost samples.
+Both independent readers authenticate the full artifact, all 129 internal
+hashes, three source/binary/lock/driver/tape contracts and every sample count.
+
+Observed native CPU/tape means are 28.714454/36.279946/34.193569 ms for
+landing/original/current. The changes close 27.58% of that observed gap;
+5.479115 ms remains. This is native whole-tape diagnosis including setup/drop,
+not a WASM steady-state gate or a completed performance fix. Self estimates
+scale 20-second sample fractions by process CPU per timed plus three warmup
+tapes. Unknown instruction addresses and compiler outlines are grouped rather
+than falsely aligned across builds. Parsing attribution under `from_str` and
+`on_message` nearly cancels; it does not establish an additional parse.
+
+The next shared avoidable candidate is publication of empty effect vectors:
+about 0.434935 ms in `VecDeque<Effect>::spec_extend` and 0.213987 ms in
+`Cx::socket_effects`. Add a thin inline-always wrapper that returns only when
+the incoming vector is empty AND the existing effect queue is within
+`MAX_EFFECTS`. Preserve the entire current publication/overflow body in an
+inline-never helper. The queue-bound check matters: an overfull existing queue
+must retain its original exhaustion, retirement and cleanup behavior even if
+the new vector is empty. The owned empty vector still drops on return.
+
+No ingress admission, epoch lookup, time/expiry check, control codec, supervisor
+traffic update, timer, resource reservation or HTTP-delivery boundary changes.
+Add an overfull-plus-empty control and run existing overflow/retirement/fatal/
+HTTP-isolation controls plus engine/OKX/Bitunix/Binance native and strict checks.
+Independently reverse-check the preserved helper body and all call sites.
+Repeat the same isolated CI-native before/current/landing protocol with a new
+exact current source pin; retain every earlier cohort. Report remaining gap
+and actual profile delta before another fix or fresh full CI. Substantial
+remaining cost still requires investigation; final proof remains same-runner
+CI-WASM then full CI.
