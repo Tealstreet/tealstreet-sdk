@@ -4,8 +4,8 @@ mod support;
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
-    Context, Error, Operation, Plan, PlanPolicy, Policy, Preflight, PreflightPolicy,
-    PreflightPurpose, RetryPolicy,
+    CommandEntryError, Context, Error, Operation, Plan, PlanPolicy, Policy, Preflight,
+    PreflightPolicy, PreflightPurpose, RetryPolicy,
     plan::{CallBound, CallTerms, PlanBound, RetryWindow, Slot, StepBound},
 };
 use safe_cex_engine::test_support::prepared_actions;
@@ -16,8 +16,8 @@ use safe_cex_engine::{
 
 // Original negative seam: the opt-in receipt-capped entry does not exist yet.
 // Only this adapter changes at cutover; no deadline is fabricated in the test.
-fn receipt_preflight<P>(cx: &mut Cx<'_, P>) -> Preflight {
-    cx.begin_preflight(preflight_policy()).unwrap()
+fn receipt_preflight<P>(cx: &mut Cx<'_, P>) -> Result<Preflight, CommandEntryError> {
+    cx.begin_preflight(preflight_policy())
 }
 
 fn preflight_policy() -> PreflightPolicy {
@@ -46,6 +46,8 @@ struct Probe {
     two_steps: bool,
     capped: bool,
     complete: bool,
+    unstamped: bool,
+    capture: Option<Result<(), CommandEntryError>>,
     entry_wait: Option<CommandWait>,
     borrowed_wait: Option<CommandWait>,
     handoff_validated: bool,
@@ -62,6 +64,8 @@ impl Probe {
             two_steps: false,
             capped: true,
             complete: false,
+            unstamped: false,
+            capture: None,
             entry_wait: None,
             borrowed_wait: None,
             handoff_validated: false,
@@ -84,8 +88,12 @@ impl Venue for Probe {
             }
         ));
         self.entry_wait = cx.command_wait();
+        if self.unstamped {
+            self.capture = Some(receipt_preflight(cx).map(|_| ()));
+            return;
+        }
         let preflight = if self.capped {
-            receipt_preflight(cx)
+            receipt_preflight(cx).unwrap()
         } else {
             cx.begin_preflight(preflight_policy()).unwrap()
         };
@@ -180,7 +188,9 @@ impl Venue for Probe {
                     }
                     Err(error) => {
                         self.admission = Some(Err(error));
+                        // Original adapter projection, not engine Read normalization.
                         let mut cause = error.venue_error();
+                        assert_eq!(cause.outcome, Some(safe_cex_engine::Outcome::NotSent));
                         cause.outcome = None;
                         cx.fail_preflight(&preflight, cause).unwrap();
                     }
@@ -382,4 +392,40 @@ fn native_only_mode_preserves_its_declared_lifetime() {
     let engine = handoff(probe, Some(100), 60.);
     assert_eq!(engine.venue().admission, Some(Ok(160.)));
     assert_eq!(engine.venue().geometry, Some((100, 1, 1)));
+}
+
+#[test]
+fn unstamped_nonadvancing_receipt_cannot_fall_back_to_an_uncapped_preflight() {
+    let mut probe = Probe::new(100);
+    probe.unstamped = true;
+    let mut engine = support::seeded_engine(probe);
+    engine.start(0.);
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        f64::MAX,
+        Event::Command(Command::Query {
+            command: 7,
+            query: Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        }),
+    );
+    assert_eq!(engine.venue().entry_wait, None);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        actions.iter().all(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::STARTUP_INCOMPLETE)),
+        "only the unrelated startup deadline notice is allowed: {actions:?}; capture {:?}",
+        engine.venue().capture
+    );
+    assert!(!engine.venue().handoff_validated);
+    assert_eq!(engine.venue().selected_slots, 0);
+    assert_eq!(
+        engine.venue().capture,
+        Some(Err(CommandEntryError::Revoked))
+    );
 }

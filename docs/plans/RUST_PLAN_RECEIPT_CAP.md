@@ -250,3 +250,31 @@ Execution-owned admission is unavailable on this dependency and is not claimed
 as tested. Before composition with #1919, its owner must carry the capped-mode
 refusal ahead of every execution/group/credit/phase change. The first-slice
 command-only restriction remains binding.
+
+### Receipt-fit follow-up controls
+
+fe7 cleared `031d2835037` with an additional unstamped control. A Read query is
+not a held/deferred cancel or amend. Its duplicate live id is refused by
+`command_live` before entry when the original query has a Preflight owner.
+The new public `handle(f64::MAX, Query::Income)` control instead produces a
+non-advancing default receipt clock: `command_wait()` is None. The negative
+adapter currently admits a Preflight, whereas the capped route must not invent
+an uncapped owner or a new default. The first startup-deadline diagnostic at
+this huge clock is allowed explicitly; no Prepare, timer or command terminal
+is hidden by that allowance. The compiled target now has 2 GREEN controls and
+8 assertion REDs, including this admitted-owner versus Revoked assertion.
+
+The original fixture's `cause.outcome = None` is explicitly adapter shaping,
+not evidence of engine normalization. The runtime cutover must replace it with
+one canonical `Error::read_venue_error()` conversion, cleared by uufub4: same
+engine kind/text, no financial outcome. Reuse it in Read command-entry rejection
+and the cap-admission adapter, and test the actual conversion. Generic mutation
+and provider error projections stay unchanged.
+
+A newer overseer ruling distinguishes absent HOST timeout (default once at
+external receipt) from receipt exhaustion/duplicate failure (typed refusal, no
+new default). The shared cause-aware entry helper and exact typed disposition
+are being coordinated with fe7; neither a second emitter nor a local fallback
+belongs here. This source gate supersedes the earlier blanket no-emitter
+statement for those receipt-failure causes. Context root-expiry funnel ownership
+is being clarified separately; this checkpoint changes no lifecycle source.
