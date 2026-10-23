@@ -198,7 +198,7 @@ test('Robinhood production signatures fail the standard production verifier and 
  assert.equal(robinhood.request({method:'POST',url,body:form(),now}),false);
 });
 
-test('private tape generator preserves all deployment origins and disables absent builder defaults',()=>{
+test('private tape generator preserves all deployment origins and each mainnet builder default',()=>{
  const directory=mkdtempSync(join(tmpdir(),'lighter-private-profiles-'));
  try {
   for (const [name,testnet,rest,socket] of [
@@ -220,7 +220,7 @@ test('private tape generator preserves all deployment origins and disables absen
     if(!record.requestBody)continue;
     for (const {type,info} of decodeLighterTransactions(record.requestBody)) {
      if(type!==14)continue;
-     assert.deepEqual(info.L2TxAttributes,name==='lighter'&&!testnet?{'1':158385,'2':250,'3':0}:undefined);
+     assert.deepEqual(info.L2TxAttributes,name==='lighter-robinhood'?{'1':47296,'2':250,'3':0}:testnet?undefined:{'1':158385,'2':250,'3':0});
     }
    }
   }
