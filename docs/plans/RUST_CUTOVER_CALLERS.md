@@ -4884,7 +4884,114 @@ authority. The call shape and success value (`null`) are unchanged.
 No tealstreet-next caller matches on the old timeout text (the review grepped
 the tealstreet-sdk TS packages; `rust.market-refresh.test.ts` checks neither
 text nor kind). Callers branching on `kind === 'timeout'` need no change.
+
+
+## Profile-specific STP and income capabilities
+
+AsterDEX advertises `stpControls` only for API V3. V1 consumers must hide both
+account STP controls (fetch/change mode) and the per-order `stpMode` option. V3
+keeps all three surfaces. The native version checks and SDK's V3 checks still
+reject direct V1 STP attempts before I/O.
+
+Bybit Spot and HyroTrader advertise `incomeHistory: false`; Bybit linear, inverse
+and demo keep it true. Coinbase advertises `incomeHistory: false` for Spot, INTX
+and CFM because none of these adapters implements an income-ledger command.
+CFM's accepted native position PnL is separate from an income ledger.
+
+The existing SDK capability adoption installs branded empty income methods for
+these unsupported profiles, matching their TS fallback methods. Callers must gate
+income polling and ledger coverage on `capabilities.incomeHistory` (and
+`incomeRange`); an empty fallback is unavailable coverage, not a fetched complete
+ledger. Credentialed direct native income commands retain their existing
+pre-I/O refusals; legacy keyless shortcuts retain their existing behavior.
+
+## Polymarket unsupported history capability claims
+
+Polymarket reports `fillHistory`, `orderHistory` and `incomeHistory` as false
+for every signer mode and both public-only and credentialed construction.
+These handlers already reject native history commands as unsupported; account
+identity, live orders/positions, order-book queries and trading are unaffected.
+The TypeScript Polymarket exchange already inherits the branded base history
+fallbacks. The Rust SDK now installs those same empty fallbacks for historical
+fills, historical orders, income and ranged income instead of dispatching the
+unsupported native commands.
+
+Callers must gate history polling and coverage on the capability record. An
+empty branded fallback means unavailable history, not a fetched complete
+ledger; live cached rows are separate. A future Polymarket history implementation
+must re-enable each axis in the same PR that supplies its valid-state dispatch.
+
+
+### TxFlow indexed history shares accepted-page completion
+
+Fills, historical orders and indexed income stages now use the engine
+CursorHistory/Completion owner. HTTP/native, transport, decode and malformed-row
+failures reject with kind `internal` when no eligible output was accepted. A
+later actual failure returns only validated prior pages/stages with one command-
+scoped Warn `history.incomplete`. The failed page's streamed prefix is excluded;
+a filtered-only page cannot authorize recovery. Earlier fill-derived income and
+funding remain available if the later ledger stage fails. This replaces the
+previous whole-read rejection after later page/stage failures. No write outcome
+is added; transport and decode retain the shared Internal fallback.
+
+Empty/repeated no-progress continuation and the native offset cap remain strict
+refusals even after accepted output. Terminal offset 200000 can complete; a
+required offset 202000 rejects. The budget resets per native income stage while
+accepted output and identities persist. Losing account identity before a native
+leg also remains strict, now with Internal classification. Initial testnet/
+identity, range/limit, symbol, unsupported public-trade/lookup and selected-empty
+ledger admission contracts retain their existing behavior.
+
+Native offset steps remain 2000, and pagination continues before applying the
+caller's final output limit. Original time sorting, numeric fill-ID tie sorting,
+generic income/order tie order, exact IDs, delisted/archived symbol mapping,
+financial signs, timestamp units and result shapes are preserved. A validated
+empty result remains complete `[]`. No history Store publication, SDK argument,
+signing change or managed Context migration is added. Callers must ingest
+command-scoped incomplete warnings, gate coverage accordingly and treat typed
+rejection as unavailable history. This SDK contract does not establish NX
+runtime adoption. [Scope](RUST_OWNED_HISTORY.md).
+
+
+### Orderly history uses the shared accepted-page owner
+
+Fills, regular/algo orders, settled funding and public trades now complete
+through the engine CursorHistory/Completion owner. An HTTP, transport, decode,
+missing-list or row-validation failure before any eligible accepted output
+rejects with kind `internal`. A later failure returns only prior validated
+eligible rows plus one command-scoped Warn `history.incomplete`; streamed rows
+from the failed page are excluded. Regular orders remain available if the later
+algo read fails. A prior page containing only filtered rows cannot authorize
+partial recovery. This replaces the former whole-read rejection after a failed
+continuation or algo read.
+
+Native metadata inconsistencies, impossible/no-progress continuation and the
+fifty-page budget remain strict refusals, even after accepted output. The budget
+spans both order endpoints; a terminal fiftieth page completes. Native signing
+setup/refusal also stays strict and now has the shared `internal` classification
+(previously unclassified), with no write outcome added. Initial unsupported,
+credential, time, limit and market admission checks retain their existing errors.
+Transport and decode errors share the Internal fallback because they reach the
+same terminal callback.
+
+Exact IDs and regular/algo identity spaces, nested protective order mapping,
+settled-only funding, public trade occurrence keys, query/signing bytes,
+account-wide funding start spacing, per-stage limits, final sort/truncation and
+row shapes are preserved. A valid empty result remains complete `[]`. There is
+no history Store publication or managed Context adoption; this adapter retains
+explicit legacy completion authority. Callers must ingest command-scoped
+incomplete warnings, gate coverage accordingly and treat typed rejection as
+unavailable history. SDK adapter work does not imply NX runtime adoption.
+[Scope](RUST_OWNED_HISTORY.md).
 ## Managed native-plan admission and preflight
+
+Rust embedders enable the engine's `http-plans` Cargo feature to use Preflight
+and Plan APIs. Bybit and BingX enable it through their venue dependencies. Other
+standalone families omit Plan state, scheduling and callbacks until their own
+adoption enables the feature; ordinary managed Context behavior is unchanged.
+A venue overriding `on_http_plan_ready` or `on_http_owner_retired` must enable
+`http-plans` in its own engine dependency; workspace feature unification does
+not establish that its standalone family configuration has opted in.
 
 Managed commands using Preflight retain one command generation while prerequisite
 reads run. Each read keeps its declared deadline and retry policy. Whole-plan
@@ -4925,3 +5032,16 @@ the current DATA call and retires only unissued work; this cannot complete a
 write or abandon another selected call. The original deadline and native cache
 publication rules stay in force. NX receives the native result once and must not
 treat successful local fallback as proof that cache or Store state was refreshed.
+
+
+### Proven subset with unresolved write remainder
+
+| Native proof | Command outcome | NX handling |
+| --- | --- | --- |
+| A validated subset took effect; other targets remain unresolved (`PartialUnknown`) | `Unknown`, with bounded proven IDs and batch position metadata when available | Keep the proven subset, reconcile the remainder through reads, and never resend the whole write. |
+| A complete mixed acceptance/refusal is proven (`KnownPartial`) | Partial failure with the resolved facts | Keep accepted results and report refused targets. |
+| Count-mismatched, empty-ID or wholly unproven ACK (`Failed`) | `Unknown`; retained IDs are evidence only | Reconcile through reads; infer no Store effect or optimistic success from those IDs. |
+
+A satisfied native cancel may prove a subset without creating IDs. That proof
+still leaves any unresolved targets Unknown; a successful subset never cleans up
+the remainder or extends its deadline.

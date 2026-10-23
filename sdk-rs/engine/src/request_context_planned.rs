@@ -111,6 +111,62 @@ impl State {
 }
 
 impl ContextRegistry {
+    pub(super) fn reserved_context_count(&self) -> usize {
+        self.reserved_contexts
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(in super::super) fn plan_scan_visits(&self) -> usize {
+        self.plan_scan_visits.get()
+    }
+
+    // Share cold terminal authority/journal work across all venue Pending types.
+    #[inline(never)]
+    fn plan_seal(
+        &mut self,
+        plan: &Plan,
+        now: f64,
+        delivery: Option<&Delivery>,
+        error: Option<VenueError>,
+    ) -> Result<(CommandId, Seal), Error> {
+        if !now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        let body = self.plan_body(plan)?;
+        let Owner::Command { id, .. } = plan.owner() else {
+            unreachable!()
+        };
+        let owner = &self.commands[&id];
+        let admitted = delivery.is_none() && owner.deliveries == 0
+            || delivery.is_some_and(|delivery| {
+                body.handoff.as_ref() == Some(delivery)
+                    || body.entries.iter().any(|entry| {
+                        entry.call.as_ref().is_some_and(|call| {
+                            call.matches(delivery)
+                                || (matches!(call.stage, Stage::Ready)
+                                    && call.admission.predecessor.as_ref() == Some(delivery))
+                        })
+                    })
+            });
+        if !admitted {
+            return Err(Error::Revoked);
+        }
+        let owner = self.commands.get_mut(&id).unwrap();
+        let seal = if let Some(writes) = owner.writes.as_mut() {
+            if error.is_none() && writes.succeed().is_ok() {
+                Seal::Success
+            } else {
+                let error = writes.fail(error.unwrap_or_else(|| {
+                    VenueError::new("Command writes are not all confirmed accepted")
+                }))?;
+                Seal::Failure(error, writes.reports().map(str::to_owned).collect())
+            }
+        } else {
+            Seal::Legacy(error)
+        };
+        Ok((id, seal))
+    }
+
     fn plan_body(&self, handle: &Plan) -> Result<&Body, Error> {
         if !handle.issued_by(&self.issuer) {
             return Err(Error::Revoked);
@@ -273,6 +329,11 @@ impl<P> Cx<'_, P> {
             .try_reserve(future)
             .map_err(|_| Error::Capacity)?;
         self.io.timers.try_reserve(1).map_err(|_| Error::Capacity)?;
+        self.io
+            .request_contexts
+            .plan_index
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)?;
         let io_count = 1 + count as u64 + 3 * attempts as u64;
         let signed = policy.credential.is_some();
         if !self.io.next_id.available(io_count)
@@ -329,6 +390,7 @@ impl<P> Cx<'_, P> {
         owner.leg_intents = leg_intents;
         owner.last_deadline = deadline;
         self.io.request_contexts.reserved_contexts = future;
+        self.io.request_contexts.plan_index.push(id);
         self.io.timers.insert(timer, ());
         self.rearm_plan(&handle);
         Ok(handle)
@@ -678,42 +740,12 @@ impl<P> Cx<'_, P> {
         result: Option<String>,
         error: Option<VenueError>,
     ) -> Result<(), Error> {
-        if !self.now.is_finite() {
-            return Err(Error::Invalid);
-        }
-        let body = self.io.request_contexts.plan_body(plan)?;
-        let Owner::Command { id, .. } = plan.owner() else {
-            unreachable!()
-        };
-        let owner = &self.io.request_contexts.commands[&id];
-        let delivery = self.io.http_delivery.as_ref();
-        let admitted = delivery.is_none() && owner.deliveries == 0
-            || delivery.is_some_and(|delivery| {
-                body.handoff.as_ref() == Some(delivery)
-                    || body.entries.iter().any(|entry| {
-                        entry.call.as_ref().is_some_and(|call| {
-                            call.matches(delivery)
-                                || (matches!(call.stage, Stage::Ready)
-                                    && call.admission.predecessor.as_ref() == Some(delivery))
-                        })
-                    })
-            });
-        if !admitted {
-            return Err(Error::Revoked);
-        }
-        let owner = self.io.request_contexts.commands.get_mut(&id).unwrap();
-        let seal = if let Some(writes) = owner.writes.as_mut() {
-            if error.is_none() && writes.succeed().is_ok() {
-                Seal::Success
-            } else {
-                let error = writes.fail(error.unwrap_or_else(|| {
-                    VenueError::new("Command writes are not all confirmed accepted")
-                }))?;
-                Seal::Failure(error, writes.reports().map(str::to_owned).collect())
-            }
-        } else {
-            Seal::Legacy(error)
-        };
+        let (id, seal) = self.io.request_contexts.plan_seal(
+            plan,
+            self.now,
+            self.io.http_delivery.as_ref(),
+            error,
+        )?;
         self.finish_sealed_command(id, result, seal)
     }
 
@@ -843,8 +875,15 @@ impl<P> Cx<'_, P> {
 }
 
 impl ContextRegistry {
+    pub(in super::super) fn has_plans(&self) -> bool {
+        !self.plan_index.is_empty()
+    }
+
     pub(in super::super) fn end_plan_admission(&mut self) {
-        for owner in self.commands.values_mut() {
+        for command in &self.plan_index {
+            let owner = self.commands.get_mut(command).expect("indexed Plan owner");
+            #[cfg(any(test, feature = "test-support"))]
+            self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             if let CommandPhase::Planned(state) = &mut owner.phase {
                 state.body[0].initial_custody = false;
             }
@@ -856,7 +895,10 @@ impl ContextRegistry {
     }
 
     pub(in super::super) fn next_plan_ready(&mut self, now: f64) -> Option<Plan> {
-        for owner in self.commands.values_mut() {
+        for command in &self.plan_index {
+            let owner = self.commands.get_mut(command).expect("indexed Plan owner");
+            #[cfg(any(test, feature = "test-support"))]
+            self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             let CommandPhase::Planned(state) = &mut owner.phase else {
                 continue;
             };
@@ -882,7 +924,10 @@ impl ContextRegistry {
     }
 
     pub(in super::super) fn plan_for_timer(&self, timer: TimerId) -> Option<Plan> {
-        self.commands.values().find_map(|owner| {
+        self.plan_index.iter().find_map(|command| {
+            let owner = self.commands.get(command).expect("indexed Plan owner");
+            #[cfg(any(test, feature = "test-support"))]
+            self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             let CommandPhase::Planned(state) = &owner.phase else {
                 return None;
             };

@@ -298,6 +298,7 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    #[inline(never)]
     pub(in super::super::super) fn fail_owned_admission(
         &mut self,
         admission: &Admission,
@@ -373,6 +374,7 @@ impl<P> Cx<'_, P> {
             .expect("owned admission failure");
     }
 
+    #[inline(never)]
     pub(in super::super::super) fn finish_owned_read_failure(
         &mut self,
         delivery: &Delivery,
