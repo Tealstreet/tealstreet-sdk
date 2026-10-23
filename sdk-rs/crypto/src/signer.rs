@@ -2,8 +2,8 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef, Operation,
-    PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
+    Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
 };
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::{BTreeMap, HashMap};
@@ -513,9 +513,33 @@ impl LocalSigner {
         Ok(result)
     }
 }
+/// Mirrors the `sign_now` arms; keep the two in step.
+fn implemented(algorithm: Algorithm) -> bool {
+    match algorithm {
+        Algorithm::HmacSha256 | Algorithm::HmacSha512 | Algorithm::Sha256SecretSuffix => true,
+        Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
+        Algorithm::Ed25519
+        | Algorithm::Es256
+        | Algorithm::Secp256k1Digest
+        | Algorithm::StarkDigest
+        | Algorithm::SchnorrDigest => false,
+    }
+}
+
 impl Signer for LocalSigner {
     fn immediate(&self) -> bool {
         true
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        let usable = match algorithm {
+            Algorithm::ZkLinkContract => self.role_key(key, ExtraKey::ZklinkSeed).is_ok(),
+            _ => self.key(key).is_ok(),
+        };
+        if usable && implemented(algorithm) {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        }
     }
     fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         Some(self.sign_now(request))
@@ -1351,5 +1375,56 @@ mod tests {
             signer.sign_now(&zklink_request(key, payload)),
             Err(SignError::Unsupported)
         );
+    }
+
+    #[test]
+    fn capability_mirrors_installed_roles_and_compiled_arms_without_signing() {
+        let (seed, _, _) = zklink_case();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let primary = ids.primary.unwrap();
+        let seed_ref = primary.extra[&ExtraKey::ZklinkSeed].clone();
+        let zklink = if cfg!(feature = "zklink") {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        };
+        for (key, algorithm, expected) in [
+            (
+                &primary.signing,
+                Algorithm::HmacSha256,
+                Capability::Supported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::HmacSha512,
+                Capability::Supported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::Sha256SecretSuffix,
+                Capability::Supported,
+            ),
+            (&seed_ref, Algorithm::ZkLinkContract, zklink),
+            // Role binding: neither ref crosses into the other's algorithm.
+            (&seed_ref, Algorithm::HmacSha256, Capability::Unsupported),
+            (
+                &primary.signing,
+                Algorithm::ZkLinkContract,
+                Capability::Unsupported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::Ed25519,
+                Capability::Unsupported,
+            ),
+            (
+                &KeyRef("absent".into()),
+                Algorithm::HmacSha256,
+                Capability::Unsupported,
+            ),
+        ] {
+            assert_eq!(signer.can_sign(key, algorithm), expected, "{algorithm:?}");
+        }
     }
 }
