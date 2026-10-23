@@ -176,3 +176,40 @@ planning from actual15bd. It owns sign.rs/provider/setup and coordinated request
 funnel plumbing; history remains this lane's. The exact selected-read and native
 byte requirements above were sent before any implementation. No reviewed recipe
 or landed helper is consumed by this checkpoint.
+
+## Authorized unsigned public-trades implementation
+
+The overseer authorized one small implementation PR for unsigned public trades,
+on `feat/rust-phemex-public-trades-context`. The full signed plan/RED checkpoint
+remains at321992b680c on `feat/rust-phemex-bounded-history-context`. Its unlanded
+test target is replaced in this PR by a public-trades target retaining the
+selected unsigned assertions and native signed compatibility controls. Signed
+preparation/lookup-expiry REDs remain committed on the held branch, with no
+ignored tests or signed adoption claim in the unsigned PR.
+
+Select the new path only when both constructed primary and read credential
+containers are absent. Preserve credentialed public trades, fills/orders/lookup,
+signing and the common legacy request funnel. Use one public Read root,20s,Never,
+ReadCompletion and guarded ReadHistoryRows. Share the native sixteen-owner
+history limit and the existing deferred-history timer queue through a typed
+pending variant; do not add another queue, timer owner or scheduler.
+
+New Pending::PublicTrades callbacks validate before streaming row staging and
+common429/envelope response effects. Typed preparation/transport failures reach
+that root without text demotion or credential evidence. The existing native
+tuple decoder is shared by old signed and new unsigned public trades so exact
+time/quantity/duplicate identities have one codec. Preserve strict all-or-nothing
+page acceptance, output limit, headers, URL and no account-state mutation.
+
+Exact prune is intentionally narrower than the full six-fingerprint target:
+the shared tuple codec extraction retires only conservative macro fingerprint
+f913fd4fec0b8ab4a85e00f3b7439983491def6ad5bc264f606d18cbfc7da52e,
+one occurrence. The common legacy request and numeric lookup fingerprints still
+serve held signed consumers and must remain inventoried. Projected Phemex map
+is34fingerprints/38occurrences; this is one lexical removal, not a retired
+physical call-site claim. The unchanged scanner must confirm the exact delta.
+
+The final signer ruling supersedes the earlier additive proposal: no partial
+injected signer/bootstrap arm ships; dispatchSigning stays off. All signed
+history waits for uufub4's uncapped raw-expiry seam and zs5e83's full Phemex
+signer cutover. This unsigned path consumes neither prerequisite.
