@@ -348,6 +348,8 @@ pub(crate) struct Lifecycle {
     // Only live physical epochs. Central retirement removes entries before any
     // native invalidation/retry callback; size is bounded by registered feeds.
     current_sockets: BTreeMap<u64, Epoch>,
+    #[cfg(test)]
+    socket_lookups: std::cell::Cell<usize>,
     pending_frames: usize,
     external_queue_bytes: usize,
 }
@@ -380,10 +382,16 @@ impl Lifecycle {
         (0..self.feeds.len()).map(FeedId).collect()
     }
     pub(crate) fn socket_epoch(&self, socket: SocketId) -> Option<Epoch> {
+        #[cfg(test)]
+        self.socket_lookups.set(self.socket_lookups.get() + 1);
         self.current_sockets
             .get(&socket.0)
             .copied()
             .filter(|epoch| self.current(*epoch))
+    }
+    #[cfg(test)]
+    pub(crate) fn socket_lookup_count(&self) -> usize {
+        self.socket_lookups.get()
     }
     pub(crate) fn has_pending_frames(&self) -> bool {
         self.pending_frames != 0

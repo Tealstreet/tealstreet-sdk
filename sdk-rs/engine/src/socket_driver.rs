@@ -775,6 +775,46 @@ mod tests {
         }
     }
 
+    // Structural hot-path controls; no timing measurement.
+    #[test]
+    fn current_open_resolves_one_epoch_per_fresh_admission() {
+        let mut h = Harness::new(vec![policy(AuthMode::None)], true);
+        let before = h.engine.venue().driver.state.socket_lookup_count();
+        h.open(0);
+        assert_eq!(
+            h.engine.venue().driver.state.socket_lookup_count() - before,
+            1,
+            "opening must resolve its exact current epoch only once"
+        );
+    }
+
+    #[test]
+    fn current_text_keeps_two_independent_single_lookup_admissions() {
+        let mut h = Harness::new(vec![policy(AuthMode::None)], true);
+        h.open(0);
+        let before = h.engine.venue().driver.state.socket_lookup_count();
+        h.text(0, "pong");
+        assert_eq!(
+            h.engine.venue().driver.state.socket_lookup_count() - before,
+            2,
+            "ingress and control must each resolve exactly one fresh epoch"
+        );
+        assert!(h.engine.venue().driver.state.current(h.epoch(0)));
+    }
+
+    #[test]
+    fn retired_ingress_resolves_once_without_effect_or_callback() {
+        let mut h = Harness::new(vec![policy(AuthMode::None)], true);
+        h.open(0);
+        let socket = h.epoch(0).socket();
+        h.text(0, "stop");
+        let before = h.engine.venue().driver.state.socket_lookup_count();
+        let effects = h.engine.venue().effects.len();
+        h.event(Event::WsMessage { socket, text: "pong" });
+        assert_eq!(h.engine.venue().driver.state.socket_lookup_count() - before, 1);
+        assert_eq!(h.engine.venue().effects.len(), effects);
+    }
+
     // Independent pre-optimization formula; keep the full interval list here.
     fn original_time_check(policy: &FeedPolicy, now: f64) -> bool {
         let c = policy.supervision;
