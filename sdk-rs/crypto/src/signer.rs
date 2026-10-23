@@ -1427,4 +1427,97 @@ mod tests {
             assert_eq!(signer.can_sign(key, algorithm), expected, "{algorithm:?}");
         }
     }
+
+    // P4 REDs: public derivations reach the provider through the existing setup
+    // policy and request decode; vectors are the pinned ethers/Node/starknet.js ones.
+    fn public_setup(algorithm: &str, secret: &str) -> (LocalSigner, KeyRef) {
+        let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
+            "primary": {"secretEncoding": "hex", "signingAlgorithm": algorithm}
+        }))
+        .unwrap();
+        let setup = serde_json::json!({"primary": {"key": "account", "secret": secret}});
+        let (signer, identities) =
+            LocalSigner::from_json_with_policy(setup.to_string(), policy).unwrap();
+        (signer, identities.primary.unwrap().signing)
+    }
+    fn public_request(operations: serde_json::Value) -> SignRequest {
+        serde_json::from_value(serde_json::json!({
+            "receipt": {}, "context": {"venue": "", "method": "", "host": "", "path": ""},
+            "operations": operations,
+        }))
+        .unwrap()
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn public_address_of_a_declared_secp256k1_ref_matches_ethers() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/ethereum/primitives.json"))
+                .unwrap();
+        for case in corpus["cases"].as_array().unwrap() {
+            let secret = case["privateKey"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x");
+            let (signer, key) = public_setup("secp256k1Digest", secret);
+            let request =
+                public_request(serde_json::json!([{"kind": "publicAddress", "key": key}]));
+            let result = signer.sign_now(&request).unwrap();
+            let expected = case["recovered"].as_str().unwrap().to_ascii_lowercase();
+            assert_eq!(format!("0x{}", crate::hex(&result.values[0])), expected);
+        }
+    }
+
+    #[cfg(all(feature = "ed25519", feature = "stark"))]
+    #[test]
+    fn public_key_of_declared_ed25519_and_stark_refs_matches_independent_vectors() {
+        let node: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/ed25519/node.json")).unwrap();
+        let stark: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/starknet/sdk.json")).unwrap();
+        let cases = node["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|case| ("ed25519", "seed", case))
+            .chain(
+                stark["cases"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|case| ("starkDigest", "key", case)),
+            );
+        for (algorithm, field, case) in cases {
+            let secret = case[field].as_str().unwrap().trim_start_matches("0x");
+            let secret = format!("{secret:0>64}");
+            let (signer, key) = public_setup(algorithm, &secret);
+            let request = public_request(serde_json::json!([
+                {"kind": "publicKey", "algorithm": algorithm, "key": key}
+            ]));
+            let result = signer.sign_now(&request).unwrap();
+            let expected = case["publicKey"].as_str().unwrap().trim_start_matches("0x");
+            assert_eq!(
+                crate::hex(&result.values[0]),
+                format!("{expected:0>64}"),
+                "{algorithm}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_operations_never_fingerprint_hmac_undeclared_or_role_refs() {
+        let (signer, key) = fixture();
+        for operation in [
+            serde_json::json!({"kind": "publicAddress", "key": key}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "ed25519", "key": key}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "starkDigest", "key": key}),
+        ] {
+            let request = public_request(serde_json::json!([operation]));
+            assert_eq!(
+                signer.sign_now(&request),
+                Err(SignError::InvalidRequest),
+                "{operation}"
+            );
+        }
+    }
 }
