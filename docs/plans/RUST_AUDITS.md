@@ -2396,7 +2396,7 @@ limit would change caller-visible liveness policy and needs a separate decision.
 ## Ordinary Bybit Plan adoption
 
 Ordinary Bybit writes move from the legacy job pipeline to the shared Preflight
-and Plan core; Hyro and option placements stay on the legacy pipeline until
+and Plan core; Hyro and every option-symbol command stay on the legacy pipeline until
 their own adoption (D5, remove-before-master-merge). One const code table and a
 strict object-only acknowledgement codec record write facts before any Store or
 Demo publication; refusals that carry rows or IDs are unproven, and no text or
