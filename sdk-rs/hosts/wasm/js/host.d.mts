@@ -25,7 +25,7 @@ export interface HttpPacket {
   /** Required for managed requests; absent on older transport callers. */
   request?: number;
   method: string;
-  route?: 'direct' | 'publicCors' | 'primary';
+  route?: 'direct' | 'publicCors' | 'primary' | 'secondary';
   /** Remaining original lifecycle timeout, never renewed by binding. */
   timeoutMs?: number;
   url: string;

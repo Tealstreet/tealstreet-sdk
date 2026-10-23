@@ -235,6 +235,11 @@ impl RoutingState {
         {
             return Err("Secondary credentials conflict with primary HTTP routing".into());
         }
+        if request.route == Some(safe_cex_engine::RequestRoute::Secondary)
+            && intent != RoutingIntent::Secondary
+        {
+            return Err("Secondary HTTP routing requires secondary credentials".into());
+        }
         if let Some(route) = self.explicit_http(request.route)? {
             return Ok(route);
         }
@@ -266,6 +271,14 @@ impl RoutingState {
         use safe_cex_engine::RequestRoute;
         match route {
             Some(RequestRoute::Primary) => Ok(Some(self.plan.http.clone())),
+            // Same fallback as an inferred read when no read egress is configured.
+            Some(RequestRoute::Secondary) => Ok(Some(
+                self.plan
+                    .read_http
+                    .as_ref()
+                    .unwrap_or(&self.plan.http)
+                    .clone(),
+            )),
             Some(RequestRoute::Direct) => Ok(Some(HttpRoute::default())),
             Some(RequestRoute::PublicCors) => self
                 .plan
@@ -1061,6 +1074,50 @@ mod tests {
         assert_eq!(state.http(&request).unwrap().prefix, "public");
         request.headers.push(("X-MBX-APIKEY", String::new()));
         assert_eq!(state.http(&request).unwrap().prefix, "public");
+    }
+
+    #[test]
+    fn declared_secondary_route_uses_read_egress_regardless_of_method() {
+        let plan = RoutingPlan {
+            http: HttpRoute {
+                prefix: "primary".into(),
+                ..HttpRoute::default()
+            },
+            read_http: Some(HttpRoute {
+                prefix: "read".into(),
+                ..HttpRoute::default()
+            }),
+            ..RoutingPlan::default()
+        };
+        let mut request = HttpRequest {
+            id: RequestId(0),
+            method: Method::Post,
+            route: Some(safe_cex_engine::RequestRoute::Secondary),
+            timeout_ms: None,
+            url: "https://venue.test/account".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        };
+        assert_eq!(state(plan.clone()).http(&request).unwrap().prefix, "read");
+        let unconfigured = state(RoutingPlan {
+            read_http: None,
+            ..plan.clone()
+        });
+        assert_eq!(unconfigured.http(&request).unwrap().prefix, "primary");
+        use safe_cex_engine::request_context::RoutingIntent;
+        request.method = Method::Get;
+        let state = state(plan);
+        assert_eq!(
+            state
+                .managed_http(&request, RoutingIntent::Secondary)
+                .unwrap()
+                .prefix,
+            "read"
+        );
+        for intent in [RoutingIntent::Primary, RoutingIntent::Public] {
+            assert!(state.managed_http(&request, intent).is_err());
+        }
     }
 
     #[test]

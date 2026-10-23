@@ -6,6 +6,7 @@ use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::{ArrayAt, ArraySplitter, ItemCheck};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -13,11 +14,11 @@ use safe_cex_engine::model::{
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::request_context::{
-    Context, Credential, Operation, Owner, Policy, RejectionReports, RetryPolicy, Scope,
-    UnprovenEvidence, WriteResult,
+    Context, Operation, Owner, Policy, RejectionReports, RetryPolicy, Scope, UnprovenEvidence,
+    WriteResult,
 };
 use safe_cex_engine::{
-    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -454,7 +455,7 @@ impl BinanceFutures {
             }
             _ => return,
         };
-        if self.credentials.is_none() {
+        if self.credentials.primary().is_none() {
             let error = not_sent("Binance trading needs an API key").kind(ErrorKind::AuthInvalid);
             cx.fail(id, error);
             return;
@@ -471,14 +472,12 @@ impl BinanceFutures {
             } else {
                 Operation::Mutation
             };
-            let credential = (operation == Operation::Mutation).then(|| Credential {
-                slot: CredentialSlot::Primary,
-                reference: self
+            let credential = (operation == Operation::Mutation).then(|| {
+                let (selection, credentials) = self
                     .credentials
-                    .as_ref()
-                    .expect("checked above")
-                    .credential
-                    .clone(),
+                    .select(CredentialRole::Mutation)
+                    .expect("checked above");
+                selection.credential(credentials.credential.clone())
             });
             job.context = Some(
                 cx.http_context(
@@ -569,19 +568,16 @@ impl BinanceFutures {
         job.outstanding = step.len();
         let root = job.context.clone().expect("managed job has an authority");
         for planned in step {
-            let credentials = self
+            let (selection, credentials) = self
                 .credentials
-                .as_ref()
-                .expect("checked before planning")
-                .clone();
+                .select(CredentialRole::Mutation)
+                .expect("checked before planning");
+            let credentials = credentials.clone();
             let context = cx.http_leg_context(
                 &root,
                 Policy {
                     operation: Operation::Mutation,
-                    credential: Some(Credential {
-                        slot: CredentialSlot::Primary,
-                        reference: credentials.credential.clone(),
-                    }),
+                    credential: Some(selection.credential(credentials.credential.clone())),
                     timeout_ms: 20_000,
                     pacing: None,
                     retry: RetryPolicy::Never,

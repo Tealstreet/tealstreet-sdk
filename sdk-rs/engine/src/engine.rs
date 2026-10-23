@@ -78,6 +78,8 @@ impl Method {
 pub enum RequestRoute {
     /// A primary-account read must not use the secondary read identity/egress.
     Primary,
+    /// A read signed by the secondary key uses the read identity's egress.
+    Secondary,
     Direct,
     PublicCors,
 }
@@ -85,6 +87,7 @@ impl RequestRoute {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Primary => "primary",
+            Self::Secondary => "secondary",
             Self::Direct => "direct",
             Self::PublicCors => "publicCors",
         }
