@@ -5,6 +5,7 @@ mod history;
 mod public;
 mod rest;
 mod sign;
+pub use sign::REMOTE_RECIPES;
 mod trading;
 mod wire;
 
