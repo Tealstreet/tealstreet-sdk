@@ -1,5 +1,5 @@
 //! Original behavioral controls for #1896, using only reviewed #1873 APIs.
-#![cfg(feature = "test-support")]
+#![cfg(all(feature = "test-support", feature = "http-plans"))]
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::classify::WriteFact;
