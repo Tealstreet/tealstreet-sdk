@@ -437,3 +437,17 @@ carry shared typed Read metadata and cannot consume another owner; no financial
 outcome or transport support is required for these synchronous reads. No caller
 outside the SDK needs a signature change. Architecture gate: No; this consumes
 existing engine entry and completion authority, adding no cross-cutting mechanism.
+
+### Cached Read original RED and implementation receipt
+
+Plan2a093966518, original RED ffef6eaf580. Eight focused tests run against the
+unchanged actual732cf8 production: five intended assertion failures and three
+compatibility passes. Present leverage/tier incorrectly succeed at full capacity;
+missing leverage exposes its native unclassified error instead of the capacity
+refusal; both cached success branches ignore invalid clocks. After consuming
+shared admission and Context terminals directly, all eight controls pass unchanged.
+The test uses real Engine callbacks and genuine parked candle peers, never mocks
+Context authority. Unknown tier remains null; existing loaded-tier/write controls
+remain intact in account_limits.rs. Scanner-generated delta is exactly lib c5a…1
+and c873…1 plus limits417fc047…1; no other fingerprints are changed. Production
+uses only existing shared APIs, no new helper, transport, retry or signing path.

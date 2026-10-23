@@ -2257,3 +2257,13 @@ on rejected/revoked admission without a numeric terminal. The one removed legacy
 fingerprint shrinks Lighter47→46 and lib6→5; all other inventory entries remain.
 This closes only the candle refusal and introduces no venue capacity, retry or
 outcome rule. Native background polling continues using its independent Context.
+
+### Lighter cached reads: remove legacy numeric completion
+
+The cached FetchLeverage and FetchAccountTier branches consume shared initial
+Read admission and Context terminals. This closes their capacity/invalid-clock
+admission bypass without fabricating HTTP or financial evidence. Rejected and
+revoked entries return without numeric fallback; cache data and native errors
+remain unchanged after admission. Exactly three lexical sites are removed:
+Lighter46→43, lib5→3, limits6→5. SetAccountTier's separate identical numeric fail
+fingerprint remains counted. No held trading or engine source is changed.
