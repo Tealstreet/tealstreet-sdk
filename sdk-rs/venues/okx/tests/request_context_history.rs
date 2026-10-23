@@ -37,17 +37,20 @@ fn public_trades() -> Query {
     }
 }
 
-// Original source has no handle_command. After actual #1945, change only this
-// adapter to handle_command(now, command, timeout_ms); assertions stay intact.
+// Valid receipts use the reviewed #1945 API. The nonfinite-clock control keeps
+// exercising plain handle's unstamped entry until that separate contract settles.
 fn deliver(engine: &mut Engine<Okx>, at: f64, query: Query, timeout_ms: Option<u32>) {
-    let _ = timeout_ms;
-    engine.handle(
-        at,
-        Event::Command(Command::Query {
-            command: OWNER,
-            query,
-        }),
-    );
+    let command = Command::Query {
+        command: OWNER,
+        query,
+    };
+    if at.is_finite() {
+        engine
+            .handle_command(at, command, timeout_ms)
+            .expect("valid caller receipt");
+    } else {
+        engine.handle(at, Event::Command(command));
+    }
 }
 fn actions(engine: &mut Engine<Okx>, at: f64) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(engine, at)

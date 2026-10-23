@@ -241,3 +241,17 @@ source. The #1773/#1938/#1942 chain and narrow source handoff are being
 reconfirmed with claude-4yjlw0. No held venue source is edited until the agreed
 stack/order is established. Planned history shrink remains 14 fingerprints,
 18 occurrences; the conditional three-site lib funnel prune remains separate.
+
+On this composition, valid finite receipts now use real `handle_command`,
+including explicit 250 ms, 1000 ms and 180000 ms waits; the nonfinite-clock
+control still exercises plain handle's separate unstamped entry. The unchanged
+behavioral assertions produce seven runtime assertion REDs and five native
+compatibility passes, zero ignored. These are venue-adoption gaps with actual
+caller-wait propagation, except the separately reviewed unstamped-entry edge.
+
+claude-4yjlw0 reconfirmed the reviewed chain `e5aea380675` (#1773),
+`2a58ec8d414` (#1938), `b09e8882187` (#1942), with no successors. History.rs
+ownership passes to this lane from b09e8882187; its signer edits are final on
+that chain. The only permitted lib.rs edits are Pending::History response,
+failure and typed signing-failure arms. Send/sign funnel pruning and deleting
+the OKX staging entry wait for a later coordinated slice after actual landings.
