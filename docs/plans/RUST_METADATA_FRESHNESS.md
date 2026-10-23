@@ -356,3 +356,136 @@ The positive two-leg path retains the original root for completion and the same
 logical/scheduler deadlines. All 1002 engine/WEEX/BingX native tests pass, including
 these controls; strict all-target Clippy/fmt, bans and fourteen exact provenance
 controls pass. Native private adapters are unchanged by this checkpoint.
+
+## Plan and execution ownership continuation
+
+The authorized Plan prerequisite is reviewed #1873 `2fe13f4d892`, with core
+integration `450555399be`. Its later head `7585d3beb49` adds landing ancestry;
+the Plan owner confirms all 90 engine entries are identical. Stack on the exact
+authorized pin, then integrate actual shared landings before final CI. The
+engine `http-plans` feature is default-off. Adopting BingX must enable it in its
+own dependency graph; combined workspace feature unification is not proof of a
+standalone family build.
+
+This continuation replaces BingX's numeric metadata admission refusals and
+joined numeric terminals with genuine command-entry and shared execution
+authority. Existing Store Epoch/Stamp settings publication remains a separate
+proof. A live Plan does not make a superseded settings token current, and a
+current settings token does not make a stale delivery or observer live.
+
+### Ownership and integration
+
+- This lane owns shared metadata/settings policy, its controls, BingX's
+  `account.rs::fetch_metadata` pre-admission checks and metadata-specific caller
+  documentation. Preserve unrelated financial, signing and history changes.
+- The native BingX paired-read adapter is #1884 `f833fd19e7e`, owned by
+  claude-4yjlw0. Its agreed handoff may accept an already admitted Preflight and
+  the shared metadata token/work key. Only its current Plan-constructor region
+  may change to the agreed shared planned-execution constructor; the resulting
+  Plan, Slot and Context continue through the existing native Leg.
+- Preserve #1884's two serial steps, each with two fresh 20-second native
+  attempts: 40 seconds per call and an immutable 80-second whole-read bound.
+  Preserve secondary read-key selection, signature-refusal retry evidence,
+  dispatch recipe/custody, signed managed release, typed callbacks and
+  `done_read_plan_after_data`. No local retry, timer or deadline is substituted.
+- Account `positions_revision` and `bump_positions` remain native financial
+  fences. Replace only metadata eligibility's duplicate generation/revision
+  checks with the shared Store token. Native settings-write and snapshot paths
+  must still invalidate the relevant metadata publication. Retain
+  `settings_revision` wherever another native consumer still uses it.
+- Execution and planned-execution source remains claude-fe7lgm's shared core;
+  Plan/lifecycle source remains its owning lanes. No allocator, observer table,
+  journal, cancellation clock or execution core is duplicated here.
+- WEEX's native codec, cache/publication ordering and positions fence remain
+  covered. Do not silently reinterpret a legacy WEEX completion as managed
+  authority or claim its production cutover from the BingX proof.
+
+The read-only stack preview has conflicts in BingX `account.rs`, WEEX `lib.rs`,
+the legacy inventory and three shared append documents. Resolve shared append
+documents incoming-first with each own block once. Preserve incoming signer,
+typed callback and native routing changes in source; agree the exact remaining
+metadata hunks with their owner before resolving them. Inventory changes must
+be exact reviewed operations, with no broader bootstrap or exemption.
+
+### Admission, joining and publication
+
+Initial refusal belongs to a genuine command-entry loan. Missing credentials,
+unknown market and metadata capacity checks cannot call numeric `cx.fail` or
+obtain a synthetic HTTP Context merely to complete. The founder uses the
+reviewed ReadOnly Preflight and the shared atomic planned-execution admission.
+A follower uses its own genuine Read root and shared join authority. Failure
+must leave no physical request, stray observer, retained slot or numeric retry.
+
+The complete coalescing key includes normalized symbol, trusted account subject,
+credential slot/reference and intent, read kind, full native-work identity,
+publication policy and fallback policy. Return-only and publish-if-current,
+independent rails and complete-setting fallback must not accidentally join.
+Uniform terminal projection is sufficient only within one such key. Settings
+freshness storage does not become a second list of numeric completion owners.
+
+Only an exact validated Plan-slot delivery may enter a Store-capable native
+codec or publish. Validate before native state changes, check the Store token
+separately, and settle only the matching native call. Only validated current
+DATA progresses the existing read lease. Signature refusal, admission, reprepare,
+retry and late joining cannot renew the logical bound. Typed preparation and
+transport failures remain typed. A Plan or slot is never cast to an original
+Read Context, and direct execution completion cannot bypass a Plan seal.
+
+### Open composition decision
+
+The proposed shared API exists locally at `779b8891ecf` on the reviewed Plan
+pin. Its `begin_planned_execution` returns `(Plan, ExecutionHandle)`; Read
+controls and independent source review are still being prepared by its owner.
+Do not consume it as a frozen reviewed seam yet.
+
+That version keeps the founder command as the physical Plan owner. The founder
+cannot detach and survives until Plan sealing; it therefore cannot represent
+the standing metadata requirement that every observer, including the first,
+can detach or expire independently while a live peer remains eligible. Nor can
+it exercise a truly orphaned read's current-stamp denial before the codec.
+The group owner confirmed this difference. An execution-owned retained Plan
+with an explicit founder observer would be a shared additive change, not a
+venue adapter. Keep the original matrix as a gate until the owner settles this
+policy or supplies a reviewed shared authority that implements it. Do not
+weaken the controls or create local orphan bookkeeping to manufacture a pass.
+
+### Original REDs and implementation gates
+
+Commit original assertion controls before production changes, recording exact
+source, fixture and assertion separately from compile/API failures:
+
+1. A duplicate command ID cannot use the unknown-market admission path to
+   numerically fail an already active metadata owner. A distinct invalid-market
+   command remains the working refusal control.
+2. A valid private metadata read requires real managed Prepare/Bind/Claim before
+   native HTTP, and one complete paired native result; no legacy signed path.
+3. Same-key peers share native work, terminate once each and retain independent
+   bounds. Different account/key/intent/native-work/publication/fallback keys
+   cannot join. Late joining cannot extend the Plan or existing lease.
+4. Initial capacity/refusal and mixed-owner denial precede native effects;
+   stale/reused command generations cannot complete or publish through a
+   numeric fallback. Missing-key and unknown-market controls retain their native
+   text when entry authority is available.
+5. First/follower detach and expiry, all-observers-gone with a current Store
+   token, exact-deadline denial and a live-peer positive run before the native
+   codec. A Plan-founder-only approximation does not satisfy these controls.
+6. Wrong slot, sibling delivery and wrong physical attempt cannot decode,
+   publish, settle or complete; first-leg DATA alone permits the next leg.
+7. Preserve settings-write/snapshot invalidation, fallback rails, superseded
+   margin discard, native position fencing and the 20/40/80-second retry matrix.
+
+Review this plan and test design independently before implementing. First commit
+the reproducible native-entry/managed-release REDs on unchanged source; retain
+them through the exact Plan integration. Review integration preservation before
+adapting fixtures to native signer changes, keeping the original assertions.
+Wait for the composition policy and reviewed Read API before group production
+wiring. Use build/test concurrency two. Run focused metadata/BingX/WEEX native
+controls, standalone feature-on/off checks, strict Clippy/fmt, bans and the
+existing scanner controls; shipped WASM and replay gates remain CI work.
+
+Update CALLERS in the implementation commit: genuine admission/refusal,
+independent observer semantics actually provided, native retry bounds,
+freshness versus liveness, incomplete authority boundaries and required caller
+fallback handling. Keep the Plan/composition and family adoption evidence
+separate. Actual shared inputs, fresh green CI, independent review, an explicit
+window, a fresh separate guard and a head-matched merge remain landing gates.
