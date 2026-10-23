@@ -5153,6 +5153,21 @@ candle codec, duplicate timestamps, oversized results and ascending sorting are
 preserved. Private credentials, successful setting no-ops and capability policy
 retain their existing behavior.
 
+## MEXC initial plan-list credential refusal
+
+An initial Plan snapshot with an existing parsed native credential refusal now
+rejects startup with AuthInvalid, AuthExpired or AuthPermission, matching the
+initial position-mode read. Native venueCode and venueMessage are preserved,
+including complete error envelopes without a data list. A primary-key AuthInvalid rejection
+still deactivates; secondary-key refusal retains the existing non-deactivation
+policy. Startup publishes one terminal failure and cannot initialize orders or
+resume account polling, snapshot pages or asset refreshes through late callbacks.
+
+Transient failures, bare HTTP401/403 without a parsed native refusal, successful
+envelopes missing their list and refusals after initial orders loaded retain
+their existing retry behavior. No caller option or credential migration is
+required; callers awaiting startup receive the existing typed rejection.
+
 ## Script adapter batch failures retain SDK-reported IDs
 
 `createCoreAdapter.placeOrders` rejects with the exported `ScriptBatchOrderError`
