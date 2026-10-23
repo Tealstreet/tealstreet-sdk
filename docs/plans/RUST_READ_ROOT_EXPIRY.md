@@ -47,7 +47,7 @@ impl Cx<'_, P> {
     /// engine-owned expiry. Fresh entry only.
     pub fn admit_caller_read_root(
         &mut self,
-        credential: Option<CredentialSlot>,
+        credential: Option<Credential>, // slot plus the trusted KeyRef
         pacing: Option<Pacing>,
     ) -> Result<Context, CommandEntryError>;
 
@@ -63,10 +63,12 @@ impl Cx<'_, P> {
 }
 
 trait Venue {
-    /// The engine has retired this tracked Read root at its deadline. Drop
-    /// any queued continuation for `owner`. No Cx, so no completion, send or
-    /// Store rights; the engine seals the command itself.
-    fn read_root_retired(&mut self, owner: Owner) {}
+    /// The engine has retired this tracked Read root at its deadline.
+    /// `pending` holds the continuations of the owner's outstanding managed
+    /// requests, already discarded from transport. Drop them and any queued
+    /// continuation for `owner`. No Cx, so no completion, send, timer or Store
+    /// rights; the engine seals the command itself.
+    fn read_root_retired(&mut self, owner: Owner, pending: Vec<Self::Pending>) {}
 }
 ```
 
@@ -78,62 +80,102 @@ trait Venue {
 | Own receipt expired, or under 1 ms left | `Err(Revoked)` | None. The entry stays Fresh for `reject_expired_command(Read)`. |
 | Receipt missing | `Err(Rejected)` | One typed Read failure with outcome None, through #1949's `with_command_entry(Read, Err(cause))`. |
 | Not Fresh, borrowed callback, or delivery set | `Err(Revoked)` | None. |
+| Index or timer reservation refused | `Err(Rejected)` | One typed Read failure (Capacity, outcome None). No root, owner, index entry, timer or credit is left behind. |
+
+The guard is #1949's `fresh_command_entry`, which requires an untouched
+resource counter and no delivery. The receipt comes from #1949's
+`command_receipt`, through the same matching rule.
 
 The root policy is Read, `RetryPolicy::Never`, with the given credential and
-pacing. Legs are minted under it with the existing `http_leg_context` and are
-capped at the root deadline (`request_context_registry.rs:342-360`).
+pacing. Its deadline is the receipt's raw f64, issued through a registry
+variant `issue_command_root_at(.., deadline)`. It is never floored to a u32
+timeout and re-derived. Legs are minted under it with the existing
+`http_leg_context` and are capped at the root deadline
+(`request_context_registry.rs:342-360`).
+
+**Plain Read only.** A tracked owner stays a plain Read owner. A later
+Mutation sibling, a replacement Context or ownership conversion (to a
+Preflight, Plan or Execution) is refused with `Invalid`. The refusal comes
+before any id, journal or phase change, so a Timeout seal can never erase a
+released write.
+
+**Transaction order** (refusal-atomic):
+1. Guard and receipt checks, which have no effects.
+2. Reserve the index slot. `Io.read_roots` is preallocated to the registry's
+   owner capacity, 256, so the push cannot fail.
+3. Reserve one timer id through `reserve_ids`.
+4. Issue the root.
+5. Push the index entry.
+6. Re-arm the single engine timer.
+
+A refusal at step 2, 3 or 4 leaves nothing tracked, and it is a typed
+rejection through `with_command_entry`.
 
 ## Engine mechanism
 
-1. **Index.** `Io.read_roots: Vec<(f64, CommandId, generation)>` holds tracked
-   roots, with one engine timer at the earliest deadline.
-   - The timer is armed and cleared like `execution_timer`
-     (`execution_cx.rs:20-38`), with no venue `on_timer`.
-   - The sweep's empty guard is O(1): `if read_roots.is_empty() { return }`.
-   - An entry leaves the index when its command seals for any reason, at the
-     `finish_sealed_command` retirement point.
-2. **Sweep position.** `expire_read_roots(now)` runs at every public engine
-   entry, before any codec or physical timer can lend authority:
-   - first in `handle_received`, before `process_socket_work` (3294) and
-     therefore before `expire_plan_timer` and `expire_http_timer` (3301);
-   - at the top of `http_prepared`, `http_preparation_failed`, `claim_http`,
-     `prepare_dispatch` and `drain_actions`.
+1. **Index.**
+   - `Io.read_roots: Vec<(f64, CommandId, generation)>` holds the entries,
+     bounded by owner capacity.
+   - One engine timer `(TimerId, at)` covers the earliest deadline, with an
+     exact generation per arm. It is re-armed like `execution_timer`
+     (`execution_cx.rs:20-38`): the old id is cleared and a new id armed when
+     the earliest deadline changes. It is never in `io.timers`, so it never
+     reaches a venue's `on_timer`.
+   - The sweep's empty guard is O(1).
+   - Every terminal of a tracked owner removes its entry by exact
+     (id, generation) at the `finish_sealed_command` retirement point. That
+     covers venue success, venue failure, a typed rejection and the funnel.
+2. **Sweep position.** `expire_read_roots(now)` runs at every timed public
+   entry, before anything that can stamp, call a codec or lend authority:
+   - **`handle` and `handle_command`:** after `handle_command`'s argument and
+     clock validation (invalid input still has no effect) and BEFORE the
+     external receipt stamp. A same-id command arriving at or after an old
+     root's deadline therefore finds the old owner already sealed. It gets a
+     new sequence and generation instead of being stamped as a duplicate.
+   - **`handle_received`:** first, before `process_socket_work` (3294), the
+     plan and physical HTTP timers (3298, 3301) and every codec callback.
+   - **Other timed entries:** the top of `start`, `prepare_dispatch`,
+     `apply_public_feed`, `http_prepared`, `http_preparation_failed`,
+     `claim_http`, `snapshot_frame`, `account_snapshot_frame`, `take_frame` and
+     `take_market_frame`.
+   - **`drain_actions`:** it has no clock, so it sweeps at the last observed
+     engine time (`io.dispatch_now`), never a wall clock.
 
    Expiry at equality: `now >= deadline`.
-3. **Per expired root, in this order:**
-   1. **Mark.** Set `expired` on the owner's `Context` phase (a field inside
-      the variant, so existing `Context { .. }` matches are unchanged). Once
-      set, the following refuse with `Revoked`:
-      - `validate_completion_as`, for venue authority seals through the root
-        and numeric `done`/`fail` for that id;
-      - `validate_read_completion_context`;
-      - `validate_read_http_delivery`;
-      - `http_leg_context`.
+3. **Expired fence.** An `expired` field inside the owner's `Context` phase is
+   checked in the registry's shared `validate`/`validate_handle` and in
+   `validate_completion_as`. Every path through them refuses with `Revoked`:
+   - issuance (`http_leg_context`, siblings), queueing
+     (`queue_managed_admitted`), retry and re-sign;
+   - signing apply, `http_prepared` bind, final `claim_http` release;
+   - publication and companion events (`validate_read_completion_context`);
+   - history admission (`validate_read_http_delivery`);
+   - numeric `done`/`fail` for the id, refused while the owner is retained.
 
-      From here the owner is unsendable and non-publishing.
-   2. **Failure-only cleanup.** Each outstanding managed request of that owner
-      is found by scanning `managed_http` (by `delivery().context.owner()`, as
-      in `expire_plan_calls`). It goes through the existing typed paths:
-      - a released request gets `HttpFailed` with kind Timeout;
-      - an unreleased one gets `http_preparation_failed(TimedOut)`.
-
-      The venue gets its Pending back and its own cleanup runs, but every
-      terminal attempt is inert because of step 1. Native accepted-prefix
-      recovery cannot publish. Sent and delivery custody is preserved for
-      reconciliation, and nothing is re-admitted or retried. This mirrors
-      the plans-only precedent `http_plan_expiring`
-      (`request_context_planned.rs:816-829`).
-   3. **Queued state.** `venue.read_root_retired(owner)` is called with no Cx
-      (model: `discard_unproven_http_command`, `engine.rs:2539`). The venue
-      drops parked continuations, such as the Hyperliquid `pump_reads` history
-      entries.
-   4. **Seal once.** `finish_command(id, Err(Timeout read error), Some(&root))`
-      runs with `http_delivery == None`, through an engine-only seal origin
-      that is exempt from the step-1 flag. It reaches `finish_sealed_command`
-      and emits one `CommandFailed { kind: Timeout, outcome: None }`. The owner
-      is then removed, so later generation checks return `Stale` or `Revoked`.
-4. **Panics.** Steps 2-4 run under a poison guard like `ExpiryScope`. An
-   unwind poisons the engine instead of leaving a half-retired owner.
+   This includes children selected before the mark.
+4. **Barrier.** At one sweep boundary:
+   1. Mark ALL due roots first, before the first cleanup step. Cleanup for
+      root A therefore can never publish for a due root B.
+   2. Then, per root, run an engine-owned cleanup scope (analogous to #1932's
+      plan sweep and `ExpiryScope`).
+5. **Cleanup** has no venue Cx and no borrowed entry, Plan, socket, order or
+   Read-transport proof. Per root, in order:
+   1. For each outstanding managed request of the owner, `discard_managed`
+      runs. The scan matches `delivery().context.owner()` by exact id and
+      generation. The request gets an `HttpAction::Cancel`, and its `Pending`
+      is collected. Any sent evidence is retained by the existing
+      reconciliation capture; a Read has no write journal. Nothing is
+      re-admitted, retried or completed.
+   2. `venue.read_root_retired(owner, pending)` hands back those `Pending`s
+      plus the owner, with no Cx. The venue drops native state and queued
+      continuations. It cannot send, complete or touch the Store.
+   3. Seal once with a private engine capability: a `RootExpirySeal` token,
+      constructed only inside the sweep and bound to the exact issuer, root
+      and generation. It is never lent to a venue. `finish_sealed_command`
+      then emits `CommandFailed { kind: Timeout, outcome: None }` with
+      `http_delivery == None`, and removes the owner and the index entry.
+6. **Panics.** The scope poisons the engine on unwind, so a half-retired owner
+   can never survive.
 
 ## Invariants
 
@@ -144,7 +186,8 @@ capped at the root deadline (`request_context_registry.rs:342-360`).
   page-failure recovery, including accepted-only partials, still applies.
 - **Timer order.** Root first and leg first are equivalent. The sweep runs
   before `expire_http_timer`, so a same-instant leg timer finds the owner
-  already marked.
+  already sealed. Its request was already discarded, so no venue failure
+  callback runs for it.
 - **Late replies.** A late reply or DATA for a retired owner is inert,
   through the existing generation and leg validation.
 - **Reused ids.** A reused command id gets a new generation and a new receipt.
@@ -159,27 +202,39 @@ capped at the root deadline (`request_context_registry.rs:342-360`).
 
 These run against existing engine APIs with a probe venue, using the real
 `handle_command` receipt and managed Prepare/Bind/Claim. API-shape tests are
-labelled as new-API tests, not REDs.
+labelled as new-API tests, not REDs. The probe counts finalizer invocations
+and records which command each INCOMPLETE marker belongs to.
 
 1. **Parked root.** A tracked root parked with no HTTP reaches its deadline.
-   There is exactly one `CommandFailed` with kind Timeout and outcome None, and
-   no venue callback is needed. The probe's later `finish_with(Err)` with
-   accepted rows publishes nothing. (Today: no terminal at all.)
+   There is exactly one `CommandFailed` with kind Timeout and outcome None. The
+   finalizer count is 0, and there are no markers for that command. Run at the
+   deadline exactly and at a fractional remainder (deadline - 0.5 ms
+   expires). (Today: no terminal at all.)
 2. **Released leg in flight, root deadline equals the leg deadline.**
-   - Root first then leg, and leg first then root: one strict Timeout in each.
-   - An accepted earlier page is never published.
-   - The probe's failure callback receives its Pending exactly once.
-3. **Unreleased leg in preparation.** The same as 2, through
-   `on_http_preparation_failed`.
+   - Both delivery orders: the leg `TimerFired` and the deadline sweep.
+   - One strict Timeout, with the earlier accepted page unpublished and a
+     finalizer count of 0.
+   - The probe receives its `Pending` once, through the hook, and no failure
+     callback runs.
+3. **Unreleased leg in preparation.** The same as 2. A late `http_prepared`
+   bind, or `claim_http`, after the deadline releases nothing.
 4. **Leg-only timeout with the root live.** Accepted-only partial recovery
-   still publishes, as today.
-5. **Late DATA and late Bind after expiry.** Inert, with no second terminal.
-6. **Reused id.** After expiry, the same id with a new receipt runs to
-   completion. The old index entry does nothing.
-7. **Isolation.** Another live root and a Plan owner are unaffected. The
-   index keeps one engine timer, and the empty guard emits no timer actions.
-8. **Public entrypoints.** `http_prepared` or `claim_http` called after the
-   deadline expires the root first, so no Bind or release happens.
+   publishes, with a finalizer count of 1 and one marker for that command,
+   as today.
+5. **Late reply and late DATA after expiry.** Inert, with no second terminal.
+6. **Same id, no `TimerFired`.** The id arrives at the deadline exactly, and
+   again past it:
+   - the old root gets one strict Timeout;
+   - the new command gets a new receipt and generation and runs to completion;
+   - the old timer, when it fires later, is inert.
+7. **Cross-owner.**
+   - Two roots due at the same boundary: the cleanup for A cannot publish or
+     send for B, and each gets exactly one Timeout.
+   - A live third root and a Plan owner are untouched.
+   - There is one engine timer, and the empty guard emits no timer actions.
+8. **Public entrypoints.** `http_prepared`, `claim_http`, `prepare_dispatch`,
+   a frame call, `apply_public_feed` and `drain_actions` (at
+   `io.dispatch_now`) each expire a due root first.
 9. **Missing receipt.** `reject_unstamped_command` gives one typed failure:
    Read with outcome None, Mutation with NotSent. It is Revoked with no effect
    when the receipt is live, and `admit_caller_read_root` agrees. Cases:
@@ -188,6 +243,12 @@ labelled as new-API tests, not REDs.
    - a duplicate of a live legacy id (whose original stamp is preserved).
 10. **Expired at admission.** `admit_caller_read_root` returns Revoked with no
     effect, then `reject_expired_command(Read)` gives one Timeout.
+11. **Plain Read only.** A Mutation sibling, a replacement or a conversion on
+    a tracked owner is refused before any id or journal change. The root
+    still expires normally.
+12. **Reservation refusal.** Forced index, timer or id capacity refusal gives
+    one typed rejection and leaves nothing tracked: no owner, timer or credit.
+    A fresh admission immediately afterwards succeeds.
 
 ## Files
 
