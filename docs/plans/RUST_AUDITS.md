@@ -2646,6 +2646,79 @@ the original-RED composition control cover both initial arming and prior wakeup.
   safe diagnostics and native rate floors. Native successful candle codec and
   wire behavior remain compatible. Private P0#33 and signer conversion remain.
 
+### WEEX local history admission custody (2026-10-24)
+
+Original test-only checkpoint `d5746d2d490` on actual `a828ede7ebb` compiles and
+runs eleven dedicated controls: three native controls pass; seven independent
+capacity assertions and the invalid-clock assertion fail at native legacy
+publication. The forwarding fixture retains256 genuine engine Read command
+roots and delegates WEEX Query unchanged; it creates no HTTP or fake Context.
+Source/adversarial, caller and full-map reviews cleared the plan and REDs.
+The seven inline terminals now use shared initial Read admission and checked
+Context completion. The unchanged eleven controls pass, including native
+credential-presence/validation order, exact error metadata, equal/one-sided/
+safe-integer bounds, budget boundaries, remote signed/public wire controls at
+full capacity, peer isolation, recovery and300 fixed-clock completions/refill.
+Exact own inventory prune is WEEX51->44/history10->3 occurrences; all remote
+macro records, foreign maps and held trading/dispatch regions are preserved.
+
+Scoped WEEX/Binance native verification passes506tests,0failed/ignored;
+strict WEEX all-target/all-feature Clippy, scoped formatting, source scan and
+all15request-context checker tests pass. Implementation review/CI remain separate.
+
+### WEEX account identity Read entry (2026-10-24)
+
+Committed plan `af65a1577b2` and original test-only checkpoint `a55a561b921`
+received independent source/adversarial, caller and full-map CLEAN reviews.
+Test-only refinement `902335f2b6f` removes a Clippy identity-map expression while
+retaining exact header equality; all three reviews cleared that bounded change.
+On unchanged actual `a828ede7ebb`, nine tests compile/run:3native controls PASS,
+6intended assertion REDs (four local capacity bypasses, remote numeric admission
+fallback and invalid clock). A fixture initially drained Prepare before the
+shared release helper; this was fixed before freezing and is not a RED.
+The unchanged frozen nine controls now PASS after direct use of genuine initial
+Read entry and existing signed-managed dispatch in identity.rs. Checked native
+companion diagnostics and exact signer/primary namespace survive. The orphan
+legacy success arm and numeric failure helper are removed, pruning exactly the
+two identity singletons; no held helper, dispatch, account or trading code moves.
+
+Pre-integration native504WEEX/Binance tests and strict WEEX Clippy/fmt pass.
+Whole-map provenance is blocked by newer Aster inventory shrink in origin;
+actual integration and fresh gates follow, with no foreign manifest edits.
+
+Actual integration e336f67b7de genuinely includes15bd7821b52; all unowned incoming
+blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
+full bans and both request-context checks (15tests) PASS. Three independent
+implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
+prune is verified; the parallel #1951 history prune is not credited here.
+
+### Binance identity terminal provenance
+
+The local identity error helper reuses existing Read entry and typed identity
+error completion. Its unused numeric success arm and numeric command argument
+are removed. Successful credential selection, HTTP preparation and response
+handling remain exact to actual `15bd7821b52`; no shared API, session, signing,
+history, account reducer or Store changes are involved. The listen-key owner
+confirmed the identity helper and distant FetchAccount dispatch arm are clear;
+the existing command-entry capacity assertion is preserved.
+
+Pure inventory prune removes only `venues/binance/src/identity.rs`:
+`c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548: 1`
+and `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa: 1`.
+All other manifest bytes/maps remain exact; Binance shrinks from 26 fingerprints
+/ 30 occurrences to 24 / 28. No rehash, site growth or checker exemption.
+
+## Phemex unsigned public-trades Context ownership
+
+The unsigned /md/v2/trade query now owns one genuine public Read root and
+managed delivery, including its existing native pause queue. Row admission and
+terminal ownership use ReadCompletion/ReadHistoryRows; stale429 cannot extend a
+pause, and typed preparation/network/expiry errors survive to the correct owner.
+Native signed public/private, income, identity, trading and socket paths remain
+held consumers. Their shared legacy fingerprints are retained. Only the public
+tuple codec's conservative f913fd4f macro occurrence is removed (1F/1O); this is
+not a claim that the shared physical request funnel has migrated.
+
 ## Selected managed signed Read composition
 
 Shared admission/selection/queue/refusal composition is additive in engine

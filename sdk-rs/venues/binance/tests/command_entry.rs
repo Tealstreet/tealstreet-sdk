@@ -98,3 +98,71 @@ fn native_command_entry_refusal_is_one_typed_result_before_any_transport() {
         )));
     }
 }
+
+fn assert_identity_preflight_requires_admission(options: support::Options) {
+    let (venue, signer) = options.build();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(FullRegistry(venue));
+    engine.set_signer(Some(signer)).unwrap();
+    engine.start(0.);
+    engine.drain_actions().for_each(drop);
+    let before = engine.account_snapshot_frame(1.).to_vec();
+    engine.handle(1., Event::Command(Command::FetchAccount { command: 7 }));
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let errors = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1, "one correlated terminal: {actions:?}");
+    assert_eq!(errors[0].message, "Engine request capacity reached");
+    assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
+    assert_eq!(errors[0].outcome, None, "identity is a Read");
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Http(_)
+            | Action::ManagedHttp(_)
+            | Action::Sign { .. }
+            | Action::Notice(Notice::CommandDone { .. } | Notice::CommandError { .. })
+    )));
+    assert_eq!(engine.account_snapshot_frame(1.), before);
+}
+
+#[test]
+fn missing_identity_credentials_cannot_bypass_read_admission() {
+    assert_identity_preflight_requires_admission(support::Options::default());
+}
+
+#[test]
+fn disabled_private_identity_cannot_bypass_read_admission() {
+    assert_identity_preflight_requires_admission(support::Options {
+        key: Some("identity-key".into()),
+        secret: Some("identity-secret".into()),
+        public_data_only: true,
+        ..Default::default()
+    });
+}
+
+#[test]
+fn incomplete_primary_identity_cannot_bypass_read_admission() {
+    assert_identity_preflight_requires_admission(support::Options {
+        key: Some("identity-key".into()),
+        secret: Some(String::new()),
+        ..Default::default()
+    });
+}
+
+#[test]
+fn incomplete_secondary_identity_cannot_bypass_read_admission() {
+    assert_identity_preflight_requires_admission(support::Options {
+        key: Some("identity-key".into()),
+        secret: Some("identity-secret".into()),
+        read_credentials: Some(safe_cex_engine::ReadCredentials {
+            key: "identity-read-key".into(),
+            secret: String::new(),
+            passphrase: None,
+        }),
+        ..Default::default()
+    });
+}
