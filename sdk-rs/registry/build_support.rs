@@ -108,6 +108,17 @@ struct IdentitySetupPolicy {
     passphrase: Option<SetupFieldPolicy>,
     secret_encoding: Option<KeyEncoding>,
     extra: Option<ExtraKeyPolicy>,
+    signing_algorithm: Option<SigningAlgorithm>,
+}
+
+/// Only asymmetric algorithms may be declared; the provider refuses others.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SigningAlgorithm {
+    Ed25519,
+    Es256,
+    Secp256k1Digest,
+    StarkDigest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -238,8 +249,12 @@ fn rule(value: &Rule) -> String {
                     )
                 },
             );
+            let signing_algorithm = value.signing_algorithm.as_ref().map_or_else(
+                || "None".into(),
+                |algorithm| format!("Some(safe_cex_engine::signing::Algorithm::{algorithm:?})"),
+            );
             format!(
-                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra} }})",
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm} }})",
                 value.trim_credential
             )
         }
@@ -371,11 +386,15 @@ mod tests {
             "default":{"canSign":[],"privateEligible":[]},
             "venues":{
                 "mexc":{"signerSetup":{"primary":{"trimCredential":true},"secondary":{"trimCredential":false}}},
-                "empty":{"signerSetup":{"primary":{}}}
+                "empty":{"signerSetup":{"primary":{}}},
+                "evm":{"signerSetup":{"primary":{"signingAlgorithm":"secp256k1Digest"}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest) }), secondary: None }"));
+        // MAC algorithms are never declarable.
+        assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"hmacSha256"}}}}}"#).is_err());
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
     }
 
