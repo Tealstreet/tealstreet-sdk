@@ -147,3 +147,17 @@ authority and typed error propagation; an expired or reused ID cannot complete f
 signature, new REST capability or private auth behavior changes. Record concrete
 landed behavior in RUST_CUTOVER_CALLERS.md, RUST_AUDITS.md and RUST_QUALITY.md with
 the implementation; this plan alone claims no source cutover or consumer proof.
+
+## Current reviewed-stack integration after callback release
+
+Callback dependency #1813 actually landed3c4c3c3d042; seeds #1829 are also actual.
+This branch genuinely merges reviewed #1848 f4719c16597a3fd852f0ebf68a685a733802a49a
+and actual #1871/#1872 landing e233cb05dfb. All engine source/test blobs are exact
+to the authorized f471 bridge; no core conflict or local seam change occurred.
+The earlier three CLEAN plan reviews and seven original RED controls retain the
+same API/native contracts. Shared README/CALLERS merges preserve full incoming,
+bridge row/appendix once and the exact own public-trades index row once. No
+Paradex signing, auth, account/trading or private history authority is changed.
+Sam's pending remote Stark payloadSigner option C has no bearing on unsigned
+GET /trades. The current source/test hold check clears history.rs/lib.rs and the
+new regression file; recheck before source. No reviewed seam is claimed actual.
