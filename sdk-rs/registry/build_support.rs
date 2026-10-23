@@ -31,6 +31,15 @@ struct Rule {
     signer_setup: CredentialSetupPolicy,
     #[serde(default)]
     remote_signing: RemoteSigningPolicy,
+    /// Family-specific trusted setup mapping, declared rather than name-matched.
+    #[serde(default)]
+    setup_mapping: Option<SetupMapping>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SetupMapping {
+    Asterdex,
 }
 
 #[derive(Default, Deserialize)]
@@ -65,6 +74,7 @@ struct RemoteSigningWire {
 enum RemoteExtraData {
     BybitExpiry,
     BinanceSpot,
+    OkxTimestamp,
 }
 
 #[derive(Default, Deserialize)]
@@ -81,6 +91,17 @@ struct IdentitySetupPolicy {
     passphrase: Option<SetupFieldPolicy>,
     secret_encoding: Option<KeyEncoding>,
     extra: Option<ExtraKeyPolicy>,
+    signing_algorithm: Option<SigningAlgorithm>,
+}
+
+/// Only asymmetric algorithms may be declared; the provider refuses others.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SigningAlgorithm {
+    Ed25519,
+    Es256,
+    Secp256k1Digest,
+    StarkDigest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,6 +137,7 @@ enum ExtraFieldPolicy {
 #[serde(rename_all = "camelCase")]
 enum ExtraKey {
     ZklinkSeed,
+    L1Wallet,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,8 +234,12 @@ fn rule(value: &Rule) -> String {
                     )
                 },
             );
+            let signing_algorithm = value.signing_algorithm.as_ref().map_or_else(
+                || "None".into(),
+                |algorithm| format!("Some(safe_cex_engine::signing::Algorithm::{algorithm:?})"),
+            );
             format!(
-                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra} }})",
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm} }})",
                 value.trim_credential
             )
         }
@@ -249,8 +275,12 @@ fn rule(value: &Rule) -> String {
             .as_ref()
             .map_or_else(|| "None".into(), |header| format!("Some({header:?})")),
     );
+    let setup_mapping = value.setup_mapping.as_ref().map_or_else(
+        || "None".into(),
+        |mapping| format!("Some(SetupMapping::{mapping:?})"),
+    );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing} }}",
+        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )
@@ -335,11 +365,15 @@ mod tests {
             "default":{"canSign":[],"privateEligible":[]},
             "venues":{
                 "mexc":{"signerSetup":{"primary":{"trimCredential":true},"secondary":{"trimCredential":false}}},
-                "empty":{"signerSetup":{"primary":{}}}
+                "empty":{"signerSetup":{"primary":{}}},
+                "evm":{"signerSetup":{"primary":{"signingAlgorithm":"secp256k1Digest"}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest) }), secondary: None }"));
+        // MAC algorithms are never declarable.
+        assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"hmacSha256"}}}}}"#).is_err());
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
     }
 
@@ -364,6 +398,15 @@ mod tests {
         }
     }
 
+    // P6b R3: the l1Wallet role compiles like zklinkSeed.
+    #[test]
+    fn l1_wallet_extra_key_compiles() {
+        let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "p":{"signerSetup":{"primary":{"extra":{"key":"l1Wallet","field":"requiredForPrivate","encoding":"hex"}}}}
+        }}"#).unwrap();
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
+    }
+
     #[test]
     fn declared_encoding_and_extra_key_compile_and_unknown_values_fail_closed() {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
@@ -376,7 +419,7 @@ mod tests {
         assert!(generate(base58).unwrap().contains("KeyEncoding::Base58"));
         for field in [
             r#"{"secretEncoding":"base32"}"#,
-            r#"{"extra":{"key":"l1Wallet"}}"#,
+            r#"{"extra":{"key":"unknownRole"}}"#,
             r#"{"extra":{"key":"zklinkSeed","name":"x"}}"#,
             r#"{"extra":{"key":"zklinkSeed","field":"requiredWithPrimaryFallback"}}"#,
             r#"{"extra":{"key":"zklinkSeed","field":null}}"#,

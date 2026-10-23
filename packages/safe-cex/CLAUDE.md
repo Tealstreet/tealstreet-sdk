@@ -44,7 +44,11 @@ package setting; measured performance evidence covers WASM.
 
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
-Binance's four aliases, Bybit's five aliases and WEEX (hosted admission disabled). High-level credential input is consumed by a trusted
+Binance's four aliases, Bybit's five aliases, WEEX (hosted admission disabled)
+and AsterDEX. AsterDEX first maps its account through `asterdexSignerSetup.ts`
+(resolved API version, hex V3 wallet keys, read agent aliasing the primary
+wallet); native setup and `asterdex-signer-setup.golden.json` pin the same
+mapping. High-level credential input is consumed by a trusted
 `LocalSignerSetup` before `BaseExchange` retains options; generic options contain
 no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached
@@ -102,7 +106,8 @@ For families with enabled hosted-signing admission, browser-facing `signHttpRequ
 and `signWsAuth` use the same owned provider through bounded signing-only captures, without
 starting account discovery or venue transport work. The default synchronized
 clock can still initialize its existing time-source calibration. The original HTTP config/WS response
-wire stays intact. Shared standalone Binance/Bybit request-shape interceptors,
+wire stays intact. Shared standalone Binance/Bybit and AsterDEX V1 (an explicit,
+setup-resolved `apiVersion: v1` only; never V3 wallet keys) request-shape interceptors,
 their codec/site tables and the capture utility are the TS retained for remote
 signing after TS venue classes are deleted; no TS venue/API factory is created.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture

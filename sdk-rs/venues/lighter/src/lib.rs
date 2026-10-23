@@ -84,6 +84,7 @@ pub enum Pending {
         failed: bool,
     },
     Tickers {
+        context: Context,
         rows: Vec<(String, Ticker)>,
         failed: bool,
         revision: u64,
@@ -289,25 +290,48 @@ impl Lighter {
         if self.ticker_in_flight || self.startup.waiting(&false) {
             return;
         }
+        let Ok(context) = cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) else {
+            self.startup.failed(cx, false);
+            return;
+        };
         self.ticker_in_flight = true;
-        cx.request_streamed(
+        let pending = Pending::Tickers {
+            context: context.clone(),
+            rows: vec![],
+            failed: false,
+            revision: self.ticker_revision,
+        };
+        match cx.request_managed(
+            context,
             Method::Get,
             format!("{}/api/v1/exchangeStats", self.host()),
-            vec![],
-            ArrayAt::Envelope(&[
-                &["order_book_stats"],
-                &["data", "order_book_stats"],
-                &["result", "order_book_stats"],
-                &["tickers"],
-                &["data", "tickers"],
-                &["result", "tickers"],
-            ]),
-            Pending::Tickers {
-                rows: vec![],
-                failed: false,
-                revision: self.ticker_revision,
-            },
-        );
+            None,
+            pending,
+        ) {
+            Ok(request) => cx.stream_response(
+                request,
+                ArrayAt::Envelope(&[
+                    &["order_book_stats"],
+                    &["data", "order_book_stats"],
+                    &["result", "order_book_stats"],
+                    &["tickers"],
+                    &["data", "tickers"],
+                    &["result", "tickers"],
+                ]),
+            ),
+            Err((pending, error)) => {
+                self.public_failed(cx, pending, &error.venue_error().message);
+            }
+        }
     }
     fn depth_seed(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let Some(market) = cx.store.market(symbol) else {
@@ -664,7 +688,8 @@ impl Lighter {
                 fallback: false, ..
             } => self.markets(cx, true),
             Pending::Markets { fallback: true, .. } => self.startup.failed(cx, true),
-            Pending::Tickers { .. } => {
+            Pending::Tickers { context, .. } => {
+                let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
                 self.startup.failed(cx, false);
             }
@@ -1013,7 +1038,15 @@ impl Venue for Lighter {
                     Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
-            Pending::Tickers { rows, failed, .. } => {
+            Pending::Tickers {
+                context,
+                rows,
+                failed,
+                ..
+            } => {
+                if cx.validate_http_context(context).is_err() {
+                    return;
+                }
                 match serde_json::from_str::<Stats<'_>>(item) {
                     Ok(stats) => {
                         let id = stats.market_id.map(|v| format!("{v:.0}"));
@@ -1161,12 +1194,15 @@ impl Venue for Lighter {
                 self.poll = Some(cx.set_timer(2_000.0));
             }
             Pending::Tickers {
+                context,
                 rows,
                 failed,
                 revision,
             } => {
+                let live = cx.validate_http_context(&context).is_ok();
+                let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
-                if failed && rows.is_empty() {
+                if !live || failed && rows.is_empty() {
                     self.startup.failed(cx, false);
                     return;
                 }

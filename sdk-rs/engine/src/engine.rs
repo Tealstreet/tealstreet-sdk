@@ -78,6 +78,8 @@ impl Method {
 pub enum RequestRoute {
     /// A primary-account read must not use the secondary read identity/egress.
     Primary,
+    /// A read signed by the secondary key uses the read identity's egress.
+    Secondary,
     Direct,
     PublicCors,
 }
@@ -85,6 +87,7 @@ impl RequestRoute {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Primary => "primary",
+            Self::Secondary => "secondary",
             Self::Direct => "direct",
             Self::PublicCors => "publicCors",
         }
@@ -1443,9 +1446,15 @@ struct Io<P> {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    // Reconcile reads the engine owes the venue, one per uncertain seal: the
+    // symbols (`None` = all) and the earliest time to ask.
+    #[cfg(feature = "order-locks")]
+    reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
     #[cfg(feature = "http-plans")]
     http_plan_ready: Option<crate::request_context::Plan>,
+    #[cfg(feature = "http-plans")]
+    http_plan_expiring: Option<crate::request_context::Plan>,
     http_owner_poison: bool,
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
@@ -1470,9 +1479,14 @@ struct Io<P> {
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
+    session_waits: request_context_registry::session::Waits<P>,
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
+    /// Trusted-construction refs per slot, used only for capability admission.
+    identities: crate::signing::Identities,
+    /// Algorithms a host-fulfilled (Action::Sign) signer declared at install.
+    host_algorithms: Option<Vec<crate::signing::Algorithm>>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
     streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
@@ -1503,13 +1517,17 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
     #[cfg(feature = "managed-sockets")]
-    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal>,
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal<P>>,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_bytes: usize,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_next: u64,
     #[cfg(feature = "managed-sockets")]
     socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuations: std::collections::VecDeque<managed_sockets::Continuation<P>>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuation_bytes: usize,
 }
 
 impl<P> Default for Io<P> {
@@ -1519,9 +1537,13 @@ impl<P> Default for Io<P> {
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_due: Vec::new(),
             command_entry: None,
             #[cfg(feature = "http-plans")]
             http_plan_ready: None,
+            #[cfg(feature = "http-plans")]
+            http_plan_expiring: None,
             http_owner_poison: false,
             #[cfg(feature = "http-plans")]
             http_plan_poison: false,
@@ -1545,9 +1567,12 @@ impl<P> Default for Io<P> {
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
             signatures: Vec::new(),
+            session_waits: Default::default(),
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
+            identities: Default::default(),
+            host_algorithms: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
             streams: HashMap::new(),
@@ -1582,11 +1607,35 @@ impl<P> Default for Io<P> {
             socket_proposal_next: 0,
             #[cfg(feature = "managed-sockets")]
             socket_after: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuations: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuation_bytes: 0,
         }
     }
 }
 
 impl<P> Io<P> {
+    /// Bounded: past the cap, coalesce into one full read that waits for the
+    /// latest merged deadline, so no rate or credential wait is cut short.
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
+        const RECONCILE_QUEUE: usize = 64;
+        // A seal at a non-finite clock is due at the next drain.
+        let at = if at.is_finite() { at } else { 0. };
+        if self.reconcile_due.len() < RECONCILE_QUEUE {
+            self.reconcile_due.push((symbols, at));
+            return;
+        }
+        let latest = self
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .fold(at, f64::max);
+        self.reconcile_due = vec![(None, latest)];
+    }
+
     fn managed_socket_active(&self) -> bool {
         #[cfg(feature = "managed-sockets")]
         {
@@ -1655,6 +1704,47 @@ impl<P> Cx<'_, P> {
     fn managed_send_allowed(&self, _socket: SocketId) -> bool {
         true
     }
+    /// Admission check for a command that releases several signed requests:
+    /// every need must be supported before the first release, so a refusal
+    /// is a whole-command NotSent rather than a partial effect.
+    pub fn can_sign(
+        &self,
+        slot: CredentialSlot,
+        needs: &[crate::signing::Need],
+    ) -> Result<(), crate::signing::SignError> {
+        use crate::signing::{Capability, KeyUse, SignError};
+        let identity = match slot {
+            CredentialSlot::Primary => self.io.identities.primary.as_ref(),
+            CredentialSlot::Secondary => self.io.identities.secondary.as_ref(),
+        }
+        .ok_or(SignError::InvalidRequest)?;
+        // Resolve every ref first, so a malformed command is InvalidRequest
+        // regardless of the order of its needs.
+        let keys = needs
+            .iter()
+            .map(|need| match need.key {
+                KeyUse::Signing => Some(&identity.signing),
+                KeyUse::Extra(extra) => identity.extra.get(&extra),
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or(SignError::InvalidRequest)?;
+        for (need, key) in needs.iter().zip(keys) {
+            let capability = match (&self.io.signer, &self.io.host_algorithms) {
+                (Some(signer), _) => signer.can_sign(key, need.algorithm),
+                (None, Some(declared)) if declared.contains(&need.algorithm) => {
+                    Capability::Supported
+                }
+                (None, Some(_)) => Capability::Unsupported,
+                // No Rust provider means the host fulfils Action::Sign; undeclared is unknown.
+                (None, None) => Capability::Unknown,
+            };
+            if capability != Capability::Supported {
+                return Err(SignError::Unsupported);
+            }
+        }
+        Ok(())
+    }
+
     /// Calibrated venue UTC for outbound timestamps, absolute expiry and
     /// time-based nonces. Timers, deadlines and emitted data retain `self.now`.
     pub fn protocol_now(&self) -> f64 {
@@ -2310,6 +2400,8 @@ impl<P> Cx<'_, P> {
                 Err(error)
             }
         };
+        // A credential-free route's auth-kind refusal is no credential evidence.
+        let credential_evidence = self.io.request_contexts.owner_credentialed(command);
         self.io.retire_http_command(command);
         if !self.io.request_contexts.finish(command) {
             self.io.http_owner_poison = true;
@@ -2325,7 +2417,33 @@ impl<P> Cx<'_, P> {
             {
                 self.io.order_locks.managed_resolved(command);
             }
-            self.io.order_locks.finish(command, result.is_err());
+            let scope = self.io.order_locks.reconcile_scope(command);
+            let absent = self.io.order_locks.absent_pending(command);
+            let marked = self.io.order_locks.finish(command, result.is_err());
+            let unknown = result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.outcome == Some(crate::Outcome::Unknown));
+            // Every uncertain seal asks again, even for an already-uncertain
+            // symbol: an earlier in-flight read may predate this write.
+            // A managed write the lock never held still reconciles: a full read.
+            let scope = scope.or_else(|| (write_sealed && unknown).then_some(None));
+            if let Some(scope) = scope.filter(|_| unknown || absent || !marked.is_empty()) {
+                // A rate limit or credential refusal must not fan out reads now.
+                let delay = match result.as_ref().err().and_then(|error| error.kind) {
+                    Some(ErrorKind::RateLimited) => result
+                        .as_ref()
+                        .err()
+                        .and_then(|error| error.retry_after_ms)
+                        .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS),
+                    Some(
+                        ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission,
+                    ) => crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
+                    _ => 0.,
+                };
+                let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+                self.io.queue_reconcile(scope, self.now + delay);
+            }
             self.io.active_commands.remove(&command);
         }
         #[cfg(not(feature = "order-locks"))]
@@ -2333,7 +2451,9 @@ impl<P> Cx<'_, P> {
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
-                count_auth_failure(self.io, Some(&error));
+                if credential_evidence {
+                    count_auth_failure(self.io, Some(&error));
+                }
                 Notice::CommandFailed { command, error }
             }
         };
@@ -2482,6 +2602,32 @@ pub trait Venue {
         self.on_sign_error(cx, pending, error);
     }
 
+    /// Reconcile writes whose outcome is unknown: issue a fresh order read for
+    /// these symbols (`None`: all) and report it through `orders_reconciled`.
+    /// The engine asks once per uncertain seal, after any rate-limit wait.
+    fn reconcile_uncertain(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _symbols: Option<&[String]>,
+    ) {
+    }
+
+    /// A session waiter reached its owner's original deadline before the venue
+    /// drained it. Nothing was sent for that owner.
+    fn on_session_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_http_preparation_failed(
+            cx,
+            pending,
+            crate::request_context::Error::TimedOut,
+            error,
+        );
+    }
+
     /// Defer symbol cancellation until placement native identities are known.
     fn guard_pending_placements(&self) -> bool {
         false
@@ -2527,6 +2673,14 @@ pub trait Venue {
         _receipt: crate::signing::SignReceipt,
     ) {
     }
+    /// Observe exact final-release clock metadata; this grants no transport right.
+    fn on_signing_release(
+        &mut self,
+        target: SigningTarget<'_, Self::Pending>,
+        release: crate::SigningRelease,
+    ) {
+        self.on_signing_receipt(target, release.receipt());
+    }
     /// Shared dispatch signing failure, typed before transport. Composite jobs
     /// retain earlier attempt outcomes when projecting this attempted notSent.
     fn on_sign_error(
@@ -2568,6 +2722,15 @@ pub trait Venue {
         _event: crate::socket_lifecycle::LifecycleEvent,
     ) -> Result<(), crate::socket_lifecycle::SocketError> {
         Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_socket_interests_released(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _epoch: crate::socket_lifecycle::Epoch,
+        _pending: Self::Pending,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Ok(())
     }
     #[cfg(feature = "managed-sockets")]
     fn encode_socket_interests(
@@ -2628,7 +2791,9 @@ pub trait Venue {
         _headers: &str,
         error: &str,
     ) {
-        self.on_request_failed(cx, pending, error);
+        // The venue answered but the stream broke (or is not UTF-8): a
+        // malformed reply, never transport loss. Defaults reach on_request_failed.
+        self.on_http_failed(cx, pending, malformed_body(error));
     }
     fn on_request_failed(
         &mut self,
@@ -2638,9 +2803,9 @@ pub trait Venue {
     );
     /// A request that may have reached the venue failed without a usable
     /// response. `error.kind` is `Timeout` for engine deadline expiry,
-    /// `Internal` for a whole delivered body (or managed write reply) the engine
-    /// cannot decode, else `Network`. Streams that break mid-array still use
-    /// `on_stream_malformed`.
+    /// `Internal` for a delivered body (or managed write reply) the engine cannot
+    /// decode, including a stream that breaks mid-array (the default
+    /// `on_stream_malformed` forwards here), else `Network`.
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -2717,6 +2882,8 @@ pub struct Engine<V: Venue> {
     startup_watch_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
+    #[cfg(feature = "order-locks")]
+    reconcile_timer: Option<(TimerId, f64)>,
     /// Set while dispatching released commands, which must not be held again.
     releasing: bool,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
@@ -2763,6 +2930,8 @@ impl<V: Venue> Engine<V> {
             started: false,
             startup_watch_at: None,
             ack_timer: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_timer: None,
             releasing: false,
             account_startup: false,
             shared_books: HashMap::new(),
@@ -2793,6 +2962,38 @@ impl<V: Venue> Engine<V> {
     }
     pub fn signer(&self) -> Option<crate::signing::Provider> {
         self.io.signer.clone()
+    }
+
+    /// Trusted construction registers the same refs the venue holds, so
+    /// command admission can resolve a slot without trusting the venue's claim.
+    pub fn set_identities(
+        &mut self,
+        identities: crate::signing::Identities,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(
+                VenueError::new("Identities must be configured before startup")
+                    .kind(ErrorKind::InvalidInput),
+            );
+        }
+        self.io.identities = identities;
+        Ok(())
+    }
+    pub fn identities(&self) -> &crate::signing::Identities {
+        &self.io.identities
+    }
+
+    /// A host signer fulfilling Action::Sign declares what it can sign; undeclared is unknown.
+    pub fn set_host_algorithms(
+        &mut self,
+        algorithms: Option<Vec<crate::signing::Algorithm>>,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(VenueError::new("Signer must be configured before startup")
+                .kind(ErrorKind::InvalidInput));
+        }
+        self.io.host_algorithms = algorithms;
+        Ok(())
     }
 
     /// Delegated REST-only intent does not disable account reads or writes.
@@ -3134,12 +3335,29 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
             && let Some((_, pending)) = self.io.signing.expire(*timer)
         {
             self.sign_failed(now, pending.outbound, crate::signing::SignError::TimedOut);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
+            return;
+        }
+        #[cfg(feature = "order-locks")]
+        if let Event::TimerFired { timer } = &event
+            && self.reconcile_timer.is_some_and(|(own, _)| own == *timer)
+        {
+            self.reconcile_timer = None;
+            // The full end-of-event path: deferred commands, the reconcile
+            // drain itself and shared tickers.
+            self.finish_event_scope(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
@@ -3640,6 +3858,71 @@ impl<V: Venue> Engine<V> {
         {
             self.io.order_response_token = order_response;
         }
+        #[cfg(feature = "order-locks")]
+        self.reconcile_uncertain(now);
+        self.restore_shared_tickers(false, now);
+    }
+
+    /// Ask the venue once for each due uncertain-write reconcile read, then
+    /// re-arm one wake-up for deferred ones. A fresh read the venue reports
+    /// through `orders_reconciled` clears the order-lock fence as before.
+    // Out of line: its callers share one copy (wasm size budget).
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn reconcile_uncertain(&mut self, now: f64) {
+        // Never inside a command entry; the hook runs with no HTTP delivery
+        // or order-read authority of its own.
+        if self.io.command_entry.is_some() {
+            return;
+        }
+        let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
+        self.io.reconcile_due.retain_mut(|(scope, at)| {
+            if *at > now && now.is_finite() {
+                return true;
+            }
+            any = true;
+            match scope.take() {
+                None => all = true,
+                Some(scope) => {
+                    for symbol in scope {
+                        if !symbols.contains(&symbol) {
+                            symbols.push(symbol);
+                        }
+                    }
+                }
+            }
+            false
+        });
+        if any {
+            let delivery = self.io.http_delivery.take();
+            let token = self.io.order_response_token.take();
+            let mut cx = Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            };
+            self.venue
+                .reconcile_uncertain(&mut cx, (!all).then_some(symbols.as_slice()));
+            self.io.http_delivery = delivery;
+            self.io.order_response_token = token;
+        }
+        let next = self
+            .io
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp);
+        if self.reconcile_timer.map(|(_, at)| at) == next {
+            return;
+        }
+        if let Some((timer, _)) = self.reconcile_timer.take() {
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        if let Some(at_ms) = next {
+            let timer = TimerId(self.io.next());
+            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.reconcile_timer = Some((timer, at_ms));
+        }
     }
 
     fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {
@@ -3802,7 +4085,22 @@ impl<V: Venue> Engine<V> {
                     cx.store,
                     &mut cx.io.actions,
                 );
+                // Session writes skip the journaled collector, so expose the
+                // reply metadata the write classifier reads during this callback.
+                let session_write = cx.io.http_delivery.as_ref().is_some_and(|delivery| {
+                    delivery.context.operation() == crate::request_context::Operation::Mutation
+                        && matches!(
+                            delivery.context.owner(),
+                            crate::request_context::Owner::Session { .. }
+                        )
+                });
+                if session_write {
+                    cx.io.http_write_reply = Some((response.status, response.headers.to_owned()));
+                }
                 self.venue.on_response(&mut cx, pending.value, response);
+                if session_write {
+                    cx.io.http_write_reply = None;
+                }
             }
             Err(_) => {
                 let make_failure = || malformed_body("response body is not UTF-8");
@@ -3992,6 +4290,7 @@ impl<V: Venue> Engine<V> {
         if !now.is_finite()
             || self.io.http_delivery.is_some()
             || self.io.http_plan_ready.is_some()
+            || self.io.http_plan_expiring.is_some()
             || !self.io.request_contexts.plan_scope_clear()
         {
             return;
@@ -4000,6 +4299,7 @@ impl<V: Venue> Engine<V> {
         while let Some(plan) = self.io.request_contexts.next_plan_ready(now) {
             advanced = true;
             if now >= plan.deadline() {
+                self.expire_plan_calls(now, &plan);
                 Cx {
                     now,
                     store: &mut self.store,
@@ -4166,24 +4466,54 @@ impl<V: Venue> Engine<V> {
                             now,
                             self.io.protocol_clock.revision(),
                         ) {
-                            Some(Completion::Ready(pending, outbound)) => {
+                            Some(Completion::Ready(mut pending, mut outbound)) => {
+                                let time = crate::request_context::ReleaseTime {
+                                    raw_ms: now,
+                                    protocol_ms: self.io.protocol_clock.at(now),
+                                    revision: self.io.protocol_clock.revision(),
+                                };
+                                let release =
+                                    match crate::SigningRelease::new(pending.receipt, time) {
+                                        Ok(release) => release,
+                                        Err(crate::request_context::Error::Stale) => {
+                                            crate::signing_dispatch::wipe(&mut outbound);
+                                            pending.timer = TimerId(0);
+                                            let next = self.io.signing.next_id();
+                                            self.io.signing.retry(next, pending);
+                                            continue;
+                                        }
+                                        Err(_) => {
+                                            crate::signing_dispatch::wipe(&mut outbound);
+                                            let emitted = self.io.actions.len();
+                                            self.sign_failed(
+                                                now,
+                                                pending.outbound,
+                                                crate::signing::SignError::InvalidRequest,
+                                            );
+                                            self.queue_dispatch_callback_actions(
+                                                &mut queued,
+                                                emitted,
+                                            );
+                                            continue;
+                                        }
+                                    };
                                 match &outbound {
                                     Action::Http(http) => {
                                         if let Some(value) = self.io.pending.get_mut(&http.id) {
-                                            self.venue.on_signing_receipt(
+                                            self.venue.on_signing_release(
                                                 SigningTarget::Http {
                                                     request: http.id,
                                                     pending: &mut value.value,
                                                 },
-                                                pending.receipt,
+                                                release,
                                             );
                                         }
                                     }
                                     Action::WsConnect { socket, .. }
                                     | Action::WsSend { socket, .. } => {
-                                        self.venue.on_signing_receipt(
+                                        self.venue.on_signing_release(
                                             SigningTarget::Socket { socket: *socket },
-                                            pending.receipt,
+                                            release,
                                         );
                                     }
                                     _ => {}
@@ -4336,6 +4666,11 @@ impl<V: Venue> Engine<V> {
         self.flush_http_owner_retirements();
         self.assert_live();
         self.io.assert_actions_safe();
+        #[cfg(feature = "managed-sockets")]
+        if !self.io.socket_continuations.is_empty() {
+            self.arm_socket_continuations(self.io.dispatch_now);
+            self.io.assert_actions_safe();
+        }
         self.io.actions.drain(..)
     }
 
@@ -8177,3 +8512,7 @@ mod dispatch_signing_tests;
 #[cfg(all(test, feature = "order-locks", feature = "http-plans"))]
 #[path = "http_plan_boundary_tests.rs"]
 mod http_plan_boundary_tests;
+
+#[cfg(feature = "http-plans")]
+#[path = "http_plan_expiry.rs"]
+mod http_plan_expiry;

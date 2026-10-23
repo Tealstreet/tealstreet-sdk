@@ -2,8 +2,10 @@
 //! https://github.com/asterdex/api-docs/blob/master/V3(Recommended)/EN/aster-finance-futures-api-v3.md
 use safe_cex_engine::model::{OrderStatus, PositionSide};
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, Response, SocketId, TimerId};
-use safe_cex_venue_asterdex::{AsterDex, Options};
+mod support;
+use safe_cex_venue_asterdex::AsterDex;
 use serde_json::{Value, json};
+use support::Options;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 3_000.0;
@@ -33,11 +35,11 @@ impl H {
     }
     fn pending_mode_with_orders(open_orders: &str) -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(Options {
+            engine: support::engine(Options {
                 key: Some("documented-key".into()),
                 secret: Some("synthetic-secret".into()),
                 ..Default::default()
-            })),
+            }),
             now: 1700000000000.0,
             requests: vec![],
             sockets: vec![],
@@ -71,7 +73,7 @@ impl H {
             .0
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in support::drain(&mut self.engine, self.now).into_iter() {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::Notice(Notice::CommandDone { command, result }) => {
@@ -711,28 +713,27 @@ fn rest_nonzero_collateral_flags_multiasset_but_zero_buckets_do_not() {
 }
 
 #[test]
-fn account_identity_read_preserves_alias_and_primary_key_fallback() {
+fn account_identity_read_preserves_alias_and_never_falls_back_to_the_key() {
     let mut h = H::new();
-    for (command, body, expected) in [
-        (20, r#"{"accountAlias":"owner-alias"}"#, "owner-alias"),
-        (21, "{}", "documented-key"),
-    ] {
+    let result = |h: &mut H, command, body| {
         h.event(Event::Command(safe_cex_engine::Command::FetchAccount {
             command,
         }));
         h.reply("/account", body);
-        let output: Value = serde_json::from_str(
-            h.done
-                .iter()
-                .find(|(id, _)| *id == command)
-                .unwrap()
-                .1
-                .as_ref()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(output, json!({"userId":expected}));
-    }
+        h.done
+            .iter()
+            .find(|(id, _)| *id == command)
+            .unwrap()
+            .1
+            .clone()
+    };
+    let output: Value =
+        serde_json::from_str(&result(&mut h, 20, r#"{"accountAlias":"owner-alias"}"#).unwrap())
+            .unwrap();
+    assert_eq!(output, json!({"userId":"owner-alias"}));
+    // V1 without an alias or stableId fails typed; tests/admission.rs covers the fallbacks.
+    let error = result(&mut h, 21, "{}").unwrap_err();
+    assert!(!error.contains("documented-key"), "{error}");
 }
 #[test]
 fn leverage_metadata_command_completes_from_native_settings() {
@@ -762,15 +763,17 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     endpoint: &str,
 ) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
     use safe_cex_engine::{Action, Event};
-    engine.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_actions(engine, now)
+        .into_iter()
+        .for_each(drop);
     engine.handle(
         now,
         Event::PollScaleChanged {
             scale: 60_000.0 / POLL_MS,
         },
     );
-    let slow: Vec<_> = engine
-        .drain_actions()
+    let slow: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             Action::Http(_) => panic!("policy updates must not issue account reads"),
@@ -785,8 +788,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             scale: 1_500.0 / POLL_MS,
         },
     );
-    let fast: Vec<_> = engine
-        .drain_actions()
+    let fast: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 1.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -800,7 +803,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             scale: f64::INFINITY,
         },
     );
-    let paused: Vec<_> = engine.drain_actions().collect();
+    let paused: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 2.0)
+        .into_iter()
+        .collect();
     assert!(
         paused
             .iter()
@@ -808,15 +813,19 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
-    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        !safe_cex_engine::test_support::prepared_actions(engine, now + 1_501.0)
+            .into_iter()
+            .any(|a| matches!(a, Action::Http(_)))
+    );
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
             scale: 1_500.0 / POLL_MS,
         },
     );
-    let resumed: Vec<_> = engine
-        .drain_actions()
+    let resumed: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 90_000.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -830,8 +839,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -849,8 +858,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         },
     );
     assert!(
-        !engine
-            .drain_actions()
+        !safe_cex_engine::test_support::prepared_actions(engine, completed_at)
+            .into_iter()
             .any(|a| matches!(a, Action::SetTimer { .. }))
     );
     (completed_at, reads)
@@ -863,15 +872,17 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     use safe_cex_engine::{Action, Event};
     // A response may schedule an ordinary repair/deadline, but the parked poll
     // itself must still be registered and adopt this newest policy.
-    engine.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_actions(engine, now)
+        .into_iter()
+        .for_each(drop);
     engine.handle(
         now,
         Event::PollScaleChanged {
             scale: 30_000.0 / POLL_MS,
         },
     );
-    let times: Vec<_> = engine
-        .drain_actions()
+    let times: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { at_ms, .. } => Some(at_ms),
             _ => None,
@@ -910,8 +921,8 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
                 },
             );
         }
-        reads = engine
-            .drain_actions()
+        reads = safe_cex_engine::test_support::prepared_actions(engine, now)
+            .into_iter()
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,

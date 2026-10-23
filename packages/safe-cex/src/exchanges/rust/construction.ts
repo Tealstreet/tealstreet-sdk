@@ -6,9 +6,12 @@ import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
 export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
-export type ExtraKeyPolicy = { key: 'zklinkSeed'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+/** Asymmetric only: a declared signing ref may answer public operations (P4). */
+export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest';
 export type IdentitySetupPolicy = {
   trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
+  signingAlgorithm?: SigningAlgorithm;
 };
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
@@ -19,19 +22,24 @@ export type RemoteSigningPolicy = Readonly<{
   protectedHeaders?: readonly string[];
   signatureEncoding?: 'hex' | 'base64';
   passphraseHeader?: string;
-  wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot'; requestId?: string }>;
+  wire?: Readonly<{ exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot' | 'okxTimestamp'; requestId?: string }>;
 }>;
 
 type Rule = {
   canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string;
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
+  /** Family-specific trusted setup mapping, declared rather than name-matched. */
+  setupMapping?: 'asterdex';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 
 /** Trusted setup policy; unspecified fields retain explicit caller metadata. */
 export const deriveSignerSetupPolicy = (name: ExchangeName): CredentialSetupPolicy =>
   (rules.venues as Record<string, Rule>)[name]?.signerSetup ?? {};
+
+export const deriveSignerSetupMapping = (name: ExchangeName): Rule['setupMapping'] =>
+  (rules.venues as Record<string, Rule>)[name]?.setupMapping;
 
 export const deriveRemoteSigningPolicy = (name: ExchangeName): RemoteSigningPolicy | undefined =>
   (rules.venues as Record<string, Rule>)[name]?.remoteSigning;

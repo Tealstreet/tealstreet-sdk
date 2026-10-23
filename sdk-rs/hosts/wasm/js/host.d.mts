@@ -25,7 +25,7 @@ export interface HttpPacket {
   /** Required for managed requests; absent on older transport callers. */
   request?: number;
   method: string;
-  route?: 'direct' | 'publicCors' | 'primary';
+  route?: 'direct' | 'publicCors' | 'primary' | 'secondary';
   /** Remaining original lifecycle timeout, never renewed by binding. */
   timeoutMs?: number;
   url: string;
@@ -260,7 +260,7 @@ export interface SigningIdentity {
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
   stableId?: string;
   /** Additional provider-owned signing refs; never an identity or nonce scope. */
-  extra?: { zklinkSeed?: string };
+  extra?: { zklinkSeed?: string; l1Wallet?: string };
 }
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface LocalIdentityMetadata {
@@ -299,6 +299,9 @@ export interface EngineHostOptions {
   ownsEngine?: boolean;
   /** Overrides local signing before startup. Context is advisory, not an allowlist. */
   signer?: Signer;
+  /** What `signer` can sign. Undeclared is unknown, so multi-release commands
+   * that check capability before their first release refuse as notSent. */
+  signerAlgorithms?: readonly SignAlgorithm[];
   /** Synchronous identity/ID and retry-jitter bytes, also used for host receipt IDs.
    * Defaults to Web Crypto. A seed here never replaces signing entropy. */
   entropy?: EntropyProvider;
@@ -426,7 +429,7 @@ export interface WasmEngineLike {
   httpClaim?(permit: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner?(): boolean;
-  useExternalSigner?(): void;
+  useExternalSigner?(algorithmsJson?: string): void;
   hostedSigningClock?(now: number): string;
   prepareHostedSigning?(inputJson: string, now: number): string;
   localHostedSigning?(id: number, now: number): string;

@@ -4,11 +4,23 @@
 use crate::wire::{Number, Text, check};
 use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::history::{Completion, HistoryRows};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
-    CommandId, Cx, Method, Query, Response, VenueError, json, json::ArrayAt, num,
+    CommandId, Cx, ErrorKind, Method, Outcome, Query, Response, VenueError, json, json::ArrayAt,
+    num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+fn local_read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
 
 pub struct Request {
     owner: Box<HistoryRows<Execution>>,
@@ -134,18 +146,48 @@ impl Bitrue {
         } = query
         else {
             match query {
-                Query::OrderByClientId { symbol, client_order_id } => self.lookup_order(cx, command, symbol, client_order_id),
+                Query::OrderByClientId {
+                    symbol,
+                    client_order_id,
+                } => self.lookup_order(cx, command, symbol, client_order_id),
                 Query::PublicTrades { symbol, limit } => self.public_trades(cx, symbol, limit),
-                Query::OrderHistory { .. } => cx.fail(command, "Bitrue v2 has only single-order lookup, not complete order history"),
-                Query::Income { .. } => cx.fail(command, "Bitrue v2 transfer and force-order histories are not a complete PnL/funding ledger"),
+                Query::OrderHistory { .. } => {
+                    let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
+                        VenueError::new(
+                            "Bitrue v2 has only single-order lookup, not complete order history",
+                        )
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(Outcome::NotSent),
+                    );
+                }
+                Query::Income { .. } => {
+                    let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(
+                        &context,
+                        VenueError::new("Bitrue v2 transfer and force-order histories are not a complete PnL/funding ledger")
+                            .kind(ErrorKind::Unsupported)
+                            .outcome(Outcome::NotSent),
+                    );
+                }
                 Query::Fills { .. } => unreachable!(),
             }
             return;
         };
         if !self.authenticated() {
-            cx.fail(
-                command,
-                "Bitrue fills require authenticated futures credentials",
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Bitrue fills require authenticated futures credentials")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
             );
             return;
         }
@@ -155,11 +197,27 @@ impl Bitrue {
             .any(|t| !t.is_finite() || t < 0.0)
             || matches!((from_ms,to_ms),(Some(from),Some(to)) if from > to)
         {
-            cx.fail(command, "Invalid Bitrue fill time window");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Invalid Bitrue fill time window")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         }
         let Some(symbol) = symbol.as_deref().and_then(|s| self.resolve_symbol(cx, s)) else {
-            cx.fail(command, "Bitrue fills require a known symbol");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Bitrue fills require a known symbol")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return;
         };
         let market = cx.store.market(&symbol).unwrap();

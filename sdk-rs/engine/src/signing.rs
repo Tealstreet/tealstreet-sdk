@@ -25,6 +25,9 @@ pub struct IdentitySetupPolicy {
     pub secret_encoding: Option<KeyEncoding>,
     /// The only extra signing ref trusted setup may install for this slot.
     pub extra: Option<ExtraKeyPolicy>,
+    /// Declares the signing ref an asymmetric key of this algorithm; only a
+    /// declared ref answers public operations, so no secret is fingerprinted.
+    pub signing_algorithm: Option<Algorithm>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -72,12 +75,26 @@ pub enum KeyEncoding {
 pub enum ExtraKey {
     /// ApeX Omni zkLink seed: the exact 65-byte packed Ethereum signature.
     ZklinkSeed,
+    /// Polymarket L1 wallet: the raw 32-byte secp256k1 scalar; primary only.
+    L1Wallet,
 }
 impl ExtraKey {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ZklinkSeed => "zklinkSeed",
+            Self::L1Wallet => "l1Wallet",
         }
+    }
+    /// The one algorithm a role ref serves, for `Sign` and public operations.
+    pub const fn algorithm(self) -> Algorithm {
+        match self {
+            Self::ZklinkSeed => Algorithm::ZkLinkContract,
+            Self::L1Wallet => Algorithm::Secp256k1Digest,
+        }
+    }
+    /// The L1 wallet derives the session identity, which is primary only.
+    pub const fn primary_only(self) -> bool {
+        matches!(self, Self::L1Wallet)
     }
 }
 
@@ -108,6 +125,9 @@ impl CredentialSetupPolicy {
             (identities.secondary.as_ref(), self.secondary, false),
         ] {
             let declared = policy.and_then(|policy| policy.extra);
+            if !primary && declared.is_some_and(|declared| declared.key.primary_only()) {
+                return Err(SignError::InvalidRequest);
+            }
             let Some(identity) = identity else { continue };
             if identity
                 .extra
@@ -254,7 +274,8 @@ pub enum Algorithm {
     HmacSha512,
     /// SHA256(message || key), raw 32-byte digest. No implicit hex or prehash.
     Sha256SecretSuffix,
-    /// Ed25519 exact message, without a prehash; raw 64-byte signature.
+    /// Ed25519 exact message, without a prehash; raw 64-byte signature. The key is
+    /// a 32-byte seed or the `seed || public` keypair whose public half must match.
     Ed25519,
     /// ECDSA P-256 with one SHA256 of message; fixed-width r || s, 64 bytes.
     Es256,
@@ -308,6 +329,11 @@ pub enum Operation {
     },
     /// Credential value for an outbound header/body/upgrade field, not storage.
     Present { key: KeyRef },
+    /// Non-secret 20-byte Ethereum address of a ref declared `Secp256k1Digest`.
+    PublicAddress { key: KeyRef },
+    /// Non-secret public key of a ref declared for exactly `algorithm`:
+    /// `Ed25519` 32 bytes, `StarkDigest` the 32-byte big-endian felt.
+    PublicKey { algorithm: Algorithm, key: KeyRef },
 }
 
 /// Context is advisory; providers may optionally refuse it. No enforcement core.
@@ -405,6 +431,11 @@ impl SignRequest {
             .map(|operation| match operation {
                 Operation::Present { .. } => None,
                 Operation::Sha256 { .. } => Some(32),
+                Operation::PublicAddress { .. } => Some(20),
+                // `validate` refuses an algorithm without a public form first.
+                Operation::PublicKey { algorithm, .. } => {
+                    Some(public_key_len(*algorithm).unwrap_or(usize::MAX))
+                }
                 Operation::Sign { algorithm, .. } => Some(match algorithm {
                     Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => 32,
                     Algorithm::HmacSha512
@@ -445,6 +476,14 @@ impl SignRequest {
                 Operation::Sign { key, .. } if !valid_key_ref(key) => {
                     return Err(SignError::InvalidRequest);
                 }
+                Operation::PublicAddress { key } if !valid_key_ref(key) => {
+                    return Err(SignError::InvalidRequest);
+                }
+                Operation::PublicKey { algorithm, key }
+                    if !valid_key_ref(key) || public_key_len(*algorithm).is_none() =>
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 Operation::Sign { payload, .. } | Operation::Sha256 { payload } => {
                     if payload.len() > 256 {
                         return Err(SignError::InvalidRequest);
@@ -471,6 +510,14 @@ impl SignRequest {
             }
         }
         Ok(())
+    }
+}
+
+/// Algorithms with a public form; consumers exist only for these two.
+fn public_key_len(algorithm: Algorithm) -> Option<usize> {
+    match algorithm {
+        Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
+        _ => None,
     }
 }
 
@@ -590,8 +637,36 @@ pub trait Signer: ProviderBounds {
     fn sign_ready(&self, _request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         None
     }
+    /// Advisory admission answer from installed state only; never signs to probe.
+    /// Release-time signing remains the choke point.
+    fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
+        Capability::Unknown
+    }
 }
 pub type Provider = Arc<dyn Signer>;
+
+/// What a provider declares it can sign for one ref; anything but
+/// `Supported` fails command admission closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Capability {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
+/// Which ref of the selected identity a command will sign with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyUse {
+    Signing,
+    Extra(ExtraKey),
+}
+
+/// One signature a multi-release command will need before its first release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Need {
+    pub key: KeyUse,
+    pub algorithm: Algorithm,
+}
 
 // Authenticated payloads and values are deliberately absent from Debug output.
 macro_rules! redacted_debug {
@@ -732,7 +807,8 @@ mod setup_field_policy_tests {
         assert!(json.contains(r#""extra":{"zklinkSeed":"primary.extra.zklinkSeed"}"#));
         assert_eq!(serde_json::from_str::<Identity>(&json).unwrap(), seeded);
         assert!(
-            serde_json::from_str::<Identity>(&json.replace("zklinkSeed\"", "l1Wallet\"")).is_err()
+            serde_json::from_str::<Identity>(&json.replace("zklinkSeed\"", "unknownRole\""))
+                .is_err()
         );
         let mut invalid = seeded.clone();
         invalid

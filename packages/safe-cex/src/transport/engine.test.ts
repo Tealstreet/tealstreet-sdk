@@ -1576,6 +1576,9 @@ describe('secondary GET identity egress', () => {
         await routed.request({ ...input, method });
         expect(delivered().url).toBe(primaryUrl);
       }
+      // A declared read-key request uses the read egress whatever its method.
+      await routed.request({ ...input, method: 'POST', route: 'secondary' });
+      expect(delivered().url).toBe(`https://secondary.example/egress/${input.url}`);
       await routed.request({ ...input, headers: {} });
       if (['binance', 'binancepm', 'binanceinverse'].includes(venue))
         expect(delivered().url).not.toContain('secondary.example');

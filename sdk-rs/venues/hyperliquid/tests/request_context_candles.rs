@@ -492,7 +492,8 @@ fn streamed_prefix_is_never_published_and_progress_cannot_extend_deadline() {
         assert_eq!(
             error.kind,
             match failure {
-                0 => None,
+                // A stream that ends mid-array is a malformed reply, not loss.
+                0 => Some(ErrorKind::Internal),
                 1 => Some(ErrorKind::Network),
                 _ => Some(ErrorKind::Timeout),
             }
