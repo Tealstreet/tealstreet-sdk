@@ -89,6 +89,7 @@ pub enum Pending {
         revision: u64,
     },
     Depth {
+        context: Context,
         symbol: String,
         revision: u64,
         generation: u64,
@@ -312,6 +313,7 @@ impl Lighter {
         let Some(market) = cx.store.market(symbol) else {
             return;
         };
+        let id = market.id.clone();
         let host = self.host();
         let Some(state) = self.books.get_mut(symbol) else {
             return;
@@ -319,21 +321,35 @@ impl Lighter {
         if state.in_flight || cx.now < state.rest_retry_at {
             return;
         }
-        state.in_flight = true;
-        cx.request(
-            Method::Get,
-            format!(
-                "{}/api/v1/orderBookOrders?market_id={}&limit=100",
-                host, market.id
-            ),
-            vec![],
-            None,
-            Pending::Depth {
-                symbol: symbol.into(),
-                revision: state.revision,
-                generation: state.generation,
+        let Ok(context) = cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
             },
-        );
+        ) else {
+            state.rest_retry_at = cx.now + 2_000.0;
+            return;
+        };
+        state.in_flight = true;
+        let pending = Pending::Depth {
+            context: context.clone(),
+            symbol: symbol.into(),
+            revision: state.revision,
+            generation: state.generation,
+        };
+        if let Err((pending, error)) = cx.request_managed(
+            context,
+            Method::Get,
+            format!("{}/api/v1/orderBookOrders?market_id={}&limit=100", host, id),
+            None,
+            pending,
+        ) {
+            self.public_failed(cx, pending, &error.venue_error().message);
+        }
     }
     #[allow(clippy::too_many_arguments)]
     fn fetch_candles(
@@ -653,8 +669,12 @@ impl Lighter {
                 self.startup.failed(cx, false);
             }
             Pending::Depth {
-                symbol, generation, ..
+                context,
+                symbol,
+                generation,
+                ..
             } => {
+                let _ = cx.finish_http_context(&context);
                 if let Some(s) = self
                     .books
                     .get_mut(&symbol)
@@ -1158,10 +1178,13 @@ impl Venue for Lighter {
                 }
             }
             Pending::Depth {
+                context,
                 symbol,
                 revision,
                 generation,
             } => {
+                let live = cx.validate_http_context(&context).is_ok();
+                let _ = cx.finish_http_context(&context);
                 let Some(s) = self
                     .books
                     .get_mut(&symbol)
@@ -1171,7 +1194,7 @@ impl Venue for Lighter {
                 };
                 s.in_flight = false;
                 s.rest_retry_at = cx.now + 2_000.0;
-                if s.revision != revision {
+                if !live || s.revision != revision {
                     return;
                 }
                 #[derive(serde::Deserialize)]
