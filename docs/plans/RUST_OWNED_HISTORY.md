@@ -2125,3 +2125,58 @@ PASS. Both independent source reviews and final adversarial/tests/caller-doc
 reviews are CLEAN, including the unchanged native bounded upsert and legacy
 signing-provenance seam. No local release WASM/full replay/size/timing run. Draft
 CI and actual queued shared dependencies still require fresh source-bound proof.
+
+
+## Orderly shared history owner (2026-10-23)
+
+Plan-first from actual `fa13c9030ed51e6e0ee0ce0bfaf898cfea55f0a5`.
+Scope: Orderly history.rs and existing history integration tests, the exact
+legacy-site inventory if sites disappear, and OWNED_HISTORY/AUDITS/QUALITY/CALLERS
+appendices. No signing, account, lib, request recipe, shared engine, host or SDK
+source changes. The Orderly account/fill owner confirmed these regions are clear.
+
+Replace Request's output rows, output deduplication, global page counter and
+numeric finalization with one boxed engine CursorHistory<Row>. One continuous
+CursorWalk(MAX_PAGES=50), initially regular:1, uses native-stage-qualified page
+tokens, including algo:1 for the second orders endpoint. Do not restart its walk:
+regular and algo share the existing total fifty-page budget. Retain native
+algo/page encoding, per-stage result limit, metadata census and page counts as
+venue facts. Every fully validated page is admitted once; only eligible rows
+stage. Final normalization sorts descending native time then ID and truncates
+once, preserving millisecond order times and second execution/income/trade times.
+
+An actual HTTP, transport, decode, missing-list or row-validation failure before
+accepted output rejects with the shared Internal default. After accepted output
+it returns only accepted pages and one command-scoped Warn incomplete marker;
+failed-page prefixes stay staged and never leak. Regular orders survive an algo
+read failure. Filtered native rows cannot authorize partial recovery. Native
+metadata inconsistencies, impossible/no-progress continuation and the shared
+page-budget stall stay strict rejects even with accepted rows, retaining their
+messages. Signing/setup refusal also stays strict, now through owner rejection
+with Internal classification; no managed Context or secret-signing bridge.
+Admission checks before constructing the owner retain existing behavior.
+
+Preserve exact paths/query/signature bytes, canonical uint64 IDs, nested algo
+classification and depth/node bounds, regular/algo identity spaces, settled-only
+funding identities, funding account-wide 3001ms start spacing and delayed timers,
+public trade occurrence keys, per-stage limit and final sorting. No cache/Store
+publication or new capability. Numeric Completion is explicitly legacy authority.
+
+Commit failing-first controls on original production: typed first failure,
+accepted-page HTTP loss, malformed continuation prefix rollback, regular-to-algo
+failure and filtered-page refusal. Add compatibility controls for total budget
+across stages, terminal fiftieth page, native metadata/no-progress strictness,
+concurrent command marker attribution, empty success and funding timing. Existing
+whole-read continuation/algo-failure assertions are superseded explicitly.
+
+Plan audit: all imports and shared methods exist on this base; continuous cursor
+stages avoid a budget reset, native census is independent of filtered output,
+and owner reject suppresses an incomplete marker on strict refusals. No shared
+API extension or source conflict is needed. Run original 17 controls first, then
+regression REDs, implementation GREENs, full Orderly/engine focused native tests,
+strict Clippy/fmt/bans and request-context inventory checks with four Cargo jobs.
+Corepack Yarn only; never bare/Volta yarn, npx or account-policy. No local release
+WASM/full replay/size/timing sweep. Self-audit source and adversarial cases before
+draft publication. Caller-visible changes carry their CALLERS section in this
+PR, with behavior wording only. #1783 and #1784 are final-proof dependencies;
+current queue and separate announced guard/merge rules remain in force.
