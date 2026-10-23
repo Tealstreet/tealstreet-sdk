@@ -692,7 +692,7 @@ CI/current-head raw proof, final data reviews and separate guard/merge remain
 required. This checkpoint makes no product-RED,
 private parity or all-venue fan-out completion claim.
 
-## Next bounded Once consumers: MEXC, Phemex, Polymarket (2026-10-24)
+## Next bounded Once consumers: MEXC, Phemex, Polymarket (2026-10-23)
 
 Start from actual #1780 `02340e17712780fa526f4e07a029cd4e20fb00f5`.
 Architecture gate: YES, this is a cross-cutting reporting consumer migration;
@@ -746,3 +746,23 @@ For partial recovery controls, use a named unrelated rejection: an unknown
 identity intentionally blocks `allows_absence`. Polymarket valid-zero controls
 must pass asset/size/average validation first, then include a later invalid
 sibling so whole-response clean clearing cannot explain the observed rearm.
+
+### MEXC/Phemex/Polymarket compatibility checkpoint
+
+Both independent plan/API and cross-venue test-design reviews are CLEAN. The
+plan was committed first as b1272d1b11a; nine new controls committed separately
+as15d05c91875 pass with all116 native account tests on unchanged production.
+The original source/test/log receipt is
+`60396c532d8eb3d220bd3ba74d73578a67d92ba7fd2ef0ae6ee67a2864abba1c`.
+Only the three reporter fields/adapters/rearm operations now delegate to the
+existing shared Once API; native mapping/admission and request/signing callers
+remain unchanged. This is original-GREEN compatibility evidence, not a defect
+RED or a whole-venue correctness claim. The #1782 CALLERS cleanup removes only
+its validation/proof status text; behavior text remains intact.
+
+The migrated five-crate native run passes1294 tests across67 groups; strict
+all-target Clippy, scoped fmt and bans pass, as do root44 typecheck/28 lint
+(cached). Both independent source/caller reviews are CLEAN and confirm the
+original receipt and unchanged test hashes. No source paths outside the three
+account modules changed. This checkpoint prepares a draft, not a merge: future
+queued shared inputs require actual integration and fresh current-head proof.

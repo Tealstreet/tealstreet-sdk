@@ -4056,9 +4056,7 @@ retains bounded Once, coin/order namespaces (including empty order identity),
 admitted-versus-rejected stale balance behavior and the different REST/WS mapped
 identity filters. No SDK call/result, order/position/FILLS shape, health policy,
 financial or snapshot authority, signing, HTTP/WS lifecycle or caller migration
-changes. The 126 final native account compatibility tests pass on unchanged
-pre-migration production, including eleven new controls; this is no defect-RED
-claim. Full CI and a fresh current-head raw proof remain the merge gates.
+changes.
 ## Static public headers during managed HTTP preparation
 
 Trusted Rust `SignStep` implementations can declare static noncredential HTTP
@@ -4077,3 +4075,21 @@ and hosted signing still follow the family's separate admission policy. Semantic
 Context ownership is unchanged. Existing SDK callers need no
 new option, credential transfer or persisted identity mapping for this additive
 header seam. [Contract and scope](RUST_UNSIGNED_HTTP_HEADERS.md).
+
+
+## MEXC, Phemex and Polymarket bounded row reporting
+
+MEXC, Phemex and Polymarket use the engine's bounded Once diagnostic memory
+for their existing account-row skip notices. Repeated identities remain silent
+until native recovery or the shared 4096-entry rollover rearms them. Notice
+codes, messages and severity stay the same; Once does not upgrade a remembered
+Warn to Error. This changes internal reporting ownership without requiring a
+caller option, credential transfer or persisted identity migration.
+
+MEXC keeps coin, position and shared order namespaces and its accepted-identity
+filters. Phemex keeps currency-scoped clean recovery and position-leg rejection
+filters before symbol-key recovery, inside its write/slice admission guards.
+Polymarket keeps valid zero/priced holding recovery before final snapshot
+admission and whole-memory recovery only for an admitted clean read. Existing
+rows, financial calculations, snapshot authority, signing and HTTP/WS lifecycle
+retain their native contracts.
