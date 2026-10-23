@@ -96,3 +96,18 @@ the only seed bump is ticker discovery. Still suppress stale-seed account auth
 evidence before the grouped auth reducer and pin accepted/401 stale evidence
 as inert, with current-seed acceptance positive. The original unit control is
 an assertion RED: a stale accepted balance reports Accepted before the cutover.
+
+## Implementation checkpoint
+
+The cutover uses the existing Background Context and exact delivery gate, with
+no engine or command-helper edits. Both release REDs and the stale accepted/401
+auth RED now pass unchanged. The 39 account controls, 5 auth controls and 9
+recipe controls pass with mechanical managed Prepare/Bind/Claim draining at the
+fixture event time. Original native assertions remain intact. Strict WEEX
+all-target/all-feature Clippy and the exact request-context checker pass.
+
+Additional failure controls pin native settings backoff: after provider or
+transport failures the first recovery poll sends four account reads while the
+two settings reads remain backed off. After native cycle expiry it sends six.
+These are new-contract controls, separate from the original assertion REDs.
+Full CI, WASM/replay gates and source/preservation reviews are still pending.

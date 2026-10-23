@@ -6322,3 +6322,22 @@ metadata, logs and ordinary archives retain the 512 MiB response bound. Exact
 size, digest, producer, source, ZIP and restored-runtime checks remain required.
 This retrieval recovery adds no physical measurement and cannot repeat a failed
 second run.
+
+## WEEX account-cycle reads use Background authority
+
+WEEX's recurring balance, positions, normal/algo orders and account/symbol
+configuration reads now use the shared managed preparation and final claim
+with one Background Read Context per physical request. Credential selection,
+sorted query bytes, streamed row shapes, snapshot joins and native revision
+fences are preserved. A paused continuation admits its fresh 20-second Context
+only at eligible dequeue, with no transport retry or re-sign.
+
+Provider/preparation refusal retires the physical Context and follows the
+native failed-read path without auth evidence or deactivation. A physical
+Timeout or transport failure retains last-good snapshots and permits a later
+poll; native settings backoff still independently holds the configuration reads.
+Exact Background delivery is checked before row decode and publication, and
+stale cycle/seed deliveries have no native or credential-auth side effects.
+No command completion, metadata group, history or trading policy is changed.
+The remaining legacy shared signing helper and STAGING entry stay for their
+other callers; this semantic caller conversion has zero lexical inventory delta.

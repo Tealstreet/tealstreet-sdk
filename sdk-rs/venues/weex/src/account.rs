@@ -9,6 +9,9 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderStatus, Position, PositionMode, PositionSide,
 };
+use safe_cex_engine::request_context::{
+    Context, Credential, Operation, Policy, RetryPolicy, Scope,
+};
 use safe_cex_engine::socket::{Supervisor, Tick};
 use safe_cex_engine::store::{MarketSetting, Store};
 use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
@@ -29,6 +32,7 @@ pub enum Kind {
     Metadata,
 }
 pub struct Request {
+    pub(crate) context: Option<Context>,
     cycle: u64,
     kind: Kind,
     revision: u64,
@@ -367,6 +371,7 @@ impl WeexFutures {
                 _ => self.account.revision,
             };
             let request = Request {
+                context: None,
                 cycle: self.account.cycle,
                 kind,
                 revision,
@@ -382,7 +387,7 @@ impl WeexFutures {
             self.send_account(cx, request);
         }
     }
-    fn send_account(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+    fn send_account(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         if request.cycle != self.account.cycle {
             return;
         }
@@ -426,23 +431,100 @@ impl WeexFutures {
             String::new()
         };
         let stream = (!matches!(request.kind, Kind::Metadata)).then_some(ArrayAt::Root);
-        self.signed_request(
-            cx,
+        let Some((identity, slot)) = self.credentials.select(Method::Get) else {
+            self.account_failed(cx, request, "WEEX account read requires credentials");
+            return;
+        };
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: Some(Credential {
+                    slot,
+                    reference: identity.credential.clone(),
+                }),
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.account_failed(cx, request, &error.read_venue_error().message);
+                return;
+            }
+        };
+        let path_query = if query.is_empty() {
+            path.to_owned()
+        } else {
+            format!("{path}?{query}")
+        };
+        let recipe =
+            crate::dispatch_signing::Http::new(identity.clone(), Method::Get, path_query, None);
+        let (url, _, body) = recipe.unsigned();
+        request.context = Some(context.clone());
+        let task = Task::Account(request);
+        let scope = auth_scope(&task);
+        let pending = Pending {
+            task,
+            invalid: false,
+            skipped: vec![],
+            seed_generation: self.seed_generation,
+        };
+        match cx.request_signed_managed(
+            context.clone(),
             Method::Get,
-            path,
-            &query,
-            None,
-            Task::Account(request),
-            stream,
-        );
+            url,
+            body,
+            Box::new(recipe),
+            pending,
+        ) {
+            Ok(id) => {
+                if let Some(at) = stream {
+                    cx.stream_response(id, at);
+                }
+                if let Some(scope) = scope {
+                    cx.tag_account_read(id, slot, scope);
+                }
+            }
+            Err((pending, error)) => {
+                let _ = cx.finish_http_context(&context);
+                let Task::Account(request) = pending.task else {
+                    unreachable!()
+                };
+                self.account_failed(cx, request, &error.read_venue_error().message);
+            }
+        }
     }
+    pub(crate) fn account_delivery_current(&self, cx: &Cx<'_, Pending>, request: &Request) -> bool {
+        request.cycle == self.account.cycle
+            && request
+                .context
+                .as_ref()
+                .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok())
+    }
+    pub(crate) fn account_request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        seed: u32,
+        error: &str,
+    ) {
+        if let Some(context) = request.context.take() {
+            let _ = cx.finish_http_context(&context);
+        }
+        if seed == self.seed_generation {
+            self.account_failed(cx, request, error);
+        }
+    }
+
     pub(crate) fn account_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) -> bool {
-        if request.cycle != self.account.cycle {
+        if !self.account_delivery_current(cx, request) {
             return true;
         }
         request.page_rows += 1;
@@ -523,6 +605,9 @@ impl WeexFutures {
             }
             request.page += 1;
             request.page_rows = 0;
+            if let Some(context) = request.context.take() {
+                let _ = cx.finish_http_context(&context);
+            }
             self.send_account(cx, request);
             return;
         }
@@ -1029,6 +1114,11 @@ impl WeexFutures {
         pending: &Pending,
         response: &Response<'_>,
     ) -> Option<safe_cex_engine::AuthOutcome> {
+        if matches!(pending.task, Task::Account(_))
+            && pending.seed_generation != self.seed_generation
+        {
+            return None;
+        }
         let outcome = self.account_auth_evidence(pending, response);
         let Task::Account(r) = &pending.task else {
             return outcome;
@@ -1121,6 +1211,7 @@ mod auth_envelopes {
     fn pending(venue: &WeexFutures, kind: Kind) -> Pending {
         Pending {
             task: Task::Account(Request {
+                context: None,
                 cycle: venue.account.cycle,
                 kind,
                 revision: 0,
