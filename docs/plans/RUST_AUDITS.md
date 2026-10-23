@@ -1948,6 +1948,46 @@ Actual #1781 `ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated
 without conflicts, preserving both incoming files. Full green CI and current-head
 artifact proof remain pending.
 
+## Kraken futures owned-history fan-out
+
+~~Kraken futures histories retain rows, cursor sets, page counters and terminal
+ledger completeness emission in the venue.~~ Fills, closed orders, ledger and
+public trades now adopt the existing engine CursorHistory/Completion owner.
+Actual first/zero-eligible failure rejects typed; later actual failure retains
+only admitted pages with command-owned incompleteness. Native strict cursor/
+continuation-proof/budget refusals remain strict; terminal order folding sees
+only admitted rows. Native request/identity/units/filter/signing and ledger
+coverage facts remain unchanged. Other adapters, managed completion and B11
+coverage/runtime proof stay open. [Scope](RUST_OWNED_HISTORY.md).
+
+KuCoin owned-history follow-on: futures history/funding and spot fills
+adopt the existing engine query owner. Initial page failures become typed
+Internal rejects; later futures/funding failures return only validated eligible
+rows with command-owned incompleteness. Native continuation/census/safety proofs
+remain strict. Signing, disabled spot endpoints and B11/NX coverage are outside
+this slice; see RUST_OWNED_HISTORY.md and RUST_CUTOVER_CALLERS.md.
+
+## Bitrue single-page owned fills
+
+~~Bitrue fills keep native output storage and terminal completion beside streamed
+response validation.~~ Existing engine HistoryRows/Completion now owns staging,
+page admission, retry-page reset and typed terminal delivery. All native proof
+checks precede admission; a saturated filtered/duplicate page remains a strict
+refusal. No fictitious pagination, partial-success case or new venue marker is
+introduced. Public trades, unsupported histories and client-ID lookup stay
+separate; B11 caller/runtime coverage remains open. [Scope](RUST_OWNED_HISTORY.md).
+
+## Backpack owned-history fan-out
+
+~~Backpack retains accepted history rows and terminal paging decisions in its
+venue continuation, discarding earlier pages on later failure/repeat/cap.~~
+CursorHistory now owns page admission, repeat/cap coverage and completion, with
+the existing offset helper subordinate to owner-authorized continuation. Failed
+page prefixes remain staged; admitted malformed-fill skips supply owned coverage
+without changing native row isolation. Raw request displacement, native mapping,
+eager non-fill diagnostics and strict setup/admission behavior remain. This is
+shared-owner adoption, not universal history or NX B11 coverage closure.
+
 ## ApeX bounded execution completion
 
 ~~ApeX fills exhaust all native/display REST alternatives into apparent complete

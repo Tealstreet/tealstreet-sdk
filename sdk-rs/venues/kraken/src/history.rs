@@ -3,15 +3,14 @@
 use crate::sign::form;
 use crate::wire::{number, optional_number};
 use crate::{Kraken, Pending};
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::time;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Query, Response};
+use safe_cex_engine::{Command, Cx, Method, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-};
+use std::{borrow::Cow, collections::HashMap};
 
 const FILLS_PAGE: usize = 100;
 const LEDGER_PAGE: usize = 500;
@@ -27,7 +26,7 @@ enum Read {
     Trades,
 }
 pub struct Request {
-    command: CommandId,
+    history: Box<CursorHistory<Row>>,
     read: Read,
     symbol: Option<String>,
     order: Option<String>,
@@ -35,12 +34,6 @@ pub struct Request {
     from: f64,
     to: f64,
     limit: usize,
-    cursor: Option<String>,
-    cursors: HashSet<String>,
-    seen: HashSet<String>,
-    orders: HashMap<String, HistoricalOrder>,
-    rows: Vec<Row>,
-    pages: u32,
     count: usize,
     fresh: usize,
     oldest: f64,
@@ -51,6 +44,9 @@ pub struct Request {
     failed: Option<String>,
 }
 impl Request {
+    fn output_len(&self) -> usize {
+        self.history.accepted_len() + self.history.staged_len()
+    }
     fn reset_page(&mut self) {
         self.count = 0;
         self.fresh = 0;
@@ -75,7 +71,7 @@ impl Request {
             self.descending = false;
         }
         self.previous_time = Some(time);
-        let fresh = self.seen.insert(id.into());
+        let fresh = self.history.fresh(id.into());
         self.fresh += usize::from(fresh);
         Ok(fresh)
     }
@@ -433,7 +429,17 @@ impl Kraken {
             return true;
         }
         let request = Request {
-            command: *command,
+            history: Box::new(CursorHistory::new(
+                Completion::new(*command),
+                CursorWalk::new(MAX_PAGES)
+                    .stall_on_empty_page()
+                    .stall_on_no_new_rows(),
+                stall_message,
+                |rows| {
+                    serde_json::to_string(&rows.iter().map(|row| &row.data).collect::<Vec<_>>())
+                        .map_err(|error| VenueError::new(error.to_string()))
+                },
+            )),
             read,
             symbol,
             order,
@@ -448,12 +454,6 @@ impl Kraken {
                 },
                 |n| n as usize,
             ),
-            cursor: None,
-            cursors: HashSet::new(),
-            seen: HashSet::new(),
-            orders: HashMap::new(),
-            rows: Vec::new(),
-            pages: 0,
             count: 0,
             fresh: 0,
             oldest: f64::INFINITY,
@@ -467,20 +467,12 @@ impl Kraken {
         true
     }
     fn history_request(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
-        if request.pages >= MAX_PAGES {
-            cx.fail(
-                request.command,
-                "Kraken history is INCOMPLETE: page budget exhausted",
-            );
-            return;
-        }
-        request.pages += 1;
         request.reset_page();
         let mut params = Vec::new();
         let (path, at) = match request.read {
             Read::Fills => {
-                if let Some(cursor) = &request.cursor {
-                    params.push(("lastFillTime", cursor.clone()));
+                if let Some(cursor) = request.history.cursor() {
+                    params.push(("lastFillTime", cursor.to_owned()));
                 }
                 ("/derivatives/api/v3/fills", ArrayAt::Field("fills"))
             }
@@ -488,8 +480,9 @@ impl Kraken {
                 params.push((
                     "since",
                     request
-                        .cursor
-                        .clone()
+                        .history
+                        .cursor()
+                        .map(str::to_owned)
                         .unwrap_or_else(|| format!("{:.0}", request.from.floor())),
                 ));
                 params.push(("count", LEDGER_PAGE.to_string()));
@@ -507,8 +500,8 @@ impl Kraken {
                 if let Some(symbol) = &request.symbol {
                     params.push(("tradeable", symbol.to_ascii_lowercase()));
                 }
-                if let Some(cursor) = &request.cursor {
-                    params.push(("continuation_token", cursor.clone()));
+                if let Some(cursor) = request.history.cursor() {
+                    params.push(("continuation_token", cursor.to_owned()));
                 }
                 ("/api/history/v3/orders", ArrayAt::Field("elements"))
             }
@@ -517,13 +510,13 @@ impl Kraken {
                     "symbol",
                     request.symbol.as_ref().unwrap().to_ascii_lowercase(),
                 ));
-                if let Some(cursor) = &request.cursor {
-                    params.push(("lastTime", cursor.clone()));
+                if let Some(cursor) = request.history.cursor() {
+                    params.push(("lastTime", cursor.to_owned()));
                 }
                 ("/derivatives/api/v3/history", ArrayAt::Field("history"))
             }
         };
-        let command = request.command;
+        let command = request.history.command();
         let form = form(&params);
         if request.read == Read::Trades {
             cx.request_streamed(
@@ -583,7 +576,7 @@ impl Kraken {
         {
             return Ok(());
         }
-        request.rows.push(Row {
+        request.history.stage(Row {
             time,
             data: Data::Execution(Execution {
                 id: row.fill_id.0.into_owned(),
@@ -683,7 +676,7 @@ impl Kraken {
             {
                 continue;
             }
-            request.rows.push(Row {
+            request.history.stage(Row {
                 time,
                 data: Data::Income(Income {
                     symbol: symbol.clone(),
@@ -716,7 +709,7 @@ impl Kraken {
             return Err("Kraken trade has invalid economics".into());
         }
         if request.observe(time, &id)? {
-            request.rows.push(Row {
+            request.history.stage(Row {
                 time,
                 data: Data::Trade(Trade {
                     id,
@@ -781,13 +774,10 @@ impl Kraken {
             created_time: order.timestamp,
             updated_time: event.timestamp.max(order.last_update_timestamp),
         };
-        if request
-            .orders
-            .get(&mapped.id)
-            .is_none_or(|previous| previous.updated_time < mapped.updated_time)
-        {
-            request.orders.insert(mapped.id.clone(), mapped);
-        }
+        request.history.stage(Row {
+            time: mapped.updated_time,
+            data: Data::Order(mapped),
+        });
         Ok(())
     }
     pub(crate) fn history_http(
@@ -839,6 +829,7 @@ impl Kraken {
             self.history_failed(cx, request, &error);
             return;
         }
+        let mut gap = None;
         let next = match request.read {
             Read::Orders => {
                 if envelope.len.is_some_and(|len| len != request.count) {
@@ -854,17 +845,17 @@ impl Kraken {
                     .filter(|s| !s.is_empty());
                 if body_cursor.is_some() && header_cursor.is_some() && body_cursor != header_cursor
                 {
-                    self.history_failed(cx, request, "conflicting order page cursors");
+                    request.history.reject(
+                        cx,
+                        VenueError::new("Kraken history failed: conflicting order page cursors"),
+                    );
                     return;
                 }
                 match body_cursor.or(header_cursor) {
                     Some(cursor) => Some(cursor.to_owned()),
                     None if request.count >= ORDERS_PAGE => {
-                        self.history_failed(
-                            cx,
-                            request,
-                            "INCOMPLETE: saturated order page has no continuation token",
-                        );
+                        request.history.reject(cx, VenueError::new(
+                            "Kraken history failed: INCOMPLETE: saturated order page has no continuation token"));
                         return;
                     }
                     None => None,
@@ -878,7 +869,7 @@ impl Kraken {
                 }
             }
             Read::Trades => {
-                if request.count < FILLS_PAGE || request.rows.len() >= request.limit {
+                if request.count < FILLS_PAGE || request.output_len() >= request.limit {
                     None
                 } else {
                     Some(iso(request.oldest.floor() + 1.0))
@@ -892,18 +883,10 @@ impl Kraken {
                 } else if !request.ascending || request.oldest == request.newest {
                     // Only `since` reaches the venue, so a full page that cannot advance leaves
                     // rows unread. Like TS, return what was read and say it is truncated.
-                    if request.rows.len() < request.limit {
-                        cx.event(
-                            safe_cex_engine::Level::Warn,
-                            safe_cex_engine::log::code::HISTORY_INCOMPLETE,
-                            format!(
-                                "Kraken income history is TRUNCATED: a full {LEDGER_PAGE}-row ledger page cannot be walked further with the venue's since-only cursor; some rows in the window are missing and any total is a lower bound."
-                            ),
-                            vec![(
-                                "command",
-                                safe_cex_engine::Value::Num(f64::from(request.command)),
-                            )],
-                        );
+                    if request.output_len() < request.limit {
+                        gap = Some(format!(
+                            "Kraken income history is TRUNCATED: a full {LEDGER_PAGE}-row ledger page cannot be walked further with the venue's since-only cursor; some rows in the window are missing and any total is a lower bound."
+                        ));
                     }
                     None
                 } else if request.newest > request.to {
@@ -913,32 +896,59 @@ impl Kraken {
                 }
             }
         };
-        if let Some(cursor) = next {
-            if request.fresh == 0 || !request.cursors.insert(cursor.clone()) {
-                self.history_failed(
-                    cx,
-                    request,
-                    "INCOMPLETE: history cursor made no progress or repeated a full boundary",
-                );
-                return;
+        match request.history.advance_with_coverage(
+            CursorPage {
+                next,
+                rows: request.count,
+                fresh: request.fresh,
+                want_more: true,
+            },
+            gap,
+        ) {
+            CursorStep::More(_) => self.history_request(cx, request),
+            CursorStep::Done => self.history_finish(cx, request, Ok(())),
+            CursorStep::Stalled(reason) => request
+                .history
+                .reject(cx, VenueError::new(stall_message(reason))),
+        }
+    }
+    fn history_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        result: Result<(), VenueError>,
+    ) {
+        let limit = request.limit;
+        request.history.finish_with(cx, result, move |rows| {
+            let mut orders: HashMap<String, HistoricalOrder> = HashMap::new();
+            let mut output = Vec::new();
+            for row in rows {
+                match row.data {
+                    Data::Order(order) => {
+                        if orders
+                            .get(&order.id)
+                            .is_none_or(|previous| previous.updated_time < order.updated_time)
+                        {
+                            orders.insert(order.id.clone(), order);
+                        }
+                    }
+                    data => output.push(Row {
+                        time: row.time,
+                        data,
+                    }),
+                }
             }
-            request.cursor = Some(cursor);
-            self.history_request(cx, request);
-        } else {
-            for (_, order) in request.orders.drain() {
-                request.rows.push(Row {
+            for (_, order) in orders {
+                output.push(Row {
                     time: order.updated_time,
                     data: Data::Order(order),
                 });
             }
-            request.rows.sort_by(|a, b| b.time.total_cmp(&a.time));
-            request.rows.truncate(request.limit);
-            let rows: Vec<_> = request.rows.into_iter().map(|row| row.data).collect();
-            match serde_json::to_string(&rows) {
-                Ok(rows) => cx.done(request.command, rows),
-                Err(error) => cx.fail(request.command, error.to_string()),
-            }
-        }
+            output.sort_by(|a, b| b.time.total_cmp(&a.time));
+            output.truncate(limit);
+            let rows: Vec<_> = output.into_iter().map(|row| row.data).collect();
+            serde_json::to_string(&rows).map_err(|error| VenueError::new(error.to_string()))
+        });
     }
     pub(crate) fn history_failed(
         &mut self,
@@ -946,7 +956,18 @@ impl Kraken {
         request: Request,
         error: &str,
     ) {
-        cx.fail(request.command, format!("Kraken history failed: {error}"));
+        self.history_finish(
+            cx,
+            request,
+            Err(VenueError::new(format!("Kraken history failed: {error}"))),
+        );
+    }
+}
+
+fn stall_message(reason: Stall) -> String {
+    match reason {
+        Stall::PageBudget => "Kraken history is INCOMPLETE: page budget exhausted".into(),
+        _ => "Kraken history failed: INCOMPLETE: history cursor made no progress or repeated a full boundary".into(),
     }
 }
 
