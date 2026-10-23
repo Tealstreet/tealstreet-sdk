@@ -278,8 +278,10 @@ only Bitget and Bitget USDC may differ. Run shell syntax, focused harness tests,
 root typecheck/lint/test checks. No local release build or performance replay.
 Push the reviewed source once, open a draft titled/body marked
 "pending Sam's decision, do not merge", and run ordinary PR CI once with no
-rerun. Authenticate exact job/head/attempt/artifacts, package digests and nine
-paired samples; report Bitget and USDC public/private CPU ratios, process CPU,
+rerun. Authenticate exact job/head/attempt/artifacts and package digests. Retain
+nine paired samples per public workload. Private CPU/process figures are single
+correctness-run diagnostics, not a performance objective or margin claim; keep
+strict known-failure status explicit. Report Bitget and USDC CPU ratios, process CPU,
 WASM bytes and fixed-budget headroom, including known private correctness
 failures rather than interpreting CPU as parity. Preserve failures and report
 any missing evidence. No guard/merge and no edits to #1785-#1788. If Sam chooses
