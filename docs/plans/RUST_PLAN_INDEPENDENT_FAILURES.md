@@ -110,3 +110,19 @@ lent the callback and left the Plan unsealed. Independent routing now records
 owned failure before lending the callback; refusal goes directly to fail_plan.
 The common recorded-failure tail is shared with existing typed failure paths,
 and still checks the original delivery after callback settlement.
+
+## Actual write-reconciliation integration
+
+The branch genuinely merges landed #1857 at 867896f3e25 (merge b6592329cfb).
+Independent preservation review proves all 5,462 unowned paths exact incoming,
+with stable source patch IDs for both sides. The sole CALLERS append conflict
+keeps incoming notes followed by the independent-call section once.
+
+The required final-seal control now passes on that actual engine hook: two real
+serial Prepare/Sign/Bind/Claim writes receive 408 and 503, the first settles and
+the sibling releases with zero reconciliation callbacks, and the final Unknown
+seal retains IDs and invokes reconcile_uncertain once. Late replies and a late
+HttpFailed neither invoke failure cleanup again nor request reconciliation.
+The hook has no HTTP delivery, command entry, order-response token, write reply
+or Plan-readiness custody. This is an engine hook receipt, not an exchange read
+completion. Current focused matrix: nine controls with order-locks; eight without.

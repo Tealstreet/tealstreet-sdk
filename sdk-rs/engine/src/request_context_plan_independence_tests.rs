@@ -22,6 +22,7 @@ mod independent_plan_calls {
         callbacks: Vec<VenueError>,
         responses: usize,
         retired: usize,
+        reconciles: usize,
     }
     impl Batch {
         fn new(independent: bool, settle: bool) -> Self {
@@ -35,6 +36,7 @@ mod independent_plan_calls {
                 callbacks: Vec::new(),
                 responses: 0,
                 retired: 0,
+                reconciles: 0,
             }
         }
         fn next(&mut self, cx: &mut Cx<'_, Context>) {
@@ -221,6 +223,15 @@ mod independent_plan_calls {
         fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
             self.retired += 1;
         }
+        fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Context>, _: Option<&[String]>) {
+            assert!(cx.io.http_delivery.is_none());
+            assert!(cx.io.command_entry.is_none());
+            #[cfg(feature = "order-locks")]
+            assert!(cx.io.order_response_token.is_none());
+            assert!(cx.io.http_write_reply.is_none());
+            assert!(cx.io.http_plan_ready.is_none());
+            self.reconciles += 1;
+        }
         fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, _: &str) {
             panic!("untyped failure");
         }
@@ -390,6 +401,35 @@ mod independent_plan_calls {
         assert_eq!(failures(&terminal).len(), 1);
         assert!(response(&mut e, first, 408, 5.).is_empty());
         assert_eq!(e.venue.callbacks.len(), 1);
+        assert_eq!(e.venue.retired, 1);
+    }
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn independent_uncertain_legs_reconcile_once_at_the_final_seal() {
+        let (mut e, actions) = setup(true, true);
+        let first = release(&mut e, &actions, 0.);
+        let actions = response(&mut e, first, 408, 1.);
+        assert_eq!(e.venue.callbacks.len(), 1);
+        assert_eq!(e.venue.reconciles, 0, "unsealed leg triggered reconciliation");
+        assert!(failures(&actions).is_empty());
+        assert_eq!(e.venue.retired, 0);
+
+        let second = release(&mut e, &actions, 2.);
+        let actions = response(&mut e, second, 503, 3.);
+        assert_eq!(e.venue.callbacks.len(), 2);
+        assert_eq!(failures(&actions).len(), 1);
+        let error = failures(&actions)[0];
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["unproven-id"]);
+        assert_eq!(e.venue.retired, 1);
+        assert_eq!(e.venue.reconciles, 1, "final seal must request reconciliation once");
+
+        assert!(response(&mut e, first, 408, 4.).is_empty());
+        assert!(response(&mut e, second, 503, 5.).is_empty());
+        e.handle(6., Event::HttpFailed { request: second, error: "duplicate" });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }))));
+        assert_eq!(e.venue.callbacks.len(), 2);
+        assert_eq!(e.venue.reconciles, 1);
         assert_eq!(e.venue.retired, 1);
     }
     #[test]
