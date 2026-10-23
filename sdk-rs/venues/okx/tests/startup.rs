@@ -13,7 +13,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         ..Options::default()
     });
     engine.start(0.);
-    let request = actions(&mut engine).remove(0);
+    let request = prepared(&mut engine, 0.).remove(0);
     reply(
         &mut engine,
         &request,
@@ -21,7 +21,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         1.,
     );
     assert_eq!(engine.store().markets().len(), 1);
-    let out = actions(&mut engine);
+    let out = prepared(&mut engine, 1.);
     assert!(out.iter().any(|a| is_get(a, "/api/v5/account/config")));
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
     let ticker = out
@@ -35,9 +35,9 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         2.,
     );
     assert!(!engine.store().loaded().tickers);
-    let timer = retry_timer(&actions(&mut engine), 2.0, 1_000.0).unwrap();
+    let timer = retry_timer(&prepared(&mut engine, 2.), 2.0, 1_000.0).unwrap();
     engine.handle(1002., Event::TimerFired { timer });
-    let retry = actions(&mut engine).remove(0);
+    let retry = prepared(&mut engine, 1002.).remove(0);
     reply(
         &mut engine,
         &retry,
@@ -60,7 +60,7 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         (0., 0., 0., 0., 0.)
     );
     assert!(
-        !actions(&mut engine)
+        !prepared(&mut engine, 1003.)
             .iter()
             .any(|a| is_get(a, "/api/v5/account/config"))
     );
@@ -323,9 +323,9 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
         ..Options::default()
     });
     engine.start(0.);
-    let request = actions(&mut engine).remove(0);
+    let request = prepared(&mut engine, 0.).remove(0);
     reply(&mut engine, &request, &envelope(MARKET), 1.);
-    let config = actions(&mut engine)
+    let config = prepared(&mut engine, 1.)
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
         .unwrap();
@@ -335,9 +335,9 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
         r#"{"code":"50011","msg":"rate limit","data":[]}"#,
         2.,
     );
-    let timer = retry_timer(&actions(&mut engine), 2.0, 1_000.0).unwrap();
+    let timer = retry_timer(&prepared(&mut engine, 2.), 2.0, 1_000.0).unwrap();
     engine.handle(1_002., Event::TimerFired { timer });
-    let config = actions(&mut engine)
+    let config = prepared(&mut engine, 1_002.)
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
         .expect("config retried after failure");
@@ -347,7 +347,7 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         5_003.,
     );
-    let mut pending: Vec<_> = actions(&mut engine)
+    let mut pending: Vec<_> = prepared(&mut engine, 5_003.)
         .into_iter()
         .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade")))
         .collect();
@@ -358,7 +358,7 @@ fn failed_account_config_is_retried_by_the_startup_backoff() {
             envelope("")
         };
         reply(&mut engine, &a, &body, 5_004.);
-        pending.extend(actions(&mut engine).into_iter().filter(|a| {
+        pending.extend(prepared(&mut engine, 5_004.).into_iter().filter(|a| {
             matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade"))
         }));
     }
