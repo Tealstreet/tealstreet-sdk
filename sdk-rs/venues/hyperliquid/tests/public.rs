@@ -183,8 +183,8 @@ fn posted_candle_read_preserves_body_and_streams() {
             to_ms: Some(60000.0),
         }),
     );
-    let req = e
-        .drain_actions()
+    let req = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -279,8 +279,8 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
             to_ms: Some(90_000_000.0),
         }),
     );
-    let r = e
-        .drain_actions()
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)

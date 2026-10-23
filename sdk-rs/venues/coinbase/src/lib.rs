@@ -123,6 +123,7 @@ impl Venue for Coinbase {
             finite_history_bounds: true,
             reject_order_history_filters: true,
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
+            income_history: false,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             ..safe_cex_engine::Capabilities::BASE
