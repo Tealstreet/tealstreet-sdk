@@ -279,6 +279,7 @@ impl ContextRegistry {
     pub(in super::super) fn independent_plan_failure(
         &self,
         delivery: &Delivery,
+        fallback: VenueError,
     ) -> Option<VenueError> {
         let plan = self.plan_from_context(&delivery.context)?;
         let body = self.plan_body(&plan).ok()?;
@@ -288,12 +289,13 @@ impl ContextRegistry {
         let Owner::Command { id, .. } = plan.owner() else {
             return None;
         };
-        self.commands
-            .get(&id)?
-            .writes
-            .as_ref()?
-            .failed_attempt_error(delivery.attempt.request)
-            .ok()
+        Some(
+            self.commands
+                .get(&id)
+                .and_then(|owner| owner.writes.as_ref())
+                .and_then(|writes| writes.failed_attempt_error(delivery.attempt.request).ok())
+                .unwrap_or(fallback),
+        )
     }
 
     fn validate_plan(&self, handle: &Plan, now: f64) -> Result<&Body, Error> {
