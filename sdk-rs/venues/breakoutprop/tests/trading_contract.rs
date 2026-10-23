@@ -1130,13 +1130,11 @@ fn p0_write_partial(transport: bool) {
 }
 
 #[test]
-#[ignore = "original RED: typed session acquisition failure is not adopted"]
 fn p0_write_login_401_preserves_auth_invalid_for_waiter() {
     p0_write_login(401, safe_cex_engine::ErrorKind::AuthInvalid);
 }
 
 #[test]
-#[ignore = "original RED: typed session acquisition failure is not adopted"]
 fn p0_write_login_403_preserves_auth_permission_for_waiter() {
     p0_write_login(403, safe_cex_engine::ErrorKind::AuthPermission);
 }

@@ -179,6 +179,11 @@ appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
 
 ### Session boundary, phases and original RED controls
 
+Update (claude-55ao7t, 2026-10-23): the login transport and the 401/403 typed
+waiter controls are adopted on the session core, stacked on this PR. The SESSION
+provider-presentation and remote-readiness obligations remain OPEN. See
+[BreakoutProp password login](RUST_BACKGROUND_SESSION.md).
+
 Every current feed/write depends on password login, selected FULL_TRADING
 account and a session generation. claude-55ao7t owns login/acquisition/refresh
 Context authority; claude-19pt8s owns credential/provider presentation. Login
