@@ -4747,6 +4747,25 @@ The standard hosts already implement managed preparation. The tealstreet-next
 venue setup/load consumers continue reading the same Store events and fields;
 custom raw-HTTP transport adapters must implement the shared handoff.
 
+## Hyperliquid perps candle command ownership
+
+Perps FetchCandles, including HIP-3 markets and perps on an account with merged
+spot markets, enters shared command admission before interval, market or range
+validation. At exhausted capacity it receives the engine's correlated Internal
+failure with no financial outcome; it cannot retire another owner. With capacity,
+native validation messages and unclassified metadata remain. Standalone and
+merged spot candle commands retain their existing path in this area.
+
+The unsigned JSON POST keeps its native REST route, Content-Type, raw coin,
+field order, limit/time geometry and encounter-order candle output. Its original
+20-second deadline includes preparation and stream progress cannot extend it.
+Preparation failures preserve shared typed metadata (NotSent); released network
+or deadline failures retain Network/Timeout with no financial outcome. Native
+HTTP and malformed candle response errors remain unclassified. Failed stream
+prefixes never become a partial result, and stale or duplicate delivery cannot
+complete a reused command ID. SDK command/result shapes are unchanged; transport
+fixtures execute the existing shared Prepare/Bind/Claim contract.
+
 ## Backpack and Paradex order snapshot freshness
 
 Backpack and Paradex publish order snapshots through the engine's shared
