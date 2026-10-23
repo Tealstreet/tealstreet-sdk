@@ -92,3 +92,44 @@ corrected an overstatement of existing approval policy: lookup failures can
 continue best-effort; this slice does not change it. The final docs-only correction
 preserves all runtime/tests/manifests. Before integration689 native tests in61
 groups and strict checks passed; current integrated gates supply final evidence.
+
+## Phase 2: frozen Robinhood fixture provenance
+
+CI run39953255157 on1845feb21ee proves Hyperliquid parity passes. Its Binance job
+fails one real-WASM boundary test: the test account has no approved integrator,
+so the newly attributed Robinhood placement correctly refuses. Its other700
+boundary tests pass. Add only a venue-selected approved integrator to the existing
+recorded account (47296 for Robinhood,158385 for plain Lighter); keep all native
+signer-index, slippage, settings, tier refusal and delegated signer assertions.
+Add an explicit signed L2TxAttributes assertion for Robinhood so the fixture
+cannot silently disable attribution. Use the existing override/default when
+choosing the test approval and leave production transport/signing untouched.
+
+The same run's Robinhood public report has186 recognized declared diagnostics.
+Its two private reports have exactly the eleven already declared paths each,
+but tapes changed legitimately with master21644979020's integrator and the
+reviewed1869 harness47296 updates, invalidating the old content hashes. Compare
+all exact observed diagnostic keys and run full assessGateReport on the CI reports
+before and after a proposed refresh. Change only the two existing Robinhood
+private tapeSha256 strings; retain every diagnostic/key/rationale and every other
+venue/public entry verbatim. Neither add nor broaden an allowance. Keep the
+strict raw reports FAIL; a known-failure result is not complete parity.
+
+Base: #1869 reviewed1845feb21ee plus genuine current landing9aef. Frozen report
+artifact: strict-replay-lighter-robinhood from39953255157. Independently verify
+mainnet hash173e43cc71f0c6b317a6001ababf920307df3e46da9e6f5e412e3fa7505fb9e0
+and testnet4850485f3abcc1e1bb126a9c7d6c36bea528be3c42115dab187d3f98f0eeee10.
+Trace both hashes to the deterministic tape generator; compare old/new decoded
+tape data to prove only the authorized integrator fixture fields differ. Use
+existing policy and verifier controls; no local replay/performance/release build.
+For the WASM RED/GREEN receipt reuse CI's matching engine artifact and run the
+one boundary test file, strict TS lint/typecheck and both request-context checks.
+
+Commit plan, review it independently, then commit failing fixture/provenance
+controls before the narrow fix. Files: existing WASM boundary test, two hash
+fields in known-gate-failures.json, this plan and caller/quality appendices as
+needed. Fresh all-open source-file lists show neither fixture nor declaration
+file held. All Rust sources, raw tapes, generator, transport, financial fields
+and incoming legacy manifest stay exact. Deliver independently reviewed head to
+claude-4yjlw0 to fold into1869; no direct landing merge. Architecture gate: No,
+existing test data and exact content identity refresh, with no new gate policy.
