@@ -1439,6 +1439,10 @@ struct Io<P> {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    // Reconcile reads the engine owes the venue, one per uncertain seal: the
+    // symbols (`None` = all) and the earliest time to ask.
+    #[cfg(feature = "order-locks")]
+    reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
@@ -1494,6 +1498,8 @@ impl<P> Default for Io<P> {
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_due: Vec::new(),
             command_entry: None,
             http_responses: Default::default(),
             http_write_revision: 0,
@@ -1541,6 +1547,26 @@ impl<P> Default for Io<P> {
 }
 
 impl<P> Io<P> {
+    /// Bounded: past the cap, coalesce into one full read that waits for the
+    /// latest merged deadline, so no rate or credential wait is cut short.
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
+        const RECONCILE_QUEUE: usize = 64;
+        // A seal at a non-finite clock is due at the next drain.
+        let at = if at.is_finite() { at } else { 0. };
+        if self.reconcile_due.len() < RECONCILE_QUEUE {
+            self.reconcile_due.push((symbols, at));
+            return;
+        }
+        let latest = self
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .fold(at, f64::max);
+        self.reconcile_due = vec![(None, latest)];
+    }
+
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
         Some(self.signatures.swap_remove(index).1)
@@ -2222,7 +2248,32 @@ impl<P> Cx<'_, P> {
             {
                 self.io.order_locks.managed_resolved(command);
             }
-            self.io.order_locks.finish(command, result.is_err());
+            let scope = self.io.order_locks.reconcile_scope(command);
+            let marked = self.io.order_locks.finish(command, result.is_err());
+            let unknown = result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.outcome == Some(crate::Outcome::Unknown));
+            // Every uncertain seal asks again, even for an already-uncertain
+            // symbol: an earlier in-flight read may predate this write.
+            // A managed write the lock never held still reconciles: a full read.
+            let scope = scope.or_else(|| (write_sealed && unknown).then_some(None));
+            if let Some(scope) = scope.filter(|_| unknown || !marked.is_empty()) {
+                // A rate limit or credential refusal must not fan out reads now.
+                let delay = match result.as_ref().err().and_then(|error| error.kind) {
+                    Some(ErrorKind::RateLimited) => result
+                        .as_ref()
+                        .err()
+                        .and_then(|error| error.retry_after_ms)
+                        .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS),
+                    Some(
+                        ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission,
+                    ) => crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
+                    _ => 0.,
+                };
+                let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+                self.io.queue_reconcile(scope, self.now + delay);
+            }
             self.io.active_commands.remove(&command);
         }
         #[cfg(not(feature = "order-locks"))]
@@ -2364,6 +2415,16 @@ pub trait Venue {
         self.on_sign_error(cx, pending, error);
     }
 
+    /// Reconcile writes whose outcome is unknown: issue a fresh order read for
+    /// these symbols (`None`: all) and report it through `orders_reconciled`.
+    /// The engine asks once per uncertain seal, after any rate-limit wait.
+    fn reconcile_uncertain(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _symbols: Option<&[String]>,
+    ) {
+    }
+
     /// Defer symbol cancellation until placement native identities are known.
     fn guard_pending_placements(&self) -> bool {
         false
@@ -2475,7 +2536,9 @@ pub trait Venue {
         _headers: &str,
         error: &str,
     ) {
-        self.on_request_failed(cx, pending, error);
+        // The venue answered but the stream broke (or is not UTF-8): a
+        // malformed reply, never transport loss. Defaults reach on_request_failed.
+        self.on_http_failed(cx, pending, malformed_body(error));
     }
     fn on_request_failed(
         &mut self,
@@ -2564,6 +2627,8 @@ pub struct Engine<V: Venue> {
     startup_watch_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
+    #[cfg(feature = "order-locks")]
+    reconcile_timer: Option<(TimerId, f64)>,
     /// Set while dispatching released commands, which must not be held again.
     releasing: bool,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
@@ -2610,6 +2675,8 @@ impl<V: Venue> Engine<V> {
             started: false,
             startup_watch_at: None,
             ack_timer: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_timer: None,
             releasing: false,
             account_startup: false,
             shared_books: HashMap::new(),
@@ -2968,12 +3035,29 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
             && let Some((_, pending)) = self.io.signing.expire(*timer)
         {
             self.sign_failed(now, pending.outbound, crate::signing::SignError::TimedOut);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
+            return;
+        }
+        #[cfg(feature = "order-locks")]
+        if let Event::TimerFired { timer } = &event
+            && self.reconcile_timer.is_some_and(|(own, _)| own == *timer)
+        {
+            self.reconcile_timer = None;
+            // The full end-of-event path: deferred commands, the reconcile
+            // drain itself and shared tickers.
+            self.finish_event_scope(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
@@ -3420,7 +3504,71 @@ impl<V: Venue> Engine<V> {
             }
         }
         self.io.http_delivery = delivery;
+        #[cfg(feature = "order-locks")]
+        self.reconcile_uncertain(now);
         self.restore_shared_tickers(false, now);
+    }
+
+    /// Ask the venue once for each due uncertain-write reconcile read, then
+    /// re-arm one wake-up for deferred ones. A fresh read the venue reports
+    /// through `orders_reconciled` clears the order-lock fence as before.
+    // Out of line: four callers share one copy (wasm size budget).
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn reconcile_uncertain(&mut self, now: f64) {
+        // Never inside a command entry; the hook runs with no HTTP delivery
+        // or order-read authority of its own.
+        if self.io.command_entry.is_some() {
+            return;
+        }
+        let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
+        self.io.reconcile_due.retain_mut(|(scope, at)| {
+            if *at > now && now.is_finite() {
+                return true;
+            }
+            any = true;
+            match scope.take() {
+                None => all = true,
+                Some(scope) => {
+                    for symbol in scope {
+                        if !symbols.contains(&symbol) {
+                            symbols.push(symbol);
+                        }
+                    }
+                }
+            }
+            false
+        });
+        if any {
+            let delivery = self.io.http_delivery.take();
+            let token = self.io.order_response_token.take();
+            let mut cx = Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            };
+            self.venue
+                .reconcile_uncertain(&mut cx, (!all).then_some(symbols.as_slice()));
+            self.io.http_delivery = delivery;
+            self.io.order_response_token = token;
+        }
+        let next = self
+            .io
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp);
+        if self.reconcile_timer.map(|(_, at)| at) == next {
+            return;
+        }
+        if let Some((timer, _)) = self.reconcile_timer.take() {
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        if let Some(at_ms) = next {
+            let timer = TimerId(self.io.next());
+            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.reconcile_timer = Some((timer, at_ms));
+        }
     }
 
     fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {
