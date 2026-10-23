@@ -550,6 +550,10 @@ still has the gap.
 - Undeclared refs keep MAC behaviour exactly, so HMAC families are untouched.
 - Role refs are unchanged. A role is its declaration (P6b), and
   `ZkLinkContract` stays role-only.
+- **Check order.** The declaration check runs before the algorithm arm. An
+  undeclared ref is `InvalidRequest` even in a build without the arm, and a
+  declared ref in such a build stays `Unsupported`. Tests that pin
+  `Unsupported` therefore use declared setups.
 - Refusals are `InvalidRequest` and happen before any signing. Injected
   host/remote providers enforce their own custody; this is the local
   provider's rule.
@@ -564,6 +568,16 @@ still has the gap.
   - Both trusted paths use it: native `prepare_local_signer_for` and WASM
     `local_signer_from_json_for_mode`, which gains the parsed options it
     already has.
+  - **Version source.** It reads only the explicit resolved
+    `asterdex.api_version` that the venue uses: native setup resolves it in
+    `asterdex_setup` before the policy is built, and TS sends it explicitly.
+    It never re-infers the version from the shape of the material. `None`
+    declares nothing, which fails closed because the venue already refuses a
+    missing or contradictory version.
+  - **Alias.** A V3 read agent with `signingFromPrimary` has no ref of its
+    own. It signs through the primary's ref and its single declaration: no
+    second copy, and nothing silently dropped. A V3 read agent with its own
+    hex wallet gets its own declaration.
   - The TS mapping and golden are unchanged; the declaration is Rust policy,
     never caller setup.
 - **Backpack**: `backpack_provider` installs its seed with a policy
@@ -592,10 +606,20 @@ asymmetric algorithms. Plain `insert` stays undeclared (P4).
   still signs HMAC. Backpack, Coinbase and existing HMAC families are
   byte-unchanged.
 
-**Tests.** Every refusal pair (undeclared, wrong declaration, MAC on a
-declared ref), the alias rule, Aster V1/V3 on both setup paths, the Backpack
-admission, the Coinbase recipes, and `insert_declared` refusing a MAC
-algorithm.
+**Tests.**
+- Every refusal pair: undeclared, wrong declaration, MAC on a declared ref.
+- The alias rule.
+- Aster V1/V3 on both setup paths, including:
+  - the V3 Code (EIP-712) endpoints signing `Secp256k1Digest` on the declared
+    ref;
+  - the aliased read agent and a read agent with its own wallet;
+  - `api_version: None` declaring nothing.
+- `registry/tests/backpack_admission.rs`, kept in the focused runs. Its valid
+  RFC 8032 seed case would expose a missing declaration that the setup probe
+  masks as a width error.
+- The Coinbase recipes.
+- `insert_declared` refusing a MAC algorithm.
+- Disabled-arm `Unsupported` with declared setups.
 
 **Ordering.** This touches `crypto/src/signer.rs`, which #1937, #1967 and
 #1973 also change. It is ordered after combo-5b and merges their landing
