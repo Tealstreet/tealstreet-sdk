@@ -188,6 +188,27 @@ duplicated in every listen-key venue (see the timer table above).
 - Phase C deletes the native timers listed above. Phases A and B do not depend
   on the #1771 types.
 
+### Session prerequisite gate (owner ruling, 2026-10-23)
+
+claude-ddi2il assigned this gate to the session core, and credential core
+(claude-m26ps4) dropped its C7 gate. Here one session request gates N owners:
+success re-dispatches each owner on its own request, and failure fans out to
+all of them. Sites, from #1821 `RUST_EXECUTION_GROUPS.md` section B:
+- Paradex JWT queue (`paradex/src/account.rs` request/refresh/auth_failed)
+- GRVT `account.waiting` (`grvt/src/account.rs` account_defer/account_refresh/login)
+- BreakoutProp Login/Discover prerequisite (`breakoutprop/src/lib.rs`)
+
+Contract:
+- Each waiting owner keeps its own Context and original raw deadline.
+- Session success re-dispatches each owner on its own request.
+- Session failure or retirement gives each waiting owner a typed NotSent
+  pre-send failure. A waiting owner's expiry fails only that owner.
+- The bounded wait list lives in the engine, not in per-venue queues.
+- Credential core supplies only `SessionPolicy.credential`.
+- A GRVT trade re-sent after relogin is a new physical attempt under its
+  command journal, never a session replay.
+- AsterDEX `awaiting_clock` stays with the clock lane.
+
 ## Phases
 
 - **A. Core (engine only).**
@@ -244,6 +265,27 @@ duplicated in every listen-key venue (see the timer table above).
     Clippy/fmt/bans, shrink-only inventory.
   - **Review:** independent correctness/adversarial review answering the
     architecture gate.
+  - **Checkpoint** (`47c98d53c78` + `13d3f229329`):
+    - **Code:** `Owner::Session { generation }`, `Session`, `SessionPolicy`,
+      `Cx::open_session`/`session_context`/`retire_session`/`session_live`,
+      and the `claim_http` command-journal exemption. Nothing is public
+      beyond those.
+    - **Tests:** 22 session tests.
+    - **Fault controls:** four compiled faults fail the exact tests (journal
+      for every mutation, retirement without discard, no unresolved gate,
+      in-operation retry).
+    - **Gates:** engine 646 tests with order locks and 553 without, Binance
+      293, strict Clippy both ways, fmt, bans.
+    - **Review:** the independent review found a context issued before a write
+      became unresolved could still send a second write on a session that is
+      not repeat-safe, and a venue fact could overwrite an engine-recorded
+      failure. Both are fixed, with the review probes as regressions that fail
+      on `47c98d53c78`.
+    - **Ordering rule:** record the codec fact before `finish_http_context`;
+      finishing first leaves the write unknown (fail-safe, pinned).
+    - **Not yet:** no venue adopts sessions at this checkpoint.
+- **A2. Session prerequisite gate** (above), engine-only, before the Paradex/
+  GRVT/BreakoutProp adoptions.
 - **C. Cadence/feed linkage** as above, after #1771.
 - **D. Hand-off.** The API and adoption notes go to codex-9czdjh, codex-zs5e83,
   codex-ih35js and codex-hcmq3f. BingX adoption and deletion of the #1779
