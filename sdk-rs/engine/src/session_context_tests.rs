@@ -26,6 +26,7 @@ struct Probe {
     retire_in_response: Option<Session>,
     command_fact: bool,
     items: usize,
+    settle_in_response: Option<(crate::request_context::Context, u32)>,
     facts: Vec<Result<(), Error>>,
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
@@ -43,6 +44,7 @@ impl Default for Probe {
             retire_in_response: None,
             command_fact: false,
             items: 0,
+            settle_in_response: None,
             facts: vec![],
             responses: vec![],
             failures: vec![],
@@ -84,6 +86,11 @@ impl Venue for Probe {
             return;
         }
         let session = matches!(pending.0.owner(), Owner::Session { .. });
+        if session && let Some((waiter, legacy)) = self.settle_in_response.take() {
+            self.facts
+                .push(cx.fail_context(&waiter, VenueError::new("login failed")));
+            cx.fail(legacy, VenueError::new("login failed"));
+        }
         if !session && self.command_fact && pending.0.operation() == Operation::Mutation {
             self.facts.push(
                 cx.http_write_fact(
@@ -1384,4 +1391,43 @@ fn session_egress_never_crosses_sessions_or_engines() {
         ))
         .is_ok()
     );
+}
+
+#[test]
+fn a_session_callback_settles_the_commands_waiting_on_it() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let waiter = with(&mut engine, 1., |cx| {
+        cx.http_context(Scope::Command(7), policy(Operation::Read))
+    })
+    .unwrap();
+    engine.venue.settle_in_response = Some((waiter, 9));
+    let login = {
+        let token = session_write(&mut engine, &session, 1.);
+        release(&mut engine, token, 1.)
+    };
+    engine.handle(
+        2.,
+        Event::HttpResponse {
+            request: login,
+            response: Response {
+                status: 401,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    let failed = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command, .. }) => Some(command),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        engine.venue.facts,
+        [Ok(())],
+        "a session delivery is no command's authority, so it blocks none"
+    );
+    assert_eq!(failed, [7, 9], "managed and legacy waiters both settle");
 }

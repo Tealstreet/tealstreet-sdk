@@ -259,6 +259,14 @@ and retries inherit it. There is no second Context field.
   - Keyless sessions without declared egress still route Public.
 - **Not included:** no inference from method, URL or body, and no fallback
   to Public when the private route is unavailable (preparation fails typed).
+- **Session callbacks settle waiters.** A session delivery is no command's
+  completion authority. Its callbacks may therefore complete the commands that
+  waited on the session: managed ones through their own Context, legacy ones
+  numerically (the GRVT login fails its `account.waiting` reads).
+  - Before this, numeric and Context completion were refused inside any
+    managed delivery. A failed managed login left its waiters hanging until
+    their own deadlines.
+  - RED/regression: `a_session_callback_settles_the_commands_waiting_on_it`.
 
 **Adoptions (stacked):** GRVT login (codex-zs5e83) and BreakoutProp login
 (codex-hcmq3f) as session Mutations behind the #1842 gate. Then KuCoin

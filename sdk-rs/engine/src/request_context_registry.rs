@@ -998,7 +998,7 @@ impl<P> Cx<'_, P> {
         };
         self.io.request_contexts.validate_completion(
             id,
-            self.io.http_delivery.as_ref(),
+            super::completion_delivery(&self.io.http_delivery),
             Some(context),
         )
     }

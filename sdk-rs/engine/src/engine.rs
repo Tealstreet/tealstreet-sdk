@@ -1543,6 +1543,20 @@ impl<P> Default for Io<P> {
     }
 }
 
+/// The delivery that may authorize or forbid a command's completion. A
+/// session delivery is no command's authority, so its callbacks can settle
+/// the commands that waited on the session.
+fn completion_delivery(
+    delivery: &Option<request_context_registry::Delivery>,
+) -> Option<&request_context_registry::Delivery> {
+    delivery.as_ref().filter(|delivery| {
+        !matches!(
+            delivery.context.owner(),
+            crate::request_context::Owner::Session { .. }
+        )
+    })
+}
+
 impl<P> Io<P> {
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
         let index = self.signatures.iter().position(|(id, _)| *id == request)?;
@@ -2189,7 +2203,7 @@ impl<P> Cx<'_, P> {
         let delivery = if observer {
             None
         } else {
-            self.io.http_delivery.as_ref()
+            completion_delivery(&self.io.http_delivery)
         };
         let result = match self
             .io
