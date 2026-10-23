@@ -44,11 +44,7 @@ mod planned_execution {
         preflight: &Preflight,
         steps: &[StepBound<'_>],
     ) -> Result<(Plan, ExecutionHandle), Error> {
-        // Parent: no engine API composes an admitted Plan with an execution
-        // group, so a Mutation Plan cannot serve followers.
-        let _ = Window::UntilTerminal;
-        let _plan = cx.admit_plan(preflight, steps, plan_policy())?;
-        Err(Error::Invalid)
+        cx.begin_planned_execution(preflight, steps, plan_policy(), Window::UntilTerminal)
     }
 
     #[derive(Default)]
@@ -106,7 +102,8 @@ mod planned_execution {
             )
             .unwrap();
             if self.probe_handle {
-                self.refusals.push(cx.abort_execution(&execution, "direct").unwrap_err());
+                self.refusals
+                    .push(cx.abort_execution(&execution, "direct").unwrap_err());
                 self.refusals.push(
                     cx.complete_execution(&execution, |_| Ok("direct".into()))
                         .unwrap_err(),
@@ -132,10 +129,15 @@ mod planned_execution {
         type Pending = Context;
         fn start(&mut self, _: &mut Cx<'_, Context>) {}
         fn on_command(&mut self, _: &mut Cx<'_, Context>, _: Command) {}
-        fn on_venue_action(&mut self, cx: &mut Cx<'_, Context>, command: CommandId, _: VenueAction) {
+        fn on_venue_action(
+            &mut self,
+            cx: &mut Cx<'_, Context>,
+            command: CommandId,
+            _: VenueAction,
+        ) {
             match command {
                 FOUNDER => self.found(cx),
-                FOLLOWER | LATE => self.follow(cx, 60_000),
+                FOLLOWER | LATE.. => self.follow(cx, 60_000),
                 SHORT_FOLLOWER => self.follow(cx, 100),
                 _ => unreachable!(),
             }
@@ -270,7 +272,10 @@ mod planned_execution {
     #[test]
     fn followers_receive_the_founders_one_write_and_single_projection() {
         let (mut e, token, _) = shared_write(&[FOLLOWER]);
-        assert_eq!(e.venue.joined, vec![Ok(crate::engine::Joined::Live(Vec::new()))]);
+        assert_eq!(
+            e.venue.joined,
+            vec![Ok(crate::engine::Joined::Live(Vec::new()))]
+        );
         e.handle(
             1_000.,
             Event::HttpResponse {
@@ -284,7 +289,11 @@ mod planned_execution {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         for owner in [FOUNDER, FOLLOWER] {
-            assert_eq!(terminals(&actions, owner), vec![Ok("placed".into())], "owner {owner}");
+            assert_eq!(
+                terminals(&actions, owner),
+                vec![Ok("placed".into())],
+                "owner {owner}"
+            );
         }
         assert!(prepared(&actions).is_empty());
         assert!(!e.io.request_contexts.is_observer(FOLLOWER));
@@ -305,7 +314,11 @@ mod planned_execution {
         assert_eq!(founder.len(), 1);
         let error = founder[0].clone().unwrap_err();
         assert_eq!(error.outcome, Some(crate::Outcome::Unknown), "{error:?}");
-        assert_eq!(terminals(&actions, FOLLOWER), founder, "one shared projection");
+        assert_eq!(
+            terminals(&actions, FOLLOWER),
+            founder,
+            "one shared projection"
+        );
     }
 
     #[test]
@@ -347,10 +360,16 @@ mod planned_execution {
         let (mut e, token, _) = shared_write(&[FOLLOWER]);
         let deadline = e.venue.plan.as_ref().unwrap().deadline();
         let root = e.venue.execution.as_ref().unwrap().context().deadline();
-        assert_eq!(root, deadline, "the execution bound is the Plan-minted root");
+        assert_eq!(
+            root, deadline,
+            "the execution bound is the Plan-minted root"
+        );
         command(&mut e, 500., LATE);
         assert_eq!(e.venue.plan.as_ref().unwrap().deadline(), deadline);
-        assert_eq!(e.venue.execution.as_ref().unwrap().context().deadline(), root);
+        assert_eq!(
+            e.venue.execution.as_ref().unwrap().context().deadline(),
+            root
+        );
         e.handle(
             1_000.,
             Event::HttpResponse {
@@ -365,7 +384,11 @@ mod planned_execution {
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(terminals(&actions, LATE), vec![Ok("placed".into())]);
         command(&mut e, 2_000., LATE + 1);
-        assert_eq!(e.venue.joined.last(), Some(&Err(Error::Revoked)), "no join after the seal");
+        assert_eq!(
+            e.venue.joined.last(),
+            Some(&Err(Error::Revoked)),
+            "no join after the seal"
+        );
     }
 
     #[test]
@@ -377,7 +400,12 @@ mod planned_execution {
         e.start(0.);
         command(&mut e, 0., FOUNDER);
         assert_eq!(e.venue.refusals.len(), 3);
-        assert!(e.venue.refusals.iter().all(|error| *error != Error::Capacity));
+        assert!(
+            e.venue
+                .refusals
+                .iter()
+                .all(|error| *error != Error::Capacity)
+        );
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(prepared(&actions).len(), 1);
         assert!(terminals(&actions, FOUNDER).is_empty());

@@ -290,6 +290,10 @@ impl ContextRegistry {
         {
             return Err(Error::Invalid);
         }
+        // A Plan-backed execution's physical work is its Plan slots only.
+        if parent.is_some_and(|parent| self.planned_execution_root(parent)) {
+            return Err(Error::Revoked);
+        }
         if !now.is_finite() || policy.timeout_ms == 0 {
             return Err(Error::Invalid);
         }
@@ -827,6 +831,36 @@ impl ContextRegistry {
         error: Option<VenueError>,
     ) -> Seal {
         self.seal_as(command, delivery, authority, error, false)
+    }
+
+    /// A Plan-backed execution's observer takes the Plan journal's projection
+    /// verbatim; it has no journal of its own that could rewrite the outcome.
+    pub(super) fn seal_projected(
+        &mut self,
+        command: CommandId,
+        root: &Context,
+        result: Result<String, VenueError>,
+    ) -> (Option<String>, Seal) {
+        if self
+            .validate_completion_as(command, None, Some(root), true)
+            .is_err()
+            || self
+                .commands
+                .get(&command)
+                .is_some_and(|owner| owner.writes.is_some())
+        {
+            return (None, Seal::Stale);
+        }
+        let declared = self
+            .commands
+            .get(&command)
+            .is_some_and(|owner| owner.mutation_declared);
+        match result {
+            Ok(result) if declared => (Some(result), Seal::Success),
+            Ok(result) => (Some(result), Seal::Legacy(None)),
+            Err(error) if declared => (None, Seal::Failure(error, Vec::new())),
+            Err(error) => (None, Seal::Legacy(Some(error))),
+        }
     }
 
     /// `observer` seals an execution member through its own root, never

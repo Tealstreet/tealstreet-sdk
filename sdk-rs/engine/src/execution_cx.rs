@@ -126,6 +126,13 @@ impl<P> Cx<'_, P> {
     ) -> Result<(), Error> {
         if self
             .io
+            .request_contexts
+            .planned_execution_root(&execution.0)
+        {
+            return Err(Error::Invalid);
+        }
+        if self
+            .io
             .http_delivery
             .as_ref()
             .is_some_and(|delivery| delivery.context.owner() != execution.0.owner())
@@ -174,7 +181,15 @@ impl<P> Cx<'_, P> {
                 .request_contexts
                 .observer_authority(&seal)
                 .expect("retained observer root");
-            let finished = self.finish_command_as(seal.command, seal.result, Some(&root), true);
+            let finished = if seal.projected {
+                let (success, projected) =
+                    self.io
+                        .request_contexts
+                        .seal_projected(seal.command, &root, seal.result);
+                self.finish_sealed_command(seal.command, success, projected)
+            } else {
+                self.finish_command_as(seal.command, seal.result, Some(&root), true)
+            };
             assert!(finished.is_ok(), "observer seal {finished:?}");
         }
         self.io.revoke_unsent_execution_legs();
@@ -184,6 +199,65 @@ impl<P> Cx<'_, P> {
     /// Engine-owned expiry and post-callback sweep; one terminal path.
     pub(super) fn sweep_executions(&mut self) {
         let sealed = self.io.request_contexts.expire_executions(self.now);
+        self.finish_sealed(sealed);
+    }
+}
+
+#[cfg(feature = "http-plans")]
+impl<P> Cx<'_, P> {
+    /// Admit the founder's retained Preflight as a Plan that is also the one
+    /// physical owner of an execution. Followers join with `join_execution`
+    /// and receive the Plan's single seal; the founder completes through the
+    /// Plan and cannot detach. Refusal leaves no Plan, group, root or identity.
+    pub fn begin_planned_execution(
+        &mut self,
+        preflight: &crate::request_context::Preflight,
+        steps: &[crate::request_context::plan::StepBound<'_>],
+        policy: crate::request_context::PlanPolicy,
+        window: Window,
+    ) -> Result<(crate::request_context::Plan, ExecutionHandle), Error> {
+        if window != Window::UntilTerminal {
+            return Err(Error::Invalid);
+        }
+        let bound = crate::request_context::plan::PlanBound::from_steps(steps)?;
+        // The Plan's own identities plus one for the execution root.
+        let ids = (bound.logical_calls() as u64)
+            .checked_add(3 * bound.physical_attempts() as u64)
+            .and_then(|ids| ids.checked_add(2))
+            .ok_or(Error::Capacity)?;
+        if !self.io.next_id.available(ids) {
+            return Err(Error::Capacity);
+        }
+        self.io
+            .request_contexts
+            .prepare_planned_execution(bound.logical_calls(), self.now)?;
+        let shared = policy.clone();
+        let plan = self.admit_plan(preflight, steps, policy)?;
+        let identity = self.io.reserve_ids(1).expect("checked identity").start;
+        let root = self
+            .io
+            .request_contexts
+            .begin_planned_execution(identity, &plan, &shared, window, self.now)
+            .expect("validated by the admitted Plan");
+        self.io.rearm_execution_timer();
+        Ok((plan, ExecutionHandle(root)))
+    }
+
+    /// Called once from the Plan seal: every surviving observer receives the
+    /// founder's projection. Observers past their own bound time out first.
+    pub(super) fn seal_planned_execution(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        projection: Result<String, VenueError>,
+    ) {
+        if !self.io.request_contexts.has_planned_executions() {
+            return;
+        }
+        self.sweep_executions();
+        let sealed = self
+            .io
+            .request_contexts
+            .seal_planned_execution(plan, &projection);
         self.finish_sealed(sealed);
     }
 }

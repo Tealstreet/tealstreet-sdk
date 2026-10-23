@@ -40,6 +40,12 @@ pub(crate) enum Root {
     Background {
         deadline: f64,
     },
+    /// An admitted Plan is the physical owner: its root bounds the group and
+    /// only its seal completes it.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    Planned {
+        deadline: f64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +72,8 @@ pub(crate) struct Sealed {
     pub generation: u64,
     pub result: Result<String, VenueError>,
     pub journal: bool,
+    /// Carries the Plan journal's own projection; the observer has no journal.
+    pub projected: bool,
 }
 
 #[derive(Clone)]
@@ -83,6 +91,7 @@ struct Group {
     window: Window,
     deadline: f64,
     background: bool,
+    planned: bool,
     legs: usize,
     released: bool,
     terminal: bool,
@@ -127,9 +136,15 @@ impl Group {
     /// shared journal unless this seal proves nothing was or will be sent.
     fn seal(&self, entry: Entry, result: Result<String, VenueError>, settled: bool) -> Sealed {
         let journal = self.operation == Operation::Mutation;
-        let unsent = settled && !self.released && self.legs == 0;
+        // A Plan seal is already the journal's projection; anything earlier
+        // cannot know the write outcome.
+        let keep = if self.planned {
+            settled
+        } else {
+            settled && !self.released && self.legs == 0
+        };
         let result = result.map_err(|mut error| {
-            if journal && !unsent {
+            if journal && !keep {
                 error.outcome = None;
             }
             error
@@ -139,6 +154,7 @@ impl Group {
             generation: entry.generation,
             result,
             journal,
+            projected: self.planned,
         }
     }
 
@@ -210,6 +226,7 @@ impl Groups {
             return Err(Error::Invalid);
         }
         let bound = now + f64::from(timeout_ms);
+        let planned = matches!(root, Root::Planned { .. });
         let (deadline, founder, background) = match root {
             Root::Command(member) => {
                 if member.operation != operation {
@@ -228,6 +245,15 @@ impl Groups {
                     return Err(Error::TimedOut);
                 }
                 (deadline.min(bound), None, true)
+            }
+            Root::Planned { deadline } => {
+                if window != Window::UntilTerminal || !deadline.is_finite() {
+                    return Err(Error::Invalid);
+                }
+                if deadline <= now {
+                    return Err(Error::TimedOut);
+                }
+                (deadline, None, false)
             }
         };
         let id = self.issue()?;
@@ -251,6 +277,7 @@ impl Groups {
                 window,
                 deadline,
                 background,
+                planned,
                 legs: 0,
                 released: false,
                 terminal: false,
@@ -362,7 +389,7 @@ impl Groups {
 
     pub(crate) fn leg_issued(&mut self, execution: Execution) -> Result<(), Error> {
         let group = self.open(execution)?;
-        if !group.background && group.observers.is_empty() {
+        if group.planned || (!group.background && group.observers.is_empty()) {
             return Err(Error::Revoked);
         }
         group.legs = group.legs.checked_add(1).ok_or(Error::Capacity)?;
@@ -387,8 +414,14 @@ impl Groups {
 
     /// Store/native-cache publication is allowed only for a live owner set.
     pub(crate) fn may_publish(&self, execution: Execution) -> bool {
-        self.group(execution)
-            .is_ok_and(|group| !group.terminal && (group.background || !group.observers.is_empty()))
+        self.group(execution).is_ok_and(|group| {
+            // A Plan founder stays the live owner until the Plan seals.
+            !group.terminal && (group.background || group.planned || !group.observers.is_empty())
+        })
+    }
+
+    pub(crate) fn planned(&self, execution: Execution) -> bool {
+        self.group(execution).is_ok_and(|group| group.planned)
     }
 
     #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
@@ -407,7 +440,9 @@ impl Groups {
             .map(|entry| entry.deadline)
             .filter(|deadline| *deadline < group.deadline);
         let pending = group.pending.iter().map(|entry| entry.deadline);
-        let execution_term = (!group.terminal && group.legs == 0).then_some(group.deadline);
+        // A Plan's own timer owns its root.
+        let execution_term =
+            (!group.terminal && !group.planned && group.legs == 0).then_some(group.deadline);
         observers
             .chain(pending)
             .chain(execution_term)
@@ -425,7 +460,7 @@ impl Groups {
         let timeout = group.timeout();
         // The execution bound wins over a same-instant leg timeout, so owners
         // get the typed timeout before the leg's own failure is delivered.
-        let closes = !group.terminal && now >= group.deadline;
+        let closes = !group.terminal && !group.planned && now >= group.deadline;
         let (expired, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut group.observers)
             .into_iter()
             .partition(|entry| {
@@ -436,7 +471,7 @@ impl Groups {
             .into_iter()
             .partition(|entry| entry.deadline <= now);
         group.pending = kept;
-        if closes || (!group.background && group.observers.is_empty()) {
+        if closes || (!group.background && !group.planned && group.observers.is_empty()) {
             group.terminal = true;
         }
         let settled = group.terminal;
@@ -475,7 +510,7 @@ impl Groups {
             Some(entry) => (entry, false),
             None => (found(&mut group.pending).ok_or(Error::Revoked)?, true),
         };
-        if !queued && !group.background && group.observers.is_empty() {
+        if !queued && !group.background && !group.planned && group.observers.is_empty() {
             group.terminal = true;
         }
         let sealed = group.seal(entry, Err(error), !queued && group.terminal);

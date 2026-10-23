@@ -746,7 +746,15 @@ impl<P> Cx<'_, P> {
             self.io.http_delivery.as_ref(),
             error,
         )?;
-        self.finish_sealed_command(id, result, seal)
+        let projection = match &seal {
+            Seal::Success | Seal::Legacy(None) => Ok(result.clone().unwrap_or_default()),
+            Seal::Failure(error, _) | Seal::Legacy(Some(error)) => Err(error.clone()),
+            Seal::Stale => return self.finish_sealed_command(id, result, seal),
+        };
+        self.finish_sealed_command(id, result, seal)?;
+        // The one execution hook: followers get this exact projection.
+        self.seal_planned_execution(plan, projection);
+        Ok(())
     }
 
     fn rearm_plan(&mut self, plan: &Plan) {
