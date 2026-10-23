@@ -308,13 +308,51 @@ fn retry_after_is_header_only_and_bounded() {
 }
 
 #[test]
-fn credential_evidence_needs_a_credentialed_request() {
-    assert_eq!(auth_outcome(&TABLE, false, &int(-1022)), None);
+fn credential_evidence_comes_only_from_auth_refusal_rows() {
     assert_eq!(
-        auth_outcome(&TABLE, true, &int(-1022)),
+        auth_outcome(&TABLE, &int(-1022)),
         Some(AuthOutcome::Rejected)
     );
-    assert_eq!(auth_outcome(&TABLE, true, &int(-1003)), None);
+    assert_eq!(auth_outcome(&TABLE, &int(-1003)), None);
+    assert_eq!(auth_outcome(&TABLE, &int(-9999)), None);
+}
+
+#[test]
+fn read_failures_carry_retry_evidence_and_never_an_outcome() {
+    let at = |status, headers: &'static str, native: Option<&Native<'_>>| {
+        read(
+            &TABLE,
+            Released::Response(&Response {
+                status,
+                headers,
+                body: "",
+            }),
+            native,
+            "read failed",
+        )
+    };
+    let refused = at(400, "", Some(&int(-1022)));
+    assert_eq!(refused.error.outcome, None);
+    assert_eq!(refused.error.kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(refused.retry, None);
+    assert_eq!(
+        at(400, "", Some(&int(-1021))).retry,
+        Some(ReadRetry::NativeResend)
+    );
+    // 408 decides before the table: never a native resend.
+    assert_eq!(
+        at(408, "", Some(&int(-1021))).retry,
+        Some(ReadRetry::ReadFailure)
+    );
+    assert_eq!(
+        at(429, "Retry-After: 2\r\n", None).retry,
+        Some(ReadRetry::After(2_000.))
+    );
+    assert_eq!(at(503, "", None).retry, Some(ReadRetry::ReadFailure));
+    let lost = read(&TABLE, Released::Transport, None, "lost");
+    assert_eq!(lost.error.kind, Some(ErrorKind::Network));
+    assert_eq!(lost.error.outcome, None);
+    assert_eq!(lost.retry, Some(ReadRetry::ReadFailure));
 }
 
 #[test]

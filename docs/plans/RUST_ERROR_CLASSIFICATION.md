@@ -383,6 +383,20 @@ Each PR lists its exact deltas under [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALL
   - the rule 5 deferral, `reconcile_uncertain` and Satisfied reconcile marking;
   - the cancel-echo check;
   - Binance's move to `http_write_batch`, and its read-side `venue_error`.
+- 2026-10-23, phase 2b (write fact authority and reads):
+  - Refusals exist only as `classify::Fact`. A fact comes from
+    `Cx::classify_write`, which uses the engine-delivered reply and the intent
+    captured on the command owner at dispatch, and it is bound to its attempt.
+  - `Cx::http_write_fact` records `WriteFact` and refuses an empty placement
+    acknowledgement. `http_write_leg_intent` narrows a leg before its first
+    attempt.
+  - `classify::read` returns `ReadFailure` / `ReadRetry` with no `Outcome`.
+  - Auth evidence needs no `credentialed` argument: the engine consults
+    `account_auth_outcome` only for credentialed account reads
+    (`PendingHttp.auth`), and the hook uses `classify::auth_outcome`.
+  - Still deferred to phase 2c: the rule 5 deferral, `reconcile_uncertain`,
+    Satisfied reconcile marking, the cancel-echo check, and Binance's
+    read-side `venue_error`.
 - Phase 2b decisions from venue-lane review (codex-zs5e83):
   - **Exact message rows.** Add `Key::Message`, an exact match on the native
     message. The venue codec strips only its documented suffix grammar while

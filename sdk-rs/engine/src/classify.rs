@@ -479,15 +479,10 @@ pub(crate) fn batch(
     })
 }
 
-/// Credential evidence from one table; public reads never produce any.
-pub fn auth_outcome(
-    table: &CodeTable,
-    credentialed: bool,
-    native: &Native<'_>,
-) -> Option<AuthOutcome> {
-    if !credentialed {
-        return None;
-    }
+/// Credential rejection evidence from the one table, for a venue's
+/// `account_auth_outcome`. The engine consults that hook only for credentialed
+/// account reads, so public reads never produce credential evidence.
+pub fn auth_outcome(table: &CodeTable, native: &Native<'_>) -> Option<AuthOutcome> {
     matches!(
         table.verdict(native, Intent::Read),
         Verdict::Refused(
@@ -495,6 +490,44 @@ pub fn auth_outcome(
         )
     )
     .then_some(AuthOutcome::Rejected)
+}
+
+/// How a failed read may continue. A read carries no money effect, so this
+/// is retry evidence only, separate from signing and transport budgets.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ReadRetry {
+    /// A proven refusal that permits one re-signed resend.
+    NativeResend,
+    /// The venue said when to come back (Retry-After header).
+    After(f64),
+    /// The answer proves nothing: eligible under `RetryPolicy::ReadFailure`.
+    ReadFailure,
+}
+
+/// A classified read failure: kind and native evidence, never an `Outcome`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReadFailure {
+    pub error: VenueError,
+    pub retry: Option<ReadRetry>,
+}
+
+/// Rules 2-6 for a read. Code 0 or a 2xx status never proves a body; only the
+/// venue codec does, so call this only for a failed or unproven answer.
+pub fn read(
+    table: &CodeTable,
+    released: Released<'_>,
+    native: Option<&Native<'_>>,
+    message: impl Into<String>,
+) -> ReadFailure {
+    let verdict = verdict(table, Intent::Read, released, native);
+    let error = error(verdict, Intent::Read, released, native, message);
+    let retry = match verdict {
+        Verdict::RefusedResend(_) => Some(ReadRetry::NativeResend),
+        _ if error.retry_after_ms.is_some() => error.retry_after_ms.map(ReadRetry::After),
+        Verdict::Unknown(_) => Some(ReadRetry::ReadFailure),
+        Verdict::Refused(_) | Verdict::Satisfied(_) => None,
+    };
+    ReadFailure { error, retry }
 }
 
 /// Venue table invariants, for each venue's own table test.
