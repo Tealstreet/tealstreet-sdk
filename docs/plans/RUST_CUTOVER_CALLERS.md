@@ -5996,6 +5996,30 @@ HTTP request and signer formats, history and cached lookup/candle results retain
 their native semantics. A stale handoff cannot start a refresh on a retired feed.
 Bitunix retains the separately tracked legacy boundary under Sam's decision.
 
+## Phemex unsigned public-trades request custody
+
+Phemex fetchPublicTrades uses a managed public Read when both constructed
+credential containers are absent. Its original 20 s command deadline includes
+route preparation and the existing rate-limit pause. A pause wake after that
+deadline fails typed Timeout without sending; it releases the native active
+history slot. Host setup and network failures retain their typed kind and
+venue metadata without credential-auth evidence. Initial Read admission has
+outcome None; pre-release route refusal retains the shared NotSent outcome,
+while released network failures retain outcome None.
+
+The one-response snapshot keeps the native URL, unsigned headers, tuple codec,
+occurrence-based duplicate identities, stable descending sort and output limit
+(default100, clamp1..200). More than1000 tuples or any malformed row rejects the
+whole page; no accepted prefix or incomplete marker is published. Direct and
+streamed responses validate exact delivery custody before staging, completion
+or the common429 pause update. Expired/duplicate input cannot finish a reused
+command or pause its replacement. Rare history does not mutate live account data.
+
+Credentialed public trades retain their existing signed route and wire contract,
+including public_data_only and secondary-only configurations. Private reads,
+identity, income, trading, signing and socket behavior remain on their current
+paths. Those consumers still require the inventoried shared legacy funnel.
+
 
 ## Shared two-run CPU certification
 
