@@ -5629,6 +5629,87 @@ uncached spot miss, public-only perps refusal and private perps REST lookup reta
 their native behavior. The exchange-server order reconciliation caller consumes
 the same complete cached result and must retain non-definitive miss handling.
 
+## KuCoin synchronous local Read terminals
+
+Spot query credential refusal still precedes kind, cache and parameter handling.
+Missing credentials retain their message with InvalidInput/NotSent; unsupported
+Spot public trades and futures leverage retain their messages with
+Unsupported/NotSent. Keyed missing-symbol fills, order history and income still
+return[]; cached lookup preserves exact symbol/client/native-ID matching and full
+order JSON. The constant Spot leverage projection retains leverage/buy/sell1 and
+its existing unknown-symbol behavior, preserving unrelated margin settings.
+
+Shared initial Read admission now precedes these local results. Capacity/invalid
+clock refusal emits only the engine terminal; denied leverage reads leave Store
+unchanged and denied cache hits publish nothing. No credentials or route are
+borrowed for these no-I/O branches. Private fills, user-info, cache-miss paging,
+setters and successful margin/position no-ops retain native dispatch and policy.
+
+### Lighter public ticker seed uses managed Background Read
+
+The public `/api/v1/exchangeStats` GET now requires prepare/bind/claim support in
+custom transports, with its original20s bound covering preparation and streamed
+response together. Empty headers/body, all six native list-envelope aliases,
+field conversion, usable partial rows, per-symbol WebSocket precedence and poll/
+startup Backoff behavior remain the same. Invalid envelopes discard staged rows;
+queued, expired or late responses cannot publish ticker changes. Admission failure
+keeps recovery on the existing startup Backoff and completes no user command.
+Successful data and SDK method signatures are unchanged for both Lighter aliases
+and networks; private credentials, trading and catalog fallback stay native.
+
+
+
+## BloFin PublicTrades managed history
+
+PublicTrades uses prepared public HTTP and the original 20-second command Read
+owner. A response must match the released, claimed physical attempt before trade
+rows or identities enter the shared history owner. Expired, unreleased or stale
+responses cannot publish results. Preparation refusals retain their typed kind
+and notSent outcome; released transport failures retain network and expiry
+retains timeout. Failed first pages publish neither a staged prefix nor an
+incompleteness warning.
+
+The native unsigned GET, ordered query parameters, empty headers, default and
+clamped wire limit, millisecond timestamps and trade result fields are preserved.
+The wire limit does not truncate returned rows. Known cross-market rows, native
+row order, unknown-market identity consumption, numeric defaults, contract-size
+quantities and side conversion retain their existing behavior. Private history
+and signing paths keep their existing lifecycle.
+
+## WOO synchronous history refusal custody
+
+WOO local history refusals require genuine initial Read admission before the
+native terminal. Unsupported low-level remote client-ID lookup, invalid symbol/
+explicit range/limit and invalid derived range keep their existing validation
+order and native error messages at finite clocks. Invalid engine entry time now
+returns typed InvalidInput, and shared owner capacity returns Internal, each
+without a financial outcome or new HTTP/signing/timer/Store effects. Rejected
+entry is already completed by the engine; revoked entry cannot complete another
+owner. A settled local command ID remains reusable.
+
+The Rust exchange callers for executions, historical orders, income and public
+trades keep their existing rejection handling. Historical positions through
+`wooJournal` still obtain historical orders through the same API. This low-level
+unsupported lookup is separate from SDK `findOrderByClientOrderId`: with WOO
+clientOrderLookup disabled, that caller retains its existing non-definitive
+open-orders lookup. Valid public/private history keeps native unsigned/signed
+dispatch, credential selection, rows, page recovery, range budgets and pacing.
+No managed HTTP-history or signer adoption is implied.
+
+### Paradex local history results require genuine Read admission
+
+Public-only Fills, OrderHistory and Income still return exact `[]`; public-only
+OrderByClientId still returns `{"found":false,"definitive":false}`, including
+invalid private query inputs. Private-enabled invalid client IDs and explicit
+invalid history bounds retain their exact native messages and unclassified
+Read errors. Fills without a symbol still returns `[]` after bounds validation,
+before authentication. These local results now require genuine engine command
+Read admission: capacity and invalid clock policy produce one correlated typed
+engine refusal without a financial outcome. Successful admission preserves the
+native decision order and introduces no request, signer, timer, Store mutation
+or incomplete marker. PublicTrades retains its existing managed public path;
+other private history, signing, settings and REST fallthrough remain unchanged.
+
 
 ## Shared two-run CPU certification
 
