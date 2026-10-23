@@ -5134,7 +5134,7 @@ listener/chart migration, NX deployment or live private connectivity.
 Lighter and Robinhood command candle reads borrow their genuine engine callback's
 initial Read owner through shared `admit_http_command`, before validation or
 outbound work. When capacity is exhausted, callers receive exactly one correlated
-`CommandFailed` with `Too many requests in flight`, Internal kind and no financial
+`CommandFailed` with `Engine request capacity reached`, Internal kind and no financial
 outcome. Invalid clock/deadline admission instead returns `Invalid request
 context`, InvalidInput kind and no outcome. These replace the adapter's generic
 lifecycle-unavailable/Internal refusal. No caller retry or special transport path

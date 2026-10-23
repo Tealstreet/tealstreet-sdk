@@ -335,7 +335,7 @@ strict touched-crate clippy/fmt, bans and both request-context checks; obtain
 three clean implementation reviews and open a separate draft PR with CI watch.
 
 Caller-visible refusal changes from the adapter's generic lifecycle-unavailable
-message to the engine's typed `Too many requests in flight` / Internal Read
+message to the engine's typed `Engine request capacity reached` / Internal Read
 denial, with no financial outcome. Successful and native validation replies keep
 their existing wire/result shape. Duplicate live command IDs are refused by the
 shared entry owner without affecting the original command. Private trading,
