@@ -549,3 +549,23 @@ processing. Successful data/cadence and SDK call signatures stay native; parked
 or expired work cannot mutate Store. Failure remains background recovery, never
 a correlated user's command result. Architecture gate No: existing Context and
 HTTP lifecycle APIs carry policy; the venue retains only protocol/cache facts.
+
+### Public-seed slice narrowed to depth only before source
+
+The deeper independent fixture audit found a concrete #1877 hold collision for
+ticker adoption: request_context_candles.rs's background-generation recovery test
+selects the first SetTimer at NOW+140000. Its poll issues ticker before candle;
+a managed ticker adds the same20s deadline first and the held test would expire
+ticker rather than the intended candle owner. No deadline change, operation
+reorder or duplicate test can honestly remove that collision. Ticker adoption
+waits until the held fixture can be disambiguated by its owner or after landing.
+No ticker source/test is changed by this PR.
+
+Proceed with **depth only**, the next unblocked physical read. All design,
+original-RED and validation requirements above apply to depth; ticker requirements
+remain a deferred plan rather than this implementation claim. Exact prune is
+only18cd2d97de7df286e747348057b54c6924eb3e65bc7df288229e919c4a447f11
+once:43→42/lib3→2; ticker2bbebb and catalog1edfac remain exact. The held candle
+fixture does not subscribe to order books, so depth adds no timer to its poll.
+Confirm this with all three plan reviews before source. Shared unheld test drivers
+may receive prepared drains with actual event clocks, retaining all assertions.
