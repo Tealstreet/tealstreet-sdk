@@ -21,6 +21,8 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub omni_key_seed: Option<String>,
+    /// Host-provider identity for managed signed requests. Opaque refs only.
+    pub identity: Option<safe_cex_engine::signing::Identity>,
     pub tick_interval_ms: Option<f64>,
 }
 safe_cex_crypto::redacted_debug!(Options);
