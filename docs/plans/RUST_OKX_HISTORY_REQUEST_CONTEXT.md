@@ -1,0 +1,152 @@
+# OKX history RequestContext adoption
+
+Plan first, 2026-10-24. Owner: codex-ih35js, handed over by claude-4yjlw0.
+User-pinned base `aa556d59cd904fe6cd81f489fc7680f80cbe578c`; branch
+`feat/rust-okx-history-context`. This phase commits the inventory, plan and
+original assertion REDs only. No production or inventory changes until actual
+#1945 lands; no merge without an overseer window. #1856 remains frozen for
+combo-4b at `774a27026888bbfca080f2605e957e631c388bb1`.
+
+## Handover and collision boundaries
+
+claude-4yjlw0 confirmed this history.rs handover and supplied the native policy
+and signer-chain notes before edits. It keeps Bitget and OKX callers #1938
+(leverage/config/trade entry) and #1942 (candles). #1773 supplies signing and
+currently owns history/lib/sign/closed and existing fixtures. #1943 also owns
+lib/socket regions. These source/test files are not edited in this phase.
+Only this plan, its index row and a new standalone history-control file change.
+
+The user requires bare landing aa556 as the phase base. The handover recommends
+future implementation from caller-chain head `b09e8882187` containing
+#1773/#1938/#1942. Record that dependency without silently changing the base:
+re-integrate the actual signer/caller landings and refresh claims before code.
+The history adoption consumes #1773's dispatch recipe through
+`request_signed_managed`, ordinary signed GET selection Secondary else Primary,
+with client-ID lookup explicitly Primary. It adds no signing implementation.
+
+On that chain, three lib.rs sites remain tied to history: list (b8eef2a7),
+sign_http (2e921890) and History's on_sign_error terminal (c873db6f). After all
+consumers are accounted for, coordinate their exact prune and deletion of the
+#1773 STAGING_BOOTSTRAPS entry with 4y. They are conditional follow-up scope,
+not part of the exact eighteen-call promise below. Do not edit held lib.rs now.
+
+## Exact inventory map
+
+At aa556, OKX has 35 fingerprints/45 occurrences: account 6/6, history 14/18,
+lib 6/8 and trading 9/13. Full history.rs adoption removes 14/18, projecting
+whole OKX to 21/27 before any later funnel prune. The scanner verifies all
+eighteen are genuine calls; no macro-only occurrence is claimed. The immediate
+local-only subset is 7 fingerprints/9 occurrences, not the whole target.
+
+| Fingerprint | Occurrences | Native branch | Shared destination |
+| --- | ---: | --- | --- |
+| `219d41f6382035ac32a6f3d3b0656b435121ade8f20af51127cd7f617db9334e` | 1 | Serialized history success | Original Read-root completion |
+| `d58bbdc6877786ed4f458e3ab566d623c3af774cc2bf29627cada3d35937483a` | 1 | History serialization failure | Original Read-root failure |
+| `2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b` | 3 | Missing credentials, missing Fills symbol, unknown market ->[] | Genuine local Read entry/completion |
+| `2ef56c72a7cc604e392db93ffd88ff38bb627358b6784a3259ce2254d38432c2` | 1 | Invalid history bounds | Genuine local Read entry/failure |
+| `ef65cf51343dbe5aca475bfd9ec4ce620ac65579e8f0b6e52d935f82437e7275` | 1 | Invalid client ID | Genuine local Read entry/failure |
+| `896c2dc203c518dc9ae1c6b5eb51b5591da28af19f9ff2461c4c629a490fb1a5` | 1 | Unknown lookup market | Genuine local Read entry/non-definitive miss |
+| `c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548` | 1 | Cached lookup success | Genuine local Read entry/completion |
+| `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa` | 1 | Cached serialization failure | Genuine local Read entry/failure |
+| `6bdc21c11d671d604715e4720a738131cd6c659c4c02b2aef436013584f03520` | 1 | Lookup credentials unavailable | Genuine local Read entry/failure |
+| `9fbbf1645dbf2e85625a23bf00328e2e4b9e0783f83d256e85b0628f56ea1588` | 1 | Primary signed lookup GET | Managed Read prepare/bind/claim |
+| `755a658b5cfaa9ec659ee94f62b5f535e94a4a91391476bda23ef1199af846bf` | 2 | Lookup result; query failure ->[] | Original Read-root completion |
+| `d5e898e07cc7c2b9f7927c0f9a7f462214e004fdec265ff4f3ed0370a6db1a81` | 2 | Lookup result/failure errors | Original Read-root failure |
+| `3c8b186aad2675ec860322e1e33c2976d18c43ef5c7f04269b5de3a84ab8ff6d` | 1 | EEA composite page cap | Original Read-root failure |
+| `799a14889bffdec46d7a35b3067158566a1b2cbaa0e0db6c31a23dfff38ebbc5` | 1 | EEA composite cursor stall | Original Read-root failure |
+
+Closed positions (`FetchClosedPositions`, closed.rs, fetchClosedPnl/okxJournal)
+are a separate source and are not part of these eighteen sites. Existing closed
+position tests remain useful compatibility gates, without a conversion claim.
+
+## Root and physical-page contract
+
+The ruling is one immutable root equal to the caller's effective
+`rustCommandTimeoutMs`, including a per-call override; default 120000 ms.
+#1945's owner confirmed the superseding API:
+`Cx::command_wait() -> Option<CommandWait::{Remaining(u32),Expired}>`,
+not the earlier proposed command_timeout_ms name. Reviewed plan pin
+`de14dd30926`; original core RED checkpoint `dbdcee8c524`. Source is not frozen
+or landed. Do not copy receipt/deadline storage into this venue.
+
+Capture Remaining only in the genuine entry and admit the Read root once with
+that remaining duration. The root therefore retains the original receipt's
+absolute deadline even after held entry; no page or fallback renews it. Fresh
+Expired is handled as #1945's typed Timeout before any admission or effect,
+Read outcome None. Missing custody grants no work. Initial entry refusal is
+already published by the engine; never add a numeric fallback.
+
+Each physical page gets a Read child of that root with timeout 20000 ms and
+RetryPolicy::Never, minted only when the native queue dequeues it, before
+managed route preparation/signing. Its deadline is capped by the root. The
+root covers all native 100 ms pacing waits; the child budget starts at dequeue,
+so a waiting page cannot expire before it is minted. Preserve the existing
+100 ms cadence, not a new venue queue or cross-cutting timer implementation.
+At an observed expired root, stop new pages and discard staged query rows.
+
+Preserve the native terminal projection after admission: command_error
+`OKX history: {error}`, then soft[] for ordinary queries; lookup rejects and
+never becomes definitive absence on signing/transport/expiry failure. Existing
+completion-only root validation permits settlement after deadline without send
+or DATA authority; shared API-fit review must confirm the full composition.
+Cap/stall semantics stay separate: plain history marks its own incomplete result
+and retains rows; EEA composite cap/stall rejects. Root expiry must not publish
+staged partial history or borrow another command's marker.
+
+Use shared Read completion and guarded page/row admission. uufub4 API-fit review
+is requested for sequential Context-root/child composition versus Preflight/Plan
+and its history authority bridge; do not invent a Plan-as-Context wrapper or
+claim an unavailable constructor. This is an explicit implementation gate in
+addition to actual #1945 and source ownership. Record any missing shared seam.
+
+## Native data and caller invariants
+
+PAGE100; orders cap50 and income cap200 per product; EEA unscoped queries walk
+SWAP then FUTURES before the global result. Fills use up to two calls: recent
+fills, then fills-history only when native count requires fallback. Bills choose
+bills-archive when the requested lower bound is older than six days. No retries.
+Exact decimal ordId/billId cursors, last-wins identity updates, sorting, filtering,
+contract/base conversion and bill fee/PnL/residual decomposition remain native.
+
+Credential absence precedes ordinary query validation. Fills normalize seconds/
+milliseconds and drop nonfinite bounds; Orders/Income reject nonfinite or
+reversed bounds before unknown-market empty results. Zero limits clamp to1
+for Fills/Trades; Orders/Income zero means unbounded. Invalid client ID precedes
+market/cache; a secondary read key disables lookup cache use. Keep UNKNOWN
+non-definitive, and ABSENT definitive only for native51603 on successful status.
+
+Consumers: fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory,
+fetchIncomeHistoryRange, fetchPublicTrades and findOrderByClientOrderId. Caller
+root expiry now bounds total work without changing the host's abandonment
+error. Future CALLERS must distinguish fresh typed admission failure from native
+post-admission soft-query/reject-lookup behavior and explicitly record shared
+ReadCompletion's Internal-kind enrichment of otherwise untyped native errors;
+never strip typed provider/native metadata locally to mimic old kind=None.
+
+## Original REDs and phase gate
+
+After independent plan review, commit a new standalone real Engine<Okx> control
+file separately, leaving production, existing fixtures and inventory exact to
+aa556. Reuse existing native history/lookup/closed and signer-chain controls.
+The pre-#1945 explicit-wait fixture adapter transparently uses legacy handle
+without propagating the requested wait, as the core's original RED checkpoint
+does. It grants no fabricated Context and makes no caller-wait readiness claim.
+After actual #1945, replace only that adapter with real handle_command; retain
+all behavioral assertions and re-prove which failures belong to venue adoption.
+
+Required assertion REDs: genuine local admission at nonfinite time; managed
+public/private/primary-lookup transport; short caller root expiring during the
+100 ms page wait; default120s expiry across individually valid20s pages with no
+root renewal. Compatibility controls: native soft[] plus command_error after
+malformed/failed later page, rejecting lookup, finite local precedence, exact
+Primary/Secondary wire, and a20s child born at dequeue (response after enqueue
++20s but before dequeue+20s remains eligible). Add a longer explicit caller wait
+control to forbid an unrelated fixed120s root. Later integration must add held
+entry, exact boundary, root-capped child, prefix rejection, provider refusal,
+duplicate/late/reused owner and same-command typed expiry controls.
+
+Report assertion failures and passing controls separately; no compile failure or
+ignored test is a RED. Stop after plan+original RED commits until the shared and
+ownership gates clear. Implementation, exact prune, full focused OKX/Binance
+checks, strict Clippy/fmt, both ratchets, three independent reviews and full CI
+follow later. No current inventory reduction or managed-history readiness.

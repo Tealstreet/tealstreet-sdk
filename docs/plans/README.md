@@ -123,6 +123,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | History and completeness | Retained plan/evidence | Changing history paging, request-owned incomplete results or transport propagation. | [RUST_HISTORY_PAGING.md](RUST_HISTORY_PAGING.md) |
 | History and completeness | Retained plan/evidence | Changing history paging, request-owned incomplete results or transport propagation. | [RUST_HYPERLIQUID_HISTORY_MARKER_OWNER.md](RUST_HYPERLIQUID_HISTORY_MARKER_OWNER.md) |
 | History and completeness | Retained plan/evidence | Changing history paging, request-owned incomplete results or transport propagation. | [RUST_OKX_HISTORY_MARKER_OWNER.md](RUST_OKX_HISTORY_MARKER_OWNER.md) |
+| OKX history request custody | Plan and original REDs; waits for #1945 | Before converting OKX history transport, native soft failure or caller-root deadlines. | [RUST_OKX_HISTORY_REQUEST_CONTEXT.md](RUST_OKX_HISTORY_REQUEST_CONTEXT.md) |
 | History and completeness | Retained plan/evidence | Changing history paging, request-owned incomplete results or transport propagation. | [RUST_PARADEX_HISTORY_MARKER_OWNER.md](RUST_PARADEX_HISTORY_MARKER_OWNER.md) |
 | History and completeness | Retained plan/evidence | Changing history paging, request-owned incomplete results or transport propagation. | [RUST_WEEX_HISTORY_MARKER_OWNER.md](RUST_WEEX_HISTORY_MARKER_OWNER.md) |
 | Hosts and SDK transports | Retained plan/evidence | Changing host/frame contracts, SDK forwarding or platform integration. | [RUST_BRIDGE_FIXES.md](RUST_BRIDGE_FIXES.md) |
