@@ -27,24 +27,42 @@ bound and continuation policy do not apply. Keep each query's native geometry:
 | OrderHistory | One response; the requested limit controls wire parameters only. Do not introduce pagination or local truncation. |
 
 Current wrapper behavior matters: general history and closed positions call
-CursorHistory::finish, which delegates to HistoryRows::finish_with. A later-page
+CursorHistory::finish/finish_with (landed history.rs:503/515), which delegate to
+HistoryRows::finish/finish_with (history.rs:323/336). A later-page
 Err retains accepted rows and emits an owned incomplete marker; no accepted
 rows means rejection. The failed page's staged rows never enter that result.
 Primitive CursorWalk failure alone does not describe query completion.
 
 There is no local HTTP retry loop in these command histories. A later failure
 terminates or recovers accepted rows; never borrow account census retries or
-startup policy. There is no native per-call timeout or whole-query deadline:
-current requests use the engine default. The native owner must explicitly
-approve per-call timeout and checked whole-query geometry before a Plan is
-declared; no timeout is inferred from the page cap.
+startup policy. The native owners explicitly approve this declaration:
+
+- Per call: 20,000 ms, one attempt, RetryPolicy::Never and no added pacing.
+  This matches engine.rs's legacy request default and existing managed BloFin
+  reads. It includes actual shared preparation/release time; queue or signing
+  delay cannot renew the call or root.
+- OrderHistory: one endpoint, one serial slot and a 20,000 ms root. Its wire-only
+  limit does not create additional slots or local truncation.
+- Income, Fills and closed positions: one endpoint family per query, up to 100
+  serial native steps with one call each, giving a checked worst-case
+  2,000,000 ms root. Each family's earlier-stop rules still decide actual sends.
+  Fills without a symbol retains its no-I/O empty result, and unsupported
+  OrderByClientId remains a no-I/O refusal.
+
+The per-call 20-second default already exists. The explicit whole-query root is
+new: native legacy history previously had no whole-query deadline. The BloFin
+consumer's CALLERS entry must describe that new root-expiry boundary alongside
+strict closed preparation refusal. Test final-slot physical timeout versus root
+expiry precedence: root expiry never permits retained success. Do not tighten
+these declared bounds or add retries without another explicit owner decision.
 
 Managed signing/preparation refusal must be strict and typed, with no retry or
 auth inference. General history already rejects header preparation strictly.
 Closed preparation currently uses legacy finish and can recover accepted rows;
 changing it to strict managed rejection is the approved caller-visible change,
 not a claim about current behavior. Its native owner must pin the original RED
-and the changed behavior, including no retained result or incomplete marker.
+and the changed behavior, including no retained result or incomplete marker,
+and document it in CALLERS in the BloFin consumer PR, not this engine PR.
 
 AsterDEX and Lighter need the same shared authority later. Their native range,
 stage, timer and strict-financial contracts remain separately planned. This PR
@@ -251,5 +269,7 @@ and closed first-page rejection. The general later-failure matrix includes an
 actual HttpFailed case. This establishes the existing wrapper contract; it is
 not a new Plan-authority RED or a private managed consumer proof. Both BloFin
 reviewers agree on accepted-only later recovery and no local retries. Source and
-new API implementation remain gated on exact lifecycle signatures and explicit
-native timeout/bound decisions.
+new API implementation remain gated on exact lifecycle signatures. The native
+20-second call and per-family whole-query bounds above are now explicitly
+confirmed by both BloFin owners; they are declarations, not an executed managed
+private-history consumer proof.
