@@ -906,26 +906,3 @@ fn hyro_retry_refused_after_a_released_create_stays_unknown() {
         [&(42, Some(Outcome::Unknown))]
     );
 }
-
-/// Every joined Hyro owner settles once by its own deadline when the venue
-/// never answers; the released create keeps the outcome unknown.
-#[test]
-fn hyro_joined_owners_each_settle_once_when_the_venue_never_answers() {
-    let (mut h, _gate) = ready(Variant::Hyrotrader);
-    for command in [42, 43] {
-        h.command(Command::PlaceOrders {
-            command,
-            orders: vec![order()],
-        });
-    }
-    let _create = h.take("/v5/order/create");
-    h.advance(130_000.);
-    for command in [42, 43] {
-        assert_eq!(
-            h.outcomes.iter().filter(|(c, _)| *c == command).count(),
-            1,
-            "command {command} terminal count"
-        );
-    }
-    assert!(h.unknown.contains(&42) && h.unknown.contains(&43));
-}

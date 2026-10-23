@@ -1990,3 +1990,49 @@ fn spot_tpsl_streamed_before_the_seed_and_committed_after_it_is_relabelled() {
     let order = h.engine.store().order("stop").expect("spot stop stored");
     assert_eq!(order.kind, OrderType::StopLoss);
 }
+
+/// Two same-ID sends per leg is a bound on the retained intent, not per
+/// caller: a resumed identical call must not send the uncertain create again.
+#[test]
+fn hyro_resumed_call_cannot_exceed_two_same_id_creates() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let mut sends = 0;
+    let mut id = None;
+    for _ in 0..2 {
+        let create = h.take("/v5/order/create");
+        sends += 1;
+        id.get_or_insert_with(|| link(&create));
+        assert_eq!(Some(link(&create)), id);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond("/v5/order/realtime", 200, EMPTY);
+        h.respond("/v5/order/history", 200, EMPTY);
+    }
+    assert!(h.result(1).unwrap().is_err());
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    while h.has_request("/v5/order/realtime") || h.has_request("/v5/order/history") {
+        let path = if h.has_request("/v5/order/realtime") {
+            "/v5/order/realtime"
+        } else {
+            "/v5/order/history"
+        };
+        h.respond(path, 200, EMPTY);
+    }
+    while h.has_request("/v5/order/create") {
+        let create = h.take("/v5/order/create");
+        sends += 1;
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond("/v5/order/realtime", 200, EMPTY);
+        h.respond("/v5/order/history", 200, EMPTY);
+    }
+    assert_eq!(sends, 2, "same orderLinkId physically sent more than twice");
+    assert!(h.result(2).unwrap().is_err());
+    assert!(h.unknown.contains(&2));
+}
+

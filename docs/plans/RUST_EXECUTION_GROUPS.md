@@ -448,58 +448,82 @@ request-context/registry seams with uufub4.
 
 ### Original REDs (committed failing on the stacked head)
 
-`venues/bybit/tests/dispatch_signer.rs`:
+1. `dispatch_signer.rs` `hyro_retry_refused_after_a_released_create_stays_unknown`:
+   a create is released and its reply lost; both reconciliation axes come back
+   complete and empty; the same-ID retry is refused by the signer. Today the
+   owner gets `NotSent` for a write that may have reached the venue, which
+   invites a duplicate order. Required: `Unknown`, with the identity retained.
+2. `trading_variants.rs` `hyro_resumed_call_cannot_exceed_two_same_id_creates`:
+   a resume resets `create.attempts = 0` (`hyro.rs` resume path). Two caller
+   attempts therefore physically send the same orderLinkId 4 times; the bound
+   is supposed to be 2 for the retained intent. Required: the resumed call
+   reconciles but sends no third create, and reports `Unknown` with the
+   identity. A new identity needs an explicit caller choice (a definitive
+   rejection or reconciled terminal state), never an implicit reset.
 
-1. `hyro_retry_refused_after_a_released_create_stays_unknown`: a create is
-   released, its reply is lost, and both reconciliation axes come back
-   complete and empty. The same-ID retry is then refused by the signer. Today
-   the owner gets `NotSent` for a write that may have reached the venue, which
-   invites a duplicate order. Required: `Unknown`.
-2. `hyro_joined_owners_each_settle_once_when_the_venue_never_answers`: two
-   identical PlaceOrders join one Hyro group, and the venue never answers.
-   Today neither owner ever gets a terminal (legacy Hyro has no deadline).
-   Required: each owner settles once, with `Unknown`, by its own deadline.
+A first draft also had a "joined owners never settle" RED. Review showed it
+fails only because the harness never times out a request: real hosts time out
+each request at 20 s, and pause then settles every waiter. It was dropped.
+Per-owner expiry is still proven by engine controls.
 
-### Engine work (one choke point; no Hyro-local copies)
+### Design (revised after the independent plan review, 3 blockers / 8 major)
 
-1. **Mutation executions.** `begin_execution` / `join_execution` accept
-   `Operation::Mutation` for command roots only. Each execution owns one
-   `CommandWrites` journal: legs register, release and record results into it
-   exactly as single-command writes do. Observer seals project that one
-   journal (choices 5 and 8): the terminal is sealed once, a pre-terminal
-   detach or timeout gets a non-consuming projection, and order-lock
-   `manage`/`managed_resolved` runs per observer. Late-ACK custody is keyed by
-   `Owner::Execution`.
-2. **Retained intent across executions.** A Hyro group outlives one execution:
-   a paused group keeps its planned lots, orderLinkIds and uncertainty, and a
-   later identical call resumes it. That later call begins a new execution
-   (new bound) and attaches the retained journal facts, so prior releases
-   stay `Unknown` and accepted IDs stay accepted. No reset sent flags, no new
-   identities, and the old execution is never reopened (choice 10).
-3. **Same-ID retry authority.** A resend of a released leg with the same
-   orderLinkId needs an engine-minted, opaque reconciliation grant, not a
-   constructible evidence enum (uufub4). The grant is minted only inside the
-   exact delivery of this execution's own complete two-axis read, after the
-   leg's latest release. It is bound to the execution and generation, the
-   leg, that latest release, the reading delivery and the original bound, and
-   it is consumed by exactly one resend. It never bypasses classifier custody;
-   native absence text alone cannot mint it. At most two physical attempts per
-   leg, bounded across resumed executions.
-4. **Deadline.** Hyro executions use a 110 s bound, below the SDK's 120 s
-   command wait, so the engine's typed `Unknown`/`Timeout` reaches callers
-   before the host gives up.
+Hyro composes the shared Plan core (#1873) with execution groups (#1854).
+It does not get a second Bybit mutation path: ordinary Bybit adopts Plan with
+its code table, strict ACK DTOs (`trading/acknowledgement.rs`) and classified
+`ResendGrant`s, and Hyro must reuse exactly those.
 
-### Hyro adoption
-
-`start_hyro_place` admits each command's entry root (Mutation, signed
-policy). An identical intent joins the live execution (`UntilTerminal`) or
-resumes the retained group in a new execution. Creates, position-stops and
-lookups become execution legs through `request_signed_managed` with the
-existing Bybit `SignStep`. Lookups are Read legs under the Mutation execution.
-`pause_hyro`, `on_hyro_sign_failed` and the done loop become `abort_execution`
-and `complete_execution`, and `waiters` is removed. Identity receipts use
-`execution_progress` with retained replay. The legacy inventory entries for
-`hyro.rs` are pruned.
+1. **Plan-backed execution (composition with uufub4).** The founder's genuine
+   entry callback admits a Plan (`begin_preflight`). The execution's physical
+   legs are that Plan's slots, and its write journal is that Plan's journal.
+   Identical-intent callers join the execution as observers. Observers seal
+   from the one Plan journal projection; there is no per-execution or
+   per-observer journal copy. This composition API is designed jointly with
+   uufub4 after #1873 lands.
+2. **One engine intent ledger (fixes F6, F7).** The retained Hyro intent
+   (planned lots, orderLinkIds, per-leg attempt count, release facts and
+   uncertainty) is one engine-owned ledger entry keyed by intent leg.
+   Executions are observation windows over it. Late-ACK custody is keyed to
+   the intent leg, not to an execution owner or deadline, so it outlives an
+   expired execution. A resume attaches to the existing ledger. While any
+   attempt of that leg is still in transport or custody, or inside its signed
+   recv_window cutoff, the resume does not begin a new attempt; it waits as an
+   observer or is refused. The attempt count never resets (fixes RED 2 / F3).
+3. **Journal recovery facts (fixes F5).** Add typed facts recorded on the
+   original attempt: reconciled-accepted (with the order ID) and
+   reconciled-absent. Projection uses them, so a lost ACK that reconciles to
+   an order is `Accepted`, not permanently uncertain. A signer-refused resend
+   after a released attempt stays `Unknown` (RED 1).
+4. **Reconciliation-proven resend (fixes F8).** It is a classified
+   `ResendGrant` variant minted by the engine (uufub4: opaque, not a
+   constructible enum). It is minted only in the exact delivery of a complete
+   two-axis read by `orderLinkId` (not 100-page symbol paging), under these
+   conditions:
+   - The read was released after the write attempt was terminal and after its
+     signed timestamp + recv_window + skew allowance. Past that point Bybit
+     rejects a late arrival, which bounds the in-flight risk.
+   - The private session and snapshot boundary were unchanged from the write's
+     release to the read's delivery (replica-lag fence).
+   - It is bound to one logical leg, its latest attempt and the original
+     bound, and consumed by one resend.
+5. **Intent key and lifetime (fixes F9).** The key is credential subject +
+   variant + canonical orders. A credential change drops retained intents.
+   The ledger has a count cap and a lifetime; eviction never forgets a leg
+   with unresolved release evidence (that is refused instead).
+6. **Bound (fixes F10).** Derived from the founder root's deadline minus a
+   fixed margin, never a constant, so a per-command `timeoutMs` is honoured. A
+   degraded multi-lot run that passes it ends `Unknown` with its known partial
+   IDs, resumable through the ledger (control: eight lots answered at 19 s).
+7. **Position-stops (F4).** An ambiguous trading-stop gets its own journal
+   fact and a reconciliation route: read the position's stop fields. Today it
+   stays blocked for the engine's lifetime, and the existing fail-closed test
+   remains until that route exists.
+8. **Store publication (F11).** Lookup rows publish only after the
+   execution's read-delivery gate. Order-lock `manage` runs for every observer
+   at join, and `managed_resolved` runs from the Plan journal seal.
+9. **Legacy text resend (F12).** `resendable` / `resend` in `lib.rs`, kept live
+   for Hyro by the Plan D5 carve-out, are replaced by the Plan core's typed
+   10004 resend grant. `Rest.resent` is removed with the legacy branch.
 
 ### Prerequisites and coordination
 
@@ -525,23 +549,15 @@ and `complete_execution`, and `waiters` is removed. Identity receipts use
   admission (`reserved_contexts`), and journal imports to keep uncertainty,
   effects, budgets and dedup without extending any root.
 
-### Acceptance (beyond the REDs)
+### Status
 
-These existing controls are preserved:
-- identical concurrent submissions share one dispatch;
-- a lost ACK recovers without recreating;
-- two complete absences reuse the ID but never loop;
-- a cyclic lookup stays `Unknown`;
-- a definitive rejection allows a new identity;
-- receipts cover the shared write and late waiter.
+**Blocked on #1873 landing** and the Plan/execution composition API with
+uufub4. The Bybit reconciliation codec (dazzy3's ordinary adoption) is a hard
+prerequisite: the default codec refuses release, and `execution_registry.rs`
+refuses Mutation today. Until then, the REDs stay committed on
+`feat/rust-hyro-execution` and nothing merges.
 
-New engine controls:
-- a mutation observer joining after release projects prior uncertainty;
-- a detach or timeout before terminal leaves the shared leg running for its peers;
-- a same-ID resend is refused without the absence fact, or with absence from
-  before the release or from another execution;
-- a resumed execution keeps the old execution's journal facts.
-
-Architecture gate: No. Every new mechanism (mutation journal, retained intent,
-retry evidence) is engine-owned and generic; Hyro only declares its intent key
-and native codecs.
+Architecture gate: No, conditionally. Hyro reuses the Plan core's code table,
+strict ACKs and resend grants, plus the shared execution groups. The intent
+ledger and recovery facts are new engine mechanisms, generic and not
+Hyro-local. Re-run the gate on the implementation PR.
