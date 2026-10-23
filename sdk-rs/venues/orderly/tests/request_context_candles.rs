@@ -337,3 +337,116 @@ fn failed_stream_does_not_publish_a_valid_prefix_or_write_outcome() {
     );
     assert_eq!(failure(&actions, 7).outcome, None);
 }
+
+fn check_initial_invalid_clock(bounded: bool) {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut engine = engine();
+        let actions = query_kind(&mut engine, 7, now, bounded);
+        let error = failure(&actions, 7);
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, None);
+        assert!(
+            actions
+                .iter()
+                .all(|action| matches!(action, Action::Notice(_)))
+        );
+
+        let fresh = query_kind(&mut engine, 7, 100., bounded);
+        let (token, _) = preparation(&fresh);
+        let packet = release(&mut engine, token, 101.);
+        let actions = response(
+            &mut engine,
+            &packet,
+            102.,
+            if bounded { EMPTY } else { CURRENT_EMPTY },
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    Action::Notice(Notice::CommandDone { command: 7, .. })
+                ))
+                .count(),
+            1
+        );
+    }
+}
+
+fn check_initial_capacity_rejection(bounded: bool) {
+    let mut engine = engine();
+    let mut first = None;
+    for command in 1..=256 {
+        let actions = query_kind(&mut engine, command, 100., bounded);
+        let (token, _) = preparation(&actions);
+        if command == 1 {
+            first = Some(token);
+        }
+    }
+    let actions = query_kind(&mut engine, 257, 101., bounded);
+    let error = failure(&actions, 257);
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.outcome, None);
+    assert!(
+        actions
+            .iter()
+            .all(|action| matches!(action, Action::Notice(_)))
+    );
+
+    let first = release(&mut engine, first.unwrap(), 102.);
+    let actions = response(
+        &mut engine,
+        &first,
+        103.,
+        if bounded { EMPTY } else { CURRENT_EMPTY },
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 1, .. })
+            ))
+            .count(),
+        1
+    );
+    let fresh = query_kind(&mut engine, 257, 104., bounded);
+    let (token, _) = preparation(&fresh);
+    let fresh = release(&mut engine, token, 105.);
+    let actions = response(
+        &mut engine,
+        &fresh,
+        106.,
+        if bounded { EMPTY } else { CURRENT_EMPTY },
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 257, .. })
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn initial_bounded_clock_rejection_has_no_write_outcome() {
+    check_initial_invalid_clock(true);
+}
+
+#[test]
+fn initial_current_clock_rejection_has_no_write_outcome() {
+    check_initial_invalid_clock(false);
+}
+
+#[test]
+fn initial_bounded_capacity_rejection_keeps_existing_owner() {
+    check_initial_capacity_rejection(true);
+}
+
+#[test]
+fn initial_current_capacity_rejection_keeps_existing_owner() {
+    check_initial_capacity_rejection(false);
+}
