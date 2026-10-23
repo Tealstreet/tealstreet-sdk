@@ -98,63 +98,6 @@ pub(crate) struct Driver {
     runtimes: Vec<Runtime>,
 }
 
-/// One stable driver owner. Borrowing never constructs a replacement registry.
-#[derive(Default)]
-pub(crate) enum DriverSlot {
-    #[default]
-    Inactive,
-    Ready(Box<Driver>),
-    Leased,
-}
-impl DriverSlot {
-    pub(crate) fn get(&self) -> Option<&Driver> {
-        match self {
-            Self::Inactive => None,
-            Self::Ready(driver) => Some(driver),
-            Self::Leased => panic!("managed socket driver is already leased"),
-        }
-    }
-    pub(crate) fn register(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
-        match self {
-            Self::Inactive => {
-                let mut driver = Driver::default();
-                let feed = driver.register(policy)?;
-                *self = Self::Ready(Box::new(driver));
-                Ok(feed)
-            }
-            Self::Ready(driver) => driver.register(policy),
-            Self::Leased => panic!("cannot register a leased socket driver"),
-        }
-    }
-    pub(crate) fn lease(&mut self) -> Box<Driver> {
-        match std::mem::replace(self, Self::Leased) {
-            Self::Ready(driver) => driver,
-            Self::Inactive | Self::Leased => panic!("managed socket driver is not available"),
-        }
-    }
-    pub(crate) fn restore(&mut self, driver: Box<Driver>) {
-        assert!(
-            matches!(self, Self::Leased),
-            "socket driver lease was replaced"
-        );
-        *self = Self::Ready(driver);
-    }
-}
-impl std::ops::Deref for DriverSlot {
-    type Target = Driver;
-    fn deref(&self) -> &Self::Target {
-        self.get().expect("managed socket driver is not registered")
-    }
-}
-impl std::ops::DerefMut for DriverSlot {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            Self::Ready(driver) => driver,
-            Self::Inactive | Self::Leased => panic!("managed socket driver is not available"),
-        }
-    }
-}
-
 impl Driver {
     pub(crate) fn frames_ready(&self, now: f64, barrier: impl Fn(SocketId) -> bool) -> bool {
         if !self.state.has_pending_frames() {
@@ -820,52 +763,6 @@ mod tests {
             subscription_interval_ms: 0.,
         }
     }
-    #[test]
-    fn inactive_holder_initializes_only_after_successful_registration() {
-        let mut slot = DriverSlot::default();
-        assert!(slot.get().is_none());
-        let mut invalid = policy(AuthMode::None);
-        invalid.supervision.idle_timeout_ms = 0.;
-        assert_eq!(
-            slot.register(invalid.clone()),
-            Err(SocketError::InvalidPolicy)
-        );
-        assert!(slot.get().is_none());
-        let feed = slot.register(policy(AuthMode::None)).unwrap();
-        let owner = std::ptr::from_ref(slot.get().unwrap());
-        assert_eq!(slot.register(invalid), Err(SocketError::InvalidPolicy));
-        assert!(std::ptr::eq(owner, std::ptr::from_ref(slot.get().unwrap())));
-        let next = slot.register(policy(AuthMode::None)).unwrap();
-        assert_ne!(feed, next);
-        assert!(std::ptr::eq(owner, std::ptr::from_ref(slot.get().unwrap())));
-        assert!(slot.state.policy(feed).is_ok());
-    }
-
-    #[test]
-    fn leased_holder_cannot_query_or_reconstruct_a_registry() {
-        let mut slot = DriverSlot::default();
-        let feed = slot.register(policy(AuthMode::None)).unwrap();
-        let owner = std::ptr::from_ref(slot.get().unwrap());
-        let driver = slot.lease();
-        assert!(std::ptr::eq(owner, std::ptr::from_ref(driver.as_ref())));
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                slot.get();
-            }))
-            .is_err()
-        );
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = slot.register(policy(AuthMode::None));
-            }))
-            .is_err()
-        );
-        assert!(matches!(slot, DriverSlot::Leased));
-        slot.restore(driver);
-        assert!(std::ptr::eq(owner, std::ptr::from_ref(slot.get().unwrap())));
-        assert_eq!(slot.state.feeds(), vec![feed]);
-    }
-
     fn bitunix() -> FeedPolicy {
         FeedPolicy {
             recovery: AuthRecovery::RetrySameSocket { delay_ms: 2_000. },
