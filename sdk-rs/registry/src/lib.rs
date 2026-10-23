@@ -889,6 +889,7 @@ pub fn build_with_signer<T: Visit>(
                     secret: options.secret.take(),
                     passphrase: options.passphrase.take(),
                     omni_key_seed: options.omni_key_seed.take(),
+                    identity: None,
                     tick_interval_ms: None,
                 }),
                 entropy,
