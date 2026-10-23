@@ -977,5 +977,6 @@ Compatibility controls preserve cache aliases/sentinels, full order results,
 constant leverage fields and unknown-symbol handling, successful setting no-ops
 and capability declarations. Private/pager requests preserve native URLs, headers
 and completion while all256 background roots can coexist without an added owner.
-No steady WS/ticker/book path changes; current post-#1888 CI must verify the
-KuCoin Spot >=1.20x median target before a venue merge.
+No steady WS/ticker/book path changes; current post-#1888 CI must pass the
+shared speed gate and report the fresh KCS ratio. The1.20x figure remains a
+headroom target, not a merge gate, per the overseer clarification.

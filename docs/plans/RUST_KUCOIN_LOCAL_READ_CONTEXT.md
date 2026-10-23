@@ -97,15 +97,15 @@ No WS message, ticker/book reducer, Store lookup, discovery or steady-event work
 moves. All new work is in cold command callbacks; no per-message registry sweep,
 index, counter or layout workaround is added. Check the diff to pin this scope.
 Original REDs run on frozen6614 as requested; final integration follows actual
-#1888 so KCS retains the accepted >=1.20x median target. CI must report the fresh
-nine-pair KCS TS/Rust median ratio after both integrations; do not waive a loss of
-speed margin or infer timing from a native test/profile.
+#1888. Report the fresh nine-pair KCS TS/Rust median ratio after integration. The
+overseer clarified that1.20x is a headroom target, not a merge gate; the shared
+CI speed gate remains mandatory. Do not infer timing from a native test/profile.
 
 Require independent plan/source-adversarial, caller and full-map CLEAN reviews.
 Run focused controls, KuCoin (Spot on/off) plus Binance native tests, strict scoped
 Clippy/fmt, bans and both request-context checks. Append CALLERS/AUDITS/QUALITY
 and README; prune only the eight exact occurrences. Full current CI/replay/size
-and KCS timing are required before an explicit venue slot, fresh separate guard
+and an honest KCS timing receipt are required before an explicit venue slot, fresh separate guard
 and head-matched merge. #1888's engine window takes priority; no venue merge ahead
 of it. Architecture gate: direct shared authority, no venue-specific cross-cutting
 mechanism; no local finalizer, fake credential/HTTP, retry, clock or owner registry.
@@ -124,3 +124,8 @@ The unchanged sixteen controls pass after adoption. KuCoin Spot-on plus Binance
 formatting, bans and both request-context checks (15 checker controls) pass.
 Independent source/adversarial, caller and full-map reviews are CLEAN. Final
 actual #1873/#1888 integration and current CI remain required before a train slot.
+
+Actual #1888 c55a6a760443bf1531eb536bfc504a312cee1356 is genuinely integrated.
+The same sixteen controls pass on that engine; all native source and test blobs
+remain exact. Incoming shared docs precede this appendix once, and only the
+eight selected legacy occurrences are removed. Current full CI remains pending.
