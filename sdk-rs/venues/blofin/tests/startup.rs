@@ -27,7 +27,8 @@ fn retry(e: &mut Engine<Blofin>) -> RequestId {
         })
         .unwrap();
     e.handle(1010., Event::TimerFired { timer });
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, 1010.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
@@ -43,8 +44,8 @@ fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
         ..Options::default()
     }));
     e.start(0.);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
@@ -56,7 +57,7 @@ fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
         &format!(r#"{{"code":"0","data":[{{}},{MARKET},{{"instId":3}}]}}"#),
     );
     assert_eq!(e.store().markets().len(), 1);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, 10.);
     assert!(
         out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("account/margin-mode")))
@@ -96,8 +97,8 @@ fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
 fn catalogue_transport_failure_retries_without_partial_rows() {
     let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options::default()));
     e.start(0.);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
@@ -123,8 +124,8 @@ fn catalogue_transport_failure_retries_without_partial_rows() {
 fn unknown_ticker_source_retains_previous_quotes_retries_and_accepts_valid_neighbors() {
     let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options::default()));
     e.start(0.);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
@@ -135,8 +136,8 @@ fn unknown_ticker_source_retains_previous_quotes_retries_and_accepts_valid_neigh
         request,
         &format!(r#"{{"code":"0","data":[{MARKET}]}}"#),
     );
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 10.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.ends_with("market/tickers") => Some(r.id),
             _ => None,
@@ -173,8 +174,8 @@ fn unknown_ticker_source_retains_previous_quotes_retries_and_accepts_valid_neigh
 fn late_ticker_seed_preserves_live_fields_missing_peers_and_funding_only_updates() {
     let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options::default()));
     e.start(0.);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
@@ -188,7 +189,7 @@ fn late_ticker_seed_preserves_live_fields_missing_peers_and_funding_only_updates
             MARKET.replace("BTC", "ETH")
         ),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 10.);
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -240,8 +241,8 @@ fn empty_successful_catalogue_is_retried_not_committed() {
         ..Options::default()
     }));
     e.start(0.);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
