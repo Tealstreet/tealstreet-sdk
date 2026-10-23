@@ -1001,6 +1001,17 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     expect(dialTunnel(routed, raw, false)).toBe('relay');
   });
 
+  it("a retired attempt's late open or frame never resets the live streak", () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
+    dialTunnel(routed, raw, false);
+    const retired = raw.connect.mock.lastCall![1];
+    for (let attempt = 0; attempt < 5; attempt++) expect(dialTunnel(routed, raw, false)).toBe(tunnelHost);
+    retired.onOpen();
+    retired.onMessage('{"event":"login","code":"0"}');
+    expect(dialTunnel(routed, raw, false)).toBe('relay');
+  });
+
   it('the direct candidate keeps the two-silent-connect rule', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options(), raw);

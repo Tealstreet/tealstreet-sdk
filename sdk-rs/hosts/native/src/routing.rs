@@ -175,6 +175,8 @@ pub(crate) struct RoutingState {
 
 #[derive(Default)]
 struct SocketAttempts {
+    /// Current dial; feedback from a retired attempt must not touch counters.
+    attempt: u64,
     connected: bool,
     opened: bool,
     message: bool,
@@ -190,6 +192,7 @@ pub(crate) struct SelectedSocket {
     pub headers: Vec<(String, String)>,
     pub key: String,
     pub relay: Option<String>,
+    pub attempt: u64,
     /// A `reject_route` connect found no further candidate: do not dial.
     pub exhausted: bool,
 }
@@ -371,6 +374,7 @@ impl RoutingState {
                 };
             }
         }
+        attempts.attempt += 1;
         attempts.connected = true;
         attempts.opened = false;
         attempts.message = false;
@@ -439,24 +443,30 @@ impl RoutingState {
             headers,
             key,
             relay,
+            attempt: attempts.attempt,
             exhausted,
         }
     }
 
-    pub fn opened(&self, key: &str) {
-        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key) {
+    pub fn opened(&self, key: &str, attempt: u64) {
+        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key)
+            && attempts.attempt == attempt
+        {
             attempts.opened = true;
         }
     }
 
-    pub fn binary_message(&self, key: &str) {
-        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key) {
+    pub fn binary_message(&self, key: &str, attempt: u64) {
+        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key)
+            && attempts.attempt == attempt
+        {
             attempts.message = true;
         }
     }
 
-    pub fn message(&self, key: &str, text: &str) {
+    pub fn message(&self, key: &str, attempt: u64, text: &str) {
         if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key)
+            && attempts.attempt == attempt
             && !attempts
                 .ignored_messages
                 .iter()
@@ -1215,10 +1225,10 @@ mod tests {
             context(false, false),
         );
         if opened {
-            state.opened(&selected.key);
+            state.opened(&selected.key, selected.attempt);
         }
         if message {
-            state.message(&selected.key, "venue-frame");
+            state.message(&selected.key, selected.attempt, "venue-frame");
         }
         selected.url
     }
@@ -1264,6 +1274,29 @@ mod tests {
     }
 
     #[test]
+    fn feedback_from_a_retired_attempt_never_touches_the_live_streak() {
+        let (state, url) = tunnelled();
+        let retired = state.socket(
+            url,
+            vec![],
+            Some(safe_cex_engine::SocketChannel::Private),
+            context(false, false),
+        );
+        for _ in 0..5 {
+            dial(&state, url, false, false);
+        }
+        // The sixth attempt is live; a late open/frame from the first is stale.
+        state.opened(&retired.key, retired.attempt);
+        state.message(&retired.key, retired.attempt, "venue-frame");
+        state.binary_message(&retired.key, retired.attempt);
+        assert_eq!(
+            dial(&state, url, false, false),
+            "wss://relay.invalid/private",
+            "six failed connects advance despite stale feedback"
+        );
+    }
+
+    #[test]
     fn one_relay_strike_does_not_exhaust_the_relay() {
         let (state, url) = tunnelled();
         dial(&state, url, true, false);
@@ -1275,7 +1308,7 @@ mod tests {
         );
         assert_eq!(relay.url, "wss://relay.invalid/private");
         // One close before login, then one failed connect: still the relay.
-        state.opened(&relay.key);
+        state.opened(&relay.key, relay.attempt);
         assert_eq!(
             dial(&state, url, false, false),
             "wss://relay.invalid/private"
@@ -1396,7 +1429,7 @@ mod tests {
         let private = Some(safe_cex_engine::SocketChannel::Private);
         let public = Some(safe_cex_engine::SocketChannel::Public);
         let first = state.socket(url, vec![], private.clone(), None);
-        state.message(&first.key, "venue-message");
+        state.message(&first.key, first.attempt, "venue-message");
         assert_eq!(state.socket(url, vec![], private.clone(), None).url, url);
         assert_eq!(state.socket(url, vec![], private.clone(), None).url, url);
         assert_eq!(
@@ -1627,8 +1660,10 @@ mod tests {
                         "{} WS upgrade headers",
                         example.name
                     );
+                    // The TS oracle's attempts all open; only proved frames reset.
+                    state.opened(&actual.key, actual.attempt);
                     if let Some(message) = expected.message {
-                        state.message(&actual.key, &message);
+                        state.message(&actual.key, actual.attempt, &message);
                     }
                 }
             }

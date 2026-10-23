@@ -102,6 +102,17 @@ describe('host fallback recovery policy', () => {
   });
 
   describe('tunnel thresholds', () => {
+    it('ignores events from a retired attempt', () => {
+      const fallback = new WsDirectFallback(2, 0, { silentOpens: 2, failedConnects: 6 });
+      fallback.primaryTunnel = true;
+      fallback.resolveUrl('proxy', 'relay');
+      const retired = fallback.attempt;
+      for (let attempt = 0; attempt < 5; attempt++) expect(fallback.resolveUrl('proxy', 'relay')).toBe('proxy');
+      fallback.onOpen(retired);
+      fallback.onMessage(retired);
+      expect(fallback.resolveUrl('proxy', 'relay')).toBe('relay');
+    });
+
     const PROXY = 'wss://proxy.example';
     const tunnel = () => {
       const f = new WsDirectFallback(2, 0, { silentOpens: 2, failedConnects: 6 });

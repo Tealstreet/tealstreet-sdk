@@ -316,7 +316,7 @@ impl Transport for NetworkTransport {
                         selected.url,
                         selected.headers,
                         selected.relay,
-                        Some(selected.key),
+                        Some((selected.key, selected.attempt)),
                     ),
                     None => (url, direct_headers, None, None),
                 };
@@ -349,7 +349,7 @@ impl Transport for NetworkTransport {
                     return;
                 }
                 if let (Some(state), Some(key)) = (&routing, &key) {
-                    state.opened(key);
+                    state.opened(&key.0, key.1);
                 }
                 let _ = events.send(HostEvent::WsOpened(socket));
                 for message in queued {
@@ -369,16 +369,16 @@ impl Transport for NetworkTransport {
                     tokio::select! {
                         message = ws.next() => match message {
                             Some(Ok(Message::Text(text))) => {
-                                if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
+                                if let (Some(state), Some(key)) = (&routing, &key) { state.message(&key.0, key.1, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
                             }
                             Some(Ok(Message::Binary(bytes))) if binary => {
-                                if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
+                                if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(&key.0, key.1); }
                                 let _ = events.send(HostEvent::WsBinary(socket, bytes.to_vec()));
                             }
                             Some(Ok(Message::Binary(bytes))) => {
                                 let Ok(text) = decode_message(&bytes) else { break 1007 };
-                                if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
+                                if let (Some(state), Some(key)) = (&routing, &key) { state.message(&key.0, key.1, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text));
                             }
                             Some(Ok(Message::Ping(_))) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break 1006; } }

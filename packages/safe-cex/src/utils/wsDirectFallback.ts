@@ -110,14 +110,19 @@ export class WsDirectFallback {
     return true;
   };
 
+  /** The current dial; pass it back so a retired socket's late events are ignored. */
+  get attempt(): number {
+    return this.connects;
+  }
+
   /** Call when this connection opened; only tunnel thresholds read it. */
-  onOpen = (): void => {
-    this.opened = true;
+  onOpen = (attempt = this.connects): void => {
+    if (attempt === this.connects) this.opened = true;
   };
 
   /** Call from the socket's message handler. */
-  onMessage = (): void => {
-    this.messages++;
+  onMessage = (attempt = this.connects): void => {
+    if (attempt === this.connects) this.messages++;
   };
 
   /**

@@ -864,6 +864,7 @@ export const createEngineTransport = (
       } else if (handlers.context?.recover && route.fallback) fallback.preferFallback();
       fallback.primaryTunnel = route.host !== undefined && route.host !== url;
       const target = fallback.resolveUrl(route.host ?? url, route.relay, route.fallback);
+      const attempt = fallback.attempt;
       const connection = requireSocketHeaders(target);
       const upgrade = AxiosHeaders.from(handlers.headers ?? {});
       if (transport.webSocketHeaders) {
@@ -872,15 +873,15 @@ export const createEngineTransport = (
       }
       const headers = upgrade.toJSON() as Record<string, string>;
       const receive = (text: string) => {
-        if (!route.ignoredMessages?.includes(text)) fallback?.onMessage();
+        if (!route.ignoredMessages?.includes(text)) fallback?.onMessage(attempt);
         handlers.onMessage(text);
       };
       const receiveBinary = (data: Uint8Array) => {
-        fallback?.onMessage();
+        fallback?.onMessage(attempt);
         handlers.onBinary?.(data);
       };
       const onOpen = () => {
-        fallback?.onOpen();
+        fallback?.onOpen(attempt);
         handlers.onOpen();
       };
       if (connection?.kind !== 'relay')
