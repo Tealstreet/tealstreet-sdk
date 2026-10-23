@@ -932,11 +932,8 @@ impl<P> Cx<'_, P> {
                 .checked_mul(prepared.reports.len() + 1)
                 .and_then(|n| n.checked_add(2))
                 .ok_or(Error::Capacity)?;
-            self.io
-                .actions
-                .try_reserve(notices)
-                .map_err(|_| Error::Capacity)?;
-            prepared.retired = self.io.prepare_owner_retirement(plan.owner())?;
+            // One reservation covers the notices and the owner's cleanup.
+            prepared.retired = self.io.prepare_owner_retirement(plan.owner(), notices)?;
             for _ in 0..observers {
                 let mut reports = Vec::new();
                 if projection.is_err() {
