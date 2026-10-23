@@ -220,6 +220,10 @@ impl ContextRegistry {
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
                 return Err(Error::Invalid);
             }
+            // A leg never moves to another session, nor takes its egress.
+            if parent.owner() != (Owner::Session { generation }) {
+                return Err(Error::Invalid);
+            }
         }
         if !now.is_finite() || policy.timeout_ms == 0 {
             return Err(Error::Invalid);

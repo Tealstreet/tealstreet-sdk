@@ -246,7 +246,8 @@ and retries inherit it. There is no second Context field.
 - **Regressions** (`session_context_tests.rs`):
   - The original RED now passes.
   - Negative controls:
-    - forged egress and a foreign session
+    - forged egress, a foreign session or engine context, and a session
+      leg or child crossing into another session's egress
     - a stale generation: issuance, leg, queue, prepared send, bound claim
       and retry
     - Background mutation, signed work, and a signed session declaring egress

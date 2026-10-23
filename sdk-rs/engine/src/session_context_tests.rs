@@ -1310,3 +1310,72 @@ fn retirement_fences_claims_and_retries_but_not_streams_or_facts() {
         "the public write-fact path records a sent write after retirement"
     );
 }
+
+#[test]
+fn session_egress_never_crosses_sessions_or_engines() {
+    let mut engine = engine();
+    let first = open_private(&mut engine);
+    let second = open_private(&mut engine);
+    let generation = |session: &Session| match session.owner() {
+        Owner::Session { generation } => generation,
+        _ => unreachable!(),
+    };
+    let login = with(&mut engine, 1., |cx| {
+        cx.session_context(&first, policy(Operation::Mutation))
+    })
+    .unwrap();
+    assert_eq!(
+        engine.io.request_contexts.issue_session(
+            1 << 40,
+            generation(&second),
+            policy(Operation::Mutation),
+            1.,
+            Some(&login),
+        ),
+        Err(Error::Invalid),
+        "a session leg cannot move to another session"
+    );
+    let scoped = with(&mut engine, 1., |cx| {
+        cx.session_scoped_context(&first, Scope::Command(7), policy(Operation::Read))
+    })
+    .unwrap();
+    let other = engine.io.request_contexts.sessions.egress(generation(&second));
+    assert!(other.is_some() && other != scoped.egress());
+    assert_eq!(
+        with(&mut engine, 1., |cx| cx.make_http_context(
+            Scope::Command(7),
+            policy(Operation::Read),
+            Some(&scoped),
+            other
+        )),
+        Err(Error::Invalid),
+        "a child cannot swap its parent's session egress"
+    );
+
+    let mut foreign = self::engine();
+    let theirs = open_private(&mut foreign);
+    let foreign_scoped = with(&mut foreign, 1., |cx| {
+        cx.session_scoped_context(&theirs, Scope::Command(7), policy(Operation::Read))
+    })
+    .unwrap();
+    assert_eq!(
+        with(&mut engine, 1., |cx| cx
+            .http_leg_context(&foreign_scoped, policy(Operation::Read))),
+        Err(Error::Revoked),
+        "another engine's egress-bearing context is not ours"
+    );
+
+    // Retiring one session fences only its own egress.
+    with(&mut engine, 2., |cx| cx.retire_session(&first)).unwrap();
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx
+            .http_leg_context(&scoped, policy(Operation::Read))),
+        Err(Error::Revoked)
+    );
+    assert!(with(&mut engine, 2., |cx| cx.session_scoped_context(
+        &second,
+        Scope::Command(8),
+        policy(Operation::Read)
+    ))
+    .is_ok());
+}

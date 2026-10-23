@@ -5099,3 +5099,30 @@ Hyperliquid's existing earlier cache-hit and identity/client-ID shortcuts remain
 Live Store/cache access stays separate from history. No REST capability, result
 wrapper, managed-request migration or NX runtime adoption is added.
 [Scope and controls](RUST_OWNED_HISTORY.md).
+
+### Session-scoped private egress (#1897)
+
+Unsigned requests that carry a login or session token now take the primary
+account egress. Examples are the GRVT API-key login, the BreakoutProp login and
+the KuCoin keyless bullet. They never take the public/CORS route. Host callers
+see a `Prepare` with intent `primary` and no explicit route, as for a primary
+signed request.
+
+This needs no host or tealstreet-next change. A host without a primary egress
+fails preparation typed; it never falls back to public.
+
+**Why `SessionEgress` carries no explicit subject (owner ruling, 2026-10-23).**
+- **Grant.** The engine mints the egress only from a live session. The grant
+  is an opaque `PrivateEgress`, which only a primary `SessionAuth` credential
+  selection yields.
+- **Session.** A session leg cannot move to another session (`issue_session`),
+  and a child cannot swap its parent's egress (`issue_with_egress`).
+- **Engine.** Another engine's session handle or egress-bearing context fails
+  issuer validation.
+- **Slot.** It is Primary only, so a slot cannot be swapped.
+- **Retirement.** `validate_send` refuses a retired generation at issuance and
+  at every send step.
+
+Together these controls make the session generation the subject. Delivery,
+streams and write facts of attempts sent before retirement remain recordable.
+[Design and controls](RUST_BACKGROUND_SESSION.md).
