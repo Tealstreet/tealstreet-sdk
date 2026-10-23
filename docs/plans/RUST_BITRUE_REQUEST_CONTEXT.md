@@ -167,3 +167,26 @@ None, and partial accepted IDs must remain structured journal evidence rather th
 text only (spec rows 8, 22 and 21). Preserve eligible native retries only within
 reviewed shared refusal/resend rules. Add RED then GREEN proofs with the owner’s
 reviewed API pin; do not encode these corrections in a venue status ladder.
+
+## WS-only lifetime prerequisite found before source adoption
+
+The pre-source adversarial review found a required shared-core proof beyond entry
+issuance: a WS-only Read Context has no managed HTTP attempt, pending count or
+delivery hold. At reviewed #1830 `2d8de248f64de168847b5cb7219713c34512b880`, later
+Context issuance can prune such an expired owner before its delayed native timer
+arrives. Retaining the Context in the FIFO alone then cannot authorize the original
+terminal failure. The shared owner must preserve or settle this original authority.
+
+Native controls interpose both a distinct command and a repeated numeric ID between
+the first request's 5000ms deadline and timer delivery. Production adoption waits
+the overseer's announced composed pin and reviewed shared retention/retirement
+proof; do not fabricate HTTP, a venue authority registry, or numeric fallback.
+
+Shared classifier #1837 is also a prerequisite for removing P2 engine-formatted
+text parsing in lib.rs/account.rs during this lane’s later write adoption. Re-verify those source sites and spec rows 8/22/21
+against the actual landing before the later write adoption; a local WS Context
+conversion does not close them or authorize a new venue status ladder.
+
+The shared owner confirmed the WS-only pruning gap and holds async WS adoption.
+Classifier #1837 is not frozen; consume only the owner’s eventual reviewed pin,
+including its expected-count/intent leg facts and Accepted-only write result seam.
