@@ -53,7 +53,9 @@ The per-call 20-second default already exists. The explicit whole-query root is
 new: native legacy history previously had no whole-query deadline. The BloFin
 consumer's CALLERS entry must describe that new root-expiry boundary alongside
 strict closed preparation refusal. Before consumer readiness, inventory the
-actual NX/Agent outer wait bounds and abandonment path with their owners. State
+actual NX/Agent outer wait bounds and abandonment path with their owners. The
+owner-supplied source inventory is recorded below; consumer execution remains
+a readiness gate. State
 whether callers stop waiting sooner and what they observe; distinguish a local
 wait timeout from an engine observer detach or command cancellation. Do not
 claim either cancels engine work without an executed control. This consumer
@@ -309,8 +311,8 @@ history_plan_bridge --jobs 2`: one GREEN control and two assertion REDs. The
 target is gated by both http-plans and test-support; a feature-off run executing
 zero tests is not this receipt. Marker detection uses HISTORY_INCOMPLETE plus
 command-field membership so additional diagnostic fields cannot hide a stale
-marker. Runtime signatures, consumer outer-wait evidence and adoption remain
-open gates.
+marker. Runtime signatures, executed consumer-boundary controls and adoption
+remain open gates.
 
 After marker-predicate hardening, the same all-features target was rerun:
 one control passed, the accepted-prefix assertion still observed no CommandDone,
@@ -333,10 +335,10 @@ at :2034-2114 supply no per-command override. Its worker proxy wait is the
 configured command timeout plus 1,000 ms for these single-command history
 methods (:998); base.ts:1783 removes the reply listener on that outer timeout.
 These are source facts about the SDK wrapper on this checkpoint, not a claim
-that every NX/Agent caller uses its defaults. Their additional wrappers,
-configured overrides and abandonment behavior still require consumer-owner
-confirmation and the consumer CALLERS entry. None of this work changes those
-waits or makes local promise expiry cancel an engine-owned Plan.
+that NX currently uses Rust or these defaults. The owner-supplied NX inventory
+below is a separate snapshot; the consumer CALLERS entry must preserve that
+distinction. None of this work changes those waits or makes local promise
+expiry cancel an engine-owned Plan.
 
 The BloFin consumer CALLERS entry must state the default consequence explicitly:
 a slow paged history query can reject its caller after 120 seconds while its
@@ -345,3 +347,41 @@ engine Plan continues to completion or root expiry. The worker proxy has a
 resolve the already-rejected caller promise. The consumer must retain this
 boundary or document and test any deliberate override; the proposed engine
 root alone does not change it.
+
+## NX/Agent inventory and required consumer CALLERS text
+
+claude-6mg5na supplied a read-only caller inventory at NX origin/master
+`abd35931b4`, confirmed by claude-ddi2il. This is owner-provided source evidence,
+not an executed NX Rust-history consumer receipt. On that snapshot NX has no
+safe-cex-wasm host import under apps or packages: createExchangeFromAccount.ts:164
+constructs the TS safe-cex instance on the main thread. The host's 120-second
+default therefore does not apply to NX today.
+
+| Caller on that NX snapshot | Wait and late-settlement behavior |
+| --- | --- |
+| Agent reads | executeReadCalls.ts:31/33-46/128 races 10 seconds. Expiry returns a failed tool result and drops the late result. Abort is checked between calls; it does not cancel an SDK command. Only getCandles reaches the venue; getHistoricalPosition reads an atom, and no fill/order-history read is an Agent tool. |
+| Historical ingestion | collectAccountAxes.ts:118 awaits without an outer timeout; tradeHistoryController.ts:60-77 serializes runPaced per exchange with a two-second floor. HistoricalIngestionWorker.tsx:146-181 awaits the pass until finally releases its latch, and :213-216 deliberately lets it outlive its effect. Settlement posts rows/completes the window after a session-user check; rejection leaves the window failed for re-walk, never partial success. |
+| Chart candles | DefaultDatafeed.ts:195-211 races only its feed AbortController; the 20-second live-bar watchdog is not a getBars deadline. Retired feeds suppress late UI callbacks, but underlying fetches can still populate candleCache. |
+| Worker proxy | NX's TS base.ts:1487-1499 uses a five-second wait when worker forwarding is selected. Expiry removes the reply listener and does not message the worker to stop; late replies do not run afterMethodCalledInWorker. This TS-snapshot policy is distinct from the mirror RustExchange override of 121 seconds with defaults. |
+| DOM volume profile | Dom.tsx:237-248 has an unbounded fetchOHLCV promise. Late results still update volume-profile state; rejection is unhandled there. Do not describe all late caller work as ignored. |
+
+The activating BloFin consumer's CALLERS entry must say: NX at this inspected
+snapshot is still on the TS path. Once a Rust history binding is enabled with
+the SDK defaults, historical ingestion has no shorter outer wait and can wait
+until the host rejects after 120 seconds. That rejects the window for re-walk;
+it does not turn an accepted engine prefix into caller-visible partial success.
+The timed-out promise cannot later resolve, while the engine Plan may continue
+to its own completion or new 2,000,000-ms root expiry. The per-exchange runPaced
+chain remains occupied until that awaited SDK promise settles, up to the host
+wait on that path. Releasing the chain does not prove the old engine Plan has
+stopped. A future walk must still enter through normal engine admission.
+
+NX's local promise races and reply-listener removal do not invoke engine
+observer detach or SDK cancellation. Keep them distinct from the reviewed
+engine detach operation. If a consumer overrides the host wait, changes worker
+routing or adds real cancellation, document and execute that changed boundary
+instead of importing the TS five-second or Rust 121-second proxy wait by name.
+Require an executed ingestion control for timeout -> failed/re-walk and late
+settlement without a second completion, alongside the final-slot physical
+failure versus root-expiry control. This engine plan changes neither NX callers
+nor host wait policy; no production CALLERS activation is claimed here.
