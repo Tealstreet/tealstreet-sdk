@@ -284,3 +284,20 @@ all-feature Clippy and Binance all-target check PASS. Both request-context check
 PASS (15 checker tests), touched rustfmt and diff checks PASS. Source/adversarial
 and full-map reviews CLEAR; caller review and final incoming integration receipts
 are tracked in the PR body. CI, rather than local builds, owns WASM/replay/size.
+
+
+Actual #1968 `87bf458ba903` was plain-merged in `a0a2f438b56`. The fresh
+integrated BingX run again passes235/0 with the same two held metadata ignores;
+strict all-target/all-feature Clippy passes. All three independent reviews are
+CLEAR on unchanged consumer source. Helper owner uufub4 separately cleared
+source/API/hunk fit at `a0a2` and independently executed an immutable archive:
+identity6PASS, managed_reads13PASS+2preexisting metadataignored, original
+request_context_identity14PASS/0ignored. No shared helper cleanup is authorized.
+
+The OKX train advanced the shared incoming inventory during checking. Actual
+#1773 `96d1f05b6b0` and #1938/#1942 through `0418d0a4599` were genuinely
+plain-merged in `4dd8b748772` and `5cd46904877`. Only shared docs conflicted,
+resolved incoming-first plus own row/tail once. All BingX source/tests remain
+byte-exact to `d78c6ca87b4`; all incoming tooling/maps are preserved. Both
+refreshed request-context checks (15 tests) and banned-pattern gate PASS on the
+integrated head. These are local/native receipts; CI status belongs to the PR.
