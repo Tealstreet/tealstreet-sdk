@@ -181,9 +181,10 @@ Consequences for this plan:
 - Before P8 admits keyless hosted signing for either family, NX must stop
   sending their signing material, for example by moving it out of `key` or
   excluding it from `INIT_FIELDS`.
-- **SDK guard.** Hosted (`hostedMode` / `remoteSigner`) Rust construction for
-  Paradex and Polymarket is refused when `key` parses as private-key
-  material. The engine would otherwise hold a key it is meant never to see.
+- **SDK guard (conditional; not implemented).** This waits on Sam's pending
+  decision: stop now, or keep until the hosted-leases hardening. If adopted,
+  hosted (`hostedMode` / `remoteSigner`) Rust construction for Paradex and
+  Polymarket is refused when `key` parses as private-key material. The engine would otherwise hold a key it is meant never to see.
   The refusal is typed (`invalidInput` / `notSent`) and never echoes the key.
 
 ### Proof
