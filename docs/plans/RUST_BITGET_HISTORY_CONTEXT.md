@@ -289,3 +289,17 @@ terminal rules are as planned.
   `notSent`, and every timer it arms is cleared. All Bitget tests and strict
   all-target Clippy pass.
 
+Independent adversarial review of `627b15ba348` found no High or Medium
+issues. Its three Lows are addressed:
+
+- A comment records that a `Revoked` root admission can only mean an
+  expired wait, because nothing allocates ids before admission.
+- New test `an_expired_root_leaves_an_unrelated_live_query_running`: an
+  expired query's parked retry is dropped, and an unrelated live walk
+  completes.
+- **Behaviour change.** A malformed read-key credential reference (empty,
+  or longer than 256 bytes) is now refused at root admission. That is a
+  typed Invalid error with no outcome, raised before the native refusals.
+  Previously it failed `notSent` at signing. Valid configurations are
+  unaffected.
+

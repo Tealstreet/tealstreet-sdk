@@ -269,6 +269,60 @@ fn unstamped_receipt_fails_closed_without_a_default_root() {
     assert_eq!(error.outcome, None, "{error:?}");
 }
 
+#[test]
+fn an_expired_root_leaves_an_unrelated_live_query_running() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    let start = h.now;
+    let query = |command| Command::Query {
+        command,
+        query: fills(),
+    };
+    h.engine
+        .handle_command(h.now, query(42), Some(2_000))
+        .unwrap();
+    h.collect();
+    h.engine
+        .handle_command(h.now, query(43), Some(60_000))
+        .unwrap();
+    h.collect();
+    let short = h.take("/order/fills");
+    let long = h.take("/order/fills");
+    h.reply(long.id, 200, &page("c1", "1"));
+    fire_new(&mut h, &before, start + 1_900.0);
+    let long_next = h.take("/order/fills");
+    // The short query's page fails and parks its first native retry past its wait.
+    h.reply(short.id, 500, "{}");
+    fire_new(&mut h, &before, start + 2_100.0);
+    h.reply(long_next.id, 200, &page("", "2"));
+    fire_new(&mut h, &before, start + 2_400.0);
+    let of = |command| {
+        let mut failures = h.failures.iter();
+        h.done
+            .iter()
+            .filter_map(|(c, result)| {
+                let terminal = match result {
+                    Ok(data) => Ok(data.clone()),
+                    Err(_) => Err(failures.next().unwrap().clone()),
+                };
+                (*c == command).then_some(terminal)
+            })
+            .collect::<Vec<_>>()
+    };
+    let short = of(42);
+    assert_eq!(short.len(), 1, "{short:?}");
+    assert!(short[0].as_ref().is_err_and(timeout), "{short:?}");
+    let long = of(43);
+    assert_eq!(long.len(), 1, "{long:?}");
+    let rows: Value = serde_json::from_str(long[0].as_ref().unwrap()).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    assert_eq!(
+        fills_requests(&h),
+        0,
+        "the expired query's parked retry still sent"
+    );
+}
+
 // ---- Compatibility controls ----
 
 #[test]

@@ -246,6 +246,8 @@ impl BitgetFutures {
             Ok(root) => root,
             // An unstamped receipt or admission refusal already published its failure.
             Err(CommandEntryError::Rejected(_)) => return,
+            // Nothing here touches ids before admission, so the genuine entry is
+            // still Fresh and Revoked can only mean an expired wait.
             Err(CommandEntryError::Revoked) => {
                 if cx.command_wait() == Some(CommandWait::Expired) {
                     let _ = cx.reject_expired_command(Operation::Read);
