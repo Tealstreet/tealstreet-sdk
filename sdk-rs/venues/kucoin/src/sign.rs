@@ -19,11 +19,15 @@ pub struct Credentials {
     pub broker: Option<BrokerOptions>,
 }
 
+pub(crate) const PUBLIC_HEADERS: &[(&str, &str)] = &[
+    ("X-CHANNEL-API-CODE", "3zexp"),
+    ("Content-Type", "application/json"),
+];
 pub(crate) fn public_headers() -> Vec<(&'static str, String)> {
-    vec![
-        ("X-CHANNEL-API-CODE", "3zexp".into()),
-        ("Content-Type", "application/json".into()),
-    ]
+    PUBLIC_HEADERS
+        .iter()
+        .map(|(name, value)| (*name, (*value).into()))
+        .collect()
 }
 
 pub(crate) fn public_request_headers(

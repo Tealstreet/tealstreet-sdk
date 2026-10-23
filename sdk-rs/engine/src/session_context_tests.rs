@@ -19,6 +19,7 @@ struct Probe {
     fact: Fact,
     fact_on_failure: Fact,
     command_fact: Fact,
+    classified: bool,
     finish_first: bool,
     retire_in_response: Option<Session>,
     facts: Vec<Result<(), Error>>,
@@ -34,6 +35,7 @@ impl Default for Probe {
             fact: Fact::None,
             fact_on_failure: Fact::None,
             command_fact: Fact::None,
+            classified: false,
             finish_first: false,
             retire_in_response: None,
             facts: vec![],
@@ -93,7 +95,16 @@ impl Venue for Probe {
         if session && self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
-        if pending.0.operation() == Operation::Mutation
+        if pending.0.operation() == Operation::Mutation && session && self.classified {
+            self.facts.push(
+                cx.http_write_fact(
+                    &pending.0,
+                    crate::classify::WriteFact::Accepted { order_ids: vec![] },
+                    None,
+                )
+                .map(drop),
+            );
+        } else if pending.0.operation() == Operation::Mutation
             && session
             && let Some(fact) = fact(self.fact)
         {
@@ -101,9 +112,20 @@ impl Venue for Probe {
         }
         if matches!(pending.0.owner(), Owner::Command { .. })
             && pending.0.operation() == Operation::Mutation
-            && let Some(fact) = fact(self.command_fact)
         {
-            self.facts.push(cx.http_write_result(&pending.0, fact));
+            // A resendable native refusal goes through the classifier, which
+            // alone grants the one resend a parked owner may later send.
+            if self.command_fact == Fact::Rejected {
+                let native = crate::classify::Native {
+                    code: crate::classify::NativeCode::Int(-1021),
+                    message: "timestamp outside recvWindow",
+                };
+                let failed =
+                    cx.http_write_failure(&pending.0, &RESEND, Some(&native), "refused", None);
+                self.facts.push(failed.map(drop));
+            } else if let Some(fact) = fact(self.command_fact) {
+                self.facts.push(cx.http_write_result(&pending.0, fact));
+            }
         }
         if session && !self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
@@ -126,6 +148,17 @@ impl Venue for Probe {
         Box::new(std::iter::empty())
     }
 }
+
+const RESEND: crate::classify::CodeTable = crate::classify::CodeTable {
+    rows: &[crate::classify::Row {
+        key: crate::classify::Key::Int(-1021),
+        verdict: crate::classify::Verdict::RefusedResend(crate::ErrorKind::AuthInvalid),
+        only: None,
+    }],
+    success: &[],
+    unlisted: crate::classify::Verdict::Unknown(None),
+    status: &[],
+};
 
 fn fact(fact: Fact) -> Option<WriteResult> {
     match fact {
@@ -1032,6 +1065,8 @@ fn a_write_with_an_unproven_release_cannot_park_for_a_resend() {
         let mut engine = engine();
         engine.venue.command_fact = fact;
         let session = open(&mut engine, false);
+        // Issued as during command dispatch, so the classifier knows its intent.
+        engine.io.request_contexts.dispatch = Some((7, crate::classify::Intent::Place));
         let write = with(&mut engine, 1., |cx| {
             cx.http_context(
                 Scope::Command(7),
@@ -1042,6 +1077,7 @@ fn a_write_with_an_unproven_release_cannot_park_for_a_resend() {
             )
         })
         .unwrap();
+        engine.io.request_contexts.dispatch = None;
         let token = queue(&mut engine, &write, 1.);
         let request = release(&mut engine, token, 2.);
         if lost {
@@ -1118,4 +1154,20 @@ fn command_entry_cannot_reclaim_a_command_with_a_parked_waiter() {
     })
     .unwrap();
     assert!(engine.io.request_contexts.prepare_command_entry(7, late));
+}
+
+#[test]
+fn a_session_write_accepted_through_the_classifier_resolves_without_order_ids() {
+    let mut engine = engine();
+    engine.venue.classified = true;
+    let session = open(&mut engine, false);
+    let token = session_write(&mut engine, &session, 1.);
+    let request = release(&mut engine, token, 2.);
+    respond(&mut engine, request, 3., "{\"listenKey\":\"k\"}");
+    assert_eq!(engine.venue.facts, [Ok(())]);
+    assert!(
+        with(&mut engine, 4., |cx| cx
+            .session_context(&session, policy(Operation::Mutation)))
+        .is_ok()
+    );
 }

@@ -661,6 +661,25 @@ pub enum Command {
 }
 
 impl Command {
+    /// The logical intent a write under this command serves. Venue actions
+    /// classify conservatively as placements.
+    pub(crate) fn write_intent(&self) -> crate::classify::Intent {
+        use crate::classify::Intent;
+        match self {
+            Self::PlaceOrders { .. } => Intent::Place,
+            Self::CancelOrders { .. }
+            | Self::CancelOrdersWithSymbols { .. }
+            | Self::CancelSymbolOrders { .. } => Intent::Cancel,
+            Self::AmendOrder { .. } | Self::AmendOrderWithSymbol { .. } => Intent::Amend,
+            Self::SetLeverage { .. }
+            | Self::SetMarginType { .. }
+            | Self::SetPositionMode { .. }
+            | Self::SetStpMode { .. } => Intent::Setting,
+            Self::Venue { .. } => Intent::Place,
+            _ => Intent::Read,
+        }
+    }
+
     pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
@@ -1410,6 +1429,8 @@ struct Io<P> {
     // Typed cause of the HttpFailed being delivered: Network from the host,
     // Timeout when the engine expires a released request at its deadline.
     http_failure_kind: ErrorKind,
+    // Status and headers of the managed write reply being delivered.
+    http_write_reply: Option<(u16, String)>,
     command_entry: Option<command_entry::Entry>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
@@ -1463,6 +1484,7 @@ impl<P> Default for Io<P> {
             request_contexts: Default::default(),
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
+            http_write_reply: None,
             command_entry: None,
             http_responses: Default::default(),
             http_write_revision: 0,
@@ -3229,7 +3251,9 @@ impl<V: Venue> Engine<V> {
             }
             Event::Command(Command::Venue { command, action }) => {
                 cx.io.begin_command_entry(Some(command));
+                cx.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
             Event::Command(Command::FetchAccount { command })
@@ -3309,7 +3333,13 @@ impl<V: Venue> Engine<V> {
                     }
                 }
                 cx.io.begin_command_entry(command.completion_id());
+                // The classifier takes intent from the command, never the venue
+                // (an amend's cancel leg is still an amend).
+                cx.io.request_contexts.dispatch = command
+                    .completion_id()
+                    .map(|id| (id, command.write_intent()));
                 self.venue.on_command(&mut cx, command);
+                cx.io.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
         }

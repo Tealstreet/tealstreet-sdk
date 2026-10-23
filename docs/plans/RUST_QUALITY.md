@@ -542,3 +542,48 @@ across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
 and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
 are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
 required; no all-venue reporter-completion claim.
+
+## BloFin public managed-read boundary
+
+Unsigned BloFin discovery/candles adopt engine-owned preparation, release,
+deadline and Context completion. Typed setup errors survive the venue callback;
+public preflight validates market before interval and reports explicit user-error
+kinds. Background retirement covers successful, malformed, missing-list, native,
+transport and preparation-failure terminals. Native row mapping, discovery retry
+policy and private behavior remain independent. Shared test transport helpers
+execute preparation/claim at fixture event time; raw-action regressions retain
+the unreleased-response and parked-preparation boundaries. One pre-Context
+numeric refusal awaits the shared command-entry seam; no new legacy fingerprint
+or checker exemption is introduced.
+
+## Bitrue FIFO read lifecycle regressions
+
+Native controls reject late and exact-deadline trade/candle success, prevent an
+expired FIFO head from dispatching queued work, and preserve delayed timeout
+completion across unrelated admissions and duplicate numeric IDs. They retain
+live-peer socket-wide failure, explicit/empty correlation compatibility, capacity,
+malformed/rejected-head continuation and command-ID reuse. Repeated native
+preflight refusal at one clock proves bounded entry ownership is released without
+opaque I/O or loss of the original diagnostic. The original three assertion RED
+controls precede the production move in a separate test commit.
+
+## MEXC candle Context regression controls
+
+The candle lifecycle regression suite exercises public preparation/binding/final
+claim, original-budget expiry before and after release, typed route and transport
+failures, late/duplicate callbacks and numeric owner reuse. Native controls retain
+query bounds, tail/zero/no-limit results, atomic malformed-column rejection,
+HTTP/native envelope errors, and live versus stale HTTP429 depth/account pauses.
+The original 1000-row no-limit fixture retains its payload/result assertions and
+uses only the shared prepared-actions executor for this command.
+
+## KuCoin Spot discovery lifecycle regressions
+
+Managed discovery regressions cover keyed/keyless unsigned header preparation,
+unreleased identity rejection, original deadline expiry, ticker-only recovery,
+unchanged native envelopes and duplicate suppression. A fixed-clock capacity probe
+drives 270 terminal attempts separately through each of six response/failure routes,
+so 20-second expiry cannot conceal missing retirement. Native startup/valuation,
+broker, secondary identity and socket-policy assertions retain their original
+payloads, using the shared prepared transport fixture. The real WASM boundary
+fixture explicitly supplies that same existing test transport preparation contract.
