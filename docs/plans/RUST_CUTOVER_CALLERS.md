@@ -5827,3 +5827,44 @@ state, so freshness-aware late publication remains explicit follow-up debt.
 The inventory shrinks exactly 51 ->46 occurrences (42 -> 38 entries), with
 trading.rs 5 ->0: two numeric completions plus three conservative macro matches.
 No other venue inventory, shared checker, allowance or signer source changes.
+
+
+## Bitunix public REST Read authority
+
+Markets, tickers and FetchCandles use shared managed unsigned HTTP with a20s
+lifecycle bound covering preparation and queue time. Public route and exact
+production/testnet headers are preserved; WebSocket behavior stays legacy.
+Unclaimed, stale or expired replies publish no rows or successful completion;
+engine expiry may emit the original command's one typed Timeout failure.
+Candles retain their native interval/query/limit precedence, seconds timestamps,
+quote volume, permissive successful code coercions and row order without local
+truncation. Admission, preparation and timeout failures are typed; unsent work
+can carry NotSent. Shared read classification owns failed-response kinds/retry.
+Discovery keeps native rate floors (429 Retry-After15s versus business10005/6
+60s); auth/refused failures log a diagnostic, leave the seed unready and schedule
+no retry. Recovery requires fresh caller-owned initialization. Public auth
+failure spends no private auth budget after actual1923. No private P0#33 closure,
+signer readiness or managed socket claim. Exact inventory18->10; only8own sites.
+
+### WEEX synchronous local history Read terminals
+
+WEEX Futures keyless Fills, OrderHistory and Income retain exact `[]` before
+private input validation. Client-order lookup remains unsupported. Invalid
+family bounds and income/list budgets retain the existing messages, ordering
+and unclassified Read errors. These seven local terminals now require genuine
+engine command Read admission: shared capacity and invalid clock policy emit
+one correlated typed refusal without a financial outcome. Admitted terminals
+create no HTTP, signer, timer, Store mutation or history marker. Remote history,
+its credential selection and paging retain their existing paths and wire bytes.
+
+### WEEX FetchAccount initial Read authority
+
+WEEX account identity validation now requires genuine engine Read admission for
+both its local refusals and its signed accountConfig GET. Shared capacity or an
+invalid request clock produces one typed correlated Read failure without the
+old numeric CommandError fallback or a financial outcome. Admitted native
+refusals keep their validation order, exact messages, metadata and checked
+CommandError-before-CommandFailed delivery, including the existing missing
+stableId Unsupported/NotSent result. Valid reads keep the selected primary or
+secondary GET signer and exact native wire; the returned userId remains the
+trusted primary stableId. Account state, polling and reconciliation stay intact.
