@@ -17,6 +17,8 @@ def modes():
          "import('./hosts/wasm/js/venues.mjs').then(({venueFamilies}) => console.log(JSON.stringify(venueFamilies)))"],
         cwd=ROOT, text=True,
     ))
+    if not families:
+        raise RuntimeError('expected at least one venue family')
     closures = {}
     grouped = {(): ['engine baseline'], ('order-locks', 'test-support'): ['explicit CI control']}
     for family in families:
@@ -35,6 +37,8 @@ def modes():
         features = resolved.pop()
         closures[family] = features
         grouped.setdefault(features, []).append(family)
+    if not any('http-plans' in flags for flags in closures.values()):
+        raise RuntimeError('expected at least one Plan-enabled family closure')
     return closures, grouped
 
 
