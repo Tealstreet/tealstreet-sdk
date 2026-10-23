@@ -1,5 +1,7 @@
 //! Original native signer controls and provider-custody REDs, before production.
-#[path = "../src/sign.rs"]
+mod support;
+use support::Options;
+#[path = "support/native_sign.rs"]
 mod native_sign;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
@@ -12,7 +14,7 @@ use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice,
     Outcome, Query, ReadCredentials, Response, SocketChannel, SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_phemex::{Options, Pending, PhemexPerpetuals};
+use safe_cex_venue_phemex::{Pending, PhemexPerpetuals};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -162,7 +164,7 @@ fn observed_engine(
 ) -> (Engine<Probe>, ReleaseLog) {
     let releases = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
-        venue: PhemexPerpetuals::new(options),
+        venue: options.build().0,
         protocol,
         releases: releases.clone(),
     });
@@ -548,7 +550,16 @@ fn refused_provider_controls_native_read_before_any_http() {
 #[test]
 fn missing_provider_cannot_fall_back_to_venue_held_material() {
     let mut e = engine(primary(false), None, None);
-    let output = ask(&mut e, NOW);
+    let mut output = ask(&mut e, NOW);
+    let (attempt, _) = stage(&output);
+    e.handle(
+        NOW,
+        Event::Signed {
+            attempt,
+            result: Err(SignError::Unavailable),
+        },
+    );
+    output.extend(actions(&mut e, NOW));
     assert!(
         !output.iter().any(|a| matches!(a, Action::Http(_))),
         "missing provider must not use a retained local secret"
@@ -882,6 +893,7 @@ fn calibrated_write_release(offset: f64) {
         raw_expiry > NOW + 1000. + 20_000.,
         "signature replayability is not capped at HTTP lifecycle"
     );
+    parked.paused.store(false, Ordering::SeqCst);
     let out = reply(&mut e, NOW + 4001., &request, r#"{"code":0,"data":{}}"#);
     let repair = repair_at(&out, raw_expiry + 5000.);
     assert!(
@@ -1115,4 +1127,104 @@ fn release_write_refused_first_leg_has_no_release_and_preserves_typed_not_sent()
             .any(|o| o.client_order_id.as_deref() == Some("refused-first"))
     );
     assert!(log.lock().unwrap().is_empty());
+}
+
+struct CorruptResult {
+    inner: Provider,
+    variant: usize,
+    ws: bool,
+}
+impl Signer for CorruptResult {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign(&self, work: SignRequest) -> SignFuture {
+        self.inner.sign(work)
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        let result = self.inner.sign_ready(work)?;
+        Some(result.map(|mut result| {
+            if (work.context.method == "WS") == self.ws {
+                match self.variant {
+                    0 => {
+                        result.values.pop();
+                    }
+                    1 => {
+                        result.values[0] = vec![0xff];
+                    }
+                    2 => {
+                        result.values[0] = b"invalid\r\nheader".to_vec();
+                    }
+                    3 => {
+                        result.values[1].pop();
+                    }
+                    4 => {
+                        result.receipt.expiry_ms = Some(1.);
+                    }
+                    5 => {
+                        result.values[0] = vec![b'k'; 8193];
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            result
+        }))
+    }
+    fn can_sign(
+        &self,
+        key: &safe_cex_engine::signing::KeyRef,
+        algorithm: safe_cex_engine::signing::Algorithm,
+    ) -> Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+}
+#[test]
+fn malformed_present_mac_or_receipt_never_releases_http() {
+    for variant in 0..6 {
+        let provider = Arc::new(CorruptResult {
+            inner: local().0,
+            variant,
+            ws: false,
+        });
+        let mut e = engine(primary(false), Some(provider), None);
+        let output = ask(&mut e, NOW);
+        assert!(
+            !output.iter().any(|a| matches!(a, Action::Http(_))),
+            "variant {variant}"
+        );
+        assert_eq!(
+            output
+                .iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 700, .. })
+                ))
+                .count(),
+            1
+        );
+    }
+}
+#[test]
+fn malformed_present_mac_or_receipt_never_releases_private_auth_or_ping() {
+    for variant in 0..6 {
+        let provider = Arc::new(CorruptResult {
+            inner: local().0,
+            variant,
+            ws: true,
+        });
+        let (mut e, socket) = bootstrap(false, Some(provider));
+        e.handle(NOW, Event::WsOpened { socket });
+        let output = actions(&mut e, NOW);
+        assert!(
+            !output
+                .iter()
+                .any(|a| matches!(a, Action::WsSend{socket:s,..} if *s==socket)),
+            "variant {variant}"
+        );
+        assert!(
+            output
+                .iter()
+                .any(|a| matches!(a, Action::WsClose{socket:s} if *s==socket))
+        );
+    }
 }

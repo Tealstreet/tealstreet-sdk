@@ -1345,3 +1345,13 @@ venue admission or numeric fallback. Exact managed delivery is checked before
 native response decoding/publication. Local config precedence and 20s/Never
 remain native; typed transport/refusal errors keep checked diagnostic ordering.
 Only identity.rs loses two legacy terminal occurrences; other inventory is intact.
+
+### Phemex full signer cutover evidence
+
+Original signer test checkpoint17b9ee461cb had6GREEN/16assertionRED/0ignored.
+All22 are now GREEN with the same assertions, plus2 malformed-provider controls
+and the trusted-setup security control. Native256 and extended signer24/security2,
+registry3 and SDK constructor5 pass; strict Phemex Clippy passes. The exact
+combined staging map is17F/18O ->16F/16O, with one temporary sign_http; trading
+stays4F/4O via its approved release-metadata re-expression. No checker predicate
+or negative assertion is weakened. Actual #1970/#1974 and final CI remain gates.

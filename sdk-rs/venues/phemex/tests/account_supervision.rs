@@ -1,8 +1,10 @@
 //! Private aop_p socket liveness, snapshot deadline and reconnect backoff.
+mod support;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketChannel, SocketId};
 use safe_cex_engine::{RequestId, TimerId};
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
 use std::collections::HashMap;
+use support::Options;
 
 const NOW: f64 = 1_700_000_000_000.;
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1000","maxLeverage":"100"}]}}"#;
@@ -29,11 +31,11 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let mut h = Self {
-            e: safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+            e: support::engine(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 ..Options::default()
-            })),
+            }),
             now: NOW,
             timers: HashMap::new(),
             http: vec![],

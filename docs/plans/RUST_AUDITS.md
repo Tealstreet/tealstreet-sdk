@@ -2735,3 +2735,12 @@ and admission-error fallback. Its two identity terminal fingerprints are removed
 family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
 typed Network/Timeout assertions pass alongside native wire/config/codec controls.
 The generic managed helper and all other family callers remain with their owners.
+
+### Phemex dispatch-signing custody candidate
+
+Full native funnel and WS auth now use opaque provider recipes, removing14
+legacy lib credential/material fingerprints. Typed signer refusal preserves
+accepted-prefix IDs and native rollback revisions; actual-release raw expiry
+is accumulated as a maximum before the native5s reconciliation skew. Production
+wire/financial controls pass. Independent source/caller reviews are CLEAR;
+full-map/HMAC review, final CI and the combined #1970/#1974 landing remain gates.

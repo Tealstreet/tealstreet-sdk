@@ -43,14 +43,17 @@ struct Job {
     placing: Vec<String>,
     /// A step took effect, so a later rejection cannot mean nothing happened.
     effective: bool,
+    revision: u64,
+    signed_until: Option<f64>,
 }
 pub struct Request {
     /// `None` for a venue-originated cancel of an order that landed after cancel-all.
     command: Option<CommandId>,
     call: Call,
     revision: u64,
-    /// Phemex refuses this write once its signed expiry passes (ms, client clock).
-    signed_until: f64,
+    /// Uncapped raw expiry observed only after an actual signing release.
+    signed_until: Option<f64>,
+    released_request: Option<safe_cex_engine::RequestId>,
 }
 /// How a failed write ended, which decides when its open orders are read.
 pub(crate) enum Outcome {
@@ -1023,6 +1026,8 @@ impl PhemexPerpetuals {
                         settings: is_settings,
                         placing,
                         effective: false,
+                        revision: 0,
+                        signed_until: None,
                     },
                 );
                 if let Some(symbol) = cancel_all {
@@ -1092,6 +1097,9 @@ impl PhemexPerpetuals {
         }
         self.account_write(cx);
         let revision = self.account.order_revision();
+        if let Some(job) = command.and_then(|id| self.trading.jobs.get_mut(&id)) {
+            job.revision = revision;
+        }
         self.request(
             cx,
             step.method,
@@ -1102,10 +1110,67 @@ impl PhemexPerpetuals {
                 command,
                 call: step.call,
                 revision,
-                signed_until: crate::sign::Credentials::expiry(cx.now) as f64 * 1000.,
+                signed_until: None,
+                released_request: None,
             }),
             None,
         );
+    }
+
+    pub(crate) fn trade_signing_release(
+        &mut self,
+        id: safe_cex_engine::RequestId,
+        request: &mut Request,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        if request
+            .released_request
+            .is_some_and(|previous| previous != id)
+        {
+            return;
+        }
+        let job = if let Some(command) = request.command {
+            let Some(job) = self
+                .trading
+                .jobs
+                .get_mut(&command)
+                .filter(|job| job.revision == request.revision)
+            else {
+                return;
+            };
+            Some(job)
+        } else {
+            None
+        };
+        let Some(expiry) = release.raw_expiry_ms() else {
+            return;
+        };
+        request.released_request = Some(id);
+        request.signed_until = Some(request.signed_until.map_or(expiry, |old| old.max(expiry)));
+        if let Some(job) = job {
+            job.signed_until = Some(job.signed_until.map_or(expiry, |old| old.max(expiry)));
+        }
+    }
+
+    pub(crate) fn trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
+        if request.command.is_some_and(|id| {
+            self.trading
+                .jobs
+                .get(&id)
+                .is_none_or(|job| job.revision != request.revision)
+        }) {
+            return;
+        }
+        let released = request.signed_until.is_some();
+        if released {
+            error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+        }
+        self.finish_failed_trade(cx, request, error, released);
     }
 
     pub(crate) fn trade_response(
@@ -1446,6 +1511,20 @@ impl PhemexPerpetuals {
         error: impl Into<String>,
         outcome: Outcome,
     ) {
+        let error = VenueError::new(error).outcome(match outcome {
+            Outcome::Rejected => safe_cex_engine::Outcome::Rejected,
+            Outcome::Unknown => safe_cex_engine::Outcome::Unknown,
+        });
+        self.finish_failed_trade(cx, request, error, matches!(outcome, Outcome::Unknown));
+    }
+
+    fn finish_failed_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+        uncertain: bool,
+    ) {
         match &request.call {
             Call::Place { order, .. } => cx.store.remove_orders(&[order.id.as_str()]),
             Call::Cancel { before, .. } if self.account.order_revision() == request.revision => {
@@ -1473,7 +1552,7 @@ impl PhemexPerpetuals {
                 format!(
                     "Phemex could not cancel late-landing order {ids} after cancel-all: {}; \
                      cancel it manually",
-                    error.into()
+                    error.message
                 ),
             );
             self.trading.late_sending = false;
@@ -1482,28 +1561,40 @@ impl PhemexPerpetuals {
         };
         let job = self.trading.jobs.remove(&command);
         self.account_refresh(cx);
-        // A later rejection after a step took effect cannot mean nothing happened.
-        let effective = job.as_ref().is_some_and(|job| job.effective);
-        let error = VenueError::new(error);
-        let error = match outcome {
-            Outcome::Rejected if effective => error,
-            Outcome::Rejected => error.outcome(safe_cex_engine::Outcome::Rejected),
-            Outcome::Unknown => error.outcome(safe_cex_engine::Outcome::Unknown),
-        };
+        if let Some(job) = &job {
+            if !uncertain && (job.effective || !job.ids.is_empty()) {
+                error.outcome = None;
+            }
+            error = error.partial_ids(&job.ids);
+        }
         reject(cx, command, error);
-        // Read only after `reject` raises the fence, so the read postdates the failure.
-        let (symbols, not_before) = match outcome {
-            Outcome::Rejected => (vec![], cx.now),
-            Outcome::Unknown => (
+        if uncertain {
+            let expiry = job
+                .as_ref()
+                .and_then(|job| job.signed_until)
+                .or(request.signed_until);
+            let Some(expiry) = expiry else {
+                // An unbounded signature must never authorize an early reconciliation.
+                cx.notice(
+                    Level::Error,
+                    code::CHILD_LEG_FAILED,
+                    "Phemex missing released signing expiry; automatic reconciliation held",
+                );
+                return;
+            };
+            let lost = match &request.call {
+                Call::Place { order, .. } => Some(&**order),
+                _ => None,
+            };
+            self.orders_uncertain(
+                cx,
                 job.map(|job| job.placing).unwrap_or_default(),
-                request.signed_until + CLOCK_SKEW_MS,
-            ),
-        };
-        let lost = match &request.call {
-            Call::Place { order, .. } => Some(&**order),
-            _ => None,
-        };
-        self.orders_uncertain(cx, symbols, lost, not_before);
+                lost,
+                expiry + CLOCK_SKEW_MS,
+            );
+        } else {
+            self.orders_uncertain(cx, vec![], None, cx.now);
+        }
     }
 
     /// Cancels orders an unknown-outcome placement left open after a cancel-all.

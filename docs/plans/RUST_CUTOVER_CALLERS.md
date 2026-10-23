@@ -6336,3 +6336,19 @@ The exact GET/query/header bytes and userId codec are preserved. Rare identity
 reads leave live account state unchanged. Network/Timeout metadata now survives
 with the native correlated diagnostic before the single terminal. No history,
 account-poll, trading or socket caller is migrated by this slice.
+
+## Phemex native dispatch signer custody
+
+Phemex native REST and private user.auth signing use the shared provider at
+actual dispatch. Trusted SDK/native setup consumes both credential slots; generic
+venue options retain only opaque identities. Ordinary GET keeps Secondary else
+Primary selection; client lookup and active-order repair keep Primary. Exact
+query/body/header bytes, optional authentication on public reads, and rounded
+60s protocol expiry are preserved. Hosted/delegated signing remains disabled.
+Provider refusal before the first write retains its typed NotSent failure;
+a later refused leg keeps accepted native IDs and cannot report the whole job
+NotSent. Unknown-write repair waits for the maximum engine-observed uncapped raw
+signature expiry across released legs plus5000ms. Private socket order follows
+the approved shared accepted-login contract: auth999 -> accepted ACK -> AOP1202
+-> opening ping1201, including a parked provider. SDK callers must provision
+providers through trusted setup rather than copying generic exchange options.

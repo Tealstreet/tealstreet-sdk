@@ -85,7 +85,7 @@ Export `dispatch_signing::Http` with immutable opaque Identity, network, Method,
 exact path, raw query and optional body. Its unsigned() returns the exact native
 intent for both the ordinary staging funnel and ih35js's managed read helper after full cutover.
 prepare uses existing shared HMAC-SHA256 work; apply inserts only validated native
-headers. The sign receipt records actual protocol stamp and expiry milliseconds: expiry
+headers. The sign receipt is expiry-only (`stamp_ms: None`): expiry
 MUST equal the rounded seconds actually signed/sent multiplied by1000, not
 protocol_now+60000. This retains the native half-second boundary exactly.
 A corresponding WsAuth recipe owns only the opaque identity and native request ID.
@@ -353,3 +353,71 @@ caller rechecks CLEAR after adding native guard delegation and early-repair
 negative controls. Actual `6c7f4fcf292` was then genuinely plain-merged in
 `12f16c0e85c`, preserving tests/Phemex source and automatic core composition;
 the same22test run again produces6GREEN/16 intendedRED/0ignored.
+
+## Full-cutover implementation and combined inventory boundary
+
+The resumed candidate consumes actual #1968 and the exact reviewed #1970/#1974
+stack authorized above. Native Options contain opaque Identity refs only; trusted
+registry/SDK setup owns raw material. Every native credentialed REST funnel and
+user.auth uses shared provider work. The sole account.rs delta is the Opened auth
+recipe call; incoming socket codec, reducers and accepted-login custody remain
+unchanged. Remote/hosted admission remains disabled. This is full native custody
+cutover, not a RequestContext adoption of the remaining native callers.
+
+HTTP/WS receipts use `stamp_ms: None`, with expiry equal to the rounded seconds
+actually signed and sent times1000. The shared SignReceipt contract explicitly
+allows expiry-only metadata (engine/signing.rs:331-357). Dispatch captures
+prepared_revision separately (signing_dispatch.rs:419), rechecks it on completion
+and final release, and checks receipt expiry from expiry_ms plus the prepared
+protocol/raw clocks (:78-82); no timestamp is synthesized from a missing stamp.
+Real HTTP/WS controls and the clock-revision reprepare control exercise this.
+Trading records only engine SigningRelease.raw_expiry_ms on the exact pending
+request/native active revision, keeps the released-only maximum per job, and
+uses that maximum plus5000 for uncertain-write repair. Refused first writes keep
+typed NotSent; accepted earlier IDs/effects prevent whole-job NotSent and retain
+partial IDs. Native optimistic Canceling rollback retains its revision guard.
+
+The original22 controls pass after two test-host completion fixes: missing
+provider sends the real Signed(Unavailable) event instead of expecting the engine
+to invent a host reply; calibrated repair tests unpark the provider only after
+the manually completed write, allowing the later repair read to sign. No original
+assertion was removed. Two further controls reject malformed Present/MAC/receipt
+results on HTTP and WS before any native packet, covering six corruptions each.
+The former native HMAC source is byte-exact in tests/support/native_sign.rs;
+existing native tests use trusted LocalSigner fixture construction with all
+wire/financial assertions preserved. Provider setup has an additional opaque-only
+security control and SDK constructor-channel control.
+
+Inventory boundary: actual6c7f4fcf292 before #1974 has Phemex lib17F/18O;
+frozen #1974 removes 8e74b914... once and f9764ec2... twice, leaving15F/15O.
+Cutover adds only one 6cf35cca... sign_http, reaching16F/16O. A standalone15->16
+bootstrap aliases its own later single-site prune and is forbidden by the existing
+negative test. Overseer therefore requires this cutover in the SAME certified
+combo as #1974, immediately after it: #1970 -> #1974 -> full signer. The exact
+STAGING_BOOTSTRAPS transition is actual17/18 -> combined16/16, never a landing
+15->16 transition. Existing checker predicates and pruning controls remain exact;
+checker owner claude-m26ps4 reviews the combined row. The current stacked-parent
+15-map remains a known checker refusal until the composed candidate/receipt head
+contains the final16-map. This is not a green checker claim for that parent.
+
+The exact trading issuance re-expression is4F/4O: ce2317fc... -> e6f9b79a...,
+replacing eager Credentials::expiry with initially absent release metadata. Both
+whole-map rows and matching negative-control entries have explicit claude-ddi2il
+approval, and are remove-before-master obligations. Signing inventory removes all
+14 old lib material fingerprints; its only new entries are provider descriptor
+import079483f8... once and hmac_sha256_work descriptor b94b333b... twice. No raw
+cryptographic implementation or material holder remains in venue source.
+
+Executed candidate proof: original256 native tests pass; the extended24 signer
+and2 security tests pass; registry3 controls pass with the phemex feature alone;
+strict Phemex all-target/all-feature Clippy passes. SDK constructor suites5 pass.
+Independent stable-source/adversarial and caller reviews are CLEAR; full-map and
+HMAC source reviews, fresh final checks/CI and actual #1970/#1974 remain gates.
+
+Final shipping ruling: checker owner confirmed sequential PR landings would still
+expose15->16 through origin/event-base refs, even inside a named combo. Overseer
+therefore selected disposition(a): fold this reviewed full cutover INTO #1974's
+own PR. codex-5c57jl merges this handoff head, cross-reviews the sole accountOpened
+signing hunk, runs fresh CI and refreezes #1974 for combo-5b after #1970. There is
+one actual17/18 ->16/16 boundary; no separate signer PR/landing, new checker
+predicate or relaxed pruning control. The two whole-map rows remain exact.
