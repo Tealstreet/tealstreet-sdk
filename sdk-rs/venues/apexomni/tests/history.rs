@@ -294,7 +294,7 @@ fn unsupported_income_and_orders_match_base_empty_and_client_lookup_is_not_defin
 }
 
 #[test]
-fn exhausted_rest_failures_use_filtered_ws_cache_without_merging_authoritative_rest() {
+fn exhausted_rest_failures_reject_without_laundering_cache_then_rest_stays_authoritative() {
     let (mut e, socket) = seeded_socket();
     ws(
         &mut e,
@@ -305,7 +305,7 @@ fn exhausted_rest_failures_use_filtered_ws_cache_without_merging_authoritative_r
     e.drain_actions().for_each(drop);
     query(&mut e, None, None, None, None);
     for i in 0..4 {
-        let r = requests(&mut e).remove(0);
+        let r = owned_request(&mut e);
         response(
             &mut e,
             &r,
@@ -313,9 +313,11 @@ fn exhausted_rest_failures_use_filtered_ws_cache_without_merging_authoritative_r
             r#"{"code":40001,"msg":"temporarily unavailable"}"#,
         );
     }
-    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].order_id.as_deref(), Some("cached-order"));
+    assert!(
+        owned_error(&mut e)
+            .message
+            .contains("temporarily unavailable")
+    );
     query(&mut e, None, None, None, None);
     let r = requests(&mut e).remove(0);
     response(
@@ -495,4 +497,333 @@ fn ws_and_synthetic_cache_filter_and_sort_using_original_milliseconds() {
         assert_eq!(rows[0].order_id.as_deref(), Some("order-456"));
         assert_eq!(rows[0].timestamp, 1700000000.0);
     }
+}
+
+fn owned_request(e: &mut TestEngine) -> safe_cex_engine::HttpRequest {
+    let mut http = Vec::new();
+    for action in e.drain_actions() {
+        match action {
+            Action::Http(r) => http.push(r),
+            Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => {
+                panic!("early completion")
+            }
+            Action::Notice(Notice::Event(event)) => {
+                assert_ne!(event.code, safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(http.len(), 1);
+    http.pop().unwrap()
+}
+fn owned_error(e: &mut TestEngine) -> safe_cex_engine::VenueError {
+    let mut errors = Vec::new();
+    for action in e.drain_actions() {
+        match action {
+            Action::Http(_) => panic!("exhausted aliases continued"),
+            Action::Notice(Notice::CommandDone { .. }) => {
+                panic!("failed REST became cache/empty success")
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                assert_eq!(command, 7);
+                errors.push(error);
+            }
+            Action::Notice(Notice::Event(event)) => {
+                assert_ne!(event.code, safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(errors.len(), 1);
+    let error = errors.pop().unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert_eq!(error.outcome, None);
+    error
+}
+fn owned_rows(e: &mut TestEngine, expected_command: u32) -> Vec<Row> {
+    let mut results = Vec::new();
+    for action in e.drain_actions() {
+        match action {
+            Action::Http(_) => panic!("terminal selection continued"),
+            Action::Notice(Notice::CommandFailed { .. }) => panic!("valid selection rejected"),
+            Action::Notice(Notice::CommandDone { command, result }) => {
+                assert_eq!(command, expected_command);
+                results.push(serde_json::from_str(&result).unwrap());
+            }
+            Action::Notice(Notice::Event(event)) => {
+                assert_ne!(event.code, safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(results.len(), 1);
+    results.pop().unwrap()
+}
+fn cached() -> TestEngine {
+    let (mut e, socket) = seeded_socket();
+    ws(
+        &mut e,
+        socket,
+        15.0,
+        r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"fills":[{"id":"cached","orderId":"cached-order","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","fee":"-0.02","createdAt":1700000000123}]}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e
+}
+fn candidate(r: &safe_cex_engine::HttpRequest, index: usize) {
+    assert!(r.url.contains(if index < 2 {
+        "/v3/fills?"
+    } else {
+        "/v3/history-orders?"
+    }));
+    assert!(r.url.contains(if index.is_multiple_of(2) {
+        "symbol=BTC-USDT"
+    } else {
+        "symbol=BTCUSDT"
+    }));
+}
+#[test]
+fn all_native_alias_failures_reject_typed_instead_of_empty_success() {
+    let mut e = seeded();
+    query(&mut e, None, None, None, None);
+    for i in 0..4 {
+        let r = owned_request(&mut e);
+        candidate(&r, i);
+        response(
+            &mut e,
+            &r,
+            30.0 + i as f64,
+            r#"{"code":40001,"msg":"native unavailable"}"#,
+        );
+    }
+    assert!(owned_error(&mut e).message.contains("native unavailable"));
+}
+#[test]
+fn malformed_and_missing_list_exhaustion_cannot_publish_valid_prefixes_or_cache() {
+    for body in [
+        r#"{"code":0,"data":null}"#.to_owned(),
+        format!(r#"{{"code":0,"data":[{FILL}],"code":{{}}}}"#),
+    ] {
+        let mut e = cached();
+        query(&mut e, None, None, None, None);
+        for i in 0..4 {
+            let r = owned_request(&mut e);
+            candidate(&r, i);
+            response(&mut e, &r, 30.0 + i as f64, &body);
+        }
+        owned_error(&mut e);
+    }
+}
+#[test]
+fn transport_exhaustion_resets_all_sixteen_attempt_prefixes_before_typed_rejection() {
+    let mut e = cached();
+    query(&mut e, None, None, None, None);
+    for attempt in 0..16 {
+        let r = owned_request(&mut e);
+        candidate(&r, attempt / 4);
+        e.handle(
+            30.0,
+            Event::HttpStart {
+                request: r.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        let prefix = format!(r#"{{"code":0,"data":[{FILL},"#);
+        e.handle(
+            30.0,
+            Event::HttpChunk {
+                request: r.id,
+                data: prefix.as_bytes(),
+            },
+        );
+        for action in e.drain_actions() {
+            match action {
+                Action::Http(_)
+                | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => {
+                    panic!("prefix escaped")
+                }
+                Action::Notice(Notice::Event(event)) => {
+                    assert_ne!(event.code, safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+                }
+                _ => {}
+            }
+        }
+        e.handle(
+            30.0,
+            Event::HttpFailed {
+                request: r.id,
+                error: "network unavailable",
+            },
+        );
+    }
+    assert!(owned_error(&mut e).message.contains("network unavailable"));
+}
+#[test]
+fn validated_empty_or_filtered_success_keeps_cache_selection_amid_failed_alternatives() {
+    for success_at in [0, 3] {
+        let mut e = cached();
+        query(&mut e, None, None, None, None);
+        for i in 0..4 {
+            let r = owned_request(&mut e);
+            candidate(&r, i);
+            let body = if i == success_at {
+                r#"{"code":0,"data":[]}"#
+            } else {
+                r#"{"code":40001,"msg":"unavailable"}"#
+            };
+            response(&mut e, &r, 30.0 + i as f64, body);
+        }
+        let rows = owned_rows(&mut e, 7);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].order_id.as_deref(), Some("cached-order"));
+    }
+    let mut e = cached();
+    query(&mut e, None, None, None, None);
+    let r = owned_request(&mut e);
+    response(
+        &mut e,
+        &r,
+        30.0,
+        &format!(
+            r#"{{"code":0,"data":[{}]}}"#,
+            FILL.replace("BTC-USDT", "ETH-USDT")
+        ),
+    );
+    assert_eq!(
+        owned_rows(&mut e, 7)[0].order_id.as_deref(),
+        Some("cached-order")
+    );
+}
+#[test]
+fn identical_native_and_display_symbol_has_only_two_alternatives() {
+    let mut e = seeded();
+    let mut markets = e.store().markets().to_vec();
+    for market in &mut markets {
+        market.id = market.symbol.clone();
+    }
+    e.store_mut().set_markets(markets);
+    query(&mut e, None, None, None, None);
+    for route in ["/v3/fills?", "/v3/history-orders?"] {
+        let r = owned_request(&mut e);
+        assert!(r.url.contains(route));
+        response(&mut e, &r, 30.0, r#"{"code":0,"data":[]}"#);
+    }
+    assert!(owned_rows(&mut e, 7).is_empty());
+}
+
+#[test]
+fn bounded_native_upsert_preserves_eviction_before_later_duplicate_replacement() {
+    let mut e = seeded();
+    query(&mut e, None, None, None, Some(1));
+    let r = owned_request(&mut e);
+    let newest = FILL.replace("1700000000123", "1700000005123");
+    let evicted = FILL
+        .replace("trade1", "trade2")
+        .replace("1700000000123", "1700000004123");
+    let replacement = FILL
+        .replace("1700000000123", "1700000003123")
+        .replace("\"fillSize\":\"2\"", "\"fillSize\":\"7\"");
+    response(
+        &mut e,
+        &r,
+        30.0,
+        &format!(r#"{{"code":0,"data":[{newest},{evicted},{replacement}]}}"#),
+    );
+    let rows = owned_rows(&mut e, 7);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].timestamp, 1700000003.0);
+    assert_eq!(rows[0].qty, 7.0);
+
+    // An identity evicted from the bounded native page may reappear later.
+    query(&mut e, None, None, None, Some(1));
+    let r = owned_request(&mut e);
+    let reappeared = FILL
+        .replace("trade1", "trade2")
+        .replace("1700000000123", "1700000006123")
+        .replace("\"fillSize\":\"2\"", "\"fillSize\":\"9\"");
+    response(
+        &mut e,
+        &r,
+        40.0,
+        &format!(r#"{{"code":0,"data":[{newest},{evicted},{replacement},{reappeared}]}}"#),
+    );
+    let rows = owned_rows(&mut e, 7);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].timestamp, rows[0].qty), (1700000006.0, 9.0));
+}
+#[test]
+fn signature_reset_discards_prefix_but_retains_original_history_owner() {
+    let mut e = seeded();
+    query(&mut e, None, None, None, None);
+    let first = owned_request(&mut e);
+    response(
+        &mut e,
+        &first,
+        30.0,
+        &format!(r#"{{"code":20016,"msg":"signature rejected","data":[{FILL}]}}"#),
+    );
+    let retry = owned_request(&mut e);
+    assert_eq!(first.url, retry.url);
+    let corrected = FILL
+        .replace("\"fillPrice\":\"100\"", "\"fillPrice\":\"101\"")
+        .replace("\"fillSize\":\"2\"", "\"fillSize\":\"3\"");
+    response(
+        &mut e,
+        &retry,
+        40.0,
+        &format!(r#"{{"code":0,"data":[{corrected}]}}"#),
+    );
+    let rows = owned_rows(&mut e, 7);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].price, rows[0].qty), (101.0, 3.0));
+}
+#[test]
+fn history_rejection_does_not_erase_background_cache_or_cross_concurrent_owners() {
+    let mut e = cached();
+    query(&mut e, None, None, None, None);
+    let first = owned_request(&mut e);
+    e.handle(
+        21.0,
+        Event::Command(Command::Query {
+            command: 8,
+            query: Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        }),
+    );
+    let second = owned_request(&mut e);
+    response(
+        &mut e,
+        &second,
+        30.0,
+        &format!(r#"{{"code":0,"data":[{FILL}]}}"#),
+    );
+    assert_eq!(owned_rows(&mut e, 8)[0].order_id.as_deref(), Some("order1"));
+    response(
+        &mut e,
+        &first,
+        31.0,
+        r#"{"code":40001,"msg":"unavailable"}"#,
+    );
+    for _ in 1..4 {
+        let r = owned_request(&mut e);
+        response(&mut e, &r, 32.0, r#"{"code":40001,"msg":"unavailable"}"#);
+    }
+    owned_error(&mut e);
+    query(&mut e, None, None, None, None);
+    for _ in 0..4 {
+        let r = owned_request(&mut e);
+        response(&mut e, &r, 40.0, r#"{"code":0,"data":[]}"#);
+    }
+    assert_eq!(
+        owned_rows(&mut e, 7)[0].order_id.as_deref(),
+        Some("cached-order")
+    );
+    assert!(e.store().orders().is_empty());
+    assert!(e.store().positions().is_empty());
 }
