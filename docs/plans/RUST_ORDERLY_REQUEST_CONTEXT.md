@@ -136,3 +136,15 @@ Source SHA256: `e1155549cf03c5a86f7a33a467313ad176e04dfed5c632d5f20651242df49dc6
 | `554f23ddc8f2c0f97ba05d9d331b8f2985e7bcdbcd6b21fe1a64c371dcc4885b` | 1 | 1123 `trade_next` → WRITE | `cx.done( job.command, if job.collect { json(&job.ids) } else { "[]".into() }, )` |
 | `780f8c3c54323f6b25b10a33fbbee35f994712f66e19966fab6d4abff969b353` | 1 | 1185 `trade_next` → WRITE | `cx.request( step.method, format!("{}{}", self.rest(), step.path), headers, step.body.clone(), Pending::Trade(Request ...` |
 | `b2b41114e06422d97e3616db989959185a6d388c99eac2646a846e3ce3bb39f6` | 1 | 1491 `trade_response` → WRITE | `cx.done( job.command, json(&Rails { buy_leverage: value, sell_leverage: value, }), )` |
+
+
+## Phase one: command candles on actual seams
+
+This slice is based on actual `bd52632f2c8` (#1785/#1808/#1816/#1838), with no unlanded seam or engine/shared source changes. The separate original-source RED commit `0851eeb7dd5` compiles eight controls and fails them at opaque early HTTP. Both mutually exclusive command endpoints then adopt managed prepare/bind/release, exact delivery validation before stream parsing/diagnostics, contextual completion and typed transport/preparation failures. The original 20-second root is captured once; both branches keep zero automatic retries.
+
+Native parameter validation, future-empty behavior, endpoint/query bytes, filtering, limits, sorting and row/envelope codecs remain. Existing public candle fixtures use shared preparation at each original declaration clock, retaining response clocks and every business oracle. History collision #1791 is untouched.
+
+Command-entry adoption is deferred until actual #1830 in a fresh follow-up, per throughput guidance. Both initial Context issuance failures keep their numeric pre-authority completion; issued work has no numeric fallback. Only `lib.rs` is pruned: 13 to 9 occurrences, family 39 to 35. Two HTTP sites and two contextualized successful completions disappear; the existing shared fail fingerprint remains at its original count through initial issuance failures and cached account failure. The remaining inventory tails still must reach zero before cutover.
+
+
+Phase-one verification: all eight managed controls and the complete Orderly/Binance native suites pass (470 tests, zero failed/ignored). Strict all-target Clippy, scoped formatting, bans, exact inventory checker and all 13 checker controls pass. Independent source/adversarial, caller and full-map reviews are clean, architecture gate **No**. Source scope remains the candle area plus dedicated/native fixture updates; actual dependencies only. Fresh CI and a parallel window with separate current-landing revert guard remain required.
