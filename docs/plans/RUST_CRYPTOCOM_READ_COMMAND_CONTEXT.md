@@ -202,3 +202,32 @@ both retain existing string-error fields. The candle selector also applies when
 the host supplies a whole HttpResponse event. An on_http_failed Internal cause,
 if supplied by the shared engine, remains typed like Network/Timeout; this does
 not reclassify native malformed text/rows/envelopes or introduce a status table.
+
+## Implementation verification
+
+The managed candle root is retained in Pending and validated before row/response
+consumption. Immediate interval/queue failures settle the issued root without a
+physical delivery check; native stream errors use its real delivery. Local history
+issues custody only after choosing a synchronous terminal; all valid native
+history/discovery/signer code remains unchanged. All sixteen corrected controls
+pass after implementation. The exact scanner delta is nine occurrences/seven
+entries; both checks pass with fifteen ratchet controls.
+
+Full-native verification required the one anticipated existing fixture update:
+public.rs's candle failure test drives shared prepared_actions at its original
+0.0 clock; its positive request and terminal failure assertions remain exact.
+Source/caller reviews accept the fixture adoption and test corrections. No test
+filter, assertion deletion, signer/account/trading/host/engine source edit.
+
+Native Crypto.com/Binance verification passes432 tests across41 targets, strict
+all-target Clippy, scoped formatting and both inventory checks (15 controls).
+Independent source/caller/full-map reviews accept venue custody, native behavior,
+fixture changes and the exact prune.
+
+A further source-review control exposes a shared engine defect: genuine unsigned
+public preparation failure with a typed AuthInvalid/Expired/Permission cause
+increments auth_failures despite credential=None. The venue correctly retains
+its typed metadata. The new seventeenth control fails health1 versus0; engine.rs
+is unchanged between53a906 and actualc55a6a76044. Routed to claude-dazzy3 and the
+overseer for shared ownership. No local clearing/demotion, ignored test or
+exemption is permitted; full green/public-auth isolation awaits that closure.

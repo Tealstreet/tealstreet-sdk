@@ -210,12 +210,32 @@ impl Request {
 }
 
 impl Cryptocom {
+    fn finish_local_history(cx: &mut Cx<'_, Pending>, result: Result<&str, &str>) {
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        match result {
+            Ok(data) => {
+                let _ = cx.done_context(&context, data.into());
+            }
+            Err(error) => {
+                let _ = cx.fail_context(&context, error);
+            }
+        }
+    }
     pub(crate) fn query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, path, symbol, order_id, income_kind, from_ms, to_ms, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(
-                    command,
-                    "Crypto.com client order lookup is not supported by the Rust engine",
+                Self::finish_local_history(
+                    cx,
+                    Err("Crypto.com client order lookup is not supported by the Rust engine"),
                 );
                 return;
             }
@@ -278,17 +298,17 @@ impl Cryptocom {
             ),
         };
         if !matches!(kind, Kind::Trades) && self.credentials.is_none() {
-            cx.fail(command, "Crypto.com credentials are required");
+            Self::finish_local_history(cx, Err("Crypto.com credentials are required"));
             return;
         }
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - 86_400_000.0);
         if !from.is_finite() || !to.is_finite() || from < 0.0 || to < from {
-            cx.fail(command, "Invalid history time range");
+            Self::finish_local_history(cx, Err("Invalid history time range"));
             return;
         }
         let (Some(from_ns), Some(to_ns)) = (millis_ns(from), millis_ns(to)) else {
-            cx.fail(command, "History time range exceeds nanosecond bounds");
+            Self::finish_local_history(cx, Err("History time range exceeds nanosecond bounds"));
             return;
         };
         let request = Request {
@@ -325,7 +345,7 @@ impl Cryptocom {
             page_seen: vec![],
         };
         if request.limit == 0 || from_ns == to_ns {
-            cx.done(command, "[]".into());
+            Self::finish_local_history(cx, Ok("[]"));
             return;
         }
         self.history_request(cx, request);
