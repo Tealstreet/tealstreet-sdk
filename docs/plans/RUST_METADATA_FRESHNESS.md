@@ -406,6 +406,9 @@ documents incoming-first with each own block once. Preserve incoming signer,
 typed callback and native routing changes in source; agree the exact remaining
 metadata hunks with their owner before resolving them. Inventory changes must
 be exact reviewed operations, with no broader bootstrap or exemption.
+The checker also retains exact temporary `STAGING_BOOTSTRAPS` sign_http bounds
+for BingX and WEEX. Remove a staging entry in the same PR that retires its last
+site; never re-key, widen or introduce another staging entry to permit this work.
 
 ### Admission, joining and publication
 
@@ -448,6 +451,10 @@ with an explicit founder observer would be a shared additive change, not a
 venue adapter. Keep the original matrix as a gate until the owner settles this
 policy or supplies a reviewed shared authority that implements it. Do not
 weaken the controls or create local orphan bookkeeping to manufacture a pass.
+The group owner has agreed the revised design with the Plan owner: move physical
+Plan ownership to `Owner::Execution` and expose the founder as an explicit
+Observer. Its implementation and original Read controls are in that lane; a
+new reviewed frozen source pin is still required. Do not consume `779b`.
 
 ### Original REDs and implementation gates
 
@@ -469,6 +476,9 @@ source, fixture and assertion separately from compile/API failures:
 5. First/follower detach and expiry, all-observers-gone with a current Store
    token, exact-deadline denial and a live-peer positive run before the native
    codec. A Plan-founder-only approximation does not satisfy these controls.
+   Until the shared authority exists these controls are explicitly failing or
+   absent behind this landing gate, never ignored or weakened. Their absence
+   blocks landing and cannot be replaced by a documentation disclaimer.
 6. Wrong slot, sibling delivery and wrong physical attempt cannot decode,
    publish, settle or complete; first-leg DATA alone permits the next leg.
 7. Preserve settings-write/snapshot invalidation, fallback rails, superseded
@@ -482,6 +492,11 @@ Wait for the composition policy and reviewed Read API before group production
 wiring. Use build/test concurrency two. Run focused metadata/BingX/WEEX native
 controls, standalone feature-on/off checks, strict Clippy/fmt, bans and the
 existing scanner controls; shipped WASM and replay gates remain CI work.
+BingX replay CPU and WASM size are explicit landing gates because `http-plans`
+enters its standalone family graph. If WEEX `lib.rs` changes, its CPU and size
+gates are required too. Landing `2badd1cb0e3` has reported BingX CPU ratios
+1.32x/1.38x and WEEX 1.59x/1.71x; retain those baseline receipts and measure the
+candidate in normal CI. Report a miss rather than waiving or changing a gate.
 
 Update CALLERS in the implementation commit: genuine admission/refusal,
 independent observer semantics actually provided, native retry bounds,
