@@ -2,6 +2,12 @@
 //! requests go out together and the next step starts when they all answer.
 //! Attached stop-loss and take-profit ride on the order itself; stops against
 //! an open position and trailing stops go through `/v5/position/trading-stop`.
+// Wired into dispatch with the Plan adoption; until then only their tests use them.
+#[allow(dead_code)]
+mod acknowledgement;
+#[allow(dead_code)]
+mod codes;
+
 use crate::sign::Body;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};

@@ -175,7 +175,31 @@ Hyro/options stay on the legacy job pipeline until their own adoption.
 non-trading `Then` variants, so no ordinary Plan response reaches it. This is a
 temporary dual path, which needs owner sign-off under the direct-cutover rule.
 
-## Owner decisions (sent to codex-uufub4; source waits on them)
+## Owner rulings (claude-ddi2il, 2026-10-23)
+
+- D1: approved. A narrowly declared Amend→Setting, only for attached TP/SL
+  legs. 34040 is Satisfied(Setting) with `only: Setting`; a plain amend
+  answered 34040 stays refused, with a negative control.
+- D2: approved. Satisfied(Cancel) makes no Cancelled store transition. An
+  engine-owned fence plus exactly one `reconcile_uncertain` read (stacked on
+  #1857) always follows a Satisfied success, and the fence clears only through
+  `orders_reconciled`. A CALLERS entry covers the caller-visible lag.
+- D3: option (b). Amend→Cancel is allowed only for a declared
+  cancel-then-recreate leg whose replacement is position-bound
+  (reduce-only/closeOnTrigger), preserving `partial_stops.rs:536,913`. A
+  negative control proves that a non-position-bound replacement after an absent
+  old leg stays refused/Unknown.
+- D4: approved. KnownPartial with proven IDs plus a CALLERS entry. Before merge,
+  the NX callers lane must confirm that NX shows partial success.
+- D5: approved as a temporary split. Recorded as a remove-before-master-merge
+  obligation, closed by claude-fe7lgm's Hyro RequestContext adoption (hook
+  contract agreed: four `hyro.rs` functions, a Hyro marker in
+  `ReconciliationData`, owner-guarded discards). No ordinary fallback.
+- The D1/D3 narrowings and the D2 fence/reconcile are engine pieces (lane
+  claude-dazzy3) delivered in #1857; this child stacks on #1857 as well as
+  #1873.
+
+### Original decision requests
 
 - **D1.** 34040 TP/SL no-op on an attached TP/SL amend: add Amend→Setting to the
   shared narrowing table (the classifier). The attached legs then get a
