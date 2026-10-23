@@ -295,7 +295,7 @@ fn normalize(rows: &mut [Execution]) {
 }
 impl AsterDex {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
-        if self.credentials.is_none() && !matches!(read, Read::PublicTrades { .. }) {
+        if !self.credentials.has_primary() && !matches!(read, Read::PublicTrades { .. }) {
             cx.done(command, "[]".into());
             return;
         }
