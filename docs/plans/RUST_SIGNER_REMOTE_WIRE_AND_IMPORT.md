@@ -292,8 +292,9 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      dropped refs. A stale-generation recipe refuses `Unavailable` before
      sending (`notSent`).
 7. **Session-core conditions (claude-55ao7t, 2026-10-23).**
-   - **Binding.** Imported refs bind to the selected slot and the opaque
-     engine `Owner::Session { generation }`, not a venue counter.
+   - **Binding.** Imported refs bind to the `ImportAuthority` (issuer,
+     identity, selected slot, the opaque engine
+     `Owner::Session { generation }`, attempt), never a venue counter.
      `request_import` accepts only a live session-owned Read context.
      Command and Background contexts are refused `Invalid`. The derive GET is
      a deterministic session Read, so it needs no write facts.
@@ -326,8 +327,8 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
   Context and attempt, not just the generation.
 - Installation is atomic: either every declared ref is installed or none is,
   and a partial install refuses and wipes.
-- Async, late and duplicate import receipts are fenced by attempt and
-  generation, so retirement can never reinstall stale refs.
+- Async, late and duplicate import receipts are fenced by the full
+  `ImportAuthority` (issuer, identity, slot, generation, attempt), so retirement can never reinstall stale refs.
 - Controls: a late response after retirement, partial-install failure, and a
   duplicate receipt.
 
