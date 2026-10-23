@@ -26,94 +26,160 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
 
 1. **Not released → `notSent`.** Covers preparation, signing, admission and
    queue refusals (`request_context::Error::venue_error()`, #1808, and
-   `SignError::venue_error()`).
+   `SignError::venue_error()`). This is a local-operation fact. The mutation
+   journal still recomputes the command outcome from earlier releases.
 2. **Released, then transport failure → write `unknown` / `network`.** A read gets
    `network`, and read-retry eligibility applies only under `RetryPolicy::ReadFailure`.
 3. **408 or ≥500 → write `unknown`** (`timeout` / `venueUnavailable`), whatever
    the body says. A native code in that body is kept only as
-   `venueCode`/`venueMessage` evidence and never makes the write `rejected`.
-4. **A decoded native error code → venue table verdict.** Integer codes decode
-   strictly (exact integer or canonical quoted integer, never `f64`). String codes
-   compare exactly.
-5. **Non-2xx with no decodable native error → `unknown`, with a status-derived
-   kind** (401 `authInvalid`, 403 `authPermission`, 418/429 `rateLimited`).
-   "HTTP status alone is not refusal evidence." A venue may declare a status row
-   only where its documentation proves the request was refused before execution,
-   with that citation next to the row.
+   `venueCode`/`venueMessage` evidence and never makes the write `rejected`. On
+   the managed path the message stays the engine's "HTTP response does not prove
+   the write outcome" (`http_evidence.rs:36`, already live for Binance). There is
+   no documented-row escape.
+4. **A decoded native error code → venue table verdict, overriding any
+   status-derived kind** (KuCoin returns 400002 with HTTP 401, for example).
+   Integer codes decode strictly: an exact integer or a canonical quoted
+   integer, never `f64`. String codes compare exactly.
+5. **Non-2xx with no decodable native error → the venue's documented status row,
+   else `unknown` with a status-derived kind** (401 `authInvalid`, 403
+   `authPermission`, 418/429 `rateLimited`). "HTTP status alone is not refusal
+   evidence" unless the venue documents it.
+   - Phase 2 starts by listing each family's documented 4xx semantics, with a
+     citation for every status row. Binance, for example, documents 4XX as
+     client-side refusals and 418/429 as rate-limit refusals, so those rows are
+     `Refused`.
+   - A family without documentation flips from today's bare-4xx `rejected` to
+     `unknown`. That flip is listed per family in Callers.
+   - An `unknown` carrying an auth or rate-limit kind must not fan out reconcile
+     reads or hold order locks past the rate window. The engine defers both until
+     `retryAfterMs`, then until the next admitted read.
 6. **2xx whose success envelope or ACK is malformed, incomplete or count-mismatched →
-   write `unknown` / `internal`.** For a read, `internal` and a malformed failure.
-7. **`satisfied` verdict → success for its declared intent only** (already
-   cancelled, not modified, already set). It is never a whole-command success for
-   another intent.
-8. **One-shot re-sign resend** only on a `refusedResend` verdict, under rules 3–4
-   (status <500 and ≠408), granted as `RetryEvidence::DefinitiveRefusal` through
-   `Context::retry`. It never comes from message text or engine-formatted strings.
-9. **Aggregation stays in `CommandWrites::fail`**, which already holds the
-   `notSent`/`rejected`/`unknown`/partial projections and the accepted-ID
-   join. Venues record a per-leg fact; they never pick the command outcome or
-   demote it after an effect.
+   write `unknown` / `internal`.** The engine enforces the count: each leg
+   declares its expected native-ID count at registration, and an `Accepted` with
+   the wrong count is recorded as `Failed`/`unknown`. For a read, a malformed
+   reply is an `internal` failure.
+7. **`Satisfied` → `Accepted { order_ids: [] }` for one cancel, amend or setting
+   intent only.** It is never a placement and never a read. It proves "not open
+   or already in that state", not a store transition. For example, Binance −2011
+   on cancel may mean filled or never existed, so the engine marks the order for
+   reconciliation and never writes `Cancelled` on that evidence.
+8. **One-shot re-sign resend, only through an opaque `ResendGrant`.**
+   - The grant comes from `http_write_failure`, and only for a `RefusedResend`
+     verdict under rules 3–4 (status <500 and ≠408).
+   - `CommandWrites::retry` and `Context::retry` require the grant. Constructing
+     `RetryEvidence::DefinitiveRefusal` publicly is removed.
+   - Each leg keeps a `resend_used` flag, so a second resend is refused.
+   - A resend never comes from message text or engine-formatted strings.
+9. **Fact recording and aggregation are engine-only.**
+   - `Cx::http_write_result` accepts only `Accepted`. `Rejected`, `KnownPartial`
+     and `Failed` are constructed only inside the engine, from a verdict (rules 3–8).
+   - Batch ACKs go through `http_write_batch`. The engine computes per-item
+     verdicts, the accepted-ID join, KnownPartial versus Rejected, and the count check.
+   - `CommandWrites::fail` keeps the `notSent`/`rejected`/`unknown`/partial
+     projections. Venues never pick the command outcome or demote it after an effect.
+10. **Reads never claim money effects.** `ReadFailure` carries a kind, native
+    evidence and retry facts, and no `Outcome`.
+    - Native retry facts (`RefusedResend`, a rate-limit delay) are separate from
+      the signature and transport retry budgets.
+    - Code 0 or a 2xx status never proves a successful body or list; success proof
+      stays with the venue codec.
+    - Auth is derived once, from the table, inside the existing
+      `Venue::account_auth_outcome` hook, through `classify::auth_outcome`. It
+      applies only when the read's Context carries a credential: public reads
+      never produce credential evidence, even with auth-looking codes such as
+      Crypto.com 40101.
 
-`kind` comes from the verdict. A `rateLimited` kind gets `retryAfterMs` from the
-engine's existing Retry-After parser (`startup::rate_limit_pause_ms`).
-Venue-specific weight/limit headers belong to the rate-limit core (audit rank 10),
-not to this lane. Caller-visible text is unchanged: `message` keeps the venue's
-current text, and the native code and message go in `venueCode`/`venueMessage`.
+`kind` comes from the verdict. `retryAfterMs` is set only when a Retry-After header
+is actually present. A new `startup::retry_after_ms(&Response) -> Option<f64>`
+works for any status, so a native `rateLimited` code on a 200 or 400 can use it.
+Unlike `rate_limit_pause_ms`, it never substitutes a default. Venue-specific
+weight/limit headers belong to the rate-limit core (audit rank 10), not to this
+lane. Outside rule 3, `message` keeps the venue's current text, and the native
+code and message go in `venueCode`/`venueMessage`.
+
+The engine reaction to an `unknown` seal also replaces the per-venue
+uncertain-write reconcile triggers: OKX `trade_lost`, Lighter submission
+uncertainty, and the Orderly −1007 gap (#24). It reuses the existing
+order-lock/reconcile fence. This needs coordinating with codex-uufub4 and is
+scheduled as phase 2b.
 
 ## Code-table API (published to venue lanes before implementation)
 
 Module `engine/src/classify.rs`, re-exported as `safe_cex_engine::classify`.
-Tables are `const` venue data and contain no logic.
+Tables are `const` struct literals: venue data with no logic.
 
 ```rust
 pub enum Verdict {
-    Refused(ErrorKind),        // proven pre-execution refusal: write `rejected`
-    RefusedResend(ErrorKind),  // proven refusal that permits one re-signed resend
-    Unknown(Option<ErrorKind>),// code does not prove the outcome: write `unknown`
-    Satisfied(Intent),         // requested state already holds, for this intent only
+    Refused(ErrorKind),          // proven pre-execution refusal: write `rejected`
+    RefusedResend(ErrorKind),    // proven refusal; yields one ResendGrant
+    Unknown(Option<ErrorKind>),  // code does not prove the outcome: write `unknown`
+    Satisfied(SatisfiedIntent),  // rule 7; requires Row.only == that intent
 }
+pub enum SatisfiedIntent { Cancel, Amend, Setting }
 pub enum Intent { Place, Cancel, Amend, Setting, Read }
 pub enum Key { Int(i64), Range(i64, i64), Text(&'static str), MessagePrefix(&'static str) }
 pub struct Row { pub key: Key, pub verdict: Verdict, pub only: Option<Intent> }
 pub struct CodeTable {
     pub rows: &'static [Row],
-    pub unlisted: Verdict,             // required; documented default for unlisted codes
-    pub status: &'static [(u16, Verdict)], // documented pre-execution statuses only (rule 5)
+    pub unlisted: Verdict,                  // required; never Satisfied
+    pub status: &'static [(u16, Verdict)],  // documented 4xx only (rule 5); never Satisfied
 }
-pub enum NativeCode<'a> { Int(i64), Text(&'a str) }
+pub enum NativeCode<'a> { Int(i64), Text(&'a str), None } // None: code-less venues
 pub struct Native<'a> { pub code: NativeCode<'a>, pub message: &'a str }
+pub struct ResendGrant { /* private */ }
 
 impl CodeTable {
-    pub const fn new(rows: &'static [Row], unlisted: Verdict) -> Self;
-    pub fn verdict(&self, code: NativeCode<'_>, intent: Intent) -> Verdict; // WS login, startup
+    pub fn verdict(&self, native: &Native<'_>, intent: Intent) -> Verdict; // WS login, startup
 }
-pub fn decode_int(token: &str) -> Option<i64>; // strict integer, rule 4
+pub fn decode_int(token: &str) -> Option<i64>;            // strict integer, rule 4
+pub fn auth_outcome(table: &CodeTable, context: &Context, native: &Native<'_>)
+    -> Option<AuthOutcome>;                               // rule 10, credentialed only
+pub fn assert_table(table: &CodeTable);                   // venue table tests
 
-// Managed path (Cx), recording the fact in the command journal:
-cx.http_write_failure(&context, &TABLE, intent, &response, native) -> Verdict;
-cx.http_write_unproven(&context, message) ;          // rule 6
+// Managed path (Cx). Each call records the fact in the command journal.
+cx.http_write_failure(&context, &TABLE, intent, &response, native)
+    -> (Verdict, Option<ResendGrant>);
+cx.http_write_unproven(&context, message);                // rule 6
+cx.http_write_batch(&context, &TABLE, intent, expected,
+    items: impl Iterator<Item = Result<&str /* native id */, Native<'_>>>) -> BatchVerdict;
 cx.http_read_failure(&context, &TABLE, &response, native) -> ReadFailure;
-pub struct ReadFailure { pub error: VenueError, pub retry: Option<RetryEvidence>,
-                         pub auth: Option<AuthOutcome> }
+pub struct ReadFailure { pub error: VenueError, pub retry: Option<ReadRetry> } // no Outcome
+
+// Legacy, unmanaged venues (transitional; see below):
+pub enum Released<'a> { No, Transport, Status(&'a Response<'a>) }
+pub fn write(table: &CodeTable, intent: Intent, released: Released<'_>, native: Option<Native<'_>>)
+    -> (Verdict, VenueError);
 ```
 
+- **Row lookup order:** the first row whose key matches and whose `only` equals
+  the intent, then the first matching row with `only: None`, then `unlisted`.
+  Duplicate keys are allowed only when `only` partitions them. For example,
+  Binance −2011 is `Satisfied(Cancel)` with `only: Cancel`, plus a refusal for
+  every other intent.
+- **`assert_table`** rejects:
+  - overlapping ranges;
+  - unpartitioned duplicates;
+  - `Satisfied` in `unlisted`, in status rows, on a `Range` key, or without a matching `only`;
+  - status rows for 408 or ≥500.
 - **`MessagePrefix`** applies only to the venue's own native message field, and
   only for venues with no native codes (Hyperliquid, TxFlow, Polymarket). It is an
   exact prefix, never `contains`. Each row cites the doc or tape that proves the
   text is stable.
-- **One table per venue family** serves writes, reads, startup and WS login. A
-  `Row.only` restricts a verdict to one intent, for example Binance −2011 is
-  `Satisfied(Cancel)` only.
-- **Table tests:** a shared `classify::assert_table(&TABLE)` rejects overlapping
-  ranges, duplicate keys and a `Satisfied(intent)` row whose `only` disagrees.
-  Each venue table calls it from its own test.
-- **Legacy, unmanaged venues** call the same pure `classify::write(&TABLE, intent,
-  status, native)` and get a `VenueError` back. This is one engine function, not a
-  fallback path. Partial-ID preservation and aggregation become correct only when
-  a venue adopts the RequestContext write journal (rule 9). The venue lanes
-  consume this API in their adoption PRs.
+- **One table per venue family** serves writes, reads, startup, WS login and
+  `account_auth_outcome`.
+- **Legacy `classify::write`** is a pure table lookup. It returns the `Verdict` so
+  that a legacy resend can be gated, and it takes a typed `Released` so that rule 1
+  and rule 2 stay distinct.
+  - Legacy signer failures must route through `on_sign_error`, not
+    `on_request_failed(&str)` (#26).
+  - `Seal::Legacy` still passes the venue's aggregation through, so this path
+    alone never closes a P0 row. P0 rows close only with RequestContext write adoption.
+  - The legacy path is deleted with the transitional bridge, as a master-merge
+    blocker (RUST_MASTER_MERGE_BLOCKERS.md).
 
-The API shape may tighten during phase 2 review. Changes are announced to the
-venue lanes before merge.
+Venue lanes consume this API in their adoption PRs. Breaking changes found in
+phase 2 review are announced to codex-9czdjh, codex-zs5e83, codex-ih35js and
+codex-hcmq3f before merge.
 
 ## Inventory (ranked by production impact)
 
@@ -136,6 +202,8 @@ before fixing it, because other lanes may have landed it already.
 | 6 | grvt | `lib.rs:918` | Code 1000 re-login and resend, with no status <500 check. |
 | 7 | bybit | `lib.rs:675-698,2396` | Text-matched (`recv_window`, `error sign`) re-sign and resend of writes, including from transport-failure text, outside `RetryPolicy`. |
 | 8 | bitrue | `lib.rs:829-838,905-915` | −1022 re-sign and resend at any status. |
+| 8a | cryptocom | `trading.rs:418-434` (5xx body reaches it through `lib.rs:636`) | 40101 re-sign and resend at any status, including 5xx. |
+| 8b | asterdex | `request.rs:262-285` | −1022/−1021 re-sign or clock resend at any status. The code is compared as `f64` (`== Some(-1022.0)`), with message-text fallback. |
 | 9 | cryptocom | `lib.rs:636-641` | A native code on 408/5xx is classified by the table, so a 500 carrying 306 becomes `rejected`. |
 | 10 | grvt, lighter | `wire.rs:202`; `trading.rs:776-829` | A 408 carrying a native code becomes `rejected`. |
 
@@ -154,7 +222,7 @@ before fixing it, because other lanes may have landed it already.
 | 19 | asterdex | `trading.rs:426` | `continue_on_error` PlaceOrders with any success reaches `done`. Failed legs appear only in `command_error`. |
 | 20 | backpack | `trading.rs:771-779` | One failed Pair leg makes both legs Unknown and drops the placed ID. |
 | 21 | grvt, lighter, woo, kraken futures, bitrue, coinbase | `trading.rs:1393-1405`; `trading.rs:1029-1034`; `trading.rs:1137-1153`; `trading.rs:965-990`; `trading.rs:1029-1050`; `trading.rs:1606-1640` | IDs survive only in message text or hand-written JSON, not structured `partial`. |
-| 22 | bitrue | `wire.rs:61` → `trading.rs:1524` | A malformed 2xx write reply gets None instead of Unknown. |
+| 22 | bitrue | `wire.rs:61` → `trading.rs:1527` | A malformed 2xx write reply gets None instead of Unknown. |
 | 23 | lighter | `account.rs:2087`; `limits.rs:224-231` | ChangeTier write failures have no outcome, even after transport loss or a 5xx. |
 | 24 | orderly | `trading.rs:1781,1513` | −1007 is left None and skips the uncertain-write account reconcile. |
 | 25 | coinbase | `trading.rs:1533-1535` | `DUPLICATE_CLIENT_ORDER_ID` "may name a live order" but is None, not Unknown. |
@@ -171,8 +239,8 @@ before fixing it, because other lanes may have landed it already.
 | 31 | breakoutprop | `lib.rs:816` | Login 401/403 carries no kind, so it is emitted as `REQUEST_FAILED`, not `AUTH_REJECTED`. |
 | 32 | paradex | `account.rs:510-521` | Auth refusals are retried every 2 s forever, with no auth kind. |
 | 33 | bitunix | `recovery.rs:209-216` | Read 401/403/404 → `network`. 10007 is `authInvalid` on writes but `invalidInput` on reads. |
-| 34 | okx, bingx, blofin, bitget, kucoin, weex | `trading.rs:1077` vs `account.rs:2193`; `account.rs:1729`; `trading.rs:1584`; `trading.rs:1920-1925`; `wire.rs:313`; `trading.rs:376` | Auth tables diverge or are ignored on writes. KuCoin 400002 (clock skew) is `authInvalid`. Bitget/WEEX native auth codes on writes get kind `rejected`. |
-| 35 | apexomni, bitrue, cryptocom, kraken, woo, blofin, bingx, kucoin, mexc, backpack, polymarket | Each family's table fallback | An unlisted native code gives None. Each table must declare `unlisted`. |
+| 34 | okx, bingx, bitget, kucoin, weex | `trading.rs:1072-1078` vs `account.rs:2190-2197`; `account.rs:1729`; `trading.rs:1920-1925`; `wire.rs:302,313`; `trading.rs:376` | Auth tables diverge or are ignored on writes. The OKX write table lacks 50100/50101/50103-50105. KuCoin 400002 (clock skew) arrives as HTTP 401, so the status branch decides `authInvalid` before the table; the fix depends on rule 4 overriding status. Bitget/WEEX native auth codes on writes get kind `rejected`. |
+| 35 | apexomni, bitrue, cryptocom, kraken, woo, blofin (`trading.rs:1584`), bingx, kucoin, mexc, backpack, polymarket | Each family's table fallback | An unlisted native code gives None. Each table must declare `unlisted`. |
 | 36 | binance, asterdex, bybit | `account.rs:324`; `account.rs:353-357`; `lib.rs:357` | A non-JSON 4xx becomes code 0 / HTTP status in the native-code namespace (Bybit leaks the status as `venue_code`, `refresh.rs:258`). |
 | 37 | kraken futures, breakoutprop, coinbase, backpack | `trading.rs:727-740`; `lib.rs:835-843`; `trading.rs:1467`; `trading.rs:906-912` | A parsed native code is ignored on non-2xx, or a 2xx in-body refusal is None. |
 
@@ -206,23 +274,37 @@ before fixing it, because other lanes may have landed it already.
 1. **Plan (this document).** Committed and independently reviewed; API shape
    sent to codex-9czdjh, codex-zs5e83, codex-ih35js and codex-hcmq3f.
    Prerequisite seam #1808 (`request_context::Error::venue_error`).
-2. **Engine core.** `classify.rs` with `Verdict`/`CodeTable`/strict decode, and
-   `Cx::http_write_failure`/`http_write_unproven`/`http_read_failure` wired into
-   the existing `CommandWrites`/`ResponseProof` path. Add `assert_table` and pure
-   precedence tests: rules 1–8, a code on 408/5xx, a non-JSON 4xx, `f64`-lookalike
-   codes, intent-scoped `Satisfied`, and resend refused on 5xx. Coordinate with
-   codex-uufub4 before touching `http_lifecycle.rs`/`request_context*.rs`.
+2. **Engine core.** `classify.rs` with `Verdict`/`CodeTable`/strict decode,
+   `assert_table` and `ResendGrant`. The `Cx` write/batch/read failure entries
+   plug into the existing `CommandWrites`/`ResponseProof` path.
+   `http_write_result` is narrowed to `Accepted` and gains an expected-count check.
+   `RetryEvidence::DefinitiveRefusal` becomes grant-only, with a one-shot flag per
+   leg. Add `retry_after_ms` and `auth_outcome`. Binance's existing
+   `http_write_result` and retry callers move in the same PR, because that is
+   the only managed venue.
+   - Pure precedence tests first: rules 1–10, a code on 408/5xx, a non-JSON 4xx
+     with and without a status row, `f64`-lookalike codes, code-over-status
+     (KuCoin 401+400002), intent-scoped `Satisfied`, a forged or second resend
+     refused, resend refused on 5xx, and a batch count mismatch.
+   - The documented-4xx survey (rule 5) lands in this phase.
+   - Coordinate with codex-uufub4 before touching `http_lifecycle.rs` or
+     `request_context*.rs`.
+   - **2b:** an engine-owned uncertain-write reconcile reaction, plus the rule 5
+     rate-window deferral.
 3. **Proof through two venues, each with a failing test before the passing one.**
    - **Binance (managed):** replace `trading.rs:1847 failure`, `account.rs:311
-     venue_error` and the special codes with `BINANCE: CodeTable`. RED test: a
-     non-JSON 429/418 on a write currently reports Unknown with no kind (#36). It
-     must report Unknown with kind `rateLimited` and `retryAfterMs`.
-   - **KuCoin (legacy, futures and spot share `wire.rs:280`, with no open PR):**
-     replace `write_failure` with `KUCOIN: CodeTable` through `classify::write`.
-     RED tests: 400002 is not `authInvalid` (#34), and a 418 write is
-     `rateLimited` Unknown, not plain Rejected.
-   - #13 (partial IDs) needs KuCoin's RequestContext write adoption. It is listed
-     as an adoption requirement, not patched locally.
+     venue_error`, the special codes and the batch projection
+     (`trading.rs:945-985`) with `BINANCE: CodeTable` and `http_write_batch`.
+     RED test: a non-JSON 429/418 on a write currently reports `unknown` with no
+     kind (#36). It must report `rejected` + `rateLimited` from Binance's
+     documented status rows, with `retryAfterMs` when the header is present.
+   - **KuCoin (futures and spot share `wire.rs:280`, with no open PR).**
+     - RED tests: 400002 with HTTP 401 is not `authInvalid` (#34), a 418 write
+       is `rateLimited`, and a failed multi-order PlaceOrders keeps the accepted
+       IDs (#13).
+     - #13 only closes through the write journal, so this proof includes KuCoin's
+       RequestContext write adoption. Before starting it, confirm with claude-ddi2il
+       that no venue lane owns KuCoin; if one does, use that lane's adoption instead.
 4. **Fan-out, one family per PR, in P0 order.** Venues with open PRs touching
    their source wait for those PRs or go through the owning lane. Each venue lane
    adopting RequestContext writes must use the table plus rule 9, which closes
@@ -238,6 +320,7 @@ No message text changes. Expected `kind`/`outcome` corrections that callers
 reading `ExchangeError` fields will see (`opts.classified`, `isUnknownOutcome`,
 `exchangeErrorTags`):
 - Writes previously None become `unknown` or `rejected`.
+- A bare 4xx write without a documented status row flips from `rejected` to `unknown` (with an auth or rate-limit kind). Families with documented rows keep `rejected`. Each PR lists its family's flip.
 - 5xx/408 coded writes on Crypto.com, GRVT and Lighter become `unknown`.
 - Phemex/TxFlow 4xx gain auth and rate-limit kinds.
 - KuCoin 400002 stops being `authInvalid`.
