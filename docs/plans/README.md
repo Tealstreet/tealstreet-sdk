@@ -17,6 +17,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | MEXC RequestContext adoption | Pinned inventory and adoption plan | Before MEXC managed reads/writes, startup refusal repair or legacy inventory changes. | [RUST_MEXC_REQUEST_CONTEXT.md](RUST_MEXC_REQUEST_CONTEXT.md) |
 | WOO RequestContext adoption | Pinned inventory and adoption plan | Before WOO managed reads, routing, release pacing or legacy inventory changes. | [RUST_WOO_REQUEST_CONTEXT.md](RUST_WOO_REQUEST_CONTEXT.md) |
 | Crypto.com RequestContext adoption | Pinned inventory and public-depth implementation plan | Before Crypto.com standalone depth, signed POST read/write ownership or legacy inventory changes. | [RUST_CRYPTOCOM_REQUEST_CONTEXT.md](RUST_CRYPTOCOM_REQUEST_CONTEXT.md) |
+| OKX-only socket-core variant | Option 1 preparation; no merge | Before selecting the OKX-only managed-sockets boundary or its CI evidence. | [RUST_SOCKET_OKX_ONLY_VARIANT.md](RUST_SOCKET_OKX_ONLY_VARIANT.md) |
 | Public managed HTTP headers | Shared additive API plan | Before unsigned HL/GRVT JSON POSTs need static headers on the existing managed transport path. | [RUST_PUBLIC_HTTP_HEADERS.md](RUST_PUBLIC_HTTP_HEADERS.md) |
 | Selected signer mode | Active shared SDK fix; queued after #1741 | Before changing RemoteSigner precedence, PayloadSigner admission or runtime feed selection with both callbacks. | [RUST_SELECTED_SIGNER_MODE.md](RUST_SELECTED_SIGNER_MODE.md) |
 | Engine resource IDs | Planned shared allocator/host correction | Before changing physical socket/request/timer identities or managed host numeric ingress. | [RUST_SAFE_ENGINE_IDS.md](RUST_SAFE_ENGINE_IDS.md) |
@@ -239,4 +240,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Bundle source readiness matrix | Immutable source inventory; no live certification | Before assessing all-held-venue eligibility or refreshing rollout source evidence. | [rust-bundle-readiness.json](rust-bundle-readiness.json) |
 
 | Shared live Plan admission | Implementation plan | Before consuming Preflight, native whole-plan roots, reserved call slots or owned readiness. | [RUST_LIVE_PLAN_ADMISSION.md](RUST_LIVE_PLAN_ADMISSION.md) |
+| KuCoin Spot steady CPU | Profiling plan | Before attributing public steady-state CPU cost or proposing shared-path performance changes. | [RUST_KUCOIN_SPOT_STEADY_PROFILE.md](RUST_KUCOIN_SPOT_STEADY_PROFILE.md) |
 | OKX dispatch signer migration | Planned | OKX opaque identities, send-time HTTP/WS and hosted caller adoption | [RUST_OKX_DISPATCH_SIGNER.md](RUST_OKX_DISPATCH_SIGNER.md) |

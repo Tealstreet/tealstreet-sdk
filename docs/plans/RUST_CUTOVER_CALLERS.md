@@ -5370,6 +5370,47 @@ A satisfied native cancel may prove a subset without creating IDs. That proof
 still leaves any unresolved targets Unknown; a successful subset never cleans up
 the remainder or extends its deadline.
 
+## Shared ticker symbol lookup
+
+Ticker symbol reads and updates use the shared Store index. Ticker row order,
+last-duplicate lookup winner, replacement/delisting and append-only recovery
+indices retain their contracts. Full snapshots and dirty-field deltas keep the
+same row identities and signed-zero behavior. Venue code and cached row-index
+consumers continue using the same Store API.
+
+Each independently loaded engine/account Store owns its ticker index. The measured
+native 965-symbol example adds 55,743 bytes (about 54.4 KiB) retained index allocation
+per Store; replacement peak adds 111,486 bytes (about 108.9 KiB) per Store while old
+and new maps coexist. Ten similarly sized independent Stores therefore add about
+544 KiB retained, with about 1.06 MiB additional peak if all replace concurrently.
+The cost occurs per Store, not per message, and grows with symbol count/string
+length and hash-table capacity steps. These are native index-only measurements;
+actual process/browser/WASM costs include allocator and memory-page effects.
+
+## Engine socket lifecycle: OKX
+
+OKX authentication state, socket epochs, reconnect permission, subscription
+replay and retirement use the shared Engine lifecycle. Native venue codecs
+provide login/subscription payloads and Store invalidation through the existing
+socket actions and events. Retired or expired frames and timers cannot restore
+authentication, replay interests, advance private health or publish a parked
+signing result. Permanent OKX private/business credential refusal revokes both
+retry authorities before callbacks; reconnectable loss retains native recovery.
+
+Current desired book/candle interests survive reconnect. Retirement clears only
+the retiring feed's owned public depth before retry; account/history/settings
+freshness fences remain unchanged. Physical IDs retain the shared host-safe
+integer boundary and signing/remote-signing wire contracts remain unchanged.
+
+Bitunix and all other venue families retain their existing socket adapters.
+Bitunix keeps its native pre-ACK reads, first-pong idle activation and shard
+pacing. The temporary managed-sockets feature remains until every legacy family
+has adopted the shared lifecycle; its inventory includes Bitunix explicitly.
+
+Initial HTTP command admission precedes any managed socket side effect. Socket
+registration, retirement, closure and queued work spend a fresh command-entry
+loan even when no new transport identity is allocated.
+
 ## OKX dispatch signer adoption (draft; CI evidence pending)
 
 This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
