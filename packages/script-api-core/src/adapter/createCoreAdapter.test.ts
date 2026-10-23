@@ -4,7 +4,11 @@ import type { HostBindings, HostWriteEvent } from './HostBindings';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OrderType } from '@tealstreet/safe-cex/src/types';
+import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
+
+import { isErrorReported, markErrorReported } from '@tealstreet/safe-cex/src/commandOutcome';
+
+import { ScriptBatchOrderError } from '../index';
 
 import { CORE_WRITE_API_PATHS } from '../runtime/runtimeSurface';
 import { createCoreAdapter } from './createCoreAdapter';
@@ -116,6 +120,219 @@ describe('createCoreAdapter', () => {
     expect(writes).toHaveLength(1);
     expect(writes[0]).toMatchObject({ method: 'placeOrder', ok: false });
     expect(writes[0].error).toMatch(/unknown market/);
+  });
+
+  describe('partial batch failures', () => {
+    const batch = [
+      { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 1 },
+      { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 2 },
+    ];
+
+    it('retains accepted IDs and the exact outcome in the failed write event', async () => {
+      const failure = Object.assign(new Error('second leg response lost'), {
+        partialOrderIds: ['accepted-1'],
+        outcome: 'unknown',
+      });
+      const placeOrders = vi.fn().mockRejectedValue(failure);
+      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders }) });
+      const success = vi.fn();
+      await createCoreAdapter(host)
+        .placeOrders(batch, 'main')
+        .then(success, () => undefined);
+
+      expect(success).not.toHaveBeenCalled();
+      expect(placeOrders).toHaveBeenCalledTimes(1);
+      expect(writes).toEqual([
+        {
+          method: 'placeOrders',
+          account: 'main',
+          summary: 'placeOrders 2x BTCUSDT',
+          ok: false,
+          error: 'second leg response lost',
+          partialOrderIds: ['accepted-1'],
+          outcome: 'unknown',
+        },
+      ]);
+      expect(writes[0]).not.toHaveProperty('orderIds');
+    });
+
+    it('rejects with a typed partial failure without changing the SDK message', async () => {
+      const failure = Object.assign(new Error('second leg rejected'), {
+        partialOrderIds: ['accepted-1'],
+        outcome: 'rejected',
+      });
+      const { host } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const success = vi.fn();
+      const caught = await createCoreAdapter(host)
+        .placeOrders(batch, 'main')
+        .then(success, (error: unknown) => error);
+
+      expect(success).not.toHaveBeenCalled();
+      expect(caught).toMatchObject({
+        name: 'ScriptBatchOrderError',
+        message: 'second leg rejected',
+        partialOrderIds: ['accepted-1'],
+        outcome: 'rejected',
+        cause: failure,
+      });
+    });
+
+    it('keeps ordinary failures unchanged and never reports them as success', async () => {
+      const failure = new Error('batch refused before sending');
+      const { host, writes } = fakeHost({
+        getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }),
+      });
+      await expect(createCoreAdapter(host).placeOrders(batch, 'main')).rejects.toBe(failure);
+      expect(writes).toEqual([
+        {
+          method: 'placeOrders',
+          account: 'main',
+          summary: 'placeOrders 2x BTCUSDT',
+          ok: false,
+          error: failure.message,
+        },
+      ]);
+    });
+
+    it('retains canonical SDK facts and reporting state without copying arbitrary fields', async () => {
+      const fields = {
+        partialOrderIds: ['accepted-1'],
+        outcome: 'unknown',
+        kind: 'network',
+        code: 'native-code',
+        retryAfterMs: 250,
+        command: 'placeOrders',
+        commandId: 17,
+        receiptKey: 'receipt-17',
+        clientOrderIds: ['requested-1'],
+        actualClientOrderIds: ['wire-1'],
+        failedOrderIndex: 1,
+        orderIdentities: [{ symbol: 'BTCUSDT', kind: 'clientOrderId', identity: 'wire-1' }],
+      };
+      const failure = Object.freeze(
+        Object.assign(new Error('native message'), fields, { privateContext: 'not public' }),
+      );
+      markErrorReported(failure);
+      expect(Object.hasOwn(failure, 'errorReported')).toBe(false);
+      const { host } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const caught = await createCoreAdapter(host)
+        .placeOrders(batch, 'main')
+        .catch((error: unknown) => error);
+      expect(caught).toBeInstanceOf(ScriptBatchOrderError);
+      expect(caught).toMatchObject({
+        ...fields,
+        message: 'native message',
+        name: 'ScriptBatchOrderError',
+        cause: failure,
+      });
+      expect(isErrorReported(caught)).toBe(true);
+      for (const key of Object.keys(fields)) expect(Object.hasOwn(caught as object, key)).toBe(true);
+      expect(caught).not.toHaveProperty('privateContext');
+    });
+
+    it.each([undefined, 'notSent', 'rejected', 'unknown'] as const)(
+      'copies immutable IDs and preserves the exact optional outcome %s',
+      async (outcome) => {
+        const ids = ['accepted-1', 'accepted-2'];
+        const failure = Object.freeze(
+          Object.assign(new Error('native message'), {
+            partialOrderIds: ids,
+            ...(outcome !== undefined && { outcome }),
+            partialOrderCount: 2,
+            totalOrderCount: 3,
+          }),
+        );
+        const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+        const caught = await createCoreAdapter(host)
+          .placeOrders(batch, 'main')
+          .catch((error: unknown) => error);
+        expect(caught).toBeInstanceOf(ScriptBatchOrderError);
+        const partial = caught as ScriptBatchOrderError;
+        expect(partial.message).toBe('native message');
+        expect(partial.cause).toBe(failure);
+        expect(Object.hasOwn(partial, 'partialOrderIds')).toBe(true);
+        expect(Object.hasOwn(partial, 'outcome')).toBe(outcome !== undefined);
+        expect(Object.hasOwn(writes[0], 'outcome')).toBe(outcome !== undefined);
+        expect(partial.outcome).toBe(outcome);
+        expect(partial.partialOrderCount).toBe(2);
+        expect(partial.totalOrderCount).toBe(3);
+        expect(writes[0]).toMatchObject({ ok: false, partialOrderCount: 2, totalOrderCount: 3 });
+        expect(Object.isFrozen(partial.partialOrderIds)).toBe(true);
+        ids.push('not-part-of-this-failure');
+        expect(partial.partialOrderIds).toEqual(['accepted-1', 'accepted-2']);
+        expect(writes[0].partialOrderIds).toEqual(['accepted-1', 'accepted-2']);
+        expect(writes[0]).not.toHaveProperty('orderIds');
+        expect(ScriptBatchOrderError.from(partial)).toBe(partial);
+      },
+    );
+
+    it.each([[], ['accepted-1', 3], Array(1), 'accepted-1'].map((ids) => ({ ids })))(
+      'leaves malformed/empty IDs unchanged (%j)',
+      async ({ ids }) => {
+        const failure = Object.assign(new Error('ordinary failure'), { partialOrderIds: ids, outcome: 'unknown' });
+        const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+        await expect(createCoreAdapter(host).placeOrders(batch, 'main')).rejects.toBe(failure);
+        expect(writes[0]).toMatchObject({ ok: false, error: failure.message });
+        expect(writes[0]).not.toHaveProperty('partialOrderIds');
+        expect(writes[0]).not.toHaveProperty('orderIds');
+      },
+    );
+
+    it('preserves a failure whose partial metadata cannot be read', async () => {
+      const failure = Object.defineProperty(new Error('native message'), 'partialOrderIds', {
+        get() {
+          throw new Error('unreadable metadata');
+        },
+      });
+      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      await expect(createCoreAdapter(host).placeOrders(batch, 'main')).rejects.toBe(failure);
+      expect(writes[0]).toMatchObject({ ok: false, error: 'native message' });
+    });
+
+    it('omits invalid outcomes and counts instead of inventing facts', async () => {
+      const failure = Object.assign(new Error('native message'), {
+        partialOrderIds: ['accepted-1'],
+        outcome: 'knownPartial',
+        partialOrderCount: -1,
+        totalOrderCount: 1.5,
+      });
+      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const caught = await createCoreAdapter(host)
+        .placeOrders(batch, 'main')
+        .catch((error: unknown) => error);
+      expect(caught).toBeInstanceOf(ScriptBatchOrderError);
+      for (const key of ['outcome', 'partialOrderCount', 'totalOrderCount']) {
+        expect(caught).not.toHaveProperty(key);
+        expect(writes[0]).not.toHaveProperty(key);
+      }
+    });
+
+    it('keeps successful batch IDs on the success path only', async () => {
+      const { host, writes } = fakeHost({
+        getExchange: () => ({ placeOrders: vi.fn().mockResolvedValue(['id-1', 'id-2']) }),
+      });
+      await expect(createCoreAdapter(host).placeOrders(batch, 'main')).resolves.toEqual({ orderIds: ['id-1', 'id-2'] });
+      expect(writes[0]).toMatchObject({ ok: true, orderIds: ['id-1', 'id-2'] });
+      expect(writes[0]).not.toHaveProperty('partialOrderIds');
+      expect(writes[0]).not.toHaveProperty('outcome');
+    });
+
+    it('keeps the observer text for a plain failure record while preserving its SDK message on the wrapper', async () => {
+      const failure = { message: 'serialized native message', partialOrderIds: ['accepted-1'], outcome: 'rejected' };
+      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const caught = await createCoreAdapter(host).placeOrders(batch, 'main').catch((error: unknown) => error);
+      expect(caught).toMatchObject({ name: 'ScriptBatchOrderError', message: failure.message, cause: failure });
+      expect(writes[0]).toMatchObject({ ok: false, error: 'Unknown error', partialOrderIds: ['accepted-1'] });
+    });
+
+    it('keeps validation failures local and unwrapped', async () => {
+      const placeOrders = vi.fn();
+      const { host } = fakeHost({ getExchange: () => ({ placeOrders }) });
+      await expect(createCoreAdapter(host).placeOrders([{ ...batch[0], amount: 0.04 }], 'main')).rejects.toMatchObject({
+        name: 'ScriptValidationError',
+      });
+      expect(placeOrders).not.toHaveBeenCalled();
+    });
   });
 
   it('cancels exactly the ids named, ignoring the other filter fields', async () => {

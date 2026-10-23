@@ -4,7 +4,9 @@ use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{
     Action, Engine, Event, HttpRequest, Level, Notice, RequestId, Response, SocketId, TimerId,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
+use support::setup::Options;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
 
@@ -46,13 +48,13 @@ fn request(actions: &[Action], path: &str) -> RequestId {
         .id
 }
 fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    let mut e = support::setup::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
         private_ws_headers: ws,
         ..Options::default()
-    }));
+    });
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
@@ -1245,11 +1247,28 @@ fn failed_settings_read_backs_off_only_settings() {
 }
 #[test]
 fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        ..Options::default()
-    }));
+    // Trusted setup refuses it; a provider-supplied identity without a passphrase
+    // ref still deactivates rather than publishing an empty account.
+    assert!(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Options::default()
+        }
+        .try_build()
+        .is_err()
+    );
+    let mut e =
+        safe_cex_engine::test_support::seeded_engine(WeexFutures::new(support::NativeOptions {
+            credentials: Some(safe_cex_engine::signing::Identity {
+                extra: Default::default(),
+                credential: safe_cex_engine::signing::KeyRef("primary.credential".into()),
+                signing: safe_cex_engine::signing::KeyRef("primary.signing".into()),
+                passphrase: None,
+                stable_id: None,
+            }),
+            ..Default::default()
+        }));
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
@@ -1279,12 +1298,12 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
 }
 #[test]
 fn ticker_seed_failure_does_not_block_private_start() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    let mut e = support::setup::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
         ..Options::default()
-    }));
+    });
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);

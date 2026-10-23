@@ -196,3 +196,59 @@ checks pass (13 adversarial controls). Independent source/adversarial, caller an
 full-map reviews are clean after correcting fixture paths, native retry/routing
 and shared dispatcher authority. Architecture gate No for all four plans.
 No production source, test or inventory changes are claimed by this checkpoint.
+
+## Unsigned candle command slice
+
+Pinned landing7c5e706e410 after Crypto.com #1818. Current source/test claims
+exclude history #1790/#1795/#1796/#1797; HMAC owner claude-4yjlw0 confirms lib.rs is clear.
+Unsigned candles are selected only when BOTH constructed primary and secondary
+credential containers are absent. `public_data_only` alone is not that test:
+optional credentials still select the exact legacy signed request branch.
+The HMAC owner will coordinate before later Phemex edits; its signed migration
+waits for shared credential selection and the engine read helper after #1817.
+
+Add a separate Context-bearing public candle Pending continuation and a small
+native adapter module. In the genuine FetchCandles callback, unsigned selection
+calls engine admit_http_command with Read/Public,20s,Never before preflight or
+transport. Rejected is already published; Revoked grants nothing. No numeric
+owner argument/fallback exists in the public adapter. The original signed arm,
+credentials/signing bytes, native query and legacy numeric terminals remain
+exactly available for the credentialed branch; no common request helper switch.
+
+Managed streamed delivery uses the existing data.rows selector, CandleRow
+mapping, sorted output, status/native failure behavior and rate-limit pause.
+Route/signing setup and transport/deadline failure carry the engine's typed
+error to the Context terminal; public network/expiry remains a declared read
+NotSent, with no credential evidence. Late/duplicate/expired replies cannot
+finish another owner or update public/account caches. There is no new retry,
+local timer, status ladder, signing recipe or cancellation authority.
+
+Before production changes, commit original-source RED tests for preparation,
+original20s expiry (parked and released), typed setup/network failures, stale
+callbacks/ID reuse and genuine initial rejection. Keep original native query,
+limit/from/daily boundary assertions; adapt their transport drain to the shared
+prepared fixture and repair the existing backward response clock without
+weakening assertions. Primary/secondary/dual credential controls must pass on
+original production and retain the unsigned/signed selection boundary.
+
+Files: lib.rs, new public_candles.rs, public.rs transport fixture,
+request_context_candles.rs, and append-only plan/CALLERS/AUDITS/QUALITY ledgers.
+Every legacy fingerprint remains necessary for credentialed candles or other
+families: this partial unsigned adoption has zero inventory delta, no exemption
+and no new legacy sites. The credentialed cutover will remove them after the
+shared signer/selection prerequisites exist. Both ratchets must match incoming
+exactly. Full Phemex+Binance native tests, scoped fmt/strict Clippy and independent
+source/adversarial, caller and full-map reviews are required before CI/readiness.
+Architecture No: native codecs consume shared command/lifecycle authority.
+
+### Unsigned candle verification checkpoint
+
+Six separately committed lifecycle controls fail on original production while
+credentialed primary/secondary/dual compatibility passes. The managed path
+passes all9 new controls plus14 existing public tests, including a
+native error/malformed-row/missing-list comparison against the signed path and
+late429 suppression. Full Phemex+Binance suites pass475 tests across38 targets;
+scoped fmt and strict all-target Clippy pass. Independent source/adversarial,
+caller and full-map reviews are clean, architecture No. The exact scanner and
+manifest remain unchanged; integration of paused landing258c880656f and both
+ratchets (14 controls) pass. Exact-head CI precedes merge readiness. Credentialed migration remains explicitly outstanding.

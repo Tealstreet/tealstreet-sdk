@@ -2079,6 +2079,429 @@ occurrences: the original shared streamed helper still serves unmigrated candles
 so this area justifies no ratchet prune or zero-legacy claim. The complete venue
 inventory and remaining prerequisites are committed in PR #1819.
 
+## MEXC candle initial rejection ownership
+
+Closed: the candle adapter's pre-Context numeric refusal no longer assigns
+NotSent to an unissued read. Genuine engine command-entry admission publishes
+initial rejection once and denies numeric fallback. Original-source RED controls
+cover nonfinite time, capacity, valid ID reuse and preservation of an existing
+parked owner. Other MEXC command families remain separately inventoried.
+
+### MEXC/Phemex/Polymarket bounded reporter ownership (2026-10-23)
+
+These three account consumers use existing engine `RowReports<String>` bounded
+Once instead of local 4096-entry sets. This is a compatibility migration, not a
+new financial defect finding: native messages, severity, labels and rearm sites
+remain authoritative. MEXC keeps its rejection-filtered mapped IDs and shared
+coin/position/order memory. Phemex keeps currency-specific clean rearm and
+leg-ID filtering before symbol-key rearm inside admitted reads. Polymarket keeps
+validated zero/priced holding forgetting before complete-response admission;
+its separate permanent unlisted-asset memory remains unchanged.
+
+Nine new original-GREEN native controls pass with all116 account tests on
+unchanged actual #1780 production (40 MEXC,40 Phemex,36 Polymarket). The sealed
+source/test/log receipt is
+`60396c532d8eb3d220bd3ba74d73578a67d92ba7fd2ef0ae6ee67a2864abba1c`.
+The controls pin namespace/currency isolation, rejected duplicate versus named
+partial recovery, stale-slice no-rearm, and early valid holding recovery despite
+later duplicate invalidation. No product-RED, all-venue closure or private parity
+claim. Remaining queued integrations, current-head CI and authenticated complete
+raw/ordered-gate proof remain required before merge.
+
+
+## Lighter candle request ownership
+
+Command candle reads and subscription REST fallbacks use the existing managed
+HTTP lifecycle. Commands use Context finalizers and the exact read-delivery
+validator; background reads use engine delivery admission plus native
+subscription generation/revision fences against stale candle publication.
+Typed preparation failures retain engine-provided metadata; terminal background
+paths retire their handle before freshness exits and release only their own
+in-flight generation. No venue admission, retry or outcome algorithm is added.
+
+The four removed lexical occurrences shrink Lighter51->47 and its lib10->6.
+One existing numeric failure remains solely when Context issuance itself refuses
+before returning authority; its removal belongs to the shared pre-authority
+failure seam. All other venue maps remain exact. This closes this candle area
+only, not the remaining public/private/history/signing inventory or master gate.
+
+## Paradex independent startup authority
+
+~~Paradex public catalog and ticker seeds bypass managed HTTP authority and can
+remain pending without an engine-owned original deadline.~~ Independent background
+Read Contexts now own preparation, release and each 20-second attempt. Native
+staging commits only on successful validated delivery; refusal, expiry and
+transport failure retire authority before the existing startup Backoff runs.
+Candle fallback, authenticated/account/history and joined startup work remain in
+their previously committed inventory; this closes only public_seed's send site.
+
+## Hyperliquid perps candle Context authority
+
+Perps candles use actual shared command admission, unsigned static-header ingress,
+exact read delivery validation and Context terminals. Native row parsing, body
+geometry and the existing single HTTP status codec remain. Spot candles preserve
+their legacy protocol branch; no signer, retry, deadline or classification core
+is implemented in the adapter. All 52 inventory occurrences (41 fingerprints)
+remain because spot and other paths still use every shared lexical site. This
+runtime area makes no inventory deletion or all-family closure claim.
+
+## BloFin candle entry fallback retirement
+
+The final numeric candle refusal recorded in the earlier BloFin public-read
+audit is removed. Initial admission uses the landed engine command-entry seam;
+shared rejection owns the pre-Context terminal. Candle payloads no longer carry
+a numeric command ID, and physical callbacks complete through their Managed
+Context. The remaining discovery error fallback accepts only Markets/Tickers.
+No venue admission policy or finalizer is introduced. The exact own inventory
+shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
+closed/private history and trading remain tracked with their original owners.
+
+
+## TxFlow indexed history ownership
+
+TxFlow now adopts existing CursorHistory for native identity observations, staged
+page admission, accepted rows and completion. The native 2000-step/200000-cap
+indexed sequence maps to shared cursor tokens with 101 pages per income stage.
+Empty/no-new continuation and cap proof refusals remain strict; actual later
+failures recover only prior accepted eligible output with one owner warning.
+Income stage restart retains the same output owner and identities. Native
+info payload, archived instrument mapping, financial codecs, full pagination
+before sorting/truncation and Store isolation remain unchanged. Exact history
+legacy inventory prunes eleven to six sites, zero additions or checker changes.
+
+
+## Orderly accepted-page history ownership
+
+Orderly history adopts the existing engine CursorHistory owner without a new
+engine API or venue-local completion implementation. The single cursor walk
+retains the total fifty-page regular/algo budget; native metadata census and
+per-stage limit remain venue facts. Actual later read failures recover only
+accepted eligible output with the owned warning, while native proof and signing
+refusals remain strict. Failed streamed prefixes and filtered rows never authorize
+recovery. Request builders, signing, timers, account reducers and Store are
+unchanged. Exact request inventory shrinks from thirteen to nine entries by
+removing four numeric finalizers, with no additions or checker changes.
+
+
+## MEXC accepted-page history ownership
+
+MEXC history adopts existing CursorHistory rather than owning a result vector,
+identity set and numeric finalization. Window transitions retain the same output
+owner and identity ledger while resetting the existing native per-window page
+budget. Only validated pages authorize partial recovery; failed prefixes and
+filtered rows do not. The cap stays strict. Request builder, native row mapping,
+account state and Store publication policy are unchanged. Exact request legacy
+inventory prunes nine entries to six, no additions or checker/bootstrap changes.
+Kraken Spot, BreakoutProp and Hyperliquid Spot remain explicitly classified as
+non-pageable inherited stubs, with no new native history capability.
+
+## Phemex bounded non-income owner
+
+~~Phemex fills/orders/public trades store output and finalize through venue-local
+Vec and numeric completion branches.~~ Existing HistoryRows/Completion now owns
+staging, one-response admission and terminal delivery. No result is accepted
+until complete response validation, so failure rejects Internal rather than
+publishing a staged prefix, partial result or incomplete marker. Native limits,
+filters, dedupe, sort/shape, shared rate pause and lookup/income policy remain.
+This is bounded owner adoption, not a new pager or managed completion seam.
+[Scope and original controls](RUST_OWNED_HISTORY.md).
+
+## WOO shared history completion and global paging owner
+
+~~WOO retains accepted history rows, seen identities, physical-page budget and
+completion in the venue continuation.~~ Existing CursorHistory/Completion now
+owns those duties across all four implemented history axes, including native
+fallback transitions and delayed ledger continuations. Existing RangeWalk stays
+the subordinate engine v3 geometry selector, preserving its span/direction,
+identity-selection and strict truncation facts. No second completion authority,
+shared API extension, venue marker emitter or synthetic REST capability is added.
+Native current-page facts remain local until complete validation; failed prefixes
+do not enter shared dedupe or output. Existing mixed-row diagnostics keep their
+timing and also supply the owner's missing-coverage fact. All-native strict
+refusals and consuming legacy signing setup remain separate.
+
+## Non-pageable history coverage ownership
+
+~~Kraken Spot, BreakoutProp and Hyperliquid Spot locally return [] for unsupported
+historical lists without declaring missing coverage.~~ Existing
+HistoryRows/Completion now owns these terminal results and emits an explicit
+command-scoped incomplete warning before the unchanged array payload. No row is
+staged or accepted and no native endpoint is fabricated. Public trades reject
+through Completion with typed pre-I/O Unsupported/NotSent, while lookup's
+nondefinitive contract remains separate. Hyperliquid perpetual history and all
+native trading/signing/account paths retain their existing behavior.
+
+
+## Paradex independent book request authority
+
+Public REST book queries use existing engine managed release and Context
+completion with exact current read-delivery validation. Native snapshot parsing,
+public errors and bounded rate hints remain the existing request-owned codec;
+no status ladder, auth/retry policy or outcome aggregator is added. Typed
+preparation errors pass intact, and original deadlines/retirement fence stale
+results and reused command IDs. Live SBE/JSON books and held account/trading
+source are unchanged.
+
+The exact inventory prune is Paradex62->57: lib3->0 and depth_query3->1, with
+every other map unchanged. The remaining numeric refusal in depth_query exists
+only if initial authority issuance fails before returning a Context; its shared
+command-entry prerequisite remains explicit. This closes one independent read
+area, not the remaining private/history/candle/JWT or whole-venue inventory.
+
+## Lighter candle pre-authority refusal closed
+
+~~The candle issuance-refusal site requires a shared pre-authority failure seam.~~
+Actual shared command-entry authority now owns the genuine initial FetchCandles
+callback and its unissued Read denial. Lighter consumes it directly and returns
+on rejected/revoked admission without a numeric terminal. The one removed legacy
+fingerprint shrinks Lighter47→46 and lib6→5; all other inventory entries remain.
+This closes only the candle refusal and introduces no venue capacity, retry or
+outcome rule. Native background polling continues using its independent Context.
+
+## KuCoin Spot candle lifecycle adoption
+
+Unsigned Spot candles now retain their original command Context through shared
+entry admission, static-header preparation, exact read delivery and Context
+completion. Typed failures and correlated companions use the shared engine
+authority; discovery background retirement remains separate. The sole legacy
+public streamed helper and three numeric candle terminal/preflight expressions
+retire. Exact KuCoin inventory shrinks84 to80 occurrences and74 to70 hash rows;
+Spot mod shrinks20 to16. The shared Account failure hash stays at count2.
+No other venue prune or exemption is introduced. Private/HMAC, account/history,
+trading, bullet sessions and futures retain the committed full-map prerequisites.
+
+## MEXC initial Plan credential refusal audit closure
+
+~~The initial plan-list read retries a parsed terminal credential refusal after
+MODE succeeds.~~ Re-verified on actual #1786: the old general statement that a
+refused key fails startup covered MODE but missed the streamed Plan path. Both
+normal Plan envelopes and complete error envelopes without data now reuse the
+existing native refusal helper and engine StartupFailed authority. Terminal
+cleanup discards the initial staged join and prevents late sibling pagination,
+private-login refresh, account poll and asset refresh from resuming account HTTP.
+The existing transient public/private startup policies and post-startup behavior
+remain. This closure does not migrate signing, request ownership or classification.
+Architecture gate: No; existing native facts and shared startup publication are
+reused. Account/history ownership remains separate from #1793.
+
+## Phemex unsigned candle lifecycle authority
+
+~~An unsigned candle command bypasses prepared request ownership and can publish
+an expired result through numeric completion.~~ When both constructed credential
+containers are absent, the native adapter now consumes genuine engine command
+entry, managed HTTP and a Context-bearing continuation. Shared lifecycle fences
+route waiting, release and response delivery before result or pause effects;
+setup/network/deadline failures retain typed causes. Existing native codec and
+error handling remain shared with the signed branch. Optional primary/secondary
+signing stays on its existing path pending the signer/selection migration.
+No legacy-site removal is claimed: every old site still serves credentialed
+candles or another family, and incoming inventory remains exact. Architecture
+No: shared engine custody and lifecycle are consumed without another executor,
+classifier, retry timer or credential-selection policy. Claimed history files
+from #1790/#1795/#1796/#1797 remain excluded.
+
+## MEXC standalone book lifecycle adoption
+
+~~An unsigned book command bypasses prepared custody, so an expired response can
+publish success or apply a depth/account pause through numeric completion.~~
+The native adapter now borrows genuine command entry and carries its Context
+with captured scaling/limit through managed HTTP and typed completion. Shared
+lifecycle fences prevent stale decode/pause effects before native callbacks.
+The native snapshot decoder, totals-before-truncation, status/code510 codec and
+live cooldown remain unchanged. Exact pruning removes8 occurrences/7 entries;
+there is no signer migration, local timer/classifier, retry executor or numeric
+Context lookup. Architecture No: existing shared custody and lifecycle are
+consumed. The separate reviewed startup fix is retained as a stack dependency.
+
+### Snapshot-token fan-out: Backpack and Paradex
+
+At actual848924, only Binance and Bitunix used the engine's financial snapshot
+admission token. The complete27-crate inventory (including nested Spot adapters)
+is in RUST_FINANCIAL_SNAPSHOT_FRESHNESS. Backpack and Paradex now use that same
+Store boundary for whole-read admission, native caches and row replacement;
+per-ID timestamps, terminal state, amend evidence and other domain clocks remain.
+This is engine-consumer fan-out, not another per-venue freshness counter.
+
+Two Backpack defects were independently reproduced on unchanged production:
+
+- A stale streamed order read, or a failed current streamed read, could erase an
+  accepted unpriced trigger's pending relabel bookkeeping before final snapshot
+  admission. When the ticker seed arrived, the retained take-profit stayed
+  classified as StopLoss. Mapping-time insert/remove decisions are now staged
+  and applied only after token admission; the two independent controls fail on
+  original code and pass after adoption.
+- A fully accepted native Pair ACK did not advance the order-read fence. An older
+  empty read could remove a retained order, or an older nonempty read could
+  inject a row into an empty Store after that ACK. The accepted, fully validated
+  identity set now invalidates shared snapshot authority. Both original-RED
+  controls pass after adoption; a malformed-identity negative retains its old
+  behavior and command correlation/result shape.
+
+Four native assertion REDs cover these two classes. Exact final fixture/source/
+log bindings are sealed in receipt
+`95ebc65eecbd8e231407715231058a93bd6662737d124f3e2eeae3ead5b2f2af`.
+Paradex's native amend-ACK compatibility control passes original code; its two
+Store-invalidation/exhaustion controls exercise the newly adopted API and are
+not claimed as production defects. Capture exhaustion admits no unfenced read
+and preserves native account-cycle progress. Final current-head CI, actual queued
+integration and full authenticated raw proof remain separate merge gates.
+
+### Lighter cached reads: remove legacy numeric completion
+
+The cached FetchLeverage and FetchAccountTier branches consume shared initial
+Read admission and Context terminals. This closes their capacity/invalid-clock
+admission bypass without fabricating HTTP or financial evidence. Rejected and
+revoked entries return without numeric fallback; cache data and native errors
+remain unchanged after admission. Exactly three lexical sites are removed:
+Lighter46→43, lib5→3, limits6→5. SetAccountTier's separate identical numeric fail
+fingerprint remains counted. No held trading or engine source is changed.
+
+## WOO family ticker decoding compiler policy
+
+The WOO family retained shared speed defaults, while its explicit venue package
+profile still used opt-level z. A names-preserved profile identified generated
+Tick deserialization as the main sampled ingress cost. The existing family build
+mechanism now overrides only the WOO venue package to opt-level3; no second
+parser, Store lookup, numeric codec or engine policy is introduced. Original
+regression evidence is the reported landing CPU miss at28.838ms versus27.68ms.
+Interleaved unchanged-source artifacts show a local median23.105→18.957ms;
+exact-head CI's fixed public/private, CPU, memory and size gates remain acceptance
+requirements. [Scope, raw evidence and limitations](RUST_WOO_PUBLIC_CPU.md).
+
+## SDK master Hyperliquid/Lighter parity
+
+~~Public or unresolved Hyperliquid startup asks userFees with an absent subject,
+and an empty vault masks a configured trading account.~~ The existing identity
+selector now follows master's nonempty vault/applicationId precedence; public or
+unresolved fees retain metadata defaults without HTTP. Actual agent discovery
+still establishes identity before private reads.
+
+~~Robinhood placements omit the newly configured integrator47296, and the
+instance client-order-index allocator wraps after its positive48-bit maximum.~~
+Robinhood uses its configured native builder and existing approval preflights.
+Each existing per-leg mint reservation considers the current candidate and
+retains monotonic state; exhaustion refuses without wrap. No transaction nonce,
+managed ownership, retry or outcome policy is introduced. No legacy inventory
+site changes; all incoming maps and the #1869 TS reference/harness remain exact.
+
+## Native mode-preflight redo liveness
+
+Repeated external mode changes can make an adapter redo its prerequisite mode
+reads indefinitely. Each request remains bounded by its declared read policy,
+but the final write-plan root starts only when the native write steps are fixed.
+No arbitrary whole-preflight or 120-second product cap is added. A finite redo
+limit would change caller-visible liveness policy and needs a separate decision.
+
+## Shared ticker lookup CPU headroom
+
+A named WASM profile identifies indirect symbol comparisons in Store::ticker_index
+as a substantial public-data cost. The shared Store now uses the existing
+HashMap<Box<str>,u32> index representation for borrowed symbol lookup, rebuilding
+in input order and releasing obsolete keys/capacity on replacement. This applies
+to every venue using symbol lookup; WOO's cached-index WS reducer remains outside
+that hot path. No authority policy, codec, venue-specific shortcut or legacy-site
+exemption changes. Exact paired CI performance and family memory/size gates remain
+separate evidence from diagnostic profiles.
+
+## Draft socket lifecycle architecture adoption
+
+The shared Supervisor alone did not own current epochs, auth acceptance,
+subscription coverage or invalidation. The draft Engine socket lifecycle now
+owns those boundaries for OKX and rejects late ingress before health
+or native mutation. Review found and corrected inactive retry-stop ownership,
+unexpected-close accounting, per-event health reset, silent callback errors and
+cleanup loss on queue exhaustion. Safe-integer physical IDs use the landed shared allocator; full family adoption and deployed cutover
+proof remain open. No allocator change is included in this socket draft.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.
+
+### Lighter depth snapshot Context ownership
+
+The independent public REST depth sender consumes an engine Background Read
+Context and retires it on every success/failure, including stale subscription or
+WS-revision returns. Original deadline/release authority fences publication;
+matching-generation native cleanup cannot release a replacement's latch.
+Exactly one sender is removed (Lighter43→42, lib3→2). Ticker adoption is deferred
+because #1877 holds its interfering candle timer fixture; no timing/order or
+source-ownership workaround is introduced. No held signing/trading/test edits.
+
+## KuCoin futures local terminal provenance
+
+Sixteen synchronous numeric history/funding terminals adopt shared initial Read
+admission and Context finalization. The exact ratchet shrinks KuCoin80->64
+occurrences and70->58 rows, nine files retained; history13->5 and funding9->1.
+Six conservative embedded macro fingerprints remain counted unchanged. Legacy
+signed-streaming, numeric Completion and multipage scheduling remain held for
+their shared signer/history/Plan prerequisites; no zero-legacy claim is made.
+No venue owner registry, finalizer wrapper or credential/routing substitute is
+introduced. Three defensive guards are migrated without an unreachable native
+original-RED claim; thirteen dispatcher-reachable exits supply the production
+acceptance coverage.
+## Bitunix local history authority adoption
+
+Five synchronous history terminal expressions now consume genuine command-entry
+Read authority and complete through the shared Context APIs. The exact four
+history.rs scanner rows retire: Bitunix23 to18 occurrences,20 to16 hash rows,
+four tothree files. Account3, lib7 and trading8 occurrences remain, including
+four conservative trading macro matches. This does not close private history's
+legacy Completion/pager or the blocked physical dispatchers; #1771 source claims,
+signer and shared multi-request prerequisites remain separate.
+
+## Bitrue local history terminal provenance
+
+Five synchronous numeric refusals consume shared initial Read admission and
+Context completion directly. Bitrue inventory shrinks42->37 occurrences,
+27->22 rows and five->four files; every other incoming hash/count stays exact.
+The still-legacy signed fill/HistoryRows/Completion path and account lookup stay
+held for their shared prerequisites, even where the scanner no longer lists the
+history source. No private read, group or whole-venue zero claim is introduced.
+
+## Bitrue local leverage terminal provenance
+
+Four synchronous account-command refusals adopt shared Read admission and Context
+failure. This independent slice prunes only two count-two account hashes:
+Bitrue42->38 occurrences,27->25 rows, five files retained. The separate history
+slice's prune composes independently. Native successful leverage joins, refresh,
+projection, account replies and signed bracket requests remain unchanged; no
+managed private-read, execution-group or whole-venue zero claim is introduced.
+
+## Phemex synchronous history/income Context ownership
+
+~~Eleven synchronous local history/income exits publish numeric terminals without
+command-entry Context admission.~~ Local branches now borrow genuine shared
+admission and immediately use its Context terminal, before active-set mutation.
+Original-source controls show full-capacity local errors lack Internal typing,
+unknown-market lookup succeeds despite full capacity, and invalid-clock errors
+lack InvalidInput typing. Finite native payloads, refusal order and outstanding
+requests are preserved. Exactly eleven Phemex occurrences/entries are removed;
+managed network/history and signer adoption remain deferred. Architecture gate:
+No lifecycle copy; the adapter consumes shared admission and finalization.
+
+## MEXC local read refusal custody
+
+Eight immediate native refusal sites now consume shared genuine command entry
+and settle through fail_context: five history admission sites and three leverage
+admission sites. They can no longer bypass the shared command-owner bound or
+nonfinite-clock rejection. Native validation precedence, full finite VenueError
+fields and all successful transport/paging/reducer paths are preserved. This
+closes exactly eight request-legacy fingerprints/occurrences, 29/29 to 21/21;
+private signing, account callbacks, discovery and valid history transport remain
+separately inventoried. The architecture gate is No: only native local error
+projection changes, with no venue-owned lifecycle, timer, credential selection,
+retry, classifier or owner registry. CI/replay/size proof remains a separate gate.
+
+### Paradex public-trades Read history bridge adoption
+
+Unsigned single-page public trades now use a dedicated Context-bearing history
+owner, separate from legacy private history. Shared exact root/leg/Attempt
+admission gates staging, identities, page advancement and terminal publication.
+Strict failures discard prefixes; stale/reused owners produce no result/marker.
+Only the obsolete public sender is removed (Paradex56→55, history14→13); all
+private history counts remain. No signing, session, Plan or engine source edit.
+
+
 ## BloFin PublicTrades history authority
 
 The PublicTrades owner now adopts shared ReadCompletion/ReadCursorHistory,

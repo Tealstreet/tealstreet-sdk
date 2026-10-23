@@ -563,12 +563,14 @@ fn required_family_policy_applies_to_raw_json_and_opaque_setup_without_material_
                 signing: KeyRef("primary.signing".into()),
                 passphrase: Some(KeyRef("primary.passphrase".into())),
                 stable_id: None,
+                extra: Default::default(),
             }),
             secondary: Some(Identity {
                 credential: KeyRef("secondary.credential".into()),
                 signing: KeyRef("secondary.signing".into()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             }),
         };
         policy.apply_to_identities(&mut opaque, false).unwrap();

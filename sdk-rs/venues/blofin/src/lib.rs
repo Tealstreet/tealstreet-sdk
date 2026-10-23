@@ -60,7 +60,6 @@ pub enum Pending {
         failed: bool,
     },
     Candles {
-        command: CommandId,
         rows: Vec<Candle>,
         failed: bool,
     },
@@ -348,7 +347,6 @@ impl Blofin {
                 self.startup.succeeded(cx, DiscoveryRead::Tickers);
             }
             Pending::Candles {
-                command: _,
                 mut rows,
                 failed: false,
             } => {
@@ -995,9 +993,8 @@ impl Venue for Blofin {
             self.account_failed(cx, request, error);
             return;
         }
-        if let Pending::Candles { command, .. } = pending {
-            cx.fail(command, error.to_string());
-        } else {
+        // Candle failures carry their Managed Context and return above.
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             self.public_failed(
                 cx,
                 matches!(pending, Pending::Markets { .. }),
@@ -1123,27 +1120,16 @@ impl Venue for Blofin {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval: i,
                 limit,
                 from_ms,
                 to_ms,
             } => {
-                let context = match cx.http_context(Scope::Command(command), Self::read_policy()) {
+                let context = match cx.admit_http_command(Self::read_policy()) {
                     Ok(context) => context,
-                    Err(_) => {
-                        self.on_request_failed(
-                            cx,
-                            Pending::Candles {
-                                command,
-                                rows: vec![],
-                                failed: false,
-                            },
-                            "BloFin read lifecycle is unavailable",
-                        );
-                        return;
-                    }
+                    Err(_) => return,
                 };
                 if let Some(m) = cx.store.market(&symbol) {
                     let Some(bar) = interval(i) else {
@@ -1175,7 +1161,6 @@ impl Venue for Blofin {
                         &path,
                         context,
                         Pending::Candles {
-                            command,
                             rows: vec![],
                             failed: false,
                         },
