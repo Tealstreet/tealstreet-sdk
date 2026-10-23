@@ -167,7 +167,7 @@ fn capacity(read: Query, expected: Result<&str, &str>) {
         &query(&mut e, NOW, 600, read.clone()),
         600,
         ErrorKind::Internal,
-        "Too many requests in flight",
+        "Engine request capacity reached",
     );
     assert!(peers.iter().all(|peer| e.http_preparation_pending(*peer)));
     e.http_preparation_failed(
