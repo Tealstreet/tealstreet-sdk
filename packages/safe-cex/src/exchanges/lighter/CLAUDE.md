@@ -209,6 +209,7 @@ Topics are tracked per channel and re-subscribed on reconnect.
 **Orderbook fallback behavior**:
 
 - On subscribe, primes orderbook immediately through `OrderApi.getOrderBookOrders()` (before waiting for first WS snapshot). The SDK maps the current official `/api/v1/orderBookOrders` route and normalizes its `{ bids, asks, remaining_base_amount }` response.
+- On public WS reconnects, active orderbook topics are primed through the same REST route, and public close events keep active books on REST fallback until live WS book frames resume. Do not make reconnect recovery wait only on the long stale-orderbook timer; DOM/depth/orderbook panels need a near-term book after account reloads or route changes.
 - That endpoint returns raw orders, so the public socket coalesces equal-price orders per side before sorting and calculating cumulative depth totals.
 - If initial WS snapshot does not arrive quickly, enables periodic REST orderbook fallback.
 - If WS orderbook goes stale, attempts recovery with re-subscribe first, then reconnect on repeated failure.

@@ -36,6 +36,12 @@ type SubscribedTopics = {
   [id: string]: string[] | string;
 };
 
+type OrderBookRestFallbackContext = {
+  marketId: string;
+  orderBook: OrderBook;
+  callback: (orderBook: OrderBook) => void;
+};
+
 const normalizeLighterFundingRate = (fundingRatePercentPerHour: number): number => {
   const eightHourPercent =
     // Lighter's UI treats the displayed 0.0012% hourly floor as the canonical 0.0100% 8h rate.
@@ -98,6 +104,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
   private orderBookRestFallbackIntervals: Record<string, NodeJS.Timeout | undefined> = {};
   private orderBookRestFallbackInFlight: Record<string, boolean> = {};
   private orderBookRestFallbackCooldownUntilByTopic: Record<string, number> = {};
+  private orderBookRestFallbackContexts: Record<string, OrderBookRestFallbackContext | undefined> = {};
   private tickerRestFallbackWatchdog?: NodeJS.Timeout;
   private tickerRestFallbackInterval?: NodeJS.Timeout;
   private tickerRestFallbackInFlight?: Promise<void>;
@@ -195,6 +202,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       this.openedSinceLastConnect = true;
       this.syncBboTickerTopics();
       this.subscribe();
+      this.primeActiveOrderBooksFromRest();
       // Prime mark/last/bid/ask quickly while ticker subscriptions spin up.
       this.primeTickerRestFallback();
       this.armExistingOrderBookTimeouts();
@@ -320,6 +328,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     this.clearAllOrderBookStaleTimeouts();
     this.clearAllOrderBookInitialDataTimeouts();
     this.startTickerRestFallback('public websocket closed; polling tickers via REST');
+    this.startActiveOrderBookRestFallbacks('public websocket closed; polling orderbook via REST');
 
     this.lastReceived = 0;
     if (this.lastReceivedTimer) {
@@ -551,6 +560,24 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       }
       void this.fetchAndEmitOrderBookFromRest(incomingChannel, marketId, orderBook, callback);
     }, LighterPublicWebsocket.ORDER_BOOK_REST_FALLBACK_INTERVAL_MS);
+  };
+
+  private primeActiveOrderBooksFromRest = (): void => {
+    for (const [incomingChannel, context] of Object.entries(this.orderBookRestFallbackContexts)) {
+      if (!context || !this.messageHandlers[incomingChannel]?.length) {
+        continue;
+      }
+      void this.fetchAndEmitOrderBookFromRest(incomingChannel, context.marketId, context.orderBook, context.callback);
+    }
+  };
+
+  private startActiveOrderBookRestFallbacks = (reason: string): void => {
+    for (const [incomingChannel, context] of Object.entries(this.orderBookRestFallbackContexts)) {
+      if (!context || !this.messageHandlers[incomingChannel]?.length) {
+        continue;
+      }
+      this.startOrderBookRestFallback(incomingChannel, context.marketId, context.orderBook, context.callback, reason);
+    }
   };
 
   private clearTickerRestFallbackWatchdog = () => {
@@ -1385,6 +1412,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
           this.sendPayload(payload);
           // Prime order book immediately instead of waiting for initial-data timeout.
           void this.fetchAndEmitOrderBookFromRest(incomingChannel, marketId, orderBook, callback);
+          this.orderBookRestFallbackContexts[incomingChannel] = { marketId, orderBook, callback };
           this.armOrderBookStaleTimeout(incomingChannel, subscribeChannel);
           this.clearOrderBookInitialDataTimeout(incomingChannel);
           this.orderBookInitialDataTimeouts[incomingChannel] = setTimeout(() => {
@@ -1418,6 +1446,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
 
       if (!this.messageHandlers[incomingChannel].length) {
         delete this.topics[incomingChannel];
+        delete this.orderBookRestFallbackContexts[incomingChannel];
       }
 
       this.cleanupMessageHandlerStats(incomingChannel);
@@ -1455,6 +1484,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
     this.clearAllOrderBookInitialDataTimeouts();
     this.clearAllOrderBookStaleTimeouts();
     this.stopAllOrderBookRestFallback();
+    this.orderBookRestFallbackContexts = {};
     this.orderBookRecoveryAttempts = {};
     this.lastOrderBookRecoveryAtByTopic = {};
     super.dispose();

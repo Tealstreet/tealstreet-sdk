@@ -1009,6 +1009,83 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     expect(callback).toHaveBeenCalled();
   });
 
+  it('keeps active order books on REST fallback while public socket reconnects', async () => {
+    const getOrderBookOrders = vi.fn().mockResolvedValue({
+      bids: [['100', '1']],
+      asks: [['101', '2']],
+    });
+    const parent = createMockParent({
+      store: {
+        markets: [{ id: '1', symbol: 'BTCUSDT' }],
+        marketsBySymbol: {
+          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
+        },
+        positions: [],
+        tickers: [],
+      },
+      orderApi: {
+        getOrderBookOrders,
+      },
+    });
+    const ws = new LighterPublicWebsocket(parent);
+    ws.ws = createMockWs();
+    const callback = vi.fn();
+
+    ws.listenOrderBook('BTCUSDT', callback);
+    await Promise.resolve();
+    await Promise.resolve();
+    getOrderBookOrders.mockClear();
+    callback.mockClear();
+
+    (ws as any).onClose({ code: 1006, reason: '' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getOrderBookOrders).toHaveBeenCalledWith(1, 100, expect.objectContaining({ __suppressExchangeError: true }));
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bids: [expect.objectContaining({ price: 100, amount: 1 })],
+        asks: [expect.objectContaining({ price: 101, amount: 2 })],
+      }),
+    );
+  });
+
+  it('primes active order books from REST when public socket opens after reconnect', async () => {
+    const getOrderBookOrders = vi.fn().mockResolvedValue({
+      bids: [['100', '1']],
+      asks: [['101', '2']],
+    });
+    const parent = createMockParent({
+      store: {
+        markets: [{ id: '1', symbol: 'BTCUSDT' }],
+        marketsBySymbol: {
+          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
+        },
+        positions: [],
+        tickers: [],
+      },
+      orderApi: {
+        getOrderBookOrders,
+      },
+    });
+    const ws = new LighterPublicWebsocket(parent);
+    ws.ws = createMockWs();
+    const callback = vi.fn();
+
+    ws.listenOrderBook('BTCUSDT', callback);
+    await Promise.resolve();
+    await Promise.resolve();
+    getOrderBookOrders.mockClear();
+    callback.mockClear();
+
+    ws.onOpen();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getOrderBookOrders).toHaveBeenCalledWith(1, 100, expect.objectContaining({ __suppressExchangeError: true }));
+    expect(callback).toHaveBeenCalled();
+  });
+
   it('cools down orderbook REST fallback after a 403', async () => {
     const getOrderBookOrders = vi
       .fn()
