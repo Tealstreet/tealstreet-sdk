@@ -908,6 +908,10 @@ impl Venue for WeexFutures {
         {
             return;
         }
+        if let Task::Trade(request) = p.task {
+            self.trade_response(cx, request, response);
+            return;
+        }
         if response.status == 429 {
             self.paused_until = self
                 .paused_until
@@ -918,16 +922,6 @@ impl Venue for WeexFutures {
             return;
         }
         if response.status >= 400 {
-            if let Task::Trade(request) = p.task {
-                let error = trading::http_failure(response.status, response.body);
-                cx.notice(
-                    safe_cex_engine::Level::Warn,
-                    code::ORDER_REJECTED,
-                    format!("WEEX: {}", error.message),
-                );
-                self.trade_failed(cx, request, error);
-                return;
-            }
             self.fail(
                 cx,
                 p.task,
@@ -1073,6 +1067,46 @@ impl Venue for WeexFutures {
             Task::Trade(r) => self.trade_failed(cx, r, error),
             Task::History(r) => self.history_refused(cx, r, error),
             task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        p: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Task::Trade(request) = p.task {
+            self.trade_failed(cx, request, error);
+        } else {
+            self.on_request_failed(cx, p, &error.message);
+        }
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.retire_trade(owner);
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Task::Trade(request) = &pending.task {
+            request.unproven_evidence(response.body, evidence);
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match &pending.task {
+            Task::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {

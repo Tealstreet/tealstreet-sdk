@@ -4,10 +4,10 @@ Owner: codex-uufub4. Signer/recipe and temporary-funnel removal review:
 claude-4yjlw0. Parent: actual landing
 `53a906fd934db2194e3b183fb219f5f9f84c8c4a`.
 
-This checkpoint contains the plan and original native tests only. Production
-source, construction declarations, request inventory and allowances are unchanged.
-The RED tests are intentionally executable and unignored; this is not a green
-adoption or merge-ready checkpoint. Independent review precedes implementation.
+Original plan/test checkpoint: `3ced6b9b588`, independently reviewed CLEAR.
+Its six assertion REDs and three compatibility controls ran on unchanged native
+source. The implementation below genuinely integrates actual Store #1888
+`c55a6a76044`; no shared-engine or signer-recipe source is changed.
 
 ## Native inventory and scope
 
@@ -114,10 +114,13 @@ responses cannot re-sign/resend a write. There is no local retry timer.
   KnownPartial is the shared journal projection (bounded partial IDs with no
   Unknown/Rejected/NotSent outcome); an unresolved released remainder is Unknown
   with those IDs. Retire every unissued remainder via the shared Plan terminal.
-- Preserve native serial continue-on-error after proven refusals where declared.
-  Generic unproven writes abort the owner under the landed Plan contract; they
-  never issue the second cancel family or another placement. Record this caller
-  behavior change rather than keeping the old native continuation as a bypass.
+- Preserve the declared CancelSymbolOrders two-family continuation. In the exact
+  failed-leg callback, `finish_plan_failed_call` settles that separate native
+  call after provider refusal or transport loss; it does not retry the failed
+  write, and the shared journal retains its uncertainty. This is the confirmed
+  native caller contract. Other ordinary jobs stop on a failed leg. HTTP
+  408/5xx still fail the owner before ordinary delivery under the shared core;
+  no caller workaround or fabricated DATA bypasses that rule.
 - The fill/revision guard before cancel-then-recreate remains exact. A revoked
   replacement fails the Plan with its journal evidence; it never silently
   skips an admitted required write. Conditional successful suffix retirement,
@@ -128,11 +131,15 @@ responses cannot re-sign/resend a write. There is no local retry timer.
 - Post-command account refresh remains background work with its own actual
   authority; it cannot borrow the retired Plan or extend a root. Preserve the
   existing refresh/freshness contract and coordinate the separate account slice.
-- Implement `capture_http_reconciliation` and the restricted `reconcile_http`
-  native ACK codec before any managed mutation can release. Bounded nonsecret
-  Call/row correlation only; no credentials, outbound recipe or venue scheduler.
-  A late ACK cannot complete a retired command, reopen work or publish through
-  an ordinary response callback.
+- `capture_http_reconciliation` retains bounded native placement client IDs or
+  cancellation selectors, never credentials, outbound recipes or a scheduler.
+  The initial late policy is deliberately nonpublishing, as in Binance: the
+  immutable late view cannot update WEEX account tombstones/freshness together
+  with Store rows, so a late Store patch could be undone by an older account
+  read. Do not add that unsafe reducer. A late ACK leaves Unknown and cannot
+  complete a retired command, reopen work or publish through an ordinary
+  callback. Native-freshness-aware late publication is explicit follow-up debt;
+  this slice does not claim that a late ACK triggers an account read.
 - Use `on_http_owner_retired` for exact job cleanup, after all native failure
   handling has finished. No forgotten command, capacity credit or optimistic
   row survives a rejected prepare/sign/claim or terminal owner retirement.
@@ -190,3 +197,54 @@ The generic legacy staging sender stays while account/history callers remain.
 Delete it only when genuinely empty, with 4yjlw0's exact-map review. No local
 engine API, fabricated Context, wrapped numeric completion or ratchet exception
 is needed or permitted for this Plan adoption.
+
+## Implemented checkpoint and caller dispositions
+
+Whole ordinary trading uses genuine initial authority, complete serial Plan
+admission, primary family recipes, immutable 20s/one-attempt calls, exact DATA
+validation and shared write facts. Local aggregate outcome/error/effective
+bookkeeping is gone; `native_ids` is the native success-result projection only.
+The shared journal owns every terminal outcome and partial evidence.
+
+The original nine controls are GREEN; five further native controls cover route
+reservation refusal, permit expiry before claim, whole-plan capacity before
+optimistic publication, a refused envelope with success-shaped fields, and old
+reply/command-generation reuse. All 46 existing trading controls are GREEN.
+The existing response driver now uses actual Prepare/Bind/Claim for subsequent
+managed packets; no assertion or payload fixture was weakened for continuation.
+
+Overseer dispositions: keep both CancelSymbolOrders native families after an
+ordinary provider/transport failure via `finish_plan_failed_call`; keep both
+original continuation assertions. Two classification assertions change under
+explicit approval: code 40015 remains Unknown with all accepted prefix IDs, and
+unproven/unlisted failures follow the shared classifier. The incoming payload
+fixture spelling40015 as insufficient balance is retained verbatim; it is not
+used as proof of rejection. Gateway failures use the shared typed reason.
+
+Exact source ratchet: WEEX51 ->46 occurrences, 42 ->38 path/fingerprint entries;
+trading.rs 5 ->0. This removes two actual numeric-completion expressions and
+three conservative source macro matches (native predicates retain identical
+logic). No new fingerprint, allowance, staging re-key or checker change. Other
+venue/path maps stay exact. Generic account/history sender staging remains.
+
+Full native family and strict checks, independent implementation review, actual
+landing integration and fresh CI are recorded with the implementation PR; the
+original plan review alone is never a source-readiness claim.
+
+## Implementation review checkpoint
+
+Independent source review found ACK contradictions, lost IDs from truncated
+batches, and a lost trading rate cooldown. Native controls reproduced each;
+corrections keep conflicting aliases/codes Unknown, retain only correlated native
+IDs under shared evidence budgets, and preserve native read cooldown from shared
+rate classification. The bounded correction review is CLEAR. Twenty managed
+controls pass; the root-first expiry control below deliberately remains RED.
+
+`root_expiry_cleans_provisional_rows_before_late_ack` reproduces a shared
+Plan-core defect: firing the Plan timer at the root bound seals the owner and
+discards Pending before native typed failure cleanup, leaving a Creating row.
+Firing the HTTP timer first does clean the row. The retirement hook has no Store
+authority and must keep that restriction. The overseer assigned uufub4 a separate
+engine fix routing outstanding calls through existing typed cleanup before
+retirement, preserving expired-root send denial. This WEEX checkpoint is blocked
+on that fix; it is not merge-ready and the RED must not be ignored or weakened.

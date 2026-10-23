@@ -412,3 +412,342 @@ fn compatibility_invalid_later_order_refuses_before_any_write() {
     assert!(writes(&actions).is_empty());
     assert_eq!(failures(&actions).len(), 1);
 }
+
+#[test]
+fn host_route_refusal_is_not_sent_and_retires_optimistic_rows() {
+    use safe_cex_engine::request_context::Error;
+    let mut engine = engine();
+    place(&mut engine, 1);
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let preparation = actions
+        .into_iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.http_preparation_failed(
+        START + 1.,
+        preparation,
+        Error::Capacity,
+        VenueError::new("route reservation refused").kind(ErrorKind::Internal),
+    );
+    let actions = collect(&mut engine, START + 1.);
+    assert!(writes(&actions).is_empty());
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::NotSent));
+    assert!(engine.store().orders().is_empty());
+}
+
+#[test]
+fn a_bound_permit_expiring_before_claim_never_releases_the_write() {
+    use safe_cex_engine::request_context::Prepared;
+    let mut engine = engine();
+    place(&mut engine, 1);
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let preparation = actions
+        .into_iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.http_prepared(
+        START,
+        preparation,
+        Prepared {
+            id: 902,
+            expires_at: None,
+        },
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let permit = actions
+        .into_iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    assert!(engine.claim_http(START + 20_000., permit).is_err());
+    let actions = collect(&mut engine, START + 20_000.);
+    assert!(writes(&actions).is_empty());
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::NotSent));
+    assert!(engine.store().orders().is_empty());
+}
+
+#[test]
+fn whole_plan_capacity_refuses_before_the_first_optimistic_row() {
+    let mut engine = engine();
+    place(&mut engine, 5 * 257);
+    let actions = collect(&mut engine, START);
+    assert!(writes(&actions).is_empty());
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::NotSent));
+    assert!(engine.store().orders().is_empty());
+}
+
+#[test]
+fn a_refused_envelope_cannot_publish_even_with_success_shaped_fields() {
+    let mut engine = engine();
+    let mut orders = orders(1);
+    orders[0].reduce_only = Some(true);
+    engine.handle(
+        START,
+        Event::Command(Command::PlaceOrders {
+            command: COMMAND,
+            orders,
+        }),
+    );
+    let request = packet(&collect(&mut engine, START));
+    assert!(request.url.ends_with("/order"));
+    let actions = respond(
+        &mut engine,
+        &request,
+        START + 1.,
+        200,
+        r#"{"code":"40006","msg":"Invalid ACCESS_KEY","success":true,"orderId":"9999"}"#,
+    );
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        failures(&actions)[0].partial.as_ref().unwrap().order_ids,
+        vec!["9999"]
+    );
+    assert!(engine.store().order("9999").is_none());
+    assert!(engine.store().orders().is_empty());
+}
+
+#[test]
+fn an_old_reply_cannot_complete_a_reused_command_generation() {
+    let mut engine = engine();
+    place(&mut engine, 1);
+    let old = packet(&collect(&mut engine, START));
+    engine.handle(
+        START + 1.,
+        Event::HttpFailed {
+            request: old.id,
+            error: "lost after release",
+        },
+    );
+    assert_eq!(failures(&collect(&mut engine, START + 1.)).len(), 1);
+    engine.handle(
+        START + 2.,
+        Event::Command(Command::PlaceOrders {
+            command: COMMAND,
+            orders: orders(1),
+        }),
+    );
+    let new = packet(&collect(&mut engine, START + 2.));
+    assert_ne!(old.id, new.id);
+    let late = acknowledge(&mut engine, &old, START + 3., 8_000);
+    assert!(failures(&late).is_empty());
+    assert!(!late.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone {
+            command: COMMAND,
+            ..
+        })
+    )));
+    assert!(engine.store().order("8000").is_none());
+    let completed = acknowledge(&mut engine, &new, START + 4., 9_000);
+    assert_eq!(ids(&completed), vec!["9000"]);
+}
+
+#[test]
+fn contradictory_success_rows_preserve_identity_without_publication() {
+    let mut engine = engine();
+    place(&mut engine, 1);
+    let request = packet(&collect(&mut engine, START));
+    let actions = respond(
+        &mut engine,
+        &request,
+        START + 1.,
+        200,
+        r#"[{"success":true,"clientOrderId":"plan-0","orderId":"9000","errorCode":"40006"}]"#,
+    );
+    assert_eq!(failures(&actions).len(), 1);
+    let error = failures(&actions)[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, vec!["9000"]);
+    assert!(engine.store().orders().is_empty());
+}
+
+#[test]
+fn truncated_correlated_success_rows_keep_ids_as_unknown_evidence() {
+    let mut engine = engine();
+    place(&mut engine, 5);
+    let request = packet(&collect(&mut engine, START));
+    let body = (0..4)
+        .map(|index| {
+            json!({"success":true,
+        "clientOrderId":format!("plan-{index}"),"orderId":format!("{}",9000+index)})
+        })
+        .collect::<Vec<_>>();
+    let actions = respond(
+        &mut engine,
+        &request,
+        START + 1.,
+        200,
+        &serde_json::to_string(&body).unwrap(),
+    );
+    assert_eq!(failures(&actions).len(), 1);
+    let error = failures(&actions)[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        vec!["9000", "9001", "9002", "9003"]
+    );
+    assert!(engine.store().orders().is_empty());
+}
+
+#[test]
+fn root_expiry_cleans_provisional_rows_before_late_ack() {
+    let mut engine = engine();
+    place(&mut engine, 1);
+    let actions = collect(&mut engine, START);
+    let _request = packet(&actions);
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(START + 20_000., Event::TimerFired { timer });
+    let actions = collect(&mut engine, START + 20_000.);
+    assert_eq!(failures(&actions).len(), 1);
+    assert!(
+        engine.store().orders().is_empty(),
+        "root expiry left provisional orders"
+    );
+}
+
+#[test]
+fn trading_rate_limit_preserves_the_native_read_cooldown() {
+    let mut engine = engine();
+    place(&mut engine, 1);
+    let request = packet(&collect(&mut engine, START));
+    engine.handle(
+        START + 1.,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 429,
+                headers: "Retry-After: 3",
+                body: r#"{"code":429,"msg":"rate limited"}"#,
+            },
+        },
+    );
+    let actions = collect(&mut engine, START + 1.);
+    assert_eq!(failures(&actions).len(), 1);
+    assert!(
+        actions.iter().all(|a| !matches!(a, Action::Http(_))),
+        "reconciliation sent during cooldown"
+    );
+    let timers = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == START + 3001. => Some(*timer),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !timers.is_empty(),
+        "native reconciliation did not wait for Retry-After"
+    );
+    let mut later = Vec::new();
+    for timer in timers {
+        engine.handle(START + 3001., Event::TimerFired { timer });
+        later.extend(collect(&mut engine, START + 3001.));
+    }
+    assert!(
+        later.iter().any(|a| matches!(a, Action::Http(_))),
+        "deferred reads never resumed"
+    );
+}
+
+#[test]
+fn gateway_failure_keeps_only_correlated_native_identity_evidence() {
+    let mut engine = engine();
+    place(&mut engine, 2);
+    let request = packet(&collect(&mut engine, START));
+    let actions = respond(
+        &mut engine,
+        &request,
+        START + 1.,
+        503,
+        r#"[{"success":true,"clientOrderId":"plan-0","orderId":"9000"},{"success":true,"clientOrderId":"foreign","orderId":"9999"}]"#,
+    );
+    assert_eq!(failures(&actions).len(), 1);
+    let error = failures(&actions)[0];
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, vec!["9000"]);
+    assert!(engine.store().order("9000").is_none());
+    assert!(engine.store().order("9999").is_none());
+}
+
+#[test]
+fn conflicting_native_aliases_cannot_success_seal_or_publish() {
+    let mut engine = engine();
+    place(&mut engine, 1);
+    let request = packet(&collect(&mut engine, START));
+    let actions = respond(
+        &mut engine,
+        &request,
+        START + 1.,
+        200,
+        r#"[{"success":true,"clientOrderId":"plan-0","clientAlgoId":"foreign","orderId":"9000","algoId":"9999"}]"#,
+    );
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        failures(&actions)[0].partial.as_ref().unwrap().order_ids,
+        vec!["9000"]
+    );
+    assert!(engine.store().orders().is_empty());
+}
+
+#[test]
+fn contradictory_rate_limit_preserves_the_native_read_cooldown() {
+    let mut engine = engine();
+    let mut orders = orders(1);
+    orders[0].reduce_only = Some(true);
+    engine.handle(
+        START,
+        Event::Command(Command::PlaceOrders {
+            command: COMMAND,
+            orders,
+        }),
+    );
+    let request = packet(&collect(&mut engine, START));
+    engine.handle(
+        START + 1.,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 429,
+                headers: "Retry-After: 3",
+                body: r#"{"code":429,"success":true,"orderId":"9000","msg":"rate limited"}"#,
+            },
+        },
+    );
+    let actions = collect(&mut engine, START + 1.);
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+    assert!(actions.iter().all(|a| !matches!(a, Action::Http(_))));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==START+3001.))
+    );
+}
