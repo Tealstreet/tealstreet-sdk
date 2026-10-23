@@ -772,6 +772,19 @@ impl Venue for Cryptocom {
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::BookQuery { context } => {
+                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::BookQuery { context } => {

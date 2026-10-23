@@ -243,3 +243,18 @@ refusal conversion, integrated by porcelain merge under overseer authorization.
 The released-expiry control exposed a shared string-failure loss of Timeout;
 the error-core owner is supplying typed post-release delivery. No venue clock or
 string-based reclassification is introduced to bypass that regression.
+
+## Green native depth checkpoint
+
+The error-core owner confirmed frozen reviewed #1816 head
+`ff6a9f8255111b228817d0ae1368e297d2e28ee3`; its exact source was integrated by
+porcelain merge. BookQuery now consumes `on_http_failed`'s typed cause and
+declares only the existing read NotSent outcome. All five original-RED controls
+pass unchanged, including the previously blocked late-response/reused-ID path.
+The complete Crypto.com/Binance native run passes 408 tests across 37 suites;
+scoped formatting and strict all-target Clippy pass. Both request-context checks
+pass, including 13 adversarial controls. Inventory shrinks35 to31 occurrences
+and31 to28 entries; every unowned map remains identical. Final independent
+source/adversarial, caller and full-map reviews are clean, architecture No.
+Actual landing integration, fresh CI/raw/size/timing proof and the overseer's
+merge window remain separate requirements; no merge/deployment is claimed.
