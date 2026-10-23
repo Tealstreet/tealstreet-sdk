@@ -2704,6 +2704,9 @@ impl<V: Venue> Engine<V> {
         self.io.identities = identities;
         Ok(())
     }
+    pub fn identities(&self) -> &crate::signing::Identities {
+        &self.io.identities
+    }
 
     /// A host signer fulfilling Action::Sign declares what it can sign; undeclared is unknown.
     pub fn set_host_algorithms(

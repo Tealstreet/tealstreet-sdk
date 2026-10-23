@@ -1151,6 +1151,7 @@ pub fn build_with_signer<T: Visit>(
                 ));
             }
             let identities = options.signing.take().unwrap_or_default();
+            let registered = identities.clone();
             if let Some(read) = &identities.secondary {
                 read.validate().map_err(invalid)?;
             }
@@ -1177,6 +1178,7 @@ pub fn build_with_signer<T: Visit>(
                 entropy,
             )?;
             engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "kucoinspot")]
@@ -1275,6 +1277,7 @@ pub fn build_with_signer<T: Visit>(
                 ));
             }
             let identities = options.signing.take().unwrap_or_default();
+            let registered = identities.clone();
             if let Some(identity) = &identities.secondary {
                 identity.validate().map_err(invalid)?;
             }
@@ -1309,6 +1312,7 @@ pub fn build_with_signer<T: Visit>(
             options.validate().map_err(|error| invalid(&error))?;
             let mut engine = Engine::new(BybitLinear::new(options), entropy)?;
             engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "bitget")]
