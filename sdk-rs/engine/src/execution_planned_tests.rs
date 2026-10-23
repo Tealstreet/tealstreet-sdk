@@ -881,4 +881,36 @@ mod planned_execution {
         );
         assert!(terminals(&actions, SHORT_FOLLOWER).is_empty());
     }
+
+    #[test]
+    fn an_observer_expired_when_preparation_failure_seals_keeps_the_accepted_prefix() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            two_steps: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., SHORT_FOLLOWER);
+        let first = prepared(&e.drain_actions().collect::<Vec<_>>())[0];
+        release(&mut e, first, 0.);
+        respond(&mut e, first, 10.);
+        let second = prepared(&e.drain_actions().collect::<Vec<_>>())[0];
+        // The host callback seals the Plan before any execution sweep runs.
+        e.http_preparation_failed(
+            101.,
+            second,
+            Error::Invalid,
+            VenueError::new("route denied"),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let founder = terminals(&actions, FOUNDER);
+        let short = terminals(&actions, SHORT_FOLLOWER);
+        assert_eq!((founder.len(), short.len()), (1, 1));
+        let ids = |error: &VenueError| error.partial.as_ref().map(|p| p.order_ids.clone());
+        let native = Some(vec!["native-1".to_owned()]);
+        assert_eq!(ids(&founder[0].clone().unwrap_err()), native);
+        let expired = short[0].clone().unwrap_err();
+        assert_eq!(expired.kind, Some(ErrorKind::Timeout));
+        assert_eq!(ids(&expired), native, "{expired:?}");
+    }
 }
