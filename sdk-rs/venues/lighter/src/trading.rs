@@ -348,7 +348,9 @@ impl Lighter {
     fn builder(&self) -> Option<sign::Builder> {
         self.options
             .integrator_account_index
-            .or(if self.options.testnet || self.options.robinhood {
+            .or(if self.options.robinhood {
+                Some(47_296)
+            } else if self.options.testnet {
                 None
             } else {
                 Some(158_385)
@@ -1067,14 +1069,17 @@ impl Lighter {
     }
 
     fn mint_id(&mut self, cx: &Cx<'_, Pending>) -> Result<u64, String> {
-        if self.trading.next_id == 0 {
-            let mut random = [0; 2];
-            cx.fill_entropy(&mut random)?;
-            self.trading.next_id = ((cx.now as u64).saturating_mul(100)
-                + u64::from(u16::from_le_bytes(random)) % 100)
-                % MAX_CLIENT_INDEX;
+        if self.trading.next_id >= MAX_CLIENT_INDEX {
+            return Err("Lighter client order index namespace exhausted.".into());
         }
-        self.trading.next_id = self.trading.next_id % MAX_CLIENT_INDEX + 1;
+        let mut random = [0; 2];
+        cx.fill_entropy(&mut random)?;
+        let candidate = ((u128::from(cx.now as u64) * 100
+            + u128::from(u16::from_le_bytes(random) % 100))
+            % u128::from(MAX_CLIENT_INDEX)) as u64;
+        // Every lot, bracket leg and batch shares this instance reservation.
+        // Failed or uncertain sends never release an already prepared index.
+        self.trading.next_id = candidate.max(self.trading.next_id + 1);
         Ok(self.trading.next_id)
     }
 
@@ -1406,4 +1411,68 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 /// The submission may have executed; callers must reconcile before resending.
 fn uncertain(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+#[cfg(test)]
+mod client_index_parity_tests {
+    use super::*;
+    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
+
+    #[test]
+    fn client_index_maximum_is_reserved_once_then_exhaustion_never_wraps() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.trading.next_id = MAX_CLIENT_INDEX - 1;
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            assert_eq!(venue.mint_id(cx), Ok(MAX_CLIENT_INDEX));
+            assert_eq!(
+                venue.mint_id(cx).unwrap_err(),
+                "Lighter client order index namespace exhausted."
+            );
+            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
+            assert!(venue.mint_id(cx).is_err());
+            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
+        }));
+        engine.start(1000.);
+        assert!(!engine.drain_actions().any(|action| matches!(
+            action,
+            safe_cex_engine::Action::Http(_) | safe_cex_engine::Action::Sign { .. }
+        )));
+    }
+
+    #[test]
+    fn a_zero_timestamp_and_entropy_candidate_still_reserves_positive_indices() {
+        let entropy = safe_cex_engine::entropy::Entropy::new(
+            Box::new(|bytes| {
+                bytes.fill(0);
+                Ok(())
+            }),
+            Box::new(|bytes| {
+                bytes.fill(0);
+                Ok(())
+            }),
+        );
+        let venue = Lighter::new(crate::Options::default());
+        let mut engine = safe_cex_engine::Engine::new(
+            ProbeVenue::new(venue, |venue, cx| {
+                assert_eq!(venue.mint_id(cx), Ok(1));
+                assert_eq!(venue.mint_id(cx), Ok(2));
+            }),
+            Some(entropy),
+        )
+        .unwrap();
+        engine.start(0.);
+    }
+
+    #[test]
+    fn each_reservation_reconsiders_the_current_timestamp_candidate() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.trading.next_id = 7;
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            let first = venue.mint_id(cx).unwrap();
+            assert!((170_000_000_000_000..=170_000_000_000_099).contains(&first));
+            let next = venue.mint_id(cx).unwrap();
+            assert!(next > first && next <= MAX_CLIENT_INDEX);
+        }));
+        engine.start(1_700_000_000_000.);
+    }
 }
