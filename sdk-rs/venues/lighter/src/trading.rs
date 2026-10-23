@@ -1436,7 +1436,7 @@ mod client_index_parity_tests {
 
     #[test]
     fn a_zero_timestamp_and_entropy_candidate_still_reserves_positive_indices() {
-        let entropy = safe_cex_engine::Entropy::new(
+        let entropy = safe_cex_engine::entropy::Entropy::new(
             Box::new(|bytes| {
                 bytes.fill(0);
                 Ok(())
