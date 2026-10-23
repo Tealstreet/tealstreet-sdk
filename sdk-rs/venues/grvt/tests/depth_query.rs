@@ -4,6 +4,9 @@ use safe_cex_engine::{
     Venue,
 };
 use safe_cex_venue_grvt::{Grvt, Options};
+
+#[path = "../../../engine/tests/support/public_managed_headers.rs"]
+mod public_managed_headers;
 fn engine(testnet: bool) -> Engine<Grvt> {
     let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
         testnet,
@@ -137,6 +140,7 @@ fn live_testnet_public_posts_use_catalog_native_id_and_ignore_limit() {
             assert_eq!(r.url, format!("{root}/lite/v1/book"));
             assert_eq!(r.route, None);
             assert_eq!(r.headers, vec![("Content-Type", "application/json".into())]);
+            public_managed_headers::assert_native_public_intent_survives_managed_release(&r);
             assert_eq!(
                 serde_json::from_str::<serde_json::Value>(r.body.as_ref().unwrap()).unwrap(),
                 serde_json::json!({"i":"BTC_USDT_Perp","d":50})
