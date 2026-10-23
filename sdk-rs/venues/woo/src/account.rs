@@ -3,7 +3,7 @@ use crate::wire::{Envelope, Str, id, number, optional_number};
 use crate::{Connection, Pending, Woo, compact, native};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
-use safe_cex_engine::coverage::{RowRepeat, RowReports};
+use safe_cex_engine::coverage::{RowKeys, RowRepeat, RowReports};
 use safe_cex_engine::execution::{Cursor, ObservedProgress};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
@@ -50,30 +50,26 @@ pub enum Request {
 /// Rows a snapshot could not map; known ids keep their stored copy, and a row
 /// without an id keeps every stored row of the list.
 #[derive(Default)]
-pub struct Skipped {
-    ids: Vec<String>,
-    anonymous: usize,
-}
+pub struct Skipped(RowKeys);
 impl Skipped {
     pub(crate) fn add(&mut self, id: Option<&str>) {
-        match id.filter(|id| !id.is_empty()) {
-            Some(id) if !self.ids.iter().any(|known| known == id) => self.ids.push(id.into()),
-            Some(_) => (),
-            None => self.anonymous += 1,
-        }
+        self.0.add(id);
     }
     pub(crate) fn ids(&self) -> &[String] {
-        &self.ids
+        self.0.ids()
+    }
+    fn into_ids(self) -> Vec<String> {
+        self.0.into_ids()
     }
     pub(crate) fn anonymous(&self) -> bool {
-        self.anonymous > 0
+        self.0.anonymous() > 0
     }
     pub(crate) fn summary(&self, kind: &str) -> Option<String> {
-        (!self.ids.is_empty() || self.anonymous > 0).then(|| {
+        self.0.summary(|rows| {
             format!(
                 "WOO {kind}: skipped {} unmappable row(s) [{}]",
-                self.ids.len() + self.anonymous,
-                self.ids.join(", ")
+                rows.count(),
+                rows.ids().join(", ")
             )
         })
     }
@@ -420,14 +416,9 @@ impl Account {
 
 impl Woo {
     fn account_skipped(&mut self, cx: &mut Cx<'_, Pending>, kind: &'static str, s: &Skipped) {
-        match s.summary(kind) {
-            Some(text) => {
-                self.account.skip_logged.report(cx, kind, Level::Warn, text);
-            }
-            None => {
-                self.account.skip_logged.forget(kind);
-            }
-        }
+        self.account
+            .skip_logged
+            .report_summary(cx, kind, Level::Warn, s.summary(kind));
     }
     /// Whether exposure on an unlisted native symbol sits on a catalogue row skipped as
     /// malformed. An anonymous skipped row names no market, so it holds nothing.
@@ -1312,8 +1303,8 @@ impl Woo {
                     .iter()
                     .filter(|p| {
                         (skipped.anonymous()
-                            || skipped.ids.contains(&p.id)
-                            || skipped.ids.contains(&p.symbol))
+                            || skipped.ids().contains(&p.id)
+                            || skipped.ids().contains(&p.symbol))
                             && !rows.iter().any(|r| r.id == p.id)
                     })
                     .cloned()
@@ -1405,10 +1396,11 @@ impl Woo {
                         dest.push(row);
                     }
                 }
-                let added =
-                    dest.len() != before || skipped.ids.iter().any(|id| !join.skipped.contains(id));
-                join.skipped.extend(skipped.ids);
-                join.unidentified |= skipped.anonymous > 0;
+                let added = dest.len() != before
+                    || skipped.ids().iter().any(|id| !join.skipped.contains(id));
+                let anonymous = skipped.anonymous();
+                join.skipped.extend(skipped.into_ids());
+                join.unidentified |= anonymous;
                 join.classifications
                     .extend(dest[before..].iter().filter_map(|row| {
                         classifications

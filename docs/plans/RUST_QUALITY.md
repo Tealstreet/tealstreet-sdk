@@ -431,3 +431,42 @@ and retains only accepted output. Inclusive timestamp/native-identity progress
 and final order-transition folding preserve native behavior; mixed income keeps
 its first gap through funding. Spot and lookup remain separate legacy paths;
 other families, managed completion and B11/deployment proof remain open.
+
+
+## Grouped and deferred row-reporting compatibility
+
+Shared `RowCount` and `RowKeys` keep the two native grouping contracts explicit.
+Crypto.com counts every rejection; WOO preserves ordered unique known IDs and
+every anonymous rejection, including its move-based order-pagination progress.
+An emitted summary increments health exactly once at the original site,
+regardless of group size or host filtering; absent or repeat-suppressed summaries
+do not. The shared optional-summary reporter
+forgets only its key on None; Some(empty text) remains an observable report.
+Bybit deferred Once memory is unbounded, separate per product, never re-armed by
+clean rows, and flushed only at accepted joined-read publication after native
+cached-row restoration. Partial admitted joins still report unsupported rows.
+Original native compatibility controls cover failed/incomplete/stale joins,
+terminal-ACK invalidation, retained exposure and account swapping; no defect RED
+or complete persistent-reporter fan-out claim. See RUST_ROW_ADMISSION.md.
+
+
+### BloFin/Kraken native reporting boundaries (2026-10-23)
+
+Five reporter collections now consume existing engine reporting policy across
+BloFin and both Kraken modes. Original-GREEN controls pin all three BloFin order
+aliases, decoded per-key forgetting before later failures while unrelated
+anonymous memory remains, held position snapshots, and Once remaining quiet
+when a kept position disappears. Kraken controls pin unlisted symbols across
+feeds/reconnect (with a fresh-symbol positive), silent zero quantity, reporting
+before failed/stale REST admission, rejected-identity duplicate protection,
+stale WS no-rearm followed by current-clean positive re-arm, coin/order/empty
+identity isolation, rejected versus admitted stale balance reads, and Spot's
+native unfiltered REST versus filtered WS duplicate re-arm. All126 original
+account tests pass before migration. No new engine API, financial/admission
+policy change, local replay/timing run, threshold, budget or manifest change.
+Full green CI, current artifacts and independent source/caller/data reviews
+remain required; this slice does not close the remaining reporter inventory.
+
+Migrated focused suites pass1253 native tests; strict all-target Clippy, scoped
+fmt, bans and root checks pass. Both independent implementation reviews confirm
+that only reporter memory/adapters changed in the three production files.

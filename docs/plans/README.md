@@ -193,4 +193,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Bitget public CPU | Historical investigation | Read before changing public parsing or Bitget family throughput profiles | [RUST_BITGET_PUBLIC_CPU.md](RUST_BITGET_PUBLIC_CPU.md) |
 | Shared JSON WASM profile | CI experiment | Before changing shared JSON optimization or removing whole-family throughput exceptions. | [RUST_JSON_WASM_PROFILE.md](RUST_JSON_WASM_PROFILE.md) |
 | Capability and compiled-feature conformance | Planned CI checker | When changing a capability, command decoder feature or shipped family | [RUST_CAPABILITY_CONFORMANCE.md](RUST_CAPABILITY_CONFORMANCE.md) |
+| Managed unsigned HTTP headers | Planned shared prerequisite | Before adapting a native signer with static public headers to managed preparation. | [RUST_UNSIGNED_HTTP_HEADERS.md](RUST_UNSIGNED_HTTP_HEADERS.md) |
 | WEEX dispatch signing | Planned after BingX/shared headers | Before WEEX private managed builders, provider custody or persisted identity cutover. | [RUST_WEEX_DISPATCH_SIGNER.md](RUST_WEEX_DISPATCH_SIGNER.md) |
