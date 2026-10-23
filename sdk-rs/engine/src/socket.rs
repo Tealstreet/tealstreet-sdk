@@ -187,7 +187,11 @@ impl Supervisor {
     pub fn expired(&self, now: f64) -> Option<Timeout> {
         #[cfg(feature = "managed-sockets")]
         if matches!(self.phase, Phase::Connecting | Phase::Authenticating)
-            && self.snapshot_deadline.is_some_and(|at| now >= at)
+            && self.snapshot_deadline.is_some_and(|at| {
+                now >= at
+                    && !(self.phase == Phase::Connecting
+                        && self.since + self.config.connect_timeout_ms <= at)
+            })
         {
             return Some(Timeout::Auth);
         }

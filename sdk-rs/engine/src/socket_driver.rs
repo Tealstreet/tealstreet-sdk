@@ -192,10 +192,16 @@ impl Driver {
         Ok(feed)
     }
 
-    pub(crate) fn snapshot_feed(&self, feed: FeedId) -> bool {
-        self.runtimes
-            .get(feed.index())
-            .is_some_and(|r| r.snapshot_timeout.is_some())
+    pub(crate) fn snapshot_connect_ids(&self, feed: FeedId) -> Option<u64> {
+        let timeout = self.runtimes.get(feed.index())?.snapshot_timeout?;
+        let initial = self
+            .state
+            .policy(feed)
+            .ok()?
+            .supervision
+            .connect_timeout_ms
+            .min(5_000.);
+        Some(if timeout < initial { 3 } else { 2 })
     }
     pub(crate) fn complete_snapshot<P>(
         &mut self,

@@ -198,3 +198,30 @@ remain equivalent; private message proof is cleared across HTTP, Plan expiry
 and continuation nesting. Preflight deadline representation and all required
 timer/resource IDs before state mutation; preserve existing fatal-first rules.
 No reuse after in-callback retirement. Runtime/source review remains separate.
+
+## Runtime checkpoint before source review
+
+The initial implementation uses the existing Supervisor watch with an exact
+connect-origin absolute snapshot deadline; accepted login advances subscription
+permission while retaining Supervisor authentication expiry until native snapshot
+completion. Private active message custody binds BOTH epoch and engine receipt
+time. Non-message, stale, duplicate, retired and caller-modified-time attempts
+cannot complete it. Exact new socket/watch resource counts are preflighted,
+including the extra early timer only when the snapshot bound is shorter than
+the original initial watch. Existing default registration remains unchanged.
+
+Fifteen real-Engine controls pass after actual1943 integration, including
+original assertions, default registration, login/AOP permission, actual HTTP,
+timer, command and released-interest callback denial, retirement/reconnect,
+stale epochs, duplicate completion and receipt-time binding. Two new internal
+controls additionally cover exact last-safe resource capacity and atomic invalid
+policy refusal. Four scoped socket feature modes and strict Clippy passed the
+initial implementation; repeat them after subsequent source changes/integration
+before certification. No source-review/full-CI/performance claim at this checkpoint.
+
+Signer-lane integration gate: moving synchronous native user.auth to an async
+provider can release the ordinary opening ping first. Preserve exact native
+auth-before-immediate-ping using reviewed shared signing-release custody; no
+venue queue/timer and no silent delay-until-ACK substitution. The Phemex signer
+lane is plan/RED-only pending shared raw-signature expiry. This snapshot
+prerequisite does not claim to resolve that separate ordering/expiry contract.

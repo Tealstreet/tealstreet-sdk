@@ -74,6 +74,7 @@ impl<P> Cx<'_, P> {
         self.io.managed_sockets = true;
         Ok(feed)
     }
+    /// Keep login permission independent of a connect-origin native snapshot bound.
     pub fn register_socket_feed_with_snapshot(
         &mut self,
         policy: FeedPolicy,
@@ -87,10 +88,14 @@ impl<P> Cx<'_, P> {
         self.io.managed_sockets = true;
         Ok(feed)
     }
+    /// Complete validated native snapshot proof from this exact text callback only.
     pub fn complete_socket_snapshot(&mut self) -> Result<(), SocketError> {
         self.io.assert_actions_safe();
         self.io.opaque_entry_activity();
-        let epoch = self.io.socket_message.ok_or(SocketError::Stale)?;
+        let (epoch, received_at) = self.io.socket_message.ok_or(SocketError::Stale)?;
+        if self.now != received_at {
+            return Err(SocketError::InvalidTime);
+        }
         if !self.io.next_id.available(1) {
             return Err(SocketError::Capacity);
         }
@@ -132,7 +137,12 @@ impl<P> Cx<'_, P> {
             return Err(SocketError::NotPermitted);
         }
         self.io.socket_driver.preflight_begin(feed, self.now)?;
-        if self.io.socket_driver.snapshot_feed(feed) && !self.io.next_id.available(3) {
+        if self
+            .io
+            .socket_driver
+            .snapshot_connect_ids(feed)
+            .is_some_and(|count| !self.io.next_id.available(count))
+        {
             return Err(SocketError::Capacity);
         }
         let role = self.io.socket_driver.state.policy(feed)?.role.clone();
@@ -700,7 +710,7 @@ impl<V: Venue> Engine<V> {
                         io: &mut self.io,
                     };
                     assert!(cx.io.socket_message.is_none());
-                    cx.io.socket_message = Some(epoch);
+                    cx.io.socket_message = Some((epoch, now));
                     Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
                     cx.io.socket_message = None;
                 }
@@ -1906,6 +1916,52 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(sent, vec!["native-follow-up"]);
         assert!(!e.has_actions());
+    }
+    #[test]
+    fn snapshot_connect_preflights_exact_owned_resource_count() {
+        for (timeout, ceiling, admitted) in
+            [(20_000., 2, true), (1_000., 2, false), (1_000., 3, true)]
+        {
+            let mut store = Store::default();
+            let mut io = Io::<()>::default();
+            io.next_id = crate::resource_ids::ResourceIds::with_ceiling(ceiling);
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let mut declared = policy();
+            declared.auth = AuthMode::Required;
+            declared.supervision.auth_timeout_ms = Some(timeout);
+            let feed = cx.register_socket_feed_with_snapshot(declared).unwrap();
+            let result = cx.connect_socket(feed, "wss://snapshot.test");
+            if admitted {
+                assert!(result.is_ok());
+                assert!(!cx.io.next_id.available(1));
+                assert!(cx.socket_epoch(feed).is_some());
+            } else {
+                assert_eq!(result, Err(SocketError::Capacity));
+                assert!(cx.io.actions.is_empty());
+                assert!(cx.io.next_id.available(ceiling));
+                assert!(cx.socket_epoch(feed).is_none());
+            }
+        }
+    }
+    #[test]
+    fn snapshot_invalid_policy_does_not_register_a_feed() {
+        let mut store = Store::default();
+        let mut io = Io::<()>::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.register_socket_feed_with_snapshot(policy()),
+            Err(SocketError::InvalidPolicy)
+        );
+        assert!(cx.io.actions.is_empty());
+        assert_eq!(cx.register_socket_feed(policy()).unwrap().index(), 0);
     }
 }
 
