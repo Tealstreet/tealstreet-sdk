@@ -217,3 +217,27 @@ historical aa556 original-source receipt above remains intact. Recheck both
 ratchets and the unchanged controls at this integration; implementation stays
 held for actual #1945 and source ownership. No inventory prune or managed
 history readiness is claimed.
+
+## Reviewed command-wait implementation prerequisite
+
+The overseer authorized implementation against frozen #1945
+`15df705c0b52efd2b9963b2f8980d6c4c947b954` before its combo-5 landing.
+Actual landing `15bd7821b52` and that frozen head are now plain-merged; no
+shared source was changed while composing them. The real API is
+`command_wait`, `reject_expired_command` and `Engine::handle_command` as
+described above. Earlier statements that source is not frozen describe the
+original RED phase. Final integration must consume the actual #1945 landing.
+
+Refresh the original controls against real `handle_command` propagation before
+attributing caller-root failures to venue adoption. Keep the original RED
+checkpoint intact. Invalid host input is a distinct API boundary:
+`handle_command` returns typed Invalid without dispatch, while plain `handle`
+can enter with no receipt stamp. Do not fabricate a default root or numeric
+terminal when `command_wait` returns None; confirm that boundary with the seam
+owner before changing its regression expectation.
+
+The fresh collision check still lists #1773 history/lib source and #1943 lib
+source. The #1773/#1938/#1942 chain and narrow source handoff are being
+reconfirmed with claude-4yjlw0. No held venue source is edited until the agreed
+stack/order is established. Planned history shrink remains 14 fingerprints,
+18 occurrences; the conditional three-site lib funnel prune remains separate.
