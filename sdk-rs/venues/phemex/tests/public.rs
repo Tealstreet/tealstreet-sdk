@@ -6,8 +6,11 @@ use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"500","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"20690.1","askRp":"20690.2","lastRp":"20690.2","markRp":"20690.3","indexRp":"20690","openRp":"20000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
 fn respond(e: &mut Engine<PhemexPerpetuals>, id: RequestId, body: &str) {
+    respond_at(e, id, body, 0.);
+}
+fn respond_at(e: &mut Engine<PhemexPerpetuals>, id: RequestId, body: &str, now: f64) {
     e.handle(
-        0.,
+        now,
         Event::HttpResponse {
             request: id,
             response: Response {
@@ -19,7 +22,11 @@ fn respond(e: &mut Engine<PhemexPerpetuals>, id: RequestId, body: &str) {
     )
 }
 fn request(e: &mut Engine<PhemexPerpetuals>, path: &str) -> RequestId {
-    e.drain_actions()
+    request_at(e, path, 0.)
+}
+fn request_at(e: &mut Engine<PhemexPerpetuals>, path: &str, now: f64) -> RequestId {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.contains(path) => Some(r.id),
             _ => None,
@@ -66,8 +73,8 @@ fn daily_candle_to_preserves_the_callers_day_instead_of_shifting_back() {
             to_ms: Some(to),
         }),
     );
-    let req = e
-        .drain_actions()
+    let req = safe_cex_engine::test_support::prepared_actions(&mut e, to)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(r) if r.url.contains("/kline/list") => Some(r),
             _ => None,
@@ -79,10 +86,11 @@ fn daily_candle_to_preserves_the_callers_day_instead_of_shifting_back() {
         "{}",
         req.url
     );
-    respond(
+    respond_at(
         &mut e,
         req.id,
         r#"{"code":0,"data":{"rows":[[1699833600,86400,0,"100","110","90","105","2",0],[1699920000,86400,0,"105","115","95","110","3",0]]}}"#,
+        to,
     );
     #[derive(serde::Deserialize)]
     struct Candle {
@@ -134,8 +142,8 @@ fn candle_limit_selects_a_bounded_recent_window_even_with_an_old_from() {
                 limit: Some(limit),
             }),
         );
-        let url = e
-            .drain_actions()
+        let url = safe_cex_engine::test_support::prepared_actions(&mut e, now)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r.url),
                 _ => None,
@@ -171,8 +179,8 @@ fn candle_from_only_and_default_500_bar_windows_keep_their_existing_semantics() 
                 limit,
             }),
         );
-        let url = e
-            .drain_actions()
+        let url = safe_cex_engine::test_support::prepared_actions(&mut e, now)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r.url),
                 _ => None,
@@ -197,7 +205,7 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
         })
     };
     e.handle(now, candles(7));
-    let id = request(&mut e, "/kline/list");
+    let id = request_at(&mut e, "/kline/list", now);
     e.handle(
         now,
         Event::HttpResponse {
@@ -221,7 +229,7 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
         Action::Notice(Notice::CommandFailed { command: 8, error }) if error.legacy_text().contains("rate limited")
     )));
     e.handle(now + 60_000., candles(9));
-    assert!(e.drain_actions().any(|a| matches!(
+    assert!(safe_cex_engine::test_support::prepared_actions(&mut e, now + 60_000.).into_iter().any(|a| matches!(
         a,
         Action::Http(r) if r.url == "https://api.phemex.com/exchange/public/md/v2/kline/list?symbol=BTCUSDT&resolution=60&from=1699970060&to=1700000060"
     )));
