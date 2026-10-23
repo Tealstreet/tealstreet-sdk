@@ -214,14 +214,15 @@ fn reconnect_reauthenticates_resubscribes_and_ignores_retired_frames() {
 }
 
 #[test]
-fn pings_every_five_seconds_after_open() {
+fn pings_every_five_seconds_after_accepted_login() {
     let mut h = Harness::new();
     let socket = h.socket();
     h.advance(NOW + 4_000.);
     assert!(h.sent_to(socket, "server.ping") == 0);
     h.open();
-    assert_eq!(h.sent_to(socket, "server.ping"), 1);
+    assert_eq!(h.sent_to(socket, "server.ping"), 0);
     h.message(AUTHED);
+    assert_eq!(h.sent_to(socket, "server.ping"), 1);
     h.message(&snapshot(1));
     let opened = h.now;
     for n in 1..=6 {
@@ -289,6 +290,7 @@ fn snapshot_ends_the_deadline_and_stable_traffic_resets_backoff() {
         h.host_close();
         h.reconnect();
     }
+    let closed_before_ready = h.closed.len();
     h.open();
     h.message(AUTHED);
     h.message(&snapshot(1));
@@ -297,7 +299,7 @@ fn snapshot_ends_the_deadline_and_stable_traffic_resets_backoff() {
         h.advance(ready + f64::from(n) * 5_000.);
         h.message(PONG);
     }
-    assert!(h.closed.is_empty());
+    assert_eq!(h.closed.len(), closed_before_ready);
     h.host_close();
     assert_backoff(h.reconnect(), 1_000.);
 }
