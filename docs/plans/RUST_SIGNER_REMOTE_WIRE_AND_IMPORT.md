@@ -89,6 +89,10 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
      browser cap + round trip < the server engine's sign deadline < the 15 s
      `SIGN_TIMEOUT_MS`. An abandoned wait must never reach the server-side
      fatal timeout.
+   - The effective remote signing deadline is never longer than
+     `min(original root bound, family freshness, transport/provider cap)`.
+     A late reply after a shorter root bound expires is discarded, with a
+     control test for it.
 5. **Algorithms.** `ed25519`, `es256`, `secp256k1Digest`, `starkDigest`,
    `zkLinkContract` (after #1839/#1844 land), and Lighter Schnorr after P3.
    - `Sha256SecretSuffix` (Bitunix) and `HmacSha512` (Kraken) have no remote
@@ -210,9 +214,12 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      it is absent, the import refuses `unsupported`.
    - **Hosted custody.** In hosted mode the server engine performs all HTTP,
      so a server-executed derive would put the L2 secret in the server's
-     response body. That is forbidden. Hosted import needs device-side
-     execution of the derive request (a later P8 extension), or it is refused.
-     Until then hosted Polymarket stays unsupported.
+     response body. That is forbidden.
+     - P8 signing ops alone do not provide a remote import wire.
+     - Keyless/hosted Polymarket therefore stays unsupported, even after P8,
+       until a separately reviewed path exists for device-side import and
+       ownership of the derive HTTP request. Only then would the derived key
+       live on the device.
    - Injected JS and Workers providers implement `import` and `drop_imported`
      together or not at all.
 6. **Credential conditions (claude-m26ps4, 2026-10-23).**
@@ -258,6 +265,16 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      for signing/dispatch and m26ps4 sign-off for credential semantics.
    - claude-55ao7t calls the retirement hook from the session core.
    - codex-hcmq3f wires the Polymarket continuation.
+
+**Import fencing (codex-hcmq3f, 2026-10-23):**
+- Before routing a body, the engine validates the exact current session
+  Context and attempt, not just the generation.
+- Installation is atomic: either every declared ref is installed or none is,
+  and a partial install refuses and wipes.
+- Async, late and duplicate import receipts are fenced by attempt and
+  generation, so retirement can never reinstall stale refs.
+- Controls: a late response after retirement, partial-install failure, and a
+  duplicate receipt.
 
 **Out of scope:** when no API key exists yet, Polymarket needs a create-api-key
 POST. That is a Mutation with different retry rules. Today's venue has no
