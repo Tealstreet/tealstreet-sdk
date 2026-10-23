@@ -5129,4 +5129,6 @@ Caller-visible changes:
   public signer address, as before. V1 previously fell back to the API key; it
   now uses the trusted primary `localSigner.primary.stableId` (WEEX precedent)
   and otherwise fails typed (`unsupported`). It is never the key and never
-  empty.
+  empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
+  Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
+  caller migration.
