@@ -82,7 +82,8 @@ impl Account {
         *generation = generation.wrapping_add(1);
         let generation = *generation;
         let credential = credential(credentials);
-        // A rejected entry already published this command's failure.
+        // Entry refusal is engine-owned: a rejection already published this
+        // command's failure, and a revoked loan grants no terminal authority.
         let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::ReadOnly,
             read_credential: Some(credential.clone()),
@@ -133,6 +134,11 @@ impl Account {
             return;
         }
         if !leg.resent && crate::signature_rejected(response.body) {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                "BingX rejected a request signature; re-signing it once",
+            );
             match cx.plan_retry_context(
                 &leg.plan,
                 &leg.slot,
@@ -182,13 +188,13 @@ impl Account {
                 answer_current(cx, &leg, read);
                 return;
             }
-            if cx.store.market(&leg.symbol).is_none() {
+            let Some(native) = cx.store.market(&leg.symbol).map(|m| m.id.clone()) else {
                 let _ = cx.fail_plan(
                     &leg.plan,
                     metadata_error("BingX market disappeared during metadata read"),
                 );
                 return;
-            }
+            };
             if cx
                 .finish_plan_call(&leg.plan, &leg.slot, &leg.context)
                 .is_err()
@@ -198,7 +204,6 @@ impl Account {
             let Leg {
                 plan,
                 symbol,
-                native,
                 revision,
                 generation,
                 publish,

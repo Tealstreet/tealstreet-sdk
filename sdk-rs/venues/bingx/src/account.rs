@@ -1610,7 +1610,6 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
     })
 }
 
-/// A superseded read still answers without publishing stale settings.
 /// Tag an account read with the credential slot that actually signs it.
 pub(crate) fn tag_read(
     cx: &mut Cx<'_, Pending>,
