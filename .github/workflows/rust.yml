@@ -622,6 +622,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Authenticate complete first evidence and select eligible cases
         id: plan
         env:
@@ -683,6 +690,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Verify strict first results or complete two-run means
         id: certify
         env:

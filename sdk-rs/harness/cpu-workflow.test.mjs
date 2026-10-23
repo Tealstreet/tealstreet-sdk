@@ -63,6 +63,11 @@ test('all required suite names certify unconditionally, with an eligible-only se
 
 test('workflow controls reject skipped final checks, unconditional second jobs and suite/local bypasses', () => {
   const changes = [
+    text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('uses: ./.github/actions/install-yarn', 'uses: actions/checkout@v7')),
+    text => text.replace(job(text, 'cpu-certify'), job(text, 'cpu-certify').replace('uses: ./.github/actions/prepare-yarn', 'uses: actions/checkout@v7')),
+    text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('cache-key: ${{ steps.yarn.outputs.cache-key }}', 'cache-key: unbound')),
+    text => text.replace(job(text, 'cpu-second'), job(text, 'cpu-second') + '      - uses: ./.github/actions/install-yarn\n'),
+    text => text.replace(job(text, 'cpu-final'), job(text, 'cpu-final') + '      - uses: ./.github/actions/prepare-yarn\n'),
     text => text.replace("needs: cpu-plan\n    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'", 'needs: cpu-plan\n    if: always()'),
     text => text.replace('needs: [gate, cpu-plan, cpu-second]\n    if: always()', 'needs: [gate, cpu-plan, cpu-second]\n    if: success()'),
     text => text.replace('needs: cpu-certify\n    if: always()', 'needs: cpu-certify\n    if: success()'),
