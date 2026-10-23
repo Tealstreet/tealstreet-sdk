@@ -161,3 +161,51 @@ be called, malformed result count/MAC/credential/header/receipt, explicit provid
 refusal and absent-versus-empty body intent. This remains a component checkpoint;
 production builders, trusted setup, identity cutover and managed lifecycle are
 not yet migrated.
+
+## Actual shared-header integration and trusted-policy checkpoint
+
+Actual #1780 `02340e17712780fa526f4e07a029cd4e20fb00f5` is genuinely
+integrated at `0b006f84055`. The only merge conflict was two independent README
+index rows, resolved by the standing authorization: incoming shared-header row
+first, then the unchanged WEEX row, each once. Deleting the WEEX row recovers the
+complete incoming README. Both preservation reviews retain the four non-index
+owned blobs and all 5,305 unowned incoming entries. All 475 WEEX/Binance native
+targets, strict Clippy and fmt pass. Record this resolution as a PR comment when
+the family draft is published.
+
+Next bounded phase uses only landed APIs and does not turn on construction or
+hosted admission:
+
+1. Declare WEEX primary `requiredForPrivate` and secondary
+   `requiredWithPrimaryFallback` passphrases in its own construction-rules entry.
+   Preserve every incoming policy verbatim; no dispatch or remote-signing flag is
+   added. Regenerate the existing construction table and run its check. The
+   shared setup path remains the only resolver; do not trim/restore secrets in a
+   venue or implement another fallback resolver.
+2. Add original-RED behavior controls through the real trusted local provider
+   setup using `signer_setup_policy("weex")`: a complete private primary without
+   a passphrase rejects; absent secondary passphrase inherits the primary ref;
+   explicit empty rejects; public mode bypasses only the primary requirement and
+   still validates a supplied secondary. Pin literal secret bytes and independent
+   primary/secondary stable IDs. Keep incomplete-primary validation separate
+   from private family construction, whose builder adoption follows.
+3. The existing opaque HTTP component already has one static UNSIGNED_HEADERS
+   declaration. Implement actual #1780's `unsigned_http_headers()` getter from
+   that same data. A real managed engine/probe fixture must prepare these exact
+   two public headers before provider work, then sign/release the existing
+   independent native vector through the provider with the exact six-header
+   order. The original component currently lacks this getter, so record the
+   preparation assertion RED first. This is an actual shared managed/component
+   test, not production WEEX builder admission.
+4. Update the relevant safe-cex trusted-policy spec and caller section in the
+   same PR, describing resulting policy behavior with no merge/proof status.
+   Run focused WEEX/Binance and isolated registry/setup tests, strict Clippy/fmt,
+   construction generator/checks and both independent source/test reviews.
+
+Production builder rewiring still needs the existing semantic-owner mapping,
+identity cutover and complete managed read/write lifecycle proof. History keeps
+its native Completion ownership until the shared bridge/read validator is
+available; any required new legacy stage needs an explicit owner disposition.
+No per-venue validator, group journal or timer lifecycle is introduced by this
+checkpoint. The unmerged shared read-delivery validator and execution-group API
+are not consumed or claimed as actual here.
