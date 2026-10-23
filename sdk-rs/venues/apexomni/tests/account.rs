@@ -14,8 +14,8 @@ const ORDERS: &str = r#"{"code":0,"data":[{"id":"parent","symbol":"BTC-USDT","st
 const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","availableBalance":"800","initialMargin":"100","maintenanceMargin":"20"}}"#;
 
 fn seeded() -> (TestEngine, SocketId, Vec<HttpRequest>) {
-    let (provider, identities) =
-        safe_cex_crypto::signer::LocalSigner::from_setup(safe_cex_crypto::signer::LocalSetup {
+    let (provider, identities) = safe_cex_crypto::signer::LocalSigner::from_setup_with_policy(
+        safe_cex_crypto::signer::LocalSetup {
             primary: Some(safe_cex_crypto::signer::LocalIdentity {
                 key: safe_cex_crypto::signer::Secret::new("key".into()),
                 secret: safe_cex_crypto::signer::Secret::new("secret".into()),
@@ -23,8 +23,16 @@ fn seeded() -> (TestEngine, SocketId, Vec<HttpRequest>) {
                 ..Default::default()
             }),
             secondary: None,
-        })
-        .unwrap();
+        },
+        safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
+    .unwrap();
     let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),

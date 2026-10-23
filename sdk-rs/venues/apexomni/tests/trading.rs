@@ -1428,13 +1428,20 @@ fn remote_actions(e: &mut TestEngine) -> Vec<Action> {
     }
     out
 }
-fn remote_hmac_answer(work: &SignRequest) -> safe_cex_engine::signing::SignResult {
+fn remote_hmac_answer(
+    work: &SignRequest,
+    identity: &safe_cex_engine::signing::Identity,
+) -> safe_cex_engine::signing::SignResult {
     use safe_cex_engine::signing::{Operation, PayloadPart};
     assert_eq!(work.context.venue, "apexomni");
     assert_eq!(work.context.method, "POST");
     assert_eq!(work.operations.len(), 3);
-    assert!(matches!(work.operations[0], Operation::Present { .. }));
-    assert!(matches!(work.operations[1], Operation::Present { .. }));
+    assert!(
+        matches!(&work.operations[0], Operation::Present { key } if key == &identity.credential)
+    );
+    assert!(
+        matches!(&work.operations[1], Operation::Present { key } if Some(key) == identity.passphrase.as_ref())
+    );
     let Operation::Sign {
         algorithm: Algorithm::HmacSha256,
         payload,
@@ -1457,22 +1464,28 @@ fn remote_hmac_answer(work: &SignRequest) -> safe_cex_engine::signing::SignResul
         }
         _ => panic!("unexpected remote command scope"),
     };
-    let expected = format!(
-        "{}{suffix}",
-        safe_cex_engine::num::format(work.receipt.stamp_ms.unwrap())
-    );
-    assert_eq!(payload, expected.as_bytes());
-    // Independent remote-side primitive, never LocalSigner or the venue recipe.
-    let key = safe_cex_crypto::encode(b"mysecret", safe_cex_crypto::Encoding::Base64);
-    let hex =
-        safe_cex_crypto::hmac_sha256(key.as_bytes(), &payload, safe_cex_crypto::Encoding::Hex);
+    assert_eq!(work.receipt.stamp_ms, Some(1_700_000_000_133.));
+    assert_eq!(payload, format!("1700000000133{suffix}").as_bytes());
+    // Node22 createHmac('sha256', Buffer.from('remote-only-secret').toString('base64')).
+    // Both literal vectors are independent of the venue secret and Rust crypto.
+    let hex = if work.context.path.ends_with("/delete-order") {
+        "c8b02f8cf2463ea0b6592a3b12860b7a2c936fe21e08d256af04de52719f1b25"
+    } else {
+        "b4441fc36d7bde557de84e929c6824c035b876528d2fcb13b66fecd9c7de09c9"
+    };
     let mac = hex
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect();
     safe_cex_engine::signing::SignResult::new(
-        vec![b"api-key".to_vec(), b"pass".to_vec(), mac],
+        vec![
+            b"remote-api-key".to_vec(),
+            b"remote-passphrase".to_vec(),
+            mac,
+        ],
         work.receipt,
     )
 }
@@ -1494,9 +1507,12 @@ fn delegated_hmac_cancel_and_multipart_setting_release_only_after_remote_reply()
                 _ => None,
             })
             .unwrap();
-        let result = remote_hmac_answer(&work);
-        let expected_mac =
-            safe_cex_crypto::encode(&result.values[2], safe_cex_crypto::Encoding::Base64);
+        let result = remote_hmac_answer(&work, e.identities().primary.as_ref().unwrap());
+        let expected_mac = if work.context.path.ends_with("/delete-order") {
+            "yLAvjPJGPqC2WSo7EoYLeiyTb+IeCNJWrwTeUnGfGyU="
+        } else {
+            "tEQfw2173lV96E6SnGgkwDW4dlKNL8sTtm/s2cfeCck="
+        };
         e.handle(
             NOW + 11.,
             Event::Signed {
@@ -1518,14 +1534,30 @@ fn delegated_hmac_cancel_and_multipart_setting_release_only_after_remote_reply()
             .map(|(key, value)| (*key, value.as_str()))
             .collect();
         assert_eq!(headers["APEX-SIGNATURE"], expected_mac);
-        assert_eq!(headers["APEX-API-KEY"], "api-key");
-        assert_eq!(headers["APEX-PASSPHRASE"], "pass");
+        assert_eq!(headers["APEX-API-KEY"], "remote-api-key");
+        assert_eq!(headers["APEX-PASSPHRASE"], "remote-passphrase");
+        assert_eq!(headers["APEX-TIMESTAMP"], "1700000000133");
+        assert_eq!(headers.len(), 5);
         if first.url.ends_with("/delete-order") {
+            assert_eq!(
+                headers["Content-Type"],
+                "application/x-www-form-urlencoded; charset=UTF-8"
+            );
             assert_eq!(first.body.as_deref(), Some("id=native-order"));
         } else {
-            assert!(headers["Content-Type"].starts_with("multipart/form-data; boundary="));
-            assert!(first.body.as_ref().unwrap().contains("0.10000"));
-            assert!(first.body.as_ref().unwrap().contains("BTC-USDT"));
+            assert_eq!(
+                headers["Content-Type"],
+                "multipart/form-data; boundary=safe-cex-apexomni"
+            );
+            assert_eq!(
+                first.body.as_deref(),
+                Some(concat!(
+                    "--safe-cex-apexomni\r\nContent-Disposition: form-data; name=\"symbol\"\r\n\r\nBTC-USDT\r\n",
+                    "--safe-cex-apexomni\r\nContent-Disposition: form-data; name=\"token\"\r\n\r\nUSDT\r\n",
+                    "--safe-cex-apexomni\r\nContent-Disposition: form-data; name=\"initialMarginRate\"\r\n\r\n0.10000\r\n",
+                    "--safe-cex-apexomni--\r\n"
+                ))
+            );
         }
         e.handle(
             NOW + 12.,
@@ -1549,6 +1581,11 @@ fn delegated_provider_refusal_is_typed_not_sent_before_http() {
     let (mut e, _) = ready_with_provider_mode(true, true);
     e.handle(NOW + 10., Event::Command(hmac_setting()));
     let staged = remote_actions(&mut e);
+    assert!(
+        !staged
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
     let attempt = staged
         .into_iter()
         .find_map(|action| match action {

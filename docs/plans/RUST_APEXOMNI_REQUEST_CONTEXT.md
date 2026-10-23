@@ -600,9 +600,14 @@ All four original HMAC error controls are active. The three original provider
 controls now pass, as do non-2xx/code-zero, quoted-code, partial cancellation IDs
 and timeout/late-ACK revision controls. The native helper drives the existing
 Prepare/Bind/Claim fixture at each test's actual event time. This proves local
-provider behavior; the HmacOnly fixture is not a remote-signing proof. Positive
-async remote HMAC cancel and multipart-setting proof remains a merge prerequisite.
-The two placement REDs remain explicitly P8-gated, unchanged.
+provider behavior; the HmacOnly fixture is not a remote-signing proof. The native delegated-provider proof now drives real managed cancel and multipart
+setting commands through Prepare, out-of-band Sign work, independently computed
+apexomni-base64 HMAC answers, Bind and Claim. Literal Node vectors and remote-only
+credential/MAC sentinels distinguish the answer from local signing. It asserts exact payload/MAC/header/body
+bytes, no HTTP before the answer, duplicate receipt inertness and typed provider
+refusal. It uses the signer owner's approved test-only venue construction while
+registry admission is pending. SDK/browser wire proof remains separate.
+The two placement REDs remain explicitly P8-gated (#1926), unchanged.
 
 The exact ratchet prune removes only `venues/apexomni/src/trading.rs`: 11
 fingerprints / 17 occurrences to zero. The shared legacy lib sender, startup,

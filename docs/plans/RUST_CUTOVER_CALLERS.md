@@ -5464,5 +5464,7 @@ cancellation targets and must not all be interpreted as newly placed orders.
 Only exact native 20016 refusal can earn one resend;
 text containing "sign" and bare statuses cannot. Capability refusal before a
 contract-bearing Amend prevents its cancel too. Local zkLink works through the
-provider; remote zkLink remains gated by P8. Positive async remote HMAC proof is
-required separately and is not inferred from the local capability fixture.
+provider; remote zkLink remains gated by P8 (#1926). Native async remote HMAC
+cancel and multipart-setting controls pin independent Node vectors, remote-only
+credential/MAC sentinels and exact timestamp/body/header bytes. SDK/browser wire
+proof and registry admission remain open; local capability fixtures prove neither.
