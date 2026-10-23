@@ -34,6 +34,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    Candles(public::Candles),
     Public(public::Request),
     Account(account::Request),
     Trade(trading::Request),
@@ -79,6 +80,49 @@ struct Envelope<'a> {
     code: Option<Code>,
     #[serde(borrow, default)]
     msg: std::borrow::Cow<'a, str>,
+}
+
+enum ApiResponse {
+    Success,
+    SignatureRefusal(safe_cex_engine::VenueError),
+    Failed(safe_cex_engine::VenueError),
+}
+
+fn api_response(response: Response<'_>) -> ApiResponse {
+    let envelope = serde_json::from_str::<Envelope<'_>>(response.body).ok();
+    if envelope.is_none() && response.body.trim_start().starts_with('{') {
+        return ApiResponse::Failed(trading::unknown(
+            "ApeX Omni response contains malformed error metadata",
+        ));
+    }
+    let code = envelope
+        .as_ref()
+        .and_then(|e| e.code.as_ref())
+        .and_then(Code::number);
+    if (200..300).contains(&response.status) && code.is_none_or(|code| code == 0) {
+        return ApiResponse::Success;
+    }
+    let signature = envelope.as_ref().is_some_and(|e| {
+        code.is_some_and(|code| code != 0)
+            && (matches!(code, Some(20016 | 401)) || e.msg.to_ascii_lowercase().contains("sign"))
+    });
+    let error = trading::failure(
+        code,
+        response.status,
+        format!(
+            "ApeX Omni request failed [{}]: {}",
+            code.unwrap_or(i64::from(response.status)),
+            envelope
+                .as_ref()
+                .map(|e| e.msg.as_ref())
+                .unwrap_or("invalid response")
+        ),
+    );
+    if signature {
+        ApiResponse::SignatureRefusal(error)
+    } else {
+        ApiResponse::Failed(error)
+    }
 }
 
 impl ApexOmni {
@@ -149,51 +193,25 @@ impl ApexOmni {
                 retries,
                 at,
             } => {
-                let envelope = serde_json::from_str::<Envelope<'_>>(response.body).ok();
-                if envelope.is_none() && response.body.trim_start().starts_with('{') {
-                    self.failed(
-                        cx,
-                        *pending,
-                        trading::unknown("ApeX Omni response contains malformed error metadata"),
-                    );
-                    return;
-                }
-                let code = envelope
-                    .as_ref()
-                    .and_then(|e| e.code.as_ref())
-                    .and_then(Code::number);
-                let rejected = envelope.as_ref().is_some_and(|e| {
-                    code.is_some_and(|code| code != 0)
-                        && (matches!(code, Some(20016 | 401))
-                            || e.msg.to_ascii_lowercase().contains("sign"))
-                });
-                if !legacy && rejected {
-                    Self::reset_request(&mut pending);
-                    if let Err((error, pending)) =
-                        self.send_signed(cx, request, *pending, at, true, retries)
-                    {
-                        // The venue refused the first signature; the resend never left.
-                        let error = safe_cex_engine::VenueError::new(error)
-                            .outcome(safe_cex_engine::Outcome::Rejected);
-                        self.failed(cx, *pending, error);
+                match api_response(response) {
+                    ApiResponse::SignatureRefusal(_) if !legacy => {
+                        Self::reset_request(&mut pending);
+                        if let Err((error, pending)) =
+                            self.send_signed(cx, request, *pending, at, true, retries)
+                        {
+                            // The venue refused the first signature; the resend never left.
+                            let error = safe_cex_engine::VenueError::new(error)
+                                .outcome(safe_cex_engine::Outcome::Rejected);
+                            self.failed(cx, *pending, error);
+                        }
                     }
-                    return;
-                }
-                if !(200..300).contains(&response.status) || code.is_some_and(|code| code != 0) {
-                    let error = format!(
-                        "ApeX Omni request failed [{}]: {}",
-                        code.unwrap_or(i64::from(response.status)),
-                        envelope
-                            .as_ref()
-                            .map(|e| e.msg.as_ref())
-                            .unwrap_or("invalid response")
-                    );
-                    let error = trading::failure(code, response.status, error);
-                    self.failed(cx, *pending, error);
-                } else {
-                    self.response(cx, *pending, response);
+                    ApiResponse::Failed(error) | ApiResponse::SignatureRefusal(error) => {
+                        self.failed(cx, *pending, error)
+                    }
+                    ApiResponse::Success => self.response(cx, *pending, response),
                 }
             }
+            Pending::Candles(pending) => self.candle_response(cx, pending, response),
             Pending::Public(pending) => self.public_response(cx, pending, response),
             Pending::Account(pending) => self.account_response(cx, pending, response),
             Pending::Trade(pending) => self.trading_response(cx, pending, response),
@@ -203,6 +221,7 @@ impl ApexOmni {
 
     fn item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Candles(_) => {}
             Pending::SignedAuth { pending, .. } => self.item(cx, pending, item),
             Pending::Public(pending) => self.public_item(cx, pending, item),
             Pending::Account(pending) => self.account_item(cx, pending, item),
@@ -213,6 +232,7 @@ impl ApexOmni {
 
     fn reset_request(pending: &mut Pending) {
         match pending {
+            Pending::Candles(_) => {}
             Pending::SignedAuth { pending, .. } => Self::reset_request(pending),
             Pending::Public(request) => request.reset(),
             Pending::Account(request) => request.reset(),
@@ -223,6 +243,7 @@ impl ApexOmni {
 
     fn transport_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error),
             Pending::SignedAuth {
                 request,
                 mut pending,
@@ -256,6 +277,7 @@ impl ApexOmni {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Candles(pending) => Self::candle_failed(cx, pending, error),
             Pending::SignedAuth { pending, .. } => self.failed(cx, *pending, error),
             Pending::Public(pending) => self.public_failed(cx, pending, &error.message),
             Pending::Account(pending) => self.account_failed(cx, pending, &error.message),
@@ -330,6 +352,18 @@ impl Venue for ApexOmni {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         self.transport_failed(cx, pending, error);
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Candles(pending) => Self::candle_failed(cx, pending, error),
+            pending => self.on_sign_error(cx, pending, error),
+        }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if !self.public_timer(cx, timer)

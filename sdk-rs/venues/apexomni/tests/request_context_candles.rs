@@ -87,12 +87,22 @@ fn release(engine: &mut TestEngine, token: Preparation, now: f64) -> HttpRequest
 }
 
 fn response(engine: &mut TestEngine, request: &HttpRequest, now: f64, body: &str) -> Vec<Action> {
+    response_status(engine, request, now, 200, body)
+}
+
+fn response_status(
+    engine: &mut TestEngine,
+    request: &HttpRequest,
+    now: f64,
+    status: u16,
+    body: &str,
+) -> Vec<Action> {
     engine.handle(
         now,
         Event::HttpResponse {
             request: request.id,
             response: Response {
-                status: 200,
+                status,
                 headers: "",
                 body,
             },
@@ -334,4 +344,44 @@ fn duplicate_command_cannot_replace_parked_candle_authority() {
             .count(),
         1
     );
+}
+
+#[test]
+fn native_candle_failures_keep_read_messages_without_write_outcomes() {
+    for (status, body, signature_retry, expected) in [
+        (
+            503,
+            r#"{"code":0,"msg":"gateway"}"#,
+            false,
+            "ApeX Omni request failed [0]: gateway",
+        ),
+        (
+            200,
+            r#"{"code":"#,
+            false,
+            "ApeX Omni response contains malformed error metadata",
+        ),
+        (
+            200,
+            r#"{"code":20016,"msg":"bad signature"}"#,
+            true,
+            "ApeX Omni request failed [20016]: bad signature",
+        ),
+    ] {
+        let mut engine = engine();
+        let actions = query(&mut engine, 7, 100.);
+        let (token, _) = preparation(&actions);
+        let packet = release(&mut engine, token, 101.);
+        let mut actions = response_status(&mut engine, &packet, 102., status, body);
+        if signature_retry {
+            let (token, _) = preparation(&actions);
+            let packet = release(&mut engine, token, 103.);
+            actions = response_status(&mut engine, &packet, 104., status, body);
+        }
+        let error = failure(&actions, 7);
+        assert_eq!(error.message, expected);
+        assert_eq!(error.outcome, None);
+        assert_eq!(error.kind, None);
+        assert_eq!(error.venue_code, None);
+    }
 }

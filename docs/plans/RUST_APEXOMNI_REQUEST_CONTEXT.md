@@ -252,3 +252,36 @@ check pass. This is plan verification, not implementation acceptance.
 | `ca37246cf8052b21b57e7f1400b1026f755a6bdaadfe661eb481c929ddcc2d68` | 1 / 714 | `cx.done(job.command, result)` | WRITE |
 | `6456c3d2f1245d934cb2d038038ae81a82d5e9fd85cf29070c87d948a57b8ea0` | 2 / 750, 780 | `cx.fail(job.command, not_sent(error))` | WRITE |
 | `06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3` | 1 / 822 | `cx.fail(job.command, error)` | WRITE |
+
+## Owner assignment update
+
+After the inventory checkpoint, the overseer assigned ApeX signer adoption to
+`codex-sy8pn5` (ApeX first in the non-HMAC signer lane). Background-session
+Context belongs to `codex-spc1lj`. Send signer requirements before private-read
+work and coordinate overlapping `lib.rs` changes before either source PR opens.
+The first unsigned candle slice leaves `signed`, `send_signed`, `sign.rs`,
+account/history/trading reducers and session authentication untouched.
+
+
+## Current first-slice checkpoint
+
+The original source compiled with seven new candle controls, then all seven
+failed at the no-send-before-preparation assertion. Regression commit:
+`84c8fedba5d`. The implementation is a narrow Pending/callback adoption plus one
+extraction of the existing native API-envelope verdict, preserving the legacy
+signed branch and the native read retry budgets. Existing daily-bound/sorting
+and malformed/row fixtures use the shared prepared-action driver without changing
+assertions or clocks.
+
+The scanner delta is only `venues/apexomni/src/public.rs`: 9 to 2 occurrences,
+six removed fingerprint entries and one count decrement. ApeX becomes 29 entries
+and 38 occurrences; global 1,226 to 1,219 at this base. Every unowned map remains
+identical. The remaining two public entries are interval refusal and initial
+context-issuance refusal; private/signing/local migrations still must reach zero.
+
+Actual shared typed conversion is a prerequisite: `claude-dazzy3` owns PR #1808
+for `request_context::Error::{kind, venue_error}`. Compilation/acceptance waits
+for its actual landing; no venue-owned classification shim or engine edits are
+part of this branch. Host disposal is exercised by the existing shared managed
+HTTP host controls in CI; native venue tests exercise retirement and late/reused
+callbacks. No claim of new ApeX-specific host disposal proof is made here.
