@@ -368,3 +368,59 @@ Shared finish handles only child retirement after that logical stage, never
 renewing root authority. Preserve both actual-builder originalRED controls and
 add managed release/refusal/expiry/duplicate/supersession controls; keep session,
 history, writes and hosted admission explicitly at their existing boundaries.
+
+### Actual read authority and safe IDs; corrected native retry lifetime
+
+The checkpoint now genuinely integrates actual read-authority #1792
+`8e53b1bd39e0fd03534ffa4453349390251e4585` and actual SafeIDs #1789
+`7641650e7b1fc54c55593880ac16299171f60a90` at `de02811a094`.
+The complete shared HTTP/header/validator/allocator source and all 5,291 unowned
+incoming entries are preserved. The only conflict was independently appended
+CALLERS prose; full incoming text precedes the prior own suffix verbatim once.
+Both preservation reviews are CLEAR. The existing completed read slices pass
+504 BingX/Binance native controls; the two paired metadata builder assertions
+remain original REDs, not a claimed production adoption.
+
+The earlier generic 40s-root / retry-retains-child-deadline proposal is superseded
+for the actual native fresh-retry contract. A metadata read that permits one
+signature retry has two physical attempts, each with its native fresh 20s window:
+one bounded read-call therefore declares 40s, and a serial two-read execution
+with that retry allowance for each read declares 80s. A 40s execution describes
+only a no-retry pair or a different shared-call budget explicitly supported by
+the native contract. Do not clip valid retries to a guessed root deadline.
+
+Use the shared owner's reviewed Preflight/CallWindow execution declaration once
+available: one original read execution owner, checked total declared bound, and
+separate immutable physical attempt caps. A reprepare cannot renew its current
+physical attempt; only an allowed native signature retry may start the next
+fresh native attempt inside the originally declared execution. No venue-local
+root, timer, numeric-owner fallback, cloned parallel send authority or arbitrary
+120s cap is permitted. The read-delivery validator is actual, but by itself does
+not implement that retry-lifetime owner. Paired production wiring waits for the
+complete shared ownership seam; the original REDs stay intact until then.
+
+Retain the same root across both logical reads. Before any metadata decode,
+Store publication or companion completion, validate the exact root/leg delivery
+with `validate_read_http_delivery`; keep all existing settings revision,
+symbol-generation, pending-write and current-settings fallback fences. Failure
+cleanup still settles the owned root exactly once even when no delivered-leg
+validator can succeed (provider/route refusal or expiry); invalid callbacks gain
+no publication or numeric completion authority. Retire a child only after that
+logical read and every declared attempt have finished.
+
+For the later shared scheduler adoption, the response lease covers the declared
+read-call chain (40s for two native 20s attempts), while the release/lifecycle
+physical cap stays 20s and bounds each lease handoff. Admission remains
+idempotent; a signature refusal is not DATA and never progresses or renews the
+scheduler lease. Only validated first-read DATA may perform the existing
+scheduler progress before the second logical read. No unscheduled fallback or
+new Scheduler API is introduced by this mapping. Add actual-path RED/GREEN
+controls for the late first response, fresh signature retry, second read,
+80s total boundary, refusal/expiry, duplicates and stale publication fences.
+
+Financial write groups remain a separate shared Plan/reservation prerequisite:
+serial eight-delete native walks can validly take 152s, and the declared
+fresh-signature-retry worst case is 320s. The same physical journal/root owner
+must handle writes and observer groups; no BingX-local ledger or timer owner is
+created. History and session ownership retain their previously documented
+explicit legacy boundaries until their own shared completion/session seams.
