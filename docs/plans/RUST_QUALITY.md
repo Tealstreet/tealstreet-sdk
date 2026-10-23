@@ -832,6 +832,19 @@ Verification on the integrated startup fix passes456 MEXC+Binance tests across
 and both ratchets (14 controls) pass. Three independent reviews are clean;
 architecture No. Source/test files held by history #1793 remain untouched.
 
+## Phemex unsigned candle request regressions
+
+Committed plan05988416603 precedes separate original-source tests2a1a008bc7c:
+six lifecycle regressions fail and primary/secondary/dual signing compatibility
+already passes. Controls cover preparation/binding/one release, parked and
+released expiry, stale callbacks with ID reuse, typed setup/network failures,
+genuine invalid-time admission and native sorted output. Additional native
+error/malformed-row/missing-list comparisons match the credentialed path, and
+an expired429 reply cannot pause another read. Existing public assertions are
+retained with the shared prepared fixture; only the daily response clock moves
+forward to its command's timestamp. No scanner/manifest change or credentialed
+signer migration is included.
+
 ## MEXC managed book regressions
 
 Plan531195b3a8c precedes separate original-source RED0213bd8e13a: all7 lifecycle
