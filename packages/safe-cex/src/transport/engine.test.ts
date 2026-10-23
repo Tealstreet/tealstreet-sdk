@@ -708,10 +708,15 @@ describe('engine socket routing at the raw transport boundary', () => {
     expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1001);
     socket.send('after-close');
     expect(relay.send).toHaveBeenCalledTimes(3);
-    routed.connect(url, handlers('private'));
-    routed.connect(url, handlers('private'));
-    routed.connect(url, handlers('private'));
+    const retries = [
+      routed.connect(url, handlers('private')),
+      routed.connect(url, handlers('private')),
+      routed.connect(url, handlers('private')),
+    ];
     expect(raw.connect.mock.lastCall?.[0]).toBe('wss://bybit-proxy-ja.tealstreet.io/v5/private');
+    // One probe may still be awaiting its dynamic relay constructor. Retire it
+    // before Vitest resets the mock; it must not open a socket in the next test.
+    retries.forEach((retry) => retry.close());
   });
 });
 
