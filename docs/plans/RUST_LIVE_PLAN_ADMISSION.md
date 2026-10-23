@@ -396,3 +396,25 @@ Keep the existing validation, callback and cleanup order byte-for-byte in the
 extracted bodies. Run the full feature-on/off engine controls and strict checks,
 review the source delta, then measure the unchanged Aster budget in normal CI.
 A size reduction is not claimed until that CI measurement exists.
+
+## Zero Plan scans on public events without a Plan
+
+The first integrated Bybit verifier failure is Hyro steady CPU. Fresh landing
+logs classify the same 5,260 Spot catalogue diagnostics as known failures; those
+are not a new catalogue regression. The new Plan flushes currently scan every
+command owner multiple times per public event even when all owners are ordinary
+Contexts or execution observers and no Plan exists.
+
+Maintain one bounded index of admitted Plan command IDs, reserved fallibly before
+both ID namespaces commit, populated only at the Preflight-to-Plan transition,
+and removed at Plan retirement. All Plan scans iterate this index; an O(1)
+empty-index guard skips the Plan flush entirely. It is an execution index, not a
+second authority or deadline owner. Retained Preflight/Context/execution owners
+must never enter it. Keep exact retirement, panic, timer and readiness ordering.
+
+Before the fix, instrument actual visited owner cells only in tests/test-support
+and prove a native Hyro engine with a live RefreshMarkets observer pays zero Plan
+visits across public ticker events, dispatch preparation and drains. Retain the
+assertion RED, then run it in native release mode and preserve all active-Plan,
+root-expiry, reservation-refusal, command-ID reuse and observer-isolation controls.
+Only normal CI establishes the WASM steady gate; no local WASM build is used.
