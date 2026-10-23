@@ -1271,3 +1271,34 @@ feature-off unused-getter failure is retained as a RED control. HTTP, dispatch,
 driver, engine ingress and supervision behavior remain unchanged. These checks
 establish preservation only; the fresh isolated measurement is still required
 before any CPU improvement or gate-feasibility conclusion.
+
+### Temporary Phase K isolated native measurement (never merge)
+
+This diagnostic branch exists only to run owner-authorized measured iteration
+1/2 after Phase J. The source under test is reviewed and verified frozen K
+`a514892ac8431f7fef7e587eb7b93ebd4890e28c`, tree
+`46c8e5a37b82df291bf1c40e8b3c9643afb6756f`. The immediate before control is
+J `1c243e48d2a3886033aa1c69b2cda6f24be366c8`, tree
+`d4166b5135430190896dbd936f46cd9cd847af79`. The fixed landing remains
+`7641650e7b1fc54c55593880ac16299171f60a90`, tree
+`c83f4bc5feb9a474d1436b9074e677658a203cee`.
+
+Copy the already reviewed Phase J diagnostic tooling/workflow from exact
+`a4417b03e8b4b71b8acf3b86570ff431a2e95486`; change ONLY before/current source
+head/tree contract values and the matching contract SHA constant. The driver,
+external lock, gzip/raw tape and native facts, toolchain, all-three-builds-before
+sampling rule, 40s processes/3 warmups, 20s 999Hz profiles and fixed eight-process
+ABBA order remain byte-identical. The normal workflow is unchanged between J
+and K; keep every production job skipped only for this explicit diagnostic.
+Run all offline negative controls and independently audit the exact substitutions
+before dispatching. Never merge this branch/tooling, alter gates or relabel any
+historical experiment. No local replay substitutes for this isolated runner.
+
+Fresh run/artifact collection must bind exact head/tree/attempt/job/log/upload
+windows and every source, binary, facts and internal payload hash. Retain all
+samples, including incomplete runs. Review the adapted collector pins and then
+independently audit the entire fresh capture and profiles. Report before/current
+against their own adjacent landing controls as well as explicitly labeled pooled
+controls; no overlapping inclusive-time sum. This is native whole-tape evidence,
+not a WASM steady gate. Preserve the at-most-two-iterations timebox and finish
+with feasibility/options if substantial cost remains.
