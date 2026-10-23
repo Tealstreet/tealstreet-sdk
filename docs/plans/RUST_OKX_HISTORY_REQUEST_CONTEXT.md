@@ -344,3 +344,13 @@ timer; native request/timer setup is otherwise supplied by the passing page
 pacing controls. The two expiry assertions now demand the current strict engine
 Timeout contract, with their original versions retained in Git history. No venue
 source, manifest or existing financial oracle changes in this checkpoint.
+
+Plan review tightens expiry controls to count every correlated terminal and
+forbid INCOMPLETE markers. A pre-release child expiry/preparation error arrives
+through the shared strict signing/preparation failure callback; a released child
+timeout through typed on_http_failed retains native live-root query soft[].
+Synchronous child mint or managed submission refusal rejects strictly through
+the root and cannot soften accepted rows. No release inference is added. Primary
+managed routing uses explicit Prepare intentPrimary; a physical routeNone means
+the host's normal primary egress, equivalent to native explicit Primary. A new
+adoption control pins that intent before signing.

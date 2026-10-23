@@ -316,7 +316,12 @@ fn native_lookup_transport_failure_is_strict_and_has_no_definitive_absence() {
     let mut engine = ready();
     deliver(&mut engine, NOW, lookup(), None);
     let request = request(actions(&mut engine, NOW));
-    assert_eq!(request.route, Some(safe_cex_engine::RequestRoute::Primary));
+    assert_eq!(
+        request
+            .route
+            .unwrap_or(safe_cex_engine::RequestRoute::Primary),
+        safe_cex_engine::RequestRoute::Primary
+    );
     engine.handle(
         NOW + 1.,
         Event::HttpFailed {
@@ -377,7 +382,20 @@ fn root_expired(output: &[Action]) {
         done(output).is_none(),
         "root expiry never softens into empty success"
     );
-    assert_eq!(output.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.kind == Some(ErrorKind::Timeout) && error.outcome.is_none())).count(), 1);
+    let failures: Vec<_> = output
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed {
+                command: OWNER,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].kind, Some(ErrorKind::Timeout));
+    assert!(failures[0].outcome.is_none());
+    assert!(!output.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
     assert!(!output.iter().any(|a| matches!(
         a,
         Action::Http(_) | Action::ManagedHttp(_) | Action::Notice(Notice::CommandError { .. })
@@ -401,4 +419,12 @@ fn revised_parked_root_timer_expires_without_pacing_or_prefix_publication() {
     paced(&waiting, NOW + 300.);
     engine.handle(NOW + 250., Event::TimerFired { timer });
     root_expired(&actions(&mut engine, NOW + 250.));
+}
+
+#[test]
+fn managed_primary_lookup_declares_primary_egress_before_signing() {
+    let mut engine = ready();
+    deliver(&mut engine, NOW, lookup(), None);
+    let output: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(output.iter().filter(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { intent: safe_cex_engine::request_context::RoutingIntent::Primary, request, .. } if request.url.contains("/trade/order?")))).count(), 1);
 }
