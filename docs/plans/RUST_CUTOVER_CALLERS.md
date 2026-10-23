@@ -5709,3 +5709,15 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
+
+## Immutable account setup contract (G2c owner decision, 2026-10-24)
+
+Account configuration changes create a new engine. Signer, selected identity and
+account-subject snapshots are immutable within an engine after startup; no live
+configuration replacement is required. The old engine is torn down before its
+replacement becomes available. Teardown cancels and fences old requests,
+preparations, provider jobs, sockets and timers; cancellation never proves a
+released write unsent or clears prior Unknown/partial-ID evidence. G2c's snapshot
+installation and explicit retirement hooks remain planned; existing setter-after-
+startup refusal is preserved, and tests for new snapshot APIs are labelled
+NEW-CONTRACT rather than invented original regressions.
