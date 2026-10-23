@@ -1487,6 +1487,7 @@ struct Io<P> {
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
+    session_waits: request_context_registry::session::Waits<P>,
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
@@ -1524,13 +1525,17 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
     #[cfg(feature = "managed-sockets")]
-    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal>,
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal<P>>,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_bytes: usize,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_next: u64,
     #[cfg(feature = "managed-sockets")]
     socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuations: std::collections::VecDeque<managed_sockets::Continuation<P>>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuation_bytes: usize,
 }
 
 impl<P> Default for Io<P> {
@@ -1571,6 +1576,7 @@ impl<P> Default for Io<P> {
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
             signatures: Vec::new(),
+            session_waits: Default::default(),
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
@@ -1610,6 +1616,10 @@ impl<P> Default for Io<P> {
             socket_proposal_next: 0,
             #[cfg(feature = "managed-sockets")]
             socket_after: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuations: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuation_bytes: 0,
         }
     }
 }
@@ -2612,6 +2622,22 @@ pub trait Venue {
     ) {
     }
 
+    /// A session waiter reached its owner's original deadline before the venue
+    /// drained it. Nothing was sent for that owner.
+    fn on_session_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_http_preparation_failed(
+            cx,
+            pending,
+            crate::request_context::Error::TimedOut,
+            error,
+        );
+    }
+
     /// Defer symbol cancellation until placement native identities are known.
     fn guard_pending_placements(&self) -> bool {
         false
@@ -2698,6 +2724,15 @@ pub trait Venue {
         _event: crate::socket_lifecycle::LifecycleEvent,
     ) -> Result<(), crate::socket_lifecycle::SocketError> {
         Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_socket_interests_released(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _epoch: crate::socket_lifecycle::Epoch,
+        _pending: Self::Pending,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Ok(())
     }
     #[cfg(feature = "managed-sockets")]
     fn encode_socket_interests(
@@ -4113,7 +4148,22 @@ impl<V: Venue> Engine<V> {
                     cx.store,
                     &mut cx.io.actions,
                 );
+                // Session writes skip the journaled collector, so expose the
+                // reply metadata the write classifier reads during this callback.
+                let session_write = cx.io.http_delivery.as_ref().is_some_and(|delivery| {
+                    delivery.context.operation() == crate::request_context::Operation::Mutation
+                        && matches!(
+                            delivery.context.owner(),
+                            crate::request_context::Owner::Session { .. }
+                        )
+                });
+                if session_write {
+                    cx.io.http_write_reply = Some((response.status, response.headers.to_owned()));
+                }
                 self.venue.on_response(&mut cx, pending.value, response);
+                if session_write {
+                    cx.io.http_write_reply = None;
+                }
             }
             Err(_) => {
                 let make_failure = || malformed_body("response body is not UTF-8");
@@ -4649,6 +4699,11 @@ impl<V: Venue> Engine<V> {
         self.flush_http_owner_retirements();
         self.assert_live();
         self.io.assert_actions_safe();
+        #[cfg(feature = "managed-sockets")]
+        if !self.io.socket_continuations.is_empty() {
+            self.arm_socket_continuations(self.io.dispatch_now);
+            self.io.assert_actions_safe();
+        }
         self.io.actions.drain(..)
     }
 
