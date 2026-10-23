@@ -406,6 +406,29 @@ HISTORY_BOOTSTRAPS = {'venues/coinbase/src/history.rs': ({'0451c29993291234cad6e
   'ce94b1ead60a3eaac0c938d1a3e396b6d56cb90b0009e5dfdca59701a3f0ca7d': 1,
   'f025fc43a750a2590ced1ab109e5ee504164bf8505fdfb4ffec28b246dacd511': 2})}
 
+# Exact same-site snapshot pending-token re-expression, using the existing
+# literal whole-map transition table under the standing rehash authorization.
+HISTORY_BOOTSTRAPS['venues/paradex/src/account.rs'] = ({'0bc0f05583257432e512c356c6a5b41046e2a70d3cfe6eb8190238c9514faba2': 1,
+  '3205be4fd57aee0c1cacd8fdd9fa48f9d000e9bbb2b7f53409ca39c64f0edc4a': 1,
+  '388c9f66c40d488788f2f4a9808088e22a0425615dfd2818c9d63d58675392d1': 1,
+  '395b8568f2efae46398fc76c6b422807900a928734749cdd4f8bd60b42366d19': 1,
+  '5c28b0ebae1f2a54f344d52c2c422801c8e82381c7fd8ad95d13cd549e88ddec': 1,
+  '85a7a04ae14d4df7bd123dd4837791701bbb02dc615d4e9f24060a2161f7ba3e': 1,
+  'a5c107b3d98e73b4c73ebd13c21dcf8cb307a0041bc896cc3e6e808fb63cf446': 1,
+  'ac42e25ca2de115b1eb59cc4913e6fd26670c4dfb47f17ed56fc0d1f34272fd9': 1,
+  'c8154248a24f58ded15a175a8afd344f331635f51e564a526d510748797ff231': 1,
+  'e473c92d9c3a15cbdf8752a673c64963c9ef531ee4a7e47ae60d1abe5e32659e': 1},
+ {'0bc0f05583257432e512c356c6a5b41046e2a70d3cfe6eb8190238c9514faba2': 1,
+  '29a6633fa3f6e05f04f534c0e675690014adde1e8a26e93c3769e8618602c13c': 1,
+  '3205be4fd57aee0c1cacd8fdd9fa48f9d000e9bbb2b7f53409ca39c64f0edc4a': 1,
+  '388c9f66c40d488788f2f4a9808088e22a0425615dfd2818c9d63d58675392d1': 1,
+  '395b8568f2efae46398fc76c6b422807900a928734749cdd4f8bd60b42366d19': 1,
+  '85a7a04ae14d4df7bd123dd4837791701bbb02dc615d4e9f24060a2161f7ba3e': 1,
+  'a5c107b3d98e73b4c73ebd13c21dcf8cb307a0041bc896cc3e6e808fb63cf446': 1,
+  'ac42e25ca2de115b1eb59cc4913e6fd26670c4dfb47f17ed56fc0d1f34272fd9': 1,
+  'c8154248a24f58ded15a175a8afd344f331635f51e564a526d510748797ff231': 1,
+  'e473c92d9c3a15cbdf8752a673c64963c9ef531ee4a7e47ae60d1abe5e32659e': 1})
+
 # Owner-authorized exact two-site recipe-factory rehash. No additional calls.
 SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5': 1,
                                     '2263b7c3975168a800233a5720729a5293adc8d79ddc822742da439875b1c927': 1,

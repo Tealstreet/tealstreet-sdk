@@ -354,31 +354,31 @@ impl Lighter {
             .candles
             .get(&(symbol.clone(), interval))
             .map_or(0, |state| state.revision);
-        let context = match cx.http_context(
-            command.map_or(Scope::Background, Scope::Command),
-            Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            },
-        ) {
-            Ok(context) => context,
-            Err(_) => {
-                // Issuance refusal has no Context; this is the remaining legacy site.
-                let error = VenueError::new("Lighter candle lifecycle is unavailable")
-                    .kind(ErrorKind::Internal);
-                if let Some(c) = command {
-                    cx.fail(c, error)
-                } else if let Some(state) = self
-                    .candles
-                    .get_mut(&(symbol, interval))
-                    .filter(|state| Some(state.generation) == generation)
-                {
-                    state.in_flight = false;
-                }
+        let policy = Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let context = if command.is_some() {
+            let Ok(context) = cx.admit_http_command(policy) else {
                 return;
+            };
+            context
+        } else {
+            match cx.http_context(Scope::Background, policy) {
+                Ok(context) => context,
+                Err(_) => {
+                    if let Some(state) = self
+                        .candles
+                        .get_mut(&(symbol, interval))
+                        .filter(|state| Some(state.generation) == generation)
+                    {
+                        state.in_flight = false;
+                    }
+                    return;
+                }
             }
         };
         let result = (|| {
@@ -1491,7 +1491,16 @@ impl Venue for Lighter {
                 from_ms,
                 to_ms,
             } => self.fetch_candles(cx, Some(command), symbol, interval, limit, from_ms, to_ms),
-            Command::FetchLeverage { command, symbol } => {
+            Command::FetchLeverage { symbol, .. } => {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
                 #[derive(serde::Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Leverage {
@@ -1510,8 +1519,12 @@ impl Venue for Lighter {
                         .map_err(|e| e.to_string())
                     });
                 match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(data) => {
+                        let _ = cx.done_context(&context, data);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_context(&context, error);
+                    }
                 };
             }
             Command::Query { command, query } => self.history_query(cx, command, query),

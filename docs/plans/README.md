@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| WOO public steady CPU headroom | Implemented; public CI 1.78x | Before optimizing WOO public steady CPU or interpreting its named-WASM profile and local medians. | [RUST_WOO_PUBLIC_CPU.md](RUST_WOO_PUBLIC_CPU.md) |
 | AsterDEX RequestContext adoption | Pinned inventory and single-request-first plan | Before migrating Aster HTTP/completion, pruning its legacy inventory or touching files claimed by concurrent PRs. | [RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md) |
 | Phemex RequestContext adoption | Pinned inventory and adoption plan | Before Phemex HTTP/completion, repair mutations, signer projection or legacy inventory changes. | [RUST_PHEMEX_REQUEST_CONTEXT.md](RUST_PHEMEX_REQUEST_CONTEXT.md) |
 | MEXC RequestContext adoption | Pinned inventory and adoption plan | Before MEXC managed reads/writes, startup refusal repair or legacy inventory changes. | [RUST_MEXC_REQUEST_CONTEXT.md](RUST_MEXC_REQUEST_CONTEXT.md) |
@@ -30,7 +31,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Shared execution groups | Inventory and settled API under review (claude-fe7lgm) | Before any joined-completion site (Hyro, metadata, Bitrue FetchLeverage, Bybit RefreshMarkets) or observer authority. | [RUST_EXECUTION_GROUPS.md](RUST_EXECUTION_GROUPS.md) |
 | BingX signing | Active native checkpoint | Before BingX HTTP signing, typed parameter recipes, credential setup or signature resend changes. | [RUST_BINGX_DISPATCH_SIGNER.md](RUST_BINGX_DISPATCH_SIGNER.md) |
 | Bybit signing | Active dispatch signer adoption | Before Bybit REST/probe/private WS authentication or credential setup changes. | [RUST_BYBIT_DISPATCH_SIGNER.md](RUST_BYBIT_DISPATCH_SIGNER.md) |
-| Metadata/settings freshness | BingX query owner; WEEX background freshness; Plan composition pending | Before metadata read coalescing, per-symbol write fences or atomic settings publication. | [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md) |
 | Integer protocol wire stamps | Active shared clock correction | Before formatting outbound timestamps or adopting dispatch signing recipes. | [RUST_PROTOCOL_WIRE_STAMP.md](RUST_PROTOCOL_WIRE_STAMP.md) |
 | Shared signer prerequisites | Active engine/provider plan | Before family signing migrations, credential decoding, nonce entropy, WS upgrades or signing receipts. | [RUST_SIGNER_PREREQUISITES.md](RUST_SIGNER_PREREQUISITES.md) |
 | Non-HMAC signer migrations | Active family adoption plan; shared provider prerequisites first | Before migrating ApeX, Aster, Bitunix, Crypto.com, Orderly, Backpack, Coinbase, Hyperliquid, TxFlow, GRVT, Polymarket, Paradex, Lighter or BreakoutProp signing, or adding provider algorithms. | [RUST_SIGNER_NON_HMAC_MIGRATIONS.md](RUST_SIGNER_NON_HMAC_MIGRATIONS.md) |
@@ -230,4 +230,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Paradex startup Read Contexts | Planned | Independent public catalog/ticker GET adoption and proof | [RUST_PARADEX_SEED_CONTEXT.md](RUST_PARADEX_SEED_CONTEXT.md) |
 | BloFin candle command entry | Focused adoption plan | Before removing the candle pre-Context numeric refusal or changing initial command ownership. | [RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md](RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md) |
 | WEEX dispatch signing | Planned after BingX/shared headers | Before WEEX private managed builders, provider custody or persisted identity cutover. | [RUST_WEEX_DISPATCH_SIGNER.md](RUST_WEEX_DISPATCH_SIGNER.md) |
-| Shared live Plan admission | Implementation plan | Before consuming Preflight, native whole-plan roots, reserved call slots or owned readiness. | [RUST_LIVE_PLAN_ADMISSION.md](RUST_LIVE_PLAN_ADMISSION.md) |
+| TypeScript unit transport isolation | Test isolation | Before adding unit fixtures that could reach fetch, XHR or sockets. | [TS_UNIT_TRANSPORT_ISOLATION.md](TS_UNIT_TRANSPORT_ISOLATION.md) |
+| Paradex RequestContext adoption | Inventory and phased plan | Before migrating Paradex HTTP/completions; independent public GET book first, held account/trading and shared JWT/plan prerequisites. | [RUST_PARADEX_REQUEST_CONTEXT.md](RUST_PARADEX_REQUEST_CONTEXT.md) |
+| KuCoin Spot managed candles | Focused adoption plan | Before migrating unsigned candle HTTP and command completion to shared authority. | [RUST_KUCOIN_SPOT_CANDLE_CONTEXT.md](RUST_KUCOIN_SPOT_CANDLE_CONTEXT.md) |
+| SDK master venue parity | Implementation plan | Before aligning Hyperliquid fee subjects or Lighter Robinhood attribution/client index reservation with master #1869. | [RUST_MASTER_VENUE_PARITY.md](RUST_MASTER_VENUE_PARITY.md) |
+| Metadata/settings freshness | BingX query owner; WEEX background freshness; Plan composition pending | Before metadata read coalescing, per-symbol write fences or atomic settings publication. | [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md) |
