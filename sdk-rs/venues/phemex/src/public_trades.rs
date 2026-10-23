@@ -124,6 +124,14 @@ impl PhemexPerpetuals {
         mut read: Read,
         response: Response<'_>,
     ) {
+        if !(200..300).contains(&response.status) {
+            self.public_trades_failed(
+                cx,
+                read,
+                VenueError::new(format!("Phemex history HTTP {}", response.status)),
+            );
+            return;
+        }
         #[derive(Deserialize)]
         struct Envelope<'a> {
             #[serde(borrow)]
