@@ -94,11 +94,12 @@ mod tests {
             context.clone(),
         );
         assert_eq!(work.context, context);
+        // Bybit refuses a request once server time passes stamp + recv_window.
         assert_eq!(
             work.receipt,
             SignReceipt {
                 stamp_ms: Some(1_709_209_849_123.),
-                expiry_ms: None
+                expiry_ms: Some(1_709_209_854_123.)
             }
         );
         assert_eq!(
