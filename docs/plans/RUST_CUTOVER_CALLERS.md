@@ -4566,6 +4566,331 @@ wallet valuation and public/private bullet acquisition. Candle, private-signing,
 setting no-op and capability behavior retain their existing paths.
 
 
+### Backpack managed standalone depth queries
+
+`fetchOrderBook` uses genuine engine command entry followed by managed unsigned
+GET preparation, binding and final claim. Custom transports preserve the exact
+`X-Broker-Id: 1200` header, encoded symbol, empty body and default route through
+handoff and stale-route preparation. A request-only transport cannot dispatch
+this path. One original 20-second deadline includes preparation; the query keeps
+zero automatic retries. Expired, duplicate and superseded callbacks cannot
+complete another owner or publish a late result.
+
+The #1680 public `notSent` presentation remains for contextual preparation,
+transport and native-response failures, with the engine-supplied typed kind and
+all native fields intact. Network failures carry `network`, undecodable HTTP
+replies carry `internal`, and root expiry carries `timeout`. Native response
+classification and the capped Retry-After remain unchanged; credential-looking
+public refusals remain non-auth and do not deactivate account credentials.
+The explicit new exception is initial engine admission rejection: this Read has
+no financial outcome, with `invalidInput` for invalid time or `internal` for
+capacity. It emits one engine failure without new request/timer/owner resources;
+a revoked entry has no completion rights and produces no new terminal.
+
+All native book rules remain: every limit is ignored, server order and duplicate
+prices retain lexical IDs, zero quantities/totals and empty sides are valid, and
+malformed rows reject the entire query. Results remain independent of subscribed
+book generations and do not update the Store book. The native query needs no
+cached market or live subscription. SDK capability readiness still awaits an
+existing startup, and callers still handle no-start, failed-start and terminal
+engine errors; unseeded native tests do not establish pre-start SDK readiness.
+
+
+### Kraken Spot OHLC initial command admission
+
+Supported `FetchCandles` now enters through genuine engine Read admission before managed HTTP preparation. This supersedes phase one's initial numeric-refusal exception: a rejected initial admission emits one engine-owned typed failure (`invalidInput` for a non-finite event clock, `internal` for capacity) with no financial `outcome`, and starts no HTTP, preparation or deadline timer. A revoked entry has no completion authority. An existing parked command retains its ownership when another admission is rejected, and a rejected caller can reuse its command ID once admission is available.
+
+This outcome change applies only to initial admission. Issued reads retain their original twenty-second root, up to four total transport attempts, exact query and response validation, typed preparation/HTTP failure handling and native exhausted-read warning. Native pair mapping, interval/since encoding, ignored limit/to_ms and cursor, whole-response rejection, sorted and empty results remain as in the managed OHLC entry above. Unsupported interval remains the separate native preflight. SDK worker/hosted error receivers consume the existing kind/message fields and do not need a financial outcome for a Read; no upstream deployment is claimed.
+
+
+### Orderly candle initial command admission
+
+Both bounded-history and current-candle `FetchCandles` enter genuine engine Read admission before managed preparation. This supersedes the phase-one initial numeric-refusal exception: a rejected initial admission emits one engine-owned typed failure (`invalidInput` for a non-finite event clock, `internal` for capacity), without a financial outcome or new HTTP/preparation/deadline timer. Rejected and revoked entries return without numeric completion; a parked command retains its owner, and a rejected caller may reuse its command ID after admission becomes available.
+
+The outcome change is limited to initial admission. Both issued endpoints keep the original twenty-second root, zero automatic retries, exact delivery and typed contextual errors. Native symbol/interval/range preflight, future-empty result, URL/query encoding, filtering, limit, sorting, row/envelope validation and cached account identity remain unchanged. SDK worker/hosted error receivers use the existing Read kind/message fields without requiring a financial outcome. This slice closes no private error-classification row and claims no upstream deployment.
+
+
+### ApeX Omni engine-owned initial candle admission
+
+Initial managed candle work uses the shared genuine command-entry API. This
+supersedes the initial pre-context numeric-refusal exception in the earlier
+ApeX candle appendix: a refused entry is completed once by the engine, with
+`invalidInput` for an invalid clock or `internal` for capacity, and no financial
+outcome for this Read. Rejection creates no timer, HTTP preparation or owner;
+the command ID can be submitted again, while existing parked owners retain
+their authority. A revoked entry grants no completion rights and emits no new
+terminal. Custom hosts must preserve these typed failures without adding a
+numeric completion or automatic resubmission.
+
+The original 20-second root, independent retry budgets, exact response fence,
+query/result codec and native unsupported-interval preflight remain. Admission
+of a fresh command grants no additional rights to later retries or callbacks.
+
+## MEXC candle initial command admission
+
+`FetchCandles` borrows initial HTTP command ownership directly from the engine,
+without passing a numeric command ID to issuance or falling back to a numeric
+terminal. Invalid command time and exhausted owner capacity emit one typed
+InvalidInput/Internal rejection before any Context or transport exists. These
+initial read rejections have no write outcome or credential evidence. A later
+valid invocation may reuse the rejected ID, and capacity refusal preserves all
+existing parked reads. Revoked entry custody grants no adapter completion.
+The existing 20-second public Read policy, no-retry behavior and issued-Context
+transport/expiry error contract remain in force.
+
+
+## MEXC, Phemex and Polymarket bounded row reporting
+
+MEXC, Phemex and Polymarket use the engine's bounded Once diagnostic memory
+for their existing account-row skip notices. Repeated identities remain silent
+until native recovery or the shared 4096-entry rollover rearms them. Notice
+codes, messages and severity stay the same; Once does not upgrade a remembered
+Warn to Error. This changes internal reporting ownership without requiring a
+caller option, credential transfer or persisted identity migration.
+
+MEXC keeps coin, position and shared order namespaces and its accepted-identity
+filters. Phemex keeps currency-scoped clean recovery and position-leg rejection
+filters before symbol-key recovery, inside its write/slice admission guards.
+Polymarket keeps valid zero/priced holding recovery before final snapshot
+admission and whole-memory recovery only for an admitted clean read. Existing
+rows, financial calculations, snapshot authority, signing and HTTP/WS lifecycle
+retain their native contracts.
+
+### BingX native dispatch signing and refusal ownership
+
+BingX HTTP signing and listen-key API-key presentation use the shared
+host-injected provider. Venue options retain
+opaque primary/secondary refs; generic engine/SDK options retain no signing
+secret. Ordinary GET work uses the secondary identity when present, while writes
+and listen-key creation/renewal select primary. Native sorted query bytes,
+integer protocol stamps, typed POST parameters and API-key/source headers stay
+unchanged. Worker or custom-host callers must provision the shared provider
+where the engine executes; secrets are not copied back into venue objects.
+
+Provider refusal is not a venue authentication response or a signature rejection.
+Identity/history/metadata commands preserve the original typed failure; failed
+history preparation discards buffered results rather than returning success.
+Background read cleanup releases only its captured in-flight reservation, while
+obsolete listen-key epochs cannot retire a replacement session. Existing read
+backoff, metadata publication and private socket ownership policies remain.
+
+A first refused write is `notSent`. After an earlier write or signature retry
+reached the venue, a later refused signer cannot make the whole operation
+`notSent`; uncertain prior effects require reconciliation. Accepted IDs remain
+in the existing partial result, including when another leg fails before send.
+BingX hosted/keyless admission is disabled. Hosted callers use their existing
+supported runtime route. Native provider signing uses hex HMAC and API-key
+presentation; WebSocket session ownership remains separate.
+
+## BingX managed single-owner reads
+
+Credentialed startup quotes, account identity, candle commands and recurring
+private snapshot reads prepare their route before provider signing, using the same native primary
+or secondary credential selection and exact header/query/body bytes. A read keeps
+its original raw 20s deadline through route/provider delays and its existing
+one-signature retry; identity retains its native no-retry behavior. Identity and candle
+success and failures complete through generation-bearing Context authority.
+Provider or route refusal stays typed and does not become native account-auth
+evidence. Account snapshot, revision, settings and stale-owner publication fences
+remain native and unchanged.
+
+Candle rows keep native time sorting and seconds conversion. Refused response
+rows and decode status are discarded before a signature retry; they cannot
+appear in or poison its successful response. Provider, route, malformed-stream
+and deadline failures settle the command once, and late responses cannot revive
+it. Unsigned public candles retain their existing request path.
+
+Session upkeep and history retain their explicit legacy ownership and existing
+native retry/completion contracts. Hosted admission is disabled. These read
+adapters require no new caller option or persisted identity mapping.
+
+
+### Lighter managed candle reads
+
+For both `lighter` and `lighter-robinhood`, Rust `fetchOHLCV` and the REST
+fallback behind `listenOHLCV` use the engine managed preparation/binding/final
+claim path. Custom worker/hosted HTTP transports must implement `prepareHttp`;
+legacy `request()` alone cannot service these candle reads. Report route denial
+and preparation failure through the existing typed error path, without a legacy
+send fallback. Typed pre-send failures retain their kind and `notSent` outcome.
+
+A candle read has one original 20,000 ms raw upper bound including route
+preparation; a shorter host request timeout can shorten it. Streaming progress
+does not renew that bound. Expired/retired replies cannot complete a reused
+command ID or publish candles to a new subscription. Background failure retires
+its read, clears only the matching generation's in-flight flag, emits no command
+result and allows later fallback polling. Command failure rejects the existing
+OHLCV promise. Candle shapes, seconds timestamps, sorted results, interval/range
+validation and recovered-stream dominance remain unchanged.
+
+Chart callers and custom `RestTransportContext` adapters consuming
+`RustEngineExchange` must preserve typed failure propagation and cancellation
+through their existing worker/hosted round trip. This requires no caller method
+signature or chart data-shape change. Private Lighter requests, other public
+reads and native Schnorr/nonce ownership are separate migrations; this behavior
+does not establish NX adoption, deployment or live private connectivity.
+
+## Paradex independent public startup Read Contexts
+
+Paradex catalog `/markets` and ticker `/markets/summary?market=ALL` GETs use the
+shared managed preparation and final claim protocol. Custom transports must
+complete that handshake before delivering a response. Each independent startup
+attempt has one original 20-second bound covering preparation and HTTP; expiry,
+preparation denial and transport failure retire the attempt, preserve the current
+Store and schedule the existing startup Backoff. Late callbacks cannot publish.
+These background reads emit Warn diagnostics and no command result.
+
+Catalog publication still starts private initialization without waiting for the
+ticker seed. Native metadata/ticker shapes, row filtering, live ticker dominance,
+public feed policy and successful startup publication retain their contracts.
+The standard hosts already implement managed preparation. The tealstreet-next
+venue setup/load consumers continue reading the same Store events and fields;
+custom raw-HTTP transport adapters must implement the shared handoff.
+
+## Hyperliquid perps candle command ownership
+
+Perps FetchCandles, including HIP-3 markets and perps on an account with merged
+spot markets, enters shared command admission before interval, market or range
+validation. At exhausted capacity it receives the engine's correlated Internal
+failure with no financial outcome; it cannot retire another owner. With capacity,
+native validation messages and unclassified metadata remain. Standalone and
+merged spot candle commands retain their existing path in this area.
+
+The unsigned JSON POST keeps its native REST route, Content-Type, raw coin,
+field order, limit/time geometry and encounter-order candle output. Its original
+20-second deadline includes preparation and stream progress cannot extend it.
+Preparation failures preserve shared typed metadata (NotSent); released network
+or deadline failures retain Network/Timeout with no financial outcome. Native
+HTTP and malformed candle response errors remain unclassified. Failed stream
+prefixes never become a partial result, and stale or duplicate delivery cannot
+complete a reused command ID. SDK command/result shapes are unchanged; transport
+fixtures execute the existing shared Prepare/Bind/Claim contract.
+
+
+## Crypto.com standalone REST depth on managed HTTP
+
+`fetchOrderBook` for Rust Crypto.com uses the engine's prepared HTTP release
+contract, including unsigned public `credentialIntent`. Custom transports must
+provide preparation, binding and final synchronous claim/handoff; the legacy
+`request()` interface is not a fallback. Route preparation consumes the original
+20-second read budget. Success at or beyond that bound is suppressed, and one
+typed timeout settles the original owner; late or duplicate replies cannot settle
+a later reuse of the same numeric command ID. Typed route/setup refusal remains
+distinct from a network failure and supplies no account-credential evidence.
+
+The request remains one unsigned GET to the selected live/UAT host, with encoded
+symbol, fixed depth50 and no automatic retry. Native level order, exact price IDs,
+zero amounts, totals and result/error shapes retain their existing contract.
+HTTP/native error kinds, native code/message and bounded Retry-After remain
+available. Auth-looking public errors never invalidate account credentials;
+standalone results never change subscription books, tickers or account state.
+Worker/hosted callers preserve the typed error fields and surface one rejection;
+no signature change or NX adoption/deployment is implied by this adapter change.
+
+Crypto.com standalone depth now uses genuine engine command-entry admission
+before any transport work. An initial clock or resource-capacity rejection emits
+one typed failure with no write outcome, replacing the old pre-Context numeric
+NotSent fallback. Existing owners remain intact; a rejected new command ID can
+be reused later. Post-release read Network/Timeout behavior retains its existing
+NotSent declaration. No retry, payload or host transport contract changes.
+
+## BloFin candle command admission
+
+FetchCandles admits its original Read owner through the shared genuine command
+entry before market/interval preflight or managed HTTP. Initial capacity and
+invalid-clock refusals now carry the engine's typed reason and Read outcome
+convention; they emit exactly one failure without a fabricated Context or numeric
+fallback. A duplicate entry leaves the original preparation and completion
+authority intact. Existing market-before-interval validation, native candle
+request bytes, result sorting and preparation/release/expiry behavior remain.
+
+## WEEX trusted passphrase setup and managed header declaration
+
+WEEX's trusted signer setup requires a passphrase for a complete private primary
+identity. An absent or JSON-null secondary passphrase inherits the opaque primary
+passphrase reference; an explicit empty secondary passphrase rejects instead of
+inheriting. Public mode bypasses only the primary requirement and still validates
+a supplied secondary identity. Secret and passphrase bytes and caller-assigned
+stable IDs remain literal, without trimming or automatic secret decoding.
+
+The opaque WEEX HTTP recipe declares Content-Type and User-Agent from the same
+static data as its unsigned renderer, so managed transport preparation sees those
+public headers before signing. API-key, signature and passphrase headers remain
+provider-owned. Provider injection is enabled by the dispatch cutover below;
+hosted signing stays disabled.
+
+### WEEX dispatch signing cutover
+
+WEEX signs every private request at dispatch through the shared host-injected
+provider. Venue and engine options hold only opaque primary/secondary identities.
+Raw `key`/`secret`/`passphrase`/`readCredentials` in engine options are refused
+whenever signer identities are supplied. Legacy raw native/WASM input still goes
+through trusted setup. Worker and custom-host callers must provision the provider
+where the engine runs. GET reads select the secondary identity when provisioned;
+POST requests and the private WebSocket upgrade select the primary. Wire bytes are
+unchanged: header order, literal secret bytes, sorted native queries, Base64 MAC.
+
+A missing required passphrase is now refused synchronously by trusted setup with
+the shared `Invalid local signer setup` message, replacing `WEEX requires a
+passphrase`. A provider-supplied primary identity without a usable
+key/signing/passphrase ref still deactivates with CONFIG_INVALID rather than
+publishing an empty account. An unusable secondary identity stops startup before
+any I/O. Read credentials no longer stand in for an unusable primary identity.
+
+**FetchAccount identity changes.** The returned `userId` is the trusted
+`primary.stableId`. It is no longer `weex:` plus the lowercase hex of the first
+12 SHA-256 bytes of the primary public key. Without a stableId the command fails
+typed (`unsupported`, `notSent`) before any I/O. NX already holds the public key,
+so it can compute each account's old ID once at cutover and map stored records
+to the stableId it provisions. The SDK and engine never compute it.
+
+Identity and FetchLeverage run as managed engine-owned Read commands. Provider,
+route and lifecycle refusals are typed and are never venue-auth evidence. The
+joined account cycle, trading and history keep their native owners, signed
+through one temporary staging site until the shared Plan/execution-group API and
+history Completion bridge own them. A provider refusal leaves an unsent write
+`notSent`. Once an earlier step was accepted, the command's outcome is neither
+`notSent` nor `rejected`. History refusals complete strictly. Hosted
+`signHttpRequest`/`signWsAuth` for WEEX refuse until hosted admission passes its
+own gates; only explicit `engine: 'rust'` accounts are affected.
+
+
+## Profile-specific STP and income capabilities
+
+AsterDEX advertises `stpControls` only for API V3. V1 consumers must hide both
+account STP controls (fetch/change mode) and the per-order `stpMode` option. V3
+keeps all three surfaces. The native version checks and SDK's V3 checks still
+reject direct V1 STP attempts before I/O.
+
+Bybit Spot and HyroTrader advertise `incomeHistory: false`; Bybit linear, inverse
+and demo keep it true. Coinbase advertises `incomeHistory: false` for Spot, INTX
+and CFM because none of these adapters implements an income-ledger command.
+CFM's accepted native position PnL is separate from an income ledger.
+
+The existing SDK capability adoption installs branded empty income methods for
+these unsupported profiles, matching their TS fallback methods. Callers must gate
+income polling and ledger coverage on `capabilities.incomeHistory` (and
+`incomeRange`); an empty fallback is unavailable coverage, not a fetched complete
+ledger. Credentialed direct native income commands retain their existing
+pre-I/O refusals; legacy keyless shortcuts retain their existing behavior.
+
+## Polymarket unsupported history capability claims
+
+Polymarket reports `fillHistory`, `orderHistory` and `incomeHistory` as false
+for every signer mode and both public-only and credentialed construction.
+These handlers already reject native history commands as unsupported; account
+identity, live orders/positions, order-book queries and trading are unaffected.
+The TypeScript Polymarket exchange already inherits the branded base history
+fallbacks. The Rust SDK now installs those same empty fallbacks for historical
+fills, historical orders, income and ranged income instead of dispatching the
+unsupported native commands.
+
+Callers must gate history polling and coverage on the capability record. An
+empty branded fallback means unavailable history, not a fetched complete
+ledger; live cached rows are separate. A future Polymarket history implementation
+must re-enable each axis in the same PR that supplies its valid-state dispatch.
+
+
 ### TxFlow indexed history shares accepted-page completion
 
 Fills, historical orders and indexed income stages now use the engine

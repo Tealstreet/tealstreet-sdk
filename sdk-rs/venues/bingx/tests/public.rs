@@ -2,7 +2,9 @@
 use safe_cex_engine::{
     Action, Command, Engine, Event, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
 };
-use safe_cex_venue_bingx::{Bingx, Options};
+use safe_cex_venue_bingx::Bingx;
+mod support;
+use support::Options;
 
 fn respond(engine: &mut Engine<Bingx>, now: f64, body: &str) {
     let request = engine
@@ -28,10 +30,10 @@ fn respond(engine: &mut Engine<Bingx>, now: f64, body: &str) {
     );
 }
 fn seeded() -> Engine<Bingx> {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+    let mut engine = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     engine.start(0.);
     respond(
         &mut engine,
@@ -113,7 +115,7 @@ fn full_depth_replaces_previous_snapshot_and_watchdog_reconnects() {
 }
 #[test]
 fn error_envelope_after_streamed_array_does_not_publish_markets() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options::default()));
+    let mut e = support::engine(Options::default());
     e.start(0.);
     respond(&mut e, 1., r#"{"data":[],"code":100004,"msg":"denied"}"#);
     assert!(!e.store().loaded().markets);
@@ -169,7 +171,7 @@ fn invalid_unicode_interval_returns_error_without_trapping() {
 }
 #[test]
 fn startup_failure_retries_the_read_without_loading_empty_markets() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options::default()));
+    let mut e = support::engine(Options::default());
     e.start(0.);
     respond(&mut e, 1., r#"{"code":100004,"msg":"temporary","data":[]}"#);
     assert!(!e.store().loaded().markets);
@@ -189,10 +191,10 @@ fn startup_failure_retries_the_read_without_loading_empty_markets() {
 
 #[test]
 fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(0.);
     respond(
         &mut e,
@@ -373,10 +375,10 @@ impl Suppressed {
 
 #[test]
 fn suppressed_public_feed_is_not_supervised() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.set_public_feed_policy(PublicFeedPolicy::Shared).unwrap();
     e.start(0.);
     let mut h = Suppressed::default();
