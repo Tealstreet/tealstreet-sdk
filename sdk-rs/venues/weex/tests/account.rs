@@ -1265,6 +1265,7 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
                 signing: safe_cex_engine::signing::KeyRef("primary.signing".into()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             }),
             ..Default::default()
         }));
