@@ -75,6 +75,8 @@ describe('delegated signer SDK runtime admission', () => {
     expect(config).toMatchObject({ remoteSigning: true, payloadSigner: false, publicMode: { remoteSigner: true, payloadSigner: true }, signing: { primary: { credential: expect.any(String), signing: expect.any(String) } } });
     expect(config).not.toHaveProperty('secret');
     expect(r.installed).toHaveBeenCalledOnce();
+    // The remote wire signs HMAC only, so multi-algorithm commands refuse before release.
+    expect(r.installed).toHaveBeenCalledWith('["hmacSha256"]');
     const identity = config.signing.primary;
     const work: SignRequest = { receipt: { stampMs: 1000 }, context: { venue: name, method: 'POST', host: 'fixture.invalid', path: '/private' }, operations: [
       { kind: 'present', key: identity.credential },

@@ -406,3 +406,186 @@ fn suppressed_public_feed_is_not_supervised() {
     assert_eq!(h.timers.len(), 1, "{:?}", h.timers);
     assert_eq!(h.pings(business), 61);
 }
+
+#[test]
+fn managed_duplicate_open_does_not_repeat_login_or_health() {
+    let mut h = Harness::private();
+    let socket = h.open("/private");
+    let sends = h.sent.len();
+    let opened = h.engine.health().ws_opened;
+    h.event(Event::WsOpened { socket });
+    assert_eq!(
+        h.sent.len(),
+        sends,
+        "duplicate open cannot resend auth/ping"
+    );
+    assert_eq!(
+        h.engine.health().ws_opened,
+        opened,
+        "duplicate open is not traffic"
+    );
+}
+
+#[test]
+fn managed_duplicate_login_ack_does_not_replay_subscriptions() {
+    let mut h = Harness::private();
+    let socket = h.open("/private");
+    let sends = h.sent.len();
+    let requests = h.requests.len();
+    h.message(socket, LOGIN_OK);
+    assert_eq!(h.sent.len(), sends, "one subscription replay per epoch");
+    assert_eq!(
+        h.requests.len(),
+        requests,
+        "duplicate ACK cannot restart reconciliation"
+    );
+}
+
+#[test]
+fn managed_expired_auth_cannot_be_rescued_before_watchdog_delivery() {
+    let mut h = Harness::private();
+    let socket = h.socket("/private");
+    h.event(Event::WsOpened { socket });
+    h.sent.clear();
+    // Deliberately do not deliver timers. Ingress must enforce the same bound.
+    h.now = 10_000.;
+    h.message(socket, LOGIN_OK);
+    assert!(
+        h.closed.contains(&socket),
+        "expired epoch must retire before ACK"
+    );
+    assert!(
+        !h.sent
+            .iter()
+            .any(|(s, t)| *s == socket && t.contains("subscribe"))
+    );
+}
+
+#[test]
+fn malformed_login_codes_never_authenticate_or_deactivate_credentials() {
+    for text in [
+        r#"{"event":"login"}"#,
+        r#"{"event":"login","code":0}"#,
+        r#"{"event":"login","code":null}"#,
+    ] {
+        let mut h = Harness::private();
+        let socket = h.socket("/private");
+        h.event(Event::WsOpened { socket });
+        h.sent.clear();
+        h.message(socket, text);
+        assert!(h.closed.contains(&socket));
+        assert!(!h.sent.iter().any(|(_, s)| s.contains("subscribe")));
+        assert_eq!(h.engine.health().auth_failures, 0);
+    }
+}
+
+#[test]
+fn array_shaped_login_is_neither_acceptance_nor_auth_recovery_evidence() {
+    for text in [r#"["login"]"#, r#"["login","0"]"#, r#"["login",null]"#] {
+        let mut h = Harness::private();
+        let socket = h.socket("/private");
+        h.event(Event::WsOpened { socket });
+        h.sent.clear();
+        h.message(socket, text);
+        assert!(!h.closed.contains(&socket));
+        assert!(!h.sent.iter().any(|(_, s)| s.contains("subscribe")));
+        assert_eq!(h.engine.health().auth_failures, 0);
+        h.message(socket, LOGIN_OK);
+        assert!(h.sent.iter().any(|(_, s)| s.contains("subscribe")));
+    }
+}
+
+#[test]
+fn retirement_before_first_depth_does_not_materialize_an_empty_consumer_book() {
+    let mut h = Harness::public();
+    h.open("/public");
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    h.engine.take_frame(h.now);
+    h.close("/public");
+    assert!(
+        h.engine.take_market_frame(h.now).is_none(),
+        "a never-published subscription must not create a BOOK clear frame"
+    );
+}
+
+#[test]
+fn retirement_of_a_loaded_book_still_publishes_an_immediate_clear() {
+    let mut h = Harness::public();
+    let socket = h.open("/public");
+    h.event(Event::Command(Command::SubscribeOrderBook {
+        symbol: "BTCUSDT".into(),
+    }));
+    h.message(socket, r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot","data":[{"seqId":100,"prevSeqId":-1,"bids":[["39999","5","0","1"]],"asks":[["40001","7","0","1"]]}]}"#);
+    h.engine.take_frame(h.now);
+    h.close("/public");
+    let frame = h
+        .engine
+        .take_market_frame(h.now)
+        .expect("published book retirement must reach its consumer");
+    assert!(
+        safe_cex_engine::wire::sections(frame)
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::BOOK)
+    );
+}
+
+#[test]
+fn reconnect_subscription_precedes_its_account_refresh() {
+    let mut h = Harness::private();
+    let first = h.open("/private");
+    h.requests.clear();
+    h.event(Event::WsClosed {
+        socket: first,
+        code: 1006,
+    });
+    let (timer, at) = h
+        .timers
+        .iter()
+        .copied()
+        .filter(|(_, at)| *at <= h.now + 1000.)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("reconnect timer");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let replacement = h.socket("/private");
+    assert_ne!(first, replacement);
+    h.now += 1.;
+    h.event(Event::WsOpened {
+        socket: replacement,
+    });
+    h.engine.handle(
+        h.now + 1.,
+        Event::WsMessage {
+            socket: replacement,
+            text: LOGIN_OK,
+        },
+    );
+    let mut out: Vec<_> = h.engine.drain_actions().collect();
+    let wakeups: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in wakeups {
+        h.engine.handle(at, Event::TimerFired { timer });
+        out.extend(h.engine.drain_actions());
+    }
+    let subscribe = out.iter().position(|action| matches!(action,
+        Action::WsSend { socket, text } if *socket == replacement && text.contains("subscribe")
+    )).expect("private subscription");
+    let refresh = out
+        .iter()
+        .position(|action| {
+            matches!(action,
+                Action::Http(request) if request.url.contains("/api/v5/account/")
+            )
+        })
+        .expect("account HTTP refresh");
+    assert!(
+        subscribe < refresh,
+        "HTTP refresh preceded private subscription release: subscribe={subscribe}, refresh={refresh}"
+    );
+}

@@ -331,6 +331,11 @@ impl CursorWalk {
         self.seen.insert(identity)
     }
 
+    /// Inspect committed identities without admitting an unvalidated page.
+    pub(crate) fn contains_identity(&self, identity: &str) -> bool {
+        self.seen.contains(identity)
+    }
+
     /// Starts another stage of the same read: a new first page, keeping the
     /// rows already seen.
     pub fn restart(&mut self) {

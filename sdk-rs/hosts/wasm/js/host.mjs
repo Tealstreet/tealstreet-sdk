@@ -295,7 +295,9 @@ export class EngineHost {
     if (options.signer !== undefined) {
       if (typeof options.signer !== 'function' || typeof engine.useExternalSigner !== 'function')
         throw new TypeError('Engine requires a callable signing provider');
-      engine.useExternalSigner();
+      if (options.signerAlgorithms !== undefined && !Array.isArray(options.signerAlgorithms))
+        throw new TypeError('Engine signer algorithms must be an array');
+      engine.useExternalSigner(options.signerAlgorithms === undefined ? undefined : JSON.stringify(options.signerAlgorithms));
     }
     this.signer = options.signer;
     this.primitiveSignings = new Map();
@@ -1010,12 +1012,19 @@ export class EngineHost {
       }
       case 'setTimer': {
         const id = action.timer;
-        const handle = transport.setTimeout(() => {
-          if (this.disposed) return;
+        if (this.timers.has(id)) transport.clearTimeout(this.timers.get(id));
+        this.timers.delete(id);
+        let fired = false;
+        let armed = false;
+        let handle;
+        handle = transport.setTimeout(() => {
+          if (fired || this.disposed || (armed && this.timers.get(id) !== handle)) return;
+          fired = true;
           this.timers.delete(id);
           this.run(this.invoke(engine.timer, id, transport.now()));
         }, Math.max(0, action.at - transport.now()));
-        if (this.disposed) transport.clearTimeout(handle);
+        armed = true;
+        if (this.disposed || fired) transport.clearTimeout(handle);
         else this.timers.set(id, handle);
         break;
       }

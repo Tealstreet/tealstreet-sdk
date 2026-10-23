@@ -3,6 +3,7 @@ mod account;
 mod closed;
 mod history;
 mod sign;
+mod socket_codec;
 mod trading;
 mod wire;
 
@@ -11,7 +12,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket::Config;
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
@@ -64,29 +65,11 @@ struct Product {
 }
 
 struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
-    authenticated: bool,
-    supervisor: Supervisor,
+    feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
 }
-
 impl Connection {
-    // Only pongs prove liveness: an unanswered ping retires the socket one cadence later.
-    fn new(login: bool) -> Self {
-        Self {
-            socket: None,
-            open: false,
-            authenticated: false,
-            supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 10_000.0,
-                auth_timeout_ms: login.then_some(10_000.0),
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(10_000.0),
-                backoff_base_ms: 1_000.0,
-                backoff_cap_ms: 30_000.0,
-                ..Config::default()
-            }),
-        }
+    fn new(_login: bool) -> Self {
+        Self { feed: None }
     }
 }
 
@@ -99,6 +82,9 @@ struct BookState {
 }
 
 pub enum Pending {
+    SocketRefresh {
+        reopened: bool,
+    },
     Account(account::Request),
     History(history::Request),
     Closed(closed::Request),
@@ -445,131 +431,47 @@ impl Okx {
         );
     }
 
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        if channel != PUBLIC && self.account.startup_rejected {
-            return;
-        }
-        // Suppressed public feeds get a placeholder socket that never opens.
-        if channel != PUBLIC || cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.connections[channel].supervisor.connecting(cx);
-        }
-        let socket = cx.connect(
-            safe_cex_engine::SocketSpec::new(self.socket_url(channel)).channel(match channel {
-                PUBLIC => safe_cex_engine::SocketChannel::Public,
-                BUSINESS => safe_cex_engine::SocketChannel::Business,
-                _ => safe_cex_engine::SocketChannel::Private,
-            }),
-        );
-        let c = &mut self.connections[channel];
-        c.socket = Some(socket);
-        c.open = false;
-        c.authenticated = false;
-    }
-
-    fn channel(&self, socket: SocketId) -> Option<usize> {
-        self.connections
-            .iter()
-            .position(|c| c.socket == Some(socket))
-    }
-
-    fn topics(&self, cx: &mut Cx<'_, Pending>, channel: usize, op: &str, args: &[Topic<'_>]) {
-        let c = &self.connections[channel];
-        if !c.open {
-            return;
-        }
-        if let Some(socket) = c.socket {
-            for args in args.chunks(100) {
-                cx.send(
-                    socket,
-                    serde_json::to_string(&Subscription { op, args }).expect("topic serialization"),
-                );
-            }
+    fn ensure_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        if let Err(error) = self.managed_connect(cx, channel) {
+            cx.notice(
+                Level::Error,
+                code::STREAM_UNAVAILABLE,
+                format!("Managed socket connect refused: {error:?}"),
+            );
         }
     }
-
+    fn channel(&self, cx: &Cx<'_, Pending>, socket: SocketId) -> Option<usize> {
+        self.connections.iter().position(|c| {
+            c.feed
+                .and_then(|f| cx.socket_epoch(f))
+                .is_some_and(|e| e.socket() == socket)
+        })
+    }
+    fn topics(&self, cx: &mut Cx<'_, Pending>, channel: usize, _op: &str, _args: &[Topic<'_>]) {
+        self.subscribe(cx, channel);
+    }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        if channel == PUBLIC {
-            // Serialize bounded topic batches while the store is borrowed;
-            // only the owned messages need to survive until Cx can send them.
-            let mut args = Vec::with_capacity(100);
-            let mut text = Vec::new();
-            for name in [
-                "tickers",
-                "mark-price",
-                "index-tickers",
-                "open-interest",
-                "funding-rate",
-            ] {
-                let mut seen = HashSet::new();
-                for m in cx.store.markets() {
-                    let id = if name == "index-tickers" {
-                        self.products
-                            .get(&m.id)
-                            .map_or(m.id.as_str(), |p| p.underlying.as_str())
-                    } else {
-                        m.id.as_str()
-                    };
-                    if !seen.insert(id) {
-                        continue;
-                    }
-                    args.push(Topic {
-                        channel: name,
-                        inst_id: Some(if name == "index-tickers" {
-                            self.products
-                                .get(&m.id)
-                                .map_or(m.id.as_str(), |p| p.underlying.as_str())
-                        } else {
-                            &m.id
-                        }),
-                        inst_type: None,
-                    });
-                    if args.len() == 100 {
-                        text.push(
-                            serde_json::to_string(&Subscription {
-                                op: "subscribe",
-                                args: &args,
-                            })
-                            .expect("topics"),
-                        );
-                        args.clear();
-                    }
-                }
-            }
-            if !args.is_empty() {
-                text.push(
-                    serde_json::to_string(&Subscription {
-                        op: "subscribe",
-                        args: &args,
-                    })
-                    .expect("topics"),
-                );
-            }
-            drop(args);
-            if let Some(socket) = self.connections[PUBLIC].socket {
-                for t in text {
-                    cx.send(socket, t);
-                }
-            }
-            for symbol in self.books.keys() {
-                if let Some(m) = cx.store.market(symbol) {
-                    let id = m.id.clone();
-                    self.topics(cx, PUBLIC, "subscribe", &[Topic::instrument("books", &id)]);
-                }
-            }
-        } else if channel == BUSINESS {
-            if self.credentials.is_some() && !self.connections[BUSINESS].authenticated {
-                return;
-            }
-            for (symbol, interval) in self.candles.keys() {
-                if let Some(m) = cx.store.market(symbol)
-                    && let Some(bar) = bar(*interval)
-                {
-                    let id = m.id.clone();
-                    let name = format!("candle{bar}");
-                    self.topics(cx, BUSINESS, "subscribe", &[Topic::instrument(&name, &id)]);
-                }
+        if let Err(error) = self.propose_interests(cx, channel) {
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
+                format!("Managed socket interest admission refused: {error:?}"),
+            );
+            if let Some(feed) = self.connections[channel].feed {
+                cx.stop_socket_feed(feed);
             }
         }
+    }
+    fn propose_interests(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        channel: usize,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if let Some(feed) = self.connections[channel].feed {
+            let desired = self.desired_socket_interests(cx.store, channel);
+            cx.set_socket_interests(feed, desired)?;
+        }
+        Ok(())
     }
 
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, message: wire::Message<'_>) {
@@ -638,8 +540,18 @@ impl Okx {
             }
             if gap {
                 let id = message.arg.inst_id;
-                self.topics(cx, PUBLIC, "unsubscribe", &[Topic::instrument("books", id)]);
-                self.topics(cx, PUBLIC, "subscribe", &[Topic::instrument("books", id)]);
+                if let Some(feed) = self.connections[PUBLIC].feed {
+                    let key =
+                        serde_json::to_string(&Topic::instrument("books", id)).expect("topic");
+                    if let Err(error) = cx.repair_socket_interests(feed, vec![key]) {
+                        cx.notice(
+                            Level::Error,
+                            code::SUBSCRIPTION_REJECTED,
+                            format!("Managed socket repair refused: {error:?}"),
+                        );
+                        cx.stop_socket_feed(feed);
+                    }
+                }
             }
             return;
         }
@@ -781,6 +693,50 @@ impl Okx {
 }
 
 impl Venue for Okx {
+    fn socket_control(
+        &self,
+        _store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        authenticated: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.managed_control(feed, authenticated, text)
+    }
+    fn socket_startup_ready(&self, _store: &safe_cex_engine::Store) -> bool {
+        self.socket_account_is_ready()
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_event(cx, event)
+    }
+    fn on_socket_interests_released(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        _epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        pending: Pending,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if let Pending::SocketRefresh { reopened } = pending {
+            self.socket_account_ready(cx, reopened);
+        }
+        Ok(())
+    }
+
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_encode(store, feed, subscribe, items, emit)
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }
@@ -823,40 +779,15 @@ impl Venue for Okx {
         self.load_catalogue(cx);
     }
 
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        let Some(channel) = self.channel(socket) else {
-            return;
-        };
-        let c = &mut self.connections[channel];
-        c.open = true;
-        c.supervisor.opened(cx);
-        if channel != PUBLIC && self.credentials.is_some() {
-            self.login(cx, channel);
-        } else {
-            self.subscribe(cx, channel);
-        }
-        cx.send(socket, "ping");
-    }
-
+    fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        let Some(channel) = self.channel(socket) else {
+        let Some(channel) = self.channel(cx, socket) else {
             return;
         };
-        if text == "pong" {
-            self.connections[channel].supervisor.received(cx.now);
-            return;
-        }
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return;
         };
         if message.event == "error" {
-            if channel != PUBLIC && self.login_rejected(cx, channel, message.code, message.msg) {
-                return;
-            }
-            if channel != PUBLIC && !self.connections[channel].authenticated {
-                cx.close(socket);
-                self.on_close(cx, socket, 1008);
-            }
             cx.notice(
                 Level::Error,
                 code::SUBSCRIPTION_REJECTED,
@@ -877,26 +808,10 @@ impl Venue for Okx {
         }
     }
 
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        let Some(channel) = self.channel(socket) else {
-            return;
-        };
-        let c = &mut self.connections[channel];
-        c.socket = None;
-        c.open = false;
-        c.authenticated = false;
-        c.supervisor.retry(cx);
-        if channel == PUBLIC {
-            for state in self.books.values_mut() {
-                state.sequence = None;
-                state.recovering = false;
-                state.book.clear();
-            }
-        }
-    }
-
+    fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::SocketRefresh { .. } => (),
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
@@ -1187,6 +1102,7 @@ impl Venue for Okx {
             return;
         }
         match pending {
+            Pending::SocketRefresh { .. } => (),
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, request, response),
@@ -1261,10 +1177,18 @@ impl Venue for Okx {
                     self.account_start(cx);
                 } else if added {
                     self.ticker_seed(cx, true);
-                    if self.connections[PUBLIC].open {
+                    if self.connections[PUBLIC]
+                        .feed
+                        .and_then(|f| cx.socket_epoch(f))
+                        .is_some()
+                    {
                         self.subscribe(cx, PUBLIC);
                     }
-                    if self.connections[BUSINESS].open {
+                    if self.connections[BUSINESS]
+                        .feed
+                        .and_then(|f| cx.socket_epoch(f))
+                        .is_some()
+                    {
                         self.subscribe(cx, BUSINESS);
                     }
                 }
@@ -1322,11 +1246,11 @@ impl Venue for Okx {
                 self.startup.ready(cx);
                 self.price_tickers = price_ticker_indexes(cx.store);
                 self.account_prices(cx);
-                if self.connections[PUBLIC].socket.is_none() {
-                    self.connect(cx, PUBLIC);
+                if self.connections[PUBLIC].feed.is_none() {
+                    self.ensure_feed(cx, PUBLIC);
                 }
-                if self.connections[BUSINESS].socket.is_none() {
-                    self.connect(cx, BUSINESS);
+                if self.connections[BUSINESS].feed.is_none() {
+                    self.ensure_feed(cx, BUSINESS);
                 }
                 if refresh {
                     self.ticker_seed(cx, false);
@@ -1432,30 +1356,7 @@ impl Venue for Okx {
         if self.history_timer(cx, timer) || self.closed_timer(cx, timer) {
             return;
         }
-        if self.account_timer(cx, timer) {
-            return;
-        }
-        let Some(channel) = (0..3).find(|&c| self.connections[c].supervisor.owns_timer(timer))
-        else {
-            return;
-        };
-        let c = &mut self.connections[channel];
-        match c.supervisor.on_timer(cx, timer) {
-            Tick::Reconnect => self.connect(cx, channel),
-            Tick::Ping => {
-                if let Some(socket) = c.socket {
-                    cx.send(socket, "ping");
-                }
-            }
-            Tick::TimedOut(_) => match c.socket {
-                Some(socket) => {
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                }
-                None => c.supervisor.retry(cx),
-            },
-            Tick::Handled | Tick::Unhandled => {}
-        }
+        self.account_timer(cx, timer);
     }
 
     fn on_venue_action(
@@ -1656,11 +1557,6 @@ impl<'a> Topic<'a> {
             inst_type: None,
         }
     }
-}
-#[derive(serde::Serialize)]
-struct Subscription<'a> {
-    op: &'a str,
-    args: &'a [Topic<'a>],
 }
 
 const BARS: [(Interval, &str); 14] = [

@@ -1878,6 +1878,7 @@ mod sign_failure_owners {
         let credentials = Credentials {
             read: None,
             primary: safe_cex_engine::signing::Identity {
+                extra: Default::default(),
                 credential: safe_cex_engine::signing::KeyRef("ref:owned-credential".into()),
                 signing: safe_cex_engine::signing::KeyRef("ref:owned-signing".into()),
                 passphrase: None,
@@ -2063,6 +2064,7 @@ mod tests {
                 &Credentials {
                     read: None,
                     primary: safe_cex_engine::signing::Identity {
+                        extra: Default::default(),
                         credential: safe_cex_engine::signing::KeyRef(
                             "ref:fixture-credential".into(),
                         ),

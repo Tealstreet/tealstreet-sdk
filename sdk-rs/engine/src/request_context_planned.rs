@@ -3,6 +3,9 @@ use super::owned_call::{Admission, Call, Stage};
 use super::*;
 use crate::request_context::plan::{CallTerms, Schedule, Slot, StepBound};
 use crate::{Action, TimerId};
+#[path = "request_context_conditional.rs"]
+mod conditional;
+use conditional::{AdmissionDeclaration, terminal_ordinals};
 use std::ops::Range;
 
 pub(super) struct State {
@@ -15,6 +18,7 @@ struct Body {
     policy: PlanPolicy,
     timer: TimerId,
     schedule: Schedule,
+    terminals: Vec<usize>,
     entries: Vec<Entry>,
     handoff: Option<Delivery>,
     initial_custody: bool,
@@ -120,15 +124,53 @@ impl ContextRegistry {
         self.plan_scan_visits.get()
     }
 
-    // Share cold terminal authority/journal work across all venue Pending types.
+    // Shared checked preparation precedes journal sealing or slot retirement.
     #[inline(never)]
-    fn plan_seal(
-        &mut self,
+    fn prepare_plan_seal(
+        &self,
         plan: &Plan,
         now: f64,
         delivery: Option<&Delivery>,
         error: Option<VenueError>,
-    ) -> Result<(CommandId, Seal), Error> {
+    ) -> Result<conditional::PreparedPlanSeal, Error> {
+        self.validate_plan_seal_origin(plan, now, delivery)?;
+        let Owner::Command { id, generation } = plan.owner() else {
+            unreachable!()
+        };
+        let owner = &self.commands[&id];
+        let mut reports = Vec::new();
+        let (journal, legacy) = if let Some(writes) = owner.writes.as_ref() {
+            let prepared = writes.prepare_seal(error)?;
+            if prepared.is_failure() {
+                for message in writes.reports() {
+                    reports.try_reserve(1).map_err(|_| Error::Capacity)?;
+                    let mut retained = String::new();
+                    retained
+                        .try_reserve_exact(message.len())
+                        .map_err(|_| Error::Capacity)?;
+                    retained.push_str(message);
+                    reports.push(retained);
+                }
+            }
+            (Some(prepared), None)
+        } else {
+            (None, error)
+        };
+        Ok(conditional::PreparedPlanSeal {
+            id,
+            generation,
+            journal,
+            legacy,
+            reports,
+        })
+    }
+
+    fn validate_plan_seal_origin(
+        &self,
+        plan: &Plan,
+        now: f64,
+        delivery: Option<&Delivery>,
+    ) -> Result<(), Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
         }
@@ -151,20 +193,39 @@ impl ContextRegistry {
         if !admitted {
             return Err(Error::Revoked);
         }
-        let owner = self.commands.get_mut(&id).unwrap();
-        let seal = if let Some(writes) = owner.writes.as_mut() {
-            if error.is_none() && writes.succeed().is_ok() {
-                Seal::Success
-            } else {
-                let error = writes.fail(error.unwrap_or_else(|| {
-                    VenueError::new("Command writes are not all confirmed accepted")
-                }))?;
-                Seal::Failure(error, writes.reports().map(str::to_owned).collect())
+        Ok(())
+    }
+
+    fn commit_plan_seal(
+        &mut self,
+        plan: &Plan,
+        prepared: conditional::PreparedPlanSeal,
+    ) -> (CommandId, Seal) {
+        self.plan_body(plan).expect("prepared current Plan");
+        assert_eq!(
+            plan.owner(),
+            Owner::Command {
+                id: prepared.id,
+                generation: prepared.generation
             }
-        } else {
-            Seal::Legacy(error)
+        );
+        let owner = self
+            .commands
+            .get_mut(&prepared.id)
+            .expect("prepared current owner");
+        let seal = match prepared.journal {
+            Some(journal) => match owner
+                .writes
+                .as_mut()
+                .expect("prepared write journal")
+                .commit_seal(journal)
+            {
+                Some(error) => Seal::Failure(error, prepared.reports),
+                None => Seal::Success,
+            },
+            None => Seal::Legacy(prepared.legacy),
         };
-        Ok((id, seal))
+        (prepared.id, seal)
     }
 
     fn plan_body(&self, handle: &Plan) -> Result<&Body, Error> {
@@ -236,6 +297,26 @@ impl<P> Cx<'_, P> {
         steps: &[StepBound<'_>],
         policy: PlanPolicy,
     ) -> Result<Plan, Error> {
+        self.admit_declared_plan(
+            preflight,
+            AdmissionDeclaration {
+                steps,
+                policy,
+                terminals: &[],
+            },
+        )
+    }
+
+    fn admit_declared_plan(
+        &mut self,
+        preflight: &Preflight,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+    ) -> Result<Plan, Error> {
+        let AdmissionDeclaration {
+            steps,
+            policy,
+            terminals,
+        } = declaration;
         let (intent, old_read) = self.preflight_plan_origin(preflight)?;
         let (operation, credential) = match intent.purpose {
             PreflightPurpose::ReadOnly => (Operation::Read, intent.read_credential),
@@ -245,6 +326,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         let schedule = Schedule::from_steps(steps)?;
+        let terminals = terminal_ordinals(steps, &policy, terminals)?;
         let bound = schedule.bound();
         let deadline = bound.deadline(self.now)?;
         Context::new(
@@ -367,6 +449,7 @@ impl<P> Cx<'_, P> {
             policy,
             timer,
             schedule,
+            terminals,
             entries,
             handoff: self.io.http_delivery.clone(),
             initial_custody: self.io.http_delivery.is_none() && self.io.http_plan_ready.is_none(),
@@ -504,7 +587,7 @@ impl<P> Cx<'_, P> {
         };
         let owner = self.io.request_contexts.commands.get_mut(&id).unwrap();
         let narrowed = match intent {
-            Some(intent) if owner.prepare_leg_intent(&context, intent)? => Some(intent),
+            Some(intent) if owner.prepare_leg_intent(&context, intent, false)? => Some(intent),
             _ => None,
         };
         // Journal enrollment precedes headers, recipe preparation and all queue
@@ -731,6 +814,19 @@ impl<P> Cx<'_, P> {
 
     /// Failure-only retirement; expired authority never creates fresh sends.
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
+        if self
+            .io
+            .http_plan_expiring
+            .as_ref()
+            .is_some_and(|current| current.same_plan(plan))
+        {
+            self.io.request_contexts.validate_plan_seal_origin(
+                plan,
+                self.now,
+                self.io.http_delivery.as_ref(),
+            )?;
+            return Ok(());
+        }
         self.seal_plan(plan, None, Some(error.into()))
     }
 
@@ -740,12 +836,32 @@ impl<P> Cx<'_, P> {
         result: Option<String>,
         error: Option<VenueError>,
     ) -> Result<(), Error> {
-        let (id, seal) = self.io.request_contexts.plan_seal(
+        let prepared = self.prepare_plan_terminal(plan, error)?;
+        self.commit_plan_terminal(plan, result, prepared)
+    }
+
+    fn prepare_plan_terminal(
+        &self,
+        plan: &Plan,
+        error: Option<VenueError>,
+    ) -> Result<conditional::PreparedPlanSeal, Error> {
+        self.io.request_contexts.prepare_plan_seal(
             plan,
             self.now,
             self.io.http_delivery.as_ref(),
             error,
-        )?;
+        )
+    }
+
+    // One Cx-level terminal funnel, including conditional completion. Shared
+    // execution observer projection hooks attach here, never re-run a journal.
+    fn commit_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        prepared: conditional::PreparedPlanSeal,
+    ) -> Result<(), Error> {
+        let (id, seal) = self.io.request_contexts.commit_plan_seal(plan, prepared);
         self.finish_sealed_command(id, result, seal)
     }
 
