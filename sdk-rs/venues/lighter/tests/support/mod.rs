@@ -97,7 +97,7 @@ pub fn ready_engine_meta(
     e.start(NOW);
     let mut private = None;
     for _ in 0..30 {
-        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let mut actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
         actions.sort_by_key(|a| !matches!(a, Action::Http(r) if r.url.contains("exchangeStats")));
         if actions.is_empty() {
             break;

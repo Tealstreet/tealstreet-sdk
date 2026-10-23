@@ -6,6 +6,7 @@ import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { signHttpCapture } from '../../utils/signHttpCapture';
+import { createAsterDEXV1RequestInterceptor, isAsterDEXPublicEndpoint } from '../asterdex/asterdex.signing';
 import { createBinanceRequestInterceptor, isBinancePublicSigningRequest } from '../binance/binance.signing';
 import { finishBitgetRequest, prepareBitgetRequest } from '../bitget/bitget.signing';
 import { BROKER_ID as BITGET_BROKER_ID } from '../bitget/bitget.types';
@@ -15,6 +16,7 @@ import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';
 import { finishOkxRequest, isOkxPublicSigningRequest, isOkxUnsignedSigningRequest, prepareOkxRequest } from '../okx/okx.signing';
 
 const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse', 'binancespot']);
+const BYBIT = new Set<ExchangeName>(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader']);
 const OKX = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const BITGET = new Set<ExchangeName>(['bitget', 'bitgetusdc', 'bitgetinverse']);
 
@@ -29,12 +31,17 @@ export const signHostedHttp = async (
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
-  const binance = BINANCE.has(name);
+  // Other dispatch families have no request codec here.
+  const aster = name === 'asterdex';
   const okx = OKX.has(name);
   const bitget = BITGET.has(name);
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !aster)
+    return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
+  const binance = BINANCE.has(name);
   // The legacy Bitget interceptor signs every request once credentials exist.
   const unsigned = binance ? isBinancePublicSigningRequest(name, request.config.url)
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
+    : aster ? isAsterDEXPublicEndpoint(request.config.url)
       : !bitget && isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
   const needsCredential = primaryComplete && !unsigned;
   const credential = needsCredential ? (await host.hostedSigning({ kind: 'credential' })).credential : undefined;
@@ -59,6 +66,12 @@ export const signHostedHttp = async (
     },
   };
   const siteHeaders = isBybitSiteIdExchange(name) ? getBybitSiteHeaders(options) : {};
+  if (aster) {
+    // AsterDEX V1 only: the host admits no V3 wallet account to hosted signing.
+    const xhr = axios.create({ timeout: 10_000, headers: { 'Content-Type': 'application/json' } });
+    xhr.interceptors.request.use(createAsterDEXV1RequestInterceptor(signingOptions, now));
+    return signHttpCapture(xhr, request);
+  }
   const xhr = axios.create({
     timeout: 20_000,
     paramsSerializer: {
