@@ -50,6 +50,9 @@ struct CommandOwner {
     intent: Option<crate::classify::Intent>,
     /// Engine-validated narrowing for individual legs (see `http_write_leg_intent`).
     leg_intents: Vec<(u64, crate::classify::Intent)>,
+    /// Some Context or declared policy of this owner named a credential; only
+    /// then can its auth-kind failure be credential-health evidence.
+    credentialed: bool,
 }
 
 enum CommandPhase {
@@ -258,6 +261,15 @@ impl ContextRegistry {
         *entry_owned = true;
     }
 
+    /// Whether this command's auth-kind failure is credential-health evidence:
+    /// a tracked owner only when a Context or declared policy named a
+    /// credential; an untracked (legacy) command keeps counting.
+    pub(in super::super) fn owner_credentialed(&self, command: CommandId) -> bool {
+        self.commands
+            .get(&command)
+            .is_none_or(|owner| owner.credentialed)
+    }
+
     fn issue(
         &mut self,
         identity: u64,
@@ -378,6 +390,7 @@ impl ContextRegistry {
                 .and_modify(|owner| {
                     owner.last_deadline = last_deadline;
                     owner.mutation_declared |= context.operation() == Operation::Mutation;
+                    owner.credentialed |= context.credential().is_some();
                 })
                 .or_insert(CommandOwner {
                     generation,
@@ -395,6 +408,7 @@ impl ContextRegistry {
                         .filter(|(command, _)| *command == id)
                         .map(|(_, intent)| intent),
                     leg_intents: Vec::new(),
+                    credentialed: context.credential().is_some(),
                 });
         }
         self.contexts.insert(identity, context.clone());
@@ -556,6 +570,11 @@ impl ContextRegistry {
         now: f64,
     ) -> Result<(), Error> {
         self.validate(context, now)?;
+        // A member's only physical work is its execution's, including on the
+        // entry root it already holds.
+        if matches!(context.owner(), Owner::Command { id, .. } if self.is_observer(id)) {
+            return Err(Error::Revoked);
+        }
         if matches!(context.owner(), Owner::Background { .. })
             && context.operation() == Operation::Read
         {
@@ -2070,6 +2089,133 @@ mod tests {
             timeout_ms: 500,
             pacing: None,
             retry: RetryPolicy::ReadFailure,
+        }
+    }
+
+    #[test]
+    fn execution_observers_record_the_execution_credential() {
+        for signed in [false, true] {
+            let mut io = super::super::Io::<()>::default();
+            let founder = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts.retain_command_entry(&founder);
+            assert!(!io.request_contexts.owner_credentialed(7));
+            let mut execution = policy();
+            execution.credential = signed.then(|| crate::request_context::Credential {
+                slot: crate::CredentialSlot::Primary,
+                reference: crate::signing::KeyRef("fixture".into()),
+            });
+            io.request_contexts
+                .begin_execution(
+                    100,
+                    &founder,
+                    execution,
+                    crate::execution_group::Window::UntilTerminal,
+                    "k",
+                    0.,
+                )
+                .unwrap();
+            assert_eq!(io.request_contexts.owner_credentialed(7), signed);
+        }
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn preflight_owners_count_auth_failures_only_with_a_declared_credential() {
+        use crate::request_context::{PreflightPolicy, PreflightPurpose};
+        use crate::{CredentialSlot, ErrorKind, VenueError};
+        let credential = || {
+            Some(crate::request_context::Credential {
+                slot: CredentialSlot::Primary,
+                reference: crate::signing::KeyRef("fixture".into()),
+            })
+        };
+        for (read, write, counted) in [(false, false, 0), (true, false, 1), (true, true, 1)] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            let mut cx = Cx {
+                now: 100.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let preflight = cx
+                .issue_preflight(
+                    7,
+                    PreflightPolicy {
+                        purpose: if write {
+                            PreflightPurpose::WriteAfterReads
+                        } else {
+                            PreflightPurpose::ReadOnly
+                        },
+                        read_credential: if read { credential() } else { None },
+                        write_credential: if write { credential() } else { None },
+                    },
+                )
+                .unwrap();
+            let error = VenueError::new("route refused").kind(ErrorKind::AuthInvalid);
+            cx.fail_preflight(&preflight, error).unwrap();
+            assert_eq!(
+                cx.io.health.auth_failures, counted,
+                "read={read} write={write}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_owners_that_carried_a_credential_count_auth_failures() {
+        use crate::{CredentialSlot, ErrorKind, Notice, VenueError};
+        let credential = || {
+            Some(crate::request_context::Credential {
+                slot: CredentialSlot::Primary,
+                reference: crate::signing::KeyRef("fixture".into()),
+            })
+        };
+        for kind in [
+            ErrorKind::AuthInvalid,
+            ErrorKind::AuthExpired,
+            ErrorKind::AuthPermission,
+        ] {
+            // (root credential, leg credential, counted)
+            for (root, leg, counted) in [
+                (false, None, 0),
+                (true, None, 1),
+                (false, Some(false), 0),
+                (false, Some(true), 1),
+            ] {
+                let mut io = super::super::Io::<()>::default();
+                let mut store = Store::default();
+                let mut cx = Cx {
+                    now: 100.,
+                    store: &mut store,
+                    io: &mut io,
+                };
+                let mut root_policy = policy();
+                root_policy.credential = if root { credential() } else { None };
+                let first = cx.http_context(Scope::Command(7), root_policy).unwrap();
+                let failed = match leg {
+                    Some(signed) => {
+                        let mut leg_policy = policy();
+                        leg_policy.credential = if signed { credential() } else { None };
+                        cx.http_context(Scope::Command(7), leg_policy).unwrap()
+                    }
+                    None => first,
+                };
+                // A credential-free route can still refuse with an auth kind.
+                let error = VenueError::new("route refused")
+                    .kind(kind)
+                    .venue_code("route");
+                cx.fail_context(&failed, error).unwrap();
+                assert_eq!(
+                    cx.io.health.auth_failures, counted,
+                    "{kind:?} root={root} leg={leg:?}"
+                );
+                // The typed terminal keeps its metadata either way.
+                assert!(cx.io.actions.iter().any(|action| matches!(action,
+                    crate::Action::Notice(Notice::CommandFailed { command: 7, error })
+                        if error.kind == Some(kind) && error.venue_code.as_deref() == Some("route"))));
+            }
         }
     }
 

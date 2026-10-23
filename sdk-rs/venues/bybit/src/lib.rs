@@ -2615,8 +2615,9 @@ impl Venue for BybitLinear {
                     safe_cex_engine::request_context::Operation::Mutation
                 };
                 if let Ok(context) = cx.admit_http_command(candles::entry_policy(operation)) {
+                    // An account-config precondition, not an unavailable command.
                     let error = safe_cex_engine::VenueError::new("Bybit product is not enabled")
-                        .kind(ErrorKind::Unsupported)
+                        .kind(ErrorKind::InvalidInput)
                         .outcome(safe_cex_engine::Outcome::NotSent);
                     let _ = cx.fail_context(&context, error);
                 }

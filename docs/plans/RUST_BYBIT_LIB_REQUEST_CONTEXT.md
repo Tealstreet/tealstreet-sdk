@@ -125,7 +125,7 @@ The sign-error routing sites leave with slices 3 and 4, and the `send` chokepoin
 On unchanged source, all four fail at their own runtime assertions:
 
 - `candles_carry_a_native_window_that_expires_as_a_timeout`: the kline request has no declared 20 s window, and nothing times it out.
-- `candle_refusals_before_any_request_are_typed_not_sent`: the option, disabled-product and unsupported-interval refusals carry no kind or NotSent outcome.
+- `candle_refusals_before_any_request_are_typed_not_sent`: the option, disabled-product and unsupported-interval refusals carry no kind or NotSent outcome. The fix types the option and interval refusals `Unsupported` and the disabled product `InvalidInput`: capability conformance forbids `unsupported` on an advertised command, and a product the account has not enabled is its configuration.
 - `a_candle_stream_ending_mid_list_is_a_malformed_reply_and_publishes_nothing`: a stream that breaks mid-list reaches the caller untyped instead of as `Internal`.
 - `cached_balance_info_and_disabled_product_refusals_need_command_authority`: with the command owners parked, the cached balance-info answer and the disabled-product refusal bypass admission instead of refusing once with the shared `Internal` capacity error.
   - Once an owner is freed, the cached answer completes with no I/O.
