@@ -2707,3 +2707,12 @@ Pure inventory prune removes only `venues/binance/src/identity.rs`:
 and `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa: 1`.
 All other manifest bytes/maps remain exact; Binance shrinks from 26 fingerprints
 / 30 occurrences to 24 / 28. No rehash, site growth or checker exemption.
+
+## Selected managed signed Read composition
+
+Shared admission/selection/queue/refusal composition is additive in engine
+selected_read.rs, with genuine callback and original-generation controls. The
+original BingX/WEEX copies erase capacity denial fields; those two native
+assertion REDs are retained for separate consumer adoption, not marked fixed by
+engine probes. No venue P0, private signer, Plan history or inventory-zero
+claim is closed by this library seam.

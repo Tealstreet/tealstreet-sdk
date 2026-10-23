@@ -5995,3 +5995,21 @@ Book/candle refcounts, spot depth variants, account snapshot/revision guards,
 HTTP request and signer formats, history and cached lookup/candle results retain
 their native semantics. A stale handoff cannot start a refresh on a retired feed.
 Bitunix retains the separately tracked legacy boundary under Sam's decision.
+
+## Selected managed signed Read helper
+
+The engine offers one selected-identity Read composition for genuine command
+entry and Background reads. Selection, opaque identity, slot, egress and account
+evidence stay coupled across the original Context generation and any permitted
+physical retry; method does not choose credentials. Timeout, pacing and retry
+remain explicit native declarations. Entry rejection is already terminal; queue
+or retry refusal preserves its exact error and original pending/wrapper. Missing
+command credentials use terminal-only local Read admission, with optional native
+diagnostic before the sole typed failure and no I/O. Caller codecs still own
+publication, completion, native error tables and body interpretation.
+
+This additive engine seam does not migrate BingX/WEEX issuers in this PR; their
+original native capacity assertions remain RED on the separately held consumer
+branch. It introduces no new NX/Agent caller timeout or cancellation behavior.
+Pre-issued external Contexts, Plan/Slot admission, writes and WS remain outside
+this API. G2 owns the separate trusted subject/config-generation retirement gap.

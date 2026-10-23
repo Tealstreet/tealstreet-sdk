@@ -1314,3 +1314,13 @@ GREEN, including 300 same-clock/same-command local refusals and exact selected
 signer request bytes. The same eleven tests pass after conversion, with no
 transport, extra diagnostic or Store mutation on initial admission refusal.
 No manufactured Context or fixture bypass is used.
+
+## Selected managed signed Read custody
+
+One non-Clone engine wrapper retains selected opaque identity, egress/evidence
+and original Context through queue and retry, with exact typed refusal and
+pending return. Missing-selection command diagnostics precede a single typed
+terminal under genuine local authority. Provider/prepare metadata and ordered
+recipe headers remain unchanged. Genuine engine controls cover capacity,
+duplicate entry, phase custody, expiry, retry, streaming and account evidence;
+native compatibility controls do not substitute for later venue adoption.
