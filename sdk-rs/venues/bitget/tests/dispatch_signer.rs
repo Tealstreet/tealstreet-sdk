@@ -124,6 +124,10 @@ fn provider_refused_probe_does_not_promote_classic_or_open_private_socket() {
         !out.iter()
             .any(|a| matches!(a, Action::Http(http) if http.url.contains("/account/settings")))
     );
+    // A refused provider releases no signed request at all.
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(http)
+        if http.headers.iter().any(|(k, _)| k.starts_with("ACCESS-"))
+            || http.signer_headers.iter().any(|(k, _)| k.starts_with("ACCESS-")))));
     assert!(
         !out.iter()
             .any(|a| matches!(a, Action::WsConnect {url,..} if url.ends_with("/private")))

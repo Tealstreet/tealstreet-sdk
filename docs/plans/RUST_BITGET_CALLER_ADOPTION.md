@@ -3,8 +3,8 @@
 Plan, 2026-10-24. Branch `feat/rust-bitget-caller-entry` starts from Bitget
 signer PR #1915 head `a56e6fa4f1c`. #1915 is stacked on the OKX signer PR #1773.
 The #1848 history bridge (`6872554ac85`) is already in this base. This document
-holds the plan and the original RED/control evidence. Production code is
-unchanged on this branch.
+holds the plan and the original RED/control evidence; the slice is implemented
+in `13edac8bd9a` (review follow-ups after it).
 
 Precedents: OKX slice 1 (#1938, `RUST_OKX_CALLER_ADOPTION.md`) for managed
 private reads, Background reads and trade entry refusals, and OKX slice 2
@@ -180,8 +180,9 @@ execution group or new engine API is needed. **No shared API is missing.**
    - Admit first with `credential: None`. On `Err`, return; the engine already
      failed the command.
    - Send with `request_managed_with_headers(root, Get, url, CHANNEL, None,
-     pending)`, where `CHANNEL = &[("X-CHANNEL-API-CODE", "Tealstreet")]` is
-     shared with `get`. Then `stream_response(id, Envelope(&[&["data"]]))`.
+     pending)`, where `CHANNEL = &[("X-CHANNEL-API-CODE", "Tealstreet")]`.
+     `get` keeps its own literal, because changing its tokens would rename the
+     discovery fingerprint `a5c4555a`. Then `stream_response(id, Envelope(&[&["data"]]))`.
    - `Pending::Candles` carries `root: Context` instead of `command`.
    - Success is gated by `validate_read_http_delivery`.
    - An override of `on_http_failed` sends the Candles arm to
@@ -401,9 +402,10 @@ Kept green: the existing `identity.rs`, `public.rs` candle tests,
 These were run from `sdk-rs` with
 `PATH=$HOME/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bin:$PATH CARGO_BUILD_JOBS=2`:
 
-- `cargo test -p safe-cex-venue-bitget --no-fail-fast` gives 262 passed and
-  6 failed. The 6 failures are exactly REDs 1–6. Every pre-existing target
-  passes with the `prepared_actions` harness.
+- On `58af6be9f0e` (REDs only): `cargo test -p safe-cex-venue-bitget
+  --no-fail-fast` gives 262 passed and 6 failed, exactly REDs 1–6.
+- After the implementation: 268 passed, 0 failed (independent review agrees),
+  and `cargo test -p safe-cex-venues --features bitget` passes.
 - `cargo fmt -p safe-cex-venue-bitget --check` passes.
 - `cargo clippy -p safe-cex-venue-bitget --all-targets -- -D warnings` is clean.
 
@@ -462,3 +464,21 @@ From the worktree root:
 5. The discovery `get` comes in a later slice.
 6. The history whole-query deadline is an owner decision (asked of
    claude-ddi2il). Until it is decided, the history slice waits for #1928.
+
+## Review follow-ups
+
+- **Pre-send probe deadline:** if signing or host bind does not finish within
+  20 s, the engine routes through `on_sign_error`. The probe then backs off
+  (`probe_failed`) and is NOT Classic evidence, and identity fails Timeout /
+  NotSent. Decision 3's Classic route applies only once the probe was released.
+- **Capacity exhaustion:** admission precedes the native entry checks. With 256
+  outstanding managed reads, an unsupported interval or a trade preflight
+  refusal returns the typed Capacity failure instead of its native text.
+- **Unreachable funnel filter kept:** the degraded-balance filter in
+  `signing_identity` is unreachable now that the send funnel carries only
+  history and writes. Removing it leaves `path` unused, and dropping that
+  parameter changes the staged `sign_http` call, which renames a fingerprint in
+  #1915's owner-approved staging entry. It goes, with its funnel-only test and
+  the `secondary_tests` module, when the history/write conversions delete the
+  funnel. The degraded-balance primary key is covered on the managed path by
+  the `caller_adoption` control.

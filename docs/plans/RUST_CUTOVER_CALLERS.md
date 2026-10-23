@@ -5735,7 +5735,9 @@ This covers `bitget`, `bitgetusdc` and `bitgetinverse`.
   Background managed Reads with no retry. The degraded balance read keeps the
   primary key and prepares with the Primary routing intent. An unanswered
   probe ends at 20 s and takes the existing transport route into Classic
-  detection, unless UTA is confirmed. An unanswered balance, position or order
+  detection, unless UTA is confirmed. A probe that was never released
+  (signing or host preparation did not finish) backs off instead and is not
+  Classic evidence. An unanswered balance, position or order
   read ends at 20 s and the next poll reads again. It no longer latches the
   poll forever. Classic/UTA routes, backoff, 40009 and rate-limit pauses are
   unchanged.
