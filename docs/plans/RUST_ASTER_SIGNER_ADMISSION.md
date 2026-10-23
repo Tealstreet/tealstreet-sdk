@@ -120,6 +120,36 @@ the current hosted and remote shape.
      swap and consumes the recipe. listenKey is a signed REST call, not
      `ws-auth`.
 
+## As built: phases 2-3
+
+- **Encoding comes from the setup mapping, not the rules.** A static
+  `signerSetup.secretEncoding` would also apply to V1 HMAC secrets, so the Aster
+  mapping (TS `asterdexSignerSetup.ts`, native `registry/src/asterdex_setup.rs`)
+  declares `hex` for V3 and `utf8` for V1 on both slots. The rules declare only
+  `bridge.dispatchSigning`. The phase-2 `requiredWithPrimaryFallback` item was
+  dropped: the alias is the explicit `signingFromPrimary`, per decision 5.
+- **Alias capability.** `LocalIdentity.signingFromPrimary` (secondary only)
+  installs no copy. Setup refuses it on the primary, with own material, without
+  primary material, or across different encodings. TS sets it only from the Aster
+  mapping (an internal `LocalSignerSetup` flag), never from caller metadata.
+- **Trimming.** V3 wallet keys are trimmed before hex decoding, as the legacy
+  venue read them. V1 secrets stay byte-exact, and a blank key is absent.
+- **Golden.** `packages/safe-cex/src/exchanges/rust/asterdex-signer-setup.golden.json`
+  runs in `rust.asterdex-signer-setup.test.ts` (exact setup JSON) and in
+  `registry/tests/asterdex_setup.rs` (native refs and signatures match the
+  golden setup).
+- **Roles.** Reads are `Read`, trading writes `Mutation`, listenKey
+  `SessionAuth`. The `history.rs` streamed reads keep `Read` through the
+  unchanged `signed_streamed`.
+- **Checker.** `check-signing.py` now bans the Aster sign module like Binance
+  and Bybit; only the `cfg(test)` oracle and test literals are frozen.
+- **`userId`.** The V1 fallback to the API key is gone (empty string). V3 falls
+  back to the public signer address. Recorded in RUST_CUTOVER_CALLERS.
+- **REDs shown.** R1: with the base rules the registry refuses refs ("Injected
+  signing is not supported for this venue yet"). R2: with the base rules TS
+  derives `dispatchSigning: false`. R3: `0x` hex fails decoding. R6 is
+  structural: the base venue has no ref fields and signs eagerly.
+
 ## Original REDs (each shown failing on the base before its fix)
 
 - R1 registry: asterdex with `options.signing` refs and a provider is refused

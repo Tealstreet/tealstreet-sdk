@@ -59,6 +59,21 @@
       }
     },
     {
+      "name": "v3 wallet key is trimmed while addresses resolve from padded auth",
+      "input": {
+        "key": "0x1111111111111111111111111111111111111111", "secret": "unused-secret",
+        "applicationId": "0x2222222222222222222222222222222222222222",
+        "auth": {"privateKey": "  0x<hex32:15>  "}
+      },
+      "expected": {
+        "apiVersion": "v3",
+        "signerAddress": "0x1111111111111111111111111111111111111111",
+        "setup": {
+          "primary": {"key": "0x1111111111111111111111111111111111111111", "secret": "0x<hex32:15>", "secretEncoding": "hex"}
+        }
+      }
+    },
+    {
       "name": "explicit v1 keeps v3-shaped material as an HMAC secret",
       "input": {
         "key": "0x1111111111111111111111111111111111111111", "secret": "<hex32:12>",

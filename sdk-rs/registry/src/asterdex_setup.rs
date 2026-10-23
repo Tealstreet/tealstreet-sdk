@@ -60,6 +60,14 @@ pub(crate) fn local_setup(
     };
     // A blank wallet or secret is absent, as Aster's legacy rule trimmed it.
     let blank = wallet.as_deref().is_none_or(|text| text.trim().is_empty());
+    // V3 wallet keys are trimmed hex, as the legacy venue read them; V1 HMAC
+    // secrets stay byte-exact.
+    if version == Version::V3
+        && let Some(text) = wallet.as_mut()
+    {
+        let trimmed = text.trim().to_owned();
+        drop(Secret::new(std::mem::replace(text, trimmed)));
+    }
     let wallet = take(wallet);
     let wallet = if blank {
         drop(wallet);

@@ -3,7 +3,13 @@ import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions } from '../../types';
 import type { CredentialPresence, CredentialSetupPolicy, IdentitySetupPolicy } from './construction';
 
-type LocalIdentity = LocalIdentityMetadata & { key?: string; secret?: string; passphrase?: string };
+type LocalIdentity = LocalIdentityMetadata & {
+  key?: string;
+  secret?: string;
+  passphrase?: string;
+  /** Secondary only, set by a family setup mapping: sign with the primary's ref. */
+  signingFromPrimary?: true;
+};
 type Credentials = { primary?: LocalIdentity; secondary?: LocalIdentity };
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
 
@@ -76,7 +82,7 @@ export class LocalSignerSetup {
   readonly primaryComplete: boolean;
   readonly credentialPresence: CredentialPresence;
 
-  constructor(options: ExchangeOptions, policy: CredentialSetupPolicy = {}) {
+  constructor(options: ExchangeOptions, policy: CredentialSetupPolicy = {}, secondarySigningFromPrimary = false) {
     const setupMetadata = parseLocalSignerMetadata(options.localSigner);
     const primaryMetadata = effectiveIdentityMetadata(setupMetadata.primary, policy.primary);
     const secondaryMetadata = effectiveIdentityMetadata(setupMetadata.secondary, policy.secondary);
@@ -85,7 +91,8 @@ export class LocalSignerSetup {
       options.secondary_secret !== undefined ||
       options.secondary_passphrase !== undefined ||
       setupMetadata.secondary !== undefined;
-    if (secondary && (!credentialPresent(options.secondary_key, secondaryMetadata?.trimCredential === true) || !options.secondary_secret)) {
+    if (secondary && (!credentialPresent(options.secondary_key, secondaryMetadata?.trimCredential === true)
+      || (!secondarySigningFromPrimary && !options.secondary_secret))) {
       const message = 'Rust engine secondary signing keys require a nonempty key and secret';
       throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
     }
@@ -101,7 +108,11 @@ export class LocalSignerSetup {
       ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
         ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }
         : {}),
-      ...(secondary ? { secondary: { ...secondaryMetadata, key: options.secondary_key, secret: options.secondary_secret, passphrase: options.secondary_passphrase } } : {}),
+      ...(secondary
+        ? { secondary: secondarySigningFromPrimary
+          ? { ...secondaryMetadata, key: options.secondary_key, signingFromPrimary: true as const }
+          : { ...secondaryMetadata, key: options.secondary_key, secret: options.secondary_secret, passphrase: options.secondary_passphrase } }
+        : {}),
     };
   }
 
@@ -140,8 +151,14 @@ export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOpt
     secondary_secret: _readSecret,
     secondary_passphrase: _readPassphrase,
     localSigner: _setupMetadata,
+    auth,
     ...routing
   } = options;
+  // AsterDEX's wallet key is signing material; its public addresses stay.
+  if (auth) {
+    const { privateKey: _privateKey, ...addresses } = auth;
+    return { ...routing, auth: addresses } as ExchangeOptions;
+  }
   // BaseExchange's legacy type requires key/secret; Rust uses the cached
   // construction record and provider refs instead of reading those fields.
   return routing as ExchangeOptions;
