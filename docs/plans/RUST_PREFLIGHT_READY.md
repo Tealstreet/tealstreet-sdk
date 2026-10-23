@@ -378,3 +378,20 @@ Both request-context commands pass (15 ratchet tests), as do bans including the
 socket inventory controls. An initial ratchet failure identified the incoming
 Lighter prune before its integration; no foreign entry was changed locally.
 Fresh CI on the pushed integrated head remains required before the next READY.
+
+## Combo integration: expiry cleanup and intent narrowing
+
+Actual combo-3b `b9d8142261f` introduces a Plan expiry cleanup scope and the
+protection-cancel intent entry. The common intent helper retains the exact ready
+owner guard for both entry points. Signed and signing-timeout paths retain the
+incoming reconciliation drain before readiness; the reconcile timer retains its
+full end-of-event cleanup before readiness.
+
+Readiness activation, failure cleanup and drainage now refuse the active Plan
+expiry scope. A queued successor stays queued until every predecessor call has
+received its typed cleanup, its terminal has been emitted and physical retirement
+has completed. The real two-call unreleased-expiry control fails without the
+cold expiry guard: readiness sees only one of two cleanup callbacks. With the
+guard it passes unchanged. A direct scope control also pins failure-custody and
+activation refusal, and the foreign-owner control covers protection-cancel intent
+narrowing. The earlier six readiness controls remain active.

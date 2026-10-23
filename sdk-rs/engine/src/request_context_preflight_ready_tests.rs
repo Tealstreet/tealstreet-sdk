@@ -28,6 +28,8 @@ struct ScopeProbe {
     retired: usize,
     hold_parked: bool,
     last_refusal: Option<Error>,
+    expiry_cleanup: bool,
+    cleaned: usize,
     #[cfg(feature = "managed-sockets")]
     socket_mode: bool,
     #[cfg(feature = "managed-sockets")]
@@ -111,12 +113,15 @@ impl Venue for ScopeProbe {
             }
             ForeignKind::Plan => {
                 let preflight = cx.begin_preflight(preflight_policy()).unwrap();
-                let calls = [CallBound {
-                    timeout_ms: 100,
-                    attempts: 1,
-                    retry_window: RetryWindow::Shared,
-                    after_refusal: &[],
-                }];
+                let count = if self.expiry_cleanup { 2 } else { 1 };
+                let calls = (0..count)
+                    .map(|_| CallBound {
+                        timeout_ms: 100,
+                        attempts: 1,
+                        retry_window: RetryWindow::Shared,
+                        after_refusal: &[],
+                    })
+                    .collect::<Vec<_>>();
                 let plan = cx
                     .admit_plan(
                         &preflight,
@@ -132,8 +137,20 @@ impl Venue for ScopeProbe {
                         },
                     )
                     .unwrap();
-                let slot = cx.plan_slots(&plan).unwrap().remove(0);
+                let mut slots = cx.plan_slots(&plan).unwrap();
+                let slot = slots.remove(0);
                 let leg = cx.plan_leg_context(&plan, &slot).unwrap();
+                for slot in slots {
+                    let other = cx.plan_leg_context(&plan, &slot).unwrap();
+                    cx.request_managed(
+                        other.clone(),
+                        Method::Get,
+                        "https://read.test/other".into(),
+                        None,
+                        other,
+                    )
+                    .unwrap();
+                }
                 self.plan = Some(plan);
                 self.slot = Some(slot);
                 leg
@@ -151,6 +168,20 @@ impl Venue for ScopeProbe {
     }
     fn on_http_preflight_ready(&mut self, cx: &mut Cx<'_, Context>, preflight: &Preflight) {
         self.ready += 1;
+        if self.expiry_cleanup {
+            assert_eq!(
+                self.cleaned, 2,
+                "all predecessor cleanup precedes readiness"
+            );
+            assert_eq!(self.retired, 1, "physical retirement precedes readiness");
+            assert!(cx.io.http_plan_expiring.is_none());
+            assert!(cx.io.actions.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 10, .. })
+            )));
+            cx.done_preflight(preflight, "after expiry".into()).unwrap();
+            return;
+        }
         #[cfg(feature = "managed-sockets")]
         if self.socket_mode {
             if self.socket_plan_tail {
@@ -198,6 +229,10 @@ impl Venue for ScopeProbe {
                 Err(Error::Revoked)
             );
             assert_eq!(cx.finish_http_context(leg), Err(Error::Revoked));
+            assert_eq!(
+                cx.http_write_protection_cancel_leg(leg),
+                Err(Error::Revoked)
+            );
             assert_eq!(
                 cx.request_managed(
                     leg.clone(),
@@ -273,6 +308,19 @@ impl Venue for ScopeProbe {
     }
     fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
         self.retired += 1;
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Context>,
+        _: Context,
+        _: Error,
+        error: VenueError,
+    ) {
+        assert!(self.expiry_cleanup);
+        self.cleaned += 1;
+        cx.request_preflight_ready(self.parked.as_ref().unwrap())
+            .unwrap();
+        cx.fail_plan(self.plan.as_ref().unwrap(), error).unwrap();
     }
     fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, error: &str) {
         panic!("unexpected {error}");
@@ -598,4 +646,99 @@ impl ScopeProbe {
             .unwrap();
         cx.stop_socket_feed(fresh);
     }
+}
+
+#[test]
+fn expiry_cleanup_cannot_activate_or_fail_a_different_parked_preflight() {
+    let mut e = crate::test_support::seeded_engine(ScopeProbe {
+        kind: ForeignKind::Plan,
+        hold_parked: false,
+        ..Default::default()
+    });
+    command(&mut e, 10, 0.);
+    crate::test_support::prepared_actions(&mut e, 0.);
+    e.venue.hold_parked = true;
+    command(&mut e, 20, 1.);
+    let handle = e.venue.parked.clone().unwrap();
+    let plan = e.venue.plan.clone().unwrap();
+    with_cx(&mut e, 2., |cx| cx.request_preflight_ready(&handle)).unwrap();
+    e.io.http_plan_expiring = Some(plan);
+    with_cx(&mut e, 2., |cx| {
+        assert_eq!(
+            cx.validate_preflight_activation(&handle),
+            Err(Error::Revoked)
+        );
+        assert_eq!(
+            cx.fail_preflight(&handle, "foreign expiry"),
+            Err(Error::Revoked)
+        );
+    });
+    e.flush_preflight_readiness(2.);
+    assert_eq!(e.venue.ready, 0);
+    assert!(matches!(
+        e.io.request_contexts
+            .preflight_state(&handle)
+            .unwrap()
+            .activation,
+        Activation::Queued
+    ));
+    e.io.http_plan_expiring = None;
+    e.flush_preflight_readiness(2.);
+    assert_eq!(e.venue.ready, 1);
+}
+
+#[test]
+fn queued_successor_waits_for_all_unreleased_expiry_cleanup_and_terminal() {
+    let mut e = crate::test_support::seeded_engine(ScopeProbe {
+        kind: ForeignKind::Plan,
+        expiry_cleanup: true,
+        ..Default::default()
+    });
+    command(&mut e, 10, 0.);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action,
+        Action::ManagedHttp(http) if matches!(http.as_ref(),
+            crate::request_context::HttpAction::Prepare { .. })))
+            .count(),
+        2
+    );
+    let plan = e.venue.plan.as_ref().unwrap();
+    let deadline = plan.deadline();
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == deadline => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.venue.hold_parked = true;
+    command(&mut e, 20, 1.);
+    e.handle(deadline, Event::TimerFired { timer });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(e.venue.cleaned, 2);
+    assert_eq!(e.venue.ready, 1);
+    assert_eq!(terminal(&actions, 10), 1);
+    assert_eq!(terminal(&actions, 20), 1);
+    let predecessor = actions
+        .iter()
+        .position(|action| {
+            matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 10, .. })
+            )
+        })
+        .unwrap();
+    let successor = actions
+        .iter()
+        .position(|action| {
+            matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 20, .. })
+            )
+        })
+        .unwrap();
+    assert!(predecessor < successor);
 }

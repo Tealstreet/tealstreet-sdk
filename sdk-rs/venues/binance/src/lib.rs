@@ -13,6 +13,7 @@ pub mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
@@ -219,7 +220,8 @@ pub struct BinanceFutures {
     options: Options,
     urls: Urls,
     paths: &'static paths::Paths,
-    credentials: Option<Credentials>,
+    /// Primary trading key and optional read key; chosen per request by role.
+    credentials: Slots<Credentials>,
     public: Connection,
     market: Connection,
     private: Connection,
@@ -264,10 +266,14 @@ impl BinanceFutures {
         };
         let urls = Urls::for_options(&options, paths);
         let spot = options.variant == Variant::Spot;
-        let credentials = options
-            .credentials
-            .clone()
-            .filter(|id| !options.public_data_only && id.validate().is_ok());
+        let credentials = Slots::new(
+            options
+                .credentials
+                .clone()
+                .filter(|id| !options.public_data_only && id.validate().is_ok()),
+            options.read_credentials.clone(),
+            SlotPolicy::default(),
+        );
         Self {
             options,
             urls,
@@ -393,49 +399,24 @@ impl BinanceFutures {
     fn signed(
         &self,
         cx: &mut Cx<'_, Pending>,
+        role: CredentialRole,
         method: Method,
         path: &str,
         query: Query,
         pending: Pending,
     ) {
-        self.signed_request(cx, method, path, query, None, pending);
-    }
-
-    fn signed_request(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        query: Query,
-        stream: Option<ArrayAt>,
-        pending: Pending,
-    ) {
-        let credentials = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get)
-            .or(self.credentials.as_ref());
-        let Some(credentials) = credentials else {
+        let Ok((selection, credentials)) = self.credentials.select(role) else {
             return;
         };
-        let request = match stream {
-            Some(at) => cx.request_streamed(
-                method,
-                format!("{}{path}", self.urls.account_rest),
-                vec![],
-                at,
-                pending,
-            ),
-            None => cx.request(
-                method,
-                format!("{}{path}", self.urls.account_rest),
-                vec![],
-                None,
-                pending,
-            ),
-        };
-        cx.sign_http(
+        let request = cx.request(
+            method,
+            format!("{}{path}", self.urls.account_rest),
+            vec![],
+            None,
+            pending,
+        );
+        selection.sign(
+            cx,
             request,
             Box::new(self.signed_recipe(credentials.clone(), query)),
         );
@@ -713,7 +694,7 @@ impl BinanceFutures {
         } else {
             self.discovery.succeeded(cx, &0);
         }
-        if self.credentials.is_some() {
+        if self.credentials.has_primary() {
             self.start_account(cx);
         }
         if was_loaded {
@@ -733,7 +714,7 @@ impl BinanceFutures {
                 }
             }
         }
-        if !was_loaded && self.credentials.is_some() && !self.is_spot() {
+        if !was_loaded && self.credentials.has_primary() && !self.is_spot() {
             self.request_leverage_brackets(cx);
         }
         self.start_ticker_seed(cx);
@@ -866,7 +847,7 @@ impl BinanceFutures {
         self.live_tickers.finish(cx.store, &mut tickers);
         cx.store.set_tickers(tickers);
         self.revalue_pending_wallet(cx);
-        if self.credentials.is_none() {
+        if !self.credentials.has_primary() {
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(Vec::new());
             cx.store.set_balance(Default::default());
