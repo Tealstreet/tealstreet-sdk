@@ -5124,3 +5124,13 @@ client-order index from the existing instance namespace. Current time/entropy is
 reconsidered for every reservation; a backward clock or failed/unknown send never
 releases its prior index. Exhaustion rejects before submission rather than
 wrapping to a reused identity. Transaction nonces and signer authority are separate.
+
+## Robinhood master-parity fixture provenance
+
+The real-WASM boundary fixture now supplies an approved test integrator matching
+the alias or explicit override, and asserts the signed Robinhood47296 attributes.
+Production approval refusal, signer indices, slippage, settings and tier behavior
+remain unchanged. The two private replay tape identities reflect the authorized
+master/harness integrator change; their eleven existing diagnostics each and all
+public declarations are unchanged. Raw replay reports remain FAIL with known
+failures; this content-hash refresh does not establish complete venue parity.

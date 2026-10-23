@@ -777,3 +777,17 @@ Shared ProbeVenue tests seed boundary state privately without a production test
 hook. Master TS sources, prepared tape/harness and all incoming inventories remain
 unchanged. Native local checks and independent reviews precede the #1869 handoff;
 its owner supplies the full CI replay evidence.
+
+## Robinhood frozen CI fixture receipt
+
+CI39953255157/1845 supplies the frozen LightRobinhood engine and three reports.
+The original boundary control reproduces one NotSent builder-approval failure
+with21 other cases passing. The corrected fixture preserves every existing
+native assertion and adds exact signed attribution. Independent and executable
+provenance checks reproduce both old and new37-record tape hashes: only three
+approved account indices and seven order-attribute objects differ per tape.
+Existing assessGateReport finds eleven unknown diagnostics per private report
+before the two-hash refresh, and zero errors/eleven known afterward; the public
+report remains186 known. Every diagnostic path/rationale and all other manifest
+entries are byte-preserved; the original reports remain strict FAIL. No replay,
+local release build, new declaration, threshold or comparison-policy change.

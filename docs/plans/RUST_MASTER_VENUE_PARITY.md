@@ -133,3 +133,22 @@ file held. All Rust sources, raw tapes, generator, transport, financial fields
 and incoming legacy manifest stay exact. Deliver independently reviewed head to
 claude-4yjlw0 to fold into1869; no direct landing merge. Architecture gate: No,
 existing test data and exact content identity refresh, with no new gate policy.
+
+Phase2 RED receipt: `d149360a455` adds the explicit signed attribute control;
+using frozen CI39953255157's authenticated Light family artifact (WASM SHA256
+f358f259f7b1d7fba3b905e48f106f6937ac379fcc74e8a53b25e1ffb33a9c59), the
+unchanged test account reproduces1 approval refusal and21 passing cases. This is
+a scoped native fixture check, not a whole-current-package/replay certification.
+Independent and primary VM generator runs reproduce both old/new content hashes
+and prove37 records each, only10 authorized decoded fields changed across9
+records (three approval account indices, seven native attribute objects). Full
+policy assessment of the real CI reports is22 unexpected before refresh and
+zero errors afterward, with11 existing known keys each and186 public known keys.
+No source/generator/tape/diagnostic/rationale changes are part of the hash refresh.
+
+Phase2 local gates: the same authenticated CI family module gives22/22 real-WASM
+boundary cases GREEN after the fixture correction. Nine existing policy/verifier
+controls pass, as do safe-cex typecheck, targeted non-ignored ESLint, bans and both
+request-context checks/14 controls. Original typed refusal and existing assertions
+remain covered. No Rust build/replay/performance result is inferred from this
+fixture proof; #1869's fresh exact-head CI remains the broad merge gate.
