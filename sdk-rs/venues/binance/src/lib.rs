@@ -1327,6 +1327,21 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            self.capture_unproven_trade(request, response, evidence);
+        }
+    }
+
+    fn discard_unproven_http_command(&mut self, owner: safe_cex_engine::request_context::Owner) {
+        self.discard_unproven_trade(owner);
+    }
+
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,

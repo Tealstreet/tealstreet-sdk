@@ -37,6 +37,22 @@ pub struct Params(BTreeMap<String, Param>);
 
 pub type RequestParts = (String, Vec<(&'static str, String)>, Option<String>);
 
+/// Native public transport bytes, shared with managed unsigned intent. API-key
+/// and signature material are deliberately absent from this static declaration.
+pub fn unsigned_headers(method: Method) -> &'static [(&'static str, &'static str)] {
+    if method == Method::Post {
+        &[
+            ("X-SOURCE-KEY", "Tealstreet"),
+            ("Content-Type", "application/json"),
+        ]
+    } else {
+        &[
+            ("X-SOURCE-KEY", "Tealstreet"),
+            ("Content-Type", "application/json, charset=utf-8"),
+        ]
+    }
+}
+
 impl Params {
     pub fn new() -> Self {
         Self::default()
@@ -83,7 +99,8 @@ impl Params {
         credentials: Option<&Credentials>,
         now: f64,
     ) -> RequestParts {
-        let mut headers = vec![("X-SOURCE-KEY", "Tealstreet".into())];
+        let public = unsigned_headers(method);
+        let mut headers = vec![(public[0].0, public[0].1.into())];
         if let Some(c) = credentials {
             let read = c.read.as_ref().filter(|_| method == Method::Get);
             let key = read.map_or(c.key.as_str(), |r| &r.key);
@@ -96,14 +113,15 @@ impl Params {
                 self = self.str("signature", &signature);
             }
         }
+        // Retain native SOURCE, APIKEY, Content-Type order for signed legacy
+        // requests, rather than appending the credential after public headers.
+        headers.push((public[1].0, public[1].1.into()));
         let url = format!("{}{path}", crate::paths::REST);
         if method == Method::Post {
-            headers.push(("Content-Type", "application/json".into()));
             let body = (!self.0.is_empty())
                 .then(|| serde_json::to_string(&self.0).expect("finite request parameters"));
             (url, headers, body)
         } else {
-            headers.push(("Content-Type", "application/json, charset=utf-8".into()));
             let query = self.query();
             (
                 if query.is_empty() {
