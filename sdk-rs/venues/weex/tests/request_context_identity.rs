@@ -438,13 +438,7 @@ fn native_remote_wire_primary_namespace_and_selected_signer_are_preserved() {
             "",
             "1700000000000",
         );
-        assert_eq!(
-            request.headers,
-            expected
-                .into_iter()
-                .map(|(k, v)| (k, v))
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(request.headers, expected);
         success(&mut e, 830, &request);
         assert_eq!(e.account_snapshot_frame(NOW), before);
     }
