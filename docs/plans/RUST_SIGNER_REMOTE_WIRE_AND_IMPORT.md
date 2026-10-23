@@ -301,6 +301,8 @@ leaves.
      unchanged.
 6. **Recipes per format.** Content checks are allowlists, per §Security.
    - EIP-712: `asterdex.code.1` (#1845).
+   - EIP-191: `asterdex.v3.1`, the V3 standard digest over
+     `abi(payload, user, signer, nonce)` (#1845). The nonce comes from Rust.
    - Starknet: `paradex.order.1`.
    - ed25519: `orderly.rest.1`, with a path allowlist.
    - JWT: `coinbase.restJwt.1`, ES256 and EdDSA. The server supplies the
