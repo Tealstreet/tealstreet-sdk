@@ -138,3 +138,9 @@ construction with its canonical stored Slots. The current command helper and
 its typed NotSent text `WEEX managed read lifecycle is unavailable` stay intact.
 Exact delivery/finish/native snapshot controls remain unchanged. This removes
 the new manual selection/admit/queue/tag block; no fallback path is retained.
+
+The SelectedRead implementation passes 9 WEEX unit controls, 39 account tests,
+6 Background release/failure controls and 5 auth tests on the actual #1976 stack.
+No new selection API or managed.rs change is introduced. The earlier socket,
+trading, identity, security and dispatch receipts precede this small builder
+convergence; CI will verify the combined branch before any readiness claim.

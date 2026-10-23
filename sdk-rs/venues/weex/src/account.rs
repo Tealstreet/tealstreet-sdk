@@ -4,13 +4,15 @@ use crate::account_wire::*;
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderStatus, Position, PositionMode, PositionSide,
 };
-use safe_cex_engine::request_context::{
-    Context, Credential, Operation, Policy, RetryPolicy, Scope,
+use safe_cex_engine::request_context::{Context, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    BackgroundReadError, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
 };
 use safe_cex_engine::socket::{Supervisor, Tick};
 use safe_cex_engine::store::{MarketSetting, Store};
@@ -431,62 +433,69 @@ impl WeexFutures {
             String::new()
         };
         let stream = (!matches!(request.kind, Kind::Metadata)).then_some(ArrayAt::Root);
-        let Some((identity, slot)) = self.credentials.select(Method::Get) else {
-            self.account_failed(cx, request, "WEEX account read requires credentials");
-            return;
-        };
-        let context = match cx.http_context(
-            Scope::Background,
-            Policy {
-                operation: Operation::Read,
-                credential: Some(Credential {
-                    slot,
-                    reference: identity.credential.clone(),
-                }),
+        let slots = Slots::new(
+            self.credentials.primary.clone(),
+            self.credentials.read.clone(),
+            SlotPolicy::default(),
+        );
+        let selected = SelectedRead::select(
+            &slots,
+            ReadRole::Read {
+                scope: Some(request.kind.auth_scope()),
+            },
+        );
+        let read = match SelectedRead::background(
+            cx,
+            selected,
+            ReadPolicy {
                 timeout_ms: 20_000,
                 pacing: None,
                 retry: RetryPolicy::Never,
             },
         ) {
-            Ok(context) => context,
+            Ok(read) => read,
             Err(error) => {
-                self.account_failed(cx, request, &error.read_venue_error().message);
+                let message = match error {
+                    BackgroundReadError::Selection(_) => {
+                        "WEEX managed read lifecycle is unavailable".into()
+                    }
+                    BackgroundReadError::Admission(error) => error.read_venue_error().message,
+                };
+                self.account_failed(cx, request, &message);
                 return;
             }
         };
+        let context = read.context().clone();
         let path_query = if query.is_empty() {
             path.to_owned()
         } else {
             format!("{path}?{query}")
         };
-        let recipe =
-            crate::dispatch_signing::Http::new(identity.clone(), Method::Get, path_query, None);
-        let (url, _, body) = recipe.unsigned();
         request.context = Some(context.clone());
-        let task = Task::Account(request);
-        let scope = auth_scope(&task);
-        let pending = Pending {
-            task,
-            invalid: false,
-            skipped: vec![],
-            seed_generation: self.seed_generation,
-        };
-        match cx.request_signed_managed(
-            context.clone(),
-            Method::Get,
-            url,
-            body,
-            Box::new(recipe),
-            pending,
+        match read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{}{path_query}", crate::paths::REST),
+                body: None,
+                stream,
+            },
+            |identity| {
+                Box::new(crate::dispatch_signing::Http::new(
+                    identity.clone(),
+                    Method::Get,
+                    path_query,
+                    None,
+                ))
+            },
+            |_| Pending {
+                task: Task::Account(request),
+                invalid: false,
+                skipped: vec![],
+                seed_generation: self.seed_generation,
+            },
         ) {
-            Ok(id) => {
-                if let Some(at) = stream {
-                    cx.stream_response(id, at);
-                }
-                if let Some(scope) = scope {
-                    cx.tag_account_read(id, slot, scope);
-                }
-            }
+            Ok(_) => {}
             Err((pending, error)) => {
                 let _ = cx.finish_http_context(&context);
                 let Task::Account(request) = pending.task else {
@@ -1095,17 +1104,22 @@ impl WeexFutures {
     }
 }
 
+impl Kind {
+    fn auth_scope(self) -> safe_cex_engine::AccountReadScope {
+        use safe_cex_engine::AccountReadScope::*;
+        match self {
+            Self::Balance => Balance,
+            Self::Positions => Positions,
+            Self::Normal | Self::Algo => Orders,
+            Self::Config | Self::Metadata => Settings,
+        }
+    }
+}
 pub(crate) fn auth_scope(task: &Task) -> Option<safe_cex_engine::AccountReadScope> {
-    use safe_cex_engine::AccountReadScope::*;
     let Task::Account(r) = task else {
         return None;
     };
-    Some(match r.kind {
-        Kind::Balance => Balance,
-        Kind::Positions => Positions,
-        Kind::Normal | Kind::Algo => Orders,
-        Kind::Config | Kind::Metadata => Settings,
-    })
+    Some(r.kind.auth_scope())
 }
 impl WeexFutures {
     /// One endpoint's rejection holds back its scope siblings' acceptance.

@@ -278,4 +278,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Caller-wait Read root expiry | Plan under review (claude-fe7lgm) | Before relying on engine-owned expiry of a tracked caller-wait Read root, or refusing a missing command receipt. | [RUST_READ_ROOT_EXPIRY.md](RUST_READ_ROOT_EXPIRY.md) |
 | Store order fence domains | Keep-both documentation plan | Before changing the broad late-ACK revision or selective logical snapshot epoch. | [RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md) |
 
-| [WEEX account-cycle Background reads](RUST_WEEX_ACCOUNT_BACKGROUND.md) | Plan first; native handoff review before production |
+| [WEEX account-cycle Background reads](RUST_WEEX_ACCOUNT_BACKGROUND.md) | Managed Background account pages; draft validation |
