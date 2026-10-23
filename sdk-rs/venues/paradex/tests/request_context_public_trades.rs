@@ -396,7 +396,7 @@ fn initial_capacity_denial_also_precedes_missing_market_empty_completion() {
         assert_eq!(failed.len(), 1);
         let error = failed[0].as_ref().unwrap_err();
         assert_eq!(error.kind, Some(ErrorKind::Internal));
-        assert_eq!(error.message, "Too many requests in flight");
+        assert_eq!(error.message, "Engine request capacity reached");
         assert_eq!(error.outcome, None);
         assert!(!actions.iter().any(|a| matches!(
             a,
