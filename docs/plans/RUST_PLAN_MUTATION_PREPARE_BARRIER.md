@@ -108,9 +108,17 @@ within the same declared bounds. Fresh entropy draws remain deterministic per
 member/reprepare generation; late old receipts are inert. If the bound is lost,
 fail the whole uncommitted step with zero HTTP. Reprepare is still unreleased
 work, not a resend: it consumes neither CallBound physical attempt credits nor
-a native definitive-refusal resend grant. A later real native 10002 after release
-must retain exactly its one permitted grant. Do not re-sign already released
-members or reopen a committed step.
+a native definitive-refusal resend grant. Preserve the existing single/serial
+control where reprepare followed by a real native 10002 retains its one grant;
+this first barrier slice itself admits no group retries. Do not re-sign already
+released members or reopen a committed step.
+
+Host resources bind once. When claim finds one current member stale, retain the
+exact already-bound resources for unchanged siblings, replace only the stale
+member's preparation/signature/resource, and invalidate the old group permit
+generation. The replacement BindGroup identifies retained bindings explicitly;
+it never calls bind twice on a sibling or silently re-signs the whole group.
+No retained resource can be swapped between members or across group generations.
 
 Parent/command retirement or poison invalidates every unreleased member before
 cancellation; duplicate Sign/Prepared/Bind/claim events cannot release any. Reuse
@@ -133,6 +141,14 @@ reconcile_uncertain work. After release, a real Unknown member fences normally.
 opens; it does not provide preparation atomicity. G2c configuration snapshot
 retirement is a separate prerequisite for changing credentials during this wait.
 A current issuer/owner/credential fence remains required even before G2c exists.
+After commit, each member keeps its own ordinary delivery/failure callback and
+typed outcome; pre-reserved release storage is not a replacement group summary.
+With independent_calls, a delivered 408/5xx follows the same per-member
+on_http_failed path; otherwise it reaches the existing fail_plan. A released
+sibling cannot become an unissued refusal. Pin two released members, first 503
+then sibling Accepted with its native ID: one final Unknown retains that ID and
+the native first-error text. A later serial G2 Verify Read in the same Mutation
+Plan remains compatible; only the declared parallel barrier is Mutation-only.
 
 ## Original REDs and checks
 
@@ -290,7 +306,20 @@ journal/pacing effects. The group claim validates issuer, owner, Plan step,
 member order/count and every original preparation generation in one turn, then
 prepares all Lifecycle claims, pure venue admissions, journal/reconciliation
 records, release flags and result storage. Any refusal before commit invalidates
-and fails the uncommitted step through the common Plan seal once.
+no current group unless the caller has exact current-group failure authority.
+The disposition is explicit:
+
+| Claim condition | Disposition before commit |
+| --- | --- |
+| Foreign, duplicate, old or retired GroupPermit | Inert structural refusal; no live group, journal, pacing or owner changes. |
+| Shared pacing WaitUntil | Keep the group live; no release evidence or pacing is spent. |
+| Exact current stale resource, route or signature | Hold the group and reprepare only the stale member within its original bounds, retaining siblings' bound resources. |
+| Exact current group's terminal provider, deadline, capacity or admission failure | Invalidate its members and seal through the common Plan funnel once, preserving prior-step effects. |
+
+A bind/resource failure associated with the exact current uncommitted group
+also releases neither member and uses that same typed failure path. It gives
+whole-command NotSent only when no earlier step released; earlier effects still
+project through the journal. An invalid token never grants retirement authority.
 
 First admission rejects any nonzero resolved shared/member pacing floor. A group
 with zero floor can still be waiting behind an earlier use of a shared pacing
@@ -306,6 +335,23 @@ feedback; it cannot create an uncertain order-lock fence or consume retry/resend
 credits. Signature reprepare consumes only a fresh preparation/signing generation,
 not a new physical attempt. These remain mandatory runtime assertions, not
 claims proven by the current baseline REDs.
+
+The per-member Mutation order_locks.note_command_write marking belongs inside
+commit_claim, never prepare_claim. The second-provider-refusal control must assert
+unchanged order locks, zero venue reconciliation calls and unchanged auth health.
+Final signing-release observation and raw-expiry projection remain one shared
+projector; publish each member's release metadata only after the entire group
+commits. No partial group's flags or metadata may escape preparation.
+
+### Reviewed direction and remaining source gate
+
+Core, classification and BloFin consumer review cleared the bounded direction
+at 956990a1b88. Independent source/full-map review required the disposition table
+and one-use sibling binding rules above; caller review confirmed the first
+consumer and the unchanged single/serial resend compatibility boundary.
+This clears implementation design, not held source files. Send exact Lifecycle,
+Plan, signing-release and host extraction hunks to their owners before edits;
+retain single Scheduled/error behavior and resolved shared pacing checks.
 
 ### Source ownership and next checks
 
