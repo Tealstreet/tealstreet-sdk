@@ -2383,6 +2383,7 @@ Each existing per-leg mint reservation considers the current candidate and
 retains monotonic state; exhaustion refuses without wrap. No transaction nonce,
 managed ownership, retry or outcome policy is introduced. No legacy inventory
 site changes; all incoming maps and the #1869 TS reference/harness remain exact.
+
 ## Native mode-preflight redo liveness
 
 Repeated external mode changes can make an adapter redo its prerequisite mode
