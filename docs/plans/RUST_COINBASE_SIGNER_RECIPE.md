@@ -30,21 +30,41 @@ and the JWT algorithm. Signing happens at release through the provider.
    - the outbound URL must be exactly `https://api.coinbase.com` + `path`;
    - at prepare it draws the nonce from `DispatchContext::signing_bytes`
      (same 21-byte uuid form), takes `nbf` from `stamp_ms`, builds the exact
-     signing input through the existing `signing_input` (shared with the
-     legacy signer and the P8 recipe), and emits `Present(credential)` plus
-     `Sign(Es256 | Ed25519, signing, input)`;
+     signing input through `signing_input`, and emits `Present(credential)`
+     plus `Sign(Es256 | Ed25519, signing, input)`;
+   - `signing_input` is extracted from `jwt_with_nonce` on this branch as a
+     pure refactor (R0 proves the legacy JWT bytes are unchanged). It is the
+     same function the P8 branch (#1926) extracts, so whichever lands second
+     merges onto an identical body;
    - the receipt declares `stamp_ms` and `expiry_ms = exp * 1000`;
    - at apply it requires the presented key name to equal `key_name`
      (refusing a provider that presents another key), checks the signature
-     width, and writes the same two headers as legacy.
+     width, and writes the same two headers as legacy, `Content-Type`
+     included on GET;
+   - freshness is 5 s, well inside the JWT's 120 s life.
 2. **`sign::WsSubscribe::new(identity, key_name, algorithm, channel)`**, a
    `SignStep` for `send_signed` that builds the same subscribe frame with
-   a JWT without `uri`.
+   a JWT without `uri`. Each channel's frame is its own step. A refusal of
+   either reaches the venue's sign-failure hook, which disconnects and
+   stops as legacy does today (the conversion wires that hook).
 3. **Provider Ed25519 keypairs** (shared, crypto): the Ed25519 arm also
    accepts the 64-byte `seed || public` form Coinbase downloads use. It
    checks that the public half matches the seed and refuses a mismatch,
    instead of a venue truncating the key.
+   - Why the provider rather than setup: every local path (native, WASM
+     local setup and the hosted browser executor) uses this one Rust
+     provider, so local and hosted signing cannot disagree about which keys
+     are accepted. Remote JS signers hold their own keys and never receive
+     key material from the engine.
+   - This is a deliberate tightening. Legacy truncates a keypair without
+     checking its public half; the provider refuses a mismatched pair. The
+     algorithm doc states the accepted forms, and the conversion records
+     the change in RUST_CUTOVER_CALLERS.
 4. `JwtAlgorithm { Es256, EdDsa }` becomes public so setup can declare it.
+
+Setup boundary: `Present` compares stored bytes exactly, so trusted setup
+must store the trimmed CDP `name` as the credential, the same text the venue
+passes as `key_name`.
 
 Out of scope, owned by the conversion or admission: the venue `Options`
 identity fields and their consumers (`lib.rs`, `rest.rs`, `account.rs`),
@@ -54,6 +74,8 @@ remote half (P8 #1926 already carries `coinbase.restJwt*.1`).
 
 ## REDs (each shown failing before its change)
 
+- R0 (refactor guard, not a RED): the existing legacy JWT tests stay green
+  after `signing_input` is extracted, so the bytes are unchanged.
 - R1: an Ed25519 keypair (seed || public) is refused by the provider arm.
 - R2: a dispatch test cannot sign a Coinbase request through the provider
   (no recipe exists).
