@@ -69,6 +69,11 @@ waits for that held fixture to clear. No GRVT HTTP slice is currently unblocked.
    currently performed in planning, before transport readiness. Do not reuse
    pre-signed expiring bodies or add venue retry/outcome machinery.
 
+Update (claude-55ao7t, 2026-10-23): the AUTH login moves onto the session
+core, stacked on #1897. Inventory prune: **56->55**, `account.rs` **12->11**.
+The joined waiters stay venue-side until their reads are managed. See
+[GRVT API-key login](RUST_BACKGROUND_SESSION.md#grvt-api-key-login-stacked-on-1897-cleared-by-codex-zs5e83).
+
 ## Caller-visible contract to document with implementation
 
 Catalog adoption requires prepare/bind/claim support in custom worker/hosted

@@ -278,6 +278,50 @@ and retries inherit it. There is no second Context field.
 (codex-hcmq3f) as session Mutations behind the #1842 gate. Then KuCoin
 `bullet-public` as a session Read (codex-9czdjh, after its header use).
 
+### GRVT API-key login (stacked on #1897; cleared by codex-zs5e83)
+
+**Scope.** Only the login moves (`grvt/src/account.rs` `login`, AUTH row of
+[RUST_GRVT_REQUEST_CONTEXT.md](RUST_GRVT_REQUEST_CONTEXT.md)). Exact inventory
+prune: GRVT **56→55**, `account.rs` **12→11** (`3bb318de…`).
+
+**Original REDs** (`grvt/tests/login_session.rs`, both fail on the legacy
+source):
+- The login is prepared as managed session work on the primary private
+  egress. That means intent `Primary`, no explicit route and a 20 s bound,
+  with exact URL, body and the three static headers.
+- A hung login is reissued at its engine bound when the host reports
+  nothing. Every due timer fires in real order.
+
+**Shape.**
+- **Session.** One repeat-safe keyless session owns API-key logins:
+  - `private_egress` comes from a `Slots` `SessionAuth` selection over the
+    configured key.
+  - Each login is its own session Mutation with `RetryPolicy::Never` and the
+    20 s host default the unmanaged login relied on.
+  - It is sent through `request_managed_with_headers`; the API key stays in
+    the body.
+  - Repeat-safe: a login only mints an independent cookie, and the legacy path
+    already reissued it five times.
+- **Outcomes.**
+  - An answered login records `Accepted` when GRVT returns success with both
+    session headers, then finishes. The existing `account_response` and
+    `account_failed` presentation is unchanged.
+  - A transport failure or expiry reissues a new session operation, up to the
+    legacy budget of five, then `account_login_unavailable`. The existing
+    network-retry fixtures pin this.
+  - `fail_authentication` retires the session. The next login opens a new
+    generation, and the engine drops late answers to the retired one.
+- **Waiting reads.** They stay in the venue's `account.waiting`. The #1842
+  gate needs managed owners, and those reads are still legacy. A failed login
+  settles them from its session callback (the #1897 completion fix).
+- **Not included.** Cookie-bearing reads and writes stay legacy for now. They
+  adopt `session_scoped_context` in their own slices.
+
+**Fixtures.** Action drains in
+`tests/{account,history,identity,products,markets_refresh,trading}.rs` switch
+to `test_support::prepared_actions` at each event's time, with no assertion
+changed. They also pass on the legacy source, where only the two REDs fail.
+
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
 The keepalive interval, failure backoff and expiry-driven recreation are
