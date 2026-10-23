@@ -975,7 +975,7 @@ export class RustEngineExchange extends BaseExchange {
           },
         },
         { commandTimeoutMs: this.commandTimeoutMs, ownsEngine: true,
-          ...(this.signerSetup instanceof DelegatedSignerSetup ? { signer: this.signerSetup.signer } : {}) },
+          ...(this.signerSetup instanceof DelegatedSignerSetup ? { signer: this.signerSetup.signer, signerAlgorithms: this.signerSetup.signerAlgorithms } : {}) },
       );
     } catch (error) {
       try { engine.free?.(); } catch { /* Keep the original construction error. */ }
