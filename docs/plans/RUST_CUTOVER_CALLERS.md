@@ -5766,3 +5766,14 @@ Request bodies are unchanged.
 | An option cancel-all answered `success:"0"` | `Unknown` (was a known refusal) | Reconcile through reads. |
 | An option create whose `orderLinkId` echo differs from the sent one | `Unknown` (was success) | Reconcile; the caller's ID is the lookup key. |
 
+### Bybit option queries and seeds on managed reads (slice 4b)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `fetchOptionChain` / `fetchAccountGreeks` have a 20 s native window | `timeout` when it expires; a late answer is ignored | None. |
+| Refusals before any request | Typed `NotSent`: `invalidInput` for "Options are not enabled" and an invalid chain query; `authInvalid` for Greeks without an API key (was untyped text) | Branch on `kind`; text unchanged. |
+| A native refusal of the option read | The classified kind and `venueCode`, with the message prefixed `Bybit options:` | Branch on `kind`. |
+| Greeks after a signature/timestamp refusal | Re-read once, re-signed, only on a native `10002`/`10004`; a text-only match never re-reads | None. |
+| `fetchOptionExpiries` | Needs command admission; a full command table refuses it once with the shared `internal` capacity error; otherwise unchanged | None. |
+| Option ticker seeds at startup | Managed discovery reads with the same retry, pause and degradation rules | None. |
+

@@ -115,7 +115,7 @@ fn call_bound<'a>(after_refusal: &'a [StepBound<'a>]) -> CallBound<'a> {
 }
 
 /// Bybit names its own clock in a recv-window refusal; it corrects ours.
-fn server_time(message: &str) -> Option<f64> {
+pub(crate) fn server_time(message: &str) -> Option<f64> {
     message
         .find("server_timestamp[")
         .map(|at| &message[at + 17..])
