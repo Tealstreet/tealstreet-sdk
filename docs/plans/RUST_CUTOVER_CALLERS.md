@@ -4566,6 +4566,36 @@ wallet valuation and public/private bullet acquisition. Candle, private-signing,
 setting no-op and capability behavior retain their existing paths.
 
 
+### Backpack managed standalone depth queries
+
+`fetchOrderBook` uses genuine engine command entry followed by managed unsigned
+GET preparation, binding and final claim. Custom transports preserve the exact
+`X-Broker-Id: 1200` header, encoded symbol, empty body and default route through
+handoff and stale-route preparation. A request-only transport cannot dispatch
+this path. One original 20-second deadline includes preparation; the query keeps
+zero automatic retries. Expired, duplicate and superseded callbacks cannot
+complete another owner or publish a late result.
+
+The #1680 public `notSent` presentation remains for contextual preparation,
+transport and native-response failures, with the engine-supplied typed kind and
+all native fields intact. Network failures carry `network`, undecodable HTTP
+replies carry `internal`, and root expiry carries `timeout`. Native response
+classification and the capped Retry-After remain unchanged; credential-looking
+public refusals remain non-auth and do not deactivate account credentials.
+The explicit new exception is initial engine admission rejection: this Read has
+no financial outcome, with `invalidInput` for invalid time or `internal` for
+capacity. It emits one engine failure without new request/timer/owner resources;
+a revoked entry has no completion rights and produces no new terminal.
+
+All native book rules remain: every limit is ignored, server order and duplicate
+prices retain lexical IDs, zero quantities/totals and empty sides are valid, and
+malformed rows reject the entire query. Results remain independent of subscribed
+book generations and do not update the Store book. The native query needs no
+cached market or live subscription. SDK capability readiness still awaits an
+existing startup, and callers still handle no-start, failed-start and terminal
+engine errors; unseeded native tests do not establish pre-start SDK readiness.
+
+
 ## MEXC, Phemex and Polymarket bounded row reporting
 
 MEXC, Phemex and Polymarket use the engine's bounded Once diagnostic memory
