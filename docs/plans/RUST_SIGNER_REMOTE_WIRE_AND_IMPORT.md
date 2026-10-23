@@ -225,7 +225,8 @@ leaves.
 
 **Scope.**
 - The additive versioned wire, the browser executor, recipe capability
-  gating, and one versioned production recipe per non-HMAC format: EIP-712,
+  gating, and one versioned production recipe per non-HMAC format: EIP-712
+  and EIP-191 (Aster),
   Starknet, ed25519, JWT and Schnorr.
 - A positive end-to-end proof per format through both halves.
 - The HMAC formats stay byte-identical.
