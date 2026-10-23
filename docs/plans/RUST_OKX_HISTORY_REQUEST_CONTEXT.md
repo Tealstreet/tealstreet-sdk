@@ -232,9 +232,9 @@ Refresh the original controls against real `handle_command` propagation before
 attributing caller-root failures to venue adoption. Keep the original RED
 checkpoint intact. Invalid host input is a distinct API boundary:
 `handle_command` returns typed Invalid without dispatch, while plain `handle`
-can enter with no receipt stamp. The getter itself grants no authority; use
-normal genuine entry admission and never fabricate a receipt or numeric
-terminal. The seam owner's clarification below settles the None boundary.
+can enter with no receipt stamp. The getter itself grants no authority; never
+fabricate a receipt, substitute a default root or emit a numeric terminal.
+The overseer's correction below settles the None boundary.
 
 The fresh collision check still lists #1773 history/lib source and #1943 lib
 source. The #1773/#1938/#1942 chain and narrow source handoff are being
@@ -256,11 +256,15 @@ that chain. The only permitted lib.rs edits are Pending::History response,
 failure and typed signing-failure arms. Send/sign funnel pruning and deleting
 the OKX staging entry wait for a later coordinated slice after actual landings.
 
-claude-fe7lgm confirmed the unstamped-entry contract: None does not itself
-terminate, and reject_expired_command is inert/Revoked there. Normal
-admit_http_command owns the outcome; a NaN-clock entry fails typed InvalidInput
-with no Read outcome, preserving the original local-empty assertion. For None,
-the admission policy uses the shared DEFAULT_COMMAND_WAIT_MS rather than a
-venue constant or zero timeout. Actual Remaining always supplies the root's
-caller-bounded duration, while Expired uses reject_expired_command. The explicit
-host-boundary handle_command failure is separately typed Err with no dispatch.
+The overseer corrected the earlier seam-owner suggestion recorded in local
+`616f7ca3ba0`: None must fail closed through the shared typed Read entry refusal
+in fe7lgm's #1945 follow-up, with outcome None. It must never fall through to
+DEFAULT_COMMAND_WAIT_MS: #1945 already stamps the SDK default when the host
+omits a timeout, so None denotes receipt failure, not an absent override.
+Remaining supplies the caller-bounded duration; Expired uses the shared expiry
+refusal. No venue-created root or receipt substitutes for either failure.
+The original NaN-clock local-empty assertion stays unchanged. A new finite
+clock control uses f64::MAX, where the default receipt deadline cannot advance,
+and demands one typed Read refusal without a local empty success or I/O.
+The explicit host-boundary handle_command failure remains a separate typed Err
+with no dispatch. Implementation of None awaits the reviewed public refusal API.

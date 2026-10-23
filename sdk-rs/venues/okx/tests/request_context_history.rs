@@ -142,6 +142,25 @@ fn host_invalid_clock_returns_typed_error_without_dispatch() {
 }
 
 #[test]
+fn missing_receipt_at_finite_clock_cannot_substitute_a_default_root() {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    engine.handle(
+        f64::MAX,
+        Event::Command(Command::Query {
+            command: OWNER,
+            query: orders(),
+        }),
+    );
+    let output: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(output.len(), 1, "receipt refusal has no effects");
+    assert!(matches!(
+        &output[0],
+        Action::Notice(Notice::CommandFailed { command: OWNER, error })
+            if error.kind == Some(ErrorKind::InvalidInput) && error.outcome.is_none()
+    ), "missing receipt must fail closed through typed Read entry refusal");
+}
+
+#[test]
 fn original_local_empty_read_requires_genuine_admission_at_invalid_time() {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
     deliver(&mut engine, f64::NAN, orders(), None);
