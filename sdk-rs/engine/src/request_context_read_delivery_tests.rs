@@ -240,6 +240,32 @@ fn released_deadline_expiry_is_a_typed_timeout_and_host_loss_stays_network() {
 }
 
 #[test]
+fn a_delivered_body_that_is_not_utf8_is_a_typed_malformed_reply() {
+    let (mut engine, request) = released_read(false);
+    engine.handle(
+        3.,
+        Event::HttpStart {
+            request,
+            status: 200,
+            headers: "",
+        },
+    );
+    engine.handle(
+        3.,
+        Event::HttpChunk {
+            request,
+            data: &[0xff, 0xfe],
+        },
+    );
+    engine.handle(3., Event::HttpEnd { request });
+    assert_eq!(
+        engine.venue().failure_kind,
+        Some(crate::ErrorKind::Internal)
+    );
+    assert_eq!(engine.venue().native_publications, 0);
+}
+
+#[test]
 fn read_publication_pair_authority_is_exact_and_read_only() {
     for case in 0..16 {
         let mut io = super::super::Io::<()>::default();
