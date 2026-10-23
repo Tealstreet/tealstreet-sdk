@@ -62,9 +62,12 @@ the current hosted and remote shape.
      32-byte check move into setup validation (hex decoding enforces the
      length).
    - The venue never calls `Credentials::validate()` on material again.
-   - A keyless account is V3 when it has an explicit `apiVersion: 3`, or when
-     its public `userAddress` and `signerAddress` are both address-shaped
-     (today's `asterLocalAuth` inference). Otherwise it is V1.
+   - Keyless accounts reach the Rust engine only with an explicit
+     `apiVersion: 1`.
+   - Address-shaped public `userAddress` and `signerAddress` (today's
+     `asterLocalAuth` inference), or `apiVersion: 3`, can only route a keyless
+     account to the TS venue. That is the conservative direction: nothing
+     inferred ever admits keyless V1 onto Rust.
    - RUST_CUTOVER_CALLERS records that keyless V3 callers should set
      `apiVersion`.
    - The venue refuses a missing or contradictory version (typed, not sent)
