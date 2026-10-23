@@ -37,13 +37,14 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
 1. **Request shape.** A new request type keeps `t` as the first JSON key, so
    the browser's `{"t":"sign-req"` fast path still sees it:
    `{t:'sign-req', d:{id, type:'op', v:2, exchangeName, accountName, op}}`.
-   - `op` = `{algorithm, slot: 'primary', key: 'signing' | ExtraKey, receipt, …}`.
-     What the op carries depends on the algorithm (see Security below):
-     - exact messages (`ed25519`, `es256`) carry the resolved message bytes;
-     - wallet and L2 algorithms (`secp256k1Digest`, `starkDigest`,
-       `zkLinkContract`) never carry a bare digest. They carry the
-       structured preimage: a family recipe id plus its canonical inputs,
-       such as the EIP-712 domain, type and message, or the action and nonce.
+   - `op` = `{recipe, slot: 'primary', inputs, receipt}`.
+     - `recipe` is a closed per-family recipe id, such as
+       `hyperliquid.order` or `coinbase.restJwt`.
+     - `inputs` are that recipe's structured canonical inputs: the EIP-712
+       domain, type and message, the action and nonce, or the JWT claims and
+       instruction fields. They are never a bare digest or opaque bytes.
+     - The recipe, not the server, fixes the algorithm and the key role, so a
+       `zklinkSeed` or `l1Wallet` key can never be applied to another recipe.
    - **Credential interpolation.** The server interpolates only the
      `publicCredential` of the same identity as the signing key, which it
      already holds from init, as `remoteSignerProvider` enforces today. A
@@ -82,8 +83,14 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
    venue classes.
    - `RustEngineExchange.signOperation(op)` → WASM `hostedSigning({kind: 'op', …})`.
    - That extends `registry/src/hosted_signing.rs` `Input` with
-     `Op {algorithm, key, payload}`. It is admitted only for the account's
-     declared family recipes and slot.
+     `Op {recipe, inputs}`, dispatched per family in the registry. This
+     replaces today's hard-coded binance/bybit gate; `safe-cex-venues`
+     already links every venue crate.
+   - Each venue exposes one canonicalizer, preimage to digest or message plus
+     classification, used by both the server recipe and the browser, so the
+     two cannot drift.
+   - The `signOps` a browser advertises are derived from the venue features
+     compiled into its WASM build.
    - It reuses `LocalSigner::sign_now`, including role binding of extra refs.
    - **Deadlines.** Raise the browser cap from the current 5 s, keeping:
      browser cap + round trip < the server engine's sign deadline < the 15 s
@@ -116,18 +123,35 @@ carry venue permission scopes. Wallet and L2 keys do not:
 - Polymarket's L1 wallet holds USDC (permits and approvals);
 - Stark and zkLink keys can sign L2 transfers.
 
-A compromised server must not be able to obtain arbitrary digests:
-- For `secp256k1Digest`, `starkDigest` and `zkLinkContract` ops, the browser's
-  Rust family code recomputes the digest or contract bytes from the
-  structured preimage. It then applies a per-family content allowlist:
-  orders, cancels, leverage and margin, auth logins and ClobAuth only. It
-  refuses withdraw, transfer, approveAgent, permit, approval and vault moves.
-- Hyperliquid refuses remote ops unless the key is an approved agent.
-- Only exact-message algorithms (`ed25519`, `es256`) may stay opaque. They
-  carry the same API-key-scope trust as HMAC `ws-auth` today, and the browser
-  still checks the host and path in their preimage against the family's
-  venue.
+A compromised server must not be able to obtain arbitrary signatures. No
+algorithm is opaque: every op names a family recipe, the browser recomputes
+the signed bytes with the shared canonicalizer, and it applies that family's
+content allowlist before signing.
+- **Wallet and L2 keys** (secp256k1, Stark, zkLink, Lighter Schnorr) sign
+  only orders, cancels, leverage, margin and auth logins. They refuse
+  withdraw, transfer, approveAgent, permit, approval, vault moves and L2
+  transfers.
+- **Polymarket ClobAuth is refused on the remote path.** A ClobAuth signature
+  is all the server needs to derive or create the L2 key itself, which would
+  defeat the hosted-custody rule. It stays refused until a reviewed
+  device-side derive exists.
+- **Hyperliquid** refuses remote ops when the address derived from the
+  signing key equals the account's main wallet address. Only a distinct
+  agent key signs remotely; Hyperliquid agents cannot withdraw or transfer.
+  An address mismatch is necessary; the content allowlist still applies.
+- **Exact-message families** are content-checked too:
+  - Backpack: an instruction allowlist (orders, cancels, account reads);
+    `withdraw` and similar instructions are refused.
+  - Coinbase: decoded JWT claims. The `uri` method and path face the same
+    deny rules as the HTTP interceptor (no transfers or sends), `aud`/`iss`
+    are fixed, and `exp - nbf` is at most 120 s with `nbf` near the device
+    clock.
+  - Orderly: the method and path are checked against the venue. Its
+    withdrawals need a separate wallet EIP-712 signature, so the risk is low.
 - Refusals are typed and never sign.
+- **Sequencing.** P8 for a family depends on that family's dispatch
+  migration first. Hyperliquid and Polymarket still sign with raw private
+  keys in-venue and have no provider recipe yet.
 
 ### tealstreet-next changes (for its owners; not made here)
 
