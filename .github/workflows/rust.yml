@@ -12,6 +12,10 @@ on:
         type: choice
         options: [family, combined]
         default: family
+      socket_native_probe:
+        description: Temporary isolated native Bitunix profile (never merge this branch)
+        type: boolean
+        default: false
   push:
     branches: [master, feat/rust-rewrite]
     paths:
@@ -50,6 +54,7 @@ defaults:
 
 jobs:
   bans:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_native_probe == true) }}
     name: Rust / banned patterns
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -63,6 +68,7 @@ jobs:
         run: ./scripts/check-bans.sh
 
   native:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_native_probe == true) }}
     name: Rust / native ${{ matrix.check }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -92,6 +98,7 @@ jobs:
         run: ${{ matrix.command }}
 
   wasm:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_native_probe == true) }}
     name: Rust / wasm32
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -113,6 +120,7 @@ jobs:
         run: cargo clippy --locked --workspace --target wasm32-unknown-unknown -- -D warnings
 
   families:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_native_probe == true) }}
     name: Rust / wasm families
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -174,7 +182,7 @@ jobs:
   # sample uses fresh Chrome/profile + DedicatedWorker, with same-run web bytes.
   browser:
     name: Rust / browser cold start
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
+    if: ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')) && !(github.event_name == 'workflow_dispatch' && inputs.socket_native_probe == true) }}
     needs: [families, gate]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -214,6 +222,7 @@ jobs:
   # Replays recorded traffic through TS and Rust: output must be identical, and
   # on public data Rust must use less CPU and less memory (see the plan's gates).
   gate:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_native_probe == true) }}
     name: Rust / replay gate (${{ matrix.venue }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -574,4 +583,51 @@ jobs:
             sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm
             sdk-rs/hosts/wasm/pkg/node/package.json
           retention-days: 3
+          if-no-files-found: error
+
+  socket_native_probe:
+    name: Diagnostic / isolated native Bitunix profiles
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.socket_native_probe == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install fixed native diagnostic tools
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          sudo apt-get update
+          sudo apt-get install -y linux-tools-common linux-tools-generic
+          sudo sysctl kernel.perf_event_paranoid=1
+      - name: Freeze diagnostic inputs outside source checkouts
+        run: |
+          mkdir "$RUNNER_TEMP/socket-native-inputs"
+          cp .github/scripts/socket-native-profile* "$RUNNER_TEMP/socket-native-inputs/"
+          python3 "$RUNNER_TEMP/socket-native-inputs/socket-native-profile.test.py"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, subprocess
+          candidates = sorted(Path('/usr/lib/linux-tools').glob('*/perf'))
+          candidates = [p for p in candidates if subprocess.run([str(p), '--version'], capture_output=True).returncode == 0]
+          assert candidates, 'missing concrete perf binary after tool installation'
+          Path(os.environ['RUNNER_TEMP']).joinpath('socket-perf-path').write_text(str(candidates[-1]))
+          PY
+      - name: Fixed original and current ABBA native profiles
+        run: |
+          perf_binary=$(cat "$RUNNER_TEMP/socket-perf-path")
+          python3 "$RUNNER_TEMP/socket-native-inputs/socket-native-profile.py" --root "$GITHUB_WORKSPACE" --inputs "$RUNNER_TEMP/socket-native-inputs" --out "$RUNNER_TEMP/socket-native-result" --perf "$perf_binary"
+      - name: Retain every profile and incomplete experiment
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: socket-native-fixed-abba
+          path: |
+            ${{ runner.temp }}/socket-native-result/
+            ${{ runner.temp }}/socket-native-inputs/
+            !${{ runner.temp }}/socket-native-result/driver/target/**
+          retention-days: 14
           if-no-files-found: error
