@@ -368,3 +368,13 @@ pipeline. It repeats only if an exact ready handle was queued by those callbacks
 The O(1) empty-index path is unchanged. Source/adversarial and full-map re-reviews
 are clean after the tail correction. Both direct and Plan-tail controls are green;
 broader native/feature-mode/CI receipts follow on the final integration.
+
+
+Final local receipts on actual #1848/#1877 `2f85168cfc7`: engine all-feature
+1,025 passed, feature-off 791 passed (including integration/doc targets); native
+ApeX+Binance 461 passed; strict all-target/all-feature Clippy and scoped fmt passed.
+The incoming Lighter `5ce4b13fb7e` merge changes no tested engine/ApeX/Binance input.
+Both request-context commands pass (15 ratchet tests), as do bans including the
+socket inventory controls. An initial ratchet failure identified the incoming
+Lighter prune before its integration; no foreign entry was changed locally.
+Fresh CI on the pushed integrated head remains required before the next READY.
