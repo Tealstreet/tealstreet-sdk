@@ -474,3 +474,27 @@ mode refusal now returns NotSent before any write preparation. Identity-only
 local signing also pins the declared 5,000 ms receive window, and the repair
 cutover RED matches the exact native cancel preparation rather than unrelated
 managed polling.
+
+## Transitional SDK admission custody (owner ruling, 2026-10-24)
+
+Backpack admission uses option B, explicitly authorized by claude-ddi2il. The
+trusted registry setup supplies the managed trading identity and provider while
+retaining raw credentials ONLY for the existing unadopted account reads/private
+WS and their legacy account-repair scope. This temporarily retains venue-held
+material alongside a provider copy; it is not whole-family signer migration.
+Managed foreground writes still require the opaque identity and sign exclusively
+through the shared provider at send time. There is no raw/eager trading fallback.
+
+construction-rules dispatchSigning stays off and TS construction is unchanged.
+SDK/browser delegated signing readiness is not implied by local admission. The
+registry must register the SAME identities it gives the venue; externally supplied
+providers cannot silently fall back to a local signer. #1946 stacks on m26ps4's
+reviewed admission PR, with the scoped recorded prepareHttp/PrototypeTransport
+fixture carry. The ruling authorizes this design; admission is not yet landed.
+
+REMOVE BEFORE MASTER: codex-hcmq3f owns account/WS/background repair adoption,
+which removes the retained raw fields and ends dual custody. That cutover uses
+ref-only trusted setup and enables the construction declaration only with actual
+SDK/native acceptance. No new raw-material consumer or permanent fallback is
+allowed under this transition. The remaining inventory and owned repair RED
+continue to track that obligation.
