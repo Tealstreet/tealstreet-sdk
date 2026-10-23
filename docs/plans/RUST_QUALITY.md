@@ -520,3 +520,14 @@ bounded duplicate replacement after eviction, two/four candidate requests,
 signature reset, concurrent owners and persistent live cache. Native endpoint
 selection/upsert facts remain local; no new owner/pager/marker policy or shared
 signing-provenance implementation is copied into the venue.
+
+### Polymarket unsupported history advertisements
+
+The valid-state capability audit found three inherited history claims whose
+native handlers unconditionally refuse. Six original-source assertion REDs
+cover public/credentialed fills, orders and income across all three signer
+modes, independently checking exact unsupported failure and zero HTTP before
+the capability assertion. Set those three bits false, preserve supported peers,
+and align the host cfg(test) record fixture. Future native history adoption must
+restore the corresponding bit atomically with valid-state dispatch. The SDK
+branded-empty fallback and coverage obligations are recorded in CALLERS.

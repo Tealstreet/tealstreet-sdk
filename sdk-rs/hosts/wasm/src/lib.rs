@@ -1592,6 +1592,7 @@ mod tests {
                     "krakenspot",
                     "binancespot",
                     "binanceinverse",
+                    "polymarket",
                 ],
                 venue,
             );
