@@ -100,3 +100,52 @@ Credentialed Bybit controls are mandatory because the keyless legacy short-circu
 returns [] before its native variant refusal; tests use the existing authenticated
 fixture. Coinbase controls select each private ProductKind (INTX, CFM, Spot) in
 the existing crate-local history-family tests, without adding a production API.
+
+
+## Unsupported Polymarket history claims (2026-10-23)
+
+The positive valid-state dispatch inventory found a confirmed capability defect:
+Polymarket inherits `fill_history`, `order_history` and `income_history = true`
+from `Capabilities::BASE`, while its Query handlers reject all three axes
+unconditionally before reading credentials or state. The existing
+`unsupported_histories_fail_explicitly_without_network_or_empty_success` test
+already pins those refusals. This is separate from fixture/bootstrap gaps.
+
+Plan, from actual SafeIDs landing `7641650e7b1`:
+
+1. Add an original-source assertion for each history bit on both public-only
+   and credentialed Polymarket construction. Keep each native unsupported
+   refusal and zero-HTTP outcome independently asserted, using explicit query
+   fixtures. All six capability assertions must fail before production changes.
+   Pin supported peers (account lookup, order-book query, native cancel-all).
+2. Override exactly the three history bits to false in Polymarket `lib.rs`.
+   Keep handlers, startup, account and trading state, request recipes, signing,
+   row shapes, paging and legacy inventory byte-identical.
+3. Update the existing host cfg(test) name-list compatibility fixture by adding
+   Polymarket to its no-history set. This is only an expected-record correction;
+   add no runtime host code or capability exemption.
+4. Add a CALLERS section describing all three false history axes and the SDK's
+   branded empty fallbacks. Callers must gate on capabilities and treat empty
+   fallback rows as unavailable coverage. Native direct commands still reject.
+5. Run original RED controls, corrected family tests, host lib tests, strict
+   Clippy/fmt/bans/request-context checks and branch-history secret scan. Obtain
+   independent source/caller review, then open a draft. Final CI/proof follows
+   actual queued shared inputs; no landing action during another lane's window.
+
+TS comparison: `PolymarketExchange` does not override `fetchHistoricalFills`,
+`fetchHistoricalOrders`, `fetchIncomeHistory` or `fetchIncomeHistoryRange`.
+It inherits the branded empty BaseExchange fallbacks (`base.ts` capability
+mapping at 288 and methods at 1214/1296/1303/1328), so TS already reports these
+axes unsupported. Rust SDK adoption in `rust.exchange.ts:572-579` installs those
+same branded empty methods when the engine reports false. No TS edit is needed.
+
+Owner decision: Polymarket's future history implementation remains a separate
+slice after the account reporter work. Any future PR implementing these axes
+must enable the corresponding capability bits in the same PR that provides
+valid-state dispatch; this correction does not claim fetched history support.
+Confirmed later capability mismatches may join this small correction PR after
+plan/reproduction/review; fixture gaps and handler repairs remain out of scope.
+
+Ownership: mxb4mq explicitly cleared `lib.rs` and history tests against #1786,
+which owns account.rs/account controls. Preserve actual #1786 before final proof
+if it lands first. Shared plan sections use the standing keep-both resolution.

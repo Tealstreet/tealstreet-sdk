@@ -4904,3 +4904,19 @@ income polling and ledger coverage on `capabilities.incomeHistory` (and
 `incomeRange`); an empty fallback is unavailable coverage, not a fetched complete
 ledger. Credentialed direct native income commands retain their existing
 pre-I/O refusals; legacy keyless shortcuts retain their existing behavior.
+
+## Polymarket unsupported history capability claims
+
+Polymarket reports `fillHistory`, `orderHistory` and `incomeHistory` as false
+for every signer mode and both public-only and credentialed construction.
+These handlers already reject native history commands as unsupported; account
+identity, live orders/positions, order-book queries and trading are unaffected.
+The TypeScript Polymarket exchange already inherits the branded base history
+fallbacks. The Rust SDK now installs those same empty fallbacks for historical
+fills, historical orders, income and ranged income instead of dispatching the
+unsupported native commands.
+
+Callers must gate history polling and coverage on the capability record. An
+empty branded fallback means unavailable history, not a fetched complete
+ledger; live cached rows are separate. A future Polymarket history implementation
+must re-enable each axis in the same PR that supplies its valid-state dispatch.
