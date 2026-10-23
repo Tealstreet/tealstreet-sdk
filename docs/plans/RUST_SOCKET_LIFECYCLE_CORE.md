@@ -1109,3 +1109,80 @@ exact current source pin; retain every earlier cohort. Report remaining gap
 and actual profile delta before another fix or fresh full CI. Substantial
 remaining cost still requires investigation; final proof remains same-runner
 CI-WASM then full CI.
+
+### Phase J: in-place ordinary message admission and observation
+
+The owner supersedes the unimplemented Phase I micro-fix with a structural
+message-path split. Independent callchain accounting of isolated run
+39914791492 attributes the full 5.479115 ms/tape gap: disjoint inclusive event
+handling +4.204221, drain/flush +1.151232, and outside those boundaries
++0.123662 ms. A nonoverlapping subtree partition assigns +1.116069 to event/
+drain/HTTP shell, +0.939020 to venue codec/Store, +0.835603 to ingress,
++0.706329 to other lifecycle/replay, +0.705431 to effects, +0.644325 to remaining
+harness callchains, +0.480404 to allocation/drop, +0.030034 to supervision and
++0.021900 to dispatch/fencing. These are sampled accounting estimates, not
+recoverable savings: inlining shifts symbols and native setup/drop is included.
+Both independent readers reproduce all 159,756 sample assignments. Raw
+inclusive parent/child deltas are never added together.
+
+Concrete changes are limited to engine_socket.rs, socket_driver.rs, socket.rs,
+and their existing tests:
+
+- Extract Driver::admit_ingress(now, socket, kind) from ingress's current
+  admit_checked closure. It performs the same fresh socket lookup, epoch/phase
+  resolution, runtime TimeBounds validation and Supervisor::expired check.
+  Admission::Expired still revokes the epoch synchronously in Lifecycle.
+- Extract finish_ingress(cx, admission, kind) containing the existing entire
+  transition/effect match. Existing ingress delegates to both, preserving all
+  send/open/close/timer users. Engine's Message/Binary ingress calls the
+  admission in place; only Expired enters the original Cx cleanup path before
+  any codec callback. Healthy/denied admission creates no effects vector and
+  does not move Driver out of Io.
+- Add a read-only Supervisor::idle_enabled query; no deadline arithmetic or
+  scheduling changes. Add a compact crate-private ControlWork outcome and
+  Driver::observe_control(now, epoch, &control). It independently calls the
+  same fresh admit_ingress AFTER native classification. It then performs
+  Lifecycle::traffic once, preserving pong_seen/refresh and the declared
+  TextAfterFirstPong receive rule. Auth or refresh while idle is disabled
+  returns cold work with the exact refresh/receive flags. Other traffic calls
+  Supervisor::received(now) in place and completes without Cx/effects.
+- Driver::finish_control consumes cold work immediately. Expired admission
+  finishes existing runtime/signing/transport retirement before callbacks;
+  first-pong activation calls set_idle_enabled(cx,true) BEFORE received(now),
+  even if it emits no effects. Auth continues through the unchanged auth
+  transition body, including retries, permanent sibling refusal and cleanup.
+  The existing control wrapper delegates to observe/finish for its users.
+- Engine retains the exact native classification, startup-ready query, health
+  observation, process_socket_work calls and final current(epoch) check. It
+  handles Complete control in place and sends only actual cold work through
+  socket_mutate. Both old pre/post socket_mutate assert_live fences remain at
+  the equivalent admission/observation boundaries. No cached admission or
+  collapsed check is permitted.
+- Skipping empty effects publication must preserve its over-capacity edge:
+  healthy/denied in-place outcomes check the existing effects queue bound and
+  route an already overfull queue through the ORIGINAL empty publication
+  cleanup. No global empty-effects micro-fix or queue/retirement reorder.
+
+Do not modify handle_event_scoped, begin/count/finish_event_scope, dispatch,
+drain, managed HTTP delivery, resource allocation, hosts, venue codecs,
+subscription semantics or timer ownership. This is not the disproven holder
+experiment: ordinary data no longer enters full-context transition/effect
+machinery; first-pong/expiry/auth and all scheduling remain cold operations.
+Empty Vec construction itself is not a heap allocation.
+
+Plan review precedes source. Preserve and run the existing two-admissions /
+128-lookup/no-new-ID/no-watchdog-renewal controls, exact stale/invalid clock and
+delayed-expiry rejection, first-pong activation/timer actions, auth refusal,
+retirement/invalidation, swallowed fatal, and HTTP-delivery isolation controls.
+Add focused semantic edge controls if missing, including overfull effects with
+ordinary in-place traffic. Run engine/OKX/Bitunix/Binance all-target tests,
+strict all-target/all-feature Clippy, formatting and all ratchets. Independent
+source/order reviews reverse-check cold bodies and all event/drain fences.
+
+Then update only the authorized temporary diagnostic branch's source contract
+for a NEW isolated fixed ABBA experiment, retaining every prior cohort. Compare
+landing/original/current per-tape CPU, callchains and native facts on the same
+runner. Target most of the remaining 5.48 ms; no savings claim comes from code
+inspection. Significant remaining cost requires further profile investigation.
+Same-runner WASM measurement and fresh full CI follow sufficient improvement;
+no threshold/profile change or gate waiver is part of this work.
