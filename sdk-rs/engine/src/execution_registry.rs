@@ -76,12 +76,20 @@ impl ContextRegistry {
         }
         let member = self.observer_member(founder, key, now)?;
         self.contexts.retain(|_, old| old.deadline() > now);
-        if self.contexts.len() >= CAPACITY {
+        if self
+            .contexts
+            .len()
+            .checked_add(self.reserved_contexts)
+            .is_none_or(|total| total >= CAPACITY)
+        {
             return Err(Error::Capacity);
         }
         if self.contexts.contains_key(&identity) {
             return Err(Error::Duplicate);
         }
+        self.contexts
+            .try_reserve(1 + self.reserved_contexts)
+            .map_err(|_| Error::Capacity)?;
         // Validate the root before committing any group state.
         let deadline = founder.deadline().min(now + f64::from(policy.timeout_ms));
         let mut root = Context::new(
