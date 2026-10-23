@@ -1,4 +1,5 @@
 //! Original controls: caller-wait propagation and managed history are absent.
+#[allow(dead_code)]
 mod support;
 use safe_cex_engine::request_context::HttpAction;
 use safe_cex_engine::{
