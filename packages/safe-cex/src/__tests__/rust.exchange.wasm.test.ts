@@ -301,6 +301,8 @@ const bingxTransport = () => {
   const writes: Array<{ path: string; body?: string }> = [];
   let nextOrderId = 4242;
   const transport: Transport = {
+    // BingX credentialed reads are managed; route preparation precedes signing.
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       sockets.set(new URL(url).pathname, onMessage);
@@ -1636,6 +1638,6 @@ describe('RustEngineExchange', () => {
 it('WEEX private engines require the passphrase before starting I/O', async () => {
   const { WasmEngine } = await loadNodeEngine();
   expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow(
-    'WEEX requires a passphrase',
+    'Invalid local signer setup',
   );
 });

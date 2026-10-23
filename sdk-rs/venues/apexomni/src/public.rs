@@ -7,13 +7,10 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, PositionSide, Precision, Ticker,
 };
-use safe_cex_engine::request_context::{
-    Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
-};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryEvidence, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    VenueError,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, VenueError,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -405,22 +402,18 @@ impl ApexOmni {
     fn start_candles(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
         symbol: String,
         params: Vec<(String, String)>,
-    ) -> Result<(), VenueError> {
-        let context = cx
-            .http_context(
-                Scope::Command(command),
-                Policy {
-                    operation: Operation::Read,
-                    credential: None,
-                    timeout_ms: 20_000,
-                    pacing: None,
-                    retry: RetryPolicy::ReadFailure,
-                },
-            )
-            .map_err(|error| error.venue_error())?;
+    ) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::ReadFailure,
+        }) else {
+            return;
+        };
         let url = format!("{}/v3/klines?{}", self.rest, crate::sign::query(&params));
         self.queue_candles(
             cx,
@@ -432,7 +425,6 @@ impl ApexOmni {
                 signature_retried: false,
             },
         );
-        Ok(())
     }
 
     fn retry_candles(&mut self, cx: &mut Cx<'_, Pending>, mut request: Candles) {
@@ -989,9 +981,7 @@ impl ApexOmni {
                 if native != "D" {
                     params.push(("end".into(), (end.floor() as i64).to_string()));
                 }
-                if let Err(error) = self.start_candles(cx, command, symbol, params) {
-                    cx.fail(command, error);
-                }
+                self.start_candles(cx, symbol, params);
             }
             other => return Err(other),
         }

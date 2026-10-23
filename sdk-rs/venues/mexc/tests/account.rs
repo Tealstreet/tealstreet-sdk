@@ -1531,3 +1531,501 @@ fn fractional_socket_open_uses_integer_auth_stamp_and_matching_signature() {
         )
     );
 }
+
+const REPORTER_ASSET: &str = r#"{"currency":"USDT","availableBalance":964,"equity":1000}"#;
+
+struct ReporterHarness {
+    engine: TestEngine,
+    reads: Vec<safe_cex_engine::HttpRequest>,
+    poll: safe_cex_engine::TimerId,
+    poll_at: f64,
+    now: f64,
+    messages: Vec<String>,
+}
+impl ReporterHarness {
+    fn new() -> Self {
+        let (engine, _, reads, poll) = private_started();
+        let mut h = Self {
+            engine,
+            reads,
+            poll,
+            poll_at: 2100.,
+            now: 100.,
+            messages: Vec::new(),
+        };
+        assert!(h.collect().is_empty());
+        h.finish(REPORTER_ASSET, POSITION);
+        h
+    }
+
+    fn collect(&mut self) -> Vec<safe_cex_engine::HttpRequest> {
+        let mut reads = Vec::new();
+        for action in self.engine.drain_actions() {
+            match action {
+                Action::Http(request) => reads.push(request),
+                Action::SetTimer { timer, at_ms } if at_ms == self.now + POLL_MS => {
+                    self.poll = timer;
+                    self.poll_at = at_ms;
+                }
+                Action::Notice(Notice::Event(event))
+                    if event.message.starts_with("MEXC skipped") =>
+                {
+                    self.messages.push(event.message);
+                }
+                _ => (),
+            }
+        }
+        reads
+    }
+
+    fn finish(&mut self, assets: &str, positions: &str) {
+        assert!(self.reads.iter().any(|r| r.url.contains("assets")));
+        assert!(self.reads.iter().any(|r| r.url.contains("open_positions")));
+        for request in std::mem::take(&mut self.reads) {
+            let rows = if request.url.contains("assets") {
+                assets
+            } else if request.url.contains("open_positions") {
+                positions
+            } else {
+                ""
+            };
+            self.engine.handle(
+                self.now,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body: &format!(r#"{{"success":true,"code":0,"data":[{rows}]}}"#),
+                    },
+                },
+            );
+            assert!(self.collect().is_empty(), "no paged or recovery read");
+        }
+    }
+
+    fn cycle(&mut self, assets: &str, positions: &str) {
+        self.now = self.poll_at;
+        self.engine
+            .handle(self.now, Event::TimerFired { timer: self.poll });
+        self.reads = self.collect();
+        self.finish(assets, positions);
+    }
+
+    fn count(&self, message: &str) -> usize {
+        self.messages.iter().filter(|m| *m == message).count()
+    }
+}
+
+#[test]
+fn reporter_clean_coin_namespace_does_not_rearm_position_or_anonymous_keys() {
+    let mut h = ReporterHarness::new();
+    let bad_position = POSITION.replace("\"holdVol\":60", "\"holdVol\":\"bad\"");
+    let positions = format!("{bad_position},{{}}");
+    let bad_asset = r#"{"currency":"USDT","availableBalance":"bad"}"#;
+    let position_message = "MEXC skipped malformed BTCUSDT position row";
+    let anonymous_message = "MEXC skipped position row without a symbol";
+    let coin_message = "MEXC skipped malformed USDT asset row";
+
+    h.cycle(bad_asset, &positions);
+    assert_eq!(h.count(position_message), 1);
+    assert_eq!(h.count(anonymous_message), 1);
+    assert_eq!(h.count(coin_message), 1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.006);
+
+    h.cycle("", &positions); // Clean only the coin namespace.
+    h.cycle(bad_asset, &positions);
+    assert_eq!(h.count(coin_message), 2);
+    assert_eq!(h.count(position_message), 1);
+    assert_eq!(h.count(anonymous_message), 1);
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.006);
+}
+
+#[test]
+fn reporter_rejected_position_duplicate_does_not_rearm_but_partial_mapping_does() {
+    let mut h = ReporterHarness::new();
+    let bad = POSITION.replace("\"holdVol\":60", "\"holdVol\":\"bad\"");
+    let other = bad.replace("BTC_USDT", "ETH_USDT");
+    let rejected = format!("{bad},{other}");
+    let btc_message = "MEXC skipped malformed BTCUSDT position row";
+    let eth_message = "MEXC skipped malformed ETHUSDT position row";
+
+    h.cycle(REPORTER_ASSET, &rejected);
+    assert_eq!(h.count(btc_message), 1);
+    assert_eq!(h.count(eth_message), 1);
+    h.cycle(REPORTER_ASSET, &format!("{bad},{POSITION},{other}"));
+    h.cycle(REPORTER_ASSET, &rejected);
+    assert_eq!(h.count(btc_message), 1, "rejected duplicate cannot rearm");
+    assert_eq!(h.count(eth_message), 1);
+
+    // A named unrelated rejection permits BTC's exact mapped-key recovery.
+    // An anonymous rejection would protect every identity and mask this path.
+    h.cycle(REPORTER_ASSET, &format!("{POSITION},{other}"));
+    assert_eq!(h.engine.store().positions()[0].contracts, 0.006);
+    h.cycle(REPORTER_ASSET, &rejected);
+    assert_eq!(h.count(btc_message), 2);
+    assert_eq!(h.count(eth_message), 1);
+
+    h.cycle(REPORTER_ASSET, "");
+    h.cycle(REPORTER_ASSET, &rejected);
+    assert_eq!(
+        h.count(btc_message),
+        3,
+        "clean positions rearm the namespace"
+    );
+    assert_eq!(h.count(eth_message), 2);
+}
+
+#[test]
+fn reporter_asset_duplicate_filters_rearm_while_named_partial_peer_recovers() {
+    let mut h = ReporterHarness::new();
+    let bad = r#"{"currency":"USDT","availableBalance":"bad"}"#;
+    let other = r#"{"currency":"USDC","availableBalance":"bad"}"#;
+    let rejected = format!("{bad},{other}");
+    let usdt_message = "MEXC skipped malformed USDT asset row";
+    let usdc_message = "MEXC skipped malformed USDC asset row";
+
+    h.cycle(&rejected, "");
+    assert_eq!(h.count(usdt_message), 1);
+    assert_eq!(h.count(usdc_message), 1);
+    h.cycle(&format!("{bad},{REPORTER_ASSET},{other}"), "");
+    h.cycle(&rejected, "");
+    assert_eq!(
+        h.count(usdt_message),
+        1,
+        "rejected duplicate stays remembered"
+    );
+    assert_eq!(h.count(usdc_message), 1);
+
+    h.cycle(&format!("{REPORTER_ASSET},{other}"), "");
+    assert_eq!(h.engine.store().balance().total, 1000.);
+    h.cycle(&rejected, "");
+    assert_eq!(
+        h.count(usdt_message),
+        2,
+        "mapped coin rearmed within a partial read"
+    );
+    assert_eq!(h.count(usdc_message), 1);
+}
+
+fn fire_startup_timers(
+    engine: &mut support::TestEngine,
+    mut actions: Vec<Action>,
+    until: f64,
+) -> Vec<Action> {
+    while let Some((timer, at)) = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms <= until => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        actions
+            .retain(|action| !matches!(action, Action::SetTimer { timer: t, .. } if *t == timer));
+        engine.handle(at, Event::TimerFired { timer });
+        actions.extend(engine.drain_actions());
+    }
+    actions
+}
+
+#[test]
+fn initial_plan_credential_refusal_fails_startup_and_cannot_resume_account_http() {
+    for (code, kind, status, data) in [
+        (602, ErrorKind::AuthInvalid, 200, ""),
+        (602, ErrorKind::AuthInvalid, 200, ",\"data\":[]"),
+        (402, ErrorKind::AuthExpired, 401, ""),
+        (701, ErrorKind::AuthPermission, 403, ""),
+    ] {
+        let (mut e, socket, reads, poll) = private_started();
+        e.drain_actions().for_each(drop);
+        let plan = reads
+            .iter()
+            .find(|r| r.url.contains("planorder/list/orders"))
+            .unwrap();
+        let assets = reads
+            .iter()
+            .find(|r| r.url.contains("account/assets"))
+            .unwrap();
+        for read in reads
+            .iter()
+            .filter(|r| r.id != plan.id && r.id != assets.id)
+        {
+            response(&mut e, read, r#"{"success":true,"code":0,"data":[]}"#);
+        }
+        e.drain_actions().for_each(drop);
+        let body = format!(
+            r#"{{"success":false,"code":{code},"message":"plan credentials denied"{data}}}"#
+        );
+        e.handle(
+            101.0,
+            Event::HttpResponse {
+                request: plan.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let mut actions: Vec<_> = e.drain_actions().collect();
+        let failure = startup_failure(&actions).expect("initial plan refusal terminates startup");
+        assert_eq!(failure.kind, Some(kind));
+        assert_eq!(
+            failure.venue_code.as_deref(),
+            Some(code.to_string().as_str())
+        );
+        assert_eq!(
+            failure.venue_message.as_deref(),
+            Some("plan credentials denied")
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+                .count(),
+            usize::from(kind == ErrorKind::AuthInvalid)
+        );
+        assert!(!e.store().loaded().orders);
+        e.handle(
+            102.0,
+            Event::HttpFailed {
+                request: assets.id,
+                error: "late sibling failure",
+            },
+        );
+        let late_failure: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !late_failure
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { .. })),
+            "terminal account failure must not rearm its poll"
+        );
+        actions.extend(late_failure);
+        e.handle(
+            103.0,
+            Event::WsMessage {
+                socket,
+                text: r#"{"channel":"rs.login","data":"success"}"#,
+            },
+        );
+        actions.extend(e.drain_actions());
+        // A cleared timer delivered late must also remain harmless.
+        actions.push(Action::SetTimer {
+            timer: poll,
+            at_ms: 2100.0,
+        });
+        let actions = fire_startup_timers(&mut e, actions, 10_000.0);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::StartupFailed { .. })))
+                .count(),
+            1
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.contains("/api/v1/private/"))),
+            "account HTTP resumed for code {code}"
+        );
+        assert!(!e.store().loaded().orders);
+    }
+}
+
+#[test]
+fn initial_plan_refusal_blocks_late_pagination_and_asset_refresh() {
+    let (mut e, socket, reads, _) = private_started();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        101.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"channel":"push.personal.asset","data":{}}"#,
+        },
+    );
+    let asset_timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1101.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("pre-refusal asset refresh is scheduled");
+    let plan = reads
+        .iter()
+        .find(|r| r.url.contains("planorder/list/orders"))
+        .unwrap();
+    e.handle(
+        102.0,
+        Event::HttpResponse {
+            request: plan.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"success":false,"code":701,"message":"permission denied"}"#,
+            },
+        },
+    );
+    e.drain_actions().for_each(drop);
+    let regular = reads
+        .iter()
+        .find(|r| r.url.contains("open_orders"))
+        .unwrap();
+    let full_page = format!(
+        r#"{{"success":true,"code":0,"data":[{}]}}"#,
+        std::iter::repeat_n(ORDER, 100)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    e.handle(
+        103.0,
+        Event::HttpResponse {
+            request: regular.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: &full_page,
+            },
+        },
+    );
+    let mut actions: Vec<_> = e.drain_actions().collect();
+    let assets = reads
+        .iter()
+        .find(|r| r.url.contains("account/assets"))
+        .unwrap();
+    e.handle(
+        104.0,
+        Event::HttpResponse {
+            request: assets.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"success":true,"code":0,"data":[]}"#,
+            },
+        },
+    );
+    actions.extend(e.drain_actions());
+    // Exercise both a previously scheduled refresh and a new asset push.
+    e.handle(1101.0, Event::TimerFired { timer: asset_timer });
+    actions.extend(e.drain_actions());
+    e.handle(
+        1102.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"channel":"push.personal.asset","data":{}}"#,
+        },
+    );
+    actions.extend(e.drain_actions());
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
+        "late snapshot pages and asset refreshes must not restart account HTTP"
+    );
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::SetTimer { .. })),
+        "terminal asset pushes must not schedule another refresh"
+    );
+    assert!(!e.store().loaded().orders);
+}
+
+#[test]
+fn initial_plan_transient_failures_keep_the_existing_retry_policy() {
+    for (body, status) in [
+        (r#"{"success":false,"code":510,"message":"busy"}"#, 200),
+        ("", 503),
+        ("<html>403 Forbidden</html>", 403),
+        ("", 401),
+        (r#"{"success":true,"code":0}"#, 200),
+        (r#"{"success":true,"code":0,"data":null}"#, 200),
+    ] {
+        let (mut e, _, reads, poll) = private_started();
+        e.drain_actions().for_each(drop);
+        let plan = reads
+            .iter()
+            .find(|r| r.url.contains("planorder/list/orders"))
+            .unwrap();
+        for read in reads.iter().filter(|r| r.id != plan.id) {
+            response(&mut e, read, r#"{"success":true,"code":0,"data":[]}"#);
+        }
+        e.drain_actions().for_each(drop);
+        e.handle(
+            101.0,
+            Event::HttpResponse {
+                request: plan.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(startup_failure(&actions).is_none(), "{status} {body}");
+        e.handle(2100.0, Event::TimerFired { timer: poll });
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(startup_failure(&actions).is_none());
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.contains("planorder/list/orders"))),
+            "native retry missing for {status} {body}"
+        );
+    }
+}
+
+#[test]
+fn plan_credential_refusal_after_initial_orders_does_not_fail_startup() {
+    let (mut e, socket, reads, poll) = private_started();
+    for read in &reads {
+        response(&mut e, read, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    assert!(e.store().loaded().orders);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        200.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"channel":"rs.login","data":"success"}"#,
+        },
+    );
+    let reads = requests(&mut e);
+    let plan = reads
+        .iter()
+        .find(|r| r.url.contains("planorder/list/orders"))
+        .unwrap();
+    for read in reads.iter().filter(|r| r.id != plan.id) {
+        e.handle(
+            200.0,
+            Event::HttpResponse {
+                request: read.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"success":true,"code":0,"data":[]}"#,
+                },
+            },
+        );
+    }
+    e.handle(
+        201.0,
+        Event::HttpResponse {
+            request: plan.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"success":false,"code":701,"message":"permission denied"}"#,
+            },
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(startup_failure(&actions).is_none());
+    assert!(e.store().loaded().orders);
+    e.handle(2100.0, Event::TimerFired { timer: poll });
+    assert!(
+        requests(&mut e)
+            .iter()
+            .any(|r| r.url.contains("planorder/list/orders"))
+    );
+}
