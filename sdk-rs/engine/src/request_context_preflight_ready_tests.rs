@@ -18,6 +18,7 @@ enum ForeignKind {
 enum SessionAttack {
     Open,
     Context,
+    Leg,
     Retire,
     Ready,
     Failed,
@@ -41,6 +42,7 @@ struct ScopeProbe {
     cleaned: usize,
     session_attack: Option<SessionAttack>,
     session: Option<Session>,
+    session_parent: Option<Context>,
     #[cfg(feature = "managed-sockets")]
     socket_mode: bool,
     #[cfg(feature = "managed-sockets")]
@@ -98,6 +100,7 @@ impl Venue for ScopeProbe {
             let owner = cx.admit_http_command(policy()).unwrap();
             let other = cx.http_context(Scope::Background, policy()).unwrap();
             let session = cx.open_session(session_policy()).unwrap();
+            self.session_parent = Some(cx.session_context(&session, policy()).unwrap());
             cx.session_wait(&session, &owner, owner.clone()).unwrap();
             self.root = Some(owner);
             self.leg = Some(other);
@@ -200,19 +203,23 @@ impl Venue for ScopeProbe {
             let before = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
             match attack {
                 SessionAttack::Open => {
-                    assert_eq!(
-                        cx.open_session(session_policy()).err(),
-                        Some(Error::Revoked)
-                    );
+                    assert_eq!(cx.open_session(session_policy()).err(), Some(Error::State));
                 }
                 SessionAttack::Context => {
                     assert_eq!(
                         cx.session_context(session, policy()).err(),
-                        Some(Error::Revoked)
+                        Some(Error::State)
+                    );
+                }
+                SessionAttack::Leg => {
+                    assert_eq!(
+                        cx.http_leg_context(self.session_parent.as_ref().unwrap(), policy())
+                            .err(),
+                        Some(Error::State),
                     );
                 }
                 SessionAttack::Retire => {
-                    assert_eq!(cx.retire_session(session).err(), Some(Error::Revoked));
+                    assert_eq!(cx.retire_session(session).err(), Some(Error::State));
                 }
                 SessionAttack::Ready => assert!(cx.session_ready(session).is_empty()),
                 SessionAttack::Failed => {
@@ -227,7 +234,7 @@ impl Venue for ScopeProbe {
                         cx.session_wait(session, owner, owner.clone())
                             .err()
                             .map(|(_, error)| error),
-                        Some(Error::Revoked),
+                        Some(Error::State),
                     );
                 }
             }
@@ -465,6 +472,10 @@ fn retained_ready_cannot_issue_foreign_session_work_before_ids() {
     for attack in [SessionAttack::Context, SessionAttack::Open] {
         session_attack_preserves_waiter(attack);
     }
+}
+#[test]
+fn retained_ready_cannot_derive_foreign_session_legs_before_ids() {
+    session_attack_preserves_waiter(SessionAttack::Leg);
 }
 #[test]
 fn ready_cannot_mutate_a_foreign_legacy_plan_or_execution_owner() {
