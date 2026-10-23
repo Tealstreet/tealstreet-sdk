@@ -270,7 +270,13 @@ impl Query {
         let Preimage::Digest(digest) = &prepared.preimage else {
             unreachable!("V3 always signs a digest")
         };
-        let secret = format!("0x{}", credentials.secret.trim_start_matches("0x"));
+        let secret = format!(
+            "0x{}",
+            credentials
+                .secret
+                .strip_prefix("0x")
+                .unwrap_or(&credentials.secret)
+        );
         let signature = ethereum::sign_digest(digest, &secret)?;
         Ok(prepared.finish(&signature))
     }
@@ -420,6 +426,8 @@ pub fn interim_nonce() -> NonceSource {
 }
 
 /// Selected signing contract for one recipe. V3 addresses are public config.
+/// The V3 identity's signing key is the 32-byte API-wallet private key; trusted
+/// setup decodes it as hex and must strip any `0x` prefix first.
 pub enum Auth {
     V1,
     V3 {
@@ -486,6 +494,10 @@ impl SignStep for Recipe {
         let Action::Http(http) = outbound else {
             return Err(SignError::InvalidRequest);
         };
+        // The signing mode follows the method, so the outbound must agree.
+        if http.method != self.method {
+            return Err(SignError::InvalidRequest);
+        }
         let stamp = dispatch.stamp_ms();
         let mode = match &mut self.auth {
             Auth::V1 => Mode::V1,

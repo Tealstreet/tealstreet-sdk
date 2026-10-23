@@ -173,15 +173,86 @@ fn v1_v3_and_code_recipes_match_independent_vectors() {
         )
         .unwrap();
         let http = send(signer, case.now_ms, (Method::Delete, path, recipe));
-        assert!(
-            http.url
-                .ends_with(&format!("&signature={}", case.signature)),
+        // V1's wire carries the same encoded business params, window and stamp.
+        let transport = case.v1_query.split("&signature=").next().unwrap();
+        assert_eq!(
+            http.url,
+            format!(
+                "{ORIGIN}{path}?{transport}&user={}&signer={}&nonce={nonce}&signature={}",
+                case.user, case.signer, case.signature
+            ),
             "V3 {}",
             case.name
         );
-        assert!(http.url.contains(&format!(
-            "&user={}&signer={}&nonce={nonce}&",
-            case.user, case.signer
-        )));
     }
+}
+
+#[test]
+fn interim_nonce_reserves_monotonically_at_each_preparation_and_methods_must_agree() {
+    let corpus: Corpus = serde_json::from_str(include_str!("fixtures/signing.json")).unwrap();
+    let case = &corpus.cases[0];
+    let key = case.private_key.trim_start_matches("0x");
+    let nonce_of = |url: &str| -> u64 {
+        url.split("&nonce=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let mut seen = vec![];
+    for _ in 0..2 {
+        let (signer, identity) = provider(&case.signer, key, KeyEncoding::Hex);
+        let auth = Auth::V3 {
+            user: case.user.clone(),
+            signer: case.signer.clone(),
+            nonce: safe_cex_venue_asterdex::sign::interim_nonce(),
+        };
+        let path = "/fapi/v3/openOrders";
+        let recipe = Recipe::new(
+            identity,
+            auth,
+            Method::Get,
+            ORIGIN,
+            path,
+            Query::new(),
+            false,
+        )
+        .unwrap();
+        seen.push(nonce_of(
+            &send(signer, case.now_ms, (Method::Get, path, recipe)).url,
+        ));
+    }
+    assert!(
+        seen[0] >= case.now_ms as u64 * 1000 && seen[1] > seen[0],
+        "{seen:?}"
+    );
+
+    let (signer, identity) = provider(&case.signer, "documentation-secret", KeyEncoding::Utf8);
+    let path = "/fapi/v1/order";
+    let recipe = Recipe::new(
+        identity,
+        Auth::V1,
+        Method::Post,
+        ORIGIN,
+        path,
+        Query::new(),
+        false,
+    )
+    .unwrap();
+    let mut engine = Engine::new(
+        Issue(vec![(Method::Delete, path.into(), Box::new(recipe))]),
+        Some(seeded_entropy(5)),
+    )
+    .unwrap();
+    engine.set_signer(Some(signer)).unwrap();
+    engine.start(case.now_ms);
+    assert!(
+        prepared_actions(&mut engine, case.now_ms)
+            .iter()
+            .all(|action| !matches!(action, Action::Http(_))),
+        "a POST recipe never signs a DELETE"
+    );
 }
