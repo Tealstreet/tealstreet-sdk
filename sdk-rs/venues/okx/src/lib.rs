@@ -74,6 +74,9 @@ struct BookState {
 }
 
 pub enum Pending {
+    SocketRefresh {
+        reopened: bool,
+    },
     Account(account::Request),
     History(history::Request),
     Closed(closed::Request),
@@ -758,6 +761,18 @@ impl Venue for Okx {
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.managed_event(cx, event)
     }
+    fn on_socket_interests_released(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        _epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        pending: Pending,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if let Pending::SocketRefresh { reopened } = pending {
+            self.socket_account_ready(cx, reopened);
+        }
+        Ok(())
+    }
+
     fn encode_socket_interests(
         &self,
         store: &safe_cex_engine::Store,
@@ -855,6 +870,7 @@ impl Venue for Okx {
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::SocketRefresh { .. } => (),
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
@@ -1159,6 +1175,7 @@ impl Venue for Okx {
             return;
         }
         match pending {
+            Pending::SocketRefresh { .. } => (),
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, request, response),
