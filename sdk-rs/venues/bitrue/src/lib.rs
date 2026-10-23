@@ -9,11 +9,11 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -115,7 +115,7 @@ enum SocketReadKind {
     },
 }
 struct SocketRead {
-    command: CommandId,
+    context: Context,
     symbol: String,
     kind: SocketReadKind,
     timer: TimerId,
@@ -419,14 +419,26 @@ impl Bitrue {
             t.ask = 0.0;
         });
     }
+    fn socket_read_policy() -> Policy {
+        Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 5000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }
+    }
     fn send_socket_read(&self, cx: &mut Cx<'_, Pending>, channel: &str) {
-        let Some(request) = self.reads.get(channel).and_then(|v| v.first()) else {
+        let Some(read) = self.reads.get(channel).and_then(|v| v.first()) else {
             return;
         };
+        if cx.validate_http_context(&read.context).is_err() {
+            return;
+        }
         let Some(socket) = self.public.socket.filter(|_| self.public.open) else {
             return;
         };
-        let (end_idx, page_size, top) = match &request.kind {
+        let (end_idx, page_size, top) = match &read.kind {
             SocketReadKind::Candles { to, limit, .. } => (
                 to.map(|v| (v / 1000.0).floor().to_string()),
                 Some((*limit).min(300)),
@@ -434,7 +446,7 @@ impl Bitrue {
             ),
             SocketReadKind::Trades { limit } => (None, None, Some(*limit)),
         };
-        let id = format!("engine-{}", request.timer.0);
+        let id = format!("engine-{}", read.timer.0);
         cx.send(
             socket,
             serde_json::to_string(&Subscription {
@@ -450,31 +462,28 @@ impl Bitrue {
             .unwrap(),
         );
     }
-    fn public_read(&mut self, cx: &mut Cx<'_, Pending>, channel: String, request: SocketRead) {
+    fn public_read(&mut self, cx: &mut Cx<'_, Pending>, channel: String, read: SocketRead) {
         if self.reads.values().map(Vec::len).sum::<usize>() >= 32 {
-            cx.clear_timer(request.timer);
-            cx.fail(request.command, "Too many Bitrue public requests");
+            cx.clear_timer(read.timer);
+            let _ = cx.fail_context(&read.context, "Too many Bitrue public requests");
             return;
         }
         let queue = self.reads.entry(channel.clone()).or_default();
-        queue.push(request);
+        queue.push(read);
         if queue.len() == 1 {
             self.send_socket_read(cx, &channel);
         }
     }
-    fn public_trades(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        symbol: String,
-        limit: Option<u32>,
-    ) {
+    fn public_trades(&mut self, cx: &mut Cx<'_, Pending>, symbol: String, limit: Option<u32>) {
+        let Ok(context) = cx.admit_http_command(Self::socket_read_policy()) else {
+            return;
+        };
         let Some(symbol) = self.resolve_symbol(cx, &symbol) else {
-            cx.fail(command, "Unknown Bitrue market");
+            let _ = cx.fail_context(&context, "Unknown Bitrue market");
             return;
         };
         if !self.public.open {
-            cx.fail(command, "Bitrue public socket not connected");
+            let _ = cx.fail_context(&context, "Bitrue public socket not connected");
             return;
         }
         let limit = limit.unwrap_or(100).clamp(1, 300);
@@ -483,7 +492,7 @@ impl Bitrue {
             cx,
             topic(&symbol, "trade_ticker"),
             SocketRead {
-                command,
+                context,
                 symbol,
                 kind: SocketReadKind::Trades { limit },
                 timer,
@@ -500,16 +509,19 @@ impl Bitrue {
         if !message.cb_id.is_empty() && message.cb_id != format!("engine-{}", queue[0].timer.0) {
             return;
         }
-        let request = queue.remove(0);
+        if cx.validate_http_context(&queue[0].context).is_err() {
+            return;
+        }
+        let read = queue.remove(0);
         {
-            cx.clear_timer(request.timer);
+            cx.clear_timer(read.timer);
             let multiplier = cx
                 .store
-                .market(&request.symbol)
+                .market(&read.symbol)
                 .map_or(1.0, |m| m.precision.amount);
-            let result = match request.kind {
+            let result = match read.kind {
                 SocketReadKind::Trades { limit } => {
-                    history::trade_result(&request.symbol, multiplier, text, limit)
+                    history::trade_result(&read.symbol, multiplier, text, limit)
                 }
                 SocketReadKind::Candles { from, to, limit } => {
                     if !message.status.is_empty() && message.status != "ok" {
@@ -547,8 +559,12 @@ impl Bitrue {
                 }
             };
             match result {
-                Ok(data) => cx.done(request.command, data),
-                Err(error) => cx.fail(request.command, error),
+                Ok(data) => {
+                    let _ = cx.done_context(&read.context, data);
+                }
+                Err(error) => {
+                    let _ = cx.fail_context(&read.context, error);
+                }
             };
         }
         self.reads.retain(|_, v| !v.is_empty());
@@ -733,7 +749,7 @@ impl Venue for Bitrue {
         for reads in self.reads.drain().map(|(_, v)| v) {
             for read in reads {
                 cx.clear_timer(read.timer);
-                cx.fail(read.command, "Bitrue public socket disconnected");
+                let _ = cx.fail_context(&read.context, "Bitrue public socket disconnected");
             }
         }
         for (symbol, state) in &mut self.books {
@@ -1086,30 +1102,33 @@ impl Venue for Bitrue {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval: i,
                 limit,
                 from_ms,
                 to_ms,
             } => {
+                let Ok(context) = cx.admit_http_command(Self::socket_read_policy()) else {
+                    return;
+                };
                 let Some(mapped) = interval(i) else {
-                    cx.fail(command, i.unsupported("Bitrue"));
+                    let _ = cx.fail_context(&context, i.unsupported("Bitrue"));
                     return;
                 };
                 let Some(symbol) = self.resolve_symbol(cx, &symbol) else {
-                    cx.fail(command, "Unknown Bitrue market");
+                    let _ = cx.fail_context(&context, "Unknown Bitrue market");
                     return;
                 };
                 if !self.public.open {
-                    cx.fail(command, "Bitrue public socket not connected");
+                    let _ = cx.fail_context(&context, "Bitrue public socket not connected");
                     return;
                 }
                 if from_ms.is_some_and(|v| !v.is_finite())
                     || to_ms.is_some_and(|v| !v.is_finite())
                     || matches!((from_ms,to_ms),(Some(f),Some(t))if f>t)
                 {
-                    cx.fail(command, "Invalid candle range");
+                    let _ = cx.fail_context(&context, "Invalid candle range");
                     return;
                 }
                 let timer = cx.set_timer(5000.0);
@@ -1117,7 +1136,7 @@ impl Venue for Bitrue {
                     cx,
                     topic(&symbol, &format!("kline_{mapped}")),
                     SocketRead {
-                        command,
+                        context,
                         symbol,
                         kind: SocketReadKind::Candles {
                             from: from_ms,
