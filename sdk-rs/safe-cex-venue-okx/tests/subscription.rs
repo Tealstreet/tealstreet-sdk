@@ -36,7 +36,7 @@ fn maintained_source_subscription_batches_order_and_send_failure() {
             .fail_send_at
             .set(case["failSendAt"].as_u64().map(|n| n as usize));
         let socket = BaseWebSocket::new(1, Parent::new(), runtime.clone(), Rc::new(Protocol));
-        ready(socket.create_websocket("wss://ws.okx.com:8443/ws/v5/public".into(), vec![], None))
+        ready(socket.create_websocket("wss://ws.okx.com/ws/v5/public".into(), vec![], None))
             .unwrap();
         let result = subscribe(&socket, case["topics"].as_object().unwrap());
         assert_eq!(
@@ -77,7 +77,7 @@ fn maintained_source_subscription_batches_order_and_send_failure() {
     let runtime = Rc::new(Runtime::default());
     runtime.io.ready.set(1);
     let socket = BaseWebSocket::new(1, Parent::new(), runtime.clone(), Rc::new(Protocol));
-    ready(socket.create_websocket("wss://ws.okx.com:8443/ws/v5/public".into(), vec![], None))
+    ready(socket.create_websocket("wss://ws.okx.com/ws/v5/public".into(), vec![], None))
         .unwrap();
     subscribe(&socket, alias["before"].as_object().unwrap()).unwrap();
     let source_later: Value = serde_json::from_str(alias["sent"][1].as_str().unwrap()).unwrap();

@@ -114,16 +114,16 @@ pub const BASE_WS_URLS: [(OkxRegion, [[&str; 2]; 3]); 2] = [
         OkxRegion::Okx,
         [
             [
-                "wss://ws.okx.com:8443/ws/v5/public",
-                "wss://wspap.okx.com:8443/ws/v5/public",
+                "wss://ws.okx.com/ws/v5/public",
+                "wss://wspap.okx.com/ws/v5/public",
             ],
             [
-                "wss://ws.okx.com:8443/ws/v5/private",
-                "wss://wspap.okx.com:8443/ws/v5/private",
+                "wss://ws.okx.com/ws/v5/private",
+                "wss://wspap.okx.com/ws/v5/private",
             ],
             [
-                "wss://ws.okx.com:8443/ws/v5/business",
-                "wss://wspap.okx.com:8443/ws/v5/business",
+                "wss://ws.okx.com/ws/v5/business",
+                "wss://wspap.okx.com/ws/v5/business",
             ],
         ],
     ),
@@ -131,16 +131,16 @@ pub const BASE_WS_URLS: [(OkxRegion, [[&str; 2]; 3]); 2] = [
         OkxRegion::Okxeu,
         [
             [
-                "wss://wseea.okx.com:8443/ws/v5/public",
-                "wss://wseeapap.okx.com:8443/ws/v5/public",
+                "wss://wseea.okx.com/ws/v5/public",
+                "wss://wseeapap.okx.com/ws/v5/public",
             ],
             [
-                "wss://wseea.okx.com:8443/ws/v5/private",
-                "wss://wseeapap.okx.com:8443/ws/v5/private",
+                "wss://wseea.okx.com/ws/v5/private",
+                "wss://wseeapap.okx.com/ws/v5/private",
             ],
             [
-                "wss://wseea.okx.com:8443/ws/v5/business",
-                "wss://wseeapap.okx.com:8443/ws/v5/business",
+                "wss://wseea.okx.com/ws/v5/business",
+                "wss://wseeapap.okx.com/ws/v5/business",
             ],
         ],
     ),

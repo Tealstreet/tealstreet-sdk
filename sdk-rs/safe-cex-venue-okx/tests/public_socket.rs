@@ -59,7 +59,7 @@ fn maintained_typescript_public_dispatch_and_sequence_recovery() {
         let socket = BaseWebSocket::new(1, parent.clone(), runtime.clone(), Rc::new(Protocol));
         if input["connected"] != false && !parent.disposed.get() {
             ready(socket.create_websocket(
-                "wss://ws.okx.com:8443/ws/v5/public".into(),
+                "wss://ws.okx.com/ws/v5/public".into(),
                 vec![],
                 None,
             ))

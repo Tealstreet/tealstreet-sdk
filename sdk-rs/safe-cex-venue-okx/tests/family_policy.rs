@@ -92,22 +92,22 @@ fn eight_live_policy_rows_match_native_values_before_wire() {
 
     let private_urls = [
         [
-            "wss://ws.okx.com:8443/ws/v5/private",
-            "wss://wspap.okx.com:8443/ws/v5/private",
+            "wss://ws.okx.com/ws/v5/private",
+            "wss://wspap.okx.com/ws/v5/private",
         ],
         [
-            "wss://wseea.okx.com:8443/ws/v5/private",
-            "wss://wseeapap.okx.com:8443/ws/v5/private",
+            "wss://wseea.okx.com/ws/v5/private",
+            "wss://wseeapap.okx.com/ws/v5/private",
         ],
     ];
     let business_urls = [
         [
-            "wss://ws.okx.com:8443/ws/v5/business",
-            "wss://wspap.okx.com:8443/ws/v5/business",
+            "wss://ws.okx.com/ws/v5/business",
+            "wss://wspap.okx.com/ws/v5/business",
         ],
         [
-            "wss://wseea.okx.com:8443/ws/v5/business",
-            "wss://wseeapap.okx.com:8443/ws/v5/business",
+            "wss://wseea.okx.com/ws/v5/business",
+            "wss://wseeapap.okx.com/ws/v5/business",
         ],
     ];
     let mut sockets = vec![];

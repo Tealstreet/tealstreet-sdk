@@ -170,7 +170,7 @@ fn connect_case(kind: usize, scenario: &str) -> Value {
     };
     let direct = || {
         events.borrow_mut().push("direct".into());
-        Ok(text(&format!("wss://ws.okx.com:8443/ws/v5/{label}")))
+        Ok(text(&format!("wss://ws.okx.com/ws/v5/{label}")))
     };
     let read = |name: &str| {
         assert_eq!(name, "endpoint");
@@ -278,7 +278,7 @@ fn connect_case(kind: usize, scenario: &str) -> Value {
                         "host"
                     })
                 } else {
-                    text(&format!("wss://ws.okx.com:8443/ws/v5/{label}"))
+                    text(&format!("wss://ws.okx.com/ws/v5/{label}"))
                 };
                 assert_eq!(*args[0], wanted, "CONNECT native selected URL value");
                 if scenario == "create-error" {
@@ -518,7 +518,7 @@ fn connect_case(kind: usize, scenario: &str) -> Value {
                 "host"
             })
         } else {
-            text(&format!("wss://ws.okx.com:8443/ws/v5/{label}"))
+            text(&format!("wss://ws.okx.com/ws/v5/{label}"))
         };
         assert_eq!(
             args[0], wanted,
