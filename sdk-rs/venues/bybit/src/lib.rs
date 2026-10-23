@@ -2299,12 +2299,14 @@ impl Venue for BybitLinear {
             return;
         }
         if matches!(&pending.then, Then::EnvironmentProbe) {
-            // Only the live probe's own delivery may attribute the key.
+            // Only the live probe's own delivery may attribute the key; any
+            // other answer leaves it unconfirmed, never hanging startup.
             if self
                 .environment_probe
                 .as_ref()
                 .is_none_or(|probe| cx.validate_http_context(&probe.context).is_err())
             {
+                self.finish_environment_probe(cx, false);
                 return;
             }
             let confirmed = (200..300).contains(&response.status)

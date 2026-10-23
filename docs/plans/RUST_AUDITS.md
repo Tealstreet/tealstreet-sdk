@@ -2427,7 +2427,6 @@ answering, with no HTTP, timer or Store activity. Exact prune: seven `lib.rs`
 occurrences (three candle refusals, two kline terminals, the balance `done`,
 the disabled-product `fail`); the shared `send` chokepoint is unchanged.
 
-
 ## Bybit environment probe (slice 1b)
 
 The opposite-environment key probe is a Background signed Read Context with
