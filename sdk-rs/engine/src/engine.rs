@@ -1550,6 +1550,7 @@ impl<P> Io<P> {
     /// Bounded: past the cap, coalesce into one full read that waits for the
     /// latest merged deadline, so no rate or credential wait is cut short.
     #[cfg(feature = "order-locks")]
+    #[inline(never)]
     fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
         const RECONCILE_QUEUE: usize = 64;
         // A seal at a non-finite clock is due at the next drain.
@@ -3509,7 +3510,9 @@ impl<V: Venue> Engine<V> {
     /// Ask the venue once for each due uncertain-write reconcile read, then
     /// re-arm one wake-up for deferred ones. A fresh read the venue reports
     /// through `orders_reconciled` clears the order-lock fence as before.
+    // Out of line: four callers share one copy (wasm size budget).
     #[cfg(feature = "order-locks")]
+    #[inline(never)]
     fn reconcile_uncertain(&mut self, now: f64) {
         // Never inside a command entry; the hook runs with no HTTP delivery
         // or order-read authority of its own.
