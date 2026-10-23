@@ -4884,3 +4884,23 @@ authority. The call shape and success value (`null`) are unchanged.
 No tealstreet-next caller matches on the old timeout text (the review grepped
 the tealstreet-sdk TS packages; `rust.market-refresh.test.ts` checks neither
 text nor kind). Callers branching on `kind === 'timeout'` need no change.
+
+
+## Profile-specific STP and income capabilities
+
+AsterDEX advertises `stpControls` only for API V3. V1 consumers must hide both
+account STP controls (fetch/change mode) and the per-order `stpMode` option. V3
+keeps all three surfaces. The native version checks and SDK's V3 checks still
+reject direct V1 STP attempts before I/O.
+
+Bybit Spot and HyroTrader advertise `incomeHistory: false`; Bybit linear, inverse
+and demo keep it true. Coinbase advertises `incomeHistory: false` for Spot, INTX
+and CFM because none of these adapters implements an income-ledger command.
+CFM's accepted native position PnL is separate from an income ledger.
+
+The existing SDK capability adoption installs branded empty income methods for
+these unsupported profiles, matching their TS fallback methods. Callers must gate
+income polling and ledger coverage on `capabilities.incomeHistory` (and
+`incomeRange`); an empty fallback is unavailable coverage, not a fetched complete
+ledger. Credentialed direct native income commands retain their existing
+pre-I/O refusals; legacy keyless shortcuts retain their existing behavior.

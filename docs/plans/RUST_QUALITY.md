@@ -661,3 +661,13 @@ completion. Another fixed-clock control runs270 market refusals,270 interval
 refusals and270 successes with stale previous-response probes. Existing native
 candle mapping, validation precedence and preparation/expiry assertions remain.
 This closes the earlier pre-Context numeric refusal gap using the shared seam.
+
+
+### Profile capability truthfulness
+
+Aster V1 STP, Bybit Spot/Hyro income and Coinbase Spot/INTX/CFM income no longer
+inherit an advertised command they refuse for that profile. Six original
+assertion REDs cover those profiles; supported Aster V3 and Bybit
+linear/inverse/demo remain positive peers. Native refusals and V3 STP route
+contracts stay separate from capability assertions. Only the three capability
+fields change in production; no handler, signing, history or PnL policy changes.
