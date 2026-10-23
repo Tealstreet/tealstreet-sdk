@@ -323,3 +323,19 @@ fingerprint is the same physical site and needs an explicit owner-approved exact
 re-expression map. The 14 old material sites are removed; new provider descriptor
 fingerprints are separately reviewed, not raw-crypto exceptions. Recompute both
 inventories against this actual+authorized stack, preserving all foreign rows.
+
+HMAC owner refresh at `2c91` is direction-CLEAR with an additional required max
+control: retain the maximum uncapped raw expiry across every actually released
+attempt/leg of the same write job, not the last observation. Keep the per-request
+released HTTP id and native active revision bound to its exact Pending::Trade;
+a superseded job/revision cannot update the live job. Released-only job max is
+preserved across sequential legs, while refused/stale/unreleased work contributes
+nothing. Unknown-write repair is explicitly `max(raw_expiry_ms) + 5000`, never a
+capped lifecycle bound. Pin two actual released legs where a negative calibration
+makes the later leg's raw expiry earlier; that later observation must not shorten
+the existing replay window. Native revisions/engine request custody provide this
+metadata binding; no new venue execution owner or clock projection is introduced.
+Current actual+authorized-stack request inventory is32F/35O (account3/3,
+history5/8, identity3/3, income2/2, lib15/15, trading4/4); signing is14F/14O in
+lib.rs. Independent refreshed-plan source/caller/full-map reviews CLEAR before
+additional existing-API REDs. Production source is still unchanged.
