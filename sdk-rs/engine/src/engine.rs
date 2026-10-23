@@ -2270,6 +2270,7 @@ impl<P> Cx<'_, P> {
                 self.io.order_locks.managed_resolved(command);
             }
             let scope = self.io.order_locks.reconcile_scope(command);
+            let absent = self.io.order_locks.absent_pending(command);
             let marked = self.io.order_locks.finish(command, result.is_err());
             let unknown = result
                 .as_ref()
@@ -2279,7 +2280,7 @@ impl<P> Cx<'_, P> {
             // symbol: an earlier in-flight read may predate this write.
             // A managed write the lock never held still reconciles: a full read.
             let scope = scope.or_else(|| (write_sealed && unknown).then_some(None));
-            if let Some(scope) = scope.filter(|_| unknown || !marked.is_empty()) {
+            if let Some(scope) = scope.filter(|_| unknown || absent || !marked.is_empty()) {
                 // A rate limit or credential refusal must not fan out reads now.
                 let delay = match result.as_ref().err().and_then(|error| error.kind) {
                     Some(ErrorKind::RateLimited) => result

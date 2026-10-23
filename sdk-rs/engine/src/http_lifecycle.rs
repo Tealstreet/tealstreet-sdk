@@ -3520,6 +3520,99 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn an_absent_order_under_a_held_placement_reconciles_after_it_finishes() {
+        use crate::classify::{
+            CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
+        };
+        const GONE: CodeTable = CodeTable {
+            rows: &[Row {
+                key: Key::Int(110001),
+                verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+                only: Some(Intent::Cancel),
+            }],
+            success: &[],
+            unlisted: Verdict::Refused(crate::ErrorKind::Rejected),
+            status: &[],
+        };
+        // A placement's conflict-cancel leg (classified as Cancel) under its
+        // own held placing lock on BTCUSDT.
+        let (mut engine, _) = start(Probe {
+            mutation_intent: Some(Intent::Cancel),
+            ..Probe::default()
+        });
+        let place = Command::PlaceOrders {
+            command: 7,
+            orders: vec![
+                serde_json::from_str(
+                    r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":1}"#,
+                )
+                .unwrap(),
+            ],
+        };
+        engine
+            .io
+            .order_locks
+            .acquire(&place, &engine.store, false)
+            .unwrap();
+        let (context, token, _) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        engine.claim_http(1., permit).unwrap();
+        let delivery = engine
+            .io
+            .managed_http
+            .get(&token.attempt().request)
+            .unwrap()
+            .delivery();
+        engine.io.http_delivery = Some(delivery);
+        engine.io.http_write_reply = Some((200, String::new()));
+        let native = Native {
+            code: NativeCode::Int(110001),
+            message: "order not exists",
+        };
+        Cx {
+            now: 2.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .http_write_failure(&context, &GONE, Some(&native), "order not exists", None)
+        .unwrap();
+        engine.io.http_write_reply = None;
+        engine.io.http_delivery = None;
+        engine.finish_event_scope(2.);
+        assert!(engine.io.order_locks.uncertain("BTCUSDT"), "fenced at once");
+        assert!(
+            engine.venue.reconciles.is_empty(),
+            "a read now could not clear the held placement's fence"
+        );
+        Cx {
+            now: 3.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .fail_context(&context, "placement finished")
+        .unwrap();
+        engine.finish_event_scope(3.);
+        assert_eq!(
+            engine.venue.reconciles,
+            vec![Some(vec!["BTCUSDT".to_owned()])],
+            "exactly one read once the placement finished"
+        );
+        engine.io.order_response_token = Some(engine.io.order_locks.token());
+        Cx {
+            now: 4.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .orders_reconciled(Some("BTCUSDT"));
+        engine.io.order_response_token = None;
+        assert!(
+            !engine.io.order_locks.uncertain("BTCUSDT"),
+            "the read clears it"
+        );
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn an_overflowing_reconcile_queue_never_cuts_a_wait_short() {
         let btc = || Some(vec!["BTCUSDT".to_owned()]);
         // 64 deferred entries with unequal waits, then one immediate entry.

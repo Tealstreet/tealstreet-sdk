@@ -1435,12 +1435,17 @@ impl<P> Cx<'_, P> {
     fn fence_absent_orders(&mut self, context: &Context) {
         #[cfg(feature = "order-locks")]
         {
-            let scope = match context.owner() {
-                Owner::Command { id, .. } => self.io.order_locks.reconcile_scope(id).flatten(),
+            let command = match context.owner() {
+                Owner::Command { id, .. } => Some(id),
                 _ => None,
             };
+            let scope = command.and_then(|id| self.io.order_locks.reconcile_scope(id).flatten());
             self.io.order_locks.fence(scope.as_deref());
-            self.io.queue_reconcile(scope, self.now);
+            // A held placing scope would make a read now unable to clear the
+            // fence; finish queues it instead.
+            if !command.is_some_and(|id| self.io.order_locks.defer_absent(id)) {
+                self.io.queue_reconcile(scope, self.now);
+            }
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = context;
