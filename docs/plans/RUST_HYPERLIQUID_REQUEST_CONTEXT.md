@@ -349,11 +349,22 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
 - **Expired or absent.**
   - `Expired` ends through `reject_expired_command(Read)`: one typed Timeout,
     no outcome, zero HTTP, timer or Store effects.
-  - `None` (an unstampable clock, or a duplicate of a live legacy id) is no
-    terminal. The query proceeds to normal admission with
-    `DEFAULT_COMMAND_WAIT_MS`, the ruled SDK default. Admission owns the typed
-    refusal: InvalidInput for a bad clock, Internal at capacity. The query
-    never uses a `Remaining(0)` and never a venue-local constant.
+  - `None` in the genuine Fresh entry means the receipt has no stamp of its
+    own. That happens for an unstampable clock, a duplicate of another live
+    legacy id, or an exhausted receipt sequence. (Rejected, spent and borrowed
+    states cannot occur at the first call of a Fresh entry.) It is a refusal
+    with zero effects, never a fresh deadline:
+    - no 120 s fallback and no `Remaining(0)`;
+    - no HTTP, timer or Store effect;
+    - exactly one typed terminal.
+
+    The exact route is an engine-fit decision for codex-uufub4, and REDs pin
+    whichever is ruled. The proposed route: admit the root under
+    `DEFAULT_COMMAND_WAIT_MS` solely to own the terminal, then immediately
+    `fail_context` with InvalidInput "caller wait unavailable" and no outcome,
+    before any page or timer. A bad clock is refused by admission first, with
+    its existing typed InvalidInput. The alternative is a post-#1945 engine
+    refusal for an unstamped entry.
 - **Never renewed.** The root is immutable across pages, the fill-to-funding
   stage restart and retries. Nothing renews it, and the venue never casts a
   Plan or a physical leg as a root.
@@ -418,14 +429,32 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
     deadline, keyed in a venue map by timer to command and root. When it fires
     for a still-parked query, the venue removes that query from the read queue
     and calls `reject(Timeout)`.
-  - **Root expiry with a leg in flight.** A leg's deadline never exceeds the
-    root's. The leg's own Timeout (`on_request_failed`, kind Timeout) arrives
-    first or at the same instant. The venue then checks
-    `validate_http_context(root)`:
+  - **Root expiry with a leg in flight.** The owner travels inside the managed
+    request's `Pending`, so the venue cannot end it from the root timer. The
+    root timer callback therefore only consumes its map entry. Ending the query
+    is left to the leg, whose deadline is capped at the root's: its engine
+    timer always delivers the owner back as one of these:
+    - `on_request_failed`, kind Timeout, after release;
+    - `on_http_preparation_failed(TimedOut)` before release. The
+      `Pending::History` arm is added there if the default does not forward
+      it.
+
+    The venue then checks `validate_http_context(root)`:
     - `TimedOut` means root expiry: strict `reject(Timeout)`.
-    - A live root means a leg timeout: an ordinary page failure, with
+    - A live root means a leg-only timeout: an ordinary page failure, with
       accepted-only recovery.
-    At equality the root is expired, so the result is strict.
+  - **Arrival order.** The rule holds for both orders of same-deadline
+    callbacks:
+    - **Root timer first:** a no-op, then the leg failure gives a strict
+      Timeout.
+    - **Leg first:** a strict Timeout, which clears the root timer.
+    - **Late DATA** after the leg deadline is engine-routed as a failed
+      delivery, so it stages nothing.
+    - **Reused id:** the stale timer's stored root differs from the live one,
+      so it does nothing.
+
+    Each case ends in exactly one strict Timeout, with no rows, marker or
+    finalizer.
   - **Timer cleanup.** The timer is cleared on every terminal. A stale timer
     whose command was finished or reused matches no live entry and does
     nothing.
@@ -443,11 +472,21 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
 - **At dequeue.**
   1. `pump_reads` first mints the child with `http_leg_context`. A timer
      callback can mint a leg because outside an entry
-     `entry_context_allowed` is true and minting needs no delivery. If minting
-     is refused with `TimedOut` because the root's timer has not fired yet,
-     the venue ends the query with strict `reject(Timeout)`. Any other refusal
-     (Revoked, State) means the owner is gone and the read is dropped. Either
-     way no weight is charged and no Prepare is emitted.
+     `entry_context_allowed` is true and minting needs no delivery. Every
+     refusal ends the query strictly through its own owner's `reject`, never
+     `finish_with`, so a preparation or policy refusal can never publish an
+     accepted prefix. No weight is charged and no Prepare is emitted. The
+     mapping is:
+     - `TimedOut`, or `State` (the entry-owned root is at or past its
+       deadline): Timeout.
+     - `Capacity`: Internal "Hyperliquid history leg capacity".
+     - `Invalid`: Internal.
+     - `Revoked`: `reject` is still called. Its own completion validation
+       denies it if the owner is really gone, and emits otherwise, so a live
+       owner is never stranded.
+
+     A `request_managed_with_headers` refusal returns its `Pending` and takes
+     the same strict route with `error.venue_error()`.
   2. It then charges weight and sends with
      `request_managed_with_headers(leg, POST /info, Content-Type: application/json)`,
      plus `stream_response(ArrayAt::Root)` for streamed kinds.
@@ -486,6 +525,17 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
    - A read-timer wake after the root is retired (command reused after a
      terminal) issues nothing for the old query.
    - A reused command id gets a fresh root.
+6b. **Unstamped entry.** A plain `handle` at `f64::MAX` (no default stamp) and
+   an exhausted receipt sequence each give `command_wait() == None`. The query
+   then follows the ruled refusal: one typed terminal, no HTTP, no timer and
+   no 120 s root.
+6c. **Same-deadline ordering.** With the root and the leg at one deadline,
+   deliver the root timer first and then the leg failure, then the reverse.
+   Each order, plus late DATA and command-id reuse, gives exactly one strict
+   Timeout with no rows or marker.
+6d. **Dequeue refusals.** At dequeue, a refused leg mint (forced Capacity,
+   and expiry) gives a strict typed terminal, never an accepted prefix, with
+   no weight and no Prepare.
 7. **Lookup.**
    - The REST `orderStatus` lookup completes through its root.
    - It is a Fresh-entry `Expired` read when the wait has passed: one Timeout,
