@@ -1990,3 +1990,1032 @@ fn spot_tpsl_streamed_before_the_seed_and_committed_after_it_is_relabelled() {
     let order = h.engine.store().order("stop").expect("spot stop stored");
     assert_eq!(order.kind, OrderType::StopLoss);
 }
+
+#[test]
+fn ordinary_gateway_already_gone_text_cannot_authorize_cancellation_effects() {
+    use safe_cex_engine::Outcome;
+    let mut observed = Vec::new();
+    for (status, code) in [
+        (408, 0),
+        (500, 0),
+        (408, 110001),
+        (500, 110001),
+        (200, 110001),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message(
+            "/v5/private",
+            r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"kept","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#,
+        );
+        let before = h
+            .engine
+            .store()
+            .order("kept")
+            .cloned()
+            .expect("native order seed");
+        h.command(Command::CancelOrders {
+            command: 91,
+            ids: vec!["kept".into()],
+        });
+        let request = h.take("/v5/order/cancel-batch");
+        h.reply(
+            request.id,
+            status,
+            &format!(r#"{{"retCode":{code},"retMsg":"order not exists or too late to cancel"}}"#),
+        );
+        observed.push((
+            status,
+            code,
+            h.engine.store().order("kept") == Some(&before),
+            h.outcomes
+                .iter()
+                .find(|(id, _)| *id == 91)
+                .and_then(|(_, outcome)| *outcome),
+            h.result(91).expect("one final outcome").is_err(),
+        ));
+        assert!(
+            !h.has_request("/v5/order/cancel"),
+            "no automatic cancel replay"
+        );
+    }
+    assert_eq!(
+        observed,
+        vec![
+            (408, 0, true, Some(Outcome::Unknown), true),
+            (500, 0, true, Some(Outcome::Unknown), true),
+            (408, 110001, true, Some(Outcome::Unknown), true),
+            (500, 110001, true, Some(Outcome::Unknown), true),
+            (200, 110001, false, None, false),
+        ],
+        "gateway status dominates benign text; only a definitive native response may cancel",
+    );
+}
+
+fn signature_words_without_refusal(body: &str, success: bool) {
+    let mut h = ready(Variant::Demo);
+    h.command(Command::SetLeverage {
+        command: 92,
+        symbol: "BTCUSDT".into(),
+        leverage: 3.,
+        side: None,
+    });
+    let request = h.take("/v5/position/set-leverage");
+    h.reply(request.id, 200, body);
+    assert!(
+        !h.has_request("/v5/position/set-leverage"),
+        "text cannot authorize replay"
+    );
+    let result = h.result(92).expect("one terminal result");
+    assert_eq!(result.is_ok(), success);
+    if !success {
+        assert!(
+            h.outcomes
+                .contains(&(92, Some(safe_cex_engine::Outcome::Unknown)))
+        );
+    }
+}
+
+#[test]
+fn ordinary_signature_words_without_native_code_cannot_authorize_retry() {
+    signature_words_without_refusal("error sign", false);
+}
+
+#[test]
+fn ordinary_signature_words_in_native_success_cannot_authorize_retry() {
+    signature_words_without_refusal(r#"{"retCode":0,"retMsg":"error sign","result":{}}"#, true);
+}
+
+#[test]
+fn ordinary_signature_words_in_mode_read_success_cannot_authorize_retry() {
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 93, vec![order("BTCUSDT", 0.01)]);
+    let mode = h.take("/v5/position/list");
+    h.reply(mode.id, 200, r#"{"retCode":0,"retMsg":"error sign","result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#);
+    assert!(!h.has_request("/v5/position/list"));
+    assert!(h.has_request("/v5/order/create-batch"));
+    assert!(h.result(93).is_none());
+}
+
+fn assert_invalid_managed_cancel_batch_preserves_rows(reply: &str) {
+    let mut h = ready(Variant::Demo);
+    let row = r#"{"symbol":"BTCUSDT","orderId":"one","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}"#;
+    h.message(
+        "/v5/private",
+        &format!(
+            r#"{{"topic":"order","data":[{},{}]}}"#,
+            row,
+            row.replace("one", "two")
+        ),
+    );
+    h.command(Command::CancelOrders {
+        command: 94,
+        ids: vec!["one".into(), "two".into()],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    h.reply(cancel.id, 200, reply);
+    for id in ["one", "two"] {
+        assert_eq!(
+            h.engine.store().order(id).map(|o| o.status),
+            Some(safe_cex_engine::model::OrderStatus::Open),
+            "{reply}: {id}"
+        );
+    }
+    assert!(h.result(94).unwrap().is_err());
+    assert!(h.unknown.contains(&94));
+    assert!(!h.has_request("/v5/order/cancel"));
+}
+
+#[test]
+fn managed_cancel_batch_missing_or_mismatched_status_never_patches_store() {
+    for reply in [
+        r#"{"retCode":0,"result":{}}"#,
+        r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0}]}}"#,
+        r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{},{}]}}"#,
+        r#"{"retCode":0,"result":{},"retExtInfo":{"list":[[0,"OK"],[0,"OK"]]}}"#,
+    ] {
+        assert_invalid_managed_cancel_batch_preserves_rows(reply);
+    }
+}
+
+#[test]
+fn managed_cancel_batch_invalid_message_type_cannot_hide_refused_rows() {
+    assert_invalid_managed_cancel_batch_preserves_rows(
+        r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":10005,"msg":42}]}}"#,
+    );
+}
+
+#[test]
+fn managed_cancel_batch_null_result_list_cannot_hide_refused_rows() {
+    assert_invalid_managed_cancel_batch_preserves_rows(
+        r#"{"retCode":0,"result":{"list":null},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":10005,"msg":"permission denied"}]}}"#,
+    );
+}
+
+#[test]
+fn managed_create_batch_count_mismatch_keeps_only_evidence_ids_without_local_rows() {
+    let mut h = ready(Variant::Demo);
+    place(
+        &mut h,
+        95,
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
+    );
+    resolve_mode(&mut h, "BTCUSDT");
+    let create = h.take("/v5/order/create-batch");
+    h.reply(create.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"native-one"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#);
+    assert!(
+        h.engine.store().order("native-one").is_none(),
+        "unattributed native ID is evidence only"
+    );
+    assert!(h.result(95).unwrap().is_err());
+    assert!(h.unknown.contains(&95));
+    assert!(h.notices.iter().any(|notice| matches!(notice, safe_cex_engine::Notice::CommandFailed { command:95, error } if error.partial.as_ref().is_some_and(|p|p.order_ids == ["native-one"]))));
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn managed_create_batch_native_shapes_are_validated_before_any_local_publication() {
+    let ids = r#"[{"orderId":"native-one"},{"orderId":"native-two"}]"#;
+    let statuses = r#"[{"code":0},{"code":0}]"#;
+    let extra_ids = (0..11)
+        .map(|i| format!(r#"{{"orderId":"extra-{i}"}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    let replies = [
+        format!(
+            r#"{{"retCode":0,"result":{{"list":[["native-one"],["native-two"]]}},"retExtInfo":{{"list":{statuses}}}}}"#
+        ),
+        format!(r#"{{"retCode":0,"result":{{"list":{ids}}},"retExtInfo":{{"list":[[0],[0]]}}}}"#),
+        format!(r#"{{"retCode":0,"result":{{"list":{ids}}},"retExtInfo":{{"list":[{{}},{{}}]}}}}"#),
+        format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"orderId":"native-one"}},{{"orderId":"native-one"}}]}},"retExtInfo":{{"list":{statuses}}}}}"#
+        ),
+        format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"orderId":"native-one","orderLinkId":"wrong-echo"}},{{"orderId":"native-two"}}]}},"retExtInfo":{{"list":{statuses}}}}}"#
+        ),
+        format!(
+            r#"{{"retCode":0,"result":{{"list":[{extra_ids}]}},"retExtInfo":{{"list":{statuses}}}}}"#
+        ),
+        format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"orderId":"native-one"}},123]}},"retExtInfo":{{"list":{statuses}}}}}"#
+        ),
+    ];
+    for (case, reply) in replies.into_iter().enumerate() {
+        let mut h = ready(Variant::Demo);
+        place(
+            &mut h,
+            96,
+            vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
+        );
+        resolve_mode(&mut h, "BTCUSDT");
+        let create = h.take("/v5/order/create-batch");
+        h.reply(create.id, 200, &reply);
+        assert!(
+            h.engine.store().order("native-one").is_none(),
+            "case {case}"
+        );
+        assert!(
+            h.engine.store().order("native-two").is_none(),
+            "case {case}"
+        );
+        assert!(h.result(96).unwrap().is_err(), "case {case}");
+        assert!(h.unknown.contains(&96), "case {case}");
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed { command: 96, error } => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        let actual = error
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.clone())
+            .unwrap_or_default();
+        if case == 0 || case == 6 {
+            assert!(actual.is_empty(), "no positional or malformed-prefix IDs");
+        }
+        if case == 5 {
+            assert_eq!(
+                actual,
+                (0..11).map(|i| format!("extra-{i}")).collect::<Vec<_>>(),
+                "valid extra rows survive as evidence only"
+            );
+            assert!(
+                !h.engine
+                    .store()
+                    .orders()
+                    .iter()
+                    .any(|o| o.id.starts_with("extra-"))
+            );
+        }
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+fn assert_contradictory_managed_batch_refusal_does_not_retry(code: i64) {
+    let mut h = ready(Variant::Demo);
+    place(
+        &mut h,
+        97,
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
+    );
+    resolve_mode(&mut h, "BTCUSDT");
+    let create = h.take("/v5/order/create-batch");
+    h.reply(create.id,200,&format!(r#"{{"retCode":{code},"retMsg":"error sign or invalid batch","result":{{"list":[{{"orderId":"contradictory-native"}}]}}}}"#));
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "contradictory native IDs forbid fallback/resigning"
+    );
+    assert!(h.result(97).unwrap().is_err());
+    assert!(h.unknown.contains(&97));
+    assert!(h.engine.store().order("contradictory-native").is_none());
+    assert!(h.notices.iter().any(|n|matches!(n,safe_cex_engine::Notice::CommandFailed{command:97,error} if error.partial.as_ref().is_some_and(|p|p.order_ids==["contradictory-native"]))));
+}
+#[test]
+fn managed_batch_refusal_with_native_ids_cannot_authorize_replacement() {
+    assert_contradictory_managed_batch_refusal_does_not_retry(10001);
+}
+#[test]
+fn managed_batch_signature_refusal_with_native_ids_cannot_authorize_retry() {
+    assert_contradictory_managed_batch_refusal_does_not_retry(10004);
+}
+
+fn assert_batch_refusal_with_item_effect_does_not_retry(code: i64) {
+    for item_code in [0, 10016] {
+        let mut h = ready(Variant::Demo);
+        place(
+            &mut h,
+            98,
+            vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
+        );
+        resolve_mode(&mut h, "BTCUSDT");
+        let create = h.take("/v5/order/create-batch");
+        h.reply(create.id,200,&format!(r#"{{"retCode":{code},"retMsg":"native batch refusal","result":{{}},"retExtInfo":{{"list":[{{"code":{item_code},"msg":"native per-item fact"}},{{"code":10005,"msg":"refused"}}]}}}}"#));
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "per-item acceptance/uncertainty forbids whole-refusal retry"
+        );
+        assert!(h.result(98).unwrap().is_err());
+        assert!(h.unknown.contains(&98));
+        assert!(h.engine.store().orders().is_empty());
+    }
+}
+#[test]
+fn managed_batch_refusal_with_item_effect_cannot_authorize_replacement() {
+    assert_batch_refusal_with_item_effect_does_not_retry(10001);
+}
+#[test]
+fn managed_batch_signature_refusal_with_item_effect_cannot_authorize_retry() {
+    assert_batch_refusal_with_item_effect_does_not_retry(10004);
+}
+
+#[test]
+fn managed_cancel_benign_native_refusal_keeps_valid_target_echoes() {
+    let mut h = ready(Variant::Demo);
+    let row = r#"{"symbol":"BTCUSDT","orderId":"one","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}"#;
+    h.message(
+        "/v5/private",
+        &format!(
+            r#"{{"topic":"order","data":[{},{}]}}"#,
+            row,
+            row.replace("one", "two")
+        ),
+    );
+    h.command(Command::CancelOrders {
+        command: 99,
+        ids: vec!["one".into(), "two".into()],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    h.reply(cancel.id,200,r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel","result":{"list":[{"orderId":"one"},{"orderId":"two"}]}}"#);
+    assert!(h.engine.store().order("one").is_none());
+    assert!(h.engine.store().order("two").is_none());
+    assert_eq!(h.result(99), Some(&Ok("[]".into())));
+    assert!(!h.unknown.contains(&99));
+}
+
+#[test]
+fn managed_native_id_overflow_denies_local_publication_before_command_seal() {
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 100, vec![order("BTCUSDT", 0.01)]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let create = h.take("/v5/order/create-batch");
+    let native_id = "n".repeat(1025);
+    h.reply(create.id,200,&format!(r#"{{"retCode":0,"result":{{"list":[{{"orderId":"{native_id}"}}]}},"retExtInfo":{{"list":[{{"code":0}}]}}}}"#));
+    assert!(
+        h.engine.store().order(&native_id).is_none(),
+        "native publication needs bounded admitted facts first"
+    );
+    assert!(h.result(100).unwrap().is_err());
+    assert!(h.unknown.contains(&100));
+    assert!(!h.engine.store().orders().iter().any(|o| o.id.len() > 1024));
+}
+
+#[test]
+fn managed_create_batch_proven_subset_survives_an_unresolved_sibling() {
+    let mut h = ready(Variant::Demo);
+    place(
+        &mut h,
+        101,
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
+    );
+    resolve_mode(&mut h, "BTCUSDT");
+    let create = h.take("/v5/order/create-batch");
+    h.reply(create.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"proven-native"},{}]},"retExtInfo":{"list":[{"code":0},{"code":10016,"msg":"execution unresolved"}]}}"#);
+    assert!(h.engine.store().order("proven-native").is_some());
+    assert_eq!(h.engine.store().orders().len(), 1);
+    assert!(h.result(101).unwrap().is_err());
+    assert!(h.unknown.contains(&101));
+    assert!(h.notices.iter().any(
+        |notice| matches!(notice, safe_cex_engine::Notice::CommandFailed { command:101, error }
+        if error.partial.as_ref().is_some_and(|p|p.order_ids == ["proven-native"]))
+    ));
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(!h.has_request("/v5/order/create-batch"));
+}
+
+#[test]
+fn managed_cancel_all_housekeeping_preserves_live_and_uncaptured_children() {
+    let mut h = ready(Variant::Demo);
+    let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"live","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    let seed = h.engine.store().order("live").unwrap().clone();
+    let mut terminal = seed.clone();
+    terminal.id = "old-parent".into();
+    terminal.status = safe_cex_engine::model::OrderStatus::Closed;
+    h.engine.store_mut().upsert_order(terminal);
+    let mut revived = seed.clone();
+    revived.id = "captured-terminal-now-live".into();
+    revived.status = safe_cex_engine::model::OrderStatus::Canceled;
+    h.engine.store_mut().upsert_order(revived.clone());
+    let mut child = seed.clone();
+    child.id = "old-parent__stop_loss".into();
+    child.kind = OrderType::StopLoss;
+    h.engine.store_mut().upsert_order(child.clone());
+    h.command(Command::CancelSymbolOrders {
+        command: 102,
+        symbol: "BTCUSDT".into(),
+    });
+    revived.status = safe_cex_engine::model::OrderStatus::Open;
+    h.engine.store_mut().upsert_order(revived.clone());
+    let mut uncaptured = seed;
+    uncaptured.id = "old-parent__take_profit".into();
+    uncaptured.status = safe_cex_engine::model::OrderStatus::Closed;
+    h.engine.store_mut().upsert_order(uncaptured.clone());
+    h.respond(
+        "/v5/order/cancel-all",
+        200,
+        r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#,
+    );
+    assert!(h.engine.store().order("old-parent").is_none());
+    assert_eq!(h.engine.store().order(&child.id), Some(&child));
+    assert_eq!(h.engine.store().order(&uncaptured.id), Some(&uncaptured));
+    assert_eq!(h.engine.store().order(&revived.id), Some(&revived));
+    assert!(h.engine.store().order("live").is_some());
+    assert!(h.result(102).unwrap().is_err());
+    assert!(h.unknown.contains(&102));
+}
+
+#[test]
+fn managed_cancel_all_housekeeping_requires_validated_native_success() {
+    for (status, body) in [
+        (503, r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#),
+        (200, r#"{"retCode":0,"result":{"list":null,"success":"1"}}"#),
+        (
+            200,
+            r#"{"retCode":10016,"result":{"list":[],"success":"1"}}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"terminal","orderStatus":"Filled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"1","leavesQty":"0"}"#;
+        // Native terminal rows may remain in the local snapshot until cleanup.
+        let open = row
+            .replace("Filled", "New")
+            .replace(r#""cumExecQty":"1""#, r#""cumExecQty":"0""#);
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{open}]}}"#),
+        );
+        let mut terminal = h.engine.store().order("terminal").unwrap().clone();
+        terminal.status = safe_cex_engine::model::OrderStatus::Closed;
+        h.engine.store_mut().upsert_order(terminal.clone());
+        h.command(Command::CancelSymbolOrders {
+            command: 103,
+            symbol: "BTCUSDT".into(),
+        });
+        h.respond("/v5/order/cancel-all", status, body);
+        assert_eq!(
+            h.engine.store().order("terminal"),
+            Some(&terminal),
+            "{status} {body}"
+        );
+        assert!(h.result(103).unwrap().is_err());
+        assert!(h.unknown.contains(&103));
+    }
+}
+
+fn managed_cancel_code_reply(body: &str, accepted: bool) {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"kept","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+    let before = h.engine.store().order("kept").unwrap().clone();
+    h.command(Command::CancelOrders {
+        command: 104,
+        ids: vec!["kept".into()],
+    });
+    h.respond("/v5/order/cancel-batch", 200, body);
+    if accepted {
+        assert!(h.engine.store().order("kept").is_none());
+        assert_eq!(h.result(104), Some(&Ok("[]".into())));
+        assert!(!h.unknown.contains(&104));
+    } else {
+        assert_eq!(h.engine.store().order("kept"), Some(&before));
+        assert!(h.result(104).unwrap().is_err());
+        assert!(h.unknown.contains(&104));
+    }
+    assert!(!h.has_request("/v5/order/cancel"));
+    assert!(!h.has_request("/v5/order/cancel-batch"));
+}
+
+#[test]
+fn managed_whole_cancel_unresolved_code_cannot_borrow_already_gone_text() {
+    managed_cancel_code_reply(
+        r#"{"retCode":10016,"retMsg":"order not exists or too late to cancel"}"#,
+        false,
+    );
+}
+
+#[test]
+fn managed_item_cancel_unresolved_code_cannot_borrow_already_gone_text() {
+    managed_cancel_code_reply(
+        r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":10016,"msg":"order not exists or too late to cancel"}]}}"#,
+        false,
+    );
+}
+
+#[test]
+fn managed_documented_absent_order_codes_do_not_depend_on_diagnostic_text() {
+    for code in [110001, 170213] {
+        managed_cancel_code_reply(
+            &format!(r#"{{"retCode":{code},"retMsg":"native diagnostic"}}"#),
+            true,
+        );
+    }
+}
+
+fn managed_trailing_noop_reply(code: i64, accepted: bool) {
+    let mut h = ready(Variant::Linear);
+    let mut opts = order("BTCUSDT", 0.0);
+    opts.kind = OrderType::TrailingStopLoss;
+    opts.price = Some(65000.0);
+    place(&mut h, 105, vec![opts]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let message = if accepted {
+        "native diagnostic"
+    } else {
+        "not modified"
+    };
+    h.respond(
+        "/v5/position/trading-stop",
+        200,
+        &format!(r#"{{"retCode":{code},"retMsg":"{message}"}}"#),
+    );
+    if accepted {
+        assert_eq!(h.result(105), Some(&Ok("[]".into())));
+        assert!(!h.unknown.contains(&105));
+    } else {
+        assert!(h.result(105).unwrap().is_err());
+        assert!(h.unknown.contains(&105));
+    }
+    assert!(!h.has_request("/v5/position/trading-stop"));
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn managed_not_modified_text_on_unresolved_code_cannot_seal_success() {
+    managed_trailing_noop_reply(10016, false);
+}
+
+#[test]
+fn managed_documented_tpsl_noop_code_retains_success() {
+    managed_trailing_noop_reply(34040, true);
+}
+
+#[test]
+fn managed_tpsl_noop_code_cannot_authorize_an_unrelated_amend_or_publish_a_new_value() {
+    for attached in [false, true] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+        let mut before = h.engine.store().order("parent").unwrap().clone();
+        if attached {
+            before.id = "parent__stop_loss".into();
+            before.parent_id = Some("parent".into());
+            before.kind = OrderType::StopLoss;
+            before.price = 70.;
+            h.engine.store_mut().upsert_order(before.clone());
+        }
+        h.command(Command::AmendOrder {
+            command: 106,
+            id: before.id.clone(),
+            price: Some(110.),
+            amount: None,
+        });
+        resolve_mode(&mut h, "BTCUSDT");
+        h.respond(
+            "/v5/order/amend",
+            200,
+            r#"{"retCode":34040,"retMsg":"not modified"}"#,
+        );
+        assert_eq!(h.engine.store().order(&before.id), Some(&before));
+        if attached {
+            assert_eq!(h.result(106), Some(&Ok("[]".into())));
+        } else {
+            assert!(h.result(106).unwrap().is_err());
+        }
+        assert!(!h.unknown.contains(&106));
+        assert!(!h.has_request("/v5/order/amend"));
+    }
+}
+
+fn managed_single_create() -> (Harness, HttpRequest) {
+    let mut h = ready(Variant::Demo);
+    let mut opts = order("BTCUSDT", 0.01);
+    opts.client_order_id = Some("SingleCaller".into());
+    place(&mut h, 107, vec![opts]);
+    resolve_mode(&mut h, "BTCUSDT");
+    h.respond(
+        "/v5/order/create-batch",
+        200,
+        r#"{"retCode":10001,"retMsg":"native batch refusal"}"#,
+    );
+    let create = h.take("/v5/order/create");
+    assert!(body(&create).contains("SingleCaller"));
+    (h, create)
+}
+
+fn assert_managed_single_create_unproven(reply: &str) {
+    let (mut h, create) = managed_single_create();
+    h.reply(create.id, 200, reply);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "invalid identity cannot authorize retry"
+    );
+    assert!(h.engine.store().order("native-one").is_none());
+    assert!(h.result(107).unwrap().is_err());
+    assert!(h.unknown.contains(&107));
+}
+
+#[test]
+fn managed_single_create_rejects_positional_identity_before_local_publication() {
+    assert_managed_single_create_unproven(r#"{"retCode":0,"result":["native-one"]}"#);
+}
+
+#[test]
+fn managed_single_create_requires_its_supplied_client_echo() {
+    assert_managed_single_create_unproven(
+        r#"{"retCode":0,"result":{"orderId":"native-one","orderLinkId":"other-caller"}}"#,
+    );
+}
+
+#[test]
+fn managed_single_create_signature_refusal_with_accepted_identity_cannot_retry() {
+    assert_managed_single_create_unproven(
+        r#"{"retCode":10004,"retMsg":"error sign","result":{"orderId":"native-one","orderLinkId":"SingleCaller"}}"#,
+    );
+}
+
+#[test]
+fn managed_single_create_valid_identity_and_absent_or_matching_echo_preserve_success() {
+    for echo in ["", r#", "orderLinkId":"SingleCaller""#] {
+        let (mut h, create) = managed_single_create();
+        h.reply(
+            create.id,
+            200,
+            &format!(r#"{{"retCode":0,"result":{{"orderId":"native-one"{echo}}}}}"#),
+        );
+        assert!(h.engine.store().order("native-one").is_some());
+        assert_eq!(h.result(107), Some(&Ok(r#"["native-one"]"#.into())));
+        assert!(!h.unknown.contains(&107));
+    }
+}
+
+#[test]
+fn managed_single_amend_requires_exact_object_target_before_local_publication() {
+    for result in [r#"["parent"]"#, "{}", r#"{"orderId":"other"}"#] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+        let before = h.engine.store().order("parent").unwrap().clone();
+        h.command(Command::AmendOrder {
+            command: 108,
+            id: "parent".into(),
+            price: Some(110.),
+            amount: None,
+        });
+        resolve_mode(&mut h, "BTCUSDT");
+        h.respond(
+            "/v5/order/amend",
+            200,
+            &format!(r#"{{"retCode":0,"result":{result}}}"#),
+        );
+        assert_eq!(h.engine.store().order("parent"), Some(&before), "{result}");
+        assert!(h.result(108).unwrap().is_err());
+        assert!(h.unknown.contains(&108));
+        assert!(!h.has_request("/v5/order/amend"));
+    }
+}
+
+#[test]
+fn managed_single_cancel_requires_exact_native_target_before_store_effects() {
+    let mut h = ready(Variant::Spot);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+    let before = h.engine.store().order("parent").unwrap().clone();
+    h.command(Command::CancelOrders {
+        command: 109,
+        ids: vec!["parent".into()],
+    });
+    h.respond(
+        "/v5/order/cancel",
+        200,
+        r#"{"retCode":0,"result":{"orderId":"other"}}"#,
+    );
+    assert_eq!(h.engine.store().order("parent"), Some(&before));
+    assert!(h.result(109).unwrap().is_err());
+    assert!(h.unknown.contains(&109));
+    assert!(!h.has_request("/v5/order/cancel"));
+}
+
+#[test]
+fn managed_single_target_only_requests_accept_the_existing_returned_client_identity() {
+    for mode in ["amend", "attached", "cancel"] {
+        let mut h = ready(if mode == "cancel" {
+            Variant::Spot
+        } else {
+            Variant::Demo
+        });
+        let category = if mode == "cancel" { "spot" } else { "linear" };
+        h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"{category}","symbol":"BTCUSDT","orderId":"parent","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}}]}}"#));
+        let target = if mode == "attached" {
+            let mut child = h.engine.store().order("parent").unwrap().clone();
+            child.id = "parent__stop_loss".into();
+            child.parent_id = Some("parent".into());
+            child.kind = OrderType::StopLoss;
+            child.price = 70.;
+            h.engine.store_mut().upsert_order(child);
+            "parent__stop_loss"
+        } else {
+            "parent"
+        };
+        let path = if mode == "cancel" {
+            h.command(Command::CancelOrders {
+                command: 110,
+                ids: vec!["parent".into()],
+            });
+            "/v5/order/cancel"
+        } else {
+            h.command(Command::AmendOrder {
+                command: 110,
+                id: target.into(),
+                price: Some(110.),
+                amount: None,
+            });
+            resolve_mode(&mut h, "BTCUSDT");
+            "/v5/order/amend"
+        };
+        let request = h.take(path);
+        assert!(!body(&request).contains("orderLinkId"));
+        h.reply(
+            request.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"parent","orderLinkId":"existing-client"}}"#,
+        );
+        assert!(h.result(110).unwrap().is_ok(), "{mode}");
+        assert!(!h.unknown.contains(&110));
+        let order = h.engine.store().order(target).unwrap();
+        if mode == "cancel" {
+            assert_eq!(order.status, safe_cex_engine::model::OrderStatus::Canceled);
+        } else {
+            assert_eq!(order.price, 110.);
+        }
+    }
+}
+
+fn managed_margin_reply(body: &str, success: bool, unproven: bool) {
+    let mut h = ready(Variant::Demo);
+    h.command(Command::SetMarginType {
+        command: 111,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 200, body);
+    assert_eq!(
+        h.result(111).expect("one terminal margin result").is_ok(),
+        success,
+        "{body}"
+    );
+    assert_eq!(h.unknown.contains(&111), unproven, "{body}");
+    assert_eq!(
+        h.has_request("/v5/position/list"),
+        success,
+        "only proved success refreshes positions: {body}"
+    );
+    assert!(
+        !h.has_request("/v5/account/set-margin-mode"),
+        "invalid reply must not retry"
+    );
+}
+
+#[test]
+fn managed_margin_rejects_positional_or_malformed_supplied_reasons() {
+    for result in [
+        "[[]]",
+        r#"{"reasons":[["native refusal"]]}"#,
+        r#"{"reasons":null}"#,
+        r#"{"reasons":{}}"#,
+        r#"{"reasons":[{"reasonMsg":1}]}"#,
+        r#"{"reasons":[{"reasonCode":1}]}"#,
+    ] {
+        managed_margin_reply(
+            &format!(r#"{{"retCode":0,"result":{result}}}"#),
+            false,
+            true,
+        );
+    }
+}
+
+#[test]
+fn managed_margin_nonempty_reason_cannot_become_success_when_text_is_blank() {
+    for reason in [r#"{"reasonCode":"3400000","reasonMsg":""}"#, "{}"] {
+        managed_margin_reply(
+            &format!(r#"{{"retCode":0,"result":{{"reasons":[{reason}]}}}}"#),
+            false,
+            true,
+        );
+    }
+}
+
+#[test]
+fn managed_margin_preserves_empty_omitted_and_native_rejection_controls() {
+    for reply in [
+        r#"{"retCode":0,"result":{"reasons":[]}}"#,
+        r#"{"retCode":0,"result":{}}"#,
+        r#"{"retCode":0}"#,
+    ] {
+        managed_margin_reply(reply, true, false);
+    }
+    managed_margin_reply(
+        r#"{"retCode":3400045,"retMsg":"Set margin mode failed","result":{"reasons":[{"reasonCode":"3400000","reasonMsg":"Equity too low"}]}}"#,
+        false,
+        false,
+    );
+}
+
+#[test]
+fn managed_mode_read_rejects_positional_rows_without_seeding_cache_or_advancing_writes() {
+    let positional = r#"["BTCUSDT",null,null,null,0]"#;
+    for result in [
+        format!(r#"[[{positional}]]"#),
+        format!(r#"{{"list":[{positional}]}}"#),
+        format!(r#"{{"list":[{{"symbol":"BTCUSDT","positionIdx":0}},{positional}]}}"#),
+    ] {
+        let mut h = ready(Variant::Demo);
+        place(&mut h, 112, vec![order("BTCUSDT", 0.01)]);
+        h.respond(
+            "/v5/position/list",
+            200,
+            &format!(r#"{{"retCode":0,"result":{result}}}"#),
+        );
+        assert!(
+            !h.has_request("/v5/order/create-batch"),
+            "unproven mode cannot advance a write: {result}"
+        );
+        assert!(h.result(112).expect("mode read fails the command").is_err());
+        assert!(
+            h.outcomes
+                .contains(&(112, Some(safe_cex_engine::Outcome::NotSent)))
+        );
+        place(&mut h, 113, vec![order("BTCUSDT", 0.01)]);
+        assert!(
+            h.has_request("/v5/position/list"),
+            "invalid prefix must not seed cached mode: {result}"
+        );
+        resolve_mode(&mut h, "BTCUSDT");
+        assert!(h.has_request("/v5/order/create-batch"));
+    }
+}
+
+fn managed_long_serial_spot_plan(signature_retry: bool) {
+    let mut h = ready(Variant::Spot);
+    let start = h.now;
+    place(&mut h, 114, (0..8).map(|_| order("BTCUSDT", 0.1)).collect());
+    for index in 0..8 {
+        let mut request = h.take("/v5/order/create");
+        assert_eq!(
+            request.timeout_ms,
+            Some(20_000),
+            "the native initial packet retains its physical window, leg {index}"
+        );
+        assert_eq!(
+            h.result(114),
+            None,
+            "required future slots keep the command open"
+        );
+        if signature_retry {
+            let original_body = request.body.clone();
+            h.advance(19_000.);
+            h.reply(
+                request.id,
+                200,
+                r#"{"retCode":10004,"retMsg":"error sign"}"#,
+            );
+            assert_eq!(
+                h.result(114),
+                None,
+                "a definitive signature refusal alone does not retire the plan at leg {index}"
+            );
+            request = h.take("/v5/order/create");
+            assert_eq!(
+                request.body, original_body,
+                "retry preserves the logical order"
+            );
+            assert_eq!(
+                request.timeout_ms,
+                Some(20_000),
+                "the native retry gets its fresh physical window, leg {index}"
+            );
+        }
+        h.advance(19_000.);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "no later logical call may hide expiry of the held packet, leg {index}"
+        );
+        assert_eq!(
+            h.result(114),
+            None,
+            "valid native physical deadline, leg {index}, retry={signature_retry}"
+        );
+        h.reply(
+            request.id,
+            200,
+            &format!(r#"{{"retCode":0,"result":{{"orderId":"long-{index}"}}}}"#),
+        );
+        if index < 7 {
+            assert_eq!(
+                h.result(114),
+                None,
+                "no premature completion after an accepted prefix"
+            );
+        }
+    }
+    assert_eq!(
+        h.now - start,
+        if signature_retry { 304_000. } else { 152_000. }
+    );
+    let expected =
+        serde_json::to_string(&(0..8).map(|n| format!("long-{n}")).collect::<Vec<_>>()).unwrap();
+    assert_eq!(h.result(114), Some(&Ok(expected)));
+    assert!(!h.unknown.contains(&114));
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+#[test]
+fn managed_long_plan_preserves_eight_valid_serial_native_deadlines() {
+    managed_long_serial_spot_plan(false);
+}
+
+#[test]
+fn managed_long_plan_preserves_fresh_physical_signature_retry_windows() {
+    managed_long_serial_spot_plan(true);
+}
+
+#[test]
+fn managed_mode_redos_do_not_start_the_final_write_plan_deadline() {
+    let mut h = ready(Variant::Linear);
+    let start = h.now;
+    place(&mut h, 115, vec![order("BTCUSDT", 0.1)]);
+    let path = "/v5/position/list?category=linear&symbol=BTCUSDT";
+    for round in 0..7 {
+        let old_mode = h.take(path);
+        assert_eq!(old_mode.timeout_ms, Some(20_000), "mode redo {round}");
+        h.advance(19_000.);
+        assert_eq!(
+            h.result(115),
+            None,
+            "bounded read is still live, redo {round}"
+        );
+        assert!(!h.has_request("/v5/order/create"));
+        h.command(Command::SetPositionMode {
+            command: 200 + round,
+            hedged: round % 2 == 0,
+            symbol: Some("BTCUSDT".into()),
+        });
+        h.respond(
+            "/v5/position/switch-mode",
+            200,
+            r#"{"retCode":0,"result":{}}"#,
+        );
+        assert_eq!(h.result(200 + round), Some(&Ok("[]".into())));
+        h.reply(
+            old_mode.id,
+            200,
+            r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+        );
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "old mode version never advances a write"
+        );
+        assert_eq!(h.result(115), None);
+    }
+    assert_eq!(h.now - start, 133_000.);
+    let current = h.take(path);
+    h.reply(
+        current.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+    );
+    let write = h.take("/v5/order/create-batch");
+    assert_eq!(write.timeout_ms, Some(20_000));
+    h.reply(
+        write.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"after-preflight"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert_eq!(h.result(115), Some(&Ok(r#"["after-preflight"]"#.into())));
+    assert!(!h.unknown.contains(&115));
+}
+
+#[test]
+fn managed_preflight_signature_retry_keeps_its_native_physical_deadline() {
+    let mut h = ready(Variant::Linear);
+    place(&mut h, 116, vec![order("BTCUSDT", 0.1)]);
+    let path = "/v5/position/list?category=linear&symbol=BTCUSDT";
+    let first = h.take(path);
+    assert_eq!(first.timeout_ms, Some(20_000));
+    h.advance(19_000.);
+    h.reply(first.id, 200, r#"{"retCode":10004,"retMsg":"error sign"}"#);
+    let retry = h.take(path);
+    assert_eq!(retry.url, first.url);
+    assert_eq!(retry.body, first.body);
+    assert_eq!(retry.timeout_ms, Some(20_000));
+    assert!(!h.has_request("/v5/order/create"));
+    h.advance(19_000.);
+    assert_eq!(h.result(116), None);
+    assert!(!h.has_request(path));
+    assert!(!h.has_request("/v5/order/create"));
+    h.reply(
+        retry.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+    );
+    let write = h.take("/v5/order/create-batch");
+    assert_eq!(write.timeout_ms, Some(20_000));
+    h.reply(
+        write.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"after-read-retry"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert_eq!(h.result(116), Some(&Ok(r#"["after-read-retry"]"#.into())));
+    assert!(!h.unknown.contains(&116));
+}

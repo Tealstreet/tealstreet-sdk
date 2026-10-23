@@ -553,6 +553,79 @@ fn documented_already_gone_batch_status_still_allows_partial_replacement() {
 }
 
 #[test]
+fn managed_partial_cancel_unresolved_code_cannot_borrow_benign_text_or_start_replacement() {
+    for profile in PROFILES
+        .into_iter()
+        .filter(|profile| !profile.variant.is_hyro())
+    {
+        for body in [
+            r#"{"retCode":10016,"retMsg":"order not exists or too late to cancel"}"#,
+            r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":10016,"msg":"order not exists or too late to cancel"}]}}"#,
+        ] {
+            let mut h = ready(profile);
+            seed(
+                &mut h,
+                profile,
+                "Sell",
+                "StopLoss",
+                "MarkPrice",
+                false,
+                true,
+            );
+            let before = h.engine.store().order("partial").unwrap().clone();
+            amend(&mut h, Some(110.0), None);
+            h.respond(profile.cancel_path(), 200, body);
+            assert!(
+                !h.has_request("/v5/position/trading-stop"),
+                "{profile:?} {body}"
+            );
+            assert!(!h.has_request("/v5/order/create"));
+            assert_eq!(h.engine.store().order("partial"), Some(&before));
+            assert!(h.result(91).unwrap().is_err());
+            assert!(h.unknown.contains(&91));
+        }
+    }
+}
+
+#[test]
+fn managed_partial_replacement_unresolved_noop_text_does_not_schedule_success_refresh() {
+    for profile in PROFILES
+        .into_iter()
+        .filter(|profile| !profile.variant.is_hyro())
+    {
+        let mut h = ready(profile);
+        seed(
+            &mut h,
+            profile,
+            "Sell",
+            "StopLoss",
+            "MarkPrice",
+            false,
+            true,
+        );
+        amend(&mut h, Some(110.0), None);
+        accept_cancel(&mut h, profile);
+        h.respond(
+            "/v5/position/trading-stop",
+            200,
+            r#"{"retCode":10016,"retMsg":"order not modified"}"#,
+        );
+        assert!(h.result(91).unwrap().is_err());
+        assert!(h.unknown.contains(&91));
+        h.advance(250.0);
+        for path in [
+            "/v5/position/trading-stop",
+            "/v5/order/create",
+            "/v5/order/realtime",
+            "/v5/position/list",
+            "/v5/account/wallet-balance",
+        ] {
+            assert!(!h.has_request(path), "{profile:?} {path}");
+        }
+    }
+}
+
+#[test]
 fn partial_invalid_updates_and_terminal_rows_fail_before_any_write() {
     for (price, amount, terminal) in [
         (Some(f64::NAN), None, false),
