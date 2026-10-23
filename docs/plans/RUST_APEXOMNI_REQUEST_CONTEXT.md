@@ -460,3 +460,63 @@ normal ApeX + Binance suites pass with these two controls explicitly ignored;
 scoped strict all-target Clippy, fmt and both request-context checks pass. This
 is regression preparation, not GREEN adoption evidence. The landed classifier
 source is #1837 (`e0322577e354739dde6d7e5011e74ab660145885`).
+
+
+## Actual write adoption, phase 1 (2026-10-23)
+
+Start exactly on reviewed #1874 head2891949d1e2. The overseer's subsequent
+scope ruling permits two steps: phase1 adopts managed Context/CodeTable/journal
+and proves positive remote HMAC cancel/settings; local zkLink placement keeps
+working through the shared provider, while remote/keyless placement refuses
+Unsupported/NotSent before foreground I/O until P8. The two placement REDs
+remain explicitly ignored with P8 named, then become active in phase2 with a
+positive remote zkLink order proof. No eager signing workaround is permitted.
+
+Owned files: lib.rs (Options identity, managed Pending/typed dispatch),
+trading.rs (native immutable plan, payload preparation, classifier facts and
+contextual settlement), owned test fixtures and new managed-write controls,
+this appendix, CALLERS and exact vanished ApeX manifest entries. Signer-owned
+sign.rs and its recipe test stay unchanged; #1839's Cargo change is consumed
+from its reviewed pin. The minimal public Options field is
+`identity: Option<safe_cex_engine::signing::Identity>` for the signer owner's
+registry admission. Opaque refs never enter the legacy eager signing path.
+
+Reviewed prerequisites: #1839 at3eaa22397d0 (extra zklinkSeed/base64Text/provider)
+and #1841 atcf70b07fac1 (Http::new/with_contracts, contract_payload and exactly
+once placeholders). Plan source0f06f289fe4 is independently reviewed but its
+feature-isolation pin is pending; use that owner's reviewed replacement before
+final proof. Missing registry/SDK/host admission and positive remote HMAC
+adapters stay with claude-19pt8s; P8 adds remote zkLink later. None is claimed
+actual merely because its branch is inspectable.
+
+1. Commit the Options identity handoff independently, then consume exact
+   reviewed signer/Plan source without editing shared engine/provider regions.
+2. Add original failing managed-HMAC cancel/settings controls before conversion:
+   no early HTTP/signing before trusted Prepare, exact bound release bytes,
+   real asynchronous remote-provider success, typed preparation refusal,
+   expired/stale/duplicate command and no resend after an uncertain reply.
+   Preserve native successful output, side effects and request/body/header bytes.
+3. Begin genuine WriteAfterReads preflight before native validation terminals,
+   retain the native FIFO/redo behavior, and admit a Plan only from the final
+   immutable step set. Compute raw bounds from checked native attempts and
+   pacing; no arbitrary120s root. Empty native work uses done_empty_plan before
+   any admitted Plan, not a dummy accepted Context. Multi-call/split/amend
+   execution must use the shared Plan API, never an invented Context loop.
+4. Replace eager contract signatures with pure 36-byte native payloads and
+   recipe placeholders. Release uses shared Http::with_contracts locally and
+   Http::new for HMAC-only writes. Credential/body/query/legacy flags remain
+   immutable recipe facts; exact delivery owns CodeTable/WriteFact settlement.
+   Keep unlisted Unknown, 408/5xx precedence and opaque resend grants central.
+5. Validate local zkLink regressions and actual positive remote HMAC behavior;
+   retain the two P8-dependent placement controls as tracked ignored debt.
+   Prune only fingerprints/counts that actually disappear; never rehash or
+   move a legacy call merely to shrink the ledger. Record exact before/after
+   totals and caller-visible limitations in the same PR.
+6. Run touched venue + Binance, strict scoped Clippy/fmt, bans and both ratchets;
+   obtain independent source/adversarial, caller and full-map reviews including
+   the architecture gate. Publish a separate ApeX PR, wait for exact-head CI,
+   and request a merge window. Then repeat Orderly, Backpack, Coinbase in order.
+
+Architecture gate: native facts and adoption only. Any missing signer-mode
+capability, admission, preflight, session or remote-wire support is requested
+from its shared owner; no venue policy replacement or stale-context bypass.
