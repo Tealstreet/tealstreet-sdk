@@ -3,8 +3,8 @@
 Owner: codex-cxxyqr. Reviewers: codex-uufub4 (Plan core) and
 claude-fe7lgm (#1945 receipt custody). Assigned as a separate engine PR after
 #1945. Base: actual `a828ede7ebb`. Status: plan only; no runtime changes or
-executed REDs. #1945 is not frozen: owner checkpoint `acc3f92b6c9` still needs
-receipt-retention/sequence fixes and independent source/host reviews. It is
+executed REDs. #1945 is not frozen: owner checkpoint `8082a59d197` still needs
+independent source/host reviews. It is
 reference material, not an authorized source dependency. Stack on its announced
 frozen head before writing tests or implementation.
 
@@ -35,7 +35,7 @@ An opaque Plan/Slot never becomes an original Read root.
 
 ## Proposed small API and scope
 
-API shape cleared by uufub4 at `a2795215932`, pending fe7's receipt-fit review:
+API shape cleared by uufub4 and fe7 at `a2795215932`:
 an explicit receipt-capped Read preflight entry operation (provisional name
 `begin_preflight_with_command_wait(policy)`) returning the existing opaque
 `Preflight`. It shares the existing genuine-entry transaction and issuer. It
@@ -61,7 +61,7 @@ Existing mutation and uncapped planned-execution contracts remain unchanged.
 
 The explicit opt-in mode is preferred over automatic changes to every Read
 Plan. Native-only existing admission remains unchanged, with no uncapped
-fallback on a failed receipt capture. Exact signatures and receipt-fit clearance
+fallback on a failed receipt capture. Exact signatures and the frozen dependency
 remain gates before source.
 
 ## Capture and retained custody
@@ -72,12 +72,21 @@ per command id, and `Entry.receipt` identifies this genuine receipt. Its public
 currently test-only; this PR owns the smallest necessary internal accessor once
 #1945 is frozen.
 
+Promote the existing `command_wait()` lookup into one private Io helper that
+returns `(receipt, deadline)` only when `stamps[entry.command]` matches
+`Entry.receipt`. Both `command_wait()` and cap capture use that helper; there is
+no second lookup or independent receipt-matching rule. No accessor change is
+required in #1945 itself.
+
 Capture during the genuine entry transaction, before asynchronous work:
 
 1. Require the entry's own live receipt and exact sequence. A duplicate id's
    entry cannot borrow another command's deadline or retire its stamp.
 2. Obtain the original finite absolute deadline directly from the engine's
    receipt state; do not reconstruct it from an integer Remaining duration.
+   Missing stamps always refuse the capped route: duplicate live id with no
+   `Entry.receipt`, invalid/non-advancing default receipt clock, or exhausted
+   checked receipt sequence. None selects uncapped mode or a new default.
 3. Bind private receipt identity/deadline data to the newly admitted Preflight
    issuer and command generation. Capture and preflight ownership succeed or
    refuse atomically. Store no independently addressable receipt table here.
@@ -92,7 +101,11 @@ Capture during the genuine entry transaction, before asynchronous work:
    command id and no renewal if that id is reused after terminal cleanup.
 
 The original raw deadline, not a rounded-up integer timeout, controls equality
-and sub-millisecond boundaries. Use #1945's Expired rule where appropriate; no
+and sub-millisecond boundaries. A raw `deadline - now < 1` is expired at capture
+and admission, matching `command_wait()`. At capture, refuse without effects and
+leave the entry Fresh so the venue can call `reject_expired_command(Read)`.
+Do not enter the preflight issuer's rejection path or add another expiry emitter.
+Use #1945's Expired rule throughout; no
 `Remaining(0)`, `Some(1)` workaround or positive-time rounding can revive it.
 An admission refusal leaves the preflight's valid failure custody intact so the
 adapter can settle once through `fail_preflight`. After admission, completion
@@ -137,11 +150,16 @@ New-mode controls after implementation:
 
 - JWT/preflight HTTP handoff at t=60 works without an entry callback and cannot
   remint the receipt. A held command's remaining budget is measured from receipt.
+- Expiry at capture leaves Fresh custody and all resource counts unchanged.
+  `reject_expired_command(Read)` then emits the sole typed Timeout, no outcome.
 - Exact receipt expiry and sub-millisecond remainder refuse admission with the
   approved typed Read Timeout shape, no outcome. No Plan/slots/readiness/timer,
   credit, root or id is added; the retained preflight fails exactly once.
 - Duplicate receipt cannot read/replace/clear the original cap. Foreign issuer,
   reused command id/generation and retired preflight cannot borrow a new stamp.
+- Invalid/non-advancing default receipt clocks and exhausted receipt sequence
+  refuse the capped route, with no unstamped fallback or new default. Deferred
+  re-entry and order-lock redelivery keep the original receipt sequence.
 - Two serial slots plus FreshAttempt retry keep one root. Early completion,
   later-slot issue, stage restart and re-sign never move its deadline.
 - A final physical timeout before the root expires remains distinct from root
@@ -164,10 +182,15 @@ uufub4 cleared the plan at `a2795215932`: one existing issuer and
 `admit_plan_owned`, private receipt cap captured in genuine entry and retained
 by issuer/generation, raw deadline minimized with checked native geometry, and
 atomic refusal of capped mutation/execution routes. Expired or sub-millisecond
-caps yield typed Read Timeout while preserving valid preflight failure custody;
-they add no timer or transport rights. This is API-fit clearance only. Source
-still waits for frozen #1945 and fe7's receipt-fit review; runtime/source review
-remains separate.
+caps at admission yield typed Read Timeout while preserving valid preflight
+failure custody; they add no timer or transport rights.
+
+fe7 cleared the #1945 custody fit at `a2795215932`, with binding notes folded in
+above: one shared exact-receipt lookup, refusal of every unstamped case,
+effect-free capture expiry leaving Fresh custody, raw sub-millisecond expiry,
+retained sequence/deadline without later stamp lookup, and original receipt on
+deferred re-entry. Both clearances are API-fit only. Source still waits for
+frozen #1945; runtime/source review remains separate.
 
 ## Files, reviews and gates
 
