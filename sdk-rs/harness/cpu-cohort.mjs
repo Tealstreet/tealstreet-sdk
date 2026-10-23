@@ -192,6 +192,12 @@ export function authenticateArtifactExecution(input) {
   return receipt;
 }
 
+export function formatMeasurementMarker(kind, key, at) {
+  check(['BEGIN', 'END'].includes(kind) && hash(key), 'invalid physical measurement marker');
+  instant(at);
+  return `CPU_CASE_${kind} ${key} ${at}`;
+}
+
 /** Bind a case's payload clock window to literal markers in its physical log. */
 export function authenticateMeasurementWindow({ execution, key, job, logBytes }) {
   check(hash(key) && execution && job && /^Rust \/ (?:replay measurement|CPU remeasurement) \([a-z0-9-]+\)$/.test(job.name), 'invalid physical measurement job/key');

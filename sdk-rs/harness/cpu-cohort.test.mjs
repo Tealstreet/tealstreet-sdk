@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { CPU_COHORT_STEPS, sourceInputFingerprint, cohortKey, parseCohortJson, createGithubReader,
-  authenticateArtifactExecution, authenticateMeasurementWindow } from './cpu-cohort.mjs';
+  authenticateArtifactExecution, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
 const anchor = { workflowId: 386369161, runNumber: 1, runId: 1000 };
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const git = (value) => createHash('sha1').update(value).digest('hex');
@@ -166,6 +166,20 @@ test('public measurement clock binds exact unique case markers, source and physi
     v => { v.logBytes = Buffer.from(Buffer.from(v.logBytes).toString().replace(`${at(8)} CPU_CASE_BEGIN`, `${at(22)} CPU_CASE_BEGIN`)); },
   ];
   for (const mutate of mutations) { const copy = clone(input); mutate(copy); assert.throws(() => authenticateMeasurementWindow(copy)); }
+});
+
+test('physical markers remain standalone after child diagnostics without a newline', () => {
+  const value = fixture(), source = value.claims[0].observations[0], key = value.claims[0].claim.key;
+  source.job.steps.splice(1, 0, { name: 'Public data (correctness, CPU and memory)', status: 'completed', conclusion: 'success', started_at: at(5), completed_at: at(18) });
+  const execution = { runId: String(value.current.id), jobId: String(source.job.id), runnerId: String(source.job.runner_id), attempt: 1, measuredCheckoutSha: source.checkout.sha, startedAt: at(8), completedAt: at(12) };
+  const timestampLines = (output, time) => output.split('\n').slice(0, -1).map(line => `${time} ${line}\n`).join('');
+  const checkout = source.logBytes.toString().split('\n').slice(0, 2).join('\n') + '\n';
+  const begin = timestampLines(`prior unterminated output${formatMeasurementMarker('BEGIN', key, at(8))}\n`, at(8));
+  const end = timestampLines(`book diagnostic [95100.5,0.00003]${formatMeasurementMarker('END', key, at(12))}\n`, at(12));
+  const input = { execution, key, job: source.job, logBytes: Buffer.from(checkout + begin + end) };
+  assert.equal(authenticateMeasurementWindow(input).stepName, 'Public data (correctness, CPU and memory)');
+  assert.throws(() => authenticateMeasurementWindow({ ...input, logBytes: Buffer.from(checkout + begin + end + end) }), /missing\/duplicate/);
+  assert.throws(() => formatMeasurementMarker('OTHER', key, at(8)), /invalid physical/);
 });
 
 test('reader caches only immutable Git/ZIP/completed log bytes; mutable authority endpoints refresh', async () => {

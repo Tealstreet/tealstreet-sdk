@@ -7,7 +7,7 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { expectedGateCases, gateCaseKey } from './ci-gate-suites.mjs';
-import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateArtifactMetadata, authenticateMeasurementWindow } from './cpu-cohort.mjs';
+import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateArtifactMetadata, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
 import { readArtifactZip } from './cpu-artifacts.mjs';
 import { captureCache, verifyCache } from './cpu-cache.mjs';
 import { assessGateReport } from './known-failure-policy.mjs';
@@ -284,7 +284,7 @@ async function secondMeasurement(context, suite, destination) {
     const reset = resetCollectionCache({ root: context.root, cachePath: state.cachePath, destination,
       environment: runtime.manifest.environment, runtimeSha256: state.runtimeSha256, nodePath: runtime.nodePath });
     const startedAt = new Date().toISOString();
-    console.log(`CPU_CASE_BEGIN ${first.key} ${startedAt}`);
+    console.log(formatMeasurementMarker('BEGIN', first.key, startedAt));
     const reportPath = resolve(context.root, `sdk-rs/harness/out/cpu-second/reports/${first.key}.json`);
     mkdirSync(dirname(reportPath), { recursive: true });
     const item = first.claim.case;
@@ -310,7 +310,7 @@ async function secondMeasurement(context, suite, destination) {
       startedAt, completedAt, initialCacheSha256: reset.initialCacheSha256, finalCacheSha256 };
     const evidence = { schema: 1, key: first.key, claim: first.claim, authority: { plan: artifactRef(planBundle), strict: artifactRef(firstBundle), tiny: artifactRef(tiny), runtime: artifactRef(capsule) }, cache: { prefix, digest: cache.digest, manifestSha256: cache.manifestSha256 }, exitCode: child.status,
       report, reportBytes: reportBytes.toString('utf8'), reportSha256: sha256(reportBytes), raw, execution };
-    console.log(`CPU_CASE_END ${first.key} ${completedAt}`);
+    console.log(formatMeasurementMarker('END', first.key, completedAt));
     revalidateRecordedEvidence(evidence, { root: context.root });
     const decision = decideRemeasurement(first, evidence);
     if (!decision.accepted) errors.push(...decision.errors.map((error) => `${first.key}: ${error}`));
