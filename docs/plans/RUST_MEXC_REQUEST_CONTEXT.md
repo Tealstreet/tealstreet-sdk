@@ -200,3 +200,77 @@ checks pass (13 adversarial controls). Independent source/adversarial, caller an
 full-map reviews are clean after correcting fixture paths, native retry/routing
 and shared dispatcher authority. Architecture gate No for all four plans.
 No production source, test or inventory changes are claimed by this checkpoint.
+
+## Next unclaimed slice: single public candle read
+
+Implementation branch starts from landing `fa5d5fb90c4`. Only `src/lib.rs`,
+the candle fixture in `tests/public.rs`, a new `tests/request_context_candles.rs`,
+the exact inventory and append-only docs are needed. Current open source/test
+claims remain account #1786 and history #1793; none of these files is edited.
+Recheck file lists before implementation. This slice does not change signing,
+headers, startup/discovery, subscription repair or the deferred startup-auth fix.
+
+Retain one issued command Read Context in `Pending::Candles`, credential=None,
+RetryPolicy::Never and original20000ms bound. Issue it before native interval/
+market validation so those failures also retain Context authority. The single
+unsigned ordinary GET moves directly to request_managed, avoiding a blanket
+change to the common legacy `get` helper that serves other consumers. Complete
+through done_context/fail_context; returned queue refusals keep the same owner.
+Only an issuance failure before any Context exists may use one exact existing
+`cx.fail(command,error)` fingerprint. Its eventual-zero command-entry custody
+seam is owned by codex-uufub4; no new fingerprint/exemption or post-issuance fallback.
+
+Preserve native-symbol path, interval spelling, floor-to-seconds from/to bounds,
+missing limit retaining every row and explicit tail trimming (including zero),
+equal-length column validation, native row order/OHLCV and seconds timestamps.
+There is no automatic candle retry. Keep generic HTTP status handling, HTTP429
+depth/account pause side effects and native envelope errors in their current
+response path; moving the decoder ahead of them would change behavior. Current
+response admission must fence those effects too. Public failures supply no
+account-auth evidence. Retain native no-I/O unsupported interval/unknown-market
+messages; shared typed route/transport/expiry errors retain their kinds and the
+explicit no-mutation read outcome, with no text/deadline inference.
+
+The existing1000-row candle fixture uses the shared prepared-actions executor at
+its original0ms command time; keep its payload/result assertions and the shared
+test support untouched. New original-RED tests cover prepare/bind/final claim,
+exact query/native output, explicit-limit tail behavior, malformed column failure,
+typed setup and released/parked expiry, late/duplicate callbacks and command ID
+reuse. Include HTTP429 pause/auth isolation and immediate validation/no-HTTP.
+Commit these failing tests separately before changing the adapter.
+
+The exact prune removes unsupported-interval, unknown-market and candle-success
+fingerprints, and reduces the generic lib.rs failure count2 to1 for pre-issuance
+failure:45 to41 occurrences and42 to39 entries. Common HTTP helper sites remain
+inventoried because their other callers remain legacy. Every other path map is
+unchanged; do not hide or rename the common helpers to claim removal.
+
+Reviewed #1808 head `9b639939e378ee3d582c06b24fd068c095eded0b` supplies error
+conversion and reviewed #1816 head `ff6a9f8255111b228817d0ae1368e297d2e28ee3`
+supplies typed post-release delivery. Stack exactly on these authorized pins and
+re-integrate actual landing before merge. Gates: full MEXC+Binance native suites,
+scoped fmt/strict all-target Clippy, both ratchets and three independent reviews;
+CI owns actual-WASM/replay/size/timing proof. CALLERS records prepared-transport
+requirements, original-budget expiry/late suppression and typed causes without
+changing candle payloads or native retry/status/pause policy. Architecture No:
+the venue supplies native semantics and consumes shared lifecycle/error custody.
+
+### Candle implementation checkpoint
+
+Plan commit `1eac68ce71f` precedes original regression commit `e3545f4edd9`:
+seven lifecycle controls fail against the legacy adapter; immediate native
+validation remains green. Caller review added transport/native-error controls
+and a public fixture proving account pause precedence without account source or
+shared-support changes. The adapter consumes shared managed HTTP and typed
+callbacks; no engine, signer, timer or classification implementation is added.
+The precise manifest delta is confined to lib.rs, 9 to5 occurrences /8 to5
+entries, giving venue totals41 occurrences/39 entries. The one retained numeric
+failure occurs only when root Context issuance fails. Eventual zero still needs
+the genuine shared command-entry custody seam; other native paths stay listed.
+
+Native checkpoint: full MEXC+Binance suites pass,443 tests across39 suites,
+including9 candle lifecycle controls; scoped fmt and strict all-target Clippy
+pass. Both request-context checks pass with13 adversarial controls. Independent
+source/adversarial and full-map reviews are clean (architecture No); caller
+review's additional controls are included. CI supplies the remaining WASM/replay/
+size/timing gates after publication; no merge permission is implied.
