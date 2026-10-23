@@ -2168,3 +2168,29 @@ Income stage restart retains the same output owner and identities. Native
 info payload, archived instrument mapping, financial codecs, full pagination
 before sorting/truncation and Store isolation remain unchanged. Exact history
 legacy inventory prunes eleven to six sites, zero additions or checker changes.
+
+
+## Orderly accepted-page history ownership
+
+Orderly history adopts the existing engine CursorHistory owner without a new
+engine API or venue-local completion implementation. The single cursor walk
+retains the total fifty-page regular/algo budget; native metadata census and
+per-stage limit remain venue facts. Actual later read failures recover only
+accepted eligible output with the owned warning, while native proof and signing
+refusals remain strict. Failed streamed prefixes and filtered rows never authorize
+recovery. Request builders, signing, timers, account reducers and Store are
+unchanged. Exact request inventory shrinks from thirteen to nine entries by
+removing four numeric finalizers, with no additions or checker changes.
+
+
+## MEXC accepted-page history ownership
+
+MEXC history adopts existing CursorHistory rather than owning a result vector,
+identity set and numeric finalization. Window transitions retain the same output
+owner and identity ledger while resetting the existing native per-window page
+budget. Only validated pages authorize partial recovery; failed prefixes and
+filtered rows do not. The cap stays strict. Request builder, native row mapping,
+account state and Store publication policy are unchanged. Exact request legacy
+inventory prunes nine entries to six, no additions or checker/bootstrap changes.
+Kraken Spot, BreakoutProp and Hyperliquid Spot remain explicitly classified as
+non-pageable inherited stubs, with no new native history capability.

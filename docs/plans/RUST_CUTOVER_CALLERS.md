@@ -4953,6 +4953,69 @@ rejection as unavailable history. This SDK contract does not establish NX
 runtime adoption. [Scope](RUST_OWNED_HISTORY.md).
 
 
+### Orderly history uses the shared accepted-page owner
+
+Fills, regular/algo orders, settled funding and public trades now complete
+through the engine CursorHistory/Completion owner. An HTTP, transport, decode,
+missing-list or row-validation failure before any eligible accepted output
+rejects with kind `internal`. A later failure returns only prior validated
+eligible rows plus one command-scoped Warn `history.incomplete`; streamed rows
+from the failed page are excluded. Regular orders remain available if the later
+algo read fails. A prior page containing only filtered rows cannot authorize
+partial recovery. This replaces the former whole-read rejection after a failed
+continuation or algo read.
+
+Native metadata inconsistencies, impossible/no-progress continuation and the
+fifty-page budget remain strict refusals, even after accepted output. The budget
+spans both order endpoints; a terminal fiftieth page completes. Native signing
+setup/refusal also stays strict and now has the shared `internal` classification
+(previously unclassified), with no write outcome added. Initial unsupported,
+credential, time, limit and market admission checks retain their existing errors.
+Transport and decode errors share the Internal fallback because they reach the
+same terminal callback.
+
+Exact IDs and regular/algo identity spaces, nested protective order mapping,
+settled-only funding, public trade occurrence keys, query/signing bytes,
+account-wide funding start spacing, per-stage limits, final sort/truncation and
+row shapes are preserved. A valid empty result remains complete `[]`. There is
+no history Store publication or managed Context adoption; this adapter retains
+explicit legacy completion authority. Callers must ingest command-scoped
+incomplete warnings, gate coverage accordingly and treat typed rejection as
+unavailable history. SDK adapter work does not imply NX runtime adoption.
+[Scope](RUST_OWNED_HISTORY.md).
+
+
+### MEXC Futures history owns accepted pages across native windows
+
+Fills, order history, funding-only income and public trades complete through
+the shared engine CursorHistory/Completion owner. HTTP/native, transport, decode,
+malformed-row and funding-page failures reject with kind `internal` when no
+eligible output page was accepted. After accepted output, an actual failure
+returns only those accepted pages plus one command-scoped Warn
+`history.incomplete`; failed-page streamed prefixes are excluded. This replaces
+the previous whole-read rejection after a later page or older-window failure.
+A validated page with every row filtered out cannot authorize partial recovery.
+Malformed funding-page metadata likewise excludes that page's entire prefix.
+Transport and decode share the existing failure callback and use the Internal
+fallback, without adding write outcomes.
+
+The existing 1000-page cap remains a strict refusal, even after earlier accepted
+rows; a terminal page 1000 succeeds. Each native 90-day window retains its own
+cap, while the logical owner, accepted output, identities and global result limit
+survive window transitions. Output retains native encounter order. Exact
+newest-first window bounds and request sequence, signing/header bytes, page-size
+selection, funding metadata rules, contract units and timestamps are preserved.
+Order-specific fills and public trades stay single-request reads. Existing
+unsupported-ledger/client-ID, credential, market, time, window-count and limit
+admission errors stay unchanged; valid empty output remains complete `[]`.
+
+No history Store publication, SDK argument, row-shape or managed Context
+migration is added. Callers must ingest command-scoped incomplete-query warnings,
+gate coverage accordingly and treat typed rejection as unavailable history.
+This SDK change does not establish NX runtime adoption.
+[Scope](RUST_OWNED_HISTORY.md).
+
+
 ### Backpack managed command candle stream
 
 Supported `FetchCandles` uses genuine engine Read admission and managed unsigned HTTP. The exact X-Broker-Id header and native /api/v1/klines query survive preparation/bind/re-preparation; streaming starts only after final claim. One original twenty-second root owns the list, with zero automatic retries. Exact delivery validation runs before row parsing, malformed diagnostics and response/status handling, so expired or reused owners cannot publish rows or complete another caller.
