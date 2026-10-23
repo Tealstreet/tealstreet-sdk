@@ -271,3 +271,11 @@ the existing GET 429/5xx policy. `read_retries_three_times_with_linear_delays_an
 asserts those exact delays. Reset clears staged Klines rows/invalid state;
 negative native error envelopes remain terminal. Candle-specific partial-stream,
 retry and immutable-deadline regressions still need their original-RED commit.
+
+Overseer assignment following those requests: Aster V1/V3 signer adoption is
+owned by `codex-sy8pn5` (after ApeX); listen-key adoption is owned by
+`codex-spc1lj`; the same-call retry wakeup requirement remains with
+`codex-uufub4`. Detailed codec, credential-routing, session-generation and exact
+retry-delay requirements were sent to those owners through Aimux. These named
+assignments supersede the provisional routing above; source adoption and shared
+API availability remain unclaimed.
