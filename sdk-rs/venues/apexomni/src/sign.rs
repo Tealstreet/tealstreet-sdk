@@ -642,7 +642,7 @@ fn work(
     let mut start = 0;
     for (position, index, length) in positions {
         payload.push(PayloadPart::Bytes {
-            bytes: text[start..position].as_bytes().to_vec(),
+            bytes: text.as_bytes()[start..position].to_vec(),
         });
         payload.push(PayloadPart::Result {
             index,
@@ -651,7 +651,7 @@ fn work(
         start = position + length;
     }
     payload.push(PayloadPart::Bytes {
-        bytes: text[start..].as_bytes().to_vec(),
+        bytes: text.as_bytes()[start..].to_vec(),
     });
     operations.extend([
         Operation::Present {
