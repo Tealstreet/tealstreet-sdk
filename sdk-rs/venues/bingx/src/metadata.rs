@@ -38,6 +38,9 @@ const STEPS: [StepBound<'static>; 2] = [
     },
 ];
 
+const STEP_WAITS: [u32; 2] = [STEPS[0].wait_ms, STEPS[1].wait_ms];
+const CALLS_PER_STEP: [usize; 2] = [STEPS[0].calls.len(), STEPS[1].calls.len()];
+
 /// One issued metadata read and the native fences its publication needs.
 pub struct Leg {
     plan: Plan,
@@ -444,8 +447,8 @@ fn work_key(credentials: &Credentials, symbol: &str, native: &str, publish: bool
         work: NativeWork {
             kind: "metadata-settings",
             endpoints: &[crate::paths::LEVERAGE, MARGIN_TYPE],
-            step_waits_ms: &[STEPS[0].wait_ms, STEPS[1].wait_ms],
-            calls_per_step: &[STEPS[0].calls.len(), STEPS[1].calls.len()],
+            step_waits_ms: &STEP_WAITS,
+            calls_per_step: &CALLS_PER_STEP,
             root_timeout_ms: 80_000,
             call_timeout_ms: READ[0].timeout_ms,
             attempts: READ[0].attempts,
