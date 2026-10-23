@@ -286,7 +286,11 @@ As built: `sdk-rs/scripts/check-credential-selection.py` +
 venue sites naming `read_credentials`, `ReadCredentials`, `tag_account_read`,
 `ethereum_agent`, `nonce::next` or `NONCES`, plus native `Method::Get` egress
 inference and the TS method/venue-list inference. Inline `#[cfg(test)]` modules
-and test files are excluded. Option fields and setup validation that name
+and test files are excluded (only the `#[cfg(test)] mod` items themselves).
+Counts are per file and term, so neighbouring edits by other lanes never churn
+them; `nonce` imports and `as` renames of frozen names fail outright. A rename
+still reads as a prune, so reviewers confirm every removed count is a real
+adoption. Option fields and setup validation that name
 `read_credentials` stay listed: the inventory is frozen, not required to reach
 zero.
 

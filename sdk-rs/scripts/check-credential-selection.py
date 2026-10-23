@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Exact, shrinking inventory of credential/nonce choices outside the engine core.
+"""Shrinking inventory of credential/nonce choices outside the engine core.
 
 Venues declare a CredentialRole and sign through Slots::select; hosts route on
 declared intent. Every remaining venue-local selection or nonce site, and every
-host GET/header egress inference, is frozen here. Adoption PRs prune their rows;
-no PR may add one. Conservative lexical ban, not Rust name resolution.
-See docs/plans/RUST_CREDENTIAL_SELECTION.md (C4).
+host GET/header egress inference, is counted per file and term. Adoption PRs
+prune their counts; no PR may grow one. Conservative lexical ban, not name
+resolution: a rename reads as a prune, so reviewers confirm every removed count
+is a real adoption. See docs/plans/RUST_CREDENTIAL_SELECTION.md (C4).
 """
 import collections
-import hashlib
 import importlib.util
 import json
 import os
@@ -17,7 +17,6 @@ import re
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-REPO = ROOT.parent
 MANIFEST = 'scripts/credential-legacy-sites.json'
 
 _spec = importlib.util.spec_from_file_location(
@@ -28,74 +27,108 @@ tokens = _request.tokens
 
 # Venue-local key choice, evidence tagging and nonce allocation.
 VENUE_TERMS = {'read_credentials', 'ReadCredentials', 'tag_account_read', 'ethereum_agent', 'NONCES'}
-WINDOW = 6
+NONCE_CALL = 'nonce::next'
+HOST_TERM = 'Method::Get'
 NATIVE_HOST = 'hosts/native/src/routing.rs'
 TS_HOST = '../packages/safe-cex/src/transport/engine.ts'
 # TS egress inference: method sniffing and the hard-coded venue list.
-TS_PATTERNS = [re.compile(r"toUpperCase\(\)\s*===\s*'GET'"),
-               re.compile(r"\['binance',\s*'binancepm',\s*'binanceinverse',\s*'asterdex'\]")]
+TS_PATTERNS = {
+    'GET': re.compile(r"""toUpperCase\(\)\s*===\s*['"]GET['"]"""),
+    'venue-list': re.compile(r"""\[\s*['"]binance['"][^\]]*['"]asterdex['"]\s*\]"""),
+}
 
 
-def digest(parts):
-    payload = json.dumps(parts, ensure_ascii=False, separators=(',', ':'))
-    return hashlib.sha256(payload.encode()).hexdigest()
+def strip_test_modules(stream):
+    """Drop only `#[cfg(test)] mod name;` and `#[cfg(test)] mod name { ... }`."""
+    attribute = ['#', '[', 'cfg', '(', 'test', ')', ']']
+    kept = []
+    i = 0
+    while i < len(stream):
+        j = i + len(attribute)
+        if stream[i:j] == attribute:
+            k = j + (stream[j:j + 1] == ['pub'])
+            if stream[k:k + 1] == ['mod'] and k + 2 < len(stream):
+                if stream[k + 2] == ';':
+                    i = k + 3
+                    continue
+                if stream[k + 2] == '{':
+                    depth, end = 0, k + 2
+                    while end < len(stream):
+                        depth += (stream[end] == '{') - (stream[end] == '}')
+                        end += 1
+                        if not depth:
+                            break
+                    if depth:
+                        raise ValueError('unbalanced test module')
+                    i = end
+                    continue
+        kept.append(stream[i])
+        i += 1
+    return kept
 
 
-def rust_fingerprints(source, native_host=False):
-    stream = tokens(source)
+def evasions(stream):
+    """Aliases and imports that would hide later sites from the counts."""
+    found = []
+    for i, token in enumerate(stream):
+        if token == 'use':
+            end = stream.index(';', i) if ';' in stream[i:] else len(stream)
+            if 'nonce' in stream[i:end]:
+                found.append('nonce import')
+        if token == 'as' and i and stream[i - 1].removeprefix('r#') in VENUE_TERMS | {'nonce', 'next'}:
+            found.append(f'renamed {stream[i - 1]}')
+    return found
+
+
+def rust_counts(source, native_host=False):
+    stream = strip_test_modules(tokens(source))
     found = collections.Counter()
     for i, token in enumerate(stream):
         name = token.removeprefix('r#')
-        venue_site = name in VENUE_TERMS or (
-            name == 'next' and stream[i - 2:i] == ['nonce', '::'])
-        host_site = native_host and name == 'Get' and stream[i - 2:i] == ['Method', '::']
-        if venue_site or host_site:
-            found[digest(stream[max(0, i - WINDOW):i + WINDOW + 1])] += 1
-    return found
+        if name in VENUE_TERMS:
+            found[name] += 1
+        elif name == 'next' and stream[i - 2:i] == ['nonce', '::']:
+            found[NONCE_CALL] += 1
+        elif native_host and name == 'Get' and stream[i - 2:i] == ['Method', '::']:
+            found[HOST_TERM] += 1
+    return found, evasions(stream)
 
 
-def without_test_module(source):
-    """Inline test modules close each file by convention; they are not production."""
-    match = re.search(r'^#\[cfg\(test\)\]\s*\n\s*mod\s', source, re.M)
-    return source[:match.start()] if match else source
-
-
-def ts_fingerprints(source):
-    found = collections.Counter()
-    for line in source.splitlines():
-        if any(pattern.search(line) for pattern in TS_PATTERNS):
-            found[digest(['ts', ' '.join(line.split())])] += 1
-    return found
+def ts_counts(source):
+    return collections.Counter(term for line in source.splitlines()
+                               for term, pattern in TS_PATTERNS.items() if pattern.search(line))
 
 
 def production(path):
-    name = path.name
-    return not (name.endswith('tests.rs') or name.endswith('_test.rs') or 'tests' in path.parts)
+    return not (path.name == 'tests.rs' or path.name.endswith(('_tests.rs', '_test.rs'))
+                or 'tests' in path.parts)
 
 
 def sites():
-    result = {}
-    for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs')):
-        if production(path) and (counts := rust_fingerprints(without_test_module(path.read_text()))):
-            result[str(path.relative_to(ROOT))] = dict(counts)
-    if counts := rust_fingerprints(without_test_module((ROOT / NATIVE_HOST).read_text()), native_host=True):
-        result[NATIVE_HOST] = dict(counts)
-    if counts := ts_fingerprints((ROOT / TS_HOST).read_text()):
+    result, failures = {}, []
+    files = [(str(p.relative_to(ROOT)), p, False)
+             for p in sorted((ROOT / 'venues').glob('*/src/**/*.rs')) if production(p)]
+    for name, path, native in [*files, (NATIVE_HOST, ROOT / NATIVE_HOST, True)]:
+        counts, hidden = rust_counts(path.read_text(), native_host=native)
+        failures += [f'{name}: {reason}' for reason in hidden]
+        if counts:
+            result[name] = dict(counts)
+    if counts := ts_counts((ROOT / TS_HOST).read_text()):
         result[TS_HOST] = dict(counts)
-    return result
+    return result, failures
 
 
 def manifest(text):
     value = json.loads(text)
     if not isinstance(value, dict):
         raise ValueError('manifest must be a path/count map')
+    terms = VENUE_TERMS | {NONCE_CALL, HOST_TERM, *TS_PATTERNS}
     for path, counts in value.items():
         if path not in {NATIVE_HOST, TS_HOST} and not re.fullmatch(r'venues/[A-Za-z0-9_-]+/src/.+\.rs', path):
             raise ValueError('invalid manifest path')
         if not isinstance(counts, dict) or not counts or any(
-                not re.fullmatch(r'[a-f0-9]{64}', d) or type(c) is not int or c <= 0
-                for d, c in counts.items()):
-            raise ValueError('invalid manifest fingerprint/count')
+                term not in terms or type(count) is not int or count <= 0 for term, count in counts.items()):
+            raise ValueError('invalid manifest term/count')
     return value
 
 
@@ -106,7 +139,7 @@ def check(current, allowed, previous):
     for label, baseline in previous:
         for path, counts in allowed.items():
             bound = baseline.get(path, {})
-            if any(count > bound.get(d, 0) for d, count in counts.items()):
+            if any(count > bound.get(term, 0) for term, count in counts.items()):
                 failures.append(f'{path}: inventory grew against {label}')
     return failures
 
@@ -117,18 +150,18 @@ def git(*args):
 
 def previous_manifests():
     base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
+    ref = f'refs/remotes/origin/{base}'
     relative = git('rev-parse', '--show-prefix').strip() + MANIFEST
-    previous = []
-    for ref in [f'refs/remotes/origin/{base}']:
-        git('rev-parse', '--verify', f'{ref}^{{commit}}')
-        if relative in git('ls-tree', '--full-name', '--name-only', ref, '--', MANIFEST).splitlines():
-            previous.append((ref, manifest(git('show', f'{ref}:{relative}'))))
-    return previous
+    git('rev-parse', '--verify', f'{ref}^{{commit}}')
+    if relative in git('ls-tree', '--full-name', '--name-only', ref, '--', MANIFEST).splitlines():
+        return [(ref, manifest(git('show', f'{ref}:{relative}')))]
+    return []
 
 
 def main():
     try:
-        failures = check(sites(), manifest((ROOT / MANIFEST).read_text()), previous_manifests())
+        current, failures = sites()
+        failures += check(current, manifest((ROOT / MANIFEST).read_text()), previous_manifests())
     except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:
         failures = [f'cannot verify credential inventory: {type(error).__name__}']
     for failure in failures:
@@ -138,5 +171,5 @@ def main():
 
 if __name__ == '__main__':
     if os.environ.get('CREDENTIAL_INVENTORY_WRITE') == '1':
-        (ROOT / MANIFEST).write_text(json.dumps(sites(), indent=2, sort_keys=True) + '\n')
+        (ROOT / MANIFEST).write_text(json.dumps(sites()[0], indent=2, sort_keys=True) + '\n')
     raise SystemExit(main())
