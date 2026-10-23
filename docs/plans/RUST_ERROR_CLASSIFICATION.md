@@ -417,4 +417,13 @@ Each PR lists its exact deltas under [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALL
 - A batch whose only effects are `Satisfied` items records `KnownPartial`
   without partial counts. The journal already treats that as known effects
   without IDs.
+- 2026-10-23, phase 2c (#1857): engine-owned reconcile of uncertain writes,
+  plus three items from the Bybit adoption rulings (claude-ddi2il):
+  - narrowing Amend→Setting (attached TP/SL legs);
+  - a separately declared `http_write_protection_cancel_leg` (Amend→Cancel,
+    only for a cancel-then-recreate whose replacement is position-bound);
+  - Satisfied(Cancel) reconcile marking: the command's symbols are fenced in
+    the order-lock uncertainty map and exactly one `reconcile_uncertain` read is
+    queued. It is not a Cancelled transition, and only `orders_reconciled`
+    clears the fence.
 
