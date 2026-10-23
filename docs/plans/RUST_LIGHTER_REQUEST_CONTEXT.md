@@ -376,7 +376,8 @@ This is the largest currently unblocked coherent slice found in the fresh
 open-PR file map. Hyperliquid spot candles could prune6 but #1877 holds the
 existing test that explicitly requires merged spot to remain legacy. Paradex
 candles could prune6 but retain klines-to-TradingView fallback and polling, which
-require shared plan/attempt authority; identity/private paths also wait on shared
+require a separate shared multi-attempt authority audit (the existing Read retry
+API is not absent); identity/private paths also wait on shared
 session/signing cores. Lighter identity/catalog have native multi-attempt fallback;
 its independent ticker/depth public pair prunes2, GRVT catalog prunes1, and the
 already planned unsigned Paradex public trades consumer prunes1. GRVT session
