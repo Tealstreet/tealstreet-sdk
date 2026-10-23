@@ -6108,3 +6108,25 @@ This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_ADOPTION.md).
   already do. The demo `x-simulated-trading: 1` header comes from the
   recipe's unsigned-header declaration. Writes, history, candles and socket
   login are unchanged.
+
+### OKX caller adoption: fetchCandles (slice 2)
+
+This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_CANDLES.md).
+
+- **Bounded by one deadline.** Candle reads stay public and unsigned, with
+  the same URLs, limits, history fallback and row shape. They are now managed
+  public reads. The recent page and the history fallback share one 20 s
+  budget per command, so the fallback gets only what is left of it.
+- **Soft-empty on any post-send failure.** A venue error, HTTP error, bad row,
+  transport failure or timeout still gives one error event and then an empty
+  `[]` result. An unanswered read ends with the error event `HTTP request
+  timed out`. A late reply after the result is ignored. If the history
+  fallback cannot be admitted (capacity), the soft result applies, because
+  the recent page was already sent. More than 256 outstanding managed reads
+  are refused with one typed capacity failure before any HTTP.
+- **Pre-send deadline is hard.** If the host never finishes route
+  preparation, nothing is sent and the deadline gives one typed failure
+  (`HTTP request timed out`, Timeout, NotSent) with no `[]` result.
+- **Refusals are unchanged.** Unknown market still answers `[]`. Invalid
+  bounds and unsupported bars keep their text, with no kind or outcome. Live
+  candle subscriptions are unchanged.
