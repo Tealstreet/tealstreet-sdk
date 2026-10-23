@@ -691,15 +691,24 @@ It shares identical Binance-family wire records, not Binance socket/depth/auth
 or order-lifecycle policy. Public books retain the documented depth20 snapshot
 contract. Native URLs carry socket roles; host transports apply account routing.
 
-- Rust owns API-version inference and exposes the resolved version as WASM
-  construction metadata. The wrapper sends only explicit overrides; synchronous
-  pre-host getters retain TS inference until async WASM initialization completes.
+- Rust signs only through the injected provider at dispatch. Trusted setup
+  (`exchanges/rust/asterdexSignerSetup.ts`, native
+  `sdk-rs/registry/src/asterdex_setup.rs`) resolves the API version from the
+  material's shape, sends it with the public signer addresses, and hands key
+  material only to the provider. V3 wallet keys are trimmed hex; V1 secrets
+  stay byte-exact. See `docs/plans/RUST_ASTER_SIGNER_ADMISSION.md`.
 - Both V1 and V3 are supported. The exact standard-V3 ABI/EIP-191 versus Code
   EIP-712 split above is preserved, with independent ethers signature vectors.
-- The wrapper forwards explicit auth/version, builder policy, and secondary
-  read agent options. GET requests use the read agent and its CORS route;
-  writes/listen keys retain the primary agent. Other venues retain their prior
-  explicit secondary-key rejection.
+- Browser-hosted signing (`signHttpRequest`) supports V1 only, through
+  `asterdex.signing.ts`'s standalone V1 request codec, which the TS venue also
+  uses. The host admits an account only when setup resolved an explicit V1, so
+  V3 wallet keys never become HMAC keys. Hosted WS auth is refused; Aster uses a
+  listen key. Hosted stamps come from the host's shared clock, not
+  `asterDEXVirtualClock`.
+- The wrapper forwards builder policy and public auth addresses. The read
+  agent is a provider slot; with an `auth.privateKey` wallet it signs with the
+  primary wallet's ref. Reads use the read agent and its secondary route;
+  writes and listen keys keep the primary agent.
 - Private reconciliation commits each domain atomically and rejects stale
   snapshots, including mode reads invalidated by later mode-write acknowledgements.
   Unique native executions emit even when their order-state payload is older.

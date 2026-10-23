@@ -38,6 +38,10 @@ mod read_delivery_tests;
 #[path = "execution_registry.rs"]
 mod execution;
 
+#[cfg(test)]
+#[path = "request_context_background_delivery_tests.rs"]
+mod background_delivery_tests;
+
 struct CommandOwner {
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
@@ -198,9 +202,42 @@ pub(super) struct ContextRegistry {
     plan_index: Vec<CommandId>,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
+    /// Order-read epoch at each live owner's first released Read: one logical
+    /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
+    #[cfg(feature = "order-locks")]
+    read_marks: HashMap<Owner, u64>,
 }
 
 impl ContextRegistry {
+    /// The order-read token for a Read released now under `owner`: the epoch of
+    /// its earliest released Read. A mark only ever keeps a fence longer.
+    #[cfg(feature = "order-locks")]
+    pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
+        *self.read_marks.entry(owner).or_insert(epoch)
+    }
+    #[cfg(all(test, feature = "order-locks"))]
+    pub(super) fn read_mark_count(&self) -> usize {
+        self.read_marks.len()
+    }
+    /// A mark lives while its owner does: a live context, or a command owner in
+    /// any phase (a serial Plan between steps has no current context).
+    #[cfg(feature = "order-locks")]
+    fn forget_dead_read_marks(&mut self) {
+        if self.read_marks.is_empty() {
+            return;
+        }
+        let mut live: std::collections::HashSet<Owner> =
+            self.contexts.values().map(Context::owner).collect();
+        live.extend(self.commands.iter().map(|(id, owner)| Owner::Command {
+            id: *id,
+            generation: owner.generation,
+        }));
+        self.read_marks.retain(|owner, _| live.contains(owner));
+    }
+    fn forget_read_mark(&mut self, _owner: Owner) {
+        #[cfg(feature = "order-locks")]
+        self.read_marks.remove(&_owner);
+    }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
         self.commands.retain(|_, old| {
@@ -211,6 +248,8 @@ impl ContextRegistry {
                 || old.deliveries > 0
                 || old.waits > 0
         });
+        #[cfg(feature = "order-locks")]
+        self.forget_dead_read_marks();
     }
     pub(super) fn command_entry_unowned(&self, command: CommandId) -> bool {
         !self.commands.contains_key(&command)
@@ -236,6 +275,7 @@ impl ContextRegistry {
         };
         self.commands.remove(&command);
         self.contexts.retain(|_, context| context.owner() != old);
+        self.forget_read_mark(old);
         true
     }
 
@@ -588,6 +628,8 @@ impl ContextRegistry {
             .expect("validated journal")
             .replace(delivery.attempt.request, &legs)?;
         self.contexts.retain(|_, context| context.deadline() > now);
+        #[cfg(feature = "order-locks")]
+        self.forget_dead_read_marks();
         self.contexts.extend(
             children
                 .iter()
@@ -1128,6 +1170,7 @@ impl ContextRegistry {
                     owner.phase = CommandPhase::Retiring(token.clone());
                     self.contexts
                         .retain(|_, context| context.owner() != token.preflight().owner());
+                    self.forget_read_mark(token.preflight().owner());
                     self.retirements.push_back(token);
                     return true;
                 }
@@ -1138,13 +1181,13 @@ impl ContextRegistry {
         }
         self.forget_observer(command);
         if let Some(owner) = self.commands.remove(&command) {
-            self.contexts.retain(|_, context| {
-                context.owner()
-                    != Owner::Command {
-                        id: command,
-                        generation: owner.generation,
-                    }
-            });
+            let retired = Owner::Command {
+                id: command,
+                generation: owner.generation,
+            };
+            self.contexts
+                .retain(|_, context| context.owner() != retired);
+            self.forget_read_mark(retired);
         }
         true
     }
@@ -1329,6 +1372,29 @@ impl<P> Cx<'_, P> {
             .commands
             .get(&id)
             .is_none_or(|owner| owner.context_root() != Some(root))
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
+    /// Validate a Background Read in this exact managed HTTP callback. Publish
+    /// synchronously after validation, before retiring the Context. Native
+    /// response validity and publication freshness remain separate requirements.
+    /// Failure callbacks also carry delivery identity, but prove no response data.
+    /// This grants no send, retry, session or command completion authority.
+    pub fn validate_background_read_http_delivery(&self, context: &Context) -> Result<(), Error> {
+        self.validate_http_context(context)?;
+        if context.operation() != Operation::Read
+            || !matches!(context.owner(), Owner::Background { .. })
+        {
+            return Err(Error::Invalid);
+        }
+        if self
+            .io
+            .http_delivery
+            .as_ref()
+            .is_none_or(|delivery| delivery.context != *context)
         {
             return Err(Error::Revoked);
         }
