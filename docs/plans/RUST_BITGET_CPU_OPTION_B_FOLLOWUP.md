@@ -196,3 +196,15 @@ request-budget controls pass, including sparse file roots, directory descendants
 adjacent names and poisoned ancestor metadata. This is verifier overhead only;
 no venue performance result follows from it. Independent review and corrected
 source CI qualify the implementation separately from preserved timing cohorts.
+
+### Offline coordinator dependencies
+
+The first coordinator attempt fails when its dynamic collection import loads the
+existing venue oracle without installed dependencies. Both offline coordinators
+must use the repository's pinned Yarn preparation and locked installation actions
+before invoking the shared verifier. They collect no timings and rebuild no WASM.
+The second runner and required-name wrappers remain install-free: the second
+restores the authenticated original runtime before importing collection code.
+Add workflow controls that reject missing or late coordinator bootstrap and any
+bootstrap added to second/wrapper jobs. Keep original failed logs and remeasure
+only in fresh corrected-source CI; no dependency fallback or comparison rewrite.

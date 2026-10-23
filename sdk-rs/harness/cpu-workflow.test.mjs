@@ -45,6 +45,17 @@ function verifyWorkflow(text) {
     assert.doesNotMatch(supplemental, /(?:yarn|npm|cargo|rustup) (?:install|build|add)|rust:build|--command prepare/);
     assert.doesNotMatch(supplemental, /continue-on-error|gh run rerun|retries|retry:/);
   }
+  for (const coordinator of [plan, certify]) {
+    const prepare = coordinator.indexOf('uses: ./.github/actions/prepare-yarn');
+    const install = coordinator.indexOf('uses: ./.github/actions/install-yarn');
+    const execute = coordinator.indexOf('run: node sdk-rs/harness/cpu-ci.mjs');
+    assert(prepare >= 0 && install > prepare && execute > install, 'coordinator needs locked dependencies before verifier imports');
+    assert.match(coordinator, /cache-dir: \$\{\{ steps\.yarn\.outputs\.cache-dir \}\}/);
+    assert.match(coordinator, /cache-key: \$\{\{ steps\.yarn\.outputs\.cache-key \}\}/);
+    assert.match(coordinator, /cache-hit: \$\{\{ steps\.yarn\.outputs\.cache-hit \}\}/);
+  }
+  for (const installFree of [second, final])
+    assert.doesNotMatch(installFree, /uses: \.\/\.github\/actions\/(?:prepare-yarn|install-yarn)/);
   assert.doesNotMatch(first, /continue-on-error/);
 }
 
