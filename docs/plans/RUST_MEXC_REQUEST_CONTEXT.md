@@ -313,3 +313,45 @@ Clippy and both ratchets (13 controls) pass. Exact inventory is40 occurrences /
 Independent source/adversarial, caller and full-map reviews are clean, architecture
 No. This checkpoint is on actual #1830 and phase-one landingbc91; actual #1820
 integration and fresh CI remain required before the overseer's merge window.
+
+## Initial plan-list credential refusal
+
+Re-verified after #1786 on landing `e37a80b8c4445e2de45abec7fa3f494ee0561888`,
+with actual #1854 engine `e2b03d5592a`. Initial MODE already terminates startup
+for the existing parsed native credential refusals. The initial Plan snapshot
+still falls through to generic retry after MODE succeeds. This separate fix
+extends that same refusal path only to Plan reads before the first complete
+orders snapshot. Successful and later account refresh behavior stays native.
+
+Use the existing auth_rejection helper and typed StartupFailed publication,
+including its native code/message and primary-invalid-key deactivation policy.
+Keep terminal account state from resuming HTTP through a later poll or private
+login. Do not change markets/tickers startup, transient private failures, bare
+HTTP401/403 responses, ordinary rate limiting or unrelated snapshot scopes.
+There is no signer, RequestContext or error-table migration in this slice.
+
+Before production edits, separately commit original-source RED controls for
+initial Plan AuthInvalid/AuthExpired/AuthPermission refusals, exactly one typed
+startup terminal, no successful orders initialization and no resumed account
+HTTP after sibling callbacks or private login. Keep negative controls for
+transient initial Plan failures and post-startup/scoped refusals. Then run full
+MEXC+Binance native tests, scoped fmt/strict Clippy, both ratchets and independent
+source/adversarial, caller and full-map reviews. Inventory remains unchanged.
+The account implementation, its account tests, narrow lib.rs stream-error
+routing and append-only ledgers are needed; history #1793 stays excluded.
+Complete error envelopes without a data list use the same refusal check through
+on_stream_error; a successful envelope without its expected list remains a
+retryable malformed snapshot. Terminal state discards late snapshot pages and
+blocks both existing and newly requested asset refreshes without rearming polls. Architecture No: reuse existing native refusal facts and
+engine startup authority rather than adding another policy implementation.
+
+### Initial Plan refusal verification
+
+Plan d015560d56a precedes separate original-source RED tests d759c610dda
+(two failures, two negative controls passing). The implemented fix passes all
+44 account tests and full MEXC+Binance native suites:456 tests across40 targets.
+Scoped formatting, strict all-target Clippy and both integrated request-context
+checks pass, including14 scanner controls. Independent source/adversarial, caller
+and full-map reviews are clean, architecture No. Actual #1786 and #1854 are
+integrated, and all incoming Crypto.com #1818 work is preserved. Inventory is
+identical to incoming; only native initial-Plan refusal behavior changes.
