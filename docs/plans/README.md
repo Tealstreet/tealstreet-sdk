@@ -248,4 +248,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Bitrue local leverage preflights | Focused adoption plan | Before converting synchronous unknown-market/absent-credential leverage refusals to shared command authority. | [RUST_BITRUE_LOCAL_LEVERAGE_CONTEXT.md](RUST_BITRUE_LOCAL_LEVERAGE_CONTEXT.md) |
 | Phemex local history command Contexts | Plan; original REDs next | Before changing synchronous history/income terminals or their engine admission. | [RUST_PHEMEX_LOCAL_HISTORY_CONTEXT.md](RUST_PHEMEX_LOCAL_HISTORY_CONTEXT.md) |
 | MEXC synchronous read command custody | Draft adoption; local checks pass | Before changing local history/leverage refusals, genuine command entry or the exact eight-site prune | [RUST_MEXC_LOCAL_READ_CONTEXT.md](RUST_MEXC_LOCAL_READ_CONTEXT.md) |
+
+| Paradex public-trades Read history | Consumer plan | Before migrating the native unsigned single-page public trade command through the reviewed history bridge. | [RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md](RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md) |
 | [Bitget CPU option-B follow-up](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md) | Shared second-runner CPU remeasurement, two-run mean and fail-closed certification; enabled for every CPU-gated suite, with unchanged tapes and thresholds. |
