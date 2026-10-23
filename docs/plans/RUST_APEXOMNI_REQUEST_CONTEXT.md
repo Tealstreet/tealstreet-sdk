@@ -347,7 +347,8 @@ Base: actual `bc91dc15d705f7d388ab3df46fa8c3ffb9395822`, after the first managed
 Use actual #1830 `admit_http_command` in `public.rs::start_candles` with the
 existing public Read policy, 20-second root and read retry budget. The engine
 owns initial rejection and its terminal; remove the helper's numeric command ID,
-error return and the caller's numeric failure fallback. Keep native interval
+error return and the caller's numeric failure fallback. A revoked entry has no
+completion rights and returns without a terminal. Keep native interval
 validation before entry, and preserve query bytes, retries and delivery codecs.
 No signer, session, engine or private source edits are needed.
 
