@@ -471,6 +471,17 @@ Migrated focused suites pass1253 native tests; strict all-target Clippy, scoped
 fmt, bans and root checks pass. Both independent implementation reviews confirm
 that only reporter memory/adapters changed in the three production files.
 
+Kraken futures histories now adopt existing CursorHistory for staged admission,
+identity/cursor progress, fifty-page bounds and query-owned completion/coverage.
+No venue-local HISTORY_INCOMPLETE emitter or accepted-row owner remains. Actual
+first/zero-eligible failure rejects typed; later actual loss returns admitted
+rows only. Missing/conflicting continuation proof, repeated/empty/no-fresh
+continuations and cap exhaustion stay strict; a terminal fiftieth page completes.
+Closed-order folds cannot admit a failed newer prefix. Ledger since-only gap
+precedence, eligible limit suppression, exact native units/IDs/request sequences
+and strict consuming setup are preserved. Other adapters, B11/runtime proof and
+managed Context completion remain open. [Scope](RUST_OWNED_HISTORY.md).
+
 KuCoin owner-adoption regression plan: original-source controls pin
 initial typed rejects, accepted-only later recovery, failed-page/retry identity
 isolation, strict ledger/funding/census proofs, concurrent owner attribution and
