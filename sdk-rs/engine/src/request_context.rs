@@ -8,6 +8,8 @@ use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
 
 #[path = "http_evidence.rs"]
 mod evidence;
+pub(crate) use evidence::ResponseProof;
+pub use evidence::UnprovenEvidence;
 #[path = "http_reconciliation.rs"]
 mod reconciliation;
 pub use reconciliation::ReconciliationData;
@@ -214,6 +216,9 @@ impl Context {
     }
     pub fn deadline(&self) -> f64 {
         self.deadline
+    }
+    pub(crate) fn pacing(&self) -> Option<Pacing> {
+        self.pacing
     }
 
     pub fn with_retry(mut self, policy: RetryPolicy) -> Result<Self, Error> {
@@ -436,11 +441,11 @@ impl Permit {
 }
 
 fn token_attempt(request: u64, generation: u64) -> Result<Attempt, Error> {
-    if request == 0 || generation == 0 {
+    if request == 0 || request > crate::resource_ids::MAX_RESOURCE_ID || generation == 0 {
         return Err(Error::Invalid);
     }
     Ok(Attempt {
-        request: RequestId(u32::try_from(request).map_err(|_| Error::Invalid)?),
+        request: RequestId(request),
         generation,
     })
 }
@@ -836,10 +841,18 @@ struct WriteAttempt {
     id_overflow: bool,
 }
 
+struct WriteLeg {
+    id: u64,
+    // Stable append-only indexes; ordinal preserves the declared child order.
+    parent: Option<(usize, usize)>,
+    superseded: bool,
+}
+
 /// Bounded evidence retained for the whole command, including prior retries.
 /// Registration order is logical planning order, never callback arrival order.
 pub struct CommandWrites {
     attempts: Vec<WriteAttempt>,
+    legs: Vec<WriteLeg>,
     capacity: usize,
     sealed: bool,
     report_bytes: usize,
@@ -853,6 +866,7 @@ impl CommandWrites {
         }
         Ok(Self {
             attempts: Vec::new(),
+            legs: Vec::new(),
             capacity,
             sealed: false,
             report_bytes: 0,
@@ -867,8 +881,20 @@ impl CommandWrites {
         if self.attempts.iter().any(|a| a.id == id || a.leg == leg) {
             return Err(Error::Duplicate);
         }
-        if self.attempts.len() >= self.capacity {
-            return Err(Error::Capacity);
+        if let Some(reserved) = self.legs.iter().find(|entry| entry.id == leg) {
+            if reserved.superseded {
+                return Err(Error::Revoked);
+            }
+            // The first physical attempt consumes this already-counted slot.
+        } else {
+            if self.occupied() >= self.capacity {
+                return Err(Error::Capacity);
+            }
+            self.legs.push(WriteLeg {
+                id: leg,
+                parent: None,
+                superseded: false,
+            });
         }
         self.attempts.push(WriteAttempt {
             id,
@@ -890,7 +916,7 @@ impl CommandWrites {
         if self.attempts.iter().any(|a| a.id == id) {
             return Err(Error::Duplicate);
         }
-        if self.attempts.len() >= self.capacity {
+        if self.occupied() >= self.capacity {
             return Err(Error::Capacity);
         }
         let old = self
@@ -898,7 +924,8 @@ impl CommandWrites {
             .iter()
             .find(|a| a.id == previous)
             .ok_or(Error::Invalid)?;
-        if old.id_overflow
+        if !self.active(old.leg)
+            || old.id_overflow
             || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
             || self.attempts.iter().rposition(|a| a.leg == old.leg)
                 != self.attempts.iter().position(|a| a.id == previous)
@@ -916,7 +943,133 @@ impl CommandWrites {
         });
         Ok(())
     }
+
+    /// Reserve every replacement leaf before superseding an effects-free
+    /// refused batch. The registry supplies engine-issued child leg identities.
+    /// This preserves physical history; it does not grant transport authority.
+    pub fn replace(&mut self, previous: RequestId, children: &[u64]) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let old = self
+            .attempts
+            .iter()
+            .find(|attempt| attempt.id == previous)
+            .ok_or(Error::Invalid)?;
+        if !old.released
+            || old.id_overflow
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self.latest(old.leg) != Some(previous)
+        {
+            return Err(Error::RetryForbidden);
+        }
+        if children.is_empty() {
+            return Err(Error::Invalid);
+        }
+        if self
+            .occupied()
+            .checked_add(children.len())
+            .is_none_or(|count| count > self.capacity)
+        {
+            return Err(Error::Capacity);
+        }
+        for (index, child) in children.iter().enumerate() {
+            if children[..index].contains(child) || self.legs.iter().any(|leg| leg.id == *child) {
+                return Err(Error::Duplicate);
+            }
+        }
+        let parent = self
+            .legs
+            .iter()
+            .position(|leg| leg.id == old.leg)
+            .expect("physical attempts have logical legs");
+        self.legs
+            .try_reserve(children.len())
+            .map_err(|_| Error::Capacity)?;
+        // No fallible operation after this point; failed admission retains the
+        // original refusal and leaves its delivery authority unsuperseded.
+        self.legs[parent].superseded = true;
+        self.legs
+            .extend(children.iter().enumerate().map(|(ordinal, id)| WriteLeg {
+                id: *id,
+                parent: Some((parent, ordinal)),
+                superseded: false,
+            }));
+        Ok(())
+    }
+
+    fn occupied(&self) -> usize {
+        self.attempts.len()
+            + self
+                .legs
+                .iter()
+                .filter(|leg| !self.attempts.iter().any(|attempt| attempt.leg == leg.id))
+                .count()
+    }
+
+    fn active(&self, leg: u64) -> bool {
+        self.legs
+            .iter()
+            .any(|entry| entry.id == leg && !entry.superseded)
+    }
+
+    pub(crate) fn superseded(&self, leg: u64) -> bool {
+        self.legs
+            .iter()
+            .any(|entry| entry.id == leg && entry.superseded)
+    }
+
+    fn terminal(&self, attempt: &WriteAttempt) -> bool {
+        self.latest(attempt.leg) == Some(attempt.id)
+    }
+
+    fn order(&self, leg: u64) -> Vec<u64> {
+        let mut index = self
+            .legs
+            .iter()
+            .position(|entry| entry.id == leg)
+            .expect("known leg");
+        let mut path = Vec::new();
+        while let Some((parent, ordinal)) = self.legs[index].parent {
+            path.push(ordinal as u64);
+            index = parent;
+        }
+        path.push(self.legs[index].id);
+        path.reverse();
+        path
+    }
+
+    fn ordered_attempts(&self) -> Vec<&WriteAttempt> {
+        let mut attempts: Vec<_> = self.attempts.iter().collect();
+        attempts.sort_by_cached_key(|attempt| self.order(attempt.leg));
+        attempts
+    }
+
+    fn reached(&self, leg: u64) -> bool {
+        let mut index = self
+            .legs
+            .iter()
+            .position(|entry| entry.id == leg)
+            .expect("known leg");
+        loop {
+            if self
+                .attempts
+                .iter()
+                .any(|attempt| attempt.leg == self.legs[index].id && attempt.released)
+            {
+                return true;
+            }
+            match self.legs[index].parent {
+                Some((parent, _)) => index = parent,
+                None => return false,
+            }
+        }
+    }
+
     pub(crate) fn latest(&self, leg: u64) -> Option<RequestId> {
+        if !self.active(leg) {
+            return None;
+        }
         self.attempts
             .iter()
             .rfind(|attempt| attempt.leg == leg)
@@ -961,6 +1114,38 @@ impl CommandWrites {
             RejectionReports::default()
         };
         self.result_with_reports(id, result, reports)
+    }
+
+    /// Record an unproven released response using the same retained-evidence
+    /// quota. No native callback runs until the attempt has passed admission.
+    pub(crate) fn unproven_result(
+        &mut self,
+        id: RequestId,
+        status: u16,
+        capture: impl FnOnce(&mut UnprovenEvidence),
+    ) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let index = self
+            .attempts
+            .iter()
+            .position(|attempt| attempt.id == id)
+            .ok_or(Error::Invalid)?;
+        let attempt = &self.attempts[index];
+        if self.latest(attempt.leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        if !attempt.released || attempt.result.is_some() {
+            return Err(Error::State);
+        }
+        let mut evidence = UnprovenEvidence::new(self.evidence, status)?;
+        capture(&mut evidence);
+        let (budget, error, overflow) = evidence.finish();
+        self.attempts[index].result = Some(WriteResult::Failed(error));
+        self.attempts[index].id_overflow = overflow;
+        self.evidence = budget;
+        Ok(())
     }
 
     /// Atomic native fact plus bounded presentation metadata. A metadata refusal
@@ -1014,12 +1199,12 @@ impl CommandWrites {
         if self.sealed || self.attempts.is_empty() || self.attempts.iter().any(|a| a.id_overflow) {
             return Err(Error::State);
         }
-        let accepted = self.attempts.iter().enumerate().all(|(index, attempt)| {
-            self.attempts[index + 1..]
-                .iter()
-                .any(|later| later.leg == attempt.leg)
-                || (attempt.released
-                    && matches!(attempt.result, Some(WriteResult::Accepted { .. })))
+        let accepted = self.legs.iter().filter(|leg| !leg.superseded).all(|leg| {
+            self.latest(leg.id)
+                .and_then(|id| self.attempts.iter().find(|attempt| attempt.id == id))
+                .is_some_and(|attempt| {
+                    attempt.released && matches!(attempt.result, Some(WriteResult::Accepted { .. }))
+                })
         });
         if !accepted {
             return Err(Error::State);
@@ -1043,18 +1228,23 @@ impl CommandWrites {
                     || self.attempts[index + 1..]
                         .iter()
                         .any(|later| later.leg == a.leg && !later.released))
+        }) || self.legs.iter().any(|leg| {
+            !leg.superseded
+                && leg.parent.is_some()
+                && self.latest(leg.id).is_none_or(|id| {
+                    self.attempts
+                        .iter()
+                        .find(|attempt| attempt.id == id)
+                        .is_none_or(|attempt| !attempt.released)
+                })
         });
         let all_rejected = any_released
             && self
                 .attempts
                 .iter()
-                .enumerate()
-                .filter(|(_, a)| a.released)
-                .all(|(index, a)| {
+                .filter(|attempt| attempt.released && self.terminal(attempt))
+                .all(|a| {
                     matches!(&a.result, Some(WriteResult::Rejected(error)) if effects_free(error))
-                        && !self.attempts[index + 1..]
-                            .iter()
-                            .any(|later| later.leg == a.leg && !later.released)
                 });
         let error = |a: &WriteAttempt| match &a.result {
             Some(
@@ -1066,25 +1256,12 @@ impl CommandWrites {
         };
         // Choose the terminal physical attempt of the earliest logical leg,
         // preferring legs that reached the venue. Callback order is irrelevant.
-        let terminal = |index: usize, a: &WriteAttempt| {
-            !self.attempts[index + 1..]
-                .iter()
-                .any(|later| later.leg == a.leg)
-        };
         let select = |sent_only: bool| {
             self.attempts
                 .iter()
-                .enumerate()
-                .filter(|(index, a)| {
-                    terminal(*index, a)
-                        && (!sent_only
-                            || self
-                                .attempts
-                                .iter()
-                                .any(|other| other.leg == a.leg && other.released))
-                })
-                .filter_map(|(_, a)| error(a).map(|error| (a.leg, error)))
-                .min_by_key(|(leg, _)| *leg)
+                .filter(|a| self.terminal(a) && (!sent_only || self.reached(a.leg)))
+                .filter_map(|a| error(a).map(|error| (self.order(a.leg), error)))
+                .min_by(|(a, _), (b, _)| a.cmp(b))
                 .map(|(_, error)| error)
         };
         let selected = select(true).or_else(|| select(false));
@@ -1116,11 +1293,14 @@ impl CommandWrites {
             // existing partial contract; do not invent execution uncertainty.
             None
         };
+        // Preserve the selected native/fallback evidence prefix exactly. Append
+        // additional facts in logical replacement order, without charging known
+        // IDs again or reordering a bounded retained prefix.
         let mut ids = error
             .partial
             .as_ref()
-            .map_or_else(Vec::new, |p| p.order_ids.clone());
-        for attempt in &self.attempts {
+            .map_or_else(Vec::new, |partial| partial.order_ids.clone());
+        for attempt in self.ordered_attempts() {
             let order_ids = attempt.result.as_ref().map(WriteResult::order_ids);
             if let Some(order_ids) = order_ids {
                 for id in order_ids {
@@ -1147,15 +1327,10 @@ impl CommandWrites {
     /// A refusal recovered by a later attempt is history, not a rejected leg.
     /// Reading evidence never reopens a sealed command or emits another result.
     pub fn rejections(&self) -> impl Iterator<Item = (RequestId, &VenueError)> {
-        self.attempts
-            .iter()
-            .enumerate()
-            .filter(|(index, attempt)| {
-                !self.attempts[index + 1..]
-                    .iter()
-                    .any(|later| later.leg == attempt.leg)
-            })
-            .filter_map(|(_, attempt)| match &attempt.result {
+        self.ordered_attempts()
+            .into_iter()
+            .filter(|attempt| self.terminal(attempt))
+            .filter_map(|attempt| match &attempt.result {
                 Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
                     Some((attempt.id, error))
                 }
@@ -1166,20 +1341,9 @@ impl CommandWrites {
     /// Engine-issued logical leg ids carry planning order, independently of
     /// physical registration/callback order and the position of a later retry.
     pub fn reports(&self) -> impl Iterator<Item = &str> {
-        let mut terminal: Vec<_> = self
-            .attempts
-            .iter()
-            .enumerate()
-            .filter(|(index, attempt)| {
-                !self.attempts[index + 1..]
-                    .iter()
-                    .any(|later| later.leg == attempt.leg)
-            })
-            .map(|(_, attempt)| attempt)
-            .collect();
-        terminal.sort_unstable_by_key(|attempt| attempt.leg);
-        terminal
+        self.ordered_attempts()
             .into_iter()
+            .filter(|attempt| self.terminal(attempt))
             .flat_map(|last| last.reports.messages.iter().map(String::as_str))
     }
 }
@@ -1202,3 +1366,7 @@ mod report_tests;
 #[cfg(test)]
 #[path = "request_context_evidence_tests.rs"]
 mod evidence_tests;
+
+#[cfg(test)]
+#[path = "request_context_replacement_tests.rs"]
+mod replacement_tests;

@@ -327,6 +327,17 @@ capability fallbacks are never wrapped, so `capabilities` keeps reporting them.
 
 ## Rust engine failure
 
+Physical socket/request/signing/timer IDs are exact JS-safe integers through
+`2^53 - 1`; command IDs and durations retain their existing bounds. Host adapters
+must not coerce resource IDs to 32 bits. WASM rejects malformed numeric IDs before
+parsing payloads or advancing clocks. Checked allocator exhaustion is sticky and
+uses the same terminal path as a trap, withholding the complete queued output
+batch. Workers retire their host and flush intervals before reporting terminal
+StartupFailed; captured pending write failures still reach their original owner
+across replacement, while stale successes and diagnostics remain suppressed.
+Native account streams settle pending owners Internal/Unknown and replay only the
+terminal notice, without constructing a frame from the failed engine.
+
 A native WASM trap makes that exchange instance terminal (`isEngineDead`),
 settles its pending commands and emits `engine-dead` after one visible error.
 The host stops its I/O and ignores late callbacks. Ordinary venue validation,

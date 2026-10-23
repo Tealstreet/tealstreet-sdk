@@ -10,8 +10,18 @@ use std::collections::HashMap;
 
 const CAPACITY: usize = 256;
 
+#[cfg(test)]
+#[path = "request_context_replacement_registry_tests.rs"]
+mod replacement_tests;
+
+#[cfg(test)]
+#[path = "request_context_read_delivery_tests.rs"]
+mod read_delivery_tests;
+
 struct CommandOwner {
     generation: u64,
+    /// Exact logical completion authority survives expired-handle cleanup.
+    completion_root: Context,
     /// Owner retention only. This never extends any issued logical deadline.
     last_deadline: f64,
     writes: Option<CommandWrites>,
@@ -52,7 +62,7 @@ impl ContextRegistry {
 
     fn issue(
         &mut self,
-        identity: u32,
+        identity: u64,
         scope: Scope,
         policy: Policy,
         now: f64,
@@ -62,7 +72,7 @@ impl ContextRegistry {
 
     fn issue_bound(
         &mut self,
-        identity: u32,
+        identity: u64,
         scope: Scope,
         policy: Policy,
         now: f64,
@@ -93,7 +103,6 @@ impl ContextRegistry {
         {
             return Err(Error::State);
         }
-        let identity = u64::from(identity);
         let owner = match parent.map(Context::owner) {
             Some(owner) => owner,
             None => match scope {
@@ -145,6 +154,7 @@ impl ContextRegistry {
                 })
                 .or_insert(CommandOwner {
                     generation,
+                    completion_root: context.clone(),
                     last_deadline,
                     writes: None,
                     mutation_declared: context.operation() == Operation::Mutation,
@@ -156,6 +166,112 @@ impl ContextRegistry {
         Ok(context)
     }
 
+    fn replace(
+        &mut self,
+        parent: &Context,
+        delivery: &Delivery,
+        first: u64,
+        policies: &[Policy],
+        now: f64,
+    ) -> Result<Vec<Context>, Error> {
+        self.validate(parent, now)?;
+        if parent.operation() != Operation::Mutation || delivery.context != *parent {
+            return Err(Error::Revoked);
+        }
+        parent.retry(RetryEvidence::DefinitiveRefusal, now)?;
+        let Owner::Command { id, generation } = parent.owner() else {
+            return Err(Error::Invalid);
+        };
+        if policies.is_empty() {
+            return Err(Error::Invalid);
+        }
+        if policies.len() > CAPACITY
+            || first == 0
+            || first
+                .checked_add(policies.len() as u64)
+                .is_none_or(|end| end > crate::resource_ids::MAX_RESOURCE_ID + 1)
+            || self
+                .contexts
+                .values()
+                .filter(|context| context.deadline() > now)
+                .count()
+                + policies.len()
+                > CAPACITY
+        {
+            return Err(Error::Capacity);
+        }
+        let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
+        let writes = owner.writes.as_ref().ok_or(Error::State)?;
+        if owner.generation != generation
+            || writes.latest(parent.leg()) != Some(delivery.attempt.request)
+        {
+            return Err(Error::Revoked);
+        }
+        let mut children = Vec::new();
+        children
+            .try_reserve_exact(policies.len())
+            .map_err(|_| Error::Capacity)?;
+        let mut legs = Vec::new();
+        legs.try_reserve_exact(policies.len())
+            .map_err(|_| Error::Capacity)?;
+        for (index, policy) in policies.iter().enumerate() {
+            if policy.operation != Operation::Mutation
+                || policy.credential.as_ref() != parent.credential()
+                || policy.pacing != parent.pacing()
+                || policy.timeout_ms == 0
+            {
+                return Err(Error::Invalid);
+            }
+            let leg = first + index as u64;
+            if self.contexts.contains_key(&leg) {
+                return Err(Error::Duplicate);
+            }
+            let mut child = Context::new(
+                parent.owner(),
+                leg,
+                policy.operation,
+                policy.credential.clone(),
+                now,
+                parent.deadline().min(now + f64::from(policy.timeout_ms)),
+                policy.pacing,
+            )?
+            .with_retry(policy.retry)?;
+            child.bind_issuer(&self.issuer);
+            legs.push(leg);
+            children.push(child);
+        }
+        // Reserve the pre-cleanup peak. Nothing visible has changed yet, and
+        // journal.replace is the final fallible operation in the transaction.
+        self.contexts
+            .try_reserve(children.len())
+            .map_err(|_| Error::Capacity)?;
+        self.commands
+            .get_mut(&id)
+            .expect("validated owner")
+            .writes
+            .as_mut()
+            .expect("validated journal")
+            .replace(delivery.attempt.request, &legs)?;
+        self.contexts.retain(|_, context| context.deadline() > now);
+        self.contexts.extend(
+            children
+                .iter()
+                .cloned()
+                .map(|context| (context.leg(), context)),
+        );
+        Ok(children)
+    }
+
+    fn superseded(&self, context: &Context) -> bool {
+        let Owner::Command { id, .. } = context.owner() else {
+            return false;
+        };
+        self.commands
+            .get(&id)
+            .and_then(|owner| owner.writes.as_ref())
+            .is_some_and(|writes| writes.superseded(context.leg()))
+    }
+
     pub(super) fn validate(&self, context: &Context, now: f64) -> Result<(), Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
@@ -163,7 +279,11 @@ impl ContextRegistry {
         if now >= context.deadline() {
             return Err(Error::TimedOut);
         }
-        self.validate_handle(context)
+        self.validate_handle(context)?;
+        if self.superseded(context) {
+            return Err(Error::Revoked);
+        }
+        Ok(())
     }
 
     /// Retirement authority only; expiry cannot create fresh send permission.
@@ -277,6 +397,27 @@ impl ContextRegistry {
             .result(delivery.attempt.request, result)
     }
 
+    pub(super) fn unproven_result(
+        &mut self,
+        delivery: &Delivery,
+        status: u16,
+        capture: impl FnOnce(&mut crate::request_context::UnprovenEvidence),
+    ) -> Result<(), Error> {
+        self.validate_handle(&delivery.context)?;
+        if delivery.context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        let writes = self
+            .command_mut(&delivery.context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?;
+        if writes.latest(delivery.context.leg()) != Some(delivery.attempt.request) {
+            return Err(Error::Revoked);
+        }
+        writes.unproven_result(delivery.attempt.request, status, capture)
+    }
+
     fn result_with_reports(
         &mut self,
         delivery: &Delivery,
@@ -306,6 +447,17 @@ impl ContextRegistry {
             if !authority.issued_by(&self.issuer)
                 || !matches!(authority.owner(), Owner::Command { id, generation } if id == command
                     && self.commands.get(&id).is_some_and(|owner| owner.generation == generation))
+            {
+                return Err(Error::Revoked);
+            }
+            // An original logical timer may seal after its root was used as a
+            // replaced physical parent. This grants no send permission and
+            // never bypasses the delivery validation below.
+            if self.superseded(authority)
+                && self
+                    .commands
+                    .get(&command)
+                    .is_none_or(|owner| owner.completion_root != *authority)
             {
                 return Err(Error::Revoked);
             }
@@ -394,6 +546,32 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    /// Atomically replace a definitively refused physical write with bounded
+    /// engine-issued child legs. This queues no HTTP and extends no deadline.
+    pub fn http_replacement_contexts(
+        &mut self,
+        parent: &Context,
+        policies: &[Policy],
+    ) -> Result<Vec<Context>, Error> {
+        if policies.is_empty() {
+            return Err(Error::Invalid);
+        }
+        if policies.len() > CAPACITY {
+            return Err(Error::Capacity);
+        }
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?.clone();
+        // Reserve the complete child range before registry/journal mutation.
+        // Failed admission may leave monotonic gaps, never reused identities.
+        let first = self
+            .io
+            .reserve_ids(policies.len() as u64)
+            .ok_or(Error::Capacity)?
+            .start;
+        self.io
+            .request_contexts
+            .replace(parent, &delivery, first, policies, self.now)
+    }
+
     /// Capture the logical raw deadline and engine-owned owner/leg generation.
     /// This neither queues HTTP nor reserves admission, a transport or pacing.
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
@@ -417,7 +595,7 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         parent: Option<&Context>,
     ) -> Result<Context, Error> {
-        let identity = self.io.next();
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = if let Some(parent) = parent {
             self.io
                 .request_contexts
@@ -446,6 +624,65 @@ impl<P> Cx<'_, P> {
     ) -> Result<Context, Error> {
         self.io.request_contexts.validate(context, self.now)?;
         context.retry(evidence, self.now)
+    }
+
+    /// Check live issuance before presenting progress for already reserved work.
+    /// This allocates nothing and grants no send, retry or completion rights.
+    pub fn validate_http_context(&self, context: &Context) -> Result<(), Error> {
+        self.io.request_contexts.validate(context, self.now)
+    }
+
+    /// Read-only companion-event authority. A Read handle cannot publish a
+    /// completion marker once its command has declared any mutation sibling.
+    /// Complete synchronously after validation; this grants no send permission.
+    pub fn validate_read_completion_context(&self, context: &Context) -> Result<(), Error> {
+        self.validate_completion_context(context)?;
+        let Owner::Command { id, .. } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        let owner = self
+            .io
+            .request_contexts
+            .commands
+            .get(&id)
+            .ok_or(Error::Revoked)?;
+        if context.operation() != Operation::Read
+            || owner.mutation_declared
+            || owner.writes.is_some()
+        {
+            return Err(Error::Invalid);
+        }
+        Ok(())
+    }
+
+    /// Validate read publication in this exact managed HTTP callback. Native
+    /// response decoding and snapshot freshness remain separate requirements.
+    /// Failure callbacks also have delivery ownership; this does not prove a
+    /// response exists or authorize publishing an unvalidated response body.
+    /// Publish synchronously after validation; this grants no send or retry rights.
+    pub fn validate_read_http_delivery(&self, root: &Context, leg: &Context) -> Result<(), Error> {
+        self.validate_read_completion_context(root)?;
+        self.validate_http_context(leg)?;
+        if leg.operation() != Operation::Read {
+            return Err(Error::Invalid);
+        }
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let Owner::Command { id, .. } = root.owner() else {
+            return Err(Error::Invalid);
+        };
+        if delivery.context != *leg
+            || leg.owner() != root.owner()
+            || leg.deadline() > root.deadline()
+            || self
+                .io
+                .request_contexts
+                .commands
+                .get(&id)
+                .is_none_or(|owner| owner.completion_root != *root)
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
     }
 
     /// Validate a synchronous managed completion before publishing its companion
@@ -745,6 +982,63 @@ mod tests {
         assert_eq!(cx.io.actions.len(), 1);
     }
 
+    #[test]
+    fn live_validation_cannot_borrow_completion_expiry_tolerance() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let root = cx.http_context(Scope::Command(7), policy()).unwrap();
+        assert_eq!(cx.validate_completion_context(&root), Ok(()));
+        cx.now = root.deadline();
+        assert_eq!(cx.validate_http_context(&root), Err(Error::TimedOut));
+        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.pending.is_empty());
+        assert!(cx.io.timers.is_empty());
+    }
+
+    #[test]
+    fn read_companion_cannot_publish_after_a_sibling_declares_mutation() {
+        for install_attempt in [false, true] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let root = cx.http_context(Scope::Command(7), policy()).unwrap();
+            assert_eq!(cx.validate_read_completion_context(&root), Ok(()));
+            let mutation = cx
+                .http_context(
+                    Scope::Command(7),
+                    Policy {
+                        operation: Operation::Mutation,
+                        retry: RetryPolicy::Never,
+                        ..policy()
+                    },
+                )
+                .unwrap();
+            if install_attempt {
+                cx.io
+                    .request_contexts
+                    .register_attempt(&mutation, RequestId(99), cx.now)
+                    .unwrap();
+            }
+            assert_eq!(
+                cx.validate_read_completion_context(&root),
+                Err(Error::Invalid)
+            );
+            assert!(cx.io.actions.is_empty());
+            assert!(cx.io.pending.is_empty());
+            assert!(cx.io.timers.is_empty());
+            assert!(cx.io.request_contexts.commands.contains_key(&7));
+        }
+    }
+
     fn policy() -> Policy {
         Policy {
             operation: Operation::Read,
@@ -806,7 +1100,9 @@ mod tests {
         assert!(registry.contexts.is_empty());
         assert!(registry.commands.is_empty());
         for id in 1..=CAPACITY as u32 {
-            registry.issue(id, Scope::Background, policy(), 0.).unwrap();
+            registry
+                .issue(u64::from(id), Scope::Background, policy(), 0.)
+                .unwrap();
         }
         assert_eq!(
             registry.issue(300, Scope::Command(7), policy(), 1.),
@@ -905,7 +1201,7 @@ mod tests {
         let mut registry = ContextRegistry::default();
         for id in 1..=CAPACITY as u32 {
             registry
-                .issue(id, Scope::Command(id), policy(), 0.)
+                .issue(u64::from(id), Scope::Command(id), policy(), 0.)
                 .unwrap();
         }
         assert_eq!(registry.commands.len(), CAPACITY);
@@ -1058,12 +1354,12 @@ mod write_tests {
             retry: crate::request_context::RetryPolicy::DefinitiveRefusal,
         }
     }
-    fn delivery(context: &Context, id: u32) -> Delivery {
+    fn delivery(context: &Context, id: u64) -> Delivery {
         Delivery {
             context: context.clone(),
             attempt: Attempt {
                 request: RequestId(id),
-                generation: u64::from(id),
+                generation: id,
             },
         }
     }
@@ -1602,7 +1898,7 @@ mod write_tests {
         let mut registry = ContextRegistry::default();
         for id in 1..=CAPACITY as u32 {
             registry
-                .issue(id, Scope::Command(id), policy(), 0.)
+                .issue(u64::from(id), Scope::Command(id), policy(), 0.)
                 .unwrap();
         }
         assert_eq!(registry.commands.len(), CAPACITY);

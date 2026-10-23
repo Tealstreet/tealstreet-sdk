@@ -1959,3 +1959,71 @@ continuation-proof/budget refusals remain strict; terminal order folding sees
 only admitted rows. Native request/identity/units/filter/signing and ledger
 coverage facts remain unchanged. Other adapters, managed completion and B11
 coverage/runtime proof stay open. [Scope](RUST_OWNED_HISTORY.md).
+
+KuCoin owned-history follow-on: futures history/funding and spot fills
+adopt the existing engine query owner. Initial page failures become typed
+Internal rejects; later futures/funding failures return only validated eligible
+rows with command-owned incompleteness. Native continuation/census/safety proofs
+remain strict. Signing, disabled spot endpoints and B11/NX coverage are outside
+this slice; see RUST_OWNED_HISTORY.md and RUST_CUTOVER_CALLERS.md.
+
+## Bitrue single-page owned fills
+
+~~Bitrue fills keep native output storage and terminal completion beside streamed
+response validation.~~ Existing engine HistoryRows/Completion now owns staging,
+page admission, retry-page reset and typed terminal delivery. All native proof
+checks precede admission; a saturated filtered/duplicate page remains a strict
+refusal. No fictitious pagination, partial-success case or new venue marker is
+introduced. Public trades, unsupported histories and client-ID lookup stay
+separate; B11 caller/runtime coverage remains open. [Scope](RUST_OWNED_HISTORY.md).
+
+## Backpack owned-history fan-out
+
+~~Backpack retains accepted history rows and terminal paging decisions in its
+venue continuation, discarding earlier pages on later failure/repeat/cap.~~
+CursorHistory now owns page admission, repeat/cap coverage and completion, with
+the existing offset helper subordinate to owner-authorized continuation. Failed
+page prefixes remain staged; admitted malformed-fill skips supply owned coverage
+without changing native row isolation. Raw request displacement, native mapping,
+eager non-fill diagnostics and strict setup/admission behavior remain. This is
+shared-owner adoption, not universal history or NX B11 coverage closure.
+
+## ApeX bounded execution completion
+
+~~ApeX fills exhaust all native/display REST alternatives into apparent complete
+WS-cache or empty success, even when every REST attempt actually failed.~~
+Existing engine HistoryRows/Completion now owns terminal admission and delivery;
+all-actual-failure exhaustion rejects typed Internal. Validated successful empty/
+nonempty paths retain native/cache selection; bounded native upsert remains an
+endpoint normalization fact. No invented pager, partial recovery or cache-backed
+coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
+separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+
+### Row reporting: AsterDEX, GRVT and TxFlow consumers (2026-10-23)
+
+Replaced three account-owned bounded suppression sets with existing engine
+RowReports Once, including GRVT's shared coin/order/position namespaces.
+Architecture gate YES: consumer fan-out through the existing cross-cutting
+reporting path; no new venue policy or engine API. Exact native notice text,
+severity, empty/composite identities, clear-before-lookup capacity and re-arm
+ordering are preserved. Aster/TxFlow mapping still forgets a mapped ID before
+full-read admission, zero quantity does not gain forgetting, and TxFlow WS has
+no REST-only per-key effect. GRVT duplicate coins rearm from unfiltered totals;
+position/order identities keep native rejection filters, including unknown
+identity preventing absence proof. Per-row timestamp rejection still follows
+current-response rearming.
+
+Final original125 account tests, including nine new compatibility controls,
+pass on unchanged actual1782 production. The source/test/log receipt is
+`/tmp/codex-row-aster-grvt-txflow-original-final125-receipt.json`, SHA256
+`0fa028da226ab076553c0d607657ba113482547141490dd1550817ac38fb8602`.
+This is standardization without a product defect RED or financial repair.
+Other persistent reporter consumers remain open; no all-venue closure or new
+private parity/provenance claim. See RUST_ROW_ADMISSION.md.
+
+Migrated focused engine/AsterDEX/GRVT/TxFlow/Binance suites pass1294 native tests
+across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
+and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
+are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
+required; no all-venue reporter-completion claim.
