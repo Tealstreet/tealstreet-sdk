@@ -9,9 +9,9 @@ const robinhood=values.venue==='lighter-robinhood';
 const REST=robinhood ? `https://api.rh${values.testnet?'-testnet':''}.lighter.xyz` : values.testnet?'https://testnet-api.lighter.xyz':'https://mainnet.zklighter.elliot.ai';
 const WS=robinhood?REST.replace('https:','wss:')+'/stream':values.testnet?'wss://testnet.zklighter.elliot.ai/stream':'wss://mainnet.zklighter.elliot.ai/stream';
 const out=values.out??`sdk-rs/harness/tapes/${values.venue}${values.testnet?'-testnet':''}-private.jsonl`;
-// Mainnet venues attach their own Tealstreet integrator (zkLighter 158385, Robinhood 47296).
+// TS attributes Robinhood to 47296 on both networks, zkLighter only on mainnet (158385).
 const integrator=robinhood?47296:158385;
-const attributed=!values.testnet;
+const attributed=robinhood||!values.testnet;
 const EPOCH=1792454400000;
 const records=[{t:0,type:'meta',venue:values.venue,private:true,epoch:EPOCH},{t:0,type:'config',private:true,options:{testnet:values.testnet,key:'',secret:'01'+'00'.repeat(39),applicationId:'42',apiKeyIndex:'3'}}];
 let time=0;
