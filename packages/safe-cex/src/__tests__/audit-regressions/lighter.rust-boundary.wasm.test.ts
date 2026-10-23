@@ -239,6 +239,11 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary'
       TimeInForce: 0,
       ReduceOnly: 1,
     });
+    if (name === 'lighter-robinhood') {
+      expect(stop.tx.L2TxAttributes).toEqual({ 1: 47296, 2: 250, 3: 0 });
+    } else {
+      expect(stop.tx).not.toHaveProperty('L2TxAttributes');
+    }
     expect(stop.tx.ClientOrderIndex.toString()).toBe(ids[0]);
     expect(atob(stop.tx.Sig)).toHaveLength(80);
     expect(stop.tx.ExpiredAt).toBeGreaterThan(NOW);
