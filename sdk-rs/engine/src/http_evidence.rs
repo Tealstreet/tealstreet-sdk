@@ -61,6 +61,18 @@ impl UnprovenEvidence {
         })
     }
 
+    pub(super) fn native(mut budget: EvidenceBudget) -> Self {
+        let mut error = VenueError::new("Native response does not prove the write outcome")
+            .kind(ErrorKind::Internal)
+            .outcome(Outcome::Unknown);
+        error.message = budget.text(&error.message);
+        Self {
+            budget,
+            error,
+            id_overflow: false,
+        }
+    }
+
     /// Stop retaining identities after any invalid/over-budget identity. Never
     /// truncate an ID or substitute a planned caller identity for native proof.
     pub fn order_id(&mut self, id: &str) -> bool {
@@ -130,6 +142,10 @@ impl EvidenceBudget {
             WriteResult::KnownPartial(error) => {
                 let (error, overflow) = self.normalize_error(error);
                 (WriteResult::KnownPartial(error), overflow)
+            }
+            WriteResult::PartialUnknown(error) => {
+                let (error, overflow) = self.normalize_error(error);
+                (WriteResult::PartialUnknown(error), overflow)
             }
             WriteResult::Failed(error) => {
                 let (error, overflow) = self.normalize_error(error);
