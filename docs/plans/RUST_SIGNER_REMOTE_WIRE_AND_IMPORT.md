@@ -166,7 +166,29 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
    - **Generation.** A selection made before retirement never signs with
      dropped refs. A stale-generation recipe refuses `Unavailable` before
      sending (`notSent`).
-7. **Ownership.**
+7. **Session-core conditions (claude-55ao7t, 2026-10-23).**
+   - **Binding.** Imported refs bind to the selected slot and the opaque
+     engine `Owner::Session { generation }`, not a venue counter.
+     `request_import` accepts only a live session-owned Read context.
+     Command and Background contexts are refused `Invalid`. The derive GET is
+     a deterministic session Read, so it needs no write facts.
+   - **Retirement order.** `retire_session` drains waiters, then discards
+     in-flight HTTP, then revokes, and only then drops imported refs. The
+     engine checks generation liveness immediately before routing a body to
+     `Signer::import`, so a late 2xx for a retired generation is never
+     imported.
+   - **Host providers.** Host-injected JS and Workers providers receive
+     `Action::DropImported { generation }` through the existing provider
+     action seam. The local provider drops synchronously. Engine disposal
+     retires every live session, which drops all imports.
+   - **Readiness.** On `on_import` success the venue calls `session_ready`,
+     releasing the #1842 waiters. On failure it calls `session_failed`
+     (`NotSent` fan-out), then applies its backoff.
+   - **Credentials.** `SessionPolicy.credential` stays the L1 wallet ref.
+     Contexts that sign with imported refs name them in their own Credential.
+     The engine rejects a context naming refs from a dead generation before
+     the provider, as pre-send `Unavailable`.
+8. **Ownership.**
    - Engine changes (`Cx::request_import`, response routing, the
      `Signer::import` and `drop_imported` trait methods) need uufub4 sign-off
      for signing/dispatch and m26ps4 sign-off for credential semantics.
