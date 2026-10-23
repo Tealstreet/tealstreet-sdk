@@ -896,3 +896,59 @@ with single-resolution admission. Both independent correctness/adversarial
 source/API/preservation reviews are CLEAR. Exact wrong-phase expiry denial,
 invalid-query queue retention and no callback for unknown/retired/legacy socket
 controls pass. No CPU improvement is claimed until the next exact CI measure.
+
+### Phase F — stable shared driver storage during Cx leases
+
+Actual SafeIDs #1789 is genuinely integrated at a31c3ff. Its entire tree is
+identical to the reviewed 7beda tree, which already contained frozen SafeIDs b74;
+the 183.426 -> 204.241ms Bitunix difference is a same-source runner observation,
+not proof that adding the actual merge introduced allocator work. Actual landing
+still passes Bitunix public CPU (before SafeIDs: TS201.1/Rust164.9ms; after:
+TS197.0/Rust172.9ms). The socket a31 result is a real failure: TS198.193 /
+Rust204.241ms versus178.3737ms target (+14.50%), with no retry. Its OKX inverse
+CPU also misses, while EEA memory and Bitget public CPU pass. Fix the shared
+socket path before a fresh CI measurement; do not change budgets or thresholds.
+
+Read-only cause/API audits find no ordinary current public-frame ID reservation,
+signing allocation or timer rearm. Both fresh admission checks remain required.
+The concrete representation work is `with_socket_driver`: each ingress/control
+lease takes and restores a complete inline Driver, constructing an empty
+Driver/Lifecycle each time. This is empty-container construction and state
+movement, not a current per-frame heap allocation. Savings remain a hypothesis
+until CI measures them.
+
+Introduce a crate-private `DriverSlot::{Inactive,Ready(Box<Driver>),Leased}`.
+Its explicit inactive and leased states cannot be confused. An inactive engine has no heap driver. First successful
+feed registration validates/registers one local Driver, then boxes it once;
+failed registration leaves the slot inactive. Later registration uses that same
+owner. Inactive epoch/auth queries keep returning None/false, connect/proposal
+validation keeps its existing typed invalid-feed refusal, and stop/retire remain
+inert when no driver exists. No generic inactive query constructs a Driver.
+
+An active Cx lease moves only the Box pointer, marks the slot leased, invokes the
+same synchronous Driver operation and restores the exact pointer before native
+codecs/effect callbacks. Missing/reentrant active access fails closed; it never
+constructs a default registry or treats a borrowed managed registry as legacy.
+Keep this safe Rust; no raw aliasing, unsafe pointers, cached epoch/admission or
+new permission state. The Leased variant guards representation access only. Existing
+SafeIDs fatal latches still prevent any output/callback after caught exhaustion.
+
+Keep public APIs, Driver/Supervisor transitions, policy/time/phase/expiry order,
+both fresh ingress/control checks, event-scope HTTP-delivery isolation, signing
+barriers and fatal checks unchanged. A narrow holder may provide checked
+read access plus Deref/DerefMut for already-active internal sites, but cannot
+initialize itself through Deref or recover a missing leased driver. Registration
+is the only initialization boundary. Do not broaden Supervisor timer/entropy
+interfaces or touch allocator/HTTP/venue/harness/profile policy.
+
+First commit assertion-RED controls observing registered Lifecycle pointee
+identity before/inside/after the existing Cx lease for both native-control and
+control-free declarations. Old inline take/restore moves it; the stable holder
+must not. Add ordinary-message compatibility controls proving no new Io IDs or
+timer/signing actions, native delivery and both fresh admission boundaries.
+Retain all existing expiry/invalid-time/stale-generation/reconnect/auth/wire,
+HTTP-delivery and caught-fatal controls. Review concrete holder access and panic
+boundaries, then implement only shared storage/access adaptations. Run focused
+engine/OKX/Bitunix/Binance native/strict/fmt/bans checks and two independent
+ordering/preservation reviews. A new exact-head CI run must establish CPU and
+memory objectives; storage stability is not a CPU-pass or margin claim.
