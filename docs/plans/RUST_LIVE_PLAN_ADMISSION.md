@@ -252,3 +252,38 @@ for reserved Plan calls. Reserve backing before IDs and reuse shared narrowing
 validation; do not weaken the incoming registered-attempt refusal or duplicate
 its allowed-intent policy in a Plan adapter. Retain all incoming grant/intent
 negative controls while adapting old test fixtures to the new evidence contract.
+
+## Actual Read execution-group composition (#1854)
+
+Actual `e2b03d5592a` supplies command-rooted Read executions. Preserve this one
+mechanism and its genuine-entry begin/join, execution-root-only legs, exact
+observer seal authority, member-scope refusal and event-entry expiry sweep.
+Mutation journals, background roots and Plan-aware group admission remain their
+separate slices. Opaque Preflight/Plan/Slot authority cannot become a command
+Context root for this API.
+
+Compose incoming `finish_command_as(observer)` by passing the exact result of
+`seal_as(..., observer)` into the existing shared terminal helper. Select
+`delivery=None` only as the observer seal's local argument; never clear the
+active delivery marker. Keep phase restriction inside `validate_completion_as`
+for both modes, retain exact membership checks, and forget observers only on
+successful Context cleanup, after any Plan retirement path that can refuse.
+Execution expiry must run before a Plan timer's early return.
+
+The approved phase representation needs the incoming execution registry's root
+and entry-owned field accesses projected through Context-phase accessors. Keep
+`observer_member` rejecting every other phase so `observer_authority` always has
+a Context root for a genuine member. No execution-Cx API implementation is copied.
+
+Execution-root insertion must honor promised Plan Context credits and reserve
+backing before any group insertion: 250 unissued credits plus six live Contexts
+already fill the shared 256 limit. Refuse a seventh root without changing group,
+observer or root maps, actions or promised credits; prove a one-free-credit
+positive. Preserve incoming begin's existing one-ID monotonic gap on refusal.
+The execution-root helper is the common seam for future command, background and
+successor roots when those consumers land; do not add a second capacity ledger.
+
+Before source freeze, add controls for direct numeric/typed observer seal denial,
+observer completion while an unrelated delivery marker remains held, observer
+expiry before Plan-timer return, non-Context membership refusal, and full-credit
+refusal/one-credit admission. Existing incoming group assertions stay unchanged.
