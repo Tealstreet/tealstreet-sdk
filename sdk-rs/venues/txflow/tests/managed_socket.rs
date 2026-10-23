@@ -70,6 +70,17 @@ impl Rig {
     }
 
     fn with_policy(private: bool, policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
+        let (mut rig, mut trace) = Self::before_account_start(private, policy);
+        let seed = rig.advance(account::NOW + 25.0);
+        trace.extend(rig.answer_reads(seed));
+        assert_eq!(rig.engine.store().ticker("BTC-USDC").unwrap().last, 65000.0);
+        if private {
+            assert_eq!(rig.engine.store().positions()[0].contracts, 2.0);
+        }
+        (rig, trace)
+    }
+
+    fn before_account_start(private: bool, policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
         let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
             testnet: true,
             public_data_only: !private,
@@ -88,15 +99,9 @@ impl Rig {
             connected_at: account::NOW,
         };
         let initial = rig.drain();
-        let mut trace = rig.answer_reads(initial);
+        let trace = rig.answer_reads(initial);
         rig.node = connected(&trace, false).expect("native node connection");
         rig.api = connected(&trace, true);
-        let seed = rig.advance(account::NOW + 25.0);
-        trace.extend(rig.answer_reads(seed));
-        assert_eq!(rig.engine.store().ticker("BTC-USDC").unwrap().last, 65000.0);
-        if private {
-            assert_eq!(rig.engine.store().positions()[0].contracts, 2.0);
-        }
         (rig, trace)
     }
 
@@ -544,4 +549,81 @@ fn private_retired_socket_cannot_publish_but_live_replacement_can() {
     assert_eq!(rig.engine.store().positions()[0].contracts, 2.0);
     rig.message(false, &financial_frame());
     assert_eq!(rig.engine.store().positions()[0].contracts, 3.0);
+}
+
+#[test]
+fn missing_private_address_rejects_setup_without_artificial_socket_or_account_work() {
+    let options = Options {
+        testnet: true,
+        public_data_only: false,
+        application_id: None,
+        vault: None,
+        secret: Some(format!("0x{:064x}", 1)),
+        ..Default::default()
+    };
+    assert!(options.validate().is_err());
+    let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(options));
+    engine.start(account::NOW);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::CONFIG_INVALID)));
+    assert!(
+        actions
+            .iter()
+            .all(|action| matches!(action, Action::Notice(_))),
+        "invalid setup must not manufacture HTTP, socket, signing or timer work"
+    );
+    assert!(engine.store().positions().is_empty());
+}
+
+#[test]
+fn genuine_private_open_before_native_account_start_keeps_refresh_noop() {
+    let (mut rig, initial) = Rig::before_account_start(true, PublicFeedPolicy::Direct);
+    assert!(initial.iter().any(|action| matches!(action,
+        Action::WsConnect { socket, channel: Some(SocketChannel::Private), .. } if *socket == rig.node)));
+    assert!(!initial.iter().any(|action| matches!(action,
+        Action::Http(request) if account::kind(request) == "clearinghouseState")));
+    assert!(rig.engine.store().positions().is_empty());
+    let opening = rig.open(false);
+    assert_eq!(sent(&opening, rig.node), [NODE_CONTEXT]);
+    assert!(
+        !opening
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    rig.message(false, &financial_frame());
+    assert!(
+        rig.engine.store().positions().is_empty(),
+        "opening must not fabricate account.started"
+    );
+    let startup = rig.advance(account::NOW + 25.0);
+    assert_eq!(
+        startup
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Http(request) if account::kind(request) == "clearinghouseState"))
+            .count(),
+        1
+    );
+    rig.answer_reads(startup);
+    assert_eq!(rig.engine.store().positions()[0].contracts, 2.0);
+    let after_batch = rig.advance(account::NOW + 1_000.0);
+    assert!(
+        !after_batch.iter().any(|action| matches!(action,
+        Action::Http(request) if matches!(account::kind(request).as_str(),
+            "clearinghouseState" | "frontendOpenOrders" | "userFills"))),
+        "subscription completion must not duplicate native startup reads"
+    );
+}
+
+#[test]
+fn public_only_without_address_has_no_private_refresh_obligation() {
+    let mut rig = Rig::new(false);
+    let mut trace = rig.open(false);
+    trace.extend(rig.advance(rig.now + 450.0));
+    assert_eq!(sent(&trace, rig.node), [NODE_CONTEXT]);
+    assert!(!trace.iter().any(|action| matches!(action, Action::Http(_))));
+    rig.message(false, &financial_frame());
+    assert!(rig.engine.store().positions().is_empty());
 }

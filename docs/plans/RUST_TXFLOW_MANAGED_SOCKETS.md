@@ -217,9 +217,11 @@ API/custody review and production verification remain separate gates.
 ## Bounded shared API/custody plan review
 
 codex-uufub4 cleared the b007/8b36 plan direction on existing1943 without a new
-seam,1970 opt-in or auth barrier. This is plan/API clearance only; its independent
-archived execution was still in progress when reported and is not claimed here.
-Production/source/runtime review remains separate.
+seam,1970 opt-in or auth barrier. Its subsequent independent exact b007 git-archive
+execution reproduced11 assertion RED/9 GREEN/0ignored with no setup/compile
+failure, including both unfiltered order observations and identical live payload
+controls. Receipt:/tmp/codex-txflow-plan-b007-review.log. This is original evidence
+and plan/API clearance; production/source/runtime review remains separate.
 
 For nonempty private keys, atomically register the complete desired node batch
 and exact canonical required private keys. The released handoff waits for every
@@ -231,3 +233,37 @@ Shared/Disabled private financial publication; and partial150ms batch release
 without early HTTP. Startup reads remain independent. Both the native-owner
 transfer boundary and the pre-start startup/poll ownership rule above are
 implementation gates, not a new authority or venue scheduling mechanism.
+
+
+## Reachable zero-address and pre-start controls
+
+Native private Options::validate requires a valid application_id, and user()
+selects vault or application_id. A genuinely admitted private setup therefore
+cannot currently reach user()==None. codex-uufub4 accepted testing the reachable
+boundaries without bypassing validation or fabricating callback custody. The
+existing defensive zero-address Ready branch remains a source-preservation
+obligation; no executed reachability claim is made for it.
+
+Three added working controls on unchanged original production now pass:
+
+- missing_private_address_rejects_setup_without_artificial_socket_or_account_work:
+  private setup emits CONFIG_INVALID before any metadata, HTTP, socket, signing
+  or timer action; no financial state is manufactured.
+- genuine_private_open_before_native_account_start_keeps_refresh_noop: an actual
+  issued Private node opens before the native25ms startup transition. Opening
+  emits the native public context frame without refresh HTTP; a financial frame
+  remains a no-op while account.started is false. The existing startup timer
+  alone issues one state read. After its response and full paced batch completion,
+  no duplicate state/orders/fills refresh is introduced.
+- public_only_without_address_has_no_private_refresh_obligation: valid public-only
+  setup opens/drains the public context subscription without private topics,
+  account HTTP or financial publication.
+
+The expanded target executes23tests:11 original assertion RED/12 GREEN/0ignored.
+All original RED observations remain; compilation succeeds. Scoped all-feature
+new-target Clippy -D warnings, rustfmt and git diff --check pass. Production,
+Cargo, inventory, engine/hosts and all pre-existing tests remain unchanged.
+The independent archived b007 result above stays pinned to its original20tests;
+this expanded23-test execution is the owner receipt, not relabeled independent
+proof. Local log:/tmp/codex-txflow-socket-zero-address-controls.log. Production
+refusal/retirement/stale-wake transfer controls and runtime review remain gates.
