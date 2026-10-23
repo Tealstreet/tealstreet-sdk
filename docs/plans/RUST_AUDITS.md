@@ -2046,6 +2046,20 @@ an exemption. The exact BloFin inventory shrinks 28 to 24; every other path map
 remains unchanged. Context-bearing history completion and multi-request admission
 remain separate shared dependencies. [Inventory and scope](RUST_BLOFIN_REQUEST_CONTEXT.md).
 
+## Bitrue FIFO read authority adoption
+
+Public candle/trade completion uses the canonical shared command-entry/retention
+seam and generation-bearing Context terminals. The native adapter checks current
+Context authority before send and response decoding, while timeout/disconnect
+cleanup retains its typed completion authority after expiry. It creates no venue
+registry, synthetic HTTP attempt, retry policy or group authority.
+
+The exact Bitrue inventory shrinks 53 to 42 occurrences, with lib.rs 22 to 11:
+ten numeric WS terminal calls and one conservative timer-correlation macro retire
+with the owned-read representation. The HTTP dispatcher and ten pending.request
+fields remain; account, private history, signing and coalesced FetchLeverage are
+outside this area. No other venue inventory entries change.
+
 ## Paradex independent startup authority
 
 ~~Paradex public catalog and ticker seeds bypass managed HTTP authority and can

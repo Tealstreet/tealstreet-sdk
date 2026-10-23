@@ -4468,6 +4468,25 @@ query promise. Custom transport providers must implement the shared managed
 HTTP contract when upgrading. SDK call arguments, result units and subscriptions
 remain the same; this establishes no NX deployment or private-request migration.
 
+## Bitrue FIFO public read Context
+
+Bitrue candle and public-trade commands retain the genuine engine-issued Read
+Context through their native per-channel FIFO, timer and response callbacks. Each
+owner keeps its original 5000ms deadline, including queue wait. A correlated reply
+at or after that bound cannot decode or complete the head, clear its timer, or
+advance the queue. The existing timer still closes the socket and fails every
+pending owner, including live peers on other channels.
+
+The shared entry owner retains completion generation through delayed timer delivery
+and unrelated admissions. A repeated in-flight numeric command ID cannot acquire a
+new timer or request. Admission refusal is completed once by the engine, without
+adapter numeric fallback. Native preflight order/messages, 32-owner queue cap,
+empty-cb_id compatibility, timer-derived correlation shape, candle timestamp/volume
+normalization and trade payloads retain their contracts. Wrong or duplicate explicit
+correlation IDs cannot consume the next owner. Rejected/malformed heads fail once
+and allow the next live owner to proceed. No HTTP operation or joined group is
+introduced for these single-owner native reads.
+
 ## Paradex independent public startup Read Contexts
 
 Paradex catalog `/markets` and ticker `/markets/summary?market=ALL` GETs use the

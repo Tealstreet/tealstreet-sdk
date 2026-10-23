@@ -556,6 +556,17 @@ the unreleased-response and parked-preparation boundaries. One pre-Context
 numeric refusal awaits the shared command-entry seam; no new legacy fingerprint
 or checker exemption is introduced.
 
+## Bitrue FIFO read lifecycle regressions
+
+Native controls reject late and exact-deadline trade/candle success, prevent an
+expired FIFO head from dispatching queued work, and preserve delayed timeout
+completion across unrelated admissions and duplicate numeric IDs. They retain
+live-peer socket-wide failure, explicit/empty correlation compatibility, capacity,
+malformed/rejected-head continuation and command-ID reuse. Repeated native
+preflight refusal at one clock proves bounded entry ownership is released without
+opaque I/O or loss of the original diagnostic. The original three assertion RED
+controls precede the production move in a separate test commit.
+
 ## Paradex managed startup GET proof
 
 Four real-venue assertion-RED controls require managed public catalog/ticker
