@@ -2023,3 +2023,105 @@ banned-pattern checks and diff checks pass. Both final source and tests/docs
 reviews are CLEAN and confirm the shared-owner architecture gate. CI/full
 artifact proof and actual queued dependency integration remain mandatory; no
 local release-WASM, full replay, timing, deployed NX or cutover proof is claimed.
+
+## Next bounded-read fan-out: ApeX Omni executions
+
+Plan first from actual landing `d05c5ede4b86409e1a8d9798e64b79b1c1c888f4`
+on `feat/rust-owned-history-apexomni`. Hyperliquid Spot and Breakout have only
+empty/unsupported history stubs, not a request pager to migrate. Keep all queued
+history CI/archive/proof watches active and honor the bounded #1769 merge hold.
+Scope ApeX `src/history.rs`, `tests/history.rs` and existing caller/audit/quality/
+this-plan docs. No signing/request-library/account/Store/engine source change.
+
+ApeX executions try native/display symbols on `/v3/fills`, then the same bounded
+alternatives on `/v3/history-orders`. They do not implement a cursor walk. Use
+existing engine HistoryRows/Completion, bound once to the original command, for
+terminal admission/encoding/error delivery, without inventing a pager. Remove
+the duplicate command field. Preserve the native per-attempt bounded Entry
+buffer: its replacement-by-key, stable raw-time sort and top-limit eviction are
+endpoint normalization facts (including last-duplicate economics and later
+reappearance after eviction), not accepted query output or a second finalizer.
+Only the selected validated terminal result enters the engine owner; no failed
+attempt prefix or background cache can independently authorize error recovery.
+
+Owner decision (2026-10-23): when every REST alias/route actually fails, reject
+typed Internal even if the background WS cache contains matching executions.
+That cache was not fetched by this command and must not be presented as complete
+history. Keep the same alias/fallback attempts and bounded upsert. On validated
+successful empty/nonempty paths, preserve the existing cache/authoritative
+selection, including nonempty primary data stopping further REST attempts even if every
+row filters out. Existing finish_history still selects matching WS cache when
+that validated nonempty response has no eligible normalized rows; preserve that
+distinction. Only eligible nonempty REST output excludes cache merging. Callers may still read the live cache separately after rejection.
+Track whether any actual REST response validated, across candidate resets, so
+mixed valid-empty/failure alternatives retain the expressly preserved successful
+path while all-actual-failure exhaustion rejects. Initial consuming signed() refusal remains the existing separate strict
+String-to-cx.fail path, without claiming unavailable typed details. The wrapper
+already flattens retry/resend preparation failures to error.message before
+history_failed; preserve that alias-exploration behavior and leave typed
+preparation provenance to the shared request/signing lane. Preserve admission's
+empty/unsupported behavior. Numeric Completion remains explicit legacy authority,
+never managed Context fallback. No first-page actual failure may become complete
+empty/cache output when all alternatives failed; no invented later-page partial
+or history.incomplete marker is needed for this bounded selection.
+
+The wrapper already validates HTTP/status/native error metadata and supports
+both signature formats and eligible transport retries. Preserve its code and
+policy exactly. Request::reset clears only native attempt count/current rows
+(and any engine pending rows defensively), retaining owner, candidate/fallback
+and the successful-response fact. Moving between aliases/routes likewise keeps
+one owner. At final success retain existing cache filter/identity/sort/limit
+selection, stage its normalized executions, accept exactly once and finish with
+the existing JSON shape. At all-failure exhaustion finalize Err through the
+engine owner, preserving the last terminal message and adding shared Internal
+classification where the history adapter previously returned success.
+
+Preserve exact signed query bytes, symbol alternative ordering, no synthetic
+page/token, clamped limit1..100, floored inclusive/exclusive time bounds, symbol/
+order/millisecond filters, native and anonymous compound identity, original raw
+milliseconds and timestamp seconds, quantity/price/fee optionality, authoritative
+REST never merging WS rows, equal-time ordering and native cumulative history-
+order fallback. No new capability, native history implementation for unsupported
+axes, remote signing policy, live state mutation or NX edit.
+
+Before production edits commit original-RED controls superseding the old
+all-failed-REST cache-success assertion: all-native failures with and without
+cache reject typed, exhausted transport/decode/missing-list alternatives reject,
+and failed streamed prefixes never enter successful or error output. Pin exact
+four candidate requests when native/display symbols differ (two when identical) and no early terminal/marker/extra HTTP. Compatibility
+controls cover valid empty aliases and cache selection, mixed valid/failed
+alternatives, first nonempty all-filtered response with cache and no further REST attempts,
+bounded duplicate
+replacement/eviction, signature reset and transport prefix rollback, concurrent
+query owners, large identities/raw-millisecond sorting and Store isolation.
+The cache remains independently available in the live account path after an
+all-failure history rejection.
+
+Independent plan/source/final tests-docs reviews answer the architecture gate:
+existing shared owner adoption, with native bounded alternative/upsert facts
+retained and no copied pager/completion policy. Run focused engine/ApeX/Binance
+native tests, touched strict all-target Clippy/fmt/bans/diff with four Cargo jobs;
+Corepack Yarn only, never bare/Volta yarn, npx or account-policy. No local release
+WASM/full replay/size/timing sweep. Open a draft after reviews, update the caller
+contract for all-failure rejection/cache access, and require actual queued shared
+inputs plus exact-head green CI and fresh raw/package/ordered-gate proof before
+an announced separate guard and separate merge. B11 and runtime coverage stay open.
+
+ApeX local implementation receipt: refined plan `bc700e3ccf6` was independently
+reviewed CLEAN twice. Regression-only `3a023040ec3` leaves production unchanged:
+18 controls PASS and four assertion groups RED. Existing HistoryRows adoption
+turns those groups GREEN. All 25 final history controls pass, including mixed
+valid/failed alternatives, filtered nonempty primary cache selection, two-route
+same-symbol alternatives, native bounded eviction-before-duplicate replacement,
+signature-prefix reset, sixteen failed transport prefixes, concurrent owners and
+cache availability after rejection. Independent source review is CLEAN; broader
+focused/strict checks and final adversarial/tests-docs review follow before the
+draft PR. The #1769 bounded hold and required actual dependency integration remain.
+
+ApeX final local checks: all 849 focused engine/ApeX/Binance tests PASS. All 25
+history controls PASS again after adding an evicted native identity's later
+reappearance case. Strict all-target Clippy/fmt, banned-pattern and diff checks
+PASS. Both independent source reviews and final adversarial/tests/caller-doc
+reviews are CLEAN, including the unchanged native bounded upsert and legacy
+signing-provenance seam. No local release WASM/full replay/size/timing run. Draft
+CI and actual queued shared dependencies still require fresh source-bound proof.

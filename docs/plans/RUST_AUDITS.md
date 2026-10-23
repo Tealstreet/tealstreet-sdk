@@ -1987,3 +1987,14 @@ page prefixes remain staged; admitted malformed-fill skips supply owned coverage
 without changing native row isolation. Raw request displacement, native mapping,
 eager non-fill diagnostics and strict setup/admission behavior remain. This is
 shared-owner adoption, not universal history or NX B11 coverage closure.
+
+## ApeX bounded execution completion
+
+~~ApeX fills exhaust all native/display REST alternatives into apparent complete
+WS-cache or empty success, even when every REST attempt actually failed.~~
+Existing engine HistoryRows/Completion now owns terminal admission and delivery;
+all-actual-failure exhaustion rejects typed Internal. Validated successful empty/
+nonempty paths retain native/cache selection; bounded native upsert remains an
+endpoint normalization fact. No invented pager, partial recovery or cache-backed
+coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
+separate. [Scope and controls](RUST_OWNED_HISTORY.md).
