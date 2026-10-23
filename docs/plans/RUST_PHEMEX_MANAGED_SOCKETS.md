@@ -131,3 +131,27 @@ and replay gates. No profile/reference/threshold/harness changes. Native tests
 are correctness evidence only. Record actual results and review scope in the
 PR body; CALLERS describes landed behavior. Temporary managed-sockets remains
 a shrink-only remove-before-master obligation, including excluded Bitunix.
+
+## Executed original private controls
+
+Isolated native production: git archive `861462871e3` (before public adapter),
+with only `tests/managed_private_socket.rs` added. Exact lib/account/sign/history
+and Cargo bytes match that commit. Command: `cargo test -p
+safe-cex-venue-phemex --test managed_private_socket` in the archived sdk-rs.
+All ten compile and execute: SIX genuine assertion REDs, FOUR working GREENs,
+zero ignored. Duplicate open emits4 frames instead of2; expired connect emits
+a login; duplicate auth emits2 AOP subscriptions instead of1; deadline-equality
+snapshot and idle-expired order publish; idle-expired pong fails to retire.
+
+The four native positives pin full auth/signature/expiry/ping/AOP bytes, accepted
+financial snapshot, connect-origin20s expiry despite delayed open/ACK/pongs,
+and malformed snapshot retaining expiry. The initial test run had one fixture
+field-order error in the new auth expectation; corrected to the native exact
+serializer bytes before this receipt. No native production was changed.
+
+Shared owner confirmed no reviewed completion/barrier seam expresses the
+connect-origin accepted-snapshot contract. The separate prerequisite must retain
+independent login and snapshot facts; exact current-message epoch custody
+discharges the barrier only after native validation, with equality expiry
+before publication. Stale/borrowed/duplicate completion is inert; pongs remain
+independent liveness. Ownership/API ruling is requested before source.
