@@ -234,9 +234,9 @@ managed conversion needs claude-19pt8s's Ed25519 recipe/provider (#1844) plus th
 shared Base58 key encoding seam; do not feed pre-signed bytes through unsigned
 admission. Plan/CallWindow owns multi-request admission and no-I/O preflight
 completion. Session mutations belong to claude-55ao7t; account reconciliation
-requires actual Background/Execution ownership and exact delivery validation,
-not a fake command Read. #1857's shared reconcile/read machinery remains an
-explicit prerequisite where used, not an actual API claim.
+requires actual Background/Execution ownership and exact delivery validation
+(#1856 for Background), not a fake command Read. #1857's typed stream-integrity
+callback is a separate prerequisite where used, not an actual API claim.
 
 Keep native stale-guard revisions, coverage, positional bracket tree identity,
 terminal/fill fences, snapshot pairing and remaining-size replacement logic.
@@ -248,8 +248,8 @@ native complete branch facts with intent-specific declarations, not a local
 At this audit #1791 holds `src/history.rs` and `tests/history.rs`; leave them
 untouched. Add ignored original-source tests only to unoccupied
 `tests/trading.rs`, reusing its authenticated fixture: HTTP 200 code -1007 must
-be Unknown and start all three existing reconcile reads; HTTP 503 with native
--1001 must remain Unknown and never resend. Run `cargo test -p
+be Unknown and start all three existing reconcile reads; HTTP 503 must retain native code
+-1001 while preserving its already-correct Unknown/no-resend behavior. Run `cargo test -p
 safe-cex-venue-orderly --test trading p0_write_ -- --ignored --nocapture`.
 Both must compile and fail behavioral assertions on the original source.
 
@@ -265,3 +265,10 @@ Clippy/fmt, bans, both ratchets, independent reviews and exact-head CI.
 
 Architecture gate: No. Tests specify native facts and the shared classifier/
 journal path; session, signing, reconciliation and admission gaps stay shared.
+
+Local plan/test evidence: 2 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(181 tests, 2 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
