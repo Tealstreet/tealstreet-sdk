@@ -5594,3 +5594,19 @@ behaviour changes until its admission PR declares the new policy.
 | TS setup policy: `secretEncoding` gains `base64Text`, plus an `extra { key, field, encoding }` signing-ref policy (`requiredForPrivate`) | `LocalSignerSetup` callers and the construction-rules `signerSetup` entries | `utf8`, `base64`, `hex`, `pem` encodings; no extra refs | `base64Text` installs the ASCII of padded base64 of the secret as the key; extras are declared per family and validated at trusted setup | add (admitted families only) |
 | `host.d.mts` `SignAlgorithm` adds `'zkLinkContract'` | custom JS host signers that switch on algorithm | previous union | handle or refuse the new member; an unhandled algorithm must refuse, never sign | add |
 | Crypto `zklink` feature (enabled by the ApeX venue only) | WASM family builds | n/a | other family builds are unchanged; a provider without it refuses `ZkLinkContract` as `Unsupported` | none
+
+### Paradex unsigned public-trades Context history consumer
+
+`fetchPublicTrades` keeps the native unsigned GET query, limit1..500/default100,
+row schema, encounter order, first-ID dedupe and truncation. The endpoint remains
+one physical page even when a valid continuation cursor is returned. A missing
+market returns admitted []. Private history, JWT and Stark signing are unchanged.
+
+The command now requires managed prepare/bind/claim support in custom transports.
+Preparation and the full response share the original20s Read bound; stale or
+reused owners cannot emit a result or history.incomplete marker. Malformed or
+failed prefixes reject strictly without returning staged rows. Typed route
+failures retain their engine metadata; released transport loss is Network and
+expiry Timeout, while native malformed/status errors retain Internal. Capacity
+admission precedes missing-market completion. Callers treat a rejected read as
+unavailable history, not an authoritative empty snapshot; no SDK signature changes.

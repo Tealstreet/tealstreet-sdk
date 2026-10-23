@@ -2491,3 +2491,12 @@ private signing, account callbacks, discovery and valid history transport remain
 separately inventoried. The architecture gate is No: only native local error
 projection changes, with no venue-owned lifecycle, timer, credential selection,
 retry, classifier or owner registry. CI/replay/size proof remains a separate gate.
+
+### Paradex public-trades Read history bridge adoption
+
+Unsigned single-page public trades now use a dedicated Context-bearing history
+owner, separate from legacy private history. Shared exact root/leg/Attempt
+admission gates staging, identities, page advancement and terminal publication.
+Strict failures discard prefixes; stale/reused owners produce no result/marker.
+Only the obsolete public sender is removed (Paradex56→55, history14→13); all
+private history counts remain. No signing, session, Plan or engine source edit.

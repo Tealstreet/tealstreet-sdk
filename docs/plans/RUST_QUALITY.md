@@ -1082,3 +1082,23 @@ MEXC/Binance tests pass 487 across 42 targets with zero failed/ignored; strict
 all-target Clippy and formatting pass. Both request-context checks pass, with
 15 ratchet controls and exact unowned-map equality; 8 entries/8 occurrences are
 removed only from MEXC. Full CI owns WASM/replay/size and performance evidence.
+
+### Paradex second native Read-history consumer controls
+
+Original plan dec36cfa468 and seven original REDs efafc26dedc retain their assertions
+on reviewed #1848 f471 plus actual e233. All seven fail on legacy dispatch before
+implementation and pass through real managed release afterward. Controls preserve
+unsigned query/body/headers/native codec, limit geometry, encounter order/dedupe,
+forced single page, strict malformed/failed prefixes, typed preparation/transport,
+original deadline and stale token/ID reuse without marker or Store leakage.
+Only one public sender fingerprint is pruned; private authority and shared bridge
+blobs remain unchanged. Full native/strict/CI and independent review are separate
+readiness gates; this native receipt alone does not claim bridge landing.
+
+The public-trades frozen source38836aad176 passes501 Paradex+Binance native tests
+(41 result groups), strict all-target/all-feature Paradex Clippy and scoped fmt;
+all three frozen implementation reviews are CLEAN/architectureNo. Incoming
+actual2badd1cb0e3 preserves tested dependency blobs and all foreign prunes. Both
+request checks/14 controls and bans pass on the integrated head; bridge blobs
+remain exact to authorized f471. This is executed native consumer evidence, not
+an actual bridge landing or complete WASM/replay/size proof.
