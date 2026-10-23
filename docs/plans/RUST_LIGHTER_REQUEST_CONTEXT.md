@@ -292,3 +292,53 @@ command authority from background engine/native admission. Full-map review
 verified every original candle-review assertion/clock/payload is retained.
 Architecture gate: No. CI replay/size/complete-package proof and the overseer's
 merge window remain separate gates; this checkpoint is not a merge approval.
+
+## Phase 1b: engine command-entry admission (2026-10-23)
+
+Base `6741c1c6609` contains actual candle #1807 and engine command-entry #1830
+(`0001c78eeb2`). This follow-up replaces only the remaining candle issuance
+refusal, not the deferred inventory families in the appendix. Current Lighter
+inventory is 47 occurrences (`lib.rs`: 6); removing the one exact
+`cx.fail(c, error)` fingerprint makes those totals 46 and 5 respectively. Every
+other venue fingerprint and every other Lighter path remains incoming verbatim.
+
+The complete callback audit finds two `fetch_candles` callers: genuine
+`on_command(FetchCandles)` passes `Some(command)`, and the poll timer passes
+`None`. Before admission the helper only reads subscription generation/revision;
+it queues no work, publishes nothing and consumes no resource. Command reads
+will call the landed `Cx::admit_http_command(Policy)` once, without an ID argument.
+On either `Rejected` (already emitted one typed denial) or `Revoked` (no current
+entry authority), return without a local terminal, request or fallback. The
+background caller continues using `http_context(Scope::Background, policy)`;
+capacity refusal still clears only its matching generation's in-flight flag.
+Both branches retain the same public Read policy, 20-second timeout, no
+credential and `RetryPolicy::Never`. Native input validation, query bytes,
+streaming, Context terminals, revision fences and WebSocket behavior are intact.
+No wrapper, numeric completion, local capacity policy or retry is introduced.
+
+Files: `src/lib.rs`, `tests/request_context_candles.rs`, this plan, the exact
+Lighter-only manifest prune and caller/audit/quality appendices. Fresh all-open
+PR inspection (`--limit 200`) finds #1866 holds only Lighter `src/trading.rs`;
+leave it untouched. No other open PR holds this slice's source or test file.
+
+Commit this plan and obtain independent source/adversarial, caller and full-map
+reviews before production edits. Commit original-RED controls separately: full
+256-owner admission returns the engine's exact typed Read capacity error (no
+financial outcome), before invalid native parameters, with exactly one terminal
+and no I/O/timer allocation. Existing owners must still release and complete;
+a live duplicate command must produce no new request or terminal and must not
+revoke the original. Exercise both aliases and networks, preserve all original
+seven candle controls, and prove a freed slot accepts the refused command.
+Then adopt shared command entry, prune just that one fingerprint and retain all
+incoming entries/prunes. Run focused candles, all Lighter+Binance native tests,
+strict touched-crate clippy/fmt, bans and both request-context checks; obtain
+three clean implementation reviews and open a separate draft PR with CI watch.
+
+Caller-visible refusal changes from the adapter's generic lifecycle-unavailable
+message to the engine's typed `Too many requests in flight` / Internal Read
+denial, with no financial outcome. Successful and native validation replies keep
+their existing wire/result shape. Duplicate live command IDs are refused by the
+shared entry owner without affecting the original command. Private trading,
+auth/nonce, history and multi-request paths remain dependent on their owning
+shared seams. Architecture gate: this is a consumer of the shared admission
+choke point, not a per-venue admission implementation.
