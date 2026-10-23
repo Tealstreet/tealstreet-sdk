@@ -814,6 +814,23 @@ unknown symbols, exact headers/query calculations and separate malformed-row
 versus envelope error timelines. Corrected native fixtures ran unchanged source
 with eleven RED and three compatibility GREEN controls before the managed source
 made all fourteen GREEN.
+
+## MEXC initial Plan refusal regressions
+
+Separate original-source tests reproduce two failures: no typed initial Plan
+startup terminal, and resumed HTTP through late pagination/asset refresh. Two
+negative controls already pass on original production, preserving transient and
+post-startup retries. Coverage includes AuthInvalid/AuthExpired/AuthPermission,
+native code/message, deactivation policy, exactly one startup terminal, stale
+poll delivery, late sibling failure/login, a 100-row late page and asset timers.
+Both normal empty-list error envelopes and errors missing data are covered;
+successful missing/null lists retain retry behavior. Existing account assertions remain
+intact, and the legacy request inventory has no venue delta.
+
+Verification on the integrated startup fix passes456 MEXC+Binance tests across
+40 targets, including all44 account tests. Scoped fmt/strict all-target Clippy
+and both ratchets (14 controls) pass. Three independent reviews are clean;
+architecture No. Source/test files held by history #1793 remain untouched.
 ## Draft Engine socket lifecycle references
 
 OKX adopt one Engine registry/driver for epoch admission, typed auth,
