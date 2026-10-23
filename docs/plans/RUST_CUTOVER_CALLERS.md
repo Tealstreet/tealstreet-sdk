@@ -5386,3 +5386,85 @@ and new maps coexist. Ten similarly sized independent Stores therefore add about
 The cost occurs per Store, not per message, and grows with symbol count/string
 length and hash-table capacity steps. These are native index-only measurements;
 actual process/browser/WASM costs include allocator and memory-page effects.
+
+## Engine socket lifecycle: OKX
+
+OKX authentication state, socket epochs, reconnect permission, subscription
+replay and retirement use the shared Engine lifecycle. Native venue codecs
+provide login/subscription payloads and Store invalidation through the existing
+socket actions and events. Retired or expired frames and timers cannot restore
+authentication, replay interests, advance private health or publish a parked
+signing result. Permanent OKX private/business credential refusal revokes both
+retry authorities before callbacks; reconnectable loss retains native recovery.
+
+Current desired book/candle interests survive reconnect. Retirement clears only
+the retiring feed's owned public depth before retry; account/history/settings
+freshness fences remain unchanged. Physical IDs retain the shared host-safe
+integer boundary and signing/remote-signing wire contracts remain unchanged.
+
+Bitunix and all other venue families retain their existing socket adapters.
+Bitunix keeps its native pre-ACK reads, first-pong idle activation and shard
+pacing. The temporary managed-sockets feature remains until every legacy family
+has adopted the shared lifecycle; its inventory includes Bitunix explicitly.
+
+Initial HTTP command admission precedes any managed socket side effect. Socket
+registration, retirement, closure and queued work spend a fresh command-entry
+loan even when no new transport identity is allocated.
+
+
+## Declared mutation terminal API (#1894)
+
+An opted-in engine Plan may declare a native conditional terminal before any
+release. `done_mutation_plan_after_data` consumes only its exact current
+released DATA anchor and retires unissued remainder; it does not manufacture
+Accepted facts or renew the native root. A valid terminal whose earlier writes
+are uncertain still emits the common journal's failure projection with known
+IDs retained. An undeclared anchor, Read Plan, foreign/old/expired delivery or
+another issued call refuses without consuming current authority.
+
+The shared seal prepares projection/report storage before commit and keeps one
+Cx terminal funnel for the forthcoming execution-observer integration. Native
+codecs still prove when their conditional native work is finished. ApeX #1891
+is a separate consumer obligation; this engine API alone does not migrate its
+writes, provider presentation, remote zkLink, startup or session paths. No TS
+caller shape or native result bytes change until an adapter adopts it.
+
+
+## Context-owned history completion and admission
+
+For adapters using `ReadCompletion` and the `Read*History` types, the history
+owner retains the original engine-issued command Read root across pages and
+composite stages. Legacy numeric owners keep their existing lifecycle; each
+venue's adoption carries its own caller contract. Bind the matching command/root once; a page
+leg, foreign issuer, stale generation, background owner or mutation owner cannot
+substitute for that root. `ReadCompletion::from_context` validates that binding
+without reserving exclusive completion; only the first valid context terminal
+can complete the owner. Read ownership does not become numeric completion
+authority when a lifecycle check refuses it. Plan and joined-observer ownership
+use their own explicit APIs.
+
+Native adapters use the borrowed admission guard for row staging, identities,
+accepted output and coverage. The guard checks the exact current HTTP leg and
+physical attempt; native response validation and publication freshness are
+separate requirements.
+Scope the guard around admission, drop it before mutable Cx diagnostics or Store
+publication, and re-admit if more staging follows. Native cache/Store effects
+outside the history owner require the same synchronous root/leg check.
+Read cursor identities stay page-local until admission, so a discarded failed
+prefix cannot suppress those rows in a later retry. Discard the failed staged
+page before retry admission; a different physical attempt is refused until that
+binding and its unvalidated rows and identities are cleared.
+
+Migrate a venue's owner to the Read type as a whole. Handle or deliberately
+ignore a Context ownership error; never unwrap it or retry through numeric
+done/fail. Stale or mixed-mutation ownership cannot run a captured finalizer,
+publish a history.incomplete companion, or consume the proper command owner's
+terminal authority. Preparation/policy refusals reject strictly; actual later
+page failures can return previously accepted rows with one command-scoped
+incomplete Warn. Native strict endpoint-policy refusals remain strict.
+
+SDK/NX callers keep the incomplete fact correlated to the command and treat
+its returned rows as partial coverage. An absent or refused managed result does
+not establish complete history. Existing native row shapes and result shaping
+remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
+and [owned history](RUST_OWNED_HISTORY.md).
