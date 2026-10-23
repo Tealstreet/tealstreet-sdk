@@ -6,9 +6,7 @@ mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
-use safe_cex_engine::request_context::{
-    Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
-};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryEvidence, RetryPolicy};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
     VenueError,
@@ -765,43 +763,44 @@ impl Venue for KrakenSpot {
             self.on_sign_error(cx, pending, error);
         }
     }
-    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
-        match &mut pending {
-            Pending::Private(_) => {
-                let Pending::Private(r) = pending else {
-                    unreachable!()
-                };
-                self.private_network_failed(cx, r, error);
-                return;
-            }
-            Pending::Candles {
-                context, retries, ..
-            } => {
-                if let Err(reason) = cx.validate_http_context(context) {
-                    self.candle_preparation_failed(cx, pending, reason.venue_error());
-                    return;
-                }
-                if *retries < 3 {
-                    match cx.http_retry_context(context, RetryEvidence::ReadFailure) {
-                        Ok(next) => {
-                            *context = next;
-                            *retries += 1;
-                            self.candle_request(cx, pending);
-                        }
-                        Err(reason) => {
-                            self.candle_preparation_failed(cx, pending, reason.venue_error())
-                        }
-                    }
-                } else {
-                    let failure = VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network);
-                    self.candle_preparation_failed(cx, pending, failure);
-                    cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-                }
-                return;
-            }
-            _ => {}
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut pending: Pending,
+        error: VenueError,
+    ) {
+        let Pending::Candles {
+            context, retries, ..
+        } = &mut pending
+        else {
+            self.on_request_failed(cx, pending, &error.message);
+            return;
+        };
+        if let Err(reason) = cx.validate_http_context(context) {
+            self.candle_preparation_failed(cx, pending, reason.venue_error());
+            return;
         }
-        self.public_failed(cx, pending, error);
+        if *retries < 3 {
+            match cx.http_retry_context(context, RetryEvidence::ReadFailure) {
+                Ok(next) => {
+                    *context = next;
+                    *retries += 1;
+                    self.candle_request(cx, pending);
+                }
+                Err(reason) => self.candle_preparation_failed(cx, pending, reason.venue_error()),
+            }
+        } else {
+            let message = error.message.clone();
+            self.candle_preparation_failed(cx, pending, error);
+            cx.notice(Level::Warn, code::REQUEST_FAILED, message);
+        }
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Private(request) = pending {
+            self.private_network_failed(cx, request, error);
+        } else {
+            self.public_failed(cx, pending, error);
+        }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(tickers) = self.discovery.on_timer(timer) {
@@ -921,28 +920,21 @@ impl Venue for KrakenSpot {
                     if let Some(s) = from_ms {
                         p.push_str(&format!("&since={}", (s / 1000.).floor()));
                     }
-                    match cx.http_context(
-                        Scope::Command(command),
-                        Policy {
-                            operation: Operation::Read,
-                            credential: None,
-                            timeout_ms: 20_000,
-                            pacing: None,
-                            retry: RetryPolicy::ReadFailure,
-                        },
-                    ) {
-                        Ok(context) => self.candle_request(
+                    if let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::ReadFailure,
+                    }) {
+                        self.candle_request(
                             cx,
                             Pending::Candles {
                                 context,
                                 params: p,
                                 retries: 0,
                             },
-                        ),
-                        Err(error) => {
-                            let error = error.venue_error();
-                            cx.fail(command, error);
-                        }
+                        );
                     }
                 } else {
                     cx.fail(command, tf.unsupported("Kraken Spot"))

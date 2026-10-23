@@ -215,7 +215,12 @@ fn exact_deadline_response_cannot_publish_success_or_native_error_warning() {
     let initial = query(&mut engine, 7, 100.);
     let (token, _) = preparation(&initial);
     let packet = release(&mut engine, token, 101.);
-    let mut actions = response(&mut engine, &packet, 20_100., r#"{"error":["EGeneral:late error"]}"#);
+    let mut actions = response(
+        &mut engine,
+        &packet,
+        20_100.,
+        r#"{"error":["EGeneral:late error"]}"#,
+    );
     engine.handle(
         20_100.,
         Event::TimerFired {
@@ -260,8 +265,26 @@ fn three_transport_retries_keep_exact_query_and_original_deadline() {
     assert!(
         !actions
             .iter()
-            .any(|action| matches!(action, Action::ManagedHttp(_)))
+            .any(|action| matches!(action, Action::ManagedHttp(action) if matches!(&**action, HttpAction::Prepare { .. })))
     );
+}
+
+#[test]
+fn released_deadline_is_typed_timeout_without_another_read_attempt() {
+    let mut engine = engine();
+    let initial = query(&mut engine, 7, 100.);
+    let (token, _) = preparation(&initial);
+    let packet = release(&mut engine, token, 101.);
+    engine.handle(
+        20_100.,
+        Event::TimerFired {
+            timer: deadline(&initial),
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(failure(&actions, 7).kind, Some(ErrorKind::Timeout));
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(&**action, HttpAction::Prepare { .. }))));
+    assert!(response(&mut engine, &packet, 20_101., EMPTY).is_empty());
 }
 
 #[test]
