@@ -99,17 +99,24 @@ Preflight, Plan or Execution) is refused with `Invalid`. The refusal comes
 before any id, journal or phase change, so a Timeout seal can never erase a
 released write.
 
-**Transaction order** (refusal-atomic):
-1. Guard and receipt checks, which have no effects.
-2. Reserve the index slot. `Io.read_roots` is preallocated to the registry's
-   owner capacity, 256, so the push cannot fail.
-3. Reserve one timer id through `reserve_ids`.
-4. Issue the root.
-5. Push the index entry.
-6. Re-arm the single engine timer.
-
-A refusal at step 2, 3 or 4 leaves nothing tracked, and it is a typed
-rejection through `with_command_entry`.
+**Transaction order** (refusal-atomic; nothing is spent before every check
+passes):
+1. **Effect-free checks:** the guard; the receipt; the Credential's own
+   validation; a raw deadline that is finite and later than now; free
+   registry owner capacity; and the plain-Read compatibility of any existing
+   owner.
+2. **Fallible storage reservations:**
+   - an index slot, with `read_roots` preallocated to owner capacity, 256;
+   - the timer action slot (`actions.try_reserve(2)`, for a clear plus an
+     arm);
+   - the registry's owner and context storage.
+3. **IDs, the only spend:** the root identity and the timer id through one
+   `reserve_ids(2)`. A refusal here, or at any earlier step, leaves no id,
+   owner, index entry, timer or credit. It is a typed rejection through
+   `with_command_entry`.
+4. **Infallible commit:** issue the root, push the index entry and re-arm the
+   timer. After step 3 nothing can fail. The issuer path used here has no
+   fallible branch left, because its checks moved into step 1.
 
 ## Engine mechanism
 
@@ -160,11 +167,17 @@ rejection through `with_command_entry`.
       plan sweep and `ExpiryScope`).
 5. **Cleanup** has no venue Cx and no borrowed entry, Plan, socket, order or
    Read-transport proof. Per root, in order:
-   1. For each outstanding managed request of the owner, `discard_managed`
-      runs. The scan matches `delivery().context.owner()` by exact id and
-      generation. The request gets an `HttpAction::Cancel`, and its `Pending`
-      is collected. Any sent evidence is retained by the existing
-      reconciliation capture; a Read has no write journal. Nothing is
+   1. **Reserve first.** Before marking or removing anything, count the
+      owner's outstanding managed requests by exact id and generation, and
+      `try_reserve` the move-only `Vec<Pending>` for that count plus the
+      Cancel actions. A reservation failure poisons the engine, which is the
+      existing no-half-state rule for engine-owned sweeps. It never runs a
+      partial cleanup.
+   2. **Discard.** `discard_managed` runs for each such request. It cancels
+      that exact generation's signing state, preparation, streams, response
+      buffers and leg timer, emits `HttpAction::Cancel`, and moves the
+      `Pending` into the reserved vector. Any sent evidence is retained by the
+      existing reconciliation capture; a Read has no write journal. Nothing is
       re-admitted, retried or completed.
    2. `venue.read_root_retired(owner, pending)` hands back those `Pending`s
       plus the owner, with no Cx. The venue drops native state and queued
@@ -174,8 +187,9 @@ rejection through `with_command_entry`.
       and generation. It is never lent to a venue. `finish_sealed_command`
       then emits `CommandFailed { kind: Timeout, outcome: None }` with
       `http_delivery == None`, and removes the owner and the index entry.
-6. **Panics.** The scope poisons the engine on unwind, so a half-retired owner
-   can never survive.
+6. **Panics.** The whole sweep, covering marking, every root's discard, hook
+   and seal, runs in one poison scope. An unwind poisons the engine, so a
+   half-retired owner can never survive.
 
 ## Invariants
 
