@@ -69,7 +69,9 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
   const store = new DefaultStore();
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
   installNativeStartupFrames(engine, store, native);
-  const exchange = new RustEngineExchange(name, { key: 'key', secret: 'secret' }, store);
+  // WEEX trusted signer setup requires its private passphrase.
+  const credentials = { key: 'key', secret: 'secret', ...(name === 'weex' ? { passphrase: 'pass' } : {}) };
+  const exchange = new RustEngineExchange(name, credentials, store);
   running.push(exchange);
   return { exchange, commands, commandTimes, started, engine };
 };
