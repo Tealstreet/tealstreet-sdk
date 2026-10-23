@@ -17,6 +17,20 @@ pub fn remote_recipes() -> impl Iterator<Item = &'static dyn RemoteRecipe> {
     GROUPS.iter().flat_map(|group| group.iter().copied())
 }
 
+/// The recipe family an account's venue may execute: the id prefix before the
+/// first '.'. Accounts never sign another family's recipes.
+pub fn recipe_family(venue: &str) -> Option<&'static str> {
+    Some(match venue {
+        "asterdex" => "asterdex",
+        "coinbase" | "coinbasespot" => "coinbase",
+        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+            "orderly"
+        }
+        "paradex" => "paradex",
+        _ => return None,
+    })
+}
+
 /// Exact versioned match only; a skewed or unknown id is never approximated.
 pub fn remote_recipe(id: &str) -> Option<&'static dyn RemoteRecipe> {
     remote_recipes().find(|recipe| recipe.id() == id)

@@ -16,6 +16,11 @@ pub trait RemoteRecipe: Sync {
     /// `None` signs with the identity's ordinary signing ref.
     fn role(&self) -> Option<ExtraKey>;
     fn canonicalize(&self, inputs: &serde_json::Value) -> Result<Vec<u8>, SignError>;
+    /// An input field that must equal the executing account's own presented
+    /// credential (e.g. a JWT `kid`), so a recipe cannot sign for another key.
+    fn bound_credential_field(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// Checks a signature over the bound payload against the account's declared

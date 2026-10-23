@@ -331,6 +331,9 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for RestJwt {
     fn role(&self) -> Option<safe_cex_engine::signing::ExtraKey> {
         None
     }
+    fn bound_credential_field(&self) -> Option<&'static str> {
+        Some("kid")
+    }
     fn canonicalize(
         &self,
         inputs: &serde_json::Value,

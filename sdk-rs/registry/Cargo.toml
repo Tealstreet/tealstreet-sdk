@@ -6,6 +6,8 @@ publish.workspace = true
 description = "Every Rust venue, constructed by name from one options shape"
 
 [features]
+# Each family with a P8 recipe enables only its own provider arm (when dispatch
+# signing compiles the provider), keeping other family WASM builds free of it.
 # Additive provider bootstrap; at least one venue feature is still required.
 dispatch-signing = ["dep:safe-cex-crypto"]
 default = [
@@ -40,13 +42,13 @@ default = [
 ]
 grvt = ["dep:safe-cex-venue-grvt"]
 polymarket = ["dep:safe-cex-venue-polymarket"]
-coinbase = ["dep:safe-cex-venue-coinbase"]
+coinbase = ["dep:safe-cex-venue-coinbase", "safe-cex-crypto?/ed25519", "safe-cex-crypto?/es256"]
 breakoutprop = ["dep:safe-cex-venue-breakoutprop"]
-paradex = ["dep:safe-cex-venue-paradex"]
+paradex = ["dep:safe-cex-venue-paradex", "safe-cex-crypto?/stark"]
 apexomni = ["dep:safe-cex-venue-apexomni"]
 txflow = ["dep:safe-cex-venue-txflow"]
 kraken = ["dep:safe-cex-venue-kraken"]
-asterdex = ["dep:safe-cex-venue-asterdex"]
+asterdex = ["dep:safe-cex-venue-asterdex", "safe-cex-crypto?/secp256k1"]
 lighter = ["dep:safe-cex-venue-lighter"]
 woo = ["dep:safe-cex-venue-woo"]
 bitrue = ["dep:safe-cex-venue-bitrue"]
@@ -65,12 +67,13 @@ kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
 bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 okx = ["dep:safe-cex-venue-okx"]
-orderly = ["dep:safe-cex-venue-orderly"]
+orderly = ["dep:safe-cex-venue-orderly", "safe-cex-crypto?/ed25519"]
 
 [dependencies]
 safe-cex-crypto = { workspace = true, optional = true }
 safe-cex-engine.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 zeroize.workspace = true
 safe-cex-venue-breakoutprop = { path = "../venues/breakoutprop", optional = true }
 safe-cex-venue-grvt = { workspace = true, optional = true }
@@ -107,6 +110,7 @@ serde_json.workspace = true
 [dev-dependencies]
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
+bs58 = "0.5"
 
 [lints]
 workspace = true
