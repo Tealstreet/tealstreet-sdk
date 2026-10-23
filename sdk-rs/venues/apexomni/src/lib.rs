@@ -290,6 +290,57 @@ impl ApexOmni {
 }
 
 impl Venue for ApexOmni {
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        if !matches!(pending, Pending::Trade(_)) {
+            return Err(safe_cex_engine::request_context::Error::Invalid);
+        }
+        // Late acknowledgements reconcile through fenced account reads.
+        safe_cex_engine::request_context::ReconciliationData::new(String::new())
+    }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if let Pending::Trade(request) = pending {
+            trading::capture_unproven(request, response, evidence);
+        }
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trading_retired(owner)
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trading_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        self.failed(cx, pending, error);
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -363,6 +414,7 @@ impl Venue for ApexOmni {
     ) {
         match pending {
             Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error),
+            Pending::Trade(request) => self.trading_failed(cx, request, error),
             pending => self.transport_failed(cx, pending, &error.message),
         }
     }
@@ -375,14 +427,12 @@ impl Venue for ApexOmni {
     ) {
         match pending {
             Pending::Candles(pending) => Self::candle_failed(cx, pending, error),
+            Pending::Trade(request) => self.trading_failed(cx, request, error),
             pending => self.on_sign_error(cx, pending, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if !self.public_timer(cx, timer)
-            && !self.account_timer(cx, timer)
-            && !self.trading_timer(cx, timer)
-        {
+        if !self.public_timer(cx, timer) && !self.account_timer(cx, timer) {
             self.history_timer(cx, timer);
         }
     }
