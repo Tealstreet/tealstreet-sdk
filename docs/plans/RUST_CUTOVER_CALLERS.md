@@ -980,8 +980,8 @@ outcome and message do not:
 - host transport loss: still `network`.
 
 The `outcome` stays `unknown` and the message text is unchanged. Callers
-branching on `kind === 'network'` for Binance write timeouts should also accept
-`timeout`. Venues adopting the typed `Venue::on_http_failed` hook see the same
+branching on `kind === 'network'` for these Binance write failures should also
+accept `timeout` and `internal`. Venues adopting the typed `Venue::on_http_failed` hook see the same
 kinds; others are unchanged.
 
 ### Build and delivery steps
