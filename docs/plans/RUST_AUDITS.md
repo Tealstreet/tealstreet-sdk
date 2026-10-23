@@ -2532,3 +2532,37 @@ deployments/six envelopes, early response/stream fencing, malformed prefixes,
 route/transport/expiry recovery, capacity peer isolation and300 retirements.
 Only2bbebb…:1 is pruned (Lighter42→41/lib2→1); catalog remains counted.
 Architecture No: existing shared Context/HTTP authority and startup Backoff.
+
+
+
+## BloFin PublicTrades history authority
+
+The PublicTrades owner now adopts shared ReadCompletion/ReadCursorHistory,
+managed HTTP delivery and borrowed page admission. Exact physical delivery is
+checked before row mutation or page acceptance; typed shared terminals own both
+preflight and asynchronous cleanup. The adapter supplies only its native wire
+codec and result shaping. Independent source/adversarial, caller and full-map
+reviews answer the architecture gate No.
+
+The legacy inventory remains 24 BloFin occurrences: the shared private-history
+dispatcher and conservative query macro matches remain inventoried. This slice
+adds no exemption and makes no zero-legacy claim. Signed/private history, trading
+and the existing candle entry refusal remain separately tracked.
+
+## BloFin PublicTrades current inventory scope
+
+The actual-#1848 PublicTrades integration preserves all incoming engine and
+venue code outside its declared slice. The earlier 24-occurrence snapshot above
+predates #1867; current BloFin is 23 occurrences /19 rows /four files, unchanged
+by PublicTrades adoption. Its private dispatcher and conservative history macro
+sites remain explicit debt; neither the actual bridge nor the capacity assertion
+update claims a ratchet removal or private signer/Plan readiness.
+
+## WOO local history admission
+
+The three synchronous pre-I/O history refusal sites use genuine engine Read
+entry and Context completion. The separately committed original tests reproduce
+three typed-admission assertion failures and four compatibility passes on native
+source; the narrow cutover passes all seven assertions unchanged. Exact inventory
+shrink is three fingerprints/three occurrences, WOO34/37 to31/34. HTTP pagination,
+private signing and socket ownership are separate conversion targets.
