@@ -282,7 +282,7 @@ impl<V: Venue> Engine<V> {
                 venue.encode_socket_interests(store, feed, subscribe, items, emit)
             })
     }
-    #[inline]
+    #[inline(always)]
     pub(super) fn process_socket_work(&mut self, now: f64) {
         self.assert_live();
         if !self.io.managed_sockets {
@@ -293,6 +293,7 @@ impl<V: Venue> Engine<V> {
         }
         self.process_pending_socket_work(now);
     }
+    #[inline(never)]
     fn process_pending_socket_work(&mut self, now: f64) {
         let mut processed = 0usize;
         loop {
