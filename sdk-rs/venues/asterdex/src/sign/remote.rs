@@ -22,6 +22,47 @@ fn nonce(value: Option<&serde_json::Value>) -> Result<u64, SignError> {
         .ok_or(SignError::Refused)
 }
 
+/// Business params a wallet key may sign: orders, cancels, leverage, margin
+/// mode, position mode and reads. Transfer and withdraw shapes (`asset`,
+/// `amount`, addresses) are absent, so they are never signed remotely.
+const SIGNED_PARAMS: &[&str] = &[
+    "symbol",
+    "side",
+    "positionSide",
+    "type",
+    "timeInForce",
+    "quantity",
+    "price",
+    "reduceOnly",
+    "newClientOrderId",
+    "stopPrice",
+    "closePosition",
+    "activationPrice",
+    "callbackRate",
+    "workingType",
+    "priceProtect",
+    "newOrderRespType",
+    "stpMode",
+    "goodTillDate",
+    "orderId",
+    "origClientOrderId",
+    "orderIdList",
+    "origClientOrderIdList",
+    "batchOrders",
+    "leverage",
+    "marginType",
+    "dualSidePosition",
+    "multiAssetsMargin",
+    "startTime",
+    "endTime",
+    "limit",
+    "fromId",
+    "incomeType",
+    "countdownTime",
+    "builder",
+    "feeRate",
+];
+
 fn only(inputs: &serde_json::Value, fields: &[&str]) -> Result<(), SignError> {
     let object = inputs.as_object().ok_or(SignError::Refused)?;
     if object.keys().any(|key| !fields.contains(&key.as_str())) {
@@ -56,9 +97,10 @@ impl RemoteRecipe for Standard {
         if serde_json::to_string(&params).ok().as_deref() != Some(payload)
             || !params.contains_key("timestamp")
             || !params.contains_key("recvWindow")
-            || ["user", "signer", "nonce", "signature"]
-                .iter()
-                .any(|key| params.contains_key(*key))
+            || params.keys().any(|key| {
+                !matches!(key.as_str(), "timestamp" | "recvWindow")
+                    && !SIGNED_PARAMS.contains(&key.as_str())
+            })
         {
             return Err(SignError::Refused);
         }
@@ -70,6 +112,19 @@ impl RemoteRecipe for Standard {
         )
         .map_err(|_| SignError::Refused)?;
         Ok(ethereum::ethereum_message_hash(&ethereum::keccak256(&encoded)).to_vec())
+    }
+    fn stamp_ms(&self, inputs: &serde_json::Value) -> Result<f64, SignError> {
+        let payload = inputs
+            .get("payload")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(SignError::Refused)?;
+        let params: BTreeMap<String, String> =
+            serde_json::from_str(payload).map_err(|_| SignError::Refused)?;
+        params
+            .get("timestamp")
+            .and_then(|stamp| stamp.parse::<u64>().ok())
+            .map(|stamp| stamp as f64)
+            .ok_or(SignError::Refused)
     }
 }
 
@@ -115,7 +170,33 @@ impl RemoteRecipe for Code {
         address(Some(&serde_json::Value::from(user)))?;
         address(Some(&serde_json::Value::from(signer)))?;
         nonce(Some(&serde_json::Value::from(nonce_text)))?;
+        // The business part before the tail is only allowlisted key=value pairs,
+        // each key once, so no reserved or fund-moving key hides in a value.
+        let business = tail.next();
+        let mut seen = std::collections::BTreeSet::new();
+        for pair in business.into_iter().flat_map(|part| part.split('&')) {
+            let (key, value) = pair.split_once('=').ok_or(SignError::Refused)?;
+            if !SIGNED_PARAMS.contains(&key)
+                || !seen.insert(key)
+                || value.bytes().any(|b| b.is_ascii_control())
+            {
+                return Err(SignError::Refused);
+            }
+        }
         Ok(code_digest(query, testnet).to_vec())
+    }
+    fn stamp_ms(&self, inputs: &serde_json::Value) -> Result<f64, SignError> {
+        // The Code nonce is milliseconds x1000 plus a sequence (sign.rs next_nonce).
+        let query = inputs
+            .get("query")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(SignError::Refused)?;
+        let text = query
+            .rsplit_once("&nonce=")
+            .map(|(_, nonce)| nonce)
+            .or_else(|| query.strip_prefix("nonce="))
+            .ok_or(SignError::Refused)?;
+        Ok((nonce(Some(&serde_json::Value::from(text)))? / 1000) as f64)
     }
 }
 
@@ -158,6 +239,10 @@ mod tests {
         signature: String,
         testnet: bool,
     }
+    fn case_stamp(payload: &str) -> f64 {
+        let params: BTreeMap<String, String> = serde_json::from_str(payload).unwrap();
+        params["timestamp"].parse().unwrap()
+    }
     fn corpus() -> Vec<Case> {
         #[derive(serde::Deserialize)]
         struct Corpus {
@@ -171,6 +256,19 @@ mod tests {
     #[test]
     fn recipes_rebuild_the_independent_vector_digests() {
         for case in corpus() {
+            // Serializer-stress vectors carry a free-text `note` param the venue
+            // never signs; the allowlist refuses them, so only the digest check
+            // for real request shapes applies.
+            if !(case.name.starts_with("documented") || case.name.starts_with("empty")) {
+                let standard = serde_json::json!({
+                    "payload": case.payload, "user": case.user,
+                    "signer": case.signer, "nonce": case.nonce
+                });
+                assert_eq!(STANDARD.canonicalize(&standard), Err(SignError::Refused));
+                let code = serde_json::json!({ "query": case.code_query, "testnet": case.testnet });
+                assert_eq!(CODE.canonicalize(&code), Err(SignError::Refused));
+                continue;
+            }
             let standard = STANDARD
                 .canonicalize(&serde_json::json!({
                     "payload": case.payload, "user": case.user,
@@ -228,6 +326,12 @@ mod tests {
             ("payload", serde_json::json!(r#"{"b":"1","a":"2"}"#)),
             (
                 "payload",
+                serde_json::json!(
+                    r#"{"amount":"1","asset":"USDT","recvWindow":"1","timestamp":"1"}"#
+                ),
+            ),
+            (
+                "payload",
                 serde_json::json!(r#"{"recvWindow":"1","symbol":"X"}"#),
             ),
             (
@@ -258,6 +362,14 @@ mod tests {
                 serde_json::json!(case.code_query.replace("nonce=", "nonce=x")),
             ),
             ("query", serde_json::json!("symbol=BTCUSDT")),
+            (
+                "query",
+                serde_json::json!(format!("asset=USDT&amount=1&{}", case.code_query)),
+            ),
+            (
+                "query",
+                serde_json::json!(format!("nonce=1&{}", case.code_query)),
+            ),
             ("path", serde_json::json!("/fapi/v3/order")),
         ] {
             let mut inputs = code.clone();
@@ -268,6 +380,11 @@ mod tests {
                 "{field}"
             );
         }
+        assert_eq!(STANDARD.stamp_ms(&standard), Ok(case_stamp(&case.payload)));
+        assert_eq!(
+            CODE.stamp_ms(&code),
+            Ok((case.nonce.parse::<u64>().unwrap() / 1000) as f64)
+        );
         assert_eq!(
             REMOTE_RECIPES.iter().map(|r| r.id()).collect::<Vec<_>>(),
             ["asterdex.v3.1", "asterdex.code.1"]

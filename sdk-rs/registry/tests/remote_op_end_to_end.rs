@@ -169,6 +169,12 @@ fn run(family: Family, tamper: bool) -> (Option<String>, Vec<String>, Vec<u8>) {
         "kind": "op", "recipe": remote.recipe, "inputs": remote.inputs
     }))
     .unwrap();
+    let stamp = recipe.stamp_ms(&remote.inputs).unwrap();
+    assert!(
+        hosted_signing::op_timeout_ms(&input, stamp + 1.)
+            .unwrap()
+            .is_some()
+    );
     let (browser_work, kind) = hosted_signing::prepare(family.venue, &identities, input).unwrap();
     let signed = signer.sign_ready(&browser_work).unwrap().unwrap();
     let hex = hosted_signing::finish(kind, &signed)
@@ -254,39 +260,72 @@ fn paradex() -> Family {
     }
 }
 
-fn asterdex() -> Family {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Case {
-        private_key: String,
-        user: String,
-        signer: String,
-        nonce: String,
-        payload: String,
-    }
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AsterCase {
+    private_key: String,
+    user: String,
+    signer: String,
+    nonce: String,
+    payload: String,
+    signature: String,
+    code_query: String,
+    code_signature: String,
+    testnet: bool,
+}
+fn aster_case() -> AsterCase {
     #[derive(serde::Deserialize)]
     struct Corpus {
-        cases: Vec<Case>,
+        cases: Vec<AsterCase>,
     }
-    let case = serde_json::from_str::<Corpus>(include_str!(
+    serde_json::from_str::<Corpus>(include_str!(
         "../../venues/asterdex/tests/fixtures/signing.json"
     ))
     .unwrap()
     .cases
-    .remove(0);
+    .remove(0)
+}
+/// Independent ethers wire form `0x r||s||v(27/28)` as provider bytes (v 0/1).
+fn wire_signature(wire: &str) -> Vec<u8> {
+    let hex = wire.trim_start_matches("0x");
+    let mut bytes: Vec<u8> = (0..65)
+        .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
+        .collect();
+    bytes[64] -= 27;
+    bytes
+}
+fn aster(recipe: &'static str) -> Family {
+    let case = aster_case();
     let hex = case.private_key.trim_start_matches("0x");
     Family {
         venue: "asterdex",
-        recipe: "asterdex.v3.1",
-        inputs: serde_json::json!({
-            "payload": case.payload, "user": case.user, "signer": case.signer, "nonce": case.nonce
-        }),
+        recipe,
+        inputs: if recipe == "asterdex.code.1" {
+            serde_json::json!({ "query": case.code_query, "testnet": case.testnet })
+        } else {
+            serde_json::json!({
+                "payload": case.payload, "user": case.user, "signer": case.signer, "nonce": case.nonce
+            })
+        },
         credential: "aster-api-key",
         key: (0..32)
             .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
             .collect(),
         verify: Some(safe_cex_venue_asterdex::sign::remote_verifier(&case.signer).unwrap()),
     }
+}
+fn asterdex() -> Family {
+    aster("asterdex.v3.1")
+}
+
+fn coinbase_es256() -> (Family, Vec<u8>) {
+    use p256::pkcs8::EncodePrivateKey;
+    let secret = p256::SecretKey::from_slice(&[7; 32]).unwrap();
+    let public = secret.public_key().to_sec1_bytes().to_vec();
+    let mut family = coinbase();
+    family.recipe = "coinbase.restJwtEs256.1";
+    family.key = secret.to_pkcs8_der().unwrap().as_bytes().to_vec();
+    (family, public)
 }
 
 fn coinbase() -> Family {
@@ -309,6 +348,7 @@ fn every_format_signs_remotely_verifies_and_releases_the_exact_bytes() {
         (orderly(), Algorithm::Ed25519),
         (paradex(), Algorithm::StarkDigest),
         (asterdex(), Algorithm::Secp256k1Digest),
+        (aster("asterdex.code.1"), Algorithm::Secp256k1Digest),
         (coinbase(), Algorithm::Ed25519),
     ] {
         let (venue, recipe, inputs) = (family.venue, family.recipe, family.inputs.clone());
@@ -326,7 +366,32 @@ fn every_format_signs_remotely_verifies_and_releases_the_exact_bytes() {
             let message = recipe.canonicalize(&inputs).unwrap();
             assert!(safe_cex_crypto::ed25519::verify(&message, &ED_PUBLIC, &signature).unwrap());
         }
+        if venue == "asterdex" {
+            // Deterministic RFC 6979: the released bytes are the independent vector.
+            let case = aster_case();
+            let wire = if recipe.id() == "asterdex.code.1" {
+                case.code_signature
+            } else {
+                case.signature
+            };
+            assert_eq!(signature, wire_signature(&wire), "{}", recipe.id());
+        }
     }
+    // ES256 JWT: RFC 6979 is deterministic in Rust, but JWS verifiers accept any
+    // valid signature, so the proof is verification under the account key.
+    let (family, public) = coinbase_es256();
+    let inputs = family.inputs.clone();
+    let (header, failed, signature) = run(family, false);
+    assert_eq!(failed, Vec::<String>::new());
+    assert_eq!(
+        header.as_deref(),
+        Some(safe_cex_crypto::hex(&signature).as_str())
+    );
+    let recipe = safe_cex_venues::remote_recipe("coinbase.restJwtEs256.1").unwrap();
+    let message = recipe.canonicalize(&inputs).unwrap();
+    assert!(safe_cex_crypto::es256::verify(
+        &message, &public, &signature
+    ));
 }
 
 #[test]

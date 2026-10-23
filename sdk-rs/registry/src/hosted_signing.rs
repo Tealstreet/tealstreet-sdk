@@ -181,6 +181,27 @@ pub fn prepare(
     }
 }
 
+/// Freshness gate for an `op` input against the executor's protocol clock,
+/// checked once for every family: the recipe's own stamp must be at most
+/// `REMOTE_FRESHNESS_MS` old and `MAX_REMOTE_LEAD_MS` ahead. Returns the
+/// remaining window, which bounds the provider deadline.
+pub fn op_timeout_ms(input: &Input, protocol_now: f64) -> Result<Option<u32>, SignError> {
+    use safe_cex_engine::signing_remote::{MAX_REMOTE_LEAD_MS, REMOTE_FRESHNESS_MS};
+    let Input::Op { recipe, inputs } = input else {
+        return Ok(None);
+    };
+    let recipe = crate::remote_recipe(recipe).ok_or(SignError::Unsupported)?;
+    let age = protocol_now - recipe.stamp_ms(inputs)?;
+    if !age.is_finite() || !(-MAX_REMOTE_LEAD_MS..REMOTE_FRESHNESS_MS).contains(&age) {
+        return Err(SignError::Refused);
+    }
+    Ok(Some(
+        (REMOTE_FRESHNESS_MS - age.max(0.))
+            .ceil()
+            .clamp(1., REMOTE_FRESHNESS_MS) as u32,
+    ))
+}
+
 /// The browser half of P8: only the account's own family, the recipe's own
 /// allowlist (defence in depth beside the server guard) and its role-bound key.
 fn op_work(

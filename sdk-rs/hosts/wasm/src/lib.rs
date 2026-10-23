@@ -684,6 +684,11 @@ impl WasmEngine {
                 .ceil()
                 .clamp(1., HOSTED_HTTP_FRESHNESS_MS) as u32;
         }
+        if let Some(window) = safe_cex_venues::hosted_signing::op_timeout_ms(&input, protocol_now)
+            .map_err(hosted_error)?
+        {
+            timeout = window;
+        }
         let (work, kind) = safe_cex_venues::hosted_signing::prepare(venue, identities, input)
             .map_err(hosted_error)?;
         let prepared = self

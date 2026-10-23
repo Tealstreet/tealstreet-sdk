@@ -57,6 +57,9 @@ it('secondary keys, the payload-signer path and malformed replies are refused', 
   await expect(provider(signer(requests, ['orderly.rest.1']))(work(secondary.signing, false), { signal: signal(), remote }))
     .rejects.toThrow('refused');
   expect(requests).toEqual([]);
+  await expect(provider(signer(requests, ['orderly.rest.1']))(work(), { signal: signal(), remote: { ...remote, role: 'zklinkSeed' } }))
+    .rejects.toThrow('refused');
+  expect(requests).toEqual([]);
   const payloadSigner = vi.fn<PayloadSigner>(() => ({ signature: 'x' }));
   await expect(provider(undefined, payloadSigner)(work(), { signal: signal(), remote })).rejects.toThrow('refused');
   expect(payloadSigner).not.toHaveBeenCalled();

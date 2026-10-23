@@ -244,7 +244,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   // advertised recipe ids, never on the payload-signer path.
   const signOp = async (request: SignRequest, receipt: SignReceipt, remote: RemoteSignOp, signal: AbortSignal): Promise<RemoteSignerResult> => {
     const recipes = remoteSigner?.signOps?.recipes;
-    if (!remoteSigner || !record(remote) || typeof remote.recipe !== 'string'
+    // Role-bound (extra) keys never ride this provider; only the primary signing key does.
+    if (!remoteSigner || !record(remote) || typeof remote.recipe !== 'string' || remote.role !== undefined
       || !Array.isArray(recipes) || !recipes.includes(remote.recipe)) throw refused();
     if (!Array.isArray(request.operations) || request.operations.length > MAX_OPERATIONS
       || request.operations.filter((operation) => operation.kind === 'sign').length !== 1) throw refused();

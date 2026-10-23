@@ -369,6 +369,17 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for RestJwt {
             .map(String::into_bytes)
             .map_err(|_| Refused)
     }
+    fn stamp_ms(
+        &self,
+        inputs: &serde_json::Value,
+    ) -> Result<f64, safe_cex_engine::signing::SignError> {
+        inputs
+            .get("nbf")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|nbf| *nbf <= u64::MAX / 2000)
+            .map(|nbf| (nbf * 1000) as f64)
+            .ok_or(safe_cex_engine::signing::SignError::Refused)
+    }
 }
 pub static REST_JWT_ES256: RestJwt = RestJwt(JwtKind::Es256);
 pub static REST_JWT_ED25519: RestJwt = RestJwt(JwtKind::EdDsa);

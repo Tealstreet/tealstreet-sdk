@@ -1703,6 +1703,9 @@ impl crate::signing_remote::RemoteRecipe for QtyRecipe {
             _ => Err(SignError::Refused),
         }
     }
+    fn stamp_ms(&self, _: &serde_json::Value) -> Result<f64, SignError> {
+        Ok(0.)
+    }
 }
 static QTY: QtyRecipe = QtyRecipe;
 /// Builds its payload and its remote description from the same quantity.

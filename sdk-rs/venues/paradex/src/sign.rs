@@ -428,6 +428,17 @@ impl safe_cex_engine::signing_remote::RemoteRecipe for OrderRecipe {
         .map_err(|_| Refused)?;
         Ok(hash.to_bytes_be().to_vec())
     }
+    fn stamp_ms(
+        &self,
+        inputs: &serde_json::Value,
+    ) -> Result<f64, safe_cex_engine::signing::SignError> {
+        inputs
+            .get("timestamp")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|stamp| stamp.parse::<u64>().ok())
+            .map(|stamp| stamp as f64)
+            .ok_or(safe_cex_engine::signing::SignError::Refused)
+    }
 }
 pub static ORDER: OrderRecipe = OrderRecipe;
 

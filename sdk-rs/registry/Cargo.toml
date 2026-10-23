@@ -112,6 +112,7 @@ safe-cex-engine = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
 bs58 = "0.5"
 starknet-crypto.workspace = true
+p256.workspace = true
 
 [lints]
 workspace = true

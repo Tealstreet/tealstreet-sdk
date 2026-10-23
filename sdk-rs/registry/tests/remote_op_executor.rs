@@ -101,6 +101,41 @@ fn executor_refuses_other_families_skewed_versions_and_disallowed_inputs() {
 }
 
 #[test]
+fn executor_refuses_stale_and_future_dated_recipe_stamps() {
+    let op_at = |inputs| op("orderly.rest.1", inputs);
+    let stamp = 1_700_000_000_000.;
+    for (now, expected) in [
+        (stamp, Ok(Some(5000))),
+        (stamp + 1000.5, Ok(Some(4000))),
+        (stamp - 1999., Ok(Some(5000))),
+        (stamp + 5000., Err(SignError::Refused)),
+        (stamp - 2001., Err(SignError::Refused)),
+        (f64::NAN, Err(SignError::Refused)),
+    ] {
+        assert_eq!(
+            hosted_signing::op_timeout_ms(&op_at(orderly_inputs()), now),
+            expected,
+            "{now}"
+        );
+    }
+    let coinbase = op(
+        "coinbase.restJwtEd25519.1",
+        serde_json::json!({ "kid": KID, "nonce": "n", "nbf": 1_700_000_000u64 }),
+    );
+    assert_eq!(
+        hosted_signing::op_timeout_ms(&coinbase, stamp + 100.),
+        Ok(Some(4900))
+    );
+    assert_eq!(
+        hosted_signing::op_timeout_ms(&op("orderly.rest.9", orderly_inputs()), stamp),
+        Err(SignError::Unsupported)
+    );
+    let credential: Input =
+        serde_json::from_value(serde_json::json!({ "kind": "credential" })).unwrap();
+    assert_eq!(hosted_signing::op_timeout_ms(&credential, stamp), Ok(None));
+}
+
+#[test]
 fn coinbase_jwt_recipe_binds_kid_to_the_accounts_own_key_name() {
     let inputs = |kid: &str| {
         serde_json::json!({

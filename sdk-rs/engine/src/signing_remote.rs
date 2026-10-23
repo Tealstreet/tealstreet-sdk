@@ -5,6 +5,11 @@ use crate::signing::{Algorithm, ExtraKey, Operation, PayloadPart, SignError, Sig
 
 /// Serialized `inputs` limit, separate from the 1 MiB payload bound.
 pub const MAX_REMOTE_INPUT_BYTES: usize = 64 * 1024;
+/// A remote executor signs only while the recipe's own stamp is this fresh
+/// against its protocol clock, and never more than `MAX_REMOTE_LEAD_MS` ahead,
+/// so a server cannot pre-mint signatures for later use.
+pub const REMOTE_FRESHNESS_MS: f64 = 5000.;
+pub const MAX_REMOTE_LEAD_MS: f64 = 2000.;
 
 /// One production canonicalizer, shared by the server step, the server guard and
 /// the browser executor. `canonicalize` is also the allowlist: any input it does
@@ -16,6 +21,9 @@ pub trait RemoteRecipe: Sync {
     /// `None` signs with the identity's ordinary signing ref.
     fn role(&self) -> Option<ExtraKey>;
     fn canonicalize(&self, inputs: &serde_json::Value) -> Result<Vec<u8>, SignError>;
+    /// The protocol time (ms) the signed bytes carry; every recipe has one so
+    /// the executor can refuse stale or future-dated work.
+    fn stamp_ms(&self, inputs: &serde_json::Value) -> Result<f64, SignError>;
     /// An input field that must equal the executing account's own presented
     /// credential (e.g. a JWT `kid`), so a recipe cannot sign for another key.
     fn bound_credential_field(&self) -> Option<&'static str> {
@@ -126,6 +134,9 @@ mod tests {
                 return Err(SignError::Refused);
             }
             Ok(format!("order:{qty}").into_bytes())
+        }
+        fn stamp_ms(&self, _: &serde_json::Value) -> Result<f64, SignError> {
+            Ok(0.)
         }
     }
     static ORDER: Order = Order;

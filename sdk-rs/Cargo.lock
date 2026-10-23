@@ -3918,6 +3918,7 @@ name = "safe-cex-venues"
 version = "0.1.0"
 dependencies = [
  "bs58",
+ "p256",
  "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-venue-apexomni",
