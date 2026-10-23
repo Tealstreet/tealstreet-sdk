@@ -54,7 +54,9 @@ struct Probe {
     headers: &'static [(&'static str, &'static str)],
     calls: Arc<AtomicUsize>,
     result: Option<Result<RequestId, (u8, Error)>>,
-    before_id: u32,
+    before_id: crate::resource_ids::ResourceIds,
+    failures: Option<Vec<(Error, VenueError)>>,
+    releases: usize,
     count: usize,
 }
 impl Venue for Probe {
@@ -94,6 +96,26 @@ impl Venue for Probe {
     fn on_request_failed(&mut self, _: &mut Cx<'_, u8>, _: u8, error: &str) {
         panic!("unexpected fixture failure: {error}");
     }
+    fn on_http_preparation_failed(
+        &mut self,
+        _: &mut Cx<'_, u8>,
+        _: u8,
+        reason: Error,
+        error: VenueError,
+    ) {
+        self.failures
+            .as_mut()
+            .expect("unexpected fixture preparation failure")
+            .push((reason, error));
+    }
+    fn on_http_release(
+        &mut self,
+        _: &mut u8,
+        _: &crate::request_context::HttpRelease,
+    ) -> Result<crate::request_context::Admission, Error> {
+        self.releases += 1;
+        Ok(crate::request_context::Admission::Unscheduled)
+    }
     fn on_command(&mut self, _: &mut Cx<'_, u8>, _: Command) {}
     fn on_open(&mut self, _: &mut Cx<'_, u8>, _: SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, u8>, _: SocketId, _: &str) {}
@@ -127,7 +149,9 @@ fn start_count(
         headers,
         calls: calls.clone(),
         result: None,
-        before_id: 0,
+        before_id: Default::default(),
+        failures: None,
+        releases: 0,
         count,
     });
     engine.start(0.);
@@ -214,6 +238,160 @@ fn empty_declaration_keeps_managed_preparation_empty() {
     let (_, actions, _) = start(&[]);
     let (_, request) = prepared(&actions);
     assert!(request.headers.is_empty() && request.signer_headers.is_empty());
+}
+
+#[test]
+fn public_headers_keep_duplicate_order_and_absent_or_empty_body_without_signing() {
+    for headers in [
+        &[][..],
+        &[("Content-Type", "application/json")][..],
+        &[("x-public", "one\ttwo"), ("X-public", "three")][..],
+    ] {
+        for body in [None, Some(String::new()), Some("{}".into())] {
+            let (mut engine, _, calls) = start_count(&[], 0);
+            let result = {
+                let mut cx = Cx {
+                    now: 0.,
+                    store: &mut engine.store,
+                    io: &mut engine.io,
+                };
+                let context = cx
+                    .http_context(
+                        Scope::Background,
+                        Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 1_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                cx.request_managed_with_headers(
+                    context,
+                    Method::Post,
+                    "https://public.test/info".into(),
+                    headers,
+                    body.clone(),
+                    41,
+                )
+            };
+            assert!(result.is_ok());
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            let (_, request) = prepared(&actions);
+            assert_eq!(request.headers, owned(headers));
+            assert_eq!(request.body, body);
+            assert!(request.signer_headers.is_empty());
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_) | Action::Sign { .. }))
+            );
+            assert_eq!(engine.io.signing.next_id(), RequestId(1));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[test]
+fn invalid_public_headers_return_original_pending_before_any_transport_allocation() {
+    for headers in [
+        declaration(vec![
+            ("valid".into(), "first".into()),
+            ("bad name".into(), "last".into()),
+        ]),
+        declaration(vec![("x".into(), "line\r\nbreak".into())]),
+        declaration(vec![("x".into(), "v".into()); 33]),
+        declaration(vec![("x".into(), "v".repeat(8192) + "x")]),
+    ] {
+        let (mut engine, _, _) = start_count(&[], 0);
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let context = cx
+            .http_context(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 1_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        let before = cx.io.next_id;
+        assert_eq!(
+            cx.request_managed_with_headers(
+                context,
+                Method::Post,
+                "https://public.test/info".into(),
+                headers,
+                None,
+                41
+            ),
+            Err((41, Error::Invalid))
+        );
+        assert_eq!(cx.io.next_id, before);
+        assert!(cx.io.pending.is_empty() && cx.io.managed_http.is_empty());
+        assert!(cx.io.actions.is_empty() && cx.io.timers.is_empty());
+        assert_eq!(cx.io.signing.next_id(), RequestId(1));
+    }
+}
+
+#[test]
+fn public_header_entry_preserves_private_expired_and_capacity_refusals() {
+    for (private, now, capacity, expected) in [
+        (true, 0., false, Error::Invalid),
+        (false, 1_000., false, Error::TimedOut),
+        (false, 0., true, Error::Capacity),
+    ] {
+        let (mut engine, _, _) = start_count(&[], 0);
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let context = cx
+            .http_context(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: private.then(|| Credential {
+                        slot: CredentialSlot::Primary,
+                        reference: KeyRef("ref:owned-primary".into()),
+                    }),
+                    timeout_ms: 1_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        cx.now = now;
+        if capacity {
+            cx.io.next_id = crate::resource_ids::ResourceIds::starting_at(
+                crate::resource_ids::MAX_RESOURCE_ID - 1,
+            );
+        }
+        let before = cx.io.next_id;
+        assert_eq!(
+            cx.request_managed_with_headers(
+                context,
+                Method::Post,
+                "https://public.test/info".into(),
+                PUBLIC,
+                Some("{}".into()),
+                41
+            ),
+            Err((41, expected))
+        );
+        assert_eq!(cx.io.next_id, before);
+        assert!(cx.io.pending.is_empty() && cx.io.managed_http.is_empty());
+        assert!(cx.io.actions.is_empty() && cx.io.timers.is_empty());
+        assert_eq!(cx.io.signing.next_id(), RequestId(1));
+    }
 }
 
 // Leaked values are bounded synthetic test declarations, never credentials.
@@ -384,4 +562,179 @@ fn full_managed_capacity_does_not_read_or_allocate_for_the_refused_recipe() {
             .iter()
             .any(|action| matches!(action, Action::Sign { .. }))
     );
+}
+
+#[test]
+fn managed_admission_preflights_both_identity_namespaces_without_partial_reservation() {
+    use crate::resource_ids::{MAX_RESOURCE_ID, ResourceIds};
+    for exhaust_signing in [false, true] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut engine = crate::test_support::seeded_engine(Probe {
+            headers: PUBLIC,
+            calls,
+            result: None,
+            before_id: Default::default(),
+            failures: None,
+            releases: 0,
+            count: 1,
+        });
+        if exhaust_signing {
+            engine
+                .io
+                .signing
+                .set_test_ids(ResourceIds::starting_at(MAX_RESOURCE_ID + 1));
+        } else {
+            // Root allocation leaves only two IDs; admission needs all three.
+            engine.io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID - 2);
+        }
+        engine.start(0.);
+        assert_eq!(engine.venue().result, Some(Err((41, Error::Capacity))));
+        assert_eq!(engine.io.next_id, engine.venue().before_id);
+        assert!(engine.io.pending.is_empty() && engine.io.managed_http.is_empty());
+        assert!(engine.io.timers.is_empty());
+        assert!(engine.drain_actions().next().is_none());
+        assert!(
+            !engine.failed(),
+            "typed capacity refusal must not retire a healthy engine"
+        );
+        if !exhaust_signing {
+            assert_eq!(engine.io.signing.next_id(), RequestId(1));
+        }
+    }
+}
+
+#[test]
+fn exhausted_signing_namespace_settles_stale_and_terminal_preparation_failures_once() {
+    use crate::resource_ids::{MAX_RESOURCE_ID, ResourceIds};
+    for reason in [Error::Stale, Error::TimedOut, Error::Invalid] {
+        let (mut engine, actions, _) = start(PUBLIC);
+        engine.venue.failures = Some(Vec::new());
+        let (token, _) = prepared(&actions);
+        engine
+            .io
+            .signing
+            .set_test_ids(ResourceIds::starting_at(MAX_RESOURCE_ID + 1));
+        engine.http_preparation_failed(1., token, reason, VenueError::new("route failed"));
+        let failures = engine.venue.failures.as_ref().unwrap();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(
+            failures[0].0,
+            if reason == Error::Stale {
+                Error::Capacity
+            } else {
+                reason
+            }
+        );
+        assert_eq!(failures[0].1.outcome, Some(crate::Outcome::NotSent));
+        assert!(engine.io.pending.is_empty() && engine.io.managed_http.is_empty());
+        assert!(engine.io.timers.is_empty() && engine.io.signing.next_work().is_none());
+        assert!(!engine.failed());
+        assert!(!engine.drain_actions().any(|action| match action {
+            Action::Sign { .. } | Action::Http(_) => true,
+            Action::ManagedHttp(action) => matches!(
+                *action,
+                HttpAction::Prepare { .. } | HttpAction::Bind { .. }
+            ),
+            _ => false,
+        }));
+        engine.http_preparation_failed(2., token, reason, VenueError::new("duplicate"));
+        assert_eq!(engine.venue.failures.as_ref().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn fatal_engine_cannot_claim_a_previously_bound_http_permit() {
+    use crate::resource_ids::ResourceIds;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let (mut engine, actions, _) = start(PUBLIC);
+    let (token, _) = prepared(&actions);
+    engine.http_prepared(
+        1.,
+        token,
+        Prepared {
+            id: 7,
+            expires_at: None,
+        },
+    );
+    let (attempt, work) = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Sign { attempt, work, .. } => Some((attempt, work)),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        2.,
+        Event::Signed {
+            attempt,
+            result: Ok(SignResult {
+                values: vec![b"provider-value".to_vec()],
+                receipt: work.receipt,
+                headers: vec![],
+            }),
+        },
+    );
+    let permit = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.io.next_id = ResourceIds::with_ceiling(1);
+    engine.io.next();
+    assert!(catch_unwind(AssertUnwindSafe(|| engine.io.next())).is_err());
+    assert!(!engine.http_preparation_pending(token));
+    assert!(!engine.signing_pending(attempt));
+    assert!(catch_unwind(AssertUnwindSafe(|| engine.claim_http(3., permit))).is_err());
+    assert_eq!(engine.venue.releases, 0);
+    assert!(engine.http_release(permit.attempt().request).is_none());
+}
+
+#[test]
+fn fatal_engine_retires_live_preparation_and_outstanding_signing_queries() {
+    use crate::resource_ids::ResourceIds;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    for route_ready in [false, true] {
+        let (mut engine, actions, _) = start(PUBLIC);
+        let (token, _) = prepared(&actions);
+        let attempt = if route_ready {
+            engine.http_prepared(
+                1.,
+                token,
+                Prepared {
+                    id: 7,
+                    expires_at: None,
+                },
+            );
+            let attempt = engine
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::Sign { attempt, .. } => Some(attempt),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(
+                engine.signing_pending(attempt),
+                "provider work is live before fatal exhaustion"
+            );
+            Some(attempt)
+        } else {
+            assert!(
+                engine.http_preparation_pending(token),
+                "route work is live before fatal exhaustion"
+            );
+            None
+        };
+        engine.io.next_id = ResourceIds::with_ceiling(1);
+        engine.io.next();
+        assert!(catch_unwind(AssertUnwindSafe(|| engine.io.next())).is_err());
+        assert!(!engine.http_preparation_pending(token));
+        if let Some(attempt) = attempt {
+            assert!(!engine.signing_pending(attempt));
+        }
+    }
 }

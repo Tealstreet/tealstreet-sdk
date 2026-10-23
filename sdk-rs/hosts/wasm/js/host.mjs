@@ -332,27 +332,41 @@ export class EngineHost {
 
   get dead() { return this.deadError !== undefined; }
 
+  failEngine(error) {
+    if (this.disposed) return;
+    this.deadError = new EngineDeadError(error);
+    this.disposed = true;
+    try { this.cleanup(); }
+    finally { this.handlers.onDead?.(this.deadError); }
+  }
+
   // Preserve native argument counts without per-message closures or rest arrays.
   invoke(fn, a, b, c, d) {
     if (this.disposed) return;
     try {
-      switch (arguments.length) {
-        case 1: return fn.call(this.engine);
-        case 2: return fn.call(this.engine, a);
-        case 3: return fn.call(this.engine, a, b);
-        case 4: return fn.call(this.engine, a, b, c);
-        default: return fn.call(this.engine, a, b, c, d);
+      if (this.engine.failed?.()) {
+        this.failEngine(new Error('Engine resource identities exhausted'));
+        return;
       }
+      let result;
+      switch (arguments.length) {
+        case 1: result = fn.call(this.engine); break;
+        case 2: result = fn.call(this.engine, a); break;
+        case 3: result = fn.call(this.engine, a, b); break;
+        case 4: result = fn.call(this.engine, a, b, c); break;
+        default: result = fn.call(this.engine, a, b, c, d); break;
+      }
+      if (this.engine.failed?.()) {
+        this.failEngine(new Error('Engine resource identities exhausted'));
+        return;
+      }
+      return result;
     } catch (error) {
-      // A trap is a RuntimeError. A RangeError here unwound wasm mid-mutation (stack
-      // overflow, allocation failure in an import, result decode) with its borrow held.
+      // Do not inspect Rust state after a trap: its mutable borrow may be held.
       const fatal = (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
         || error instanceof RangeError;
       if (!fatal) throw error;
-      this.deadError = new EngineDeadError(error);
-      this.disposed = true;
-      try { this.cleanup(); }
-      finally { this.handlers.onDead?.(this.deadError); }
+      this.failEngine(error);
     }
   }
 
@@ -831,6 +845,7 @@ export class EngineHost {
     let unknown;
     let callbackFailure;
     for (const action of JSON.parse(actionsJson)) {
+      if (this.disposed) return;
       // Unknown protocol actions remain errors, but cannot discard the batch's
       // subsequent command completions. Ordinary callbacks still propagate.
       try { this.execute(action); }
@@ -840,6 +855,7 @@ export class EngineHost {
         unknown ??= error;
       }
     }
+    if (this.disposed) return;
     if (callbackFailure) {
       // Broken diagnostic consumers must not turn a dispatched write into an
       // ordinary rejection that a caller could mistake for a safe retry.
