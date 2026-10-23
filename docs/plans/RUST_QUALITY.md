@@ -965,6 +965,20 @@ bytes; both release all index capacity at empty replacement. This is a measured
 memory tradeoff, not whole-venue or WASM allocation accounting. Full CI checks
 all venue memory and WASM size budgets, including Aster, and paired CPU medians.
 
+## Draft Engine socket lifecycle references
+
+OKX adopt one Engine registry/driver for epoch admission, typed auth,
+shared Supervisor deadlines/backoff, transactional complete interests, replay,
+retirement and required Store invalidation. Native codecs retain venue payloads
+and role policies. Original runtime controls pin retired open/close rejection
+and expiry-before-late-pong; shared controls cover bounded queues, health,
+retry revocation, signed-output retirement and transactional same-interest book
+repair. This is a OKX-only preparation, using the landed physical-ID seam; final CI evidence is separate; other families remain open.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.
+
 ### Lighter depth Background Read controls
 
 Plan8b700d2ffc8/caf6e4cf1b3/c7a1d352046 precedes RED362e8edb77f (seven compiled
