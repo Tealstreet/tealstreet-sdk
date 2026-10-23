@@ -553,6 +553,13 @@ fn deadline_revokes_late_generation_and_starts_fresh_reads() {
 fn dead_private_socket_reconnects_and_auth_uses_fresh_expiry() {
     let (mut e, _, s) = started();
     e.handle(NOW, Event::WsOpened { socket: s });
+    e.handle(
+        NOW,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"id":999,"error":null,"result":{"status":"success"}}"#,
+        },
+    );
     let a: Vec<_> = e.drain_actions().collect();
     let mut next = timer(&a, NOW + 5000.);
     for delta in [5000., 10000.] {
