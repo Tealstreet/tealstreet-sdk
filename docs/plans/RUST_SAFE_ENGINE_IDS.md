@@ -194,3 +194,9 @@ engine before invocation and failure latched during a normal native return. They
 pin zero/one native entries respectively and no transient connect or timer arm;
 the existing 189 host controls pass while these two new assertions fail. Neither
 case substitutes a thrown trap for the sticky-state contract.
+
+Three additional engine assertion-RED controls establish outbound custody:
+a valid HTTP packet followed by an unsafe timer must expose neither; unsafe
+nested SignedOutbound socket IDs must be checked before dispatch can silently
+discard their wrapper; managed Cancel.signing IDs obey the same bound. All 525
+existing all-feature engine tests pass while these three new assertions fail.

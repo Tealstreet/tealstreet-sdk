@@ -1087,6 +1087,44 @@ mod resource_identity_regressions {
         assert!(!ids.failed());
         assert!(!ids.available(1));
     }
+
+    fn assert_unsafe_batch_retires(unsafe_action: Action) {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut engine = crate::test_support::seeded_engine(Probe::default());
+        // A valid first packet must not escape before the unsafe later action.
+        engine.io.actions.push(Action::Http(HttpRequest {
+            id: RequestId(4), method: Method::Get, route: None, timeout_ms: None,
+            url: "https://venue.test/read".into(), headers: vec![], signer_headers: vec![], body: None,
+        }));
+        engine.io.actions.push(unsafe_action);
+        assert!(catch_unwind(AssertUnwindSafe(|| engine.drain_actions().collect::<Vec<_>>())).is_err());
+        assert!(engine.failed(), "unsafe output must use the sticky terminal path");
+    }
+
+    #[test]
+    fn unsafe_timer_id_retires_whole_batch_before_any_packet_is_exposed() {
+        assert_unsafe_batch_retires(Action::SetTimer {
+            timer: TimerId(crate::resource_ids::MAX_RESOURCE_ID + 1), at_ms: 1.,
+        });
+    }
+
+    #[test]
+    fn unsafe_held_outbound_id_is_validated_before_dispatch_can_discard_it() {
+        assert_unsafe_batch_retires(Action::SignedOutbound {
+            attempt: RequestId(1),
+            outbound: Box::new(Action::WsSend {
+                socket: SocketId(crate::resource_ids::MAX_RESOURCE_ID + 1), text: "".into(),
+            }),
+        });
+    }
+
+    #[test]
+    fn unsafe_managed_cancel_signing_id_uses_the_same_terminal_boundary() {
+        assert_unsafe_batch_retires(Action::ManagedHttp(Box::new(crate::request_context::HttpAction::Cancel {
+            preparation: crate::request_context::Preparation::from_wire("p1:1:1:0").unwrap(),
+            signing: Some(RequestId(crate::resource_ids::MAX_RESOURCE_ID + 1)),
+        })));
+    }
 }
 
 impl TimerSink<'_> {
