@@ -189,6 +189,7 @@ impl<P> Cx<'_, P> {
     /// Engine-owned expiry and post-callback sweep; one terminal path.
     pub(super) fn sweep_executions(&mut self) {
         if !self.io.request_contexts.has_executions() {
+            self.io.request_contexts.clear_retired_roots();
             return;
         }
         let sealed = self.io.request_contexts.expire_executions(self.now);

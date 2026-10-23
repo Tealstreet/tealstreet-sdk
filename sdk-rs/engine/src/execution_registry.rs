@@ -19,6 +19,18 @@ impl ContextRegistry {
         !self.executions.groups.is_empty()
     }
 
+    /// With no group left every root is stale; drop them without a scan.
+    pub(in crate::engine) fn clear_retired_roots(&mut self) {
+        if self.executions.groups.is_empty() && !self.executions.roots.is_empty() {
+            self.executions.roots.clear();
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::engine) fn root_count(&self) -> usize {
+        self.executions.roots.len()
+    }
+
     pub(in crate::engine) fn is_observer(&self, command: CommandId) -> bool {
         self.executions.observers.contains_key(&command)
     }
@@ -205,12 +217,7 @@ impl ContextRegistry {
     }
 
     pub(in crate::engine) fn next_execution_deadline(&self) -> Option<f64> {
-        self.executions
-            .groups
-            .executions()
-            .into_iter()
-            .filter_map(|execution| self.executions.groups.timer(execution))
-            .min_by(f64::total_cmp)
+        self.executions.groups.next_timer()
     }
 
     /// The observer's own completion root, only for its sealed generation.

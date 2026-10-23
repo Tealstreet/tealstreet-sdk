@@ -360,6 +360,14 @@ impl Groups {
         self.groups.is_empty()
     }
 
+    /// Earliest timer across every held execution, without allocating.
+    pub(crate) fn next_timer(&self) -> Option<f64> {
+        self.groups
+            .keys()
+            .filter_map(|id| self.timer(Execution(*id)))
+            .min_by(f64::total_cmp)
+    }
+
     /// Every held execution in issue order, retired or not.
     pub(crate) fn executions(&self) -> Vec<Execution> {
         let mut ids = self.groups.keys().copied().collect::<Vec<_>>();
