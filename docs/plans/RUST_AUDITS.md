@@ -2530,3 +2530,14 @@ Inventory removes four single-occurrence hashes only in Paradex `history.rs`:
 intact. The rejected settings proposal remains held on genuine keyless Mutation
 no-op terminal authority; no signing, credential or outcome workaround was added.
 Broader native gates, independent implementation review and CI are separate.
+
+Local history verification on reviewed integration `56dacc36562` genuinely
+includes actual landing `23d0d490009` (#1892 background executions and #1817
+credential selection). All513 Paradex/Binance tests pass across42 targets,
+none ignored, including the same eight original local-history controls.
+Strict all-target/all-feature Paradex Clippy, scoped formatting, bans, the
+request-context scanner and all15 ratchet tests pass. Source/adversarial,
+caller and full-map reviews are CLEAN on this actual integration; architecture
+No. The seven-path diff preserves every unowned incoming blob and all foreign
+manifest entries, with only the four planned Paradex history occurrences pruned.
+CI and an authorized train slot remain separate gates.
