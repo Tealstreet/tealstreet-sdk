@@ -347,8 +347,7 @@ pub(crate) struct Lifecycle {
     feeds: Vec<Feed>,
     // Only live physical epochs. Central retirement removes entries before any
     // native invalidation/retry callback; size is bounded by registered feeds.
-    // Sorted by socket ID, independent of feed/generation or allocation order.
-    current_sockets: Vec<Epoch>,
+    current_sockets: BTreeMap<u64, Epoch>,
     #[cfg(test)]
     socket_lookups: std::cell::Cell<usize>,
     pending_frames: usize,
@@ -386,9 +385,8 @@ impl Lifecycle {
         #[cfg(test)]
         self.socket_lookups.set(self.socket_lookups.get() + 1);
         self.current_sockets
-            .binary_search_by_key(&socket.0, |epoch| epoch.socket.0)
-            .ok()
-            .map(|index| self.current_sockets[index])
+            .get(&socket.0)
+            .copied()
             .filter(|epoch| self.current(*epoch))
     }
     #[cfg(test)]
@@ -462,14 +460,9 @@ impl Lifecycle {
     }
     pub(crate) fn begin(&mut self, feed: FeedId, socket: SocketId) -> Result<Epoch, SocketError> {
         self.can_begin(feed)?;
-        if socket.0 == 0 {
+        if socket.0 == 0 || self.current_sockets.contains_key(&socket.0) {
             return Err(SocketError::NotPermitted);
         }
-        let index = self
-            .current_sockets
-            .binary_search_by_key(&socket.0, |epoch| epoch.socket.0)
-            .err()
-            .ok_or(SocketError::NotPermitted)?;
         let f = self.feeds.get_mut(feed.0).ok_or(SocketError::Stale)?;
         let generation = f.generation.checked_add(1).ok_or(SocketError::Capacity)?;
         let epoch = Epoch {
@@ -484,7 +477,7 @@ impl Lifecycle {
         f.pong_seen = false;
         f.interests.released.clear();
         f.interests.clear_queue(&mut self.pending_frames);
-        self.current_sockets.insert(index, epoch);
+        self.current_sockets.insert(socket.0, epoch);
         Ok(epoch)
     }
     pub(crate) fn can_begin(&self, feed: FeedId) -> Result<(), SocketError> {
@@ -644,11 +637,7 @@ impl Lifecycle {
     pub(crate) fn retire(&mut self, feed: FeedId) -> Option<Retirement> {
         let f = self.feeds.get_mut(feed.0)?;
         let epoch = f.epoch.take()?;
-        let removed = self
-            .current_sockets
-            .binary_search_by_key(&epoch.socket.0, |current| current.socket.0)
-            .ok()
-            .map(|index| self.current_sockets.remove(index));
+        let removed = self.current_sockets.remove(&epoch.socket.0);
         debug_assert_eq!(removed, Some(epoch));
         f.retiring = Some(epoch);
         f.phase = Phase::Quarantined;
@@ -903,10 +892,8 @@ impl Lifecycle {
             if items.is_empty() {
                 continue;
             }
-            // Both input directions come from key-ordered map values. Track
-            // coverage by index without cloning keys into temporary trees.
-            let mut covered = vec![false; items.len()];
-            let mut covered_count = 0;
+            let expected: BTreeSet<_> = items.iter().map(|i| i.key.as_ref()).collect();
+            let mut covered = BTreeSet::new();
             let mut failure = None;
             let result = {
                 let mut emit = |batch: EncodedBatch| {
@@ -918,17 +905,7 @@ impl Lifecycle {
                             || batch.text.len() > MAX_FRAME_BYTES
                             || batch.covered_keys.is_empty()
                             || batch.covered_keys.iter().any(|key| {
-                                let Ok(index) = items
-                                    .binary_search_by(|item| item.key.as_ref().cmp(key.as_ref()))
-                                else {
-                                    return true;
-                                };
-                                if covered[index] {
-                                    return true;
-                                }
-                                covered[index] = true;
-                                covered_count += 1;
-                                false
+                                !expected.contains(key.as_ref()) || !covered.insert(key.clone())
                             })
                         {
                             return Err(SocketError::InvalidCoverage);
@@ -963,9 +940,10 @@ impl Lifecycle {
             if let Some(error) = failure {
                 return Err(error);
             }
-            // Each covered key matched one distinct input slot. Equal
-            // cardinality proves full coverage for this direction.
-            if covered_count != items.len() {
+            // Each covered key was checked against expected and inserted
+            // exactly once. Equal cardinality proves full coverage without
+            // allocating another tree of the same canonical keys.
+            if covered.len() != expected.len() {
                 return Err(SocketError::InvalidCoverage);
             }
         }
@@ -1450,10 +1428,7 @@ mod tests {
         let mut expected = ids;
         expected.sort_unstable();
         assert_eq!(
-            l.current_sockets
-                .iter()
-                .map(|e| e.socket.0)
-                .collect::<Vec<_>>(),
+            l.current_sockets.keys().copied().collect::<Vec<_>>(),
             expected
         );
         for epoch in &epochs {
@@ -1470,11 +1445,7 @@ mod tests {
         for epoch in epochs.into_iter().filter(|e| *e != old) {
             assert_eq!(l.socket_epoch(epoch.socket()), Some(epoch));
         }
-        assert!(
-            l.current_sockets
-                .windows(2)
-                .all(|w| w[0].socket.0 < w[1].socket.0)
-        );
+        assert!(l.current_sockets.keys().is_sorted());
     }
 
     #[test]
