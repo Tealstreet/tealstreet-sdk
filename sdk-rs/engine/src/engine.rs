@@ -818,6 +818,10 @@ impl std::fmt::Debug for Event<'_> {
     }
 }
 
+#[cfg(test)]
+#[path = "request_context_entry_tests.rs"]
+mod command_entry_tests;
+
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
     pub now: f64,
