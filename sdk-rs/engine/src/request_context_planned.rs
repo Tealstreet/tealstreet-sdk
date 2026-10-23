@@ -276,12 +276,8 @@ impl ContextRegistry {
         if !body.policy.independent_calls || body.policy.operation != Operation::Mutation {
             return None;
         }
-        let Owner::Command { id, .. } = plan.owner() else {
-            return None;
-        };
         Some(
-            self.commands
-                .get(&id)
+            self.owner_entry(plan.owner())
                 .and_then(|owner| owner.writes.as_ref())
                 .and_then(|writes| writes.failed_attempt_error(delivery.attempt.request).ok())
                 .unwrap_or(fallback),

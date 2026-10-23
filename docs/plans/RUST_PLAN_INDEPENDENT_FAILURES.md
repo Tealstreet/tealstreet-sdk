@@ -126,3 +126,19 @@ HttpFailed neither invoke failure cleanup again nor request reconciliation.
 The hook has no HTTP delivery, command entry, order-response token, write reply
 or Plan-readiness custody. This is an engine hook receipt, not an exchange read
 completion. Current focused matrix: nine controls with order-locks; eight without.
+
+## Physical execution composition
+
+The branch merges frozen #1919 `d7e7593a967` after actual #1932. The physical
+Plan journal is resolved through `owner_entry(plan.owner())`, preserving issuer
+and generation checks for Command owners and the exact physical Execution
+identity. The Mutation-only immutable flag, recorded-failure custody and bounded
+fallback remain unchanged.
+
+Original assertion RED `5cb44207583` drives a physical Plan through real
+Prepare/Sign/Bind/Claim with a founder and follower. A delivered 408 or 503
+produced zero failure callbacks and aborted its sibling before the correction.
+With the owner-generic lookup, the same test settles that call, releases the
+sibling, and projects the same final Unknown with both evidence and accepted IDs
+to each observer exactly once. The physical owner retires once; late replies
+change neither terminals nor callbacks. Ten focused controls pass with order-locks.
