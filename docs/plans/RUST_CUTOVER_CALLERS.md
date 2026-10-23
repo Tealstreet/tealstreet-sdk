@@ -4230,6 +4230,37 @@ public-only/missing-market empty admission remain unchanged. No live Store
 publication, SDK argument or managed Context migration is added. Callers must
 handle rejected history as unavailable and consume live cache separately when
 needed. [Scope](RUST_OWNED_HISTORY.md).
+
+
+## Shared unproven write-response guard (Binance reference)
+
+The managed send path treats HTTP 408 and statuses >=500 as unproven before a
+native codec can update Store, ownership or command effects. The unproven
+attempt is recorded with `kind=Timeout` for HTTP 408 or `kind=VenueUnavailable`
+for statuses >=500, including 502 HTML and 503 carrying native -1007/-2019.
+The logical write outcome is Unknown; existing journal rules still select the
+terminal diagnostic in logical planning order. Validated native code and message
+remain bounded diagnostic fields (`venue_code` and
+`venue_message`); they do not turn a gateway response into a retry-safe refusal
+or authentication evidence. This attempt's diagnostic uses the shared uncertainty
+summary; terminal selection still follows logical planning order. Definitively accepted earlier effects
+and exact IDs remain in the command journal.
+
+NX order-error handling must use the typed outcome rather than parsing the
+primary text or treating a rejection-looking native code as proof of no effects.
+Show the bounded native diagnostic as detail, reconcile through reads before any
+new write decision, and do not automatically replay the uncertain write. A
+PartialIDs list from an unproven body is evidence only: it cannot bind IDs to
+caller legs or publish accepted orders. Spot and portfolio margin retain only
+native-echoed client identities in their public cancellable namespace; futures
+use the endpoint's numeric order/algo identity. Never substitute an intended
+client ID when the reply has no matching echo.
+
+Required caller controls cover 503 with native timeout and rejection codes,
+502 HTML, 408, an earlier accepted leg followed by an unproven sibling, and
+malformed/mismatched identity evidence. Retain Store/ownership and physical-send
+assertions. This reference does not migrate Hyro, history/session work or any
+legacy-provenance request and does not establish NX integration or cutover.
 ## Host-safe physical engine resource IDs
 
 Physical socket, HTTP request, signing-attempt and timer IDs use exact numeric
