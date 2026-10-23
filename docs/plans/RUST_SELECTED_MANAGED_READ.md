@@ -83,11 +83,10 @@ names below describe the intended ownership, not a currently exported API.
    Never identity reads retain their existing distinction; WEEX remains Never.
 3. Distinct entry points: `command` calls genuine `admit_http_command` before
    opaque I/O and takes NO command ID; `background` creates an ordinary bounded
-   Background Read; `queue_existing` consumes a genuine pre-issued Read leg and
-   verifies operation/selected credential before queueing. It never infers
-   command entry from Scope, and never turns a Plan/Slot into a plain Read.
-   Pre-issued authority needs provenance checks before request allocation;
-   defer this entry point if no existing validator can prove the needed binding.
+   Background Read. External-Context `queue_existing` is DEFERRED entirely:
+   Context does not retain complete Identity/signing/passphrase/evidence scope,
+   so operation/credential equality cannot prove the original selection. It
+   never infers command entry from Scope or turns a Plan/Slot into plain Read.
 4. Queue descriptor contains native method/URL/body/optional ArrayAt. A pure
    family builder receives the selected opaque Identity and original Context,
    constructs the unchanged SignStep and native pending continuation. The
@@ -101,8 +100,10 @@ names below describe the intended ownership, not a currently exported API.
    background admission returns the exact request-context Error; queue refusal
    returns the original pending, exact Error and genuine issued Context so its
    owner can reject/retire through existing typed APIs. Never collapse errors to
-   generic Internal/NotSent. A Read error carries no write Outcome. Prepare,
-   provider and physical failures remain existing engine callbacks with their
+   generic Internal/NotSent. Initial Read entry rejection has outcome None;
+   queue/preparation/provider failures preserve their exact existing metadata,
+   including NotSent where the engine supplies it. Prepare, provider and
+   physical failures remain existing engine callbacks with their
    exact typed error and continuation. No synthetic Context on admission error.
 6. Caller owns native publication, completion and diagnostics. Shared helper
    must not complete an unrelated owner, hide an already-issued terminal, or
@@ -110,19 +111,99 @@ names below describe the intended ownership, not a currently exported API.
    but cannot choose native body semantics or accepted-row recovery. Queue
    failure must not leak an admitted root: consumer paths prove exactly one
    typed settlement/retirement and original pending delivery.
-7. Retry entry accepts the existing genuine root/leg, explicit RetryEvidence
-   and immutable selection, validates via `http_retry_context`, retains account
-   generation and original egress, and builds a new physical attempt only.
+7. A mandatory non-Clone admitted wrapper retains original Context plus the
+   exact selected Identity/slot/egress/evidence through every queue/retry. Retry
+   consumes that wrapper plus native continuation and explicit RetryEvidence,
+   validates via `http_retry_context`, retains account generation and original
+   egress, and builds a new physical attempt only. Validation failure returns
+   the wrapper and continuation unchanged with the exact Error; queue failure
+   also preserves both. No separately supplied replacement Selection is accepted.
    No deadline renewal, runtime fallback or newly selected key on retry. Fresh
    reconciliation reads have their own declared owner, never another read's
    in-flight reservation. Plan-owned retries remain with Plan APIs.
 
-API review must settle how to make result custody convenient without hiding
-command-entry refusal versus queue refusal. A non-Clone admitted read wrapper
-may own Context plus selection internally; exposing borrowed Context for native
-pending does not create extra authority. Do not invent a second owner registry,
-timer or retry scheduler to enforce this. Freeze the minimal reviewed shape
-before source or consumer adoption.
+For missing selection in a command, the shared helper admits a genuine local
+Read with credential None using the same explicit native policy, then calls
+fail_context with the caller-supplied exact native typed credential error.
+Rejected/Revoked return unchanged without a second terminal. This branch issues
+no I/O, Identity or selection and is shared rather than a venue admission copy.
+Background selection refusal remains typed and creates no command.
+
+## Signature proposal after core API-fit
+
+These signatures are the next review target, not an exported/frozen API. Types
+Context/Error/CommandEntryError/RetryEvidence/Pacing/RetryPolicy are existing
+request_context types; Identity/SignStep/Slots/Selection remain their existing
+engine types. SelectedRead and AdmittedRead have private fields and no Clone.
+
+```rust
+pub enum ReadRole {
+    Read { scope: Option<AccountReadScope> },
+    Primary { reason: PrimaryReason, scope: Option<AccountReadScope> },
+}
+pub struct ReadPolicy {
+    pub timeout_ms: u32,
+    pub pacing: Option<Pacing>,
+    pub retry: RetryPolicy,
+}
+pub struct ReadRequest {
+    pub method: Method,
+    pub url: String,
+    pub body: Option<String>,
+    pub stream: Option<ArrayAt>,
+}
+pub struct SelectedRead { /* private Selection + Identity */ }
+pub struct AdmittedRead { /* private SelectedRead + original Context */ }
+pub enum CommandReadError {
+    Entry(CommandEntryError),
+    LocalRefusal { error: VenueError, terminal: Result<(), Error> },
+}
+pub enum BackgroundReadError {
+    Selection(CredentialUnavailable),
+    Admission(Error),
+}
+pub struct RetryRefusal<T> {
+    pub read: AdmittedRead,
+    pub pending: T,
+    pub error: Error,
+}
+impl SelectedRead {
+    pub fn select(slots: &Slots<Identity>, role: ReadRole)
+        -> Result<Self, CredentialUnavailable>;
+    pub fn command<P>(cx: &mut Cx<'_, P>,
+        selected: Result<Self, CredentialUnavailable>, policy: ReadPolicy,
+        missing: VenueError) -> Result<AdmittedRead, CommandReadError>;
+    pub fn background<P>(cx: &mut Cx<'_, P>,
+        selected: Result<Self, CredentialUnavailable>, policy: ReadPolicy)
+        -> Result<AdmittedRead, BackgroundReadError>;
+}
+impl AdmittedRead {
+    pub fn context(&self) -> &Context;
+    pub fn queue<P>(self, cx: &mut Cx<'_, P>, request: ReadRequest,
+        recipe: impl FnOnce(&Identity) -> Box<dyn SignStep>,
+        pending: impl FnOnce(Self) -> P) -> Result<RequestId, (P, Error)>;
+    pub fn retry<P, T>(self, cx: &Cx<'_, P>, evidence: RetryEvidence, pending: T)
+        -> Result<(Self, T), RetryRefusal<T>>;
+}
+```
+
+Queue copies only the genuine Context for the engine request, and moves the
+non-Clone wrapper into native pending through its pure constructor. A queue
+refusal returns that same pending containing its original wrapper; no wrapper
+or continuation is destroyed by the helper. Retry takes native continuation T
+separately so validation refusal returns it and the wrapper intact. Consumers
+then reconstruct the same native pending, preserving all fields. Provider and
+prepare callbacks already receive that pending. The family recipe closure gets
+only the wrapper's immutable Identity. The caller can borrow Context for exact
+delivery/publication/typed terminal but cannot swap a newly selected role into
+this wrapper. LocalRefusal reports the exact typed error and terminal result;
+its caller must return, never numeric-fail or publish an additional terminal.
+No helper-owned owner registry, timer or scheduler. No external-Context queueing.
+
+Ordered headers are part of byte equality, not just header sets. Keep keyless
+remote/hosted dispatch working: one positive native control in each first
+adopter must prepare a selected read and receive provider signing without local
+key material. Existing family recipes/provider adapters remain unchanged.
 
 ## Original failing controls before source
 
@@ -153,7 +234,9 @@ for GET and POST reads, both slots/single slot/missing credentials, distinct
 account evidence scopes, wrong credential/operation/pre-issued authority,
 duplicate/foreign callback, exact entry/queue errors, provider refusal, delayed
 preparation, fractional original expiry, retry evidence/unchanged egress,
-pending preservation, and no mutation/session/public privilege. Compare native
+pending preservation (including retry-validation refusal and exactly one command
+terminal or Background retirement), and no mutation/session/public privilege.
+Compare native
 BingX/WEEX request bytes, successful body semantics, streaming and provider
 operation refs before/after. A selected identity must match the recipe and
 context at first queue and every retry; no caller-supplied replacement pair.
