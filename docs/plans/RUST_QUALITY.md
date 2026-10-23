@@ -661,3 +661,13 @@ completion. Another fixed-clock control runs270 market refusals,270 interval
 refusals and270 successes with stale previous-response probes. Existing native
 candle mapping, validation precedence and preparation/expiry assertions remain.
 This closes the earlier pre-Context numeric refusal gap using the shared seam.
+## Bitunix local history admission controls
+
+Tests-first native controls reproduced five assertion RED and three compatibility
+GREEN before all eight passed with the authority adoption. Both credential modes,
+all five local terminal expressions, native branch precedence, typed refusals and
+companion-free timelines are covered. Initial capacity fixtures assert256 genuine
+background roots before270 rounds of command refusals, explicitly retire them,
+and recover at one clock. Invalid-clock denial and more than256 fixed-clock local
+completions cover both empty-result paths as well as refusals. An unchanged valid
+signed private history request and empty response remain a compatibility control.

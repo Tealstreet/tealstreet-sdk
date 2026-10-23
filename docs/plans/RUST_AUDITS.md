@@ -2155,3 +2155,12 @@ Context. The remaining discovery error fallback accepts only Markets/Tickers.
 No venue admission policy or finalizer is introduced. The exact own inventory
 shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
 closed/private history and trading remain tracked with their original owners.
+## Bitunix local history authority adoption
+
+Five synchronous history terminal expressions now consume genuine command-entry
+Read authority and complete through the shared Context APIs. The exact four
+history.rs scanner rows retire: Bitunix23 to18 occurrences,20 to16 hash rows,
+four tothree files. Account3, lib7 and trading8 occurrences remain, including
+four conservative trading macro matches. This does not close private history's
+legacy Completion/pager or the blocked physical dispatchers; #1771 source claims,
+signer and shared multi-request prerequisites remain separate.

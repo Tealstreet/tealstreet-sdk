@@ -72,3 +72,22 @@ Clippy/fmt, bans and both request-context checks. CI owns WASM/replay/performanc
 Append caller/audit/quality evidence and README index in the source PR. Merge only
 after green CI, clean independent reviews, current landing integration and a fresh
 separate guard in an overseer-granted train slot. The landing-proof pause applies.
+
+## Executed tests-first receipt
+
+Plan `91694673cf1` passed independent source/adversarial, caller and full-map
+reviews. Tests-only `c04696781c3` ran on unchanged production: five assertion RED,
+three compatibility GREEN. The same eight controls are GREEN with the scoped
+source adoption. Capacity fixtures assert all256 genuine roots before attempting
+every local branch, preserve them across270 repeated rounds, explicitly retire
+them, and recover without advancing time. Invalid-clock tests cover all five
+terminal expressions. Fixed-clock reuse covers both empty-result expressions as
+well as refusals. The valid private history control still sends its native signed
+legacy request and completes a genuine empty page; this is preservation evidence,
+not a claim that the private path is managed.
+
+Focused verification: all535 Bitunix/Binance native tests across49 targets passed;
+strict scoped Clippy, scoped fmt, bans and both request-context checks (14 checker
+regressions) passed. Independent source/adversarial and caller reviews are CLEAN;
+full-map review and CI remain separate gates. Work is checkpointed while the owner
+prioritizes KuCoin Spot profiling; no merge or whole-history adoption is claimed.
