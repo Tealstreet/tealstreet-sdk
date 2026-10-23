@@ -53,3 +53,26 @@ final qualification; a reviewed source stack does not claim its landing. Run
 fresh CI on the actual composed head. No gate, fixture, tape, CPU, profile or
 production-policy edits. No merge without the coordinator's window and a fresh
 separate guard followed by a head-matched merge.
+
+## Local causal controls
+
+Plan commit `bc050735e3d` precedes the controls. Reviewed #1944 head
+`389d64e01f8` is integrated as a source prerequisite, not presented as landed.
+Its helper, replay caller and audit validators remain byte-identical. The
+coordinator confirmed #1905, #1897 and #1988 have no harness overlap; native
+GRVT history refusal work also remains outside this slice.
+
+The original capture module from behavior-preserving extraction `d59643b0b16`
+produces exactly two assertion REDs and eight working controls. The isolated
+probe changes only the venue-module import location; the original module bytes
+are exact. Each failed healthy-final assertion contains precisely the three
+missing streams recorded by the earlier checkpoint observation.
+
+With the existing shared final-capture correction, all ten new controls and
+14 existing GRVT controls pass. Genuine pre-ACK private data, a late wrong
+subaccount selector and an incomplete replacement generation remain failures.
+Both implementation labels exercise the same protocol-audit implementation;
+this is a capture-contract proof, not native/reference financial parity.
+Independent control review: `/tmp/codex-grvt-replay-controls-review.json`,
+SHA256 `0a9dd80af055efcf8366972235e66c5a51dc5e73183123c0f962fade74a0f0ca`.
+Declaration changes still require the separate raw evidence step.
