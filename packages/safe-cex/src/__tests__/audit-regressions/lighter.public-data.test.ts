@@ -227,6 +227,8 @@ describe('Lighter public-data audit regressions', () => {
   it('rearms active OHLCV recovery after reconnect without reviving cleaned-up or disposed topics', () => {
     vi.useFakeTimers();
     const { exchange, websocket } = createExchange();
+    // onOpen primes REST market stats as well as the OHLCV recovery timers.
+    vi.spyOn(exchange.lighterApiClient, 'get').mockResolvedValue({ market_stats: {} });
     const candleTopic = 'candle/77/1m';
     const reconnect = vi.spyOn(websocket, 'reconnect').mockImplementation(async () => {
       websocket.ws = { readyState: WebSocket.OPEN } as WebSocket;
