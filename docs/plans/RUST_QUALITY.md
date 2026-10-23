@@ -783,3 +783,17 @@ shared prepared-action helper for this query only. Both keep their original
 clocks, request bodies, native-state and protocol assertions; the public fixture
 checks the new original-deadline timer explicitly before its no-extra-actions
 control. Held account/trading source and tests/account are untouched.
+
+## Lighter command-entry regression proof
+
+The separately committed candle controls reproduce two native admission errors:
+capacity returned a generic adapter message, and invalid clock admission reported
+Internal instead of the engine's InvalidInput. Both are assertion-RED on the
+original implementation. The live-duplicate control allows the pre-existing
+COMMAND_DUPLICATE diagnostic and proves no request/terminal replacement; it is a
+compatibility control, not an original failure. All seven earlier candle controls
+remain. New controls exercise both aliases/networks, denial before invalid market
+validation, one terminal/no resource allocation, peer completion, freed-slot
+reuse and NaN/positive-infinity/negative-infinity admission followed by a finite
+command. The adapter uses shared command entry only for its genuine command
+caller; background generation cleanup and native query/stream behavior remain.
