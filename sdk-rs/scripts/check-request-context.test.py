@@ -147,6 +147,66 @@ class RequestContextBan(unittest.TestCase):
         # Source changes still have to exactly match the frozen manifest.
         self.assertTrue(ban.check(extra, landed, [('original', old)]))
 
+    def test_exact_signer_factory_rehash_preserves_count_and_cannot_regrow(self):
+        approved = {'venues/binance/src/history.rs': {'after': {'153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5': 1,
+                                                     '2263b7c3975168a800233a5720729a5293adc8d79ddc822742da439875b1c927': 1,
+                                                     '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 3,
+                                                     '5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2': 1,
+                                                     '6a3d37fddbb5fff8f3cd2c8d2ab4958d84b5c1efd268fd69c1464b41183a0c6a': 1,
+                                                     '896c2dc203c518dc9ae1c6b5eb51b5591da28af19f9ff2461c4c629a490fb1a5': 1,
+                                                     '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
+                                                     'a2e0593410ad976880489badf3fbdf89ad9f79859b04b9860d23044f327967d3': 1,
+                                                     'abe91b4dc9b434e9eb3b21058d48e235a63990574ed4431b56d81aa1bb372f49': 1,
+                                                     'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 2,
+                                                     'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
+                                                     'f859db20866f37469af70c624ec5ad2f31c4f7bd10c1bd1b0da41299b91f7eb7': 1},
+                                           'before': {'153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5': 1,
+                                                      '2263b7c3975168a800233a5720729a5293adc8d79ddc822742da439875b1c927': 1,
+                                                      '2b6c87682e5a05f8f7b1a34a56d5d415f322353ec9c26d679431d57de7aad64b': 3,
+                                                      '5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2': 1,
+                                                      '6a3d37fddbb5fff8f3cd2c8d2ab4958d84b5c1efd268fd69c1464b41183a0c6a': 1,
+                                                      '7b98ff7fe9c2b0fba3fa2034b1d3cddb9008a47f9c7731d28364b7097fb1b66d': 1,
+                                                      '896c2dc203c518dc9ae1c6b5eb51b5591da28af19f9ff2461c4c629a490fb1a5': 1,
+                                                      'a2e0593410ad976880489badf3fbdf89ad9f79859b04b9860d23044f327967d3': 1,
+                                                      'abe91b4dc9b434e9eb3b21058d48e235a63990574ed4431b56d81aa1bb372f49': 1,
+                                                      'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 2,
+                                                      'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
+                                                      'f859db20866f37469af70c624ec5ad2f31c4f7bd10c1bd1b0da41299b91f7eb7': 1}},
+         'venues/binance/src/lib.rs': {'after': {'088924f3ac9b1699da1a2b0c712052ec5d14e133e51b4a93094827c12109ef7e': 1,
+                                                 '29866cd39178c8da46ea6e7de031a9cd684e76f2734dbc6f60a081be3980972b': 1,
+                                                 '5ed40af7dbe1e5b76ca8be90e29eabcbce35d0d0c768e765826c2b6525a06ada': 1,
+                                                 '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
+                                                 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1},
+                                       'before': {'088924f3ac9b1699da1a2b0c712052ec5d14e133e51b4a93094827c12109ef7e': 1,
+                                                  '29866cd39178c8da46ea6e7de031a9cd684e76f2734dbc6f60a081be3980972b': 1,
+                                                  '5ed40af7dbe1e5b76ca8be90e29eabcbce35d0d0c768e765826c2b6525a06ada': 1,
+                                                  '660826b694da348256b3fbbb3d2e4429c0be08068f931faa9b0cf92bae92004d': 1,
+                                                  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1}}}
+        original = {path: dict(pair['before']) for path, pair in approved.items()}
+        changed = {path: dict(pair['after']) for path, pair in approved.items()}
+        self.assertEqual(sum(map(sum, (c.values() for c in original.values()))), 21)
+        self.assertEqual(sum(map(sum, (c.values() for c in changed.values()))), 21)
+        self.assertFalse(ban.check(changed, changed, [('approved-original', original)]))
+        for path in changed:
+            pruned = {p: dict(c) for p, c in changed.items()}
+            del pruned[path][next(iter(pruned[path]))]
+            self.assertTrue(ban.check(changed, changed, [('original', original), ('newer-pruned', pruned)]))
+            self.assertFalse(ban.check(pruned, pruned, [('original', original), ('newer', changed)]))
+            forged = {p: dict(c) for p, c in changed.items()}
+            forged[path]['f' * 64] = 1
+            self.assertTrue(ban.check(forged, forged, [('original', original)]))
+            grown = {p: dict(c) for p, c in changed.items()}
+            grown[path][next(iter(grown[path]))] += 1
+            self.assertTrue(ban.check(grown, grown, [('original', original)]))
+            altered_original = {p: dict(c) for p, c in original.items()}
+            altered_original[path][next(iter(altered_original[path]))] += 1
+            self.assertTrue(ban.check(changed, changed, [('altered-original', altered_original)]))
+            moved = {p: dict(c) for p, c in changed.items()}
+            moved['venues/unapproved/src/lib.rs'] = moved.pop(path)
+            self.assertTrue(ban.check(moved, moved, [('original', original)]))
+        self.assertTrue(ban.check(original, original, [('already-rehashed', changed)]))
+        self.assertTrue(ban.check(changed, original, [('original', original)]))
+
     def test_strict_manifest_schema_and_duplicates(self):
         digest = 'a' * 64
         good = {'venues/reference/src/lib.rs': {digest: 1}}
