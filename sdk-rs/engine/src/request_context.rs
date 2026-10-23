@@ -78,7 +78,7 @@ impl<'a> Reconciliation<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Owner {
     Command {
         id: CommandId,
