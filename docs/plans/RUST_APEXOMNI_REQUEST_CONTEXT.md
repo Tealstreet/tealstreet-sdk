@@ -614,6 +614,16 @@ fingerprints / 17 occurrences to zero. The shared legacy lib sender, startup,
 account, history, public and session paths remain inventoried. Opaque identity
 registration and SDK admission are separately owned by claude-m26ps4; no raw
 fallback or registry migration is claimed by this checkpoint. Shared source
-composition includes reviewed conditional/readiness/signer capability and actual
-Plan core 632da7717e2 plus Store landing c55a6a76044. Those open prerequisites
-must land and be genuinely integrated before final venue CI and a merge window.
+composition includes actual Plan core 632da7717e2, conditional terminal
+cf6b2a89db8 and landing through 749a5677d0e. Retained-Preflight readiness #1896
+and signer schema/recipe/capability #1839/#1841/#1899 remain reviewed stacks;
+their actual landings must be integrated before final venue CI and a window.
+The recipe owns the immutable REST and contract capability requirements, and
+trading selects those declarations without a local algorithm policy.
+
+Verification: the full ApeX and Binance suites passed 478 tests with only the
+two directed P8 placement ignores. After the recipe declaration extraction,
+the focused trading suite passed 41 tests with the same two ignores. Strict
+ApeX Clippy/fmt and both request-context checks are required on the published
+head. The signer owner independently approved the native delegated HMAC proof;
+source/adversarial, caller and full-map reviews found no remaining source blocker.

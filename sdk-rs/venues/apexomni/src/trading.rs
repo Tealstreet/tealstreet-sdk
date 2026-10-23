@@ -11,7 +11,6 @@ use safe_cex_engine::request_context::{
     Context, Credential, HttpOwnerRetirement, Operation, Plan, PlanPolicy, Preflight,
     PreflightPolicy, PreflightPurpose, RetryPolicy, UnprovenEvidence,
 };
-use safe_cex_engine::signing::{Algorithm, ExtraKey, KeyUse, Need};
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Outcome, Response, VenueError, num,
 };
@@ -875,17 +874,12 @@ impl ApexOmni {
                 .map_err(|e| e.venue_error())?;
             return Ok(());
         }
-        let mut needs = vec![Need {
-            key: KeyUse::Signing,
-            algorithm: Algorithm::HmacSha256,
-        }];
-        if job.placements {
-            needs.push(Need {
-                key: KeyUse::Extra(ExtraKey::ZklinkSeed),
-                algorithm: Algorithm::ZkLinkContract,
-            });
-        }
-        cx.can_sign(CredentialSlot::Primary, &needs)
+        let needs = if job.placements {
+            sign::CONTRACT_NEEDS
+        } else {
+            sign::REST_NEEDS
+        };
+        cx.can_sign(CredentialSlot::Primary, needs)
             .map_err(|error| error.venue_error())?;
         let identity = self
             .options
