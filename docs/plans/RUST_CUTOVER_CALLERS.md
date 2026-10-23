@@ -5645,6 +5645,18 @@ unchanged and denied cache hits publish nothing. No credentials or route are
 borrowed for these no-I/O branches. Private fills, user-info, cache-miss paging,
 setters and successful margin/position no-ops retain native dispatch and policy.
 
+### Lighter public ticker seed uses managed Background Read
+
+The public `/api/v1/exchangeStats` GET now requires prepare/bind/claim support in
+custom transports, with its original20s bound covering preparation and streamed
+response together. Empty headers/body, all six native list-envelope aliases,
+field conversion, usable partial rows, per-symbol WebSocket precedence and poll/
+startup Backoff behavior remain the same. Invalid envelopes discard staged rows;
+queued, expired or late responses cannot publish ticker changes. Admission failure
+keeps recovery on the existing startup Backoff and completes no user command.
+Successful data and SDK method signatures are unchanged for both Lighter aliases
+and networks; private credentials, trading and catalog fallback stay native.
+
 ## Backpack managed foreground write results
 
 Foreground place/cancel/amend/leverage uses shared Plan custody, send-time

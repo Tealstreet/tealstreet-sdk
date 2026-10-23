@@ -1129,3 +1129,16 @@ and completion while all256 background roots can coexist without an added owner.
 No steady WS/ticker/book path changes; current post-#1888 CI must pass the
 shared speed gate and report the fresh KCS ratio. The1.20x figure remains a
 headroom target, not a merge gate, per the overseer clarification.
+
+### Lighter ticker managed-entry controls
+
+Committed plan and six compiled assertion REDs precede managed ticker source.
+The previously held candle deadline driver was corrected first: every captured
+same-deadline timer fires at its original raw timestamp; all ten candle controls
+pass on legacy ticker source with every original assertion retained. Ticker
+controls preserve native fields/aliases/partial-row semantics and symbol-specific
+WS precedence through actual prepare/bind/claim, reject preclaim publication,
+discard failed prefixes, and prove failure/capacity recovery and300 Background
+retirements without completing unrelated commands. Existing fixture drains use
+shared preparation at original event times only where the new ticker requires it.
+No runtime timer/retry policy or production ordering workaround is introduced.
