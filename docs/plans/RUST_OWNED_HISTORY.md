@@ -1807,3 +1807,109 @@ baselines, foreign paths, inflated counts/new digests and newer pruning.
 Final tuple-cursor source passes all 257 KuCoin/spot tests (including the same
 17 owned-history controls), strict all-target Clippy/fmt and diff checks. No
 production request-context adoption or signing changes are implied by pruning.
+
+## Next single-page fan-out: Bitrue execution histories
+
+Plan first on fresh `feat/rust-owned-history-bitrue` from actual landing
+`bf362312d3edfb4dfa00b726c172f944053b9198` (2026-10-23). Plan only: keep queued
+Hyperliquid #1765, Backpack #1766 and Kraken futures #1768 CI/proof watches active
+and honor the owner queue, announcing before any separate guard/merge. Check
+native history/request-builder overlap with signer/clock/financial lanes before
+production edits. Future shared-engine/harness/build inputs require genuine
+integration and fresh source-bound evidence before landing.
+
+Bitrue fills read one bounded `/fapi/v2/myTrades` page; the venue's forward fromId
+is not a documented backward recent-history cursor. Do not invent continuation
+or claim general complete order history/PnL ledger. Scope existing
+`venues/bitrue/src/history.rs`, its `tests/history.rs` and nearby caller/audit/
+quality/this-plan docs. Reuse engine `HistoryRows<Execution>`/`Completion` rather
+than constructing a fake cursor walk for a one-page endpoint. One owner binds
+the real command and owns staging, admission, error finalization and encoding.
+Remove the venue row-output vector and duplicate numeric completion field. No
+new engine API, per-venue completeness emitter, paging/retry policy, Store,
+account reducer, signing/key selection, Context, capabilities, harness/fixture/
+budget/workflow or NX changes. Public WS trades, native client-ID lookup and
+explicit unsupported order-history/income admission stay separate and unchanged.
+
+Rows stream into owner staging only. Native HTTP/envelope check, required-list
+streaming decoder, all row validation, hard 1000-row guard and endpoint coverage
+proof must succeed before accept_page and final serialization. Keep the native
+received count before filters and the exact strict refusal when a full requested
+native page leaves fewer eligible unique rows than the requested limit. That
+coverage refusal remains owner.reject even if a valid prefix was staged; it
+never manufactures a successful empty/partial answer or a completeness marker.
+Actual native/HTTP/malformed/transport failure before page admission rejects
+typed with the existing shared Internal fallback, never empty complete. Since
+this endpoint admits exactly one terminal page, there is no artificial
+accepted-page/later-failure recovery case to add. Preserve valid empty success,
+exact existing messages and any supplied typed error information.
+
+Request::reset remains compatible with the existing library reset_job call.
+Discard only unvalidated owner staging and native per-attempt received/failed/
+seen-ID facts, retaining the original Completion and command across retries.
+The existing per-attempt identity set is native page deduplication, not an
+accepted/global row owner; clear it with the failed attempt so the same native
+ID can reappear in a valid retried page. No command Done/failure/marker may
+escape from a failed attempt that will retry. Preserve the one explicit -1022
+signature resend (both envelope and expected-list error paths), three eligible
+GET retries, existing rejection/UTF-8/no-list exclusions, retry counters and
+strict timestamp increment/reset behavior. Do not copy or repair the generic
+issue/retry/signing implementation in this slice; all those callsites stay as-is.
+
+Preserve byte-exact URL/contractName/limit/startTime/endTime and flooring/clamps,
+primary versus read credentials, native huge IDs and same-side bid/ask order ID,
+first eligible duplicate identity, side/type filtering, exact millisecond range
+checks before second timestamps, base/contract/quote quantity disambiguation,
+absolute commission/quote asset, maker optionality, final descending sort/limit
+and no live Store writes. The contextual finalizer sorts/truncates only the
+admitted page; serialization error rejects through the same command owner.
+Numeric Completion remains explicit legacy authority, not managed Context
+completion; notify the request-core lane of any eventual exact legacy-inventory
+net shrink after actual landing.
+
+Before production edits, commit original-source assertion-RED controls for typed
+terminal native/malformed/exhausted-transport failures and the strict full-page
+coverage refusal. Preserve existing success, lookup/public/unsupported, time/
+identity/quantity, signature-resend and interrupted-stream compatibility tests.
+Add valid-prefix plus malformed-row/envelope/UTF-8/no-list refusal, failed-prefix
+reset followed by successful same-ID changed-economics retry, mixed signature
+and transport retry accounting, filtered-full/all-duplicate pages, received-row
+1000/1001 boundary, concurrent query owners and exactly one terminal delivery.
+Inspect raw actions for no early Done/failure/marker or unexpected extra HTTP;
+no history output may mutate live orders/fills. Pin the distinction between
+legitimate terminal empty data and missing/invalid arrays. Avoid an invented
+partial-success regression for a query with no accepted earlier page.
+
+Independent plan, correctness and adversarial reviews must explicitly answer
+the architecture gate: adoption of the existing engine row-admission/completion
+owner, not another venue completion/paging/coverage implementation. Focused
+engine/Bitrue/Binance tests and touched all-target strict Clippy/fmt/bans/diff
+checks use four Cargo jobs; Corepack Yarn only, never bare/Volta yarn, npx or
+the account-policy check. No local release-WASM/full replay/size/timing sweep.
+Caller docs explain Internal fallback on formerly unclassified owner-completed
+failures and strict coverage refusals while preserving admission/lookup/setup
+paths; B11 ingestion/coverage, other adapters and deployed runtime proof stay
+open. Final exact-head green CI and fresh post-sort raw/package/ordered-gate
+evidence precede an announced fresh separate guard and separate exact-head merge.
+
+Bitrue implementation checkpoint: regression-only `51b6193c21e` leaves production
+unchanged, with 19 controls PASS and four typed-terminal assertion groups RED.
+Existing HistoryRows/Completion adoption makes those groups GREEN. All 28 final
+history controls pass, including mixed resend/GET orders with strict timestamp
+increments, no-list signature refusal after exhausted GET retries, signature
+resend not replenishing GET budget, staged same-ID economic replacement,
+1000/1001 raw-row admission, valid empty success versus malformed list,
+UTF-8/no-list nonretry, independent concurrent owners and first eligible native
+identity. No new core, library request/retry, public WS or lookup edits.
+Independent correctness source review is CLEAN; final adversarial/tests/docs
+review and focused native/strict checks remain before the draft PR. Current
+shared registry/SDK predecessor #1763 must be genuinely integrated before final
+CI/proof. No historical evidence is a certificate for that new head.
+
+Bitrue final local checks: all 842 focused engine/Bitrue/Binance tests pass;
+all 28 final history controls pass again after tightening the mixed-retry raw
+terminal drain. Touched all-target strict Clippy, fmt, bans and diff checks pass.
+Independent correctness, adversarial source and final tests/docs reviews are
+CLEAN; architecture gate is existing shared owner adoption. No local release
+WASM/full replay/size/timing run. Actual #1763 integration and fresh CI/proof
+remain required before landing.

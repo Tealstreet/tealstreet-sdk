@@ -1966,3 +1966,13 @@ Internal rejects; later futures/funding failures return only validated eligible
 rows with command-owned incompleteness. Native continuation/census/safety proofs
 remain strict. Signing, disabled spot endpoints and B11/NX coverage are outside
 this slice; see RUST_OWNED_HISTORY.md and RUST_CUTOVER_CALLERS.md.
+
+## Bitrue single-page owned fills
+
+~~Bitrue fills keep native output storage and terminal completion beside streamed
+response validation.~~ Existing engine HistoryRows/Completion now owns staging,
+page admission, retry-page reset and typed terminal delivery. All native proof
+checks precede admission; a saturated filtered/duplicate page remains a strict
+refusal. No fictitious pagination, partial-success case or new venue marker is
+introduced. Public trades, unsupported histories and client-ID lookup stay
+separate; B11 caller/runtime coverage remains open. [Scope](RUST_OWNED_HISTORY.md).

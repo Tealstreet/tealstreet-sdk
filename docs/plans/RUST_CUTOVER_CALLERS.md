@@ -4145,3 +4145,28 @@ trades remains unsupported. No signing helper, credential selection, constructor
 argument, capability or NX bootstrap changes are included. Callers must ingest
 command-scoped incomplete-query warnings, gate coverage accordingly and handle
 typed query rejection as unavailable history.
+
+### Bitrue single-page fills: shared admission and completion owner
+
+Bitrue's bounded native `/fapi/v2/myTrades` result now uses the existing engine
+HistoryRows/Completion owner. Rows stay staged until HTTP/envelope, required
+array, every row, the 1000-row guard and endpoint coverage proof validate.
+Terminal native/decode/transport failures and the existing strict full-page
+coverage refusal now report the shared `internal` kind where they previously
+had no kind. Their messages remain; no write outcome is invented. Typed-error
+consumers and telemetry should use that classification. Admission, unsupported
+history, public WS trades and client-ID lookup retain their separate behavior.
+
+A full native page that leaves fewer eligible unique fills than the requested
+limit still rejects, even with a valid prefix. This one-page endpoint has no
+previously accepted page: failures never return a partial or emit an incomplete
+marker. A valid empty array succeeds; a missing or malformed array rejects.
+This does not claim full backward venue coverage or a complete PnL ledger.
+
+The original owner survives the single signature resend and three eligible GET
+retries. Reset drops only the unvalidated page and its native attempt identities;
+retry budgets, timestamp advancement, exact URLs, quantities/IDs, filtering,
+final descending sort/limit and no live Store writes are preserved. No SDK
+argument/result shape or new NX handler is added. Numeric completion uses legacy
+authority rather than managed Context completion. Callers must handle typed query
+rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
