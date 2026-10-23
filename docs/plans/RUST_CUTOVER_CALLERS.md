@@ -5369,7 +5369,6 @@ treat successful local fallback as proof that cache or Store state was refreshed
 A satisfied native cancel may prove a subset without creating IDs. That proof
 still leaves any unresolved targets Unknown; a successful subset never cleans up
 the remainder or extends its deadline.
-
 ## AsterDEX dispatch signing admission
 
 AsterDEX now signs only through the injected provider at dispatch
