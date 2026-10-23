@@ -4,43 +4,41 @@ use super::*;
 use crate::command::{HostInput, decode_host_input};
 use crate::request_context::{Operation, Policy, RetryPolicy};
 
-/// Parent: no wait reaches the engine, so these mirror the planned API and
-/// every adapter reports the missing capability.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Wait {
-    Remaining(u32),
-    Expired,
-}
+use crate::CommandWait as Wait;
 
 fn wait<P>(cx: &Cx<'_, P>) -> Option<Wait> {
-    let _ = cx;
-    None
+    cx.command_wait()
 }
 
 /// Decode the envelope's wait: `Ok(None)` when absent.
 fn decoded_wait(json: &str) -> Result<Option<u32>, ()> {
-    decode_host_input(json).map(|_| None).map_err(|_| ())
+    match decode_host_input(json) {
+        Ok(HostInput::Command { timeout_ms, .. }) => Ok(timeout_ms),
+        _ => Err(()),
+    }
 }
 
 /// Deliver one host envelope the way the WASM host does.
 fn deliver(engine: &mut Engine<Probe>, now: f64, json: &str) {
     match decode_host_input(json).expect("valid envelope") {
-        HostInput::Command(command) => engine.handle(now, Event::Command(command)),
+        HostInput::Command {
+            command,
+            timeout_ms,
+        } => engine
+            .handle_command(now, command, timeout_ms)
+            .expect("valid wait"),
         _ => panic!("command envelope"),
     }
 }
 
 /// `handle_command` with an explicit wait; `false` when refused undispatched.
 fn handle_with(engine: &mut Engine<Probe>, now: f64, command: Command, wait: Option<u32>) -> bool {
-    let _ = wait;
-    engine.handle(now, Event::Command(command));
-    true
+    engine.handle_command(now, command, wait).is_ok()
 }
 
 /// The command's live caller deadline, keyed by its receipt.
 fn deadline(engine: &Engine<Probe>, command: CommandId) -> Option<f64> {
-    let _ = (engine, command);
-    None
+    engine.io.command_waits.deadline(command)
 }
 
 #[derive(Default)]
@@ -188,7 +186,11 @@ fn the_envelope_wait_reaches_the_fresh_entry_and_absence_is_the_sdk_default() {
 fn a_deferred_command_sees_the_time_left_from_its_receipt() {
     for (wait, left) in [(Some(300_000), 295_000), (None, 115_000)] {
         let mut e = engine(Probe::default());
-        deliver(&mut e, 0., r#"{"op":"placeOrders","command":1,"orders":[]}"#);
+        deliver(
+            &mut e,
+            0.,
+            r#"{"op":"placeOrders","command":1,"orders":[]}"#,
+        );
         deliver(&mut e, 0., &cancel(2, "7", wait));
         assert!(observed(&e, 2).is_empty(), "held until the order is stored");
         e.handle(
@@ -198,7 +200,11 @@ fn a_deferred_command_sees_the_time_left_from_its_receipt() {
                 text: "7",
             },
         );
-        assert_eq!(observed(&e, 2), [Some(Wait::Remaining(left))], "wait {wait:?}");
+        assert_eq!(
+            observed(&e, 2),
+            [Some(Wait::Remaining(left))],
+            "wait {wait:?}"
+        );
     }
 }
 
@@ -223,7 +229,11 @@ fn borrowed_callbacks_and_other_entries_see_no_wait() {
 fn an_expired_fresh_entry_finishes_typed_with_zero_effects() {
     for (release_at, label) in [(1_000., "at the deadline"), (999.5, "under 1 ms before")] {
         let mut e = engine(Probe::default());
-        deliver(&mut e, 0., r#"{"op":"placeOrders","command":1,"orders":[]}"#);
+        deliver(
+            &mut e,
+            0.,
+            r#"{"op":"placeOrders","command":1,"orders":[]}"#,
+        );
         deliver(&mut e, 0., &cancel(2, "7", Some(1_000)));
         e.drain_actions().for_each(drop);
         e.handle(
@@ -256,7 +266,11 @@ fn a_duplicate_live_id_neither_replaces_nor_clears_the_first_stamp() {
     });
     deliver(&mut e, 0., &cancel(21, "x", Some(300_000)));
     deliver(&mut e, 10., &cancel(21, "x", Some(5_000)));
-    assert_eq!(observed(&e, 21), [Some(Wait::Remaining(300_000))], "duplicate refused");
+    assert_eq!(
+        observed(&e, 21),
+        [Some(Wait::Remaining(300_000))],
+        "duplicate refused"
+    );
     assert_eq!(
         deadline(&e, 21),
         Some(300_000.),
@@ -277,8 +291,14 @@ fn a_reused_id_after_either_terminal_gets_a_fresh_stamp() {
     e.venue.reject = false;
     deliver(&mut e, 5_000., &cancel(11, "x", None));
     deliver(&mut e, 5_000., &cancel(12, "y", None));
-    assert_eq!(observed(&e, 11).last(), Some(&Some(Wait::Remaining(120_000))));
-    assert_eq!(observed(&e, 12).last(), Some(&Some(Wait::Remaining(120_000))));
+    assert_eq!(
+        observed(&e, 11).last(),
+        Some(&Some(Wait::Remaining(120_000)))
+    );
+    assert_eq!(
+        observed(&e, 12).last(),
+        Some(&Some(Wait::Remaining(120_000)))
+    );
 }
 
 #[test]
@@ -304,6 +324,7 @@ fn handle_command_refuses_bad_clocks_and_waits_without_dispatch() {
         (f64::NAN, Some(1_000)),
         (0., Some(0)),
         (0., Some(2_147_483_648)),
+        (0., Some(u32::MAX)),
         (f64::MAX, Some(1_000)),
     ] {
         let mut e = engine(Probe::default());
@@ -311,7 +332,10 @@ fn handle_command_refuses_bad_clocks_and_waits_without_dispatch() {
             command: 5,
             ids: vec!["x".into()],
         };
-        assert!(!handle_with(&mut e, now, command, wait), "now {now} wait {wait:?}");
+        assert!(
+            !handle_with(&mut e, now, command, wait),
+            "now {now} wait {wait:?}"
+        );
         assert!(observed(&e, 5).is_empty(), "now {now} wait {wait:?}");
     }
 }

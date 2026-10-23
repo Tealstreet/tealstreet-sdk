@@ -106,6 +106,17 @@ trait AnyEngine {
     ) -> Result<(), &'static str>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
+    /// A host command with the caller's wait (see `Engine::handle_command`).
+    fn handle_command(
+        &mut self,
+        now: f64,
+        command: safe_cex_engine::Command,
+        wait_ms: Option<u32>,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        let _ = wait_ms;
+        self.handle(now, Event::Command(command));
+        Ok(())
+    }
     fn drain(&mut self) -> Vec<Action>;
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
     fn snapshot(&mut self, now: f64) -> &[u8];
@@ -196,6 +207,15 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn handle(&mut self, now: f64, event: Event<'_>) {
         Engine::handle(self, now, event);
+    }
+
+    fn handle_command(
+        &mut self,
+        now: f64,
+        command: safe_cex_engine::Command,
+        wait_ms: Option<u32>,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        Engine::handle_command(self, now, command, wait_ms)
     }
 
     fn drain(&mut self) -> Vec<Action> {
@@ -1183,7 +1203,15 @@ impl WasmEngine {
                         .map_err(JsError::new)?;
                     return Ok(self.flush());
                 }
-                safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
+                safe_cex_engine::command::HostInput::Command {
+                    command,
+                    timeout_ms,
+                } => {
+                    self.inner
+                        .handle_command(now, command, timeout_ms)
+                        .map_err(|error| JsError::new(&format!("{error:?}")))?;
+                    return Ok(self.flush());
+                }
                 safe_cex_engine::command::HostInput::PollScaleChanged { scale, ceiling_ms } => {
                     self.inner
                         .handle(now, Event::PollCeilingChanged { ceiling_ms });
@@ -1207,7 +1235,15 @@ impl WasmEngine {
                     .map_err(JsError::new)?;
                 return Ok(self.flush());
             }
-            safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
+            safe_cex_engine::command::HostInput::Command {
+                command,
+                timeout_ms,
+            } => {
+                self.inner
+                    .handle_command(now, command, timeout_ms)
+                    .map_err(|error| JsError::new(&format!("{error:?}")))?;
+                return Ok(self.flush());
+            }
             safe_cex_engine::command::HostInput::PollScaleChanged { scale, ceiling_ms } => {
                 self.inner
                     .handle(now, Event::PollCeilingChanged { ceiling_ms });
@@ -1969,7 +2005,10 @@ mod tests {
             fn start(&mut self, _: f64) {}
             fn handle(&mut self, now: f64, event: Event<'_>) {
                 let input = match event {
-                    Event::Command(command) => HostInput::Command(command),
+                    Event::Command(command) => HostInput::Command {
+                        command,
+                        timeout_ms: None,
+                    },
                     Event::PollScaleChanged { scale } => HostInput::PollScaleChanged {
                         scale,
                         ceiling_ms: None,

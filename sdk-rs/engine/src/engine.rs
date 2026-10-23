@@ -901,6 +901,7 @@ mod execution_cx;
 #[cfg(test)]
 #[path = "execution_cx_tests.rs"]
 mod execution_cx_tests;
+pub use command_entry::{CommandWait, DEFAULT_COMMAND_WAIT_MS, MAX_COMMAND_WAIT_MS};
 pub use execution_cx::{ExecutionHandle, Joined, Window};
 
 /// A delivered response whose bytes the engine cannot hand to a codec. The
@@ -1454,6 +1455,8 @@ struct Io<P> {
     #[cfg(feature = "order-locks")]
     reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
+    /// Caller waits stamped at each external command receipt.
+    command_waits: command_entry::Waits,
     #[cfg(feature = "http-plans")]
     http_plan_ready: Option<crate::request_context::Plan>,
     #[cfg(feature = "http-plans")]
@@ -1534,6 +1537,7 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             command_entry: None,
+            command_waits: Default::default(),
             #[cfg(feature = "http-plans")]
             http_plan_ready: None,
             #[cfg(feature = "http-plans")]
@@ -2348,6 +2352,7 @@ impl<P> Cx<'_, P> {
         };
         // A credential-free route's auth-kind refusal is no credential evidence.
         let credential_evidence = self.io.request_contexts.owner_credentialed(command);
+        self.io.finish_command_wait(command);
         self.io.retire_http_command(command);
         if !self.io.request_contexts.finish(command) {
             self.io.http_owner_poison = true;
@@ -3167,6 +3172,43 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        // An external command receipt gets the SDK default caller wait.
+        if let Event::Command(command) = &event
+            && !self.io.command_waits.redelivering
+            && let Some(id) = command.completion_id()
+        {
+            let deadline =
+                command_entry::wait_deadline(now, command_entry::DEFAULT_COMMAND_WAIT_MS);
+            self.io.command_waits.receive(id, deadline, now);
+        }
+        self.handle_received(now, event);
+        self.io.command_waits.end_receipt();
+    }
+
+    /// Dispatch one host command with the caller's own wait. A non-finite
+    /// clock, an out-of-range wait or a deadline that does not advance is
+    /// refused with nothing dispatched.
+    pub fn handle_command(
+        &mut self,
+        now: f64,
+        command: Command,
+        wait_ms: Option<u32>,
+    ) -> Result<(), crate::request_context::Error> {
+        let wait_ms = wait_ms.unwrap_or(command_entry::DEFAULT_COMMAND_WAIT_MS);
+        if !(1..=command_entry::MAX_COMMAND_WAIT_MS).contains(&wait_ms) {
+            return Err(crate::request_context::Error::Invalid);
+        }
+        let deadline = command_entry::wait_deadline(now, wait_ms)
+            .ok_or(crate::request_context::Error::Invalid)?;
+        if let Some(id) = command.completion_id() {
+            self.io.command_waits.receive(id, Some(deadline), now);
+        }
+        self.handle_received(now, Event::Command(command));
+        self.io.command_waits.end_receipt();
+        Ok(())
+    }
+
+    fn handle_received(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
         self.io.dispatch_now = now;
         self.process_socket_work(now);
@@ -3729,7 +3771,10 @@ impl<V: Venue> Engine<V> {
                 if let Some(id) = command.completion_id() {
                     self.io.active_commands.remove(&id);
                 }
+                // Not a new receipt: it keeps its original caller wait.
+                let outer = std::mem::replace(&mut self.io.command_waits.redelivering, true);
                 self.handle(now, Event::Command(command));
+                self.io.command_waits.redelivering = outer;
             }
         }
         self.process_socket_work(now);
