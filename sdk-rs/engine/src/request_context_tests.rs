@@ -64,6 +64,211 @@ fn released(claim: Claim) -> HttpRelease {
     }
 }
 
+fn bounded_lifecycle(id: u64, pacing: Option<Pacing>, deadline: f64) -> Lifecycle {
+    Lifecycle::with_deadline(
+        context(Operation::Mutation, pacing),
+        Attempt {
+            request: RequestId(id),
+            generation: 1,
+        },
+        0.,
+        deadline,
+    )
+    .unwrap()
+}
+
+#[test]
+fn physical_window_may_only_narrow_a_live_logical_bound() {
+    let logical = context(Operation::Mutation, None);
+    let attempt = Attempt {
+        request: RequestId(1),
+        generation: 1,
+    };
+    for (created_at, deadline) in [
+        (0., 0.),
+        (100., 99.),
+        (0., 5_001.),
+        (5_000., 5_000.),
+        (f64::NAN, 100.),
+        (f64::NEG_INFINITY, 100.),
+        (0., f64::NAN),
+        (0., f64::INFINITY),
+    ] {
+        assert!(matches!(
+            Lifecycle::with_deadline(logical.clone(), attempt, created_at, deadline),
+            Err(Error::Invalid)
+        ));
+    }
+    assert_eq!(Lifecycle::new(logical.clone(), attempt).deadline(), 5_000.);
+    let equal = Lifecycle::with_deadline(logical.clone(), attempt, 0., 5_000.).unwrap();
+    assert_eq!(equal.deadline(), 5_000.);
+    let narrow = Lifecycle::with_deadline(logical.clone(), attempt, 0., 100.).unwrap();
+    assert_eq!(narrow.deadline(), 100.);
+    assert_eq!(narrow.context(), &logical);
+}
+
+#[test]
+fn physical_deadline_precedes_logical_deadline_for_release_and_expiry() {
+    for at in [100., 101., 4_999.] {
+        let mut life = bounded_lifecycle(1, None, 100.);
+        let permit = ready(&mut life);
+        let mut calls = 0;
+        assert_eq!(
+            life.claim(permit, clock(at), &mut SendPacing::default(), &mut |_| {
+                calls += 1;
+                Ok(Admission::Unscheduled)
+            }),
+            Err(Error::TimedOut)
+        );
+        assert_eq!(calls, 0);
+        assert!(life.release().is_none());
+        assert!(!life.accepts_response());
+    }
+    let mut life = bounded_lifecycle(1, None, 100.);
+    let permit = ready(&mut life);
+    let release = released(claim(&mut life, permit, 99., &mut SendPacing::default()).unwrap());
+    assert_eq!(release.deadline, 100.);
+    assert_eq!(life.context().deadline(), 5_000.);
+    assert!(!life.expire(99.).unwrap());
+    assert!(life.expire(100.).unwrap());
+    assert!(!life.expire(101.).unwrap());
+    assert_eq!(life.release(), Some(release));
+    assert!(!life.accepts_response());
+}
+
+#[test]
+fn route_reprepare_cannot_renew_a_physical_window() {
+    let mut life = bounded_lifecycle(1, None, 100.);
+    let old_token = life.preparation();
+    let old_permit = ready(&mut life);
+    life.reprepare().unwrap();
+    assert_eq!(life.deadline(), 100.);
+    assert_eq!(life.context().deadline(), 5_000.);
+    assert_eq!(
+        life.prepared(
+            old_token,
+            Prepared {
+                id: 1,
+                expires_at: None
+            }
+        ),
+        Err(Error::Revoked)
+    );
+    let current = ready(&mut life);
+    assert_eq!(
+        claim(&mut life, old_permit, 50., &mut SendPacing::default()),
+        Err(Error::Revoked)
+    );
+    assert_eq!(
+        claim(&mut life, current, 100., &mut SendPacing::default()),
+        Err(Error::TimedOut)
+    );
+    assert!(life.expire(100.).unwrap());
+}
+
+#[test]
+fn physical_pacing_refusal_does_not_consume_admission_or_the_next_slot() {
+    let gap = Pacing {
+        group: 9,
+        minimum_gap_ms: 100.,
+    };
+    let mut pacing = SendPacing::new(&[gap]).unwrap();
+    let mut first = lifecycle(1, Some(gap));
+    let permit = ready(&mut first);
+    claim(&mut first, permit, 10., &mut pacing).unwrap();
+    let mut short = bounded_lifecycle(2, Some(gap), 110.);
+    let permit = ready(&mut short);
+    let mut calls = 0;
+    assert_eq!(
+        short.claim(permit, clock(11.), &mut pacing, &mut |_| {
+            calls += 1;
+            Ok(Admission::Unscheduled)
+        }),
+        Err(Error::TimedOut)
+    );
+    assert_eq!(calls, 0);
+    let mut peer = lifecycle(3, Some(gap));
+    let permit = ready(&mut peer);
+    assert_eq!(
+        claim(&mut peer, permit, 11., &mut pacing),
+        Ok(Claim::WaitUntil(110.))
+    );
+    assert!(claim(&mut peer, permit, 110., &mut pacing).is_ok());
+}
+
+#[test]
+fn parked_signing_metadata_cannot_extend_the_physical_cap() {
+    for (route_expiry, freshness, revision) in [
+        (4_000., 4_000., 2),
+        (100., 4_000., 2),
+        (4_000., 100., 2),
+        (4_000., 4_000., 1),
+    ] {
+        let mut life = bounded_lifecycle(1, None, 100.);
+        life.prepared(
+            life.preparation(),
+            Prepared {
+                id: 4,
+                expires_at: Some(route_expiry),
+            },
+        )
+        .unwrap();
+        life.begin_signing().unwrap();
+        life.signed(
+            life.preparation(),
+            SignReceipt::default(),
+            revision,
+            freshness,
+        )
+        .unwrap();
+        let permit = life.permit().unwrap();
+        assert_eq!(
+            claim(&mut life, permit, 100., &mut SendPacing::default()),
+            Err(Error::TimedOut),
+            "physical expiry wins over simultaneous stale metadata"
+        );
+        assert_eq!(life.deadline(), 100.);
+        assert!(life.release().is_none());
+    }
+}
+
+#[test]
+fn physical_window_caps_signature_projection_and_scheduler_response_lease() {
+    let mut life = bounded_lifecycle(1, None, 100.);
+    life.prepared(
+        life.preparation(),
+        Prepared {
+            id: 4,
+            expires_at: Some(4_000.),
+        },
+    )
+    .unwrap();
+    life.begin_signing().unwrap();
+    life.signed(
+        life.preparation(),
+        SignReceipt {
+            stamp_ms: Some(10_000.),
+            expiry_ms: Some(100_000.),
+        },
+        2,
+        4_000.,
+    )
+    .unwrap();
+    let permit = life.permit().unwrap();
+    let release = released(
+        life.claim(
+            permit,
+            clock(99.),
+            &mut SendPacing::default(),
+            &mut |release| release.response_lease(1_000.).map(Admission::Scheduled),
+        )
+        .unwrap(),
+    );
+    assert_eq!(release.deadline, 100.);
+    assert_eq!(release.signature_valid_until, Some(100.));
+    assert_eq!(release.response_lease, Some(100.));
+}
+
 #[test]
 fn read_semantics_do_not_implicitly_authorize_retries() {
     // No Method is accepted here: both POST reads and GET mutations need an
@@ -1280,4 +1485,75 @@ fn a_write_resend_needs_an_engine_grant_and_each_grant_is_used_once() {
     failed.released(RequestId(1)).unwrap();
     failed.result(RequestId(1), self::failed("lost")).unwrap();
     assert_eq!(failed.grant_resend(RequestId(1)), Err(Error::State));
+}
+#[test]
+fn full_plan_journal_backing_is_reserved_before_any_native_fact() {
+    for (attempts, legs) in [(0, 1), (257, 1), (1, 0), (1, 2)] {
+        assert!(matches!(
+            CommandWrites::new_reserved(attempts, legs),
+            Err(Error::Capacity)
+        ));
+    }
+    let mut writes = CommandWrites::new_reserved(256, 128).unwrap();
+    let backing = (writes.attempts.capacity(), writes.legs.capacity());
+    assert!(backing.0 >= 256 && backing.1 >= 128);
+    assert!(writes.attempts.is_empty() && writes.legs.is_empty());
+    for leg in 1..=128 {
+        let first = RequestId(leg * 2);
+        let second = RequestId(leg * 2 + 1);
+        writes.register(first, leg).unwrap();
+        *writes.release_flag(first).unwrap() = true;
+        writes
+            .result(first, WriteResult::Rejected(VenueError::new("refused")))
+            .unwrap();
+        writes.grant_resend(first).unwrap();
+        writes.retry(first, second).unwrap();
+        *writes.release_flag(second).unwrap() = true;
+        writes
+            .result(
+                second,
+                WriteResult::Accepted {
+                    order_ids: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            (writes.attempts.capacity(), writes.legs.capacity()),
+            backing
+        );
+    }
+    writes.succeed().unwrap();
+}
+#[test]
+fn reserved_journal_never_grows_leg_backing_for_generic_registration_or_replacement() {
+    for replacement in [false, true] {
+        let mut writes = CommandWrites::new_reserved(4, 1).unwrap();
+        let backing = (writes.attempts.capacity(), writes.legs.capacity());
+        writes.register(RequestId(1), 1).unwrap();
+        if replacement {
+            *writes.release_flag(RequestId(1)).unwrap() = true;
+            writes
+                .result(
+                    RequestId(1),
+                    WriteResult::Rejected(VenueError::new("refused")),
+                )
+                .unwrap();
+            writes.replace(RequestId(1), &[2, 3, 4]).unwrap();
+            assert_eq!(
+                (writes.attempts.capacity(), writes.legs.capacity()),
+                backing
+            );
+        }
+        for leg in 2..=4 {
+            writes.register(RequestId(leg), leg).unwrap();
+            assert_eq!(
+                (writes.attempts.capacity(), writes.legs.capacity()),
+                backing
+            );
+        }
+        assert!(matches!(
+            writes.register(RequestId(5), 5),
+            Err(Error::Capacity)
+        ));
+    }
 }
