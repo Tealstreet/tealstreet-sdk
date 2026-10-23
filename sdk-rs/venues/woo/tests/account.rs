@@ -1707,3 +1707,78 @@ fn grouped_positions_count_unique_ids_and_each_anonymous_row_keep_cached_exposur
     assert_eq!(e.health().rows_skipped - health, 1);
     assert_eq!(e.store().positions(), before);
 }
+
+// Snapshot authority is distinct from the per-ID WS clocks.
+#[test]
+fn snapshot_token_rejects_both_join_orders_after_explicit_invalidation() {
+    for algo_first in [false, true] {
+        let (mut e, socket, mut reads, _) = start();
+        load(&mut e, &mut reads);
+        let before = e.store().orders().to_vec();
+        e.drain_actions().for_each(drop);
+        e.handle(70.0, Event::WsOpened { socket });
+        let mut reads = requests(&mut e);
+        let normal = take(&mut reads, "/v1/orders?");
+        let algo = take(&mut reads, "/v3/algo/orders?");
+        if algo_first {
+            response(&mut e, &algo, 80.0, &algos(""));
+        } else {
+            response(&mut e, &normal, 80.0, &page(""));
+        }
+        e.store_mut().invalidate_order_snapshots();
+        if algo_first {
+            response(&mut e, &normal, 90.0, &page(""));
+        } else {
+            response(&mut e, &algo, 90.0, &algos(""));
+        }
+        assert_eq!(e.store().orders(), before, "algo_first={algo_first}");
+        assert!(!requests(&mut e).iter().any(|r| r.url.contains("/orders?")));
+    }
+}
+
+#[test]
+fn snapshot_token_accepted_cancel_ack_fences_an_older_join() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    let before = e.store().orders().to_vec();
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let normal = take(&mut reads, "/v1/orders?");
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    e.handle(75.0, Event::Command(Command::CancelSymbolOrders {
+        command: 907, symbol: "BTCUSDT".into(),
+    }));
+    let writes = requests(&mut e);
+    let cancel = writes.iter().find(|r| r.method == safe_cex_engine::Method::Delete).unwrap();
+    response(&mut e, cancel, 76.0, r#"{"success":true}"#);
+    response(&mut e, &normal, 80.0, &page(""));
+    response(&mut e, &algo, 90.0, &algos(""));
+    assert_eq!(e.store().orders(), before);
+}
+
+#[test]
+fn snapshot_token_capture_and_late_exhaustion_leave_orders_and_polling_owned() {
+    for late in [false, true] {
+        let (mut e, socket, mut reads, timer) = start();
+        load(&mut e, &mut reads);
+        let before = e.store().orders().to_vec();
+        e.drain_actions().for_each(drop);
+        if !late { safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut()); }
+        e.handle(70.0, Event::WsOpened { socket });
+        let mut reads = requests(&mut e);
+        if late {
+            let normal = take(&mut reads, "/v1/orders?");
+            let algo = take(&mut reads, "/v3/algo/orders?");
+            response(&mut e, &normal, 80.0, &page(""));
+            safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
+            response(&mut e, &algo, 90.0, &algos(""));
+        } else {
+            assert!(!reads.iter().any(|r| r.url.contains("/orders?")));
+        }
+        assert_eq!(e.store().orders(), before);
+        e.drain_actions().for_each(drop);
+        e.handle(2010.0, Event::TimerFired { timer });
+        assert!(e.drain_actions().any(|a| matches!(a, Action::SetTimer { .. })));
+    }
+}

@@ -1060,3 +1060,62 @@ fn decoded_position_rearms_skip_memory_before_the_snapshot_finishes() {
     );
     assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
 }
+
+#[test]
+fn snapshot_token_regular_advanced_join_preserves_absent_rows_after_invalidation() {
+    let mut h = Harness::new();
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    h.reply("private/get-open-orders", &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#));
+    h.engine.store_mut().invalidate_order_snapshots();
+    h.reply("advanced/get-open-orders", EMPTY);
+    assert!(h.engine.store().orders().is_empty());
+    assert!(!h.engine.store().loaded().orders);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+}
+
+#[test]
+fn snapshot_token_accepted_cancel_ack_fences_absent_rows_and_retry_keeps_authority() {
+    for retry in [false, true] {
+        let mut h = Harness::new();
+        h.reply("get-positions", EMPTY);
+        h.reply("user-balance", BALANCE);
+        h.reply("private/get-open-orders", &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#));
+        if retry {
+            h.reply("advanced/get-open-orders", r#"{"code":40101,"message":"retry auth"}"#);
+        }
+        h.event(Event::Command(safe_cex_engine::Command::CancelSymbolOrders {
+            command: 908, symbol: "BTCUSD-PERP".into(),
+        }));
+        h.reply("cancel-all-orders", r#"{"code":0,"result":{}}"#);
+        h.reply("advanced/get-open-orders", EMPTY);
+        assert!(h.engine.store().orders().is_empty(), "retry={retry}");
+        assert!(!h.engine.store().loaded().orders);
+    }
+}
+
+#[test]
+fn snapshot_token_capture_and_late_exhaustion_preserve_reconciliation_timer() {
+    for late in [false, true] {
+        let mut h = Harness::new();
+        h.reply("get-positions", EMPTY);
+        if !late { safe_cex_engine::test_support::exhaust_order_snapshots(h.engine.store_mut()); }
+        h.reply("user-balance", BALANCE);
+        if late {
+            h.reply("private/get-open-orders", &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#));
+            safe_cex_engine::test_support::exhaust_order_snapshots(h.engine.store_mut());
+            h.reply("advanced/get-open-orders", EMPTY);
+        } else {
+            assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.contains("get-open-orders"))));
+        }
+        assert!(h.engine.store().orders().is_empty());
+        assert!(!h.engine.store().loaded().orders);
+        let timer = h.actions.iter().rev().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
+            _ => None,
+        }).unwrap();
+        h.now = timer.1;
+        h.event(Event::TimerFired { timer: timer.0 });
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.contains("get-positions"))));
+    }
+}
