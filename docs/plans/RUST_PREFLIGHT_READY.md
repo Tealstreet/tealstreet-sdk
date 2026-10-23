@@ -330,3 +330,17 @@ Both are corrected in the shared Cx boundaries, with genuine pending-owner
 controls. All three final independent re-reviews are clean. Full-map review
 confirms feature-off exclusion, bounded reservation and the O(1) empty-ready
 guard. Final owner source/API-fit confirmation and CI remain gates.
+
+
+### Idle-path follow-up after actual integration
+
+Fresh CI on actual-integrated `d93cc3bc535` passed native/feature/fmt/Clippy/WASM
+and all correctness gates, but the Bybit job failed Hyro public steady CPU:
+TS 5.826 ms, Rust 7.072 ms, allowed 6.826 ms. The conditional sibling on the same
+actual core passed that job. This is a real gate failure; no threshold or
+known-failure declaration changes. The source now retains the old `handle` body
+and drains readiness at each of its seven early returns and normal exit, removing
+the added outer call layer. The empty-queue guard is inline; the cold drain body
+is unchanged. All three independent delta reviews are clean and the engine
+feature-on/off suites and strict Clippy pass again. CI determines performance
+recovery; source inspection does not establish the cause or a speedup.

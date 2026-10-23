@@ -3002,17 +3002,13 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
-        self.handle_inner(now, event);
-        self.flush_preflight_readiness(now);
-    }
-
-    fn handle_inner(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
         self.io.dispatch_now = now;
         self.io.http_responses.prune(now);
         // Expired observers detach before any delivery can project to them.
         self.sweep_executions(now);
         if self.expire_plan_timer(now, &event) {
+            self.flush_preflight_readiness(now);
             return;
         }
         if self.expire_http_timer(now, &event) {
@@ -3020,6 +3016,7 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            self.flush_preflight_readiness(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -3030,16 +3027,19 @@ impl<V: Venue> Engine<V> {
         {
             self.io.execution_timer = None;
             self.sweep_executions(now);
+            self.flush_preflight_readiness(now);
             return;
         }
         let admitted = self.admit_http_event(now, &event);
         if self.collect_write_response(now, &event, admitted) {
+            self.flush_preflight_readiness(now);
             return;
         }
         if !admitted {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            self.flush_preflight_readiness(now);
             return;
         }
         let completed_http = match &event {
@@ -3055,6 +3055,7 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            self.flush_preflight_readiness(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -3064,6 +3065,7 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            self.flush_preflight_readiness(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -3080,6 +3082,7 @@ impl<V: Venue> Engine<V> {
             self.settle_http_event(request);
             self.sweep_executions(now);
         }
+        self.flush_preflight_readiness(now);
     }
 
     fn sweep_executions(&mut self, now: f64) {
