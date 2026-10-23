@@ -16,8 +16,8 @@ occurrences include conservative lexical witnesses, not only HTTP sends.
 | AsterDEX | 43 | 67 | 13 | 54 |
 | MEXC | 21 | 21 | 5 | 16 |
 | WOO | 31 | 34 | 0 | 34 |
-| Crypto.com | 27 | 30 | 10 | 20 |
-| Total | 122 | 152 | 28 | 124 |
+| Crypto.com | 27 | 30 | 9 | 21 |
+| Total | 122 | 152 | 27 | 125 |
 
 Aster has10 synchronous Read terminals selected below and3 separately workable
 pre-I/O trading refusals. Those three also serve FetchStpMode Read commands:
@@ -48,13 +48,19 @@ claude-4yjlw0 queues it after BloFin. Unsigned Primary command entry also has no
 reviewed admit_http_command_with_egress pin; scoped issuance is not a substitute.
 Secondary test witnesses are not three physical HTTP requests.
 
-Crypto.com workable10 consists of local history5, complete unsigned candles4,
-and discovery sender1. Its20 blocked occurrences comprise13 in #1788-held
-account/trading files,5 retry-bearing history/conservative sites and2 identity
+Crypto.com workable9 consists of local history5 and complete unsigned candles4.
+Its21 blocked occurrences comprise13 in #1788-held account/trading files,
+discovery sender1 requiring its held account fixture,5 retry-bearing history/
+conservative sites and2 identity
 finish sites coupled to private setup/callback custody. Native history retries
 wait1000ms and reset only the failed staging; no copied retry scheduler is
 allowed. The Envelope recipe, shared selected-read helper and public-auth-health
-fix are actual. The old #1923 auth-health blocker is resolved, not a reason to
+fix are actual. Discovery has no missing engine API, but its account fixture
+partial_catalogue_commits_then_rereads_without_a_second_private_start rejects
+all SetTimer actions, including the managed deadline; its raw-drain Harness also
+needs owned preparation. That test file is held by #1788, so this is a collision,
+not an API blocker, and timer filtering must not hide it.
+The old #1923 auth-health blocker is resolved, not a reason to
 hold unsigned/local work. The existing local Crypto plan/source branch can be
 plain-merged later as authorized; no cherry-pick or source-copy shortcut is used.
 
