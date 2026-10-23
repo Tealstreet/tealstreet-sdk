@@ -87,6 +87,10 @@ Goldilocks, Lighter's scheme.
   Aster recipe, the recipe is proven through the real engine dispatcher with a
   stub issuing venue. The admission PR swaps the venue to it in a single
   cutover and deletes the eager path.
+- Until then `implemented()` keeps SchnorrDigest `false`, so
+  `LocalSigner::can_sign` answers Unsupported and command admission (#1899)
+  fails closed. The admission PR flips it to `cfg!(feature = "schnorr")` in
+  the same cutover.
 
 **Part 2: auth-token recipe** (on part 1)
 - `sign::AuthRecipe` for HTTP `auth=` query strings and the private WS
@@ -99,6 +103,9 @@ Goldilocks, Lighter's scheme.
 - `build_support` and the TS `SigningAlgorithm` union gain `schnorrDigest`.
 - `LocalSigner` gets a `PublicKey` arm (`lighter::public_key`), and
   `valid_public_value` a canonical, on-curve ECgFp5 check.
+- Lighter's signing ref declares `signingAlgorithm: schnorrDigest`, so
+  claude-19pt8s's cross-family follow-up (asymmetric Sign requires a matching
+  declaration, closing key confusion with an undeclared MAC secret) covers it.
 
 **Part 4: remote recipe ids** (after #1926 and part 3 land)
 - `lighter.tx.1` and `lighter.auth.1` in `REMOTE_RECIPES`.

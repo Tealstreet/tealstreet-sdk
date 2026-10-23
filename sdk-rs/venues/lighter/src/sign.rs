@@ -632,15 +632,15 @@ impl SignStep for TxRecipe {
         for (tx, nonce) in &self.txs {
             let input = tx_input(&self.account, tx, *nonce, now_ms)
                 .map_err(|_| SignError::InvalidRequest)?;
-            let mut payload = Zeroizing::new(vec![0u8; 32]);
+            // Entropy is not secret on its own: the nonce is keyed by the scalar.
+            let mut payload = Vec::with_capacity(32 + input.preimage.len());
+            payload.resize(32, 0);
             dispatch.signing_bytes(&mut payload)?;
             payload.extend_from_slice(&input.preimage);
             operations.push(Operation::Sign {
                 algorithm: Algorithm::SchnorrDigest,
                 key: self.identity.signing.clone(),
-                payload: vec![PayloadPart::Bytes {
-                    bytes: payload.to_vec(),
-                }],
+                payload: vec![PayloadPart::Bytes { bytes: payload }],
             });
             self.prepared.push(input);
         }
@@ -663,7 +663,10 @@ impl SignStep for TxRecipe {
             return Err(SignError::InvalidRequest);
         };
         let prepared = std::mem::take(&mut self.prepared);
-        if prepared.is_empty() || result.values.len() != prepared.len() {
+        if prepared.is_empty() {
+            return Err(SignError::InvalidRequest);
+        }
+        if result.values.len() != prepared.len() {
             return Err(SignError::InvalidResult);
         }
         let signed = prepared

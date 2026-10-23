@@ -924,8 +924,8 @@ mod tests {
         );
     }
 
-    /// R1: keys are refused, never reduced: zero, the group order and above
-    /// are refused, order - 1 signs. Legacy reduces a key at or above the
+    /// R1: keys are refused, never reduced: zero, the group order and above,
+    /// and 39/41-byte keys are refused; order - 1 signs. Legacy reduces a key at or above the
     /// order and signs; the arm's refusal is the recorded behaviour change.
     #[cfg(feature = "schnorr")]
     #[test]
@@ -936,11 +936,23 @@ mod tests {
         let mut payload = vec![0x11; 32];
         payload.extend_from_slice(&input);
         let order = ScalarField::N.to_bytes_le();
-        for key in [[0u8; 40], order, [0xff; 40]] {
+        let mut short = vec![0u8; 39];
+        short[0] = 1;
+        let mut long = vec![0u8; 41];
+        long[0] = 1;
+        for key in [
+            [0u8; 40].to_vec(),
+            order.to_vec(),
+            [0xff; 40].to_vec(),
+            short,
+            long,
+        ] {
             let (signer, signing) = schnorr_signer(&key);
             assert_eq!(
                 signer.sign_now(&schnorr_request(signing, payload.clone())),
-                Err(SignError::InvalidRequest)
+                Err(SignError::InvalidRequest),
+                "{}-byte key",
+                key.len()
             );
         }
         for key in [order, [0xff; 40]] {

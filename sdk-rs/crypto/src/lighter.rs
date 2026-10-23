@@ -25,8 +25,13 @@ fn scalar(bytes: &[u8]) -> Result<[u8; 40], String> {
 /// True for a canonical (below the group order), nonzero 40-byte scalar. Prime
 /// order means such a key never maps to the neutral point. Legacy paths reduce.
 pub fn canonical_scalar(key: &[u8]) -> Result<bool, String> {
-    let reduced = scalar(key)?;
-    Ok(key == reduced && !ScalarField::from_bytes_le(&reduced)?.is_zero())
+    let reduced = zeroize::Zeroizing::new(scalar(key)?);
+    // Constant-time over the secret bytes; scalar() has already fixed the width.
+    let differs = key
+        .iter()
+        .zip(reduced.iter())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b));
+    Ok(differs == 0 && !ScalarField::from_bytes_le(reduced.as_ref())?.is_zero())
 }
 /// Poseidon2 hash to the quintic extension used by Schnorr.
 pub fn poseidon2_hash_fp5(input: &[u8]) -> Result<[u8; 40], String> {

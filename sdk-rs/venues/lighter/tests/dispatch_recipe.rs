@@ -103,10 +103,35 @@ impl Venue for Issue {
     }
 }
 
+/// A counter source: each draw differs, exposing a reused entropy prefix.
+fn counting_entropy() -> Entropy {
+    let mut next = 0u8;
+    Entropy::new(
+        Box::new(|bytes| {
+            bytes.fill(1);
+            Ok(())
+        }),
+        Box::new(move |bytes| {
+            next = next.wrapping_add(1);
+            bytes.fill(next);
+            Ok(())
+        }),
+    )
+}
+
 fn engine(
     signer: Arc<dyn safe_cex_engine::signing::Signer>,
     identity: Identity,
     txs: Vec<(Transaction, u64)>,
+) -> (Engine<Issue>, Arc<Mutex<Vec<String>>>) {
+    engine_with(signer, identity, txs, entropy())
+}
+
+fn engine_with(
+    signer: Arc<dyn safe_cex_engine::signing::Signer>,
+    identity: Identity,
+    txs: Vec<(Transaction, u64)>,
+    entropy: Entropy,
 ) -> (Engine<Issue>, Arc<Mutex<Vec<String>>>) {
     let path = if txs.len() == 1 {
         "sendTx"
@@ -120,7 +145,7 @@ fn engine(
             recipe: Some((format!("{ORIGIN}/api/v1/{path}"), recipe)),
             failed: failed.clone(),
         },
-        Some(entropy()),
+        Some(entropy),
     )
     .unwrap();
     engine.set_signer(Some(signer)).unwrap();
@@ -267,10 +292,17 @@ impl safe_cex_engine::signing::Signer for Parked {
     }
 }
 
-fn parked() -> (Engine<Issue>, Arc<LocalSigner>, Arc<Mutex<Vec<String>>>) {
+fn parked_with(
+    txs: Vec<(Transaction, u64)>,
+    entropy: Entropy,
+) -> (Engine<Issue>, Arc<LocalSigner>, Arc<Mutex<Vec<String>>>) {
     let (local, identity) = provider();
-    let (engine, failed) = engine(Arc::new(Parked(local.clone())), identity, cases().remove(0));
+    let (engine, failed) = engine_with(Arc::new(Parked(local.clone())), identity, txs, entropy);
     (engine, local, failed)
+}
+
+fn parked() -> (Engine<Issue>, Arc<LocalSigner>, Arc<Mutex<Vec<String>>>) {
+    parked_with(cases().remove(0), entropy())
 }
 
 fn work(engine: &mut Engine<Issue>) -> (RequestId, safe_cex_engine::signing::SignRequest) {
@@ -286,13 +318,52 @@ fn work(engine: &mut Engine<Issue>) -> (RequestId, safe_cex_engine::signing::Sig
     works.pop().unwrap()
 }
 
+fn payloads(work: &safe_cex_engine::signing::SignRequest) -> Vec<&[u8]> {
+    work.operations
+        .iter()
+        .map(|operation| match operation {
+            Operation::Sign { payload, .. } => match &payload[..] {
+                [PayloadPart::Bytes { bytes }] => bytes.as_slice(),
+                _ => panic!("one byte payload"),
+            },
+            _ => panic!("Sign operations only"),
+        })
+        .collect()
+}
+
 fn payload(work: &safe_cex_engine::signing::SignRequest) -> &[u8] {
-    match &work.operations[..] {
-        [Operation::Sign { payload, .. }] => match &payload[..] {
-            [PayloadPart::Bytes { bytes }] => bytes,
-            _ => panic!("one byte payload"),
+    let [payload] = payloads(work)[..] else {
+        panic!("one Sign operation");
+    };
+    payload
+}
+
+/// R4: entropy is drawn per transaction and again on every preparation.
+#[test]
+fn entropy_is_fresh_per_transaction_and_per_preparation() {
+    let (mut engine, local, _) = parked_with(cases().remove(4), counting_entropy());
+    engine.prepare_dispatch(NOW);
+    let (old, old_work) = work(&mut engine);
+    let result = local.sign_ready(&old_work).unwrap().unwrap();
+    engine.handle(
+        NOW + 5_001.,
+        Event::Signed {
+            attempt: old,
+            result: Ok(result),
         },
-        _ => panic!("one Sign operation"),
+    );
+    let (_, fresh_work) = work(&mut engine);
+    let prefixes: Vec<&[u8]> = [&old_work, &fresh_work]
+        .into_iter()
+        .flat_map(payloads)
+        .map(|payload| &payload[..32])
+        .collect();
+    assert_eq!(prefixes.len(), 4);
+    for (index, prefix) in prefixes.iter().enumerate() {
+        assert!(
+            prefixes[index + 1..].iter().all(|other| other != prefix),
+            "entropy prefix {index} was reused"
+        );
     }
 }
 
