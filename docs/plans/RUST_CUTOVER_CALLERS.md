@@ -5127,7 +5127,7 @@ replies cannot complete a reused owner or extend the depth/account cooldown.
 
 The unsigned native depth URL, captured contract size and limit1..1000/default100,
 sorted base amounts and totals, zero quantities and exact u64 version string
-remain. Overflow beyond the requested output limit still rejects the whole
-snapshot. Native status/code510 classification, code/message and bounded retry
+remain. Numeric overflow in rows beyond the requested output limit still rejects the
+whole snapshot. Native status/code510 classification, code/message and bounded retry
 hint remain; live rate limits pause depth and account reads without resending.
 Results never change subscribed books, account state or credential health.

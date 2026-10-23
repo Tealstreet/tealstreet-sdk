@@ -423,3 +423,11 @@ retain result/auth checks and use forward callback clocks. The exact scanner
 shows29 occurrences /29 entries, an8-occurrence/7-entry reduction. Incoming
 landing integration and both ratchets precede CI/readiness; no merge window is
 claimed. Actual #1872 integration remains required before final merge proof.
+
+Frozen actual landing9aef6bca90b is genuinely integrated atb5d484c45ff. Runtime,
+MEXC/Binance tests and dependency trees are byte-identical to the472-test/strict/
+fmt checkpoint; both integrated ratchets pass (14 controls), and every incoming
+map is preserved except the exact8-occurrence/7-entry book prune. Three
+independent reviews are clean, architecture No. The reviewed #1872 source stays
+exact apart from the explicitly authorized BookQuery integration; its actual
+landing and the overseer's window remain required before merge.
