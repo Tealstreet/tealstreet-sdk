@@ -258,7 +258,7 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
    - `Signer::drop_imported(ImportScope)` (the authority without the attempt) is called by
      `retire_session` (claude-55ao7t) and on engine disposal. It is
      idempotent and fire-and-forget, and it runs again on re-open.
-   - The engine records each receipt's refs per authority tuple and checks
+   - The engine records each receipt's refs per `ImportAuthority` and checks
      membership at sign time, as does the provider. It never parses ref
      names.
    - Recipes that reference a retired ref fail with `Unavailable`, and the
@@ -406,7 +406,7 @@ no passphrase in venue state, and derives nothing from them.**
      `requiredForPrivate` on `l1Wallet`), so `apply_to_identities` validates
      it without an L2 credential.
    - Imported refs never mutate the static `Identity`. On `on_import` the
-     receipt carries a per-generation session `Identity`
+     receipt carries a session `Identity` bound to its `ImportAuthority`
      (credential/signing/passphrase refs plus the same `l1Wallet` extra).
      L2 `SignStep`s use that `Identity`. The engine checks its membership for
      the (issuer, identity, slot, generation, attempt) tuple.
@@ -514,8 +514,8 @@ no passphrase in venue state, and derives nothing from them.**
   there; the echo is non-authoritative.
 - claude-55ao7t: the retirement hunk, the readiness calls, and both fences.
 - codex-uufub4, source gates:
-  - Import authority is the full tuple (engine issuer, identity or subject,
-    slot, session generation, exact attempt): `ImportAuthority`. Drop
+  - Import authority is the full tuple (engine issuer, trusted identity (never
+    an echoed subject), slot, session generation, exact attempt): `ImportAuthority`. Drop
     authority is the same tuple without the attempt (`ImportScope`), so one
     drop covers every attempt of the generation. A numeric slot plus
     generation alone collides across accounts.
