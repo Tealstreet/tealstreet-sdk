@@ -46,21 +46,37 @@ and nanosecond overflow keep their original behavior and refusal precedence.
 Candles obtain genuine Read custody before dispatch and carry the original
 Context in Pending through managed streamed HTTP. Use the shared read delivery
 validator against the original root before consuming rows or completing it.
+Delivery validation applies only in real managed delivery callbacks. Interval
+preflight and immediate queue failures have no delivery token; settle the issued
+Context directly through the shared finalizer/on_sign_error path.
 Preserve one physical attempt, unsigned Public route/no credential/no signer,
-existing20s lifetime, live/UAT roots, encoded raw symbol, timeframe mapping and
+a new immutable20s command bound including preparation and released HTTP,
+live/UAT roots, encoded raw symbol, timeframe mapping and
 raw from/to formatting. Native limit is ignored. Preserve raw CandleRow.t values
 and response row order: no timestamp conversion, sorting or added range filter.
-Malformed-row atomic failure, missing-list/envelope/native-error and HTTP precedence
-are controlled against the native path. Public40101 never creates auth evidence
-or a retry. Typed route/transport/expiry errors use engine callbacks and native
+Legacy unsigned requests had timeout_ms=None and relied on the physical host
+20s fallback; the engine-owned preparation/deadline fencing is an intentional
+caller-visible lifecycle change. Preserve num::parse numeric-string behavior
+(including malformed numeric strings becoming0); missing/wrong-type fields still
+poison a row through Serde. Malformed-row atomic failure, missing-list/envelope/
+native-error and HTTP precedence
+are controlled against the native path. Native HTTP401/403/40101 responses keep string-error metadata
+(kind=None, outcome=None, no venueCode/venueMessage) and create no auth evidence,
+auth-health increment or retry. Test missing result.data separately from data[]:
+nonzero codes without the list currently follow the missing-list stream error;
+code+data[] reaches the native envelope-error branch. Typed route/transport/expiry errors use engine callbacks and native
 read NotSent semantics; initial shared rejection retains outcome=None. Local
 history errors do not inherit a transport outcome.
 
 Shared get remains for discovery and its frozen fingerprint must remain. Do not
 migrate startup/background or touch #1788 fixtures to increase the shrink. No
 new status/code ladder, timer, retry policy, payload codec or lifecycle mechanism.
-Use actual engine read classification and an existing-code-only const CodeTable
-where classification is needed; preserve caller-visible native error messages.
+Retain the existing native response/error ladder and its complete string-error
+fields for this slice; do not introduce read classification or a CodeTable that
+adds status/native metadata, auth kinds or retry hints. Typed shared setup/
+transport/expiry callbacks preserve their engine-provided cause. If public
+credential-free typed failures expose a shared auth-health defect, report it to
+the core owner and require the shared fix; never clear/demote kinds locally.
 The actual default-off Plan is unnecessary for these single-attempt reads; do
 not opt into http-plans or imply Aster retries/WOO egress are unblocked.
 
@@ -87,7 +103,9 @@ not compile failures. Retain every existing fixture/assertion.
 4. Native controls assert exact live/UAT URL and symbol escaping, every timeframe,
    from/to formatting, ignored limit, raw timestamps/order, successful empty list,
    malformed streamed rows, nonzero/native codes including40101, HTTP and missing
-   list precedence. Keep Store/ticker/book/account snapshots isolated. Exercise
+   list precedence. Assert complete native error fields plus account-auth notices
+   and auth-health counters for bare401/403,40101, malformed and nonzero codes.
+   Keep Store/ticker/book/account snapshots isolated. Exercise
    existing credential option combinations: this public path remains unsigned.
 5. Only after RED commit and clean source/caller/map plan audits, cut over selected
    branches, then prune exactly the inventory below. Run Crypto.com plus Binance
@@ -148,3 +166,13 @@ read validation and finalization. The plan and its tests do not establish comple
 managed history/private parity, full-package provenance or merge readiness.
 
 Collision snapshot: 52 landing-base PRs and 71 all-base PRs inspected.
+
+## Independent plan audit
+
+Source/adversarial, caller and full-map reviewers confirm the coherent9/7 scope,
+exact27-entry table and legitimate shared authority path. Review corrections
+distinguish the new whole-command20s bound from the old physical host fallback,
+retain numeric-string coercion and stream-list/native-error precedence, require
+full native error/auth-health controls, and restrict delivery validation to
+actual callbacks. No production/test change or executed original RED is claimed
+by this plan checkpoint; those are the next separate commit.
