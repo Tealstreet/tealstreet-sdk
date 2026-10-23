@@ -40,8 +40,12 @@ payloadSigner contract in [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md).
   - `SchnorrDigest` is reserved and declared with a 64-byte result
     (`engine/src/signing.rs:314-319`), but Lighter signatures are 80 bytes.
   - No algorithm exists for zkLink.
-- **Identity shape:** `Identity` has only `credential`, `signing` and
-  `passphrase` refs. `LocalIdentity` rejects unknown fields.
+- **Identity shape:** `Identity` carries `credential`, `signing` and an
+  optional `passphrase` ref, plus the trusted optional `stable_id`. It has no
+  slot for additional signing keys. `LocalIdentity` accepts the trusted
+  `stableId` and rejects unknown fields.
+  - Families that need an identity or nonce scope keep `require_stable_id()`.
+    A missing id is a typed unavailable, never a key or address hash.
 - **Setup encodings:** `secretEncoding` already decodes Utf8, Base64, Hex and
   Pem (`crypto/src/signer/key_material.rs`).
 - **Engine policy:** `RequestContext` already owns `RetryPolicy` and `Pacing`
