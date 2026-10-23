@@ -33,8 +33,21 @@ test('native Bybit discovery survives transfer and the real CLI TradFi preflight
     const queue = [];
     const collect = (json) => { if (json) queue.push(...JSON.parse(json)); };
     collect(engine.start(1000));
+    let resources = 0;
     for (let step = 0; queue.length && step < 100; step++) {
-      const action = queue.shift();
+      let action = queue.shift();
+      // Managed reads reach the fake venue only after the engine's own claim.
+      if (action.op === 'managedHttp') {
+        if (action.phase === 'prepare') {
+          collect(engine.httpPrepared(action.preparation, String(++resources), undefined, 1000));
+          continue;
+        }
+        if (action.phase !== 'bind') continue;
+        const released = JSON.parse(engine.httpClaim(action.permit, 1000)).status === 'released';
+        collect(engine.prepareDispatch(1000));
+        if (!released) continue;
+        action = { ...action.packet, op: 'http' };
+      }
       if (action.op !== 'http') continue;
       const url = new URL(action.url);
       let list;

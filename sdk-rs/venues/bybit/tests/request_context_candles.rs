@@ -1,7 +1,7 @@
 //! Slice 1a: Bybit candles, the cached balance-info answer and the
 //! product-not-enabled refusal on the engine's managed Read authority.
 mod support;
-use safe_cex_engine::model::{Interval, OrderSide, OrderType, PlaceOrderOpts};
+use safe_cex_engine::model::Interval;
 use safe_cex_engine::{Command, ErrorKind, Event, Notice, Outcome, Query, VenueAction, VenueError};
 use safe_cex_venue_bybit::Variant;
 use support::{Harness, Options};
@@ -62,47 +62,6 @@ fn failure(h: &Harness, command: u32) -> VenueError {
             _ => None,
         })
         .expect("one typed failure")
-}
-
-fn order() -> PlaceOrderOpts {
-    PlaceOrderOpts {
-        symbol: "BTCUSDT".into(),
-        kind: OrderType::Limit,
-        side: OrderSide::Buy,
-        amount: 0.01,
-        price: Some(100.0),
-        trigger_price: None,
-        stop_loss: None,
-        take_profit: None,
-        reduce_only: None,
-        time_in_force: None,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        client_order_id: None,
-        close: None,
-        stp_mode: None,
-        implied_volatility: None,
-        max_slippage_pct: None,
-        bybit_bbo: None,
-        bybit_slippage_tolerance_ticks: None,
-    }
-}
-
-/// Park the engine's command owners with ordinary placements whose mode
-/// reads stay unanswered; returns the parked mode reads.
-fn park_owners(h: &mut Harness) -> Vec<safe_cex_engine::HttpRequest> {
-    let mut reads = Vec::new();
-    for command in 1_000..1_256 {
-        h.command(Command::PlaceOrders {
-            command,
-            orders: vec![order()],
-        });
-        if h.has_request("/v5/position/list") {
-            reads.push(h.take("/v5/position/list"));
-        }
-    }
-    reads
 }
 
 #[test]
@@ -179,7 +138,7 @@ fn a_candle_stream_ending_mid_list_is_a_malformed_reply_and_publishes_nothing() 
 #[test]
 fn cached_balance_info_and_disabled_product_refusals_need_command_authority() {
     let mut h = ready();
-    let reads = park_owners(&mut h);
+    let reads = support::park_owners(&mut h);
     assert!(!reads.is_empty());
     h.requests.clear();
     h.command(Command::Venue {

@@ -214,6 +214,7 @@ impl BybitLinear {
                 derivatives: HashMap::new(),
                 rejected: false,
             }),
+            read: None,
         };
         match cx.request_managed_with_headers(
             leg,

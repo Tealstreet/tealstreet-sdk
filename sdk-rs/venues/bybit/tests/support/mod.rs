@@ -300,3 +300,44 @@ impl Harness {
             .map(|(_, v)| v.clone())
     }
 }
+
+pub fn order() -> safe_cex_engine::model::PlaceOrderOpts {
+    safe_cex_engine::model::PlaceOrderOpts {
+        symbol: "BTCUSDT".into(),
+        kind: safe_cex_engine::model::OrderType::Limit,
+        side: safe_cex_engine::model::OrderSide::Buy,
+        amount: 0.01,
+        price: Some(100.0),
+        trigger_price: None,
+        stop_loss: None,
+        take_profit: None,
+        reduce_only: None,
+        time_in_force: None,
+        trigger_type: None,
+        tp_trigger_type: None,
+        sl_trigger_type: None,
+        client_order_id: None,
+        close: None,
+        stp_mode: None,
+        implied_volatility: None,
+        max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
+    }
+}
+
+/// Park the engine's command owners with ordinary placements whose mode
+/// reads stay unanswered; returns the parked mode reads.
+pub fn park_owners(h: &mut Harness) -> Vec<HttpRequest> {
+    let mut reads = Vec::new();
+    for command in 1_000..1_256 {
+        h.command(Command::PlaceOrders {
+            command,
+            orders: vec![order()],
+        });
+        if h.has_request("/v5/position/list") {
+            reads.push(h.take("/v5/position/list"));
+        }
+    }
+    reads
+}

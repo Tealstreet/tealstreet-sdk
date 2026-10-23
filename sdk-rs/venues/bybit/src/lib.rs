@@ -155,6 +155,8 @@ pub struct Pending {
     category: Category,
     rest: Rest,
     then: Then,
+    /// Background Read authority of a managed discovery request.
+    read: Option<safe_cex_engine::request_context::Context>,
 }
 
 struct EnvironmentProbe {
@@ -660,6 +662,7 @@ impl BybitLinear {
             category: self.category,
             rest,
             then,
+            read: None,
         };
         let request = if stream {
             cx.request_streamed(method, url, headers, ArrayAt::Path(MARKETS_PATH), pending)
@@ -668,6 +671,44 @@ impl BybitLinear {
         };
         if let Some(signing) = signing {
             cx.sign_http(request, Box::new(signing));
+        }
+    }
+
+    /// Public startup discovery on its own Background Read with a 20 s window.
+    /// A refused admission or queue fails the read like transport loss, so it
+    /// retries through the same category backoff.
+    fn send_discovery(&mut self, cx: &mut Cx<'_, Pending>, rest: Rest, then: Then) {
+        if self.config_error.is_some() {
+            return;
+        }
+        let url = format!("{}{}?{}", self.paths.rest, rest.path, rest.payload);
+        let context = match cx.http_context(
+            safe_cex_engine::request_context::Scope::Background,
+            candles::read_policy(),
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                return self.on_public_response(cx, then, Err(&error.venue_error().message));
+            }
+        };
+        let pending = Pending {
+            category: self.category,
+            rest,
+            then,
+            read: Some(context.clone()),
+        };
+        match cx.request_managed_with_headers(
+            context,
+            Method::Get,
+            url,
+            &[("X-Referer", sign::BROKER_ID)],
+            None,
+            pending,
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Path(MARKETS_PATH)),
+            Err((pending, error)) => {
+                self.on_public_response(cx, pending.then, Err(&error.venue_error().message));
+            }
         }
     }
 
@@ -805,7 +846,7 @@ impl BybitLinear {
         Some(format!("kline.{}.{symbol}", interval_code(interval)?))
     }
 
-    fn request_markets(&self, cx: &mut Cx<'_, Pending>, prelaunch: bool, cursor: Option<&str>) {
+    fn request_markets(&mut self, cx: &mut Cx<'_, Pending>, prelaunch: bool, cursor: Option<&str>) {
         let mut query = Query::new().str("category", self.paths.category);
         if self.category == Category::Option {
             query = query.str("baseCoin", "All");
@@ -817,7 +858,7 @@ impl BybitLinear {
                 .opt_str("cursor", cursor);
         }
         let markets = Vec::new();
-        self.send(
+        self.send_discovery(
             cx,
             Rest::get("/v5/market/instruments-info", query).streamed(),
             Then::Markets {
@@ -853,7 +894,7 @@ impl BybitLinear {
         {
             self.startup.tickers_in_flight = true;
             let query = Query::new().str("category", self.paths.category);
-            self.send(
+            self.send_discovery(
                 cx,
                 Rest::get("/v5/market/tickers", query).streamed(),
                 Then::Tickers(Vec::new()),
@@ -970,6 +1011,7 @@ impl BybitLinear {
             category: self.category,
             rest: Rest::get("/v5/user/query-api", Query::new()).signed(),
             then: Then::EnvironmentProbe,
+            read: None,
         };
         if cx
             .request_signed_managed(
@@ -2135,6 +2177,7 @@ impl Venue for BybitLinear {
                     category: pending.category,
                     rest: pending.rest,
                     then,
+                    read: pending.read,
                 },
                 &error.message,
             ),
@@ -2325,6 +2368,16 @@ impl Venue for BybitLinear {
             Self::candles_response(cx, read, &response);
             return;
         }
+        if let Some(read) = pending.read.clone() {
+            // Only a live Background read may publish; the engine never
+            // delivers an answer for a retired attempt.
+            if cx.validate_http_context(&read).is_err() {
+                return;
+            }
+            self.on_public_response(cx, pending.then, Ok(response));
+            let _ = cx.finish_http_context(&read);
+            return;
+        }
         let mut pending = Some(pending);
         if self.resend(cx, &mut pending, response.body) {
             return;
@@ -2376,6 +2429,11 @@ impl Venue for BybitLinear {
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         self.select_category(pending.category);
+        if let Some(read) = &pending.read
+            && cx.validate_http_context(read).is_err()
+        {
+            return;
+        }
         if self.market_refresh.retired_startup && matches!(&pending.then, Then::Markets { .. }) {
             return;
         }
@@ -2462,13 +2520,19 @@ impl Venue for BybitLinear {
         if self.resend(cx, &mut pending, error) {
             return;
         }
-        let Some(Pending { rest, then, .. }) = pending else {
+        let Some(Pending {
+            rest, then, read, ..
+        }) = pending
+        else {
             return;
         };
         // A rejected retry may arrive as a host error containing the signed origin URL.
         let safe_error = (rest.signed && rest.resent)
             .then_some("Bybit signed request failed after its signature retry");
         self.on_public_response(cx, then, Err(safe_error.unwrap_or(error)));
+        if let Some(read) = read {
+            let _ = cx.finish_http_context(&read);
+        }
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
