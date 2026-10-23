@@ -123,6 +123,17 @@ provider completion, uncapped managed expiry beyond a 20s lifecycle, and the
 final re-prepared receipt after a clock revision (old result stays inert).
 Use nonzero offsets so a coincident raw/UTC clock cannot make the fixture pass.
 
+Executed on the unchanged `60d4b8cf9eb` production source with
+`cargo test -p safe-cex-engine --features test-support --test signing_release_expiry --locked`:
+8 tests compiled and ran, 4 GREEN / 4 intended assertion RED / 0 ignored.
+The four failures are precisely absent raw metadata (`None`) versus expected
+raw expiry: 61000 for both calibration offsets, 61001 for the managed claim,
+and 61101 for the final re-prepared receipt. The four controls pass: exact
+protocol receipt/borrowed Pending, absent expiry, provider refusal without
+release, and the unchanged capped managed repair deadline. No production or
+inventory source changed. These are new-contract metadata assertions; runtime
+and reviewer acceptance remain pending.
+
 Additional source/new-contract controls before runtime is READY:
 
 - No metadata or mutation of another Pending before successful physical release;
