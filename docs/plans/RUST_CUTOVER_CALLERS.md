@@ -5425,7 +5425,7 @@ orders make the command `Unknown`; this proves nothing about them.
 
 | Change | Command outcome | NX handling |
 | --- | --- | --- |
-| `fetchOHLCV` refusals before any request (option symbol, disabled product, unsupported interval) | Typed `NotSent` with kind `unsupported` (was untyped text) | Branch on `kind`/`outcome`; text unchanged. |
+| `fetchOHLCV` refusals before any request (option symbol, disabled product, unsupported interval) | Typed `NotSent`: kind `unsupported` for the option symbol and the interval; `invalidInput` for a product the account has not enabled, as for every non-trade command refused that way (was untyped text) | Branch on `kind`/`outcome`; text unchanged. Enable the product rather than treating the command as unavailable. |
 | A kline read has its own 20 s native window | `timeout` when it expires; a late answer is ignored | None. |
 | A kline stream that breaks mid-list | `internal`; nothing is published | None. |
 | `fetchBalanceInfo` and a disabled-product refusal go through command admission | A full command table refuses them once with the shared `internal` capacity error; otherwise unchanged | None. |
