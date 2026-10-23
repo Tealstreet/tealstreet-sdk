@@ -273,3 +273,24 @@ new API implementation remain gated on exact lifecycle signatures. The native
 20-second call and per-family whole-query bounds above are now explicitly
 confirmed by both BloFin owners; they are declarations, not an executed managed
 private-history consumer proof.
+
+
+## Executed original Plan-history assertion controls
+
+The test-only history_plan_bridge target compiles against unchanged runtime
+source from actual #1848. With http-plans,test-support enabled, three controls
+execute: one first-page failure control passes and two semantic assertions fail.
+The two-slot fixture uses genuine ReadOnly Preflight/Plan admission, shared
+prepared_actions for Prepare/Bind/Claim, exact DATA validation and real HttpFailed
+delivery. The Mutation-only failed-call helper returns Invalid as a separate
+working control; it is not a workaround.
+
+After one accepted page and the second page's Network failure, there is one
+owned marker and a terminal, but no successful retained-row terminal (expected
+[1], observed no CommandDone). A sealed numeric completion fixture produces
+one additional stale terminal and one marker where both must be absent, while
+a different genuine live Read owner still completes successfully. Those are
+assertion REDs, not compile or setup failures. The numeric owner exists only in
+the original negative test seam and must be replaced by opaque Plan authority;
+all terminal/marker/result assertions remain when that seam changes. No new
+runtime authority or exact API-signature readiness is claimed.
