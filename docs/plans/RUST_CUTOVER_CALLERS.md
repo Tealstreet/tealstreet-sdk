@@ -4351,3 +4351,8 @@ preparation/network/timeout failures and treat the rejected read as unavailable.
 Private reads/writes, history alternatives, discovery, local cached commands and
 capability defaults are separate from this candle migration. This behavior does
 not establish downstream deployment or live venue connectivity.
+
+The shared context-error converter's `notSent` describes the refused local
+operation only. It does not establish that earlier read attempts never reached
+the venue or that a whole multi-step command was unsent. Mutation journals
+retain their separate authoritative release/outcome aggregation.

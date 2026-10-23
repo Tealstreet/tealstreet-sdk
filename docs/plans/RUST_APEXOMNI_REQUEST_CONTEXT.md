@@ -285,3 +285,35 @@ for its actual landing; no venue-owned classification shim or engine edits are
 part of this branch. Host disposal is exercised by the existing shared managed
 HTTP host controls in CI; native venue tests exercise retirement and late/reused
 callbacks. No claim of new ApeX-specific host disposal proof is made here.
+
+
+## Authorized reviewed dependency stack and passing native verification
+
+The overseer authorized stacking exactly reviewed #1808 head
+`9b639939e378ee3d582c06b24fd068c095eded0b` before its actual merge so this
+slice can compile and get CI. Porcelain merge `9e5bab721ea` is conflict-free;
+the two inherited engine files exactly match that reviewed dependency. This
+supersedes the earlier actual-landing compilation hold only for this authorized
+stack. Re-integrate actual `origin/feat/rust-rewrite` after #1808 merges before
+final readiness/revert guard and a separately granted merge window.
+
+All eight new candle controls pass, including the seven original-source
+assertion-RED controls and the native-error compatibility matrix. The complete
+ApeX and Binance native suites pass, strict all-target Clippy for both crates
+passes, scoped formatting and bans pass, and both request-context checks pass
+(13 adversarial controls plus exact shrinking inventory). Source/adversarial,
+caller and full-map reviews of the integrated boundary are clean; all answer
+the architecture gate No. These are local native and static proofs, not rebuilt
+WASM/replay/size/timing or deployment evidence; CI remains required.
+
+Final scope against the initial base: nine lane-owned docs/manifest/venue/test
+paths and the two inherited shared API paths. Every other inventory path is
+unchanged; only the seven ApeX public completion sites are pruned. Public tests
+retain all original assertions and event clocks; only their two request-drain
+calls adopt the shared prepared executor.
+
+Authoritative replacement lane IDs are `claude-19pt8s` for ApeX signing and
+`claude-55ao7t` for background-session Context. The signer lane has reserved this
+slice's `lib.rs`/public candle regions and will integrate its actual pin without
+reshaping the extracted native verdict helper. No private signer/session source
+is migrated by this slice.
