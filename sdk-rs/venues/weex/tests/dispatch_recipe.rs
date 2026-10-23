@@ -367,3 +367,122 @@ fn non_native_authority_fragment_or_transport_normalization_never_reaches_provid
         );
     }
 }
+
+struct ManagedProbe(Identity);
+impl Venue for ManagedProbe {
+    type Pending = ();
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        use safe_cex_engine::request_context::{Credential, Operation, Policy, RetryPolicy, Scope};
+        let context = cx
+            .http_context(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: Some(Credential {
+                        slot: safe_cex_engine::CredentialSlot::Primary,
+                        reference: self.0.credential.clone(),
+                    }),
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        let recipe = Http::new(
+            self.0.clone(),
+            Method::Get,
+            "/capi/v3/openOrders?limit=100&page=0".into(),
+            None,
+        );
+        let (url, _, body) = recipe.unsigned();
+        assert!(
+            cx.request_signed_managed(context, Method::Get, url, body, Box::new(recipe), ())
+                .is_ok()
+        );
+    }
+    fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+    fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+    fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+    fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+    fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+    fn book(&self, _: &str) -> Option<&Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+#[test]
+fn managed_component_preserves_declared_public_headers_then_exact_native_vector() {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    let (identity, provider) = setup();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(ManagedProbe(identity));
+    engine.set_signer(Some(provider)).unwrap();
+    engine.start(1234.);
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
+    let prepares = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => Some((*preparation, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(prepares.len(), 1);
+    assert_eq!(
+        prepares[0].1.headers,
+        vec![
+            ("Content-Type", "application/json".into()),
+            ("User-Agent", "Tealstreet".into())
+        ],
+        "managed preparation must snapshot the actual WEEX public declaration"
+    );
+    assert!(prepares[0].1.signer_headers.is_empty());
+    engine.http_prepared(
+        1234.9,
+        prepares[0].0,
+        Prepared {
+            id: 1,
+            expires_at: None,
+        },
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let binds = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Bind {
+                    permit, request, ..
+                } => Some((*permit, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        binds.len(),
+        1,
+        "real managed route signs and binds once through the provider"
+    );
+    assert_eq!(
+        binds[0].1.headers,
+        headers("bCU4mL/nryWPHh2ijQKaUlRR81jLGrRazQ5ZFQPfR+E=")
+    );
+    assert!(matches!(
+        engine.claim_http(1234.9, binds[0].0),
+        Ok(Claim::Released(_))
+    ));
+}
