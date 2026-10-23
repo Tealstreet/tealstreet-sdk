@@ -190,3 +190,140 @@ Its deterministic prepared resource IDs are checked against Bind/claim tokens.
 The two original REDs stay owned/ignored pending G2b runtime. Classification
 controls for order-lock state, native resend after reprepare, late commit expiry
 and release-hook preparation remain implementation gates, not claimed passing.
+
+## Concrete source API proposal (review gate)
+
+This proposal narrows the first implementation to a side-effect-free Unscheduled
+Mutation contract. It needs core/consumer approval before runtime edits. It does
+not broaden the existing #1919/#1939 or session work, or clear held files.
+
+### Common Lifecycle preparation and commit
+
+Extract the existing Lifecycle::claim checks into two private operations:
+
+```rust
+fn prepare_claim(&self, permit: Permit, time: ReleaseTime, pacing: &SendPacing)
+    -> Result<ClaimPreparation, Error>;
+fn commit_claim(&mut self, ready: PreparedClaim, pacing: &mut SendPacing)
+    -> HttpRelease;
+```
+
+ClaimPreparation is WaitUntil or an opaque PreparedClaim. PreparedClaim retains
+exact attempt, preparation/permit generation, checked route/freshness revision,
+release time and validated admission. It is neither Clone nor public, and never
+escapes the single synchronous claim call. Installing Admission::Denied or an
+invalid lease fails before commit. commit_claim consumes the token with no
+fallible validation or venue callback. It updates the release and pacing state
+only from already checked data. Allocation failure, journal/reconciliation
+capacity and all per-member release flags are prepared before the group commit.
+No caller can manufacture or retain a PreparedClaim across events.
+
+The existing single claim remains a compatibility wrapper: prepare_claim,
+existing fallible on_http_release, checked admission installation, commit_claim.
+It preserves Scheduled leases and all existing callbacks. That wrapper and the
+new group claim use ONE Lifecycle validation/commit implementation; no duplicate
+clock, permit, freshness, pacing or release logic. A denied single request keeps
+its existing settlement behavior. This is not a second venue signing path.
+
+### First group contract and immutable declaration
+
+Add an immutable MutationBarrierBound { step: usize } to the SAME internal
+AdmissionDeclaration used by uniform and conditional Plans. Public spelling is
+provisionally admit_plan_with_barriers(preflight, steps, policy, barriers).
+Validate all declarations before IDs and preserve existing readiness custody.
+First slice accepts only top-level steps with at least two Mutation calls, one
+attempt each and no per-member fallback; reject other barrier geometry before
+reservation rather than silently release independently. Serial surrounding steps
+retain their native attempt/fallback policy and earlier journal evidence.
+
+Membership is resolved structurally from the Schedule's actual root step and
+retained call entries, not a separate root-first flattened index convention.
+Later mixed-leg admission must check EACH bound call's Operation, not merely
+PlanPolicy.operation. Read calls cannot opt into this Mutation-only barrier.
+Group members keep their original call IDs/windows and all existing owner,
+credential and preparation generations. No new timer extends their bounds.
+
+The first consumer explicitly opts into pure Unscheduled group admission through
+a shared readonly Venue hook. Its default refuses support:
+
+```rust
+fn prepare_group_http_release(&self, pending: &Self::Pending, release: &HttpRelease)
+    -> Result<Admission, Error>;
+```
+
+Only Unscheduled is accepted for this slice. Scheduled or Denied refuses the
+uncommitted group; a family that needs mutable release admission remains held.
+The hook grants no Cx/Store/I/O and must not mutate native state through interior
+mutability. It cannot call the old mutable on_http_release. Existing families do
+not become eligible merely because their old hook happens to return Unscheduled;
+BloFin's consumer must explicitly declare its side-effect-free contract. The
+existing mutable hook is never bypassed by guessing from a method/endpoint.
+Any post-commit Pending notification is a separate infallible hook and cannot
+make a release decision, schedule work or return an error. Panic follows sticky
+poison and conservative already-committed write projection. Exact notification
+signature, including whether the first consumer needs one, remains reviewed.
+
+This narrows the earlier general staged-admission design: it delivers an explicit
+Unscheduled contract first, while all single-request consumers continue through
+the shared compatibility wrapper. General Scheduled-group prepare tokens need a
+later shared scheduler transaction; they are not fabricated from mutable hooks.
+
+### One group host handoff
+
+All routes are prepared and every recipe is prepared in declaration order;
+provider results may arrive in either order. No member emits a claimable individual
+Bind. Once all members are signed, emit one BindGroup action with an opaque
+GroupPermit and the immutable declaration-order packets/preparations. The host
+binds every exact prepared resource and checks every resource.ready first. An
+unsupported group protocol refuses before claim; there is no individual fallback.
+
+```rust
+engine.claim_http_group(now, permit: GroupPermit) -> Result<GroupClaim, Error>
+// GroupClaim is WaitUntil or Released(ReleasedGroup).
+```
+
+ReleasedGroup is a move-only declaration-order vector of exact request/release
+facts for the already bound packets. Storage is reserved before claim commit;
+no packet/header cloning or fallible vector construction follows the first
+member's commit. An individual claim_http for any grouped permit refuses before
+journal/pacing effects. The group claim validates issuer, owner, Plan step,
+member order/count and every original preparation generation in one turn, then
+prepares all Lifecycle claims, pure venue admissions, journal/reconciliation
+records, release flags and result storage. Any refusal before commit invalidates
+and fails the uncommitted step through the common Plan seal once.
+
+First admission rejects any nonzero resolved shared/member pacing floor. A group
+with zero floor can still be waiting behind an earlier use of a shared pacing
+domain; the same checked shared pacing state decides eligibility. Never waive a
+floor or consume member pacing before all checks pass. No host await, actor hop
+or reentrant engine callback may occur between returned release facts and the
+immediate ordered transport sends. Host resource failure before claim is
+NotSent; a synchronous send exception or host-observed expiry after commit is
+conservatively Unknown with prior effects retained, as defined above.
+
+Group preparation failure stores provider/native kind without auth-health
+feedback; it cannot create an uncertain order-lock fence or consume retry/resend
+credits. Signature reprepare consumes only a fresh preparation/signing generation,
+not a new physical attempt. These remain mandatory runtime assertions, not
+claims proven by the current baseline REDs.
+
+### Source ownership and next checks
+
+Own modules proposed: request_context_group_claim.rs (bounded membership and
+atomic preparation/commit orchestration) and request_context_group_lifecycle.rs
+(private Lifecycle preparation token). Source hooks are narrow: Lifecycle::claim,
+shared Plan admission, dispatch readiness/entropy ordering, group action
+serialization, and the shared native/WASM host protocol. The exact edits in
+request_context.rs, engine.rs, http_lifecycle.rs, request_context_planned.rs and
+host.mjs are held by live PRs; obtain their owners' hunk agreement or integrate
+their actual landing before touching them. G1's session hooks remain separately
+held for combo-5. Unheld filenames alone do not clear a runtime/API gate.
+
+After API approval: reproduce and activate the two baseline REDs through the
+group protocol, retain the existing single-claim tests unchanged, and add focused
+controls for readonly-hook refusal, Scheduled denial, pre-reserved evidence
+capacity refusal, mixed-operation/fallback/pacing declaration refusal, reverse
+route/provider completion, declaration-order entropy, stale one-member reprepare,
+prior-step Partial/Unknown and duplicate/retired group permits. Then the BloFin
+native consumer proves its exact long/short wire and failure behavior. No claim
+of whole-family custody readiness or removal of legacy inventory in this slice.
