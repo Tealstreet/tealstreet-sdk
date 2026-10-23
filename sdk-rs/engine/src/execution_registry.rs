@@ -166,6 +166,38 @@ impl ContextRegistry {
         }
     }
 
+    /// A planned observer leaving before the Plan seal is told what the shared
+    /// journal knows now, without sealing or charging it: Unknown for a
+    /// released write, with its accepted IDs. While a peer remains, nothing
+    /// sent yet is still not proof that nothing will be.
+    #[cfg(feature = "http-plans")]
+    fn project_early(&self, sealed: &mut Sealed) {
+        let (Some(execution), Err(error)) = (sealed.early, &mut sealed.result) else {
+            return;
+        };
+        let Some(writes) = self
+            .executions
+            .roots
+            .iter()
+            .find(|(_, root)| **root == execution)
+            .and_then(|(identity, _)| self.physical.get(identity))
+            .and_then(|owner| owner.writes.as_ref())
+        else {
+            return;
+        };
+        if let Ok(mut projected) = writes.project_failure(error.clone()) {
+            if projected.outcome == Some(crate::Outcome::NotSent)
+                && self.executions.groups.may_publish(execution)
+            {
+                projected.outcome = Some(crate::Outcome::Unknown);
+            }
+            *error = projected;
+        }
+    }
+
+    #[cfg(not(feature = "http-plans"))]
+    fn project_early(&self, _: &mut Sealed) {}
+
     pub(in crate::engine) fn detach_observer(
         &mut self,
         root: &Context,
@@ -183,7 +215,9 @@ impl ContextRegistry {
             return Err(Error::Revoked);
         }
         let observer = *self.executions.observers.get(&id).ok_or(Error::Revoked)?;
-        self.executions.groups.detach(observer, error)
+        let mut sealed = self.executions.groups.detach(observer, error)?;
+        self.project_early(&mut sealed);
+        Ok(sealed)
     }
 
     /// Whether `context` is a Plan-backed execution root: its only physical
@@ -217,6 +251,9 @@ impl ContextRegistry {
         roots.sort_unstable_by_key(|(identity, _)| **identity);
         for (_, execution) in roots {
             sealed.extend(self.executions.groups.expire(*execution, now));
+        }
+        for seal in &mut sealed {
+            self.project_early(seal);
         }
         let groups = &self.executions.groups;
         self.executions

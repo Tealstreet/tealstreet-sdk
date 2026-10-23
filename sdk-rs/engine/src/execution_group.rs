@@ -75,6 +75,10 @@ pub(crate) struct Sealed {
     pub journal: bool,
     /// Carries the Plan journal's own projection; the observer has no journal.
     pub projected: bool,
+    /// A planned observer sealed before its Plan: the registry substitutes
+    /// the physical journal's non-consuming projection for its outcome.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    pub early: Option<Execution>,
 }
 
 #[derive(Clone)]
@@ -152,6 +156,7 @@ impl Group {
             result,
             journal,
             projected: self.planned,
+            early: self.planned.then_some(entry.token),
         }
     }
 
@@ -563,6 +568,7 @@ impl Groups {
                         result,
                         journal: group.operation == Operation::Mutation,
                         projected: true,
+                        early: None,
                     }
                 } else {
                     group.seal(entry, result, true)

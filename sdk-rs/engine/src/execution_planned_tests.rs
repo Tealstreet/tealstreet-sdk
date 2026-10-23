@@ -715,9 +715,9 @@ mod planned_execution {
         assert_eq!(short.len(), 1);
         let error = short[0].clone().unwrap_err();
         assert_eq!(error.kind, Some(ErrorKind::Timeout));
-        assert_ne!(
+        assert_eq!(
             error.outcome,
-            Some(crate::Outcome::NotSent),
+            Some(crate::Outcome::Unknown),
             "the write was released"
         );
     }

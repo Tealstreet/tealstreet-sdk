@@ -479,10 +479,13 @@ policy; its controls were kept and extended.
 - **Order locks:** a released physical write marks the placement scope of
   every observer present at release as sent. A later joiner is not marked;
   an observer present at release flags the symbol when it fails.
-- **Early observer seals:** a planned group does not see its Plan's releases,
-  so an observer that expires or detaches before the Plan seal never keeps an
-  outcome (no NotSent for a released write); only the Plan seal's journal
-  projection carries one.
+- **Early observer seals:** an observer that expires or detaches before the
+  Plan seal gets the physical journal's non-consuming projection
+  (`project_failure`, computed while the owner and binding are live; nothing
+  is sealed, charged or copied): Unknown for a released write, with the
+  accepted ID prefix. While a peer remains, "nothing sent yet" becomes
+  Unknown, since the shared write may still go out. The Plan seal's own
+  projection still reaches the remaining observers verbatim.
 - **Group ids:** `Groups::next` cannot overflow: every begin first reserves
   one engine id (ceiling 2^53-1), so `next` stays below that.
 
