@@ -771,3 +771,35 @@ pass; both independent correctness/adversarial reviews are CLEAR. The ban check
 correctly refuses the older ApeX legacy-request inventory against the newly
 landed #1772; actual integration is required before CI, with no exemption or
 manual inventory growth. Performance remains unmeasured on this checkpoint.
+
+### Exact 03006 CI measurement and remaining shared hot path
+
+Run39887733824/head03006d1224ad427c768a00367c1daaffb796f9ba attempt1
+measures the original EEA xperp memory objective GREEN:5932056B vs TS7203768,
+target6483391.2B. The exact OKX strict artifact and Bitunix diagnostic are bound
+by fresh run/head/artifact/digest checks in
+`/tmp/codex-socket-03006-metrics/report.json`; this is diagnostic evidence, not
+final replay/package proof. Original performance failures remain historical.
+Current CPU failures are real: Bitunix106.98ms vs TS106.083/target95.4747;
+OKX inverse197.401 vs TS213.743/target192.3687 and EEA178.778 vs
+TS196.753/target177.0777. No retry or timing exception is used.
+
+Next narrow shared phase, audit before source: make idle pending-frame presence
+constant-time with one Lifecycle-owned total queued-batch count. Preserve exact
+per-feed queue identity/revisions/order and all admission/release checks. Update
+only at successful transactional queue replacement, actual pop (including a
+rejected stale revision), and central queue clearing used by begin/retire/group/
+stop. Failed encoding/coverage/budget/epoch/signer-barrier operations leave it
+unchanged. The count is the exact sum of queue lengths, not send authority or a
+new budget. Keep external one-shot accounting separate. Existing per-feed and
+aggregate byte/frame bounds remain unchanged. Add mutation-path invariants plus
+multi-feed partial release/replacement/refused-transaction and retirement controls.
+
+Use an ordered current-socket map rather than a fresh randomized hash-map default
+on every temporary driver move. It preserves the same private exact Epoch index,
+bounded cardinality, lookup validation and retirement timing; no identity/policy
+change. This avoids unnecessary per-message hasher initialization and uses the
+already-required tree representation. Re-run both independent reviews, focused
+four-crate tests/strict/fmt/bans and fresh CI. All CPU objectives remain real
+failures until that CI passes. The frozen03006 evidence stays historical on any
+new source head; no artifact relabel or automatic retry is authorized here.
