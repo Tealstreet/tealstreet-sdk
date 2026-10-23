@@ -324,3 +324,20 @@ Context Read-root expiry belongs to fe7's separate #1945 follow-up. #1949 adds
 no such timer/funnel. #1945's frozen dependency must be refreshed once its owner
 publishes the successor fixing decode/bans, feature-fixture and WASM gates; no
 unowned fixes are copied here. Full CI/merge readiness is not claimed.
+
+### Source reviews and receipt-cause precision
+
+uufub4 cleared the exact `b7d70cd21ce` source/API baseline and independently ran
+all ten integration and five custody controls. fe7 also cleared the entry-helper
+and receipt fit. The cause is deliberately coarse when no stamp exists: once
+the receipt counter is exhausted, such a capture reports Capacity even if an
+invalid receipt clock was also present. Both refuse without a replacement
+deadline. A present foreign/duplicate stamp still reports Revoked and preserves
+its original owner; the duplicate control also checks this after exhausting the
+counter. Exact per-receipt failure-cause provenance is outside this small cap
+slice. This precision does not change the canonical Read outcome of None.
+
+Final composition must use the cleared, frozen #1945 successor's `stamp()`
+accessor. #1949 owns the one raw matching helper; fe7's separate Context expiry
+follow-up reuses it. Both reviewers still require that bounded composition
+review and fresh integrated CI before readiness.

@@ -238,6 +238,7 @@ fn duplicate_legacy_receipt_cannot_retire_original_stamp_or_http_owner() {
             }
         })
         .unwrap();
+    e.io.command_waits.exhaust_receipts();
     e.handle_command(5., query(), Some(1_000)).unwrap();
     assert_eq!(e.io.command_waits.deadline(7), Some(100.));
     assert_eq!(e.io.pending.len(), 1);
