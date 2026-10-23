@@ -111,3 +111,18 @@ to 21000; duplicate/late opens release native frames that the assertions prohibi
 The positive controls prove exact opening wire order, normal live packed-ticker
 values and retired-socket inertness. This is a correctness checkpoint only,
 not a baseline performance or full private-suite claim.
+
+## Whole-venue ruling and parked checkpoint
+
+The public-only implementation passes all six original controls, but the wider
+Phemex account target fails 24/40 tests with account.rs/private production exact.
+Once any managed feed is active, shared ingress intentionally does not retain
+a public-managed/private-legacy dual path. Unregistered private ingress never
+reaches native account callbacks. No fixture or financial assertion is weakened.
+
+Overseer ruling: socket slices migrate a venue whole. Preserve this public WIP
+and original controls for a later full Phemex public/private adoption; do not
+publish this partial variant or add mixed-mode compatibility in core. A whole
+Phemex plan must first include its connect-relative auth/snapshot deadline,
+accepted financial snapshot proof and private ping/retry behavior. That scope
+is not cleared by the preceding public-only policy review.

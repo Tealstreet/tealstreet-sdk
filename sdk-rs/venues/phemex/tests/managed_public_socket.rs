@@ -163,3 +163,131 @@ fn retired_open_and_ticker_are_inert() {
     assert!(messages(&output, socket).is_empty());
     assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, previous);
 }
+
+#[test]
+fn book_refcounts_release_only_the_first_subscribe_and_last_unsubscribe() {
+    use safe_cex_engine::Command;
+    let (mut engine, socket, _) = opened();
+    let add = || {
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        })
+    };
+    let remove = || {
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        })
+    };
+    engine.handle(4., add());
+    let first = actions(&mut engine, 4.);
+    assert_eq!(messages(&first, socket).len(), 1);
+    assert!(
+        messages(&first, socket)[0]
+            .contains(r#""method":"orderbook_p.subscribe","params":["BTCUSDT",false,0]"#)
+    );
+    assert!(
+        !first
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+    );
+    engine.handle(5., add());
+    assert!(messages(&actions(&mut engine, 5.), socket).is_empty());
+    engine.handle(6., remove());
+    assert!(messages(&actions(&mut engine, 6.), socket).is_empty());
+    engine.handle(7., remove());
+    let last = actions(&mut engine, 7.);
+    assert_eq!(messages(&last, socket).len(), 1);
+    assert!(
+        messages(&last, socket)[0]
+            .contains(r#""method":"orderbook_p.unsubscribe","params":["BTCUSDT"]"#)
+    );
+}
+
+#[test]
+fn reconnect_replays_each_retained_native_topic_before_opening_ping() {
+    use safe_cex_engine::{Command, model::Interval};
+    let (mut engine, socket, _) = opened();
+    engine.handle(
+        4.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    actions(&mut engine, 4.);
+    engine.handle(
+        5.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+        }),
+    );
+    actions(&mut engine, 5.);
+    engine.handle(6., Event::WsClosed { socket, code: 1006 });
+    let retired = actions(&mut engine, 6.);
+    let (timer, at) = retired
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (756. ..=1006.).contains(at_ms) => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("native bounded retry");
+    engine.handle(at, Event::TimerFired { timer });
+    let replacement = actions(&mut engine, at)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("replacement socket");
+    assert_ne!(replacement, socket);
+    engine.handle(
+        at + 1.,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let output = actions(&mut engine, at + 1.);
+    #[derive(serde::Deserialize)]
+    struct Rpc {
+        id: u32,
+        method: String,
+    }
+    let frames: Vec<Rpc> = messages(&output, replacement)
+        .iter()
+        .map(|text| serde_json::from_str(text).unwrap())
+        .collect();
+    assert_eq!(
+        frames.iter().map(|f| f.method.as_str()).collect::<Vec<_>>(),
+        [
+            "perp_market24h_pack_p.subscribe",
+            "orderbook_p.subscribe",
+            "kline_p.subscribe",
+            "server.ping"
+        ]
+    );
+    assert!(frames.windows(2).all(|pair| pair[0].id < pair[1].id));
+    assert!(messages(&output, replacement)[1].contains(r#""params":["BTCUSDT",false,0]"#));
+    assert!(messages(&output, replacement)[2].contains(r#""params":["BTCUSDT",60]"#));
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+    );
+}
+
+#[test]
+fn malformed_current_text_retains_the_native_any_text_liveness_policy() {
+    let (mut engine, socket, _) = opened();
+    engine.handle(18000., Event::WsMessage { socket, text: "{" });
+    actions(&mut engine, 18000.);
+    engine.handle(
+        20004.,
+        Event::WsMessage {
+            socket,
+            text: TICKER,
+        },
+    );
+    assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 21000.);
+}
