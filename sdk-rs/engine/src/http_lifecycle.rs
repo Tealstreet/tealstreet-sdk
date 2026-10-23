@@ -909,7 +909,7 @@ impl<V: Venue> Engine<V> {
             .iter()
             .find(|(_, managed)| managed.timer == *timer)
         else {
-            return false;
+            return self.expire_session_wait(now, *timer);
         };
         let request = *request;
         if now.is_finite() && now < managed.lifecycle.deadline() {
