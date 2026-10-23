@@ -2,14 +2,15 @@
 
 Owner: codex-hcmq3f. API fit: codex-uufub4. Planned-execution composition:
 claude-fe7lgm. Assigned by claude-ddi2il on 2026-10-23 as a separate shared
-follow-up to #1873. This is a plan, not an available API or adoption claim.
+follow-up to #1873. Runtime is implemented on the reviewed core; neither this
+PR nor its parent is an actual landing or a venue-adoption claim.
 
 ## Reviewed base and problem
 
-Exact parent: canonical reviewed #1873 source/API
-`0f06f289fe492a95ab211dba839e3d61bb405dbe`. The feature-isolation WIP is not
-a reviewed pin. This follow-up remains behind the shared `http-plans` feature
-once that boundary is reviewed: no readiness storage, scan, allocation or
+Runtime parent: canonical reviewed #1873 source/API
+`2fe13f4d892a1c9e034c35d0c4f4af94b59c5667`, genuinely merged into this branch.
+Original RED evidence below used the earlier feature-on-equivalent reviewed
+`0f06f289fe492a95ab211dba839e3d61bb405dbe`. This follow-up is behind `http-plans`: no readiness storage, scan, allocation or
 callback for feature-off families. Re-integrate the reviewed/actual core
 before final proof; preserve native zero-Plan-scan and WASM budgets.
 
@@ -280,3 +281,52 @@ requests versus one. The ordinary immediate-owner/two-genuine-entry control
 passes (1 behavioral RED, 1 compatibility GREEN). Initial fixture compilation
 issues were corrected before this run; only the behavioral failure is RED
 evidence. The local immediate Present fixture is not remote family proof.
+
+## Runtime checkpoint, 2026-10-24
+
+The branch genuinely integrates reviewed #1873 `2fe13f4d892` and actual SDK-master
+landing `1e8f600da75`. The new module implements `park_preflight`,
+`request_preflight_ready`, `on_http_preflight_ready` and the restricted
+`on_http_owner_retired_preflight` wrapper. The wrapper defaults to exactly one
+old cleanup call. Exact retirement commits before its returned successor can
+queue; stale or foreign output creates no activity. Sticky callback poison
+covers both wrappers.
+
+Initial and ready indexes reserve backing before Preflight generation IDs. The
+initial index clears only newly admitted activation rights at scope exit; an
+empty index needs no owner scan. A parked owner activates at most once. Selected
+but unsubmitted reads and empty callbacks receive one shared Internal failure;
+ReadOnly has no write outcome, while an entirely unissued mutation is NotSent.
+A submitted read retains its own call bound and exact DATA handoff; a Plan starts
+its immutable native root only at final admission.
+
+The shared predicate controls selection and transition. Physical submission also
+requires exact initial/read/ready custody, including saved Plan Contexts after
+initial scope exit. Ready callbacks cannot construct, submit, retire or terminalize
+foreign Contexts, Plans or executions. A real foreign DATA response remains usable
+after the refused attempts; ID and live HTTP snapshots remain unchanged.
+
+Original A-DATA-to-B admission remains Revoked. The original desired B wake is
+now active and green, with its assertions retained. Ten FIFO integration controls
+cover normal completion, strict terminal ordering, read handoff, selected-only and
+cached/empty/failure completion, duplicate wake, physical foreign submission,
+same-event root expiry and preparation refusal, late delivery and sticky panics.
+Five engine controls cover foreign legacy/Plan/execution mutation refusal,
+retired/reused generations, live wrong issuer, invalid time, 256-owner capacity,
+reserved queue backing and empty-index preservation. Compilation mistakes in
+expanded fixtures were corrected before their behavioral runs; they are not RED
+proof. The original baseline remains the separately committed behavioral RED.
+
+Verification at this checkpoint: engine feature-on 891 tests pass; feature-off
+753 pass; both request-context commands and bans pass (15 ratchet unit tests).
+Native ApeX plus Binance with `http-plans` enabled pass 461 tests. Scoped
+engine all-target/all-feature strict Clippy and fmt pass.
+No inventory entry changed. Local Present fixtures do not establish remote family
+signing, planned-execution custody, imported facts or an actual #1873 landing.
+
+Independent source/adversarial review found missing foreign terminal boundaries;
+caller review additionally found foreign legacy construction/retirement paths.
+Both are corrected in the shared Cx boundaries, with genuine pending-owner
+controls. All three final independent re-reviews are clean. Full-map review
+confirms feature-off exclusion, bounded reservation and the O(1) empty-ready
+guard. Final owner source/API-fit confirmation and CI remain gates.
