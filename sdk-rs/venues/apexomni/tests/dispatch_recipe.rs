@@ -13,7 +13,13 @@ use safe_cex_engine::{
     Action, Command, Cx, Engine, HttpRequest, Response, SignStep, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_apexomni::{Options, sign};
+use std::cell::RefCell;
 use std::sync::Arc;
+
+thread_local! {
+    /// Pre-dispatch refusals reported by the engine for the current test.
+    static FAILURES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
 
 const NOW: f64 = 1_700_000_000_123.0;
 const REST: &str = "https://omni.apex.exchange/api";
@@ -99,7 +105,9 @@ impl Venue for Issue {
     fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
     fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
-    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), error: &str) {
+        FAILURES.with(|failures| failures.borrow_mut().push(error.into()));
+    }
     fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
     fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
     fn book(&self, _: &str) -> Option<&Book> {
@@ -110,7 +118,12 @@ impl Venue for Issue {
     }
 }
 
+fn failures() -> Vec<String> {
+    FAILURES.with(|failures| std::mem::take(&mut *failures.borrow_mut()))
+}
+
 fn run(steps: Vec<(Option<sign::Request>, Box<dyn SignStep>)>) -> Vec<Action> {
+    failures();
     let (signer, _) = provider();
     let mut engine = Engine::new(Issue(steps), Some(seeded_entropy(3))).unwrap();
     engine.set_signer(Some(signer)).unwrap();
@@ -149,6 +162,21 @@ fn rest_recipes_match_legacy_headers_and_bodies_for_every_body_kind_and_legacy_r
             fields(&[("symbol", "BTC-USDT"), ("initialMarginRate", "0.1")]),
         ),
         sign::Request::raw("/v3/order", "clientId=abc&reduceOnly=false&size=1".into()),
+        sign::Request::get(
+            "/v3/fills",
+            fields(&[
+                ("beginTimeInclusive", "0"),
+                ("endTimeExclusive", "0"),
+                ("limit", "100"),
+            ]),
+        ),
+        sign::Request {
+            method: safe_cex_engine::Method::Delete,
+            path: "/v3/delete-open-orders".into(),
+            params: fields(&[("symbol", "BTC-USDT")]),
+            body: sign::Body::None,
+        },
+        sign::Request::raw("/v3/set-initial-margin-rate", "symbol=BTC-USDT".into()),
     ];
     let mut steps: Vec<(Option<sign::Request>, Box<dyn SignStep>)> = vec![];
     for legacy in [false, true] {
@@ -178,7 +206,7 @@ fn rest_recipes_match_legacy_headers_and_bodies_for_every_body_kind_and_legacy_r
 }
 
 #[test]
-fn order_recipe_signs_zklink_contracts_in_the_same_batch_as_the_hmac() {
+fn order_recipe_signs_bracket_zklink_contracts_in_the_same_batch_as_the_hmac() {
     let (_, identity) = provider();
     let account = "611779989544632629";
     let contract = |id: &str, buy: bool| {
@@ -198,39 +226,57 @@ fn order_recipe_signs_zklink_contracts_in_the_same_batch_as_the_hmac() {
         )
         .unwrap()
     };
-    let body = |main: &str, tp: &str| {
+    // Sorted keys put slSignature (contract 2) before tpSignature (contract 1).
+    let body = |main: &str, tp: &str, sl: &str| {
         sign::query(&fields(&[
             ("clientId", "client-1"),
             ("signature", main),
             ("size", "0.001"),
+            ("slSignature", sl),
             ("tpSignature", tp),
         ]))
     };
-    let template = body(&sign::zk_placeholder(0), &sign::zk_placeholder(1));
+    let template = body(
+        &sign::zk_placeholder(0),
+        &sign::zk_placeholder(1),
+        &sign::zk_placeholder(2),
+    );
+    let contracts = vec![
+        contract("client-1", true),
+        contract("leg-tp", false),
+        contract("leg-sl", false),
+    ];
     let request = sign::Request::raw("/v3/order", template);
-    let actions = run(vec![(
-        Some(request.clone()),
-        Box::new(sign::Http::with_contracts(
-            identity,
-            request,
-            false,
-            vec![contract("client-1", true), contract("leg-1", false)],
-        )),
-    )]);
-    let http = https(&actions)[0];
-    let expected = sign::request(
-        &legacy_options(),
-        NOW,
-        &sign::Request::raw(
-            "/v3/order",
-            body(&signature("client-1", true), &signature("leg-1", false)),
+    let actions = run([false, true]
+        .into_iter()
+        .map(|legacy| {
+            (
+                Some(request.clone()),
+                Box::new(sign::Http::with_contracts(
+                    identity.clone(),
+                    request.clone(),
+                    legacy,
+                    contracts.clone(),
+                )) as Box<dyn SignStep>,
+            )
+        })
+        .collect());
+    assert_eq!(failures(), Vec::<String>::new());
+    let sent = https(&actions);
+    assert_eq!(sent.len(), 2);
+    let signed = sign::Request::raw(
+        "/v3/order",
+        body(
+            &signature("client-1", true),
+            &signature("leg-tp", false),
+            &signature("leg-sl", false),
         ),
-        false,
-    )
-    .unwrap();
-    assert_eq!(http.body, expected.body);
-    assert_eq!(http.headers, expected.headers);
-    assert!(!http.body.as_deref().unwrap().contains("PLACEHOLDER"));
+    );
+    for (http, legacy) in sent.into_iter().zip([false, true]) {
+        let expected = sign::request(&legacy_options(), NOW, &signed, legacy).unwrap();
+        assert_eq!(http.body, expected.body, "legacy={legacy}");
+        assert_eq!(http.headers, expected.headers, "legacy={legacy}");
+    }
 }
 
 #[test]
@@ -258,27 +304,52 @@ fn ws_login_recipe_matches_the_legacy_frame_and_klines_are_never_signed() {
         Some(klines.clone()),
         Box::new(sign::Http::new(identity, klines, false)),
     )]);
-    assert!(
-        https(&actions).iter().all(|http| !http
-            .headers
-            .iter()
-            .any(|(name, _)| name.starts_with("APEX-"))),
-        "a credential recipe refuses public klines instead of signing them"
+    assert!(https(&actions).is_empty());
+    assert_eq!(
+        failures(),
+        ["Invalid signing request"],
+        "klines are never signed"
     );
 }
 
 #[test]
-fn missing_seed_or_mismatched_placeholders_refuse_before_any_credential_leaves() {
+fn malformed_recipes_refuse_with_their_class_before_any_credential_leaves() {
     let (_, identity) = provider();
     let mut seedless = identity.clone();
     seedless.extra.clear();
-    let template = sign::Request::raw(
+    let mut passless = identity.clone();
+    passless.passphrase = None;
+    let once = format!("signature={}", sign::zk_placeholder(0));
+    let twice = format!("clientId={0}&signature={0}", sign::zk_placeholder(0));
+    let form = sign::Request::form(
         "/v3/order",
-        format!("signature={}", sign::zk_placeholder(0)),
+        fields(&[("signature", &sign::zk_placeholder(0))]),
     );
-    let wrong = sign::Request::raw("/v3/order", "signature=missing".into());
     let payload = [0u8; 36];
-    for (identity, request) in [(seedless, template.clone()), (identity, wrong)] {
+    let cases = [
+        (
+            seedless,
+            sign::Request::raw("/v3/order", once.clone()),
+            "Signing provider is unavailable",
+        ),
+        (
+            passless,
+            sign::Request::raw("/v3/order", once),
+            "Signing provider is unavailable",
+        ),
+        (
+            identity.clone(),
+            sign::Request::raw("/v3/order", "signature=missing".into()),
+            "Invalid signing request",
+        ),
+        (
+            identity.clone(),
+            sign::Request::raw("/v3/order", twice),
+            "Invalid signing request",
+        ),
+        (identity, form, "Invalid signing request"),
+    ];
+    for (identity, request, expected) in cases {
         let actions = run(vec![(
             Some(request.clone()),
             Box::new(sign::Http::with_contracts(
@@ -288,11 +359,20 @@ fn missing_seed_or_mismatched_placeholders_refuse_before_any_credential_leaves()
                 vec![payload],
             )),
         )]);
-        assert!(
-            https(&actions)
-                .iter()
-                .all(|http| !http.headers.iter().any(|(_, value)| value == "api-key")),
-            "no presented credential on refusal"
-        );
+        assert!(https(&actions).is_empty());
+        assert_eq!(failures(), [expected]);
     }
+    // A recipe never signs a different outbound method than it canonicalises.
+    let (_, identity) = provider();
+    let get = sign::Request::get("/v3/account", vec![]);
+    let delete = sign::Request {
+        method: safe_cex_engine::Method::Delete,
+        ..get.clone()
+    };
+    let actions = run(vec![(
+        Some(delete),
+        Box::new(sign::Http::new(identity, get, false)),
+    )]);
+    assert!(https(&actions).is_empty());
+    assert_eq!(failures(), ["Invalid signing request"]);
 }

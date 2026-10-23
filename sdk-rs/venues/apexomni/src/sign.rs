@@ -627,25 +627,31 @@ fn work(
             });
         }
     }
-    let mut payload = Vec::new();
-    let mut rest = text;
+    // Each placeholder occurs exactly once; sorted keys decide the text order.
+    let mut positions = Vec::with_capacity(contracts.len());
     for index in 0..contracts.len() {
         let marker = zk_placeholder(index);
-        let (before, after) = rest.split_once(&marker).ok_or(SignError::InvalidRequest)?;
+        let mut found = text.match_indices(&marker);
+        let (Some((position, _)), None) = (found.next(), found.next()) else {
+            return Err(SignError::InvalidRequest);
+        };
+        positions.push((position, index, marker.len()));
+    }
+    positions.sort_unstable();
+    let mut payload = Vec::with_capacity(positions.len() * 2 + 1);
+    let mut start = 0;
+    for (position, index, length) in positions {
         payload.push(PayloadPart::Bytes {
-            bytes: before.as_bytes().to_vec(),
+            bytes: text[start..position].as_bytes().to_vec(),
         });
         payload.push(PayloadPart::Result {
             index,
             encoding: PartEncoding::Hex,
         });
-        rest = after;
-    }
-    if (0..contracts.len()).any(|index| rest.contains(&zk_placeholder(index))) {
-        return Err(SignError::InvalidRequest);
+        start = position + length;
     }
     payload.push(PayloadPart::Bytes {
-        bytes: rest.as_bytes().to_vec(),
+        bytes: text[start..].as_bytes().to_vec(),
     });
     operations.extend([
         Operation::Present {
@@ -689,6 +695,8 @@ fn presented(result: &SignResult, contracts: usize) -> Result<(&str, &str, &[u8]
 /// Dispatch recipe for one private REST request. Order writes carry their
 /// zkLink contracts: each is signed in the same atomic batch and its hex
 /// signature replaces `zk_placeholder(index)` in the raw body and preimage.
+/// Keep the default `Deny` result-header policy: delegated callback headers
+/// admit only single-signature batches, and an order batch has several.
 pub struct Http {
     identity: Identity,
     unsigned: Request,
@@ -726,9 +734,16 @@ impl SignStep for Http {
             return Err(SignError::InvalidRequest);
         };
         // Klines are public; a credential-bearing recipe must never cover them.
-        if is_unsigned(&self.unsigned) {
+        // The outbound must be exactly the request this recipe canonicalises.
+        if is_unsigned(&self.unsigned)
+            || http.method != self.unsigned.method
+            || !http.url.ends_with(&request_path(&self.unsigned))
+            || (!self.contracts.is_empty() && !matches!(self.unsigned.body, Body::Raw(_)))
+        {
             return Err(SignError::InvalidRequest);
         }
+        // Validate transport bytes before any credential is presented.
+        transport(&self.unsigned.body).map_err(|_| SignError::InvalidRequest)?;
         let stamp_ms = stamp(dispatch.stamp_ms(), self.legacy);
         self.timestamp = num::format(stamp_ms);
         let text = canonical_text(&self.unsigned, self.legacy, &self.timestamp);
