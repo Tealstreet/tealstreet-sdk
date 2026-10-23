@@ -15,11 +15,13 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Credential, Operation, Policy, RetryPolicy};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, CredentialSlot, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
+    Venue, num,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -94,8 +96,10 @@ pub enum Pending {
         invalid: bool,
         seeded: u32,
     },
+    /// One physical candle read (`leg`) under the command's admitted `root`.
     Candles {
-        command: CommandId,
+        root: Context,
+        leg: Context,
         rows: Vec<Candle>,
         invalid: bool,
         read: CandleRead,
@@ -372,21 +376,93 @@ impl Okx {
         );
     }
 
-    pub(crate) fn get(
-        &self,
+    /// Private reads prefer the read-only key; the primary key is the fallback.
+    pub(crate) fn read_credential(&self) -> Option<Credential> {
+        let (identity, slot) = match (&self.options.read_credentials, &self.credentials) {
+            (Some(read), _) => (read, CredentialSlot::Secondary),
+            (None, Some(primary)) => (primary, CredentialSlot::Primary),
+            (None, None) => return None,
+        };
+        Some(Credential {
+            slot,
+            reference: identity.credential.clone(),
+        })
+    }
+
+    /// One signed private GET under engine-issued Read authority. A queue
+    /// refusal is a pre-send failure, as a provider refusal is.
+    pub(crate) fn managed_get(
+        &mut self,
         cx: &mut Cx<'_, Pending>,
+        context: Context,
         path: &str,
-        private: bool,
         pending: Pending,
     ) {
-        let request = cx.request(
+        let identity = match context.credential().map(|c| c.slot) {
+            Some(CredentialSlot::Secondary) => self.options.read_credentials.clone(),
+            _ => self.credentials.clone(),
+        };
+        let recipe = sign::Http::new(identity, path.into()).demo(self.options.testnet);
+        if let Err((pending, error)) = cx.request_signed_managed(
+            context,
             Method::Get,
             format!("{}{path}", self.rest()),
-            self.headers(Method::Get),
             None,
+            Box::new(recipe),
             pending,
-        );
-        self.sign_request(cx, request, Method::Get, path, private, false);
+        ) {
+            self.on_sign_error(cx, pending, error.venue_error());
+        }
+    }
+
+    /// The recent page is sent on the admitted root; the history fallback on
+    /// a leg of it, so both share the command's original deadline and a
+    /// command holds at most two of the registry's shared Context slots.
+    fn history_candles(&mut self, cx: &mut Cx<'_, Pending>, root: Context, read: CandleRead) {
+        match cx.http_leg_context(&root, candle_policy()) {
+            Ok(leg) => self.send_candles(cx, root, leg, read),
+            // The recent page already went out: keep the native soft shape.
+            Err(reason) => {
+                let message = reason.venue_error().message;
+                if cx.command_error_context(&root, message).is_ok() {
+                    let _ = cx.done_context(&root, "[]".into());
+                }
+            }
+        }
+    }
+
+    /// Candles are public: unsigned on every alias, demo header on demo.
+    fn send_candles(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        root: Context,
+        leg: Context,
+        read: CandleRead,
+    ) {
+        let url = format!("{}{}", self.rest(), read.path());
+        let pending = Pending::Candles {
+            root,
+            leg: leg.clone(),
+            rows: Vec::new(),
+            invalid: false,
+            read,
+        };
+        let sent = if self.options.testnet {
+            cx.request_managed_with_headers(
+                leg,
+                Method::Get,
+                url,
+                sign::DEMO_HEADERS,
+                None,
+                pending,
+            )
+        } else {
+            cx.request_managed(leg, Method::Get, url, None, pending)
+        };
+        match sent {
+            Ok(id) => cx.stream_response(id, ArrayAt::EnvelopeField("data")),
+            Err((pending, reason)) => self.on_sign_error(cx, pending, reason.venue_error()),
+        }
     }
 
     fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
@@ -649,9 +725,12 @@ impl Okx {
             self.history_failed(cx, request, error);
         } else if let Pending::Closed(request) = pending {
             Self::closed_failed(cx, request, error);
-        } else if let Pending::Candles { command, .. } = pending {
-            cx.command_error(command, error);
-            cx.done(command, "[]".into());
+        } else if let Pending::Candles { root, .. } = pending {
+            // Native soft shape for any post-send failure, deadline included.
+            // Not gated on read delivery: an expired leg would never finish.
+            if cx.command_error_context(&root, error).is_ok() {
+                let _ = cx.done_context(&root, "[]".into());
+            }
         } else {
             self.public_failed(
                 cx,
@@ -1029,17 +1108,31 @@ impl Venue for Okx {
                     safe_cex_engine::startup::skipped_row(cx);
                 }
             },
-            Pending::Candles { rows, invalid, .. } => match serde_json::from_str::<Vec<&str>>(item)
-                .ok()
-                .and_then(|r| wire::candle(&r))
-            {
-                Some(c) => rows.push(c),
-                None => *invalid = true,
-            },
+            Pending::Candles {
+                root,
+                leg,
+                rows,
+                invalid,
+                ..
+            } => {
+                if cx.validate_read_http_delivery(root, leg).is_err() {
+                    return;
+                }
+                match serde_json::from_str::<Vec<&str>>(item)
+                    .ok()
+                    .and_then(|r| wire::candle(&r))
+                {
+                    Some(c) => rows.push(c),
+                    None => *invalid = true,
+                }
+            }
         }
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(account::Request::Config { context, .. }) = &pending {
+            let _ = cx.finish_http_context(context);
+        }
         if let Pending::Account(account::Request::Config { .. }) = &pending
             && self.config_rejected(cx, response.body)
         {
@@ -1237,35 +1330,24 @@ impl Venue for Okx {
                 }
             }
             Pending::Candles {
-                command,
+                root,
+                leg,
                 mut rows,
                 invalid: false,
                 mut read,
             } => {
+                if cx.validate_read_http_delivery(&root, &leg).is_err() {
+                    return;
+                }
                 if !read.historical && (rows.is_empty() || read.force_history) {
                     read.historical = true;
-                    let path = read.path();
-                    self.list(
-                        cx,
-                        &path,
-                        false,
-                        Pending::Candles {
-                            command,
-                            rows: Vec::new(),
-                            invalid: false,
-                            read,
-                        },
-                    );
+                    self.history_candles(cx, root, read);
                     return;
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                {
-                    let result: Result<String, String> =
-                        serde_json::to_string(&rows).map_err(|e| e.to_string());
-                    match result {
-                        Ok(data) => cx.done(command, data),
-                        Err(error) => cx.fail(command, error),
-                    }
+                let _ = match serde_json::to_string(&rows) {
+                    Ok(data) => cx.done_context(&root, data),
+                    Err(error) => cx.fail_context(&root, error.to_string()),
                 };
             }
             other => self.on_request_failed(cx, other, "malformed OKX list item"),
@@ -1324,15 +1406,35 @@ impl Venue for Okx {
         match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
             Pending::Closed(request) => Self::closed_sign_failed(cx, request, error),
-            Pending::Account(account::Request::Leverage { command, .. })
-            | Pending::History(history::Request { command, .. })
-            | Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Account(account::Request::Leverage { context, .. }) => {
+                let _ = cx.fail_context(&context, error);
+            }
+            Pending::Candles { root, .. } => {
+                let _ = cx.fail_context(&root, error);
+            }
+            Pending::History(history::Request { command, .. }) => cx.fail(command, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
+    /// The managed leverage read keeps the engine's typed failure, e.g. Timeout.
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Account(account::Request::Leverage { context, .. }) => {
+                let _ = cx.fail_context(&context, error);
+            }
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Account(account::Request::Config { .. }) = &pending {
+        if let Pending::Account(account::Request::Config { context, .. }) = &pending {
+            let _ = cx.finish_http_context(context);
             self.config_unanswered();
         }
         self.request_failed(cx, pending, error);
@@ -1442,15 +1544,19 @@ impl Venue for Okx {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 limit,
                 from_ms,
                 to_ms,
             } => {
+                // A rejected admission already published the command's typed failure.
+                let Ok(root) = cx.admit_http_command(candle_policy()) else {
+                    return;
+                };
                 let Some(m) = cx.store.market(&symbol) else {
-                    cx.done(command, "[]".into());
+                    let _ = cx.done_context(&root, "[]".into());
                     return;
                 };
                 if [from_ms, to_ms]
@@ -1458,14 +1564,14 @@ impl Venue for Okx {
                     .flatten()
                     .any(|v| !v.is_finite())
                 {
-                    cx.fail(command, "invalid candle time bounds");
+                    let _ = cx.fail_context(&root, "invalid candle time bounds");
                     return;
                 }
                 let explicit_limit = limit.filter(|n| *n > 0);
                 let limit = explicit_limit.unwrap_or(300).min(300);
                 let end = to_ms.unwrap_or(cx.now);
                 let Some(default_start) = subtract_bars(end, interval, limit) else {
-                    cx.fail(command, interval.unsupported("OKX"));
+                    let _ = cx.fail_context(&root, interval.unsupported("OKX"));
                     return;
                 };
                 let before = if explicit_limit.is_none() {
@@ -1474,7 +1580,7 @@ impl Venue for Okx {
                     default_start
                 };
                 if before > end {
-                    cx.fail(command, "invalid candle time bounds");
+                    let _ = cx.fail_context(&root, "invalid candle time bounds");
                     return;
                 }
                 let read = CandleRead {
@@ -1488,18 +1594,7 @@ impl Venue for Okx {
                         subtract_bars(cx.now, interval, 1440).is_some_and(|oldest| to < oldest)
                     }),
                 };
-                let path = read.path();
-                self.list(
-                    cx,
-                    &path,
-                    false,
-                    Pending::Candles {
-                        command,
-                        rows: Vec::new(),
-                        invalid: false,
-                        read,
-                    },
-                );
+                self.send_candles(cx, root.clone(), root, read);
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             other => self.trade_command(cx, other),
@@ -1514,6 +1609,17 @@ impl Venue for Okx {
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
+    }
+}
+
+/// Public candle reads: one physical attempt per leg inside one 20 s command budget.
+fn candle_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
     }
 }
 

@@ -1,6 +1,7 @@
 #![cfg(feature = "okx")]
 
-use safe_cex_engine::{Action, Engine, Event, Response, Venue};
+use safe_cex_engine::test_support::prepared_actions;
+use safe_cex_engine::{Action, Command, Engine, Event, Response, Venue};
 use safe_cex_venues::{EngineOptions, Visit, build};
 
 const STAMP: f64 = 1_709_209_849_123.9;
@@ -10,55 +11,80 @@ struct Discovery;
 impl Visit for Discovery {
     type Output = Vec<Action>;
     fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
-        engine.start(STAMP);
-        let mut all = Vec::new();
-        for step in 0..8 {
-            let out: Vec<_> = engine.drain_actions().collect();
-            if out.is_empty() {
-                break;
-            }
-            for action in out {
-                if let Action::Http(http) = &action {
-                    let body = if http.url.contains("instruments") {
-                        let row = if http.url.contains("instType=FUTURES") {
-                            MARKET.replace("BTC-USDT-SWAP", "BTC-USDT-261225").replace(
-                                "\"instType\":\"SWAP\"",
-                                "\"instType\":\"FUTURES\",\"ruleType\":\"xperp\"",
-                            )
-                        } else {
-                            MARKET.into()
-                        };
-                        Some(format!(r#"{{"code":"0","data":[{row}]}}"#))
-                    } else if http.url.contains("/account/config") {
-                        Some(r#"{"code":"0","data":[{"posMode":"net_mode","acctLv":"2"}]}"#.into())
-                    } else if http.url.contains("tickers") {
-                        Some(r#"{"code":"0","data":[]}"#.into())
-                    } else {
-                        None
-                    };
-                    if let Some(body) = body {
-                        engine.handle(
-                            STAMP + f64::from(step),
-                            Event::HttpResponse {
-                                request: http.id,
-                                response: Response {
-                                    status: 200,
-                                    headers: "",
-                                    body: &body,
-                                },
-                            },
-                        );
-                    }
-                }
-                if let Action::WsConnect { socket, url, .. } = &action
-                    && (url.ends_with("/private") || url.ends_with("/business"))
-                {
-                    engine.handle(STAMP + f64::from(step), Event::WsOpened { socket: *socket });
-                }
-                all.push(action);
-            }
+        discover(&mut engine).0
+    }
+}
+
+/// Loads the catalogue and answers the account config read; returns every
+/// action and the time of the last event.
+fn discover<V: Venue>(engine: &mut Engine<V>) -> (Vec<Action>, f64) {
+    engine.start(STAMP);
+    let mut all = Vec::new();
+    let mut now = STAMP;
+    for step in 0..8 {
+        let out = prepared_actions(engine, now);
+        if out.is_empty() {
+            break;
         }
-        all
+        now = STAMP + f64::from(step);
+        for action in out {
+            if let Action::Http(http) = &action {
+                let body = if http.url.contains("instruments") {
+                    let row = if http.url.contains("instType=FUTURES") {
+                        MARKET.replace("BTC-USDT-SWAP", "BTC-USDT-261225").replace(
+                            "\"instType\":\"SWAP\"",
+                            "\"instType\":\"FUTURES\",\"ruleType\":\"xperp\"",
+                        )
+                    } else {
+                        MARKET.into()
+                    };
+                    Some(format!(r#"{{"code":"0","data":[{row}]}}"#))
+                } else if http.url.contains("/account/config") {
+                    Some(r#"{"code":"0","data":[{"posMode":"net_mode","acctLv":"2"}]}"#.into())
+                } else if http.url.contains("tickers") {
+                    Some(r#"{"code":"0","data":[]}"#.into())
+                } else {
+                    None
+                };
+                if let Some(body) = body {
+                    engine.handle(
+                        now,
+                        Event::HttpResponse {
+                            request: http.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body: &body,
+                            },
+                        },
+                    );
+                }
+            }
+            if let Action::WsConnect { socket, url, .. } = &action
+                && (url.ends_with("/private") || url.ends_with("/business"))
+            {
+                engine.handle(now, Event::WsOpened { socket: *socket });
+            }
+            all.push(action);
+        }
+    }
+    (all, now)
+}
+
+/// Discovery, then one FetchLeverage; returns the actions it releases.
+struct LeverageRead;
+impl Visit for LeverageRead {
+    type Output = Vec<Action>;
+    fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
+        let (_, now) = discover(&mut engine);
+        engine.handle(
+            now + 1.,
+            Event::Command(Command::FetchLeverage {
+                command: 7,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        prepared_actions(&mut engine, now + 1.)
     }
 }
 
@@ -166,6 +192,54 @@ fn okx_only_feature_installs_provider_and_all_aliases_sign_secondary_gets() {
                 }));
             }
         }
+    }
+}
+
+#[test]
+fn all_aliases_send_the_leverage_read_with_the_read_key_and_demo_header() {
+    for venue in ["okx", "okxeu", "okxdemo", "okxeudemo"] {
+        let input = serde_json::json!({"key":"primary-key","secret":"primary-material","passphrase":"primary-pass",
+            "readCredentials":{"key":"read-key","secret":"read-material","passphrase":"read-pass"}});
+        let actions = build(
+            venue,
+            serde_json::from_value(input).unwrap(),
+            Some(safe_cex_engine::test_support::seeded_entropy(7)),
+            LeverageRead,
+        )
+        .unwrap();
+        let reads: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Http(http) if http.url.contains("/api/v5/account/leverage-info?") => {
+                    Some(http)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reads.len(), 1, "{venue}");
+        let http = reads[0];
+        let header = |name| &http.headers.iter().find(|(key, _)| *key == name).unwrap().1;
+        assert_eq!(header("OK-ACCESS-KEY"), "read-key", "{venue}");
+        assert_eq!(header("OK-ACCESS-PASSPHRASE"), "read-pass", "{venue}");
+        let path = &http.url[http.url.find("/api/").unwrap()..];
+        let text = format!("{}GET{path}", header("OK-ACCESS-TIMESTAMP"));
+        assert_eq!(
+            *header("OK-ACCESS-SIGN"),
+            safe_cex_crypto::hmac_sha256(
+                b"read-material",
+                text.as_bytes(),
+                safe_cex_crypto::Encoding::Base64
+            ),
+            "{venue}"
+        );
+        assert_eq!(
+            http.headers
+                .iter()
+                .filter(|(name, value)| *name == "x-simulated-trading" && value == "1")
+                .count(),
+            usize::from(venue.ends_with("demo")),
+            "{venue}"
+        );
     }
 }
 
