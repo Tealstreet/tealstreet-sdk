@@ -38,10 +38,8 @@ fn entropy() -> Option<safe_cex_engine::entropy::Entropy> {
 #[test]
 fn opaque_phemex_setup_accepts_the_owned_provider_and_registers_exact_refs() {
     let (local, refs) = provider();
-    let input = EngineOptions {
-        signing: Some(refs.clone()),
-        ..serde_json::from_str::<EngineOptions>("{}").unwrap()
-    };
+    let mut input: EngineOptions = serde_json::from_str("{}").unwrap();
+    input.signing = Some(refs.clone());
     let (registered, present) =
         build_with_signer("phemex", input, entropy(), Some(local), Registered)
             .expect("full Phemex custody cutover must accept opaque provider setup");
@@ -51,19 +49,15 @@ fn opaque_phemex_setup_accepts_the_owned_provider_and_registers_exact_refs() {
 #[test]
 fn missing_provider_is_refused_before_any_venue_work() {
     let (_, refs) = provider();
-    let input = EngineOptions {
-        signing: Some(refs),
-        ..serde_json::from_str::<EngineOptions>("{}").unwrap()
-    };
+    let mut input: EngineOptions = serde_json::from_str("{}").unwrap();
+    input.signing = Some(refs);
     assert!(build_with_signer("phemex", input, entropy(), None, Start).is_err());
 }
 #[test]
 fn trusted_legacy_inputs_preserve_the_existing_signed_startup_wire() {
-    let input = EngineOptions {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        ..serde_json::from_str::<EngineOptions>("{}").unwrap()
-    };
+    let mut input: EngineOptions = serde_json::from_str("{}").unwrap();
+    input.key = Some("key".into());
+    input.secret = Some("secret".into());
     let output = build("phemex", input, entropy(), Start).unwrap();
     let requests: Vec<_> = output
         .iter()
