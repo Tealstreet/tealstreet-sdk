@@ -5888,3 +5888,10 @@ No other venue inventory, shared checker, allowance or signer source changes.
 | Refusals before any request (invalid options, invalid read key, no primary key) | Typed `NotSent`: `invalidInput`, `invalidInput`, `authInvalid`; texts unchanged (was untyped) | Branch on `kind`. |
 | A signature/timestamp refusal | Re-read once only on a native `10002`/`10004`; text never re-reads | None. |
 
+### Bybit market refresh refusals (slice 2)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `refreshMarkets` on a shared public-feed consumer | Typed `NotSent` `unsupported` under the command's admitted authority (was the same kind with no outcome); text unchanged | Refresh the shared source instead. |
+| Invalid options during a refresh walk | Every joined caller fails `NotSent` `invalidInput` at once (was silent until the 30 s deadline; not reachable through startup today) | None. |
+

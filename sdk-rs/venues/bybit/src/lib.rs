@@ -25,9 +25,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
-use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-};
+use safe_cex_engine::{Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue};
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -2706,7 +2704,8 @@ impl Venue for BybitLinear {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
-            safe_cex_engine::VenueAction::RefreshMarkets => self.refresh_markets(cx, command),
+            // The engine binds the command when the refresh is admitted.
+            safe_cex_engine::VenueAction::RefreshMarkets => self.refresh_markets(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,
