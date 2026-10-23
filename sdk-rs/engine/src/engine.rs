@@ -436,6 +436,11 @@ impl SocketSpec {
         self
     }
 
+    /// `reject_route` when the venue holds current refusal evidence.
+    pub fn reject_if(self, refused: bool) -> Self {
+        if refused { self.reject_route() } else { self }
+    }
+
     pub fn headers(mut self, headers: Vec<(&'static str, String)>) -> Self {
         self.headers = headers;
         self

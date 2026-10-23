@@ -94,6 +94,13 @@ pub struct Account {
     pub detected: bool,
     pub authenticated: bool,
     pub needs_recovery: bool,
+    /// The last pre-login refusal was about the egress IP: the next private
+    /// connect asks the host for its next route (TS #8093).
+    pub(crate) reject_route: bool,
+    /// That refusal's native code and message, reported once routes are spent.
+    pub(crate) egress_refusal: Option<(f64, String)>,
+    /// Every route refused this key's egress; private connects stay stopped.
+    pub(crate) egress_exhausted: bool,
     poll: Option<TimerId>,
     /// Backs off the settings probe that gates private startup; transient failures never end it.
     probe: safe_cex_engine::startup::Backoff<()>,
@@ -972,6 +979,31 @@ impl BitgetFutures {
         }
     }
 
+    /// The host refused every route for this private socket's egress: report
+    /// the native refusal once and stop reconnecting (TS #8093).
+    pub(crate) fn private_route_exhausted(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        (code, msg): (f64, String),
+    ) {
+        let connection = &mut self.sockets[3];
+        connection.open = false;
+        connection.socket = None;
+        self.account.authenticated = false;
+        self.account.egress_exhausted = true;
+        self.account.supervisor.cancel(cx);
+        let error = rejection(
+            "private WebSocket login from every available egress IP",
+            code,
+            &msg,
+            ErrorKind::AuthPermission,
+        );
+        cx.notice(Level::Error, code::AUTH_REJECTED, error.message.clone());
+        if !self.startup_ready(cx) {
+            self.reject_startup(cx, error, true);
+        }
+    }
+
     fn startup_ready(&self, cx: &Cx<'_, Pending>) -> bool {
         let loaded = cx.store.loaded();
         loaded.balance && loaded.positions && loaded.orders
@@ -1487,8 +1519,15 @@ impl BitgetFutures {
                     return;
                 }
                 self.account.authenticated = true;
+                self.account.egress_refusal = None;
                 self.account.supervisor.authenticated(cx);
                 self.private_subscribe(cx);
+            } else if refused && let Some(code) = egress_refusal_code(text) {
+                // 40018 (key bound to other IPs) or 40024 (restricted location)
+                // refuses this egress: try the host's next route before reporting.
+                self.account.egress_refusal = Some((code, header.msg.to_string()));
+                self.account.reject_route = true;
+                self.connect(cx, 3);
             } else {
                 if !self.account.authenticated
                     && !self.startup_ready(cx)
@@ -2663,6 +2702,27 @@ fn key_rejection(code: f64, msg: &str) -> Option<ErrorKind> {
         {
             Some(ErrorKind::AuthInvalid)
         }
+        _ => None,
+    }
+}
+
+/// Login refusals about where the connection comes from, by exact native code.
+fn egress_refusal_code(text: &str) -> Option<f64> {
+    #[derive(Deserialize)]
+    struct Header<'a> {
+        #[serde(borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+    }
+    let header: Header<'_> = serde_json::from_str(text).ok()?;
+    let raw = header.code?.get();
+    let code: std::borrow::Cow<'_, str> = if raw.starts_with('"') {
+        serde_json::from_str(raw).ok()?
+    } else {
+        std::borrow::Cow::Borrowed(raw)
+    };
+    match code.as_ref() {
+        "40018" => Some(40018.0),
+        "40024" => Some(40024.0),
         _ => None,
     }
 }

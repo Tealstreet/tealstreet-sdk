@@ -244,7 +244,11 @@ impl BitgetFutures {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
-        if index == 3 && (self.account.startup_rejected || self.account.supervisor.is_waiting()) {
+        if index == 3
+            && (self.account.startup_rejected
+                || self.account.egress_exhausted
+                || self.account.supervisor.is_waiting())
+        {
             return;
         }
         let url = if index == 3 {
@@ -258,6 +262,7 @@ impl BitgetFutures {
         };
         let recover =
             index == 3 && std::mem::take(&mut self.account.needs_recovery) && !self.account.uta;
+        let reject_route = index == 3 && std::mem::take(&mut self.account.reject_route);
         let connection = &mut self.sockets[index];
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
@@ -273,7 +278,8 @@ impl BitgetFutures {
                     .feed(
                         ["primary", "secondary-1", "secondary-2", "private"][index],
                         recover,
-                    ),
+                    )
+                    .reject_if(reject_route),
             ),
         );
         connection.open = false;
@@ -667,6 +673,13 @@ impl Venue for BitgetFutures {
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _: u16) {
         if let Some(index) = self.channel(socket) {
             self.disconnected(cx, index);
+        }
+    }
+    fn on_route_exhausted(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        // Only a held native refusal is reported; anything else is a close.
+        match (self.channel(socket), self.account.egress_refusal.take()) {
+            (Some(3), Some(refusal)) => self.private_route_exhausted(cx, refusal),
+            _ => self.on_close(cx, socket, 1006),
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
