@@ -330,3 +330,191 @@ checks. Independently review plan then source/adversarial, caller and full-map
 preservation. Architecture gate: No; only consumes existing shared entry and
 terminal authority. Draft PR and background CI; request a serialized train slot
 only after clean reviews and green exact-head CI. No engine or signer work.
+
+## 2026-10-24: perps history on the caller-wait Read root
+
+Owner: claude-fe7lgm. Approved by claude-ddi2il: `history.rs` (11 occurrences)
+plus only its exact `lib.rs` pending/callback branches, on the #1848 history
+authority. Reviewers: codex-cxxyqr (history bridge consumer) and codex-uufub4
+(engine fit). Production waits for #1945 to land. This plan and its REDs stack
+on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
+
+### Root policy (overseer ruling)
+
+- **The root.** Each perps history command (fills, order history, both income
+  forms, public trades and the REST client-ID lookup) admits ONE original Read
+  root in its genuine Fresh entry. Its `timeout_ms` is the caller's
+  `command_wait()` `Remaining(ms)`: the configured `rustCommandTimeoutMs`, the
+  per-call override, or the SDK default 120000.
+- **Expired or absent.**
+  - `Expired` ends through `reject_expired_command(Read)`: one typed Timeout,
+    no outcome, zero HTTP, timer or Store effects.
+  - `None` (an unstampable clock, or a duplicate of a live legacy id) is no
+    terminal. The query proceeds to normal admission with
+    `DEFAULT_COMMAND_WAIT_MS`, the ruled SDK default. Admission owns the typed
+    refusal: InvalidInput for a bad clock, Internal at capacity. The query
+    never uses a `Remaining(0)` and never a venue-local constant.
+- **Never renewed.** The root is immutable across pages, the fill-to-funding
+  stage restart and retries. Nothing renews it, and the venue never casts a
+  Plan or a physical leg as a root.
+- **Children.** Each page is a physical child leg,
+  `http_leg_context(&root, Read, 20_000 ms, Never)`. It is minted only at
+  eligible dequeue in `account.rs::pump_reads`, never at enqueue, so a page
+  parked behind the shared 1000-weight/minute budget does not burn its 20 s
+  before release. The engine caps the child at the root deadline.
+
+### Geometry (for CALLERS)
+
+| Family | Endpoint | Rows/page | Page cap | Stages |
+| --- | --- | --- | --- | --- |
+| Fills | `userFillsByTime` | 2000 | 200 | 1 |
+| Income (fills part) | `userFillsByTime` | 2000 | 200 | 1 of 2 |
+| Income (funding part) | `userFunding` | 500 | 200 | 2 of 2 |
+| Funding-only income | `userFunding` | 500 | 200 | 1 |
+| Order history | `historicalOrders` | 2000 (retention) | 1 | 1 |
+| Public trades | `recentTrades` | n/a | 1 | 1 |
+| Client-ID lookup | `orderStatus` | n/a | 1 | 1 |
+
+- **Weight.** A streamed page reserves 120 weight at dequeue against the shared
+  1000/minute account read budget, then settles to `ceil(rows/20)` on
+  response. An uncontended walk is therefore about 7-8 pages a minute.
+- **Duration.** A 200-page fills walk is about 25+ minutes, and combined
+  income (up to 400 pages, because `restart_stage` resets the page budget) is
+  about 50+ minutes. Any default or configured caller wait shorter than that
+  ends the walk at root expiry, as a strict Timeout failure with no rows.
+  CALLERS documents this. The overseer ruled not to refuse multi-page and not
+  to shrink geometry.
+
+### Bridge and terminals
+
+- **Owner.** `history::Request` holds a `ReadCursorHistory<HistoryRow>` built
+  from `ReadCompletion::from_context(cx, command, root)`, plus the current page
+  leg once one is minted.
+- **Per item.** Every streamed item runs under `history.admit(cx, &leg)`, so a
+  stale, foreign or expired leg stages nothing.
+- **Response.** `history_response` validates the delivery first, then charges
+  the settled weight. It advances through `admit(..).advance_with_coverage`,
+  keeping the existing native inclusive-progress, gap, retention and stall
+  rules unchanged.
+- **Terminals.**
+  - A **failed page with the root live** keeps today's accepted-only recovery:
+    `finish_with(Err)` publishes accepted rows with one INCOMPLETE marker, or a
+    strict typed failure when nothing was accepted. The failed page's staging
+    never enters the output.
+  - **Root expiry** (parked, in flight, or on the last page) publishes no
+    rows, no marker and no native finalizer. It ends through
+    `history.reject(Timeout)`, which is strict even after accepted pages, never
+    `finish_with(Err)`.
+  - **No engine funnel.** Engine facts at `15df705c0b5`:
+    - A plain `admit_http_command` root has no engine expiry timer or sweep.
+      Only per-leg timers exist (`http_lifecycle.rs:316`).
+    - Completion validation has no deadline check, so `finish_with(Err)` on an
+      expired root would still publish accepted rows.
+    - `fail_context` on the expired root is valid exactly once
+      (`request_context_entry_retention_tests.rs:48`).
+
+    So the venue owns the single expiry terminal.
+  - **Root timer.** At admission the venue arms one root timer at the root
+    deadline, keyed in a venue map by timer to command and root. When it fires
+    for a still-parked query, the venue removes that query from the read queue
+    and calls `reject(Timeout)`.
+  - **Root expiry with a leg in flight.** A leg's deadline never exceeds the
+    root's. The leg's own Timeout (`on_request_failed`, kind Timeout) arrives
+    first or at the same instant. The venue then checks
+    `validate_http_context(root)`:
+    - `TimedOut` means root expiry: strict `reject(Timeout)`.
+    - A live root means a leg timeout: an ordinary page failure, with
+      accepted-only recovery.
+    At equality the root is expired, so the result is strict.
+  - **Timer cleanup.** The timer is cleared on every terminal. A stale timer
+    whose command was finished or reused matches no live entry and does
+    nothing.
+- **Lookup.** The REST client-ID lookup completes through `done_context` or
+  `fail_context` on its root, not numeric `done`/`fail`.
+- **No-I/O branches.** Missing identity, an invalid range and an unknown
+  public-trades market fail through `fail_context` on the admitted root. The
+  standalone-spot branches already use the legacy `Completion` and are out of
+  scope; they keep their numeric sites.
+
+### Queue seam (`account.rs`, history branch only)
+
+- **Parking.** `ReadContinuation::History` parks the retained root plus its
+  continuation, with no leg.
+- **At dequeue.**
+  1. `pump_reads` first mints the child with `http_leg_context`. A timer
+     callback can mint a leg because outside an entry
+     `entry_context_allowed` is true and minting needs no delivery. If minting
+     is refused with `TimedOut` because the root's timer has not fired yet,
+     the venue ends the query with strict `reject(Timeout)`. Any other refusal
+     (Revoked, State) means the owner is gone and the read is dropped. Either
+     way no weight is charged and no Prepare is emitted.
+  2. It then charges weight and sends with
+     `request_managed_with_headers(leg, POST /info, Content-Type: application/json)`,
+     plus `stream_response(ArrayAt::Root)` for streamed kinds.
+- **Wake-ups.** The read timer path issues children through the same public
+  APIs. Expired queued history is pruned through its own owner's `reject`,
+  never a codec or numeric completion.
+- **Unchanged.** The Account branch, its weights, the FIFO order and the
+  shared budget are unchanged.
+
+### Original REDs (assertions on existing behaviour; fail before source)
+
+1. A perps fills query with envelope `timeoutMs: 300000` emits a managed
+   Prepare (not legacy `Action::Http`). It is a public-intent JSON POST
+   `/info` with the native body and Content-Type, and its root deadline is the
+   receipt plus 300000. With no field, the deadline is the receipt plus 120000.
+2. **Multi-window queue.** Twenty concurrent fills queries:
+   - only the budget-eligible first reads are prepared;
+   - a parked read gets its 20 s child only when the read timer releases it
+     (its child deadline is the dequeue time plus 20000, capped at the root);
+   - no weight is charged and nothing is prepared for a read whose root has
+     expired.
+3. **Root expiry.**
+   - **While parked:** the root timer fires and gives one Timeout terminal
+     (kind Timeout, no outcome), with no rows, no marker and no Prepare after
+     expiry. The queue does not need to pump for this to happen.
+   - **During page 2 in flight, after page 1 was accepted:** one Timeout
+     terminal with no partial rows and no marker. Late page-2 DATA is inert.
+   - **On the last page:** the same inert result.
+4. **A page failure with the root live** keeps accepted-only recovery (the
+   existing `owned_partial` oracle) under managed delivery. A first-page or
+   zero-eligible failure stays a strict typed failure.
+5. **Income stage restart** keeps the same root: the funding-stage child's
+   deadline never exceeds the original root deadline. A root expiring between
+   stages ends with no fills-only partial.
+6. **Live versus stale timer issuance.**
+   - A read-timer wake after the root is retired (command reused after a
+     terminal) issues nothing for the old query.
+   - A reused command id gets a fresh root.
+7. **Lookup.**
+   - The REST `orderStatus` lookup completes through its root.
+   - It is a Fresh-entry `Expired` read when the wait has passed: one Timeout,
+     no HTTP.
+8. **Shared queue.** Account reads queued behind and ahead of history keep
+   their FIFO position and weights. A history root expiry does not consume
+   another owner's budget slot.
+9. **Fingerprints.** `check-request-context.py` with only removals: history.rs
+   goes from 11 to 0 for these perps branches. The spot `Completion` sites are
+   not in the manifest. The shared Account sites stay, with no rehash.
+
+All existing `tests/history.rs` native assertions (paging, gaps, retention,
+order fold, income split, sort/limit) are kept. Where they drive legacy
+`Action::Http`, they move to the shared managed fixture (prepare, bind and
+claim), not to new expectations.
+
+### Files
+
+- `venues/hyperliquid/src/history.rs`
+- `venues/hyperliquid/src/account.rs`: `ReadContinuation::History` and the
+  `pump_reads` history branch only
+- `venues/hyperliquid/src/lib.rs`: only the `Pending::History` callback arms
+- a new `venues/hyperliquid/tests/request_context_history.rs`
+- `tests/history.rs` fixture glue
+- this appendix, CALLERS, and the manifest removals
+
+Open-PR map at plan time: no open PR touches these Hyperliquid files.
+codex-5c57jl's socket plan keeps its new `Pending` arm separate and leaves
+`history.rs` and the history branch of `pump_reads` exact.
+
+Architecture gate: No. This only consumes #1848, #1945 and the existing
+managed-header ingress.
