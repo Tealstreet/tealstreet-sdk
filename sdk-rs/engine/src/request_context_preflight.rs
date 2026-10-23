@@ -116,6 +116,10 @@ impl ContextRegistry {
         }
     }
 
+    pub(crate) fn has_retirements(&self) -> bool {
+        !self.retirements.is_empty()
+    }
+
     pub(crate) fn next_retirement(&self) -> Option<HttpOwnerRetirement> {
         self.retirements.front().cloned()
     }

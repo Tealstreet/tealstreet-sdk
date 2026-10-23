@@ -3450,6 +3450,7 @@ impl<V: Venue> Engine<V> {
         self.flush_http_plans(now);
     }
 
+    #[inline(never)]
     fn finish_deferred_commands(&mut self, now: f64) {
         #[cfg(not(feature = "order-locks"))]
         let _ = now;
@@ -3793,9 +3794,13 @@ impl<V: Venue> Engine<V> {
     }
 
     fn flush_http_plans(&mut self, now: f64) {
-        if !self.io.request_contexts.has_plans() {
-            return;
+        if self.io.request_contexts.has_plans() {
+            self.flush_live_http_plans(now);
         }
+    }
+
+    #[inline(never)]
+    fn flush_live_http_plans(&mut self, now: f64) {
         self.io.request_contexts.end_plan_admission();
         if !now.is_finite()
             || self.io.http_delivery.is_some()
@@ -3865,6 +3870,13 @@ impl<V: Venue> Engine<V> {
     fn flush_http_owner_retirements(&mut self) {
         self.io.request_contexts.end_plan_admission();
         self.assert_live();
+        if self.io.request_contexts.has_retirements() {
+            self.flush_pending_http_owner_retirements();
+        }
+    }
+
+    #[inline(never)]
+    fn flush_pending_http_owner_retirements(&mut self) {
         while let Some(token) = self.io.request_contexts.next_retirement() {
             self.assert_live();
             if !self.io.request_contexts.retirement_current(&token) {
