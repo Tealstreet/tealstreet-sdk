@@ -4271,8 +4271,10 @@ preparation/permit tokens retain their existing contracts. Resource identities
 are opaque correlation values, not permission to send or publish state.
 
 Managed admission reserves complete resource groups atomically and reports typed
-capacity refusal without partial preparation or I/O. A fatal legacy allocation
-exhaustion permanently retires the engine: hosts report a terminal engine failure,
+capacity refusal without partial preparation or I/O. Replacement-context child
+identities use the same complete-range reservation and remain exact above the
+former 32-bit boundary; a refused range admits no child or journal supersession.
+A fatal legacy allocation exhaustion permanently retires the engine: hosts report a terminal engine failure,
 dispose it and require reconstruction. No partially queued callback actions or
 previously bound HTTP permit can release after that retirement. Prior-sent write
 uncertainty remains subject to the existing reconciliation contract; terminal

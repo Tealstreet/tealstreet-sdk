@@ -279,3 +279,29 @@ Backpack/Bitrue/KuCoin history inventory removals absent from this branch; queue
 actual-history integration is required before final bans/CI proof. No ratchet
 exception or inventory edits were added for this checkpoint. Actual matching-WASM
 98-control GREEN, final integration/CI/package proof and merge remain outstanding.
+
+## Replacement-context integration after actual #1783
+
+Owner-approved adaptation belongs in this allocator PR, not socket1771. Actual
+response-proof core9a48b645d49 adds a bounded replacement child allocator using
+the prior scalar u32 next_id; this must consume Io.reserve_ids instead. Preserve
+empty/oversized request checks and exact current Delivery precheck before reserve;
+reserve the entire child range atomically, then retain monotonic burned gaps if
+policy, ownership or journal admission later refuses. ContextRegistry replacement
+first/child identities use u64 and checked safe-end validation. No new timer,
+send authority, journal ledger or allocator is added. Existing replacement
+financial/ownership/negative controls remain, with fixtures using ResourceIds
+states and the actual host-safe maximum. Add success crossing2^32 and atomic
+last-safe whole-child-range refusal/one-child success controls. Both independent
+reviews and focused engine/native/reference gates must pass before refreezing.
+The former076 head/evidence remain historical; only socket1771 is authorized to
+consume the new reviewed freeze, and actual1784 is still ahead in merge order.
+
+The actual1783 adaptation passes561 all-feature engine controls and1,040 focused
+engine/native/Binance all-target tests. Strict touched-crate all-target Clippy,
+fmt, diff and full bans pass. Both independent final source/adversarial and
+complete-tree preservation reviews are CLEAR. The only incoming doc conflict
+retains the complete incoming CALLERS first and prior own section once; new
+replacement behavior is described solely in the own SafeIDs section. Two
+redundant test-fixture u64 conversions were removed without changing assertions.
+No journal, body-proof, release, timer or venue signing policy changed.
