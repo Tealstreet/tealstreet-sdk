@@ -1271,3 +1271,74 @@ feature-off unused-getter failure is retained as a RED control. HTTP, dispatch,
 driver, engine ingress and supervision behavior remain unchanged. These checks
 establish preservation only; the fresh isolated measurement is still required
 before any CPU improvement or gate-feasibility conclusion.
+
+### Phase K isolated result and final iteration L
+
+Both independent DATA readers authenticate run39925752443/job120321583930,
+artifact12489841767 SHA256
+f056ca2150188e6adb06bcae3b576d00c62e22e2c955b5bd322eb4cf6d18dfc6.
+All136 ZIP members/129 internal hashes/159761 samples/eight records and three
+source/build/binary identities pass. Own-cohort J is31.4295471ms landing versus
+35.9597417ms candidate (4.5301947ms excess); K is31.4345662 versus36.2056813
+(4.7711150ms excess). Observed excess increased0.2409204ms; no savings or causal
+slowdown conclusion follows. Initial derived self-profile metadata incorrectly
+retained J's artifact ID and an H-before label. Both labels are corrected, the
+initial derived files retained and the unchanged complete numerical maps checked
+independently. Raw samples and every historical experiment remain untouched.
+
+The owner allows ONE final measured iteration, then a gate-math/options report.
+The largest disjoint bucket is native codec/Store +1.71347ms; net native
+on_message is +1.69156ms. The separate parser's +17.4ms inclusive row represents
+changed inlining attribution, not an extra public parse. Public ControlPolicy
+None already skips native classification. ELF inspection shows landing has one
+static native text callback callsite; J/K have two (managed and legacy).
+Both use the same parser also referenced by the private classifier. K/J native
+on_message is16746B plus a2883B parser, versus landing21571B with parser inlined.
+These facts motivate a codegen experiment; they do not prove its cause or savings.
+
+First remove K's unhelpful production storage substitutions in a NEW commit,
+restoring the entire lifecycle production prefix byte-for-byte from verified J.
+Keep K's meaningful full-width/nonmonotonic/retirement and transactional coverage
+controls, adapting only their private representation assertions back to the
+BTreeMap. Keep the actual feature-off getter fix. Do not rewrite any prior commit
+or erase the failed measurement. The last comparison uses verified J directly as
+before, so no unproven K storage optimization remains in the shipping candidate.
+
+The final shared change is one private #[inline(never)] Engine delivery helper
+whose complete body is the existing venue.on_message(cx,socket,text) call. Both
+the managed data path in engine_socket.rs and legacy text arm in engine.rs call
+that helper using their ORIGINAL venue/Cx/socket/text arguments. All existing Cx
+construction stays in place, so the helper takes separate &mut V and &mut Cx
+rather than borrowing/reconstructing the entire Engine. It may compile to a tail
+call, but that must be inspected rather than assumed. Gate the helper and legacy
+call substitution on managed-sockets; feature-off builds retain the original
+direct native call. No new Venue API, identity, routing lookup, Context, retained
+marker, driver cache, header, parser or per-venue codec change is permitted.
+
+Keep all admission/current/expiry checks at the exact original boundaries,
+including two independent fresh message checks and the final current epoch
+predicate. Keep health, startup-ready/classification ordering, capacity cleanup,
+HTTP delivery isolation, event custody, fatal checks, dispatch/fence/frame/timer
+and drain rails byte-identical. No forward-data enum or delayed callback path is
+needed; both callsites remain at their existing positions. The change targets
+the largest net profile delta, but the existing native callback is already
+out-of-line and the parser still has two callers: the helper may simply add
+call overhead. Do not label a source-only codegen change an improvement.
+
+Plan and two independent API/order audits precede source. Run engine/OKX/
+Bitunix/Binance all-target/all-feature native tests, strict Clippy in both feature
+modes, formatting and all bans/ratchets; review the complete diff and unchanged
+callback/context/HTTP order. Then freeze and run ONE final isolated identical
+8-process ABBA (fixed landing7641650, beforeJ1c243, currentL), retaining all prior
+cohorts. Inspect emitted callsites/code sizes as well as every sample and profile.
+Fresh capture, complete independent DATA audits and honest own-cohort arithmetic
+are mandatory. No extra experiment or full-CI luck follows this timebox.
+
+Report exact gate math Rust<=0.90*TS (landing ratio1.14 affords2.60% extra Rust
+CPU), native-versus-WASM limits and concrete choices after this measurement.
+Even hypothetical recovery of the full1.7ms codec bucket leaves about3.06ms of
+the observed native excess. Choices for the owner/Sam include retaining the
+existing temporary managed-sockets boundary while deferring Bitunix adoption,
+a deeper redesign, or an explicitly decided Bitunix-specific objective. Do not
+change any threshold, profile or adoption gate without that decision. Same-runner
+WASM and fresh final CI/proof remain required before a performance-ready claim.
