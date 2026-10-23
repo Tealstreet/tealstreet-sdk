@@ -2,7 +2,7 @@
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
 use safe_cex_engine::Level;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -23,7 +23,6 @@ const ORDERS: &str = "/lite/v1/open_orders";
 const LEVERAGE: &str = "/lite/v1/get_all_initial_leverage";
 const BUILDERS: &str = "/full/v1/get_authorized_builders";
 const RECENT_LIMIT: usize = 1000;
-const SKIP_LOG_LIMIT: usize = 4_096;
 pub(crate) const BUILDER_MAINNET: &str = "0xee8f3559f298fffa79b8253437969d15b5dccff3";
 pub(crate) const BUILDER_TESTNET: &str = "0xb0108ae4c07218ce320e5e22dd911a01c2042162";
 
@@ -98,7 +97,7 @@ pub(crate) struct Account {
     pending_placements: HashSet<String>,
     prior_lifecycle: HashMap<String, (u64, Option<String>)>,
     /// `position:`/`order:`/`coin:` + identity (empty when unreadable) of skips already logged.
-    skip_logged: HashSet<String>,
+    skip_logged: RowReports<String>,
 }
 impl Account {
     pub(crate) fn cancellation_evidence(&self) -> HashMap<String, (Option<String>, Option<u64>)> {
@@ -176,17 +175,12 @@ impl Account {
 /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut RowReports<String>,
     key: String,
     level: Level,
     message: String,
 ) {
-    if logged.len() >= SKIP_LOG_LIMIT {
-        logged.clear();
-    }
-    if logged.insert(key) {
-        cx.notice(level, code::ROW_SKIPPED, message);
-    }
+    logged.report(cx, key, level, message);
 }
 /// A rejected row with no stored copy kept is an error: it commits as absent.
 fn skip_level(stored: bool) -> Level {
@@ -194,18 +188,12 @@ fn skip_level(stored: bool) -> Level {
 }
 /// Re-arms the skip logs of `prefix`: all of them after a clean read, else those `ids` mapped.
 fn rearm_skips<'a>(
-    logged: &mut HashSet<String>,
+    logged: &mut RowReports<String>,
     prefix: &str,
     clean: bool,
     ids: impl IntoIterator<Item = &'a str>,
 ) {
-    if clean {
-        logged.retain(|key| !key.starts_with(prefix));
-    } else {
-        for id in ids {
-            logged.remove(&format!("{prefix}{id}"));
-        }
-    }
+    logged.rearm_namespace(prefix, clean, ids);
 }
 impl Account {
     pub(crate) fn new() -> Self {
@@ -327,7 +315,7 @@ impl Summary<'_> {
     fn currencies(
         &self,
         cx: &mut Cx<'_, Pending>,
-        logged: &mut HashSet<String>,
+        logged: &mut RowReports<String>,
     ) -> Option<Vec<CurrencyBalance>> {
         let mut totals = BTreeMap::<String, f64>::new();
         let mut coins = SnapshotBuilder::default();
