@@ -1,5 +1,11 @@
 # Engine rollback through cutover
 
+Sam's current rollout mechanism is the [per-user hard-cut bundle switch](RUST_BUNDLE_ROLLOUT.md):
+frozen TS app/server versus new Rust app/server for every held venue. Its cohort,
+shared-state and rollback rules supersede older per-account/default-switch
+recommendations below; the evidence and reconciliation requirements still apply.
+This is preparation only, with no deployment or flag change.
+
 Status: recommendation for owner decision 4; no selector, flag, default or runtime
 behavior is implemented by this document. No deployment, live shadow, trading
 or rollback exercise was performed. Retain executable TS implementations and
