@@ -140,6 +140,8 @@ describe('BinanceInverseExchange', () => {
     expect(balance.free).toBe(20_000);
     expect(balance.used).toBe(2_500);
     expect(balance.upnl).toBe(500);
+    expect(balance.info?.coinMargined).toBe(true);
+    expect(balance.currencies?.BTC).toEqual({ total: 0.5, free: 0.4, used: 0.05, upnl: 0.01 });
     expect(balance.coins?.BTC).toEqual({ base: 'BTC', amount: 0.5, notional: 25_000 });
   });
 

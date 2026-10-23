@@ -356,3 +356,108 @@ invalid-clock kind), with all eight compatibility controls passing. The first
 RED commit `3c99a9d2957` also rejected the engine's existing duplicate diagnostic;
 `d1e6ab36d6c` explicitly preserves that diagnostic rather than treating it as an
 admission bug. No production source was committed before these controls.
+
+## Cached Read completion slice on actual 732cf8 (2026-10-23)
+
+Base `732cf8b0a6e5f5dbe783c62af9f14e7c32ee8fe0`; branch
+`feat/rust-lighter-cached-read-context`. The current full venue inventory is
+46 occurrences: account5/history10/identity3/lib5/limits6/trading17. The original
+full inventory appendix remains historical; incoming prunes are retained.
+
+Selection: migrate the two synchronous cached reads together. `FetchLeverage`
+(lib.rs) reads only Store settings and serializes equal buy/sell leverage;
+missing settings fail with `Lighter leverage is not loaded`. The extension
+`FetchAccountTier` (limits.rs) returns only its existing tier cache, including
+`null` before a successful limits refresh. Neither command fetches metadata,
+refreshes limits, authenticates, signs, allocates transport or joins another read.
+Native cache cadence, tier labels/normalization and all writes remain unchanged.
+
+This is the largest currently unblocked coherent slice found in the fresh
+open-PR file map. Hyperliquid spot candles could prune6 but #1877 holds the
+existing test that explicitly requires merged spot to remain legacy. Paradex
+candles could prune6 but retain klines-to-TradingView fallback and polling, which
+require a separate shared multi-attempt authority audit (the existing Read retry
+API is not absent); identity/private paths also wait on shared
+session/signing cores. Lighter identity/catalog have native multi-attempt fallback;
+its independent ticker/depth public pair prunes2, GRVT catalog prunes1, and the
+already planned unsigned Paradex public trades consumer prunes1. GRVT session
+regions belong to claude-55ao7t. Paradex signing is untouched while Sam decides
+whether to use remote Stark payloadSigner option C. Lighter trading.rs is held by
+#1866, and Hyperliquid sign/trading by #1852/#1866; no held source/test is edited.
+
+### Implementation and exact prune
+
+Before reading or serializing either cache, admit the genuine current callback
+using existing `Cx::admit_http_command(Policy)` with Read/no credential,
+20,000ms/Never/no pacing. This existing engine API explicitly supports a no-HTTP
+initial Read root. Rejected already emitted its one typed failure; Revoked
+returns without touching another owner. Never use a numeric fallback or invent a
+request, delivery, timer, mutation fact, completion wrapper or venue capacity rule.
+Consume the root immediately with `done_context`/`fail_context`; handle returned
+revocation without unwrap or a second result. Put admission directly in each
+existing command branch; preserve the native result/error codec verbatim.
+
+Only lib.rs, limits.rs, new tests/request_context_cached_reads.rs, this plan,
+CALLERS/AUDITS/QUALITY appendices and the shared inventory are intended paths.
+The exact three removed occurrences are lib.rs `cx.done(command, data)` and
+`cx.fail(command, error)`, plus limits.rs `cx.done(command, tier)`. Expected
+inventory46→43, lib5→3 and limits6→5; every other Lighter and foreign mapping
+remains byte-equivalent. Do not prune the identical `fail(command,error)` in
+limits.rs's SetAccountTier branch. Generate counts from the actual scanner.
+
+### Original REDs and verification
+
+Commit assertion-failing tests before source. Test both command entry points via
+the real Engine, both aliases and networks. With256 managed candle owners parked,
+valid cached leverage/missing settings/tier must each refuse once with the shared
+Internal capacity error and no financial outcome; a refused ID can be used after
+freeing a peer slot. Invalid NaN/±Infinity clocks must give the shared InvalidInput
+entry error, then succeed at finite time. These assertions must fail on original
+source, which currently bypasses admission and returns cache data/native missing
+setting error instead. No tests merely inspect source spelling or mirror the move.
+
+Compatibility controls preserve finite-time leverage JSON, missing-setting text,
+unknown tier null and repeated immediate completions without leaking the256-owner
+bound; prove no HTTP/managed HTTP/signing/socket/timer or Store publication from
+cached reads. Preserve duplicate-live-command diagnostic/original candle ownership,
+including cross-entrypoint duplicate IDs. Retain existing account_limits cached
+standard-tier and SetAccountTier tests unchanged. Use existing shared test_support
+and native support fixtures, with no generic transport fork.
+
+Obtain independent source/adversarial, caller and full-map plan reviews before
+source and repeat after implementation. Run focused new tests, full Lighter and
+Binance native tests with CARGO_BUILD_JOBS=2, strict touched-crate Clippy/scoped fmt,
+bans and both request-context checks. CI runs WASM/replays/size/timing. Push a draft
+PR, keep a background CI watch, then request a train slot when green and reviews
+are CLEAN; separate fresh full-map guard before a head-matched merge.
+
+Caller-visible: finite valid caches retain method signatures and native output.
+Cached calls now share bounded command admission: capacity/invalid clock failures
+carry shared typed Read metadata and cannot consume another owner; no financial
+outcome or transport support is required for these synchronous reads. No caller
+outside the SDK needs a signature change. Architecture gate: No; this consumes
+existing engine entry and completion authority, adding no cross-cutting mechanism.
+
+### Cached Read original RED and implementation receipt
+
+Plan2a093966518, original RED ffef6eaf580. Eight focused tests run against the
+unchanged actual732cf8 production: five intended assertion failures and three
+compatibility passes. Present leverage/tier incorrectly succeed at full capacity;
+missing leverage exposes its native unclassified error instead of the capacity
+refusal; both cached success branches ignore invalid clocks. After consuming
+shared admission and Context terminals directly, all eight controls pass unchanged.
+The test uses real Engine callbacks and genuine parked candle peers, never mocks
+Context authority. Unknown tier remains null; existing loaded-tier/write controls
+remain intact in account_limits.rs. Scanner-generated delta is exactly lib c5a…1
+and c873…1 plus limits417fc047…1; no other fingerprints are changed. Production
+uses only existing shared APIs, no new helper, transport, retry or signing path.
+
+Cached slice verification: 504 Lighter+Binance native tests across48 result groups,
+all8 focused controls, strict Lighter all-target/all-feature Clippy, scoped fmt,
+bans and both request-context checks (14 controls) pass. Genuine integration of
+actual #1871/#1872 at e233cb05dfb preserves their source and prunes; three shared
+doc conflicts keep complete incoming first plus exact611/868/777-byte own tails.
+No Rust runtime dependency of the tested Lighter/Binance closure changed during
+integration. Only the same8 own paths differ from the new landing. Fresh CI and
+independent implementation reviews are separate final gates; no WASM/replay or
+whole-venue closure is claimed by native evidence.
