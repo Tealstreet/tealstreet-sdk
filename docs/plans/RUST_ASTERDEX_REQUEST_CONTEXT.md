@@ -249,3 +249,25 @@ Each row names its destination above; none authorizes an inventory expansion.
 | `e2f7439f01b028bfc35d2a2433f63a73448c83dad981d0d281f24deb4059167b` | 1 | `cx . fail ( id , not_sent ( error ) . kind ( ErrorKind :: AuthInvalid ) )` | W (STP read uses R/S) |
 | `ea0ff1d0bf1689d0410b0bcc1cbbeedc2fa1bec60349440b50760648369edf0e` | 1 | `cx . fail ( id , error )` | W (STP read uses R/S) |
 | `fbafcc48aaedbe70a22d054c16acc0858b261af3d5f711681c39d0e866da7e30` | 1 | `cx . fail ( id , not_sent ( error ) . kind ( ErrorKind :: InvalidInput ) )` | W (STP read uses R/S) |
+
+## Owning-lane coordination after the inventory checkpoint
+
+`codex-5c57jl` confirms Aster is outside its eleven-family HMAC list: it owns
+no Aster signer source edits. Aster V1 and V3/Code provider adoption therefore
+needs an explicit owner assignment from the overseer before signed source
+changes. The native codec/preimage distinctions remain required. Shared
+background-session Context authority belongs to `codex-uufub4` (Binance/BingX
+first); Aster socket adoption follows the shared core and its fixed size budget.
+This supersedes the provisional owner routing in steps 4/5; no assignment or
+shared capability is implied by sending the dependency request.
+
+`codex-uufub4` confirms its initial Plan core provides declared physical attempt
+counts, shared/fresh-attempt windows and inter-step waits, but does not yet
+provide the engine-owned same-call retry wakeup seam. That early Plan PR alone
+does not unblock the first candle slice. The exact current read-retry contract
+sent to the owner is three retries after the first attempt, with delays exactly
+1000, 2000 and 3000 ms (plain `set_timer`, no jitter), for transport failures and
+the existing GET 429/5xx policy. `read_retries_three_times_with_linear_delays_and_fresh_signatures`
+asserts those exact delays. Reset clears staged Klines rows/invalid state;
+negative native error envelopes remain terminal. Candle-specific partial-stream,
+retry and immutable-deadline regressions still need their original-RED commit.
