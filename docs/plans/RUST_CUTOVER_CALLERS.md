@@ -5682,7 +5682,8 @@ and signing paths keep their existing lifecycle.
 Markets, tickers and FetchCandles use shared managed unsigned HTTP with a20s
 lifecycle bound covering preparation and queue time. Public route and exact
 production/testnet headers are preserved; WebSocket behavior stays legacy.
-Unclaimed, stale or expired replies publish no rows or terminal results.
+Unclaimed, stale or expired replies publish no rows or successful completion;
+engine expiry may emit the original command's one typed Timeout failure.
 Candles retain their native interval/query/limit precedence, seconds timestamps,
 quote volume, permissive successful code coercions and row order without local
 truncation. Admission, preparation and timeout failures are typed; unsent work
