@@ -153,6 +153,10 @@ fn terminals(actions: &[Action], command: u32) -> Vec<Result<Value, VenueError>>
 fn failed(actions: &[Action], command: u32) -> VenueError {
     let mut results = terminals(actions, command);
     assert_eq!(results.len(), 1, "one typed failure: {results:?}");
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandError { .. } | Notice::CommandProgress { .. })
+    )));
     results.remove(0).expect_err("failed read")
 }
 
@@ -310,10 +314,14 @@ fn unsigned_public_auth_failure_neither_retries_nor_spends_private_auth_budget()
         response(&mut e, 0., request.id, status, "", body);
         assert!(!e.store().loaded().markets);
         assert_eq!(e.health().auth_failures, 0);
-        assert!(!e.drain_actions().any(|a| matches!(
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(
             a,
             Action::SetTimer { .. } | Action::Http(_) | Action::ManagedHttp(_)
         )));
+        assert!(actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.message.contains("bad signature") || event.message.contains("401"))));
+        assert!(terminals(&actions, 7).is_empty());
     }
 }
 
@@ -509,6 +517,7 @@ impl Venue for Probe {
                             .unwrap(),
                         );
                     }
+                    assert_eq!(self.held.len(), 256);
                 }
                 Some("release") => {
                     for root in self.held.drain(..) {
@@ -546,12 +555,13 @@ fn genuine_entry_capacity_refuses_local_and_remote_candles_then_recovers() {
     });
     probe_command(&mut e, "hold");
     e.drain_actions().for_each(drop);
-    for interval in [Interval::M1, Interval::S1] {
+    for interval in [Interval::M1, Interval::S1].into_iter().cycle().take(270) {
         candles(&mut e, 100., 7, interval, None, None, None);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let error = failed(&actions, 7);
         assert_eq!(error.kind, Some(ErrorKind::Internal));
         assert_eq!(error.message, Error::Capacity.to_string());
+        assert_eq!(error.outcome, None);
         assert!(
             !actions
                 .iter()
@@ -619,5 +629,119 @@ fn background_seed_owners_retire_at_one_clock_across_success_and_failure() {
         let ticker = released(&mut e, 100., "/tickers");
         response(&mut e, 100., ticker.id, 200, "", TICKERS);
         assert!(e.store().loaded().markets && e.store().loaded().tickers);
+    }
+}
+
+#[test]
+fn invalid_clock_entry_refuses_candles_before_transport() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut e = seeded(venue(false));
+        candles(&mut e, now, 7, Interval::M1, None, None, None);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(failed(&actions, 7).kind, Some(ErrorKind::Internal));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
+    }
+}
+
+#[test]
+fn parked_expiry_and_expired_prepared_binding_never_release_or_publish() {
+    for prepared_expiry in [false, true] {
+        let mut e = seeded(venue(false));
+        candles(&mut e, 100., 7, Interval::M1, None, None, None);
+        let (token, request) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/kline?");
+        e.http_prepared(
+            if prepared_expiry { 100. } else { 20_100. },
+            token,
+            Prepared {
+                id: request.id.0,
+                expires_at: prepared_expiry.then_some(100.),
+            },
+        );
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))
+            || matches!(a,
+            Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))));
+        response(&mut e, 20_100., request.id, 200, "", CANDLES);
+        actions.extend(e.drain_actions());
+        let error = failed(&actions, 7);
+        assert_eq!(error.kind, Some(ErrorKind::Timeout));
+        assert_eq!(error.outcome, None);
+    }
+}
+
+#[test]
+fn retired_attempt_cannot_settle_a_reused_candle_command() {
+    let mut e = seeded(venue(false));
+    candles(&mut e, 100., 7, Interval::M1, None, None, None);
+    let old = released(&mut e, 100., "/kline?");
+    response(&mut e, 100., old.id, 200, "", CANDLES);
+    assert_eq!(
+        terminals(&e.drain_actions().collect::<Vec<_>>(), 7).len(),
+        1
+    );
+    candles(&mut e, 100., 7, Interval::M1, None, None, None);
+    let (token, request) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/kline?");
+    response(&mut e, 100., old.id, 200, "", CANDLES);
+    response(&mut e, 100., RequestId(u64::MAX), 200, "", CANDLES);
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7).is_empty());
+    claim(&mut e, 100., token);
+    response(&mut e, 100., request.id, 200, "", CANDLES);
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7)[0].is_ok());
+}
+
+#[test]
+fn both_background_seed_failures_retire_prepared_and_released_owners() {
+    for tickers in [false, true] {
+        for preparation_failure in [false, true] {
+            let mut e = seeded(Probe {
+                venue: venue(false),
+                held: vec![],
+            });
+            for _ in 0..270 {
+                probe_command(&mut e, "restart");
+                if tickers {
+                    let r = released(&mut e, 100., "/trading_pairs");
+                    response(&mut e, 100., r.id, 200, "", PAIRS);
+                }
+                let path = if tickers {
+                    "/tickers"
+                } else {
+                    "/trading_pairs"
+                };
+                if preparation_failure {
+                    let (token, _) = preparation(&e.drain_actions().collect::<Vec<_>>(), path);
+                    e.http_preparation_failed(
+                        100.,
+                        token,
+                        Error::Invalid,
+                        VenueError::new("typed seed preparation refusal")
+                            .kind(ErrorKind::Unsupported),
+                    );
+                } else {
+                    let request = released(&mut e, 100., path);
+                    e.handle(
+                        100.,
+                        Event::HttpFailed {
+                            request: request.id,
+                            error: "seed transport",
+                        },
+                    );
+                }
+                e.drain_actions().for_each(drop);
+            }
+            probe_command(&mut e, "restart");
+            let request = released(&mut e, 100., "/trading_pairs");
+            response(&mut e, 100., request.id, 200, "", PAIRS);
+            let request = released(&mut e, 100., "/tickers");
+            response(&mut e, 100., request.id, 200, "", TICKERS);
+            assert!(e.store().loaded().markets && e.store().loaded().tickers);
+            // Filling the whole context registry proves all prior attempt roots retired.
+            probe_command(&mut e, "hold");
+            probe_command(&mut e, "release");
+        }
     }
 }
