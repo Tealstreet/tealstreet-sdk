@@ -3949,6 +3949,7 @@ dependencies = [
  "safe-cex-venue-woo",
  "serde",
  "serde_json",
+ "starknet-crypto",
  "zeroize",
 ]
 
