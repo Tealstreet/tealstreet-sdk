@@ -4,7 +4,7 @@ mod account_wire;
 mod history;
 mod public;
 mod rest;
-mod sign;
+pub mod sign;
 mod trading;
 mod wire;
 

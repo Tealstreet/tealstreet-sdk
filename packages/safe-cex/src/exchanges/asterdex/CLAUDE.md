@@ -699,6 +699,12 @@ contract. Native URLs carry socket roles; host transports apply account routing.
   stay byte-exact. See `docs/plans/RUST_ASTER_SIGNER_ADMISSION.md`.
 - Both V1 and V3 are supported. The exact standard-V3 ABI/EIP-191 versus Code
   EIP-712 split above is preserved, with independent ethers signature vectors.
+- Browser-hosted signing (`signHttpRequest`) supports V1 only, through
+  `asterdex.signing.ts`'s standalone V1 request codec, which the TS venue also
+  uses. The host admits an account only when setup resolved an explicit V1, so
+  V3 wallet keys never become HMAC keys. Hosted WS auth is refused; Aster uses a
+  listen key. Hosted stamps come from the host's shared clock, not
+  `asterDEXVirtualClock`.
 - The wrapper forwards builder policy and public auth addresses. The read
   agent is a provider slot; with an `auth.privateKey` wallet it signs with the
   primary wallet's ref. Reads use the read agent and its secondary route;

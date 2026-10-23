@@ -1,10 +1,16 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::{MARKET, TICKER, envelope};
+use safe_cex_engine::signing::{Provider, SignError, SignFuture, SignRequest, SignResult, Signer};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, PublicFeedPolicy, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
 };
-use safe_cex_venue_okx::{Okx, Options};
-use support::{MARKET, TICKER, envelope};
+use safe_cex_venue_okx::Okx;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 const LOGIN_OK: &str = r#"{"event":"login","code":"0","msg":""}"#;
 
@@ -16,12 +22,40 @@ struct Harness {
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
     requests: Vec<Action>,
+    signs: Vec<(RequestId, SignRequest)>,
+}
+
+/// Holds signing work until released, like a slow host provider.
+struct Gate {
+    provider: Provider,
+    parked: Arc<AtomicBool>,
+}
+impl Signer for Gate {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.provider.sign(request)
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if self.parked.load(Ordering::SeqCst) {
+            None
+        } else {
+            self.provider.sign_ready(request)
+        }
+    }
 }
 
 impl Harness {
     fn new(options: Options, policy: PublicFeedPolicy) -> Self {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(options));
+        Self::new_with(options, policy, |_| {})
+    }
+
+    fn new_with(
+        options: Options,
+        policy: PublicFeedPolicy,
+        configure: impl FnOnce(&mut Engine<Okx>),
+    ) -> Self {
+        let mut engine = crate::support::engine(options);
         engine.set_public_feed_policy(policy).unwrap();
+        configure(&mut engine);
         let mut h = Self {
             engine,
             now: 0.0,
@@ -30,6 +64,7 @@ impl Harness {
             sent: vec![],
             closed: vec![],
             requests: vec![],
+            signs: vec![],
         };
         h.engine.start(h.now);
         h.collect();
@@ -44,7 +79,21 @@ impl Harness {
 
     /// Credentials make business and private sockets log in; HTTP is answered empty.
     fn private() -> Self {
-        let mut h = Self::new(
+        Self::private_with(|_| {})
+    }
+
+    /// `private`, with the provider behind a gate that parks signing work.
+    fn private_gated(parked: Arc<AtomicBool>) -> Self {
+        Self::private_with(|engine| {
+            let provider = engine.signer().unwrap();
+            engine
+                .set_signer(Some(Arc::new(Gate { provider, parked })))
+                .unwrap();
+        })
+    }
+
+    fn private_with(configure: impl FnOnce(&mut Engine<Okx>)) -> Self {
+        let mut h = Self::new_with(
             Options {
                 key: Some("test-key".into()),
                 secret: Some("test-secret".into()),
@@ -52,6 +101,7 @@ impl Harness {
                 ..Options::default()
             },
             PublicFeedPolicy::Direct,
+            configure,
         );
         let config = h
             .requests
@@ -65,7 +115,7 @@ impl Harness {
     }
 
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in crate::support::prepared(&mut self.engine, self.now) {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
@@ -73,6 +123,7 @@ impl Harness {
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::Http(_) => self.requests.push(action),
+                Action::Sign { attempt, work, .. } => self.signs.push((attempt, work)),
                 _ => {}
             }
         }
@@ -527,5 +578,158 @@ fn retirement_of_a_loaded_book_still_publishes_an_immediate_clear() {
     assert!(
         safe_cex_engine::wire::sections(frame)
             .any(|(kind, _)| kind == safe_cex_engine::wire::section::BOOK)
+    );
+}
+
+/// A login signed after its socket closed, or after its freshness window, never
+/// reaches a socket: the engine's signing gate rechecks the epoch and expiry.
+fn parked_login(h: &mut Harness, parked: &Arc<AtomicBool>) -> (SocketId, RequestId, SignResult) {
+    h.open("/private");
+    let delay = h.close("/private");
+    h.reconnect("/private", delay);
+    let socket = h.socket("/private");
+    h.sent.clear();
+    h.signs.clear();
+    parked.store(true, Ordering::SeqCst);
+    h.event(Event::WsOpened { socket });
+    assert!(
+        !h.sent
+            .iter()
+            .any(|(s, t)| *s == socket && t.contains("login")),
+        "login waits for the provider"
+    );
+    let (attempt, work) = h
+        .signs
+        .iter()
+        .find(|(_, work)| work.context.method == "WS")
+        .cloned()
+        .expect("staged WS login work");
+    parked.store(false, Ordering::SeqCst);
+    let result = h
+        .engine
+        .signer()
+        .unwrap()
+        .sign_ready(&work)
+        .unwrap()
+        .unwrap();
+    parked.store(true, Ordering::SeqCst);
+    (socket, attempt, result)
+}
+
+#[test]
+fn delayed_login_signature_after_socket_retirement_is_inert() {
+    let parked = Arc::new(AtomicBool::new(false));
+    let mut h = Harness::private_gated(parked.clone());
+    let (socket, attempt, result) = parked_login(&mut h, &parked);
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.sent.clear();
+    h.event(Event::Signed {
+        attempt,
+        result: Ok(result),
+    });
+    assert!(
+        !h.sent.iter().any(|(s, _)| *s == socket),
+        "late signature cannot send on a retired socket"
+    );
+}
+
+#[test]
+fn expired_login_signature_never_sends_its_stale_stamp() {
+    let parked = Arc::new(AtomicBool::new(false));
+    let mut h = Harness::private_gated(parked.clone());
+    let (socket, attempt, result) = parked_login(&mut h, &parked);
+    let stale = format!(r#""timestamp":"{}""#, (h.now / 1000.0).floor());
+    h.now += 6_000.0;
+    h.sent.clear();
+    h.signs.clear();
+    h.event(Event::Signed {
+        attempt,
+        result: Ok(result),
+    });
+    assert!(
+        !h.sent
+            .iter()
+            .any(|(s, t)| *s == socket && t.contains(&stale)),
+        "an expired login signature is never released"
+    );
+}
+
+#[test]
+fn prompt_login_signature_is_released_on_the_live_socket() {
+    let parked = Arc::new(AtomicBool::new(false));
+    let mut h = Harness::private_gated(parked.clone());
+    let (socket, attempt, result) = parked_login(&mut h, &parked);
+    let stamp = format!(r#""timestamp":"{}""#, (h.now / 1000.0).floor());
+    h.sent.clear();
+    h.event(Event::Signed {
+        attempt,
+        result: Ok(result),
+    });
+    assert!(
+        h.sent
+            .iter()
+            .any(|(s, t)| *s == socket && t.contains(r#""op":"login""#) && t.contains(&stamp)),
+        "control: a live, fresh signature sends the login: {:?}",
+        h.sent
+    );
+}
+
+#[test]
+fn reconnect_subscription_precedes_its_account_refresh() {
+    let mut h = Harness::private();
+    let first = h.open("/private");
+    h.requests.clear();
+    h.event(Event::WsClosed {
+        socket: first,
+        code: 1006,
+    });
+    let (timer, at) = h
+        .timers
+        .iter()
+        .copied()
+        .filter(|(_, at)| *at <= h.now + 1000.)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("reconnect timer");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let replacement = h.socket("/private");
+    assert_ne!(first, replacement);
+    h.now += 1.;
+    h.event(Event::WsOpened {
+        socket: replacement,
+    });
+    h.engine.handle(
+        h.now + 1.,
+        Event::WsMessage {
+            socket: replacement,
+            text: LOGIN_OK,
+        },
+    );
+    let mut out: Vec<_> = h.engine.drain_actions().collect();
+    let wakeups: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in wakeups {
+        h.engine.handle(at, Event::TimerFired { timer });
+        out.extend(h.engine.drain_actions());
+    }
+    let subscribe = out.iter().position(|action| matches!(action,
+        Action::WsSend { socket, text } if *socket == replacement && text.contains("subscribe")
+    )).expect("private subscription");
+    let refresh = out
+        .iter()
+        .position(|action| {
+            matches!(action,
+                Action::Http(request) if request.url.contains("/api/v5/account/")
+            )
+        })
+        .expect("account HTTP refresh");
+    assert!(
+        subscribe < refresh,
+        "HTTP refresh preceded private subscription release: subscribe={subscribe}, refresh={refresh}"
     );
 }
