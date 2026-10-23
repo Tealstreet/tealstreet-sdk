@@ -5656,3 +5656,22 @@ queued, expired or late responses cannot publish ticker changes. Admission failu
 keeps recovery on the existing startup Backoff and completes no user command.
 Successful data and SDK method signatures are unchanged for both Lighter aliases
 and networks; private credentials, trading and catalog fallback stay native.
+
+
+
+## BloFin PublicTrades managed history
+
+PublicTrades uses prepared public HTTP and the original 20-second command Read
+owner. A response must match the released, claimed physical attempt before trade
+rows or identities enter the shared history owner. Expired, unreleased or stale
+responses cannot publish results. Preparation refusals retain their typed kind
+and notSent outcome; released transport failures retain network and expiry
+retains timeout. Failed first pages publish neither a staged prefix nor an
+incompleteness warning.
+
+The native unsigned GET, ordered query parameters, empty headers, default and
+clamped wire limit, millisecond timestamps and trade result fields are preserved.
+The wire limit does not truncate returned rows. Known cross-market rows, native
+row order, unknown-market identity consumption, numeric defaults, contract-size
+quantities and side conversion retain their existing behavior. Private history
+and signing paths keep their existing lifecycle.
