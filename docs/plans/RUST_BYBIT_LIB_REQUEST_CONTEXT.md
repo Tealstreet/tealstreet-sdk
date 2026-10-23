@@ -134,3 +134,14 @@ On unchanged source, all four fail at their own runtime assertions:
 2. Does the engine prerequisite (managed order-read token) go to this lane?
 3. Who owns `history.rs` and `closed.rs`? They use `send` but are outside this ruling.
 4. Should the option seed tickers move with slice 4 (options) rather than with discovery?
+
+## 1b PROBE: plan, RED and prune
+
+- **Destination.** The opposite-environment key probe becomes a Background signed Read Context, built with `http_context(Background, Read, rejected-GET credential as Secondary when a read key exists, else Primary, 2 s, Never)` and sent with `request_signed_managed`.
+  - The venue's own probe timer is removed; the Context deadline owns expiry, which arrives as a typed failure and ends the probe unconfirmed.
+  - The response attributes the key only after `validate_http_context` on the live probe's own Context, and every terminal retires it with `finish_http_context`.
+  - Native confirmation (exact integer `retCode 0`), hints, the single terminal and the no-retry rule are unchanged.
+- **Original RED.** `tests/request_context_probe.rs` `the_environment_probe_is_issued_through_managed_prepare`.
+  - On unchanged source the probe goes out as legacy `Http` plus `Sign` and fails the Prepare assertion.
+  - Compatibility controls stay in `tests/startup_auth.rs`: the 2 s window, exact hints in both directions, unproven answers, non-integer codes, expiry and failure finishing once, the concurrent shared probe, and exclusions.
+- **Prune.** `lib.rs` `cx.request` (`051e…`) and one `sign_http` (`6d6c…`, 2→1). The other `sign_http` is the shared `send` chokepoint.

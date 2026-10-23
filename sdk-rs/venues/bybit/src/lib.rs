@@ -159,7 +159,8 @@ pub struct Pending {
 
 struct EnvironmentProbe {
     category: Category,
-    timer: TimerId,
+    /// Background Read authority with the probe's native 2 s window.
+    context: safe_cex_engine::request_context::Context,
     message: String,
 }
 
@@ -894,7 +895,7 @@ impl BybitLinear {
             return;
         }
         if let Some(probe) = self.environment_probe.take() {
-            cx.clear_timer(probe.timer);
+            let _ = cx.finish_http_context(&probe.context);
         }
         let kind = match code {
             33004 => ErrorKind::AuthExpired,
@@ -944,25 +945,51 @@ impl BybitLinear {
         let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window)
             .with_header_policy(self.signing_policy.header_policy());
         self.environment_probe_attempted = true;
-        let timer = cx.set_timer(f64::from(ENVIRONMENT_PROBE_TIMEOUT_MS));
+        use safe_cex_engine::request_context::{Credential, Operation, Policy, RetryPolicy, Scope};
+        let slot = if self.read_credentials.is_some() {
+            safe_cex_engine::CredentialSlot::Secondary
+        } else {
+            safe_cex_engine::CredentialSlot::Primary
+        };
+        let Ok(context) = cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: Some(Credential {
+                    slot,
+                    reference: credentials.credential.clone(),
+                }),
+                timeout_ms: ENVIRONMENT_PROBE_TIMEOUT_MS,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) else {
+            return false;
+        };
+        let pending = Pending {
+            category: self.category,
+            rest: Rest::get("/v5/user/query-api", Query::new()).signed(),
+            then: Then::EnvironmentProbe,
+        };
+        if cx
+            .request_signed_managed(
+                context.clone(),
+                Method::Get,
+                format!("{origin}/v5/user/query-api"),
+                None,
+                Box::new(signing),
+                pending,
+            )
+            .is_err()
+        {
+            let _ = cx.finish_http_context(&context);
+            return false;
+        }
         self.environment_probe = Some(EnvironmentProbe {
             category: self.category,
-            timer,
+            context,
             message: message.to_owned(),
         });
-        let request = cx.request(
-            Method::Get,
-            format!("{origin}/v5/user/query-api"),
-            vec![],
-            None,
-            Pending {
-                category: self.category,
-                rest: Rest::get("/v5/user/query-api", Query::new()).signed(),
-                then: Then::EnvironmentProbe,
-            },
-        );
-        cx.sign_http(request, Box::new(signing));
-        cx.request_timeout(request, ENVIRONMENT_PROBE_TIMEOUT_MS);
         true
     }
 
@@ -971,7 +998,7 @@ impl BybitLinear {
         let Some(probe) = self.environment_probe.take() else {
             return;
         };
-        cx.clear_timer(probe.timer);
+        let _ = cx.finish_http_context(&probe.context);
         self.select_category(probe.category);
         let hint = confirmed.then_some(if self.variant == Variant::Demo {
             "Bybit API key environment mismatch: this key is valid for live Bybit, but this account is configured for Bybit Demo Trading. Create a Demo Trading API key or switch the account to live Bybit."
@@ -2272,6 +2299,16 @@ impl Venue for BybitLinear {
             return;
         }
         if matches!(&pending.then, Then::EnvironmentProbe) {
+            // Only the live probe's own delivery may attribute the key; any
+            // other answer leaves it unconfirmed, never hanging startup.
+            if self
+                .environment_probe
+                .as_ref()
+                .is_none_or(|probe| cx.validate_http_context(&probe.context).is_err())
+            {
+                self.finish_environment_probe(cx, false);
+                return;
+            }
             let confirmed = (200..300).contains(&response.status)
                 && serde_json::from_str::<EnvironmentProbeStatus>(response.body)
                     .is_ok_and(|status| status.ret_code == 0);
@@ -2435,14 +2472,6 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self
-            .environment_probe
-            .as_ref()
-            .is_some_and(|probe| probe.timer == timer)
-        {
-            self.finish_environment_probe(cx, false);
-            return;
-        }
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);
