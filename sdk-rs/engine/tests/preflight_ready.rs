@@ -236,6 +236,7 @@ fn terminals(actions: &[Action], id: safe_cex_engine::CommandId) -> usize {
         .count()
 }
 #[test]
+#[ignore = "adoption #1896, owner codex-hcmq3f; runtime waits for reviewed #1873 feature pin"]
 fn original_red_queued_owner_gets_own_activation_after_foreign_delivery() {
     let mut e = start();
     let first = released(&mut e, 1.).remove(0);
