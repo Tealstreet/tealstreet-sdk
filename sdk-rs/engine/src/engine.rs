@@ -1453,6 +1453,8 @@ struct Io<P> {
     command_entry: Option<command_entry::Entry>,
     #[cfg(feature = "http-plans")]
     http_plan_ready: Option<crate::request_context::Plan>,
+    #[cfg(feature = "http-plans")]
+    http_plan_expiring: Option<crate::request_context::Plan>,
     http_owner_poison: bool,
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
@@ -1531,6 +1533,8 @@ impl<P> Default for Io<P> {
             command_entry: None,
             #[cfg(feature = "http-plans")]
             http_plan_ready: None,
+            #[cfg(feature = "http-plans")]
+            http_plan_expiring: None,
             http_owner_poison: false,
             #[cfg(feature = "http-plans")]
             http_plan_poison: false,
@@ -4149,6 +4153,7 @@ impl<V: Venue> Engine<V> {
         if !now.is_finite()
             || self.io.http_delivery.is_some()
             || self.io.http_plan_ready.is_some()
+            || self.io.http_plan_expiring.is_some()
             || !self.io.request_contexts.plan_scope_clear()
         {
             return;
@@ -4157,6 +4162,7 @@ impl<V: Venue> Engine<V> {
         while let Some(plan) = self.io.request_contexts.next_plan_ready(now) {
             advanced = true;
             if now >= plan.deadline() {
+                self.expire_plan_calls(now, &plan);
                 Cx {
                     now,
                     store: &mut self.store,
@@ -8334,3 +8340,7 @@ mod dispatch_signing_tests;
 #[cfg(all(test, feature = "order-locks", feature = "http-plans"))]
 #[path = "http_plan_boundary_tests.rs"]
 mod http_plan_boundary_tests;
+
+#[cfg(feature = "http-plans")]
+#[path = "http_plan_expiry.rs"]
+mod http_plan_expiry;
