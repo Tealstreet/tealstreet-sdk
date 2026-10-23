@@ -12,9 +12,11 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, Position, PositionSide, Precision, Ticker,
 };
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketId, TimerId,
+    Venue, VenueError,
 };
 use std::collections::{HashMap, HashSet};
 use wire::*;
@@ -92,6 +94,7 @@ pub enum Pending {
         generation: u64,
     },
     Candles {
+        context: Context,
         command: Option<CommandId>,
         symbol: String,
         interval: Interval,
@@ -351,6 +354,33 @@ impl Lighter {
             .candles
             .get(&(symbol.clone(), interval))
             .map_or(0, |state| state.revision);
+        let policy = Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let context = if command.is_some() {
+            let Ok(context) = cx.admit_http_command(policy) else {
+                return;
+            };
+            context
+        } else {
+            match cx.http_context(Scope::Background, policy) {
+                Ok(context) => context,
+                Err(_) => {
+                    if let Some(state) = self
+                        .candles
+                        .get_mut(&(symbol, interval))
+                        .filter(|state| Some(state.generation) == generation)
+                    {
+                        state.in_flight = false;
+                    }
+                    return;
+                }
+            }
+        };
         let result = (|| {
             if !supported(interval) {
                 return Err(interval.unsupported("Lighter"));
@@ -381,29 +411,30 @@ impl Lighter {
                 market.id
             ))
         })();
+        let pending = Pending::Candles {
+            context: context.clone(),
+            command,
+            symbol,
+            interval,
+            rows: vec![],
+            failed: false,
+            revision,
+            generation,
+        };
         match result {
-            Ok(url) => {
-                cx.request_streamed(
-                    Method::Get,
-                    url,
-                    vec![],
+            Ok(url) => match cx.request_managed(context, Method::Get, url, None, pending) {
+                Ok(request) => cx.stream_response(
+                    request,
                     ArrayAt::Envelope(&[&["c"], &["candles"], &["candlesticks"]]),
-                    Pending::Candles {
-                        command,
-                        symbol,
-                        interval,
-                        rows: vec![],
-                        failed: false,
-                        revision,
-                        generation,
-                    },
-                );
-            }
-            Err(error) => {
-                if let Some(c) = command {
-                    cx.fail(c, error)
-                }
-            }
+                ),
+                Err((pending, _)) => self.on_sign_error(
+                    cx,
+                    pending,
+                    VenueError::new("Lighter candle preparation is unavailable")
+                        .kind(ErrorKind::Internal),
+                ),
+            },
+            Err(error) => self.on_sign_error(cx, pending, error.into()),
         }
     }
     fn apply_stats(
@@ -633,23 +664,7 @@ impl Lighter {
                     s.rest_retry_at = cx.now + 2_000.0;
                 }
             }
-            Pending::Candles {
-                command,
-                symbol,
-                interval,
-                generation,
-                ..
-            } => {
-                if let Some(c) = command {
-                    cx.fail(c, error);
-                } else if let Some(s) = self
-                    .candles
-                    .get_mut(&(symbol, interval))
-                    .filter(|s| Some(s.generation) == generation)
-                {
-                    s.in_flight = false;
-                }
-            }
+            pending @ Pending::Candles { .. } => self.on_sign_error(cx, pending, error.into()),
         }
     }
 }
@@ -1180,6 +1195,7 @@ impl Venue for Lighter {
                 }
             }
             Pending::Candles {
+                context,
                 command,
                 symbol,
                 interval,
@@ -1188,6 +1204,13 @@ impl Venue for Lighter {
                 revision,
                 generation,
             } => {
+                if command.is_some() {
+                    if cx.validate_read_http_delivery(&context, &context).is_err() {
+                        return;
+                    }
+                } else {
+                    let _ = cx.finish_http_context(&context);
+                }
                 if command.is_none()
                     && !self
                         .candles
@@ -1200,6 +1223,7 @@ impl Venue for Lighter {
                     self.public_failed(
                         cx,
                         Pending::Candles {
+                            context,
                             command,
                             symbol,
                             interval,
@@ -1213,13 +1237,17 @@ impl Venue for Lighter {
                     return;
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                if let Some(c) = command {
+                if command.is_some() {
                     {
                         let result: Result<String, String> =
                             serde_json::to_string(&rows).map_err(|e| e.to_string());
                         match result {
-                            Ok(data) => cx.done(c, data),
-                            Err(error) => cx.fail(c, error),
+                            Ok(data) => {
+                                let _ = cx.done_context(&context, data);
+                            }
+                            Err(error) => {
+                                let _ = cx.fail_context(&context, error);
+                            }
                         }
                     };
                 } else {
@@ -1258,6 +1286,32 @@ impl Venue for Lighter {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         self.public_failed(cx, pending, error);
+    }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Candles {
+                context,
+                command,
+                symbol,
+                interval,
+                generation,
+                ..
+            } => {
+                if command.is_some() {
+                    let _ = cx.fail_context(&context, error);
+                } else {
+                    let _ = cx.finish_http_context(&context);
+                    if let Some(state) = self
+                        .candles
+                        .get_mut(&(symbol, interval))
+                        .filter(|state| Some(state.generation) == generation)
+                    {
+                        state.in_flight = false;
+                    }
+                }
+            }
+            pending => self.public_failed(cx, pending, &error.message),
+        }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(markets) = self.startup.on_timer(timer) {

@@ -8,6 +8,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 it.each([false, true])(
   'delegates exact StarkNet hashes through the SDK and wasm host (forced text fallback: %s)',
@@ -23,6 +24,7 @@ it.each([false, true])(
     const response = (body: unknown) => ({ status: 200, body: new TextEncoder().encode(JSON.stringify(body)) });
     const transport: Transport = {
       now: () => vector.now,
+      prepareHttp: prepareRecordedHttp,
       setTimeout,
       clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
       connect: (_url, handlers) => {
