@@ -295,7 +295,9 @@ export class EngineHost {
     if (options.signer !== undefined) {
       if (typeof options.signer !== 'function' || typeof engine.useExternalSigner !== 'function')
         throw new TypeError('Engine requires a callable signing provider');
-      engine.useExternalSigner();
+      if (options.signerAlgorithms !== undefined && !Array.isArray(options.signerAlgorithms))
+        throw new TypeError('Engine signer algorithms must be an array');
+      engine.useExternalSigner(options.signerAlgorithms === undefined ? undefined : JSON.stringify(options.signerAlgorithms));
     }
     this.signer = options.signer;
     this.primitiveSignings = new Map();
