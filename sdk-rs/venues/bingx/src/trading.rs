@@ -172,6 +172,11 @@ impl Data<'_> {
             || self.new_order_id.is_some()
             || self.order.is_some()
             || self.new_order_response.is_some()
+            || !self.status.is_empty()
+            || self.quantity.is_some()
+            || !self.cancel_result.is_empty()
+            || !self.new_order_result.is_empty()
+            || !self.replace_result.is_empty()
     }
     fn evidence_ids(&self, ids: &mut Vec<String>) {
         for id in self
@@ -1480,8 +1485,8 @@ fn decode(call: &Call, data: &Data<'_>, absent: bool) -> Result<Vec<String>, Ven
     match call {
         Call::Place => Ok(vec![placement_id(data)?]),
         Call::Cancel { ids, .. } => {
+            data.canceled()?;
             if !absent {
-                data.canceled()?;
                 if let Some(id) = data.id().map_err(unknown)?
                     && ids.len() == 1
                     && id != ids[0]

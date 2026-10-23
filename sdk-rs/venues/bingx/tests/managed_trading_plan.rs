@@ -776,3 +776,42 @@ fn deeply_nested_object_acknowledgements_keep_the_parser_depth_limit() {
     assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
     assert!(writes(&actions).is_empty());
 }
+
+#[test]
+fn native_ack_state_cannot_be_used_as_a_signature_refusal_or_absence_proof() {
+    let mut e = engine();
+    place(&mut e, 1);
+    let r = packet(&collect(&mut e, START));
+    let actions = respond(
+        &mut e,
+        &r,
+        START + 1.,
+        200,
+        r#"{"code":100001,"msg":"Signature verification failed","data":{"status":"NEW"}}"#,
+    );
+    assert!(
+        writes(&actions).is_empty(),
+        "acknowledged state forbids resend"
+    );
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+
+    let mut e = engine();
+    e.store_mut().set_orders(vec![open_order("old")]);
+    e.handle(
+        START,
+        Event::Command(Command::CancelOrders {
+            command: COMMAND,
+            ids: vec!["old".into()],
+        }),
+    );
+    let r = cancel_packet(&collect(&mut e, START));
+    let actions = respond(
+        &mut e,
+        &r,
+        START + 1.,
+        200,
+        r#"{"code":80016,"msg":"order not exist","data":{"status":"NEW"}}"#,
+    );
+    assert_eq!(failures(&actions).len(), 1);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+}
