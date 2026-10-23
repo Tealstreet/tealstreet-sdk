@@ -231,3 +231,7 @@ impl ContextRegistry {
 #[cfg(test)]
 #[path = "execution_plan_capacity_tests.rs"]
 mod plan_capacity_tests;
+
+#[cfg(test)]
+#[path = "execution_plan_composition_tests.rs"]
+mod plan_composition_tests;
