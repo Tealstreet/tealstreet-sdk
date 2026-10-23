@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
+import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { Market, Order, OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
+import { MarginType, Market, Order, OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
 
 class TestHyroExchange extends HyrotraderExchange {
   getBybitRestBaseUrl() {
@@ -79,6 +80,25 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
     ids.forEach((id) => expect(id.length).toBeLessThanOrEqual(36));
     post.mock.calls.forEach(([, payload]) => expect(payload.positionIdx).toBe(0));
   });
+  it('sends conditional triggerDirection as a number for the simulator contract', async () => {
+    const { exchange, store } = setup();
+    store.update({ tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', mark: 83_000, last: 83_000 } as any] });
+    const post = vi.fn().mockResolvedValue(success({ orderId: 'conditional' }));
+    exchange.xhr = { post } as any;
+    await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Conditional,
+      side: OrderSide.Sell,
+      amount: 0.002,
+      triggerPrice: 84_000,
+    });
+    expect(post).toHaveBeenCalledExactlyOnceWith(
+      ENDPOINTS.CREATE_ORDER,
+      expect.objectContaining({ triggerDirection: 1 }),
+      expect.anything(),
+    );
+    expect(typeof post.mock.calls[0][1].triggerDirection).toBe('number');
+  });
   it('cancels individual orders and retires only successful rows', async () => {
     const { exchange, store } = setup();
     const rows = ['first', 'second'].map((id) => ({ ...order, id, status: OrderStatus.Open }) as Order);
@@ -107,6 +127,38 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
     expect(post).toHaveBeenCalledTimes(1);
     expect(store.orders).toEqual([]);
   });
+  it('retires rows silently when cancel-all races a simulator "no longer open" response', async () => {
+    const { exchange, store } = setup();
+    const rows = ['first', 'second'].map((id) => ({ ...order, id, status: OrderStatus.Open }) as Order);
+    store.update({ orders: rows });
+    const mockXhr = {
+      post: vi
+        .fn()
+        .mockResolvedValue({ data: { retCode: 110001, retMsg: 'Order does not exist or is no longer open' } }),
+    } as any;
+    exchange.xhr = mockXhr;
+    exchange.unlimitedXHR = mockXhr;
+    await exchange.cancelSymbolOrders('BTCUSDT');
+    expect(exchange.emitAndLogError).not.toHaveBeenCalled();
+    expect(store.orders).toEqual([]);
+  });
+  it('does not leak the Hyro gone-phrase acceptance into ordinary Bybit', async () => {
+    // The base classifier only accepts Bybit livenet's "order not exists" /
+    // "too late to cancel" phrasing. Hyro extends it via `isAlreadyGoneCancelMessage`
+    // without mutating the shared regex; this guard keeps that boundary.
+    const store = new DefaultStore();
+    const bybit = new BybitExchange('bybit' as any, { key: 'k', secret: 's' }, store);
+    exchanges.push(bybit as unknown as TestHyroExchange);
+    const emit = vi.spyOn(bybit, 'emitAndLogError').mockImplementation(() => {});
+    bybit.xhr = {
+      post: vi
+        .fn()
+        .mockResolvedValue({ data: { retCode: 110001, retMsg: 'Order does not exist or is no longer open' } }),
+    } as any;
+    bybit.unlimitedXHR = bybit.xhr;
+    await bybit.cancelSymbolOrders('BTCUSDT');
+    expect(emit).toHaveBeenCalledWith('Order does not exist or is no longer open');
+  });
   it('disables unsupported capabilities without sending requests', async () => {
     const { exchange } = setup();
     const get = vi.fn();
@@ -121,6 +173,8 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
     expect(getExchangeMetadata('hyrotrader')).toMatchObject({
       positionModes: [PositionMode.OneWay],
       hidePositionModeSelector: true,
+      marginTypes: [MarginType.Cross],
+      hideMarginTypeSelector: true,
       supportsFeeRates: false,
       supportsPositionMargin: false,
     });
