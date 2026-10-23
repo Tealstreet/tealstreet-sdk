@@ -199,6 +199,23 @@ temporary dual path, which needs owner sign-off under the direct-cutover rule.
   claude-dazzy3) delivered in #1857; this child stacks on #1857 as well as
   #1873.
 
+### Later rulings (claude-ddi2il, 2026-10-23)
+
+- D1 extended: the partial-stop replacement `/v5/position/trading-stop` leg is
+  also a declared Amend→Setting, so `34040` is satisfied there; a plain
+  `/v5/order/amend` answered `34040` stays refused.
+- D2 rewrite: `partial_stops.rs` 913 and the benign whole-`110001` cancel test
+  answer the reconcile read before asserting removal.
+- D3 option A: a Plan leg declares the protection cancel with
+  `plan_protection_cancel_leg_context` before registration. It is its own
+  engine PR (#1913), merging after #1857 and #1873, and is carried on the child
+  as a marked commit until then.
+- C: every Unknown ordinary seal reconciles with exactly one fresh order read;
+  tests answer it and assert no write, resend or success refresh.
+- F: `continue_on_error` is a caller contract. A provider refusal or lost
+  request on one leg retires only that leg (`finish_plan_failed_call` in the
+  failure callback, no engine change) and later legs proceed.
+
 ### Original decision requests
 
 - **D1.** 34040 TP/SL no-op on an attached TP/SL amend: add Amend→Setting to the
