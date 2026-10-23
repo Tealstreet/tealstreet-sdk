@@ -829,7 +829,7 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
         private: SocketId(0),
         tick: TimerId(0),
     };
-    h.collect();
+    h.collect_at(0.);
     let mut instruments: serde_json::Value = serde_json::from_str(INSTRUMENT).unwrap();
     let mut eth = instruments["data"][0].clone();
     eth["instId"] = "ETH-USDT".into();

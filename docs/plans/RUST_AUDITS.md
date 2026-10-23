@@ -2030,6 +2030,22 @@ and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
 are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
 required; no all-venue reporter-completion claim.
 
+## BloFin public request-context adoption
+
+BloFin instruments, ticker seeds and candle queries now declare unsigned Read
+semantics through the existing managed transport lifecycle. Context-bearing
+pending reads replace opaque public HTTP and numeric candle terminal callbacks;
+discovery retires its logical handle on terminal success/failure before native
+startup callbacks can enqueue another read. Native catalogue, ticker and candle
+mapping remain intact. No private signing, financial admission, history owner or
+trading-outcome policy is copied into the venue.
+
+One original numeric candle failure site remains for refusal before Context
+issuance; it is a shared command-entry blocker, assigned to `codex-uufub4`, not
+an exemption. The exact BloFin inventory shrinks 28 to 24; every other path map
+remains unchanged. Context-bearing history completion and multi-request admission
+remain separate shared dependencies. [Inventory and scope](RUST_BLOFIN_REQUEST_CONTEXT.md).
+
 ## MEXC public candle lifecycle adoption
 
 The single `FetchCandles` path now consumes shared Context admission, managed
