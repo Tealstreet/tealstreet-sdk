@@ -860,6 +860,26 @@ large IDs, scaling, overflow beyond limit, code510 and live cooldown controls
 remain independently exercised. Inventory shrinks by exactly8 occurrences and
 7 entries, with no unowned map or scanner change.
 
+### Shared order-snapshot admission: Backpack/Paradex
+
+Both families replace whole-order snapshot counters with the existing opaque
+Store token. Backpack preserves newer-read supersession by invalidating before
+capture. Paradex keeps single-read busy ownership and all lagging-replica,
+terminal and amend-evidence semantics. Native cache changes and Store rows now
+publish under one admission boundary; repair HTTP actions remain outside the
+callback and run only after acceptance. Other domain and per-ID clocks stay
+native. Permanent exhaustion performs no order GET and does not strand either
+family's account continuation.
+
+The original four-crate baseline passes1157 tests; final native controls include
+four original Backpack assertion REDs across two proven defects, native malformed
+Pair and Paradex ACK compatibility positives, and distinct token API/exhaustion
+controls. The inventory ratchet keeps1253 sites: only the existing Paradex order
+request's pending-field hash rebinds10-to-10, with exact whole-map substitution,
+source/hash pins and growth/unrelated/pruned-parent negative controls. No rule,
+path or site-kind allowlist is added. Architecture gate: YES, consumers adopt the
+existing engine choke point. No all-venue completion or private parity claim.
+
 ## Shared ticker index compatibility and measurement
 
 Tests and generic benchmark were committed before the representation change. All
