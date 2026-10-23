@@ -49,8 +49,11 @@ Revised after uufub4's API-fit review (2026-10-24).
    - Receipt means the public `Engine::handle(now, Event::Command(..))`
      (native hosts and tests) and the new `Engine::handle_command(now,
      command, timeout_ms: Option<u32>)` (the WASM host). `handle_command`
-     itself refuses a non-finite `now` or an out-of-range `timeout_ms` with a
-     typed error and dispatches nothing.
+     itself refuses a non-finite `now`, an out-of-range `timeout_ms`, or a
+     computed deadline that is not finite or does not advance past `now`,
+     with a typed error and no dispatch. The public `handle` applies the same
+     deadline check to its default stamp; on failure it dispatches unstamped,
+     so the getter answers `None`.
    - Internal re-dispatch (`handle_event` for held commands) stamps nothing.
      It reuses the live stamp, so a deferred entry sees the remaining time
      from the original receipt, default included.
@@ -60,8 +63,10 @@ Revised after uufub4's API-fit review (2026-10-24).
      its own and the getter answers `None`.
    - The stamp is removed on the command's terminal through either emitter:
      the shared `finish_sealed_command`, or the typed initial rejection in
-     `with_command_entry` (direct `CommandFailed`). A reused id after either
-     starts fresh.
+     `with_command_entry` (direct `CommandFailed`). Removal compares the exact
+     receipt sequence, so a duplicate entry's terminal can never delete the
+     first command's live stamp. A reused id after a genuine terminal starts
+     fresh.
    - Storage is bounded by the commands awaiting a reply.
 4. **API.** `Cx::command_wait() -> Option<CommandWait>`, with `enum
    CommandWait { Remaining(u32), Expired }`. It is observation only: it
@@ -71,12 +76,18 @@ Revised after uufub4's API-fit review (2026-10-24).
    - It is `None` in every borrowed callback: timer, socket, HTTP delivery,
      plan readiness, another command's entry, a rejected or spent entry, or a
      duplicate entry without its own stamp.
-   - `Remaining(ms)` is the whole milliseconds strictly before the deadline.
-     `Expired` means `now >= deadline`.
-   - On `Expired` a venue must not admit or start work. It finishes the
-     command with a typed `Timeout`/`NotSent` failure through the entry's
-     existing numeric-terminal custody, with zero HTTP, timer or Store
-     effects.
+   - `Remaining(ms)` is `floor(deadline - now)` whole milliseconds and is
+     always at least 1. A remainder under 1 ms is `Expired`, as is
+     `now >= deadline`. `Remaining(0)` is never exposed and nothing renews.
+   - On `Expired` in a **Fresh** entry (before admission or any opaque
+     effect), a venue must not admit or start work. It finishes through the
+     entry's numeric-terminal custody with a typed `Timeout` error, with zero
+     HTTP, timer or Store effects. The outcome is `NotSent` for a mutation
+     command and none (`None`) for a read.
+   - A **Bound** or **Legacy** entry may already own a Context, Preflight or
+     Plan that has sent writes. There, `Expired` only informs the venue. It
+     terminates through that existing authority and its journal projection,
+     and never claims `NotSent`.
 5. **No other effect.** The engine does not enforce the deadline by itself.
    Venues opt in by using `Remaining` as a root `Policy.timeout_ms`. The
    host's own timer and its `COMMAND_TIMEOUT` result are unchanged.
@@ -120,15 +131,20 @@ Engine, through real decode and dispatch (a probe venue records
    command's Fresh entry, before any admission. Without the field it gives
    120000. RED today, because the field is dropped and no API exists (the
    adapter returns `None`).
-2. A held command released 40 s after receipt gives about 260000, both with
-   an explicit wait and with the default, so the default is stamped at
-   receipt.
+2. A held command released 40 s after receipt gives about 260000 with an
+   explicit 300000 wait, and about 80000 with the default 120000, so the
+   default is stamped at receipt.
 3. `None` in timer, HTTP response, socket and plan-readiness callbacks, and in
    another command's entry.
-4. A released entry at or past its deadline gives `Expired`. The probe's
-   typed Timeout terminal then makes zero HTTP, timer or Store effects.
+4. A released Fresh entry at or past its deadline gives `Expired`, and so
+   does one under 1 ms short of it (no `Remaining(0)`). The probe's typed
+   Timeout terminal makes zero HTTP, timer or Store effects: outcome
+   `NotSent` for a mutation command, none for a read. A Bound entry with a
+   released write that sees `Expired` ends through its Context/journal
+   projection, not `NotSent`.
 5. A duplicate live id: the second receipt neither replaces nor reads the
-   first stamp, and the first keeps its deadline.
+   first stamp. The duplicate's own terminal does not delete it, and the
+   first keeps its deadline.
 6. Cleanup and reuse: after a typed initial rejection (`CommandFailed` from
    `with_command_entry`) and after a normal terminal, a reused id gets a
    fresh stamp.
