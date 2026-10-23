@@ -294,6 +294,7 @@ impl Account {
             .store
             .finish_metadata(&leg.token, Ok(Proposal::complete(proposal)))
         else {
+            fail(cx, &leg, refused());
             return;
         };
         if resolution.published {
@@ -401,6 +402,7 @@ fn answer_current(cx: &mut Cx<'_, Pending>, leg: &Leg, read: (f64, f64)) {
         .store
         .finish_metadata(&leg.token, Ok(Proposal::rails(rails)))
     else {
+        fail(cx, leg, refused());
         return;
     };
     match resolution.into_result() {

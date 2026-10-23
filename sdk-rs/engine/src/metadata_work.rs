@@ -62,7 +62,7 @@ impl<H> Index<H> {
             .map(|(_, _, handle)| handle)
     }
     pub(super) fn remove(&mut self, token: &Token) {
-        self.0.retain(|(_, key, _)| key != token);
+        self.0.retain(|(_, existing, _)| existing != token);
     }
 }
 
