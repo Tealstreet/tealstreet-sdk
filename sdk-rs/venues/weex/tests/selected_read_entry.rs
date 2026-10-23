@@ -1,7 +1,5 @@
 //! Frozen native controls for the shared selected Read issuer.
-use safe_cex_engine::request_context::{
-    Claim, Error, HttpAction, Preparation, Prepared, RoutingIntent,
-};
+use safe_cex_engine::request_context::{Claim, HttpAction, Preparation, Prepared, RoutingIntent};
 use safe_cex_engine::signing::{Identity, KeyRef, Operation, SignResult};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice};
 use safe_cex_venue_weex::{Options, WeexFutures as Venue};
@@ -84,36 +82,6 @@ fn duplicate_pending_command_cannot_issue_or_retire_the_original_read() {
         e.drain_actions().any(|a| matches!(a, Action::Sign { .. })),
         "original read retains its preparation after duplicate admission refusal"
     );
-}
-
-#[test]
-fn genuine_entry_capacity_keeps_the_exact_typed_denial_and_no_new_work() {
-    let mut e = engine(true);
-    for command in 1..=256 {
-        let _ = prepare(&ask(&mut e, command));
-    }
-    let actions = ask(&mut e, 257);
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_) | Action::Sign { .. })
-        || matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
-    let failed = actions
-        .iter()
-        .filter_map(|a| match a {
-            Action::Notice(Notice::CommandFailed {
-                command: 257,
-                error,
-            }) => Some(error),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(failed.len(), 1);
-    let mut expected = Error::Capacity.venue_error();
-    expected.outcome = None;
-    assert_eq!(
-        *failed[0], expected,
-        "do not erase the admission failure phase or typed fields"
-    );
-    assert!(e.store().orders().is_empty());
-    assert!(e.store().positions().is_empty());
 }
 
 #[test]

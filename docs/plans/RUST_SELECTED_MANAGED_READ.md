@@ -189,7 +189,7 @@ impl AdmittedRead {
         recipe: impl FnOnce(&Identity) -> Box<dyn SignStep>,
         pending: impl FnOnce(Self) -> P) -> Result<RequestId, (P, Error)>;
     pub fn retry<P, T>(self, cx: &Cx<'_, P>, evidence: RetryEvidence, pending: T)
-        -> Result<(Self, T), RetryRefusal<T>>;
+        -> Result<(Self, T), Box<RetryRefusal<T>>>;
 }
 ```
 
@@ -310,3 +310,24 @@ this receipt and is not counted as a RED. No production or inventory changed.
 Overseer provenance disposition: hcmq3f owns trusted issuer/subject/config-
 generation snapshot retirement inside G2 or a separate G2c slice. This helper
 continues to consume existing Context generation only.
+
+## Maintainer standalone-helper split
+
+The overseer subsequently directed the helper to land independently: new
+selected_read.rs, engine controls and minimal module export, with existing
+native compatibility evidence. This explicitly authorizes the one-line lib.rs
+export despite concurrent claims. No claimant runtime hunk is edited. BingX
+adopts after #1889 (claude-55ao7t); WEEX after #1934 (uufub4, combo-4a). Native
+original capacity REDs remain unchanged at `95d6b16389d`, held on branch
+`feat/rust-selected-read-consumer-reds`. The standalone helper excludes those
+still-failing native assertions from its passing test targets; it retains the
+six native compatibility controls and proves exact capacity behavior through
+genuine engine-helper controls. This is not native adoption or a claim that
+those two original venue failures have gone GREEN. Consumer PRs must re-enable
+and execute the unchanged original assertions through actual adoption.
+
+Source verification found RetryRefusal is at least 233 bytes. Its error return
+is boxed to satisfy strict Clippy without adding a success-path allocation or
+weakening custody: `Result<(Self,T), Box<RetryRefusal<T>>>`. The boxed error still
+owns the identical wrapper and continuation. This signature refinement requires
+source/API re-review; no lint exemption is added.
