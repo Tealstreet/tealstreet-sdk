@@ -757,7 +757,8 @@ Identity, RoutingIntent, Read operation, symbol/native instrument, native
 endpoint sequence and immutable call/retry geometry, publication and fallback
 policy. The bounded index stores only WorkKey/Token/ExecutionHandle. It checks
 full equality and token currency independently of publication eligibility;
-return-only reads can join while writes/supersession cannot revive publication.
+only reads with the same publication policy can join. Return-only reads never
+join publish-if-current work; writes/supersession cannot revive publication.
 The adapter prunes nonvalidating handles before lookup, and retires their token
 storage too. No key text, observer list or new completion table enters the group.
 
@@ -789,3 +790,8 @@ controls, not an executed NX deployment or Plan-history runtime receipt. Keep
 NX abd35931b4's current TS path distinct from the future Rust binding. The real
 private paged consumer still needs its final-slot physical-timeout/root-expiry
 controls after #1928's exact runtime signatures are reviewed.
+
+On exact513985923bb, the refreshed BingX account target executes78PASS and
+five assertion failures: the same two entry-capacity and three coalescing
+controls named above. No setup failure or ignored test is counted. Native-owner
+plan review is CLEAR; same-policy-only joining is explicit.
