@@ -87,10 +87,48 @@ pub enum Owner {
     Background {
         generation: u64,
     },
+    /// Venue-maintained authentication session (listen key, WS token, login).
+    /// Retiring the session revokes every context and attempt it owns.
+    Session {
+        generation: u64,
+    },
     /// One physical execution serving several command observers.
     Execution {
         generation: u64,
     },
+}
+
+/// Engine-issued session authority. Holds no key, token or credential value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Session {
+    issuer: std::sync::Arc<()>,
+    generation: u64,
+}
+
+impl Session {
+    pub(crate) fn new(issuer: &std::sync::Arc<()>, generation: u64) -> Self {
+        Self {
+            issuer: issuer.clone(),
+            generation,
+        }
+    }
+    pub(crate) fn issued_by(&self, issuer: &std::sync::Arc<()>) -> bool {
+        std::sync::Arc::ptr_eq(&self.issuer, issuer)
+    }
+    pub fn owner(&self) -> Owner {
+        Owner::Session {
+            generation: self.generation,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionPolicy {
+    /// Every context issued for the session must use exactly this credential.
+    pub credential: Option<Credential>,
+    /// The venue contract makes a new create/keepalive harmless while an
+    /// earlier one is unresolved (cite it at the declaration site).
+    pub repeat_safe: bool,
 }
 
 /// Independent of HTTP method: private POST snapshots are still reads.
