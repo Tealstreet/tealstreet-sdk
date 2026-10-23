@@ -3,7 +3,7 @@ use super::*;
 use safe_cex_engine::Fill;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::execution::{
     Arithmetic, CumulativePrice, Cursor, ExecutionRounding, Rejection, Report,
 };
@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// BloFin counts REST limits per one-minute window, so a 418/429 without
 /// `Retry-After` waits out a whole window before the settings read retries.
 const RATE_LIMIT_PAUSE_MS: f64 = 60_000.0;
-const SKIP_LOG_LIMIT: usize = 4_096;
 
 /// A skipped row is an error only when the store has no copy for it to keep.
 fn skip_level(stored: bool) -> Level {
@@ -26,17 +25,12 @@ fn skip_level(stored: bool) -> Level {
 /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut RowReports<String>,
     key: &str,
     level: Level,
     message: impl Into<String>,
 ) {
-    if logged.len() >= SKIP_LOG_LIMIT {
-        logged.clear();
-    }
-    if logged.insert(key.to_owned()) {
-        cx.notice(level, code::ROW_SKIPPED, message);
-    }
+    logged.report(cx, key.to_owned(), level, message);
 }
 /// The identity fields of a position or order row that failed to decode.
 #[derive(Deserialize, Default)]
@@ -117,9 +111,9 @@ pub(crate) struct Account {
     signature_rejections: [u8; 2],
     pub startup_rejected: bool,
     /// Instrument ids (empty when unidentified) whose skipped position row was already logged.
-    position_skips: HashSet<String>,
+    position_skips: RowReports<String>,
     /// Order ids (empty when unidentified) whose skipped row was already logged.
-    order_skips: HashSet<String>,
+    order_skips: RowReports<String>,
 }
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum StartupRead {
@@ -918,7 +912,7 @@ impl Blofin {
                 ..
             } => match serde_json::from_str::<PositionRow<'_>>(item) {
                 Ok(p) => {
-                    self.account.position_skips.remove(p.inst_id.as_ref());
+                    self.account.position_skips.forget(p.inst_id.as_ref());
                     if (p.inst_type.is_empty() || p.inst_type.eq_ignore_ascii_case("SWAP"))
                         && p.positions.0 != 0.0
                         && cx.store.market_by_id(&p.inst_id).is_none()
@@ -972,7 +966,7 @@ impl Blofin {
             } => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(o) => {
                     for id in [&o.order_id, &o.tpsl_id, &o.algo_id] {
-                        self.account.order_skips.remove(id.as_ref());
+                        self.account.order_skips.forget(id.as_ref());
                     }
                     if (o.inst_type.is_empty() || o.inst_type.eq_ignore_ascii_case("SWAP"))
                         && !matches!(

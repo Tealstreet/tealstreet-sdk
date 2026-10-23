@@ -318,6 +318,7 @@ test('Workers applies factory protocol options after caller flags while retainin
 });
 
 test('Workers requests honor typed deadlines through response bodies and consume routing metadata', async (t) => {
+  t.mock.method(Date, 'now', () => 1_700_000_000_000);
   const deadlines = [];
   const requests = [];
   t.mock.method(AbortSignal, 'timeout', (milliseconds) => {
@@ -772,4 +773,133 @@ test('Workers releases managed local signer allocation after failed host constru
   assert.ok(messages.some((message) => message.includes('Engine start failed')));
   object.leave(client);
   assert.equal(frees, 1);
+});
+
+// Real EngineHost ownership with a deterministic native engine double. No WASM
+// build or exhaustion loop is needed to reach the sticky terminal state.
+function terminalWorkers(t, dieAt) {
+  const intervals = new Map();
+  let next = 0;
+  t.mock.method(globalThis, 'setInterval', (callback) => { intervals.set(++next, callback); return next; });
+  t.mock.method(globalThis, 'clearInterval', (id) => intervals.delete(id));
+  const engines = [];
+  class WasmEngine {
+    constructor() { this.fatal = false; this.freed = 0; this.frames = 0; engines.push(this); }
+    failed() { return this.fatal; }
+    start() { if (dieAt === 'start') this.fatal = true; return '[]'; }
+    command(json) { if (JSON.parse(json).op === 'placeOrders') this.fatal = true; return '[]'; }
+    takeFrame() { this.frames++; if (dieAt === 'flush') this.fatal = true; return undefined; }
+    snapshotFrame() { if (dieAt === 'snapshot') this.fatal = true; return new Uint8Array(8); }
+    free() { this.freed++; }
+  }
+  const EngineObject = createEngineObject({
+    accountToken: () => 'terminal-fixture', loadEngine: async () => ({ WasmEngine }),
+    createTransport: () => ({ now: () => 0, setTimeout, clearTimeout }),
+    flush: { store: 250, books: 60 },
+  });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const messages = [[], []];
+  const clients = messages.map((received) => ({ send(text) { received.push(JSON.parse(text)); } }));
+  for (const client of clients) object.clients.add(client);
+  return { object, clients, messages, engines, intervals,
+    start: () => object.receive(clients[0], '{"op":"start","venue":"fixture"}') };
+}
+
+for (const phase of ['start', 'flush']) {
+  test(`Workers terminal ${phase} retires its host and intervals before notifying clients`, async (t) => {
+    const r = terminalWorkers(t, phase);
+    try {
+      await r.start();
+      if (phase === 'flush') [...r.intervals.values()][0]();
+      assert.equal(r.object.host, undefined);
+      assert.equal(r.intervals.size, 0);
+      assert.equal(r.engines[0].freed, 1);
+      for (const received of r.messages) {
+        assert.equal(received.length, 1);
+        assert.deepEqual(received[0], { op: 'startupFailed', detail: {
+          message: 'Exchange engine stopped unexpectedly; recreate the engine', kind: 'internal', outcome: 'unknown',
+        } });
+      }
+      const failure = r.object.startupFailure;
+      assert.equal(typeof failure, 'string');
+    } finally { for (const client of r.clients) r.object.leave(client); }
+  });
+}
+
+test('Workers terminal commands keep their original owners after host replacement', async (t) => {
+  const r = terminalWorkers(t);
+  try {
+    await r.start();
+    const old = r.object.host;
+    const first = r.object.receive(r.clients[0], '{"op":"command","id":77,"command":{"op":"fetchFills"}}');
+    const second = r.object.receive(r.clients[1], '{"op":"command","id":77,"command":{"op":"fetchFills"}}');
+    const fatal = r.object.receive(r.clients[0], '{"op":"command","id":88,"command":{"op":"placeOrders","orders":[]}}');
+    assert.equal(r.object.host, undefined);
+    const replacement = { dispose() {}, flush() { throw new Error('old interval reached replacement'); } };
+    r.object.host = replacement;
+    await Promise.all([first, second, fatal]);
+    assert.equal(r.object.host, replacement);
+    assert.equal(old.dead, true);
+    for (const [index, received] of r.messages.entries()) {
+      const done = received.filter((message) => message.op === 'done');
+      assert.deepEqual(done.map((message) => message.id).sort(), index === 0 ? [77, 88] : [77]);
+      assert.ok(done.every((message) => message.error.includes('engine stopped')));
+      if (index === 0) assert.match(done.find((message) => message.id === 88).error,
+        /outcome is unknown.*Reconcile before retrying/);
+      assert.equal(received.filter((message) => message.op === 'startupFailed').length, 1);
+    }
+  } finally { for (const client of r.clients) r.object.leave(client); }
+});
+
+test('Workers queued old intervals and late death cannot touch a replacement', async (t) => {
+  const r = terminalWorkers(t, 'flush');
+  try {
+    await r.start();
+    const old = r.object.host;
+    const oldTicks = [...r.intervals.values()];
+    oldTicks[0]();
+    assert.equal(r.object.host, undefined);
+    let flushes = 0;
+    const replacement = { dispose() {}, flush() { flushes++; } };
+    r.object.host = replacement;
+    r.object.startupFailure = 'replacement state';
+    old.handlers.onDead(old.deadError);
+    for (const tick of oldTicks) tick();
+    assert.equal(r.object.host, replacement);
+    assert.equal(r.object.startupFailure, 'replacement state');
+    assert.equal(flushes, 0);
+    assert.equal(r.engines[0].freed, 1);
+  } finally { for (const client of r.clients) r.object.leave(client); }
+});
+
+test('Workers join snapshot death returns one terminal notice without leaking the accepted client', async (t) => {
+  const r = terminalWorkers(t, 'snapshot');
+  try {
+    await r.start();
+    const response = await r.object.fetch({ headers: new Map([['Upgrade', 'websocket'], ['Authorization', 'Bearer terminal-fixture']]) });
+    assert.equal(response.status, 101);
+    assert.equal(r.object.host, undefined);
+    const joined = [...r.object.clients].at(-1);
+    assert.deepEqual(joined.sent.map((text) => JSON.parse(text).op), ['startupFailed']);
+    response.webSocket.close();
+    assert.equal(r.object.clients.has(joined), false);
+    assert.equal(r.engines[0].freed, 1);
+    assert.equal(r.intervals.size, 0);
+  } finally { for (const client of [...r.object.clients]) r.object.leave(client); }
+});
+
+
+test('Workers terminal errors stay silent after their original client departs', async (t) => {
+  const r = terminalWorkers(t);
+  try {
+    await r.start();
+    const pending = r.object.receive(r.clients[0], '{"op":"command","id":77,"command":{"op":"fetchFills"}}');
+    const fatal = r.object.receive(r.clients[1], '{"op":"command","id":88,"command":{"op":"placeOrders","orders":[]}}');
+    r.object.leave(r.clients[0]);
+    await Promise.all([pending, fatal]);
+    assert.equal(r.messages[0].filter((message) => message.op === 'done').length, 0);
+    const done = r.messages[1].filter((message) => message.op === 'done');
+    assert.deepEqual(done.map((message) => message.id), [88]);
+    assert.match(done[0].error, /outcome is unknown.*Reconcile before retrying/);
+  } finally { for (const client of [...r.object.clients]) r.object.leave(client); }
 });

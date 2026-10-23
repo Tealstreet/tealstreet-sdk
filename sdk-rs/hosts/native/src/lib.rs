@@ -5,6 +5,7 @@
 //! drive the same loop as the network.
 #![cfg(not(target_arch = "wasm32"))]
 
+mod managed_http;
 mod routing;
 mod server;
 mod transport;
@@ -15,11 +16,12 @@ pub use routing::{
 };
 pub use server::{FrameServer, ServerConfig};
 pub use transport::{
-    NetworkTransport, PayloadSigner, PayloadSignerFuture, PayloadSignerResult, Transport,
+    BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PayloadSigner,
+    PayloadSignerFuture, PayloadSignerResult, PreparedHttp, Transport,
 };
 
 use safe_cex_engine::{
-    Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue,
+    Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue, VenueError,
 };
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -44,6 +46,14 @@ pub enum HostEvent {
     HttpChunk(RequestId, Vec<u8>),
     HttpEnd(RequestId),
     HttpFailed(RequestId, String),
+    HttpPrepared(
+        safe_cex_engine::request_context::Preparation,
+        Result<Box<dyn PreparedHttp>, HttpPrepareError>,
+    ),
+    HttpWake(
+        safe_cex_engine::request_context::Preparation,
+        safe_cex_engine::request_context::Permit,
+    ),
     Signed(
         RequestId,
         Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>,
@@ -71,6 +81,29 @@ pub fn production_entropy() -> safe_cex_engine::entropy::Entropy {
     safe_cex_engine::entropy::Entropy::new(Box::new(fill), Box::new(fill))
 }
 
+/// Only the engine's sticky resource failure changes a panic into a terminal
+/// host result. Venue, transport and consumer bugs retain their panic behavior.
+fn engine_turn<S, R>(
+    state: &mut S,
+    operation: impl FnOnce(&mut S) -> R,
+    failed: impl Fn(&S) -> bool,
+) -> Result<R, VenueError> {
+    fn terminal() -> VenueError {
+        VenueError::new("Engine resource identities exhausted or invalid; recreate the engine")
+            .kind(safe_cex_engine::ErrorKind::Internal)
+            .outcome(safe_cex_engine::Outcome::Unknown)
+    }
+    if failed(state) {
+        return Err(terminal());
+    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(state))) {
+        Ok(value) if !failed(state) => Ok(value),
+        Ok(_) => Err(terminal()),
+        Err(_) if failed(state) => Err(terminal()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
 pub struct Host<V: Venue, T: Transport> {
     engine: Engine<V>,
     transport: T,
@@ -78,7 +111,11 @@ pub struct Host<V: Venue, T: Transport> {
     inbox: mpsc::UnboundedReceiver<HostEvent>,
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
     timers: HashMap<TimerId, AbortHandle>,
+    managed_http: managed_http::Requests,
+    signing_tasks: HashMap<RequestId, managed_http::Task>,
     clock: fn() -> f64,
+    terminal: Option<VenueError>,
+    terminal_reported: bool,
 }
 
 impl<V: Venue, T: Transport> Host<V, T> {
@@ -91,7 +128,11 @@ impl<V: Venue, T: Transport> Host<V, T> {
             inbox,
             sockets: HashMap::new(),
             timers: HashMap::new(),
+            managed_http: Default::default(),
+            signing_tasks: HashMap::new(),
             clock: now_ms,
+            terminal: None,
+            terminal_reported: false,
         }
     }
 
@@ -134,34 +175,70 @@ impl<V: Venue, T: Transport> Host<V, T> {
         mut on_frame: impl FnMut(&[u8]),
         mut on_notice: impl FnMut(Notice),
     ) -> Engine<V> {
-        self.engine.start((self.clock)());
+        self.turn(|host| host.engine.start((host.clock)()));
         self.execute(&mut on_notice);
         let mut flush = tokio::time::interval(flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
+        while self.terminal.is_none() {
             tokio::select! {
                 Some(event) = self.inbox.recv() => self.dispatch(event),
                 command = commands.recv() => match command {
-                    Some(command) => self.engine.handle((self.clock)(), Event::Command(command)),
+                    Some(command) => { self.turn(|host| host.engine.handle((host.clock)(), Event::Command(command))); },
                     None => break,
                 },
                 _ = flush.tick() => {
-                    if let Some(frame) = self.engine.take_frame((self.clock)()) {
-                        on_frame(frame);
-                    }
+                    self.frame(&mut on_frame);
                 }
             }
             self.execute(&mut on_notice);
         }
-        if let Some(frame) = self.engine.take_frame((self.clock)()) {
-            on_frame(frame);
+        if self.terminal.is_none() {
+            self.frame(&mut on_frame);
         }
         self.stop();
+        self.report_terminal(&mut on_notice);
         self.engine
+    }
+
+    fn turn<R>(&mut self, operation: impl FnOnce(&mut Self) -> R) -> Option<R> {
+        if self.terminal.is_some() {
+            return None;
+        }
+        match engine_turn(self, operation, |host| host.engine.failed()) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                self.terminal = Some(error);
+                self.stop();
+                None
+            }
+        }
+    }
+
+    fn report_terminal(&mut self, on_notice: &mut impl FnMut(Notice)) {
+        if !self.terminal_reported
+            && let Some(error) = &self.terminal
+        {
+            self.terminal_reported = true;
+            // Deliberately outside the panic classifier: consumer failures are
+            // never disguised as another engine terminal result.
+            on_notice(Notice::StartupFailed {
+                error: error.clone(),
+            });
+        }
+    }
+
+    fn frame(&mut self, on_frame: &mut impl FnMut(&[u8])) {
+        // Own the result before calling application code, outside the guard.
+        let frame = self.turn(|host| host.engine.take_frame((host.clock)()).map(Vec::from));
+        if let Some(Some(frame)) = frame {
+            on_frame(&frame);
+        }
     }
 
     fn stop(&mut self) {
         self.inbox.close();
+        self.managed_http.clear();
+        self.signing_tasks.clear();
         self.sockets.clear();
         for (_, timer) in self.timers.drain() {
             timer.abort();
@@ -169,9 +246,19 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn dispatch(&mut self, event: HostEvent) {
+        self.turn(|host| host.dispatch_inner(event));
+    }
+
+    fn dispatch_inner(&mut self, event: HostEvent) {
         let now = (self.clock)();
         let engine = &mut self.engine;
         match event {
+            HostEvent::HttpPrepared(preparation, result) => {
+                self.complete_http_preparation(preparation, result);
+            }
+            HostEvent::HttpWake(preparation, permit) => {
+                self.wake_http(preparation, permit);
+            }
             HostEvent::PublicFeedUpdate(update) => {
                 if let Err(error) = engine.apply_public_feed(now, update) {
                     // A configuration error is observable through the normal notice path.
@@ -228,6 +315,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 },
             ),
             HostEvent::Signed(attempt, result) => {
+                self.signing_tasks.remove(&attempt);
                 engine.handle(now, Event::Signed { attempt, result })
             }
             HostEvent::PayloadSigned(request, result) => engine.handle(
@@ -253,9 +341,21 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn execute(&mut self, on_notice: &mut impl FnMut(Notice)) {
-        self.engine.prepare_dispatch((self.clock)());
-        let actions: Vec<Action> = self.engine.drain_actions().collect();
+        while self.execute_batch(on_notice) {}
+    }
+
+    fn execute_batch(&mut self, on_notice: &mut impl FnMut(Notice)) -> bool {
+        let Some(actions) = self.turn(|host| {
+            host.engine.prepare_dispatch((host.clock)());
+            host.engine.drain_actions().collect::<Vec<Action>>()
+        }) else {
+            return false;
+        };
+        let had_actions = !actions.is_empty();
         for action in actions {
+            if self.terminal.is_some() {
+                break;
+            }
             match action {
                 Action::WsConnect {
                     binary,
@@ -286,6 +386,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     self.sockets.remove(&socket);
                 }
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
+                Action::ManagedHttp(action) => {
+                    self.turn(|host| host.execute_managed_http(*action));
+                }
                 Action::SignedOutbound { .. } => {
                     unreachable!("engine drain unwraps signed outbound")
                 }
@@ -294,9 +397,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     work,
                     timeout_ms,
                 } => {
+                    if !self.engine.signing_pending(attempt) {
+                        continue;
+                    }
                     let signer = self.engine.signer();
                     let events = self.events.clone();
-                    tokio::spawn(async move {
+                    let task = tokio::spawn(async move {
                         use safe_cex_engine::signing::SignError;
                         if events.is_closed() {
                             return;
@@ -314,6 +420,8 @@ impl<V: Venue, T: Transport> Host<V, T> {
                         };
                         let _ = events.send(HostEvent::Signed(attempt, result));
                     });
+                    self.signing_tasks
+                        .insert(attempt, managed_http::Task(task.abort_handle()));
                 }
                 Action::SignPayload {
                     request,
@@ -349,6 +457,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 Action::Notice(notice) => on_notice(notice),
             }
         }
+        had_actions
     }
 }
 
@@ -454,6 +563,160 @@ mod timer_tests {
             order.borrow_mut().push("progress");
         });
         assert_eq!(*order.borrow(), ["progress", "http"]);
+    }
+
+    struct NeverStep;
+    impl safe_cex_engine::SignStep for NeverStep {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &safe_cex_engine::DispatchContext<'_>,
+        ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError>
+        {
+            panic!("unsafe socket must fail before recipe preparation")
+        }
+        fn apply(
+            &mut self,
+            _: &mut Action,
+            _: &safe_cex_engine::signing::SignResult,
+        ) -> Result<(), safe_cex_engine::signing::SignError> {
+            unreachable!()
+        }
+        fn freshness_ms(&self) -> f64 {
+            1_000.
+        }
+    }
+
+    async fn native_fatal_control(during_start: bool) {
+        use std::sync::{Arc, Mutex};
+        let venue =
+            safe_cex_engine::test_support::ProbeVenue::new(TimerVenue::default(), move |_, cx| {
+                cx.request(
+                    Method::Get,
+                    "https://venue.test/unsent".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+                let unsafe_socket = SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1);
+                if during_start {
+                    cx.send_signed(unsafe_socket, "".into(), Box::new(NeverStep));
+                } else {
+                    cx.send(unsafe_socket, "");
+                }
+            });
+        let host = Host::new(
+            safe_cex_engine::test_support::seeded_engine(venue),
+            NoNetwork,
+        );
+        let events = host.event_sender();
+        let notices = Arc::new(Mutex::new(Vec::new()));
+        let captured = notices.clone();
+        let (commands, inbox) = mpsc::unbounded_channel();
+        drop(commands);
+        let event_check = events.clone();
+        let result = tokio::spawn(async move {
+            host.run(
+                inbox,
+                Duration::from_millis(100),
+                |_| panic!("fatal engine cannot publish a frame"),
+                move |notice| {
+                    assert!(
+                        event_check.is_closed(),
+                        "resources must retire before terminal notification"
+                    );
+                    captured.lock().unwrap().push(notice);
+                },
+            )
+            .await
+        })
+        .await;
+        assert!(
+            result.is_ok(),
+            "sticky engine failure must use the typed terminal channel"
+        );
+        assert!(result.unwrap().failed());
+        assert!(events.is_closed());
+        let notices = notices.lock().unwrap();
+        assert_eq!(notices.len(), 1);
+        assert!(matches!(&notices[0], Notice::StartupFailed { error }
+            if error.kind == Some(safe_cex_engine::ErrorKind::Internal)
+            && error.outcome == Some(safe_cex_engine::Outcome::Unknown)));
+    }
+
+    #[tokio::test]
+    async fn resource_failure_during_start_is_a_typed_terminal_native_failure() {
+        native_fatal_control(true).await;
+    }
+
+    #[tokio::test]
+    async fn unsafe_output_batch_is_a_typed_terminal_native_failure_without_partial_io() {
+        native_fatal_control(false).await;
+    }
+
+    #[tokio::test]
+    async fn ordinary_venue_startup_failure_does_not_latch_terminal_failure() {
+        let venue =
+            safe_cex_engine::test_support::ProbeVenue::new(TimerVenue::default(), |_, cx| {
+                cx.startup_failed(safe_cex_engine::VenueError::new("fixture startup refusal"));
+            });
+        let host = Host::new(
+            safe_cex_engine::test_support::seeded_engine(venue),
+            NoNetwork,
+        );
+        let events = host.event_sender();
+        let (commands, inbox) = mpsc::unbounded_channel();
+        drop(commands);
+        let mut notices = Vec::new();
+        let engine = host
+            .run(
+                inbox,
+                Duration::from_millis(100),
+                |_| {},
+                |notice| {
+                    assert!(
+                        !events.is_closed(),
+                        "ordinary startup refusal preserves host lifecycle"
+                    );
+                    notices.push(notice);
+                },
+            )
+            .await;
+        assert!(!engine.failed());
+        assert_eq!(notices.len(), 1);
+        assert!(
+            matches!(&notices[0], Notice::StartupFailed { error } if error.message == "fixture startup refusal")
+        );
+    }
+
+    #[tokio::test]
+    async fn unrelated_callback_panic_is_not_a_terminal_engine_failure() {
+        let venue =
+            safe_cex_engine::test_support::ProbeVenue::new(TimerVenue::default(), |_, _| {
+                panic!("unrelated fixture callback panic");
+            });
+        let host = Host::new(
+            safe_cex_engine::test_support::seeded_engine(venue),
+            NoNetwork,
+        );
+        let (commands, inbox) = mpsc::unbounded_channel();
+        drop(commands);
+        let result = tokio::spawn(async move {
+            host.run(
+                inbox,
+                Duration::from_millis(100),
+                |_| {},
+                |_| panic!("unrelated panic cannot become terminal notice"),
+            )
+            .await
+        })
+        .await;
+        let error = result.err().expect("unrelated callback must still panic");
+        assert!(error.is_panic());
+        assert_eq!(
+            error.into_panic().downcast_ref::<&str>(),
+            Some(&"unrelated fixture callback panic")
+        );
     }
 
     #[tokio::test(start_paused = true)]

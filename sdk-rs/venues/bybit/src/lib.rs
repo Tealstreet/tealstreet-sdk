@@ -445,7 +445,7 @@ impl BybitLinear {
                             fees: (category == Category::Option).then(HashMap::new),
                             ..Startup::default()
                         },
-                        account: account::AccountState::default(),
+                        account: account::AccountState::new(),
                     });
                 }
             }
@@ -509,7 +509,7 @@ impl BybitLinear {
                 ..Startup::default()
             },
             discovery_paused_until: 0.0,
-            account: account::AccountState::default(),
+            account: account::AccountState::new(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
             balance_info: None,
@@ -2405,9 +2405,6 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.refresh_timer(cx, timer) {
-            return;
-        }
         if self
             .environment_probe
             .as_ref()

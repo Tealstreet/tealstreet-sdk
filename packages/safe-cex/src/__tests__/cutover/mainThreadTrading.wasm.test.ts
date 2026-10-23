@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { prepareRecordedHttp } from '../support/managedHttp';
 import { OrderSide, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
@@ -90,6 +91,7 @@ const RESPONSES: Record<string, string> = {
 const venue = () => {
   const requests: string[] = [];
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (_url, { onOpen }) => {
       setTimeout(onOpen, 0);

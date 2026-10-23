@@ -1,13 +1,14 @@
 //! Bounded execution reads walk venue symbol alternatives before using WS cache.
 use crate::{ApexOmni, Pending, history_wire as wire, sign};
+use safe_cex_engine::history::{Completion, HistoryRows};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::OrderSide;
-use safe_cex_engine::{Command, CommandId, Cx, Query, Response, TimerId, num};
+use safe_cex_engine::{Command, Cx, Query, Response, TimerId, VenueError, num};
 use serde::Serialize;
 use std::collections::HashSet;
 
 pub struct Request {
-    command: CommandId,
+    owner: Box<HistoryRows<Execution>>,
     symbol: String,
     candidates: Vec<String>,
     candidate: usize,
@@ -19,11 +20,13 @@ pub struct Request {
     quote: String,
     count: usize,
     current: Vec<Entry>,
+    validated_response: bool,
 }
 impl Request {
     pub(crate) fn reset(&mut self) {
         self.count = 0;
         self.current.clear();
+        self.owner.discard_staged_page();
     }
 }
 struct Entry {
@@ -44,6 +47,9 @@ struct Execution {
     #[serde(skip_serializing_if = "Option::is_none")]
     commission: Option<f64>,
     commission_asset: String,
+}
+fn encode_executions(rows: &[Execution]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
 }
 const ARRAYS: ArrayAt = ArrayAt::Envelope(&[
     &["data", "fills"],
@@ -367,7 +373,10 @@ impl ApexOmni {
                     candidates.push(market.symbol.clone());
                 }
                 let request = Request {
-                    command,
+                    owner: Box::new(HistoryRows::new(
+                        Completion::new(command),
+                        encode_executions,
+                    )),
                     symbol: market.symbol.clone(),
                     candidates,
                     candidate: 0,
@@ -379,6 +388,7 @@ impl ApexOmni {
                     quote: market.quote.clone(),
                     count: 0,
                     current: vec![],
+                    validated_response: false,
                 };
                 self.request_history(cx, request);
             }
@@ -407,7 +417,7 @@ impl ApexOmni {
         } else {
             "/v3/fills"
         };
-        let command = request.command;
+        let command = request.owner.command();
         if let Err(error) = self.signed(
             cx,
             sign::Request::get(path, params),
@@ -450,6 +460,9 @@ impl ApexOmni {
         mut request: Request,
         _response: Response<'_>,
     ) {
+        // The signed wrapper and required-list decoder validated this response.
+        // Keep that evidence across later alias failures and signature resets.
+        request.validated_response = true;
         // Nonempty primary data is authoritative even when its rows are filtered.
         if request.count > 0 {
             self.finish_history(cx, request);
@@ -471,13 +484,17 @@ impl ApexOmni {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
-        _error: &str,
+        error: &str,
     ) {
         request.reset();
         request.candidate += 1;
         if request.candidate == request.candidates.len() {
             if request.fallback {
-                self.finish_history(cx, request);
+                if request.validated_response {
+                    self.finish_history(cx, request);
+                } else {
+                    request.owner.finish(cx, Err(VenueError::new(error)));
+                }
                 return;
             }
             request.fallback = true;
@@ -525,15 +542,11 @@ impl ApexOmni {
             .current
             .sort_by(|a, b| b.timestamp_ms.total_cmp(&a.timestamp_ms));
         request.current.truncate(request.limit);
-        let rows: Vec<_> = request.current.into_iter().map(|row| row.row).collect();
-        {
-            let result: Result<String, String> =
-                serde_json::to_string(&rows).map_err(|e| e.to_string());
-            match result {
-                Ok(data) => cx.done(request.command, data),
-                Err(error) => cx.fail(request.command, error),
-            }
-        };
+        for entry in request.current {
+            request.owner.stage(entry.row);
+        }
+        request.owner.accept_page();
+        request.owner.finish(cx, Ok(()));
     }
     pub(crate) fn history_timer(&mut self, _cx: &mut Cx<'_, Pending>, _timer: TimerId) -> bool {
         false

@@ -36,6 +36,12 @@ impl<'a> DispatchContext<'a> {
 
 /// Canonicalisation and result insertion only; no keys or I/O.
 pub trait SignStep: Send {
+    /// Static public codec data for the unsigned managed transport intent.
+    /// Credentials and signatures belong exclusively to provider/apply results.
+    /// The managed queue snapshots this once; it grants no callback authority.
+    fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
     fn prepare(
         &mut self,
         outbound: &mut Action,
@@ -54,8 +60,10 @@ pub(crate) struct Pending {
     pub outbound: Action,
     unsigned: Action,
     step: Box<dyn SignStep>,
-    sequence: u32,
+    sequence: u64,
     plain: bool,
+    pub managed: bool,
+    route_ready: bool,
     pub timer: TimerId,
     pub deadline: f64,
     staged_at: f64,
@@ -73,6 +81,12 @@ impl Pending {
                 + (raw_now - self.prepared_at.unwrap_or(f64::NAN));
             !protocol_now.is_finite() || protocol_now >= expiry
         })
+    }
+    pub fn managed_freshness(&self) -> Option<(u64, f64)> {
+        Some((
+            self.prepared_revision?,
+            (self.prepared_at? + self.step.freshness_ms()).min(self.deadline),
+        ))
     }
     pub fn request_id(&self) -> Option<RequestId> {
         match &self.outbound {
@@ -92,7 +106,7 @@ pub(crate) struct Dispatch {
     pending: HashMap<RequestId, Pending>,
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: HashMap<RequestId, Pending>,
-    next: u32,
+    next: crate::resource_ids::ResourceIds,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -101,22 +115,48 @@ pub(crate) enum Completion {
 }
 impl Dispatch {
     pub fn next_id(&mut self) -> RequestId {
-        self.next = self
-            .next
-            .checked_add(1)
-            .expect("signing attempt IDs exhausted");
-        RequestId(self.next)
+        RequestId(self.next.next_or_fatal())
+    }
+    pub fn available_id(&self) -> bool {
+        self.next.available(1)
+    }
+    pub fn failed(&self) -> bool {
+        self.next.failed()
+    }
+    #[cfg(test)]
+    pub(crate) fn set_test_ids(&mut self, ids: crate::resource_ids::ResourceIds) {
+        self.next = ids;
     }
     fn head(&self) -> Option<(RequestId, &Pending)> {
-        self.pending
-            .iter()
-            .chain(self.outbound.iter())
-            .min_by_key(|(_, p)| p.sequence)
-            .map(|(id, p)| (*id, p))
+        let entries = || self.pending.iter().chain(self.outbound.iter());
+        let first = entries().min_by_key(|(_, p)| p.sequence)?;
+        if first.1.managed {
+            // Independent managed HTTP can finish route/provider preparation in
+            // either order. Keep the existing non-HTTP/legacy sequence barrier.
+            let barrier = entries()
+                .filter(|(_, p)| !p.managed)
+                .map(|(_, p)| p.sequence)
+                .min();
+            if let Some(ready) = self
+                .pending
+                .iter()
+                .filter(|(_, p)| {
+                    p.managed
+                        && p.route_ready
+                        && p.prepared_at.is_none()
+                        && barrier.is_none_or(|sequence| p.sequence < sequence)
+                })
+                .min_by_key(|(_, p)| p.sequence)
+            {
+                return Some((*ready.0, ready.1));
+            }
+        }
+        Some((*first.0, first.1))
     }
     pub fn next_work(&self) -> Option<RequestId> {
         self.head().and_then(|(id, p)| {
-            (!p.plain && p.prepared_at.is_none() && self.pending.contains_key(&id)).then_some(id)
+            (!p.plain && p.route_ready && p.prepared_at.is_none() && self.pending.contains_key(&id))
+                .then_some(id)
         })
     }
     pub fn can_prepare(&self, id: RequestId) -> bool {
@@ -220,6 +260,8 @@ impl Dispatch {
                 step,
                 sequence: id.0,
                 plain: false,
+                managed: false,
+                route_ready: true,
                 timer,
                 deadline,
                 staged_at: now,
@@ -232,6 +274,37 @@ impl Dispatch {
             },
         );
         Ok(deadline)
+    }
+    pub fn stage_managed(
+        &mut self,
+        id: RequestId,
+        outbound: Action,
+        step: Box<dyn SignStep>,
+        now: f64,
+        deadline: f64,
+    ) -> Result<(), SignError> {
+        self.stage(id, outbound, step, TimerId(0), now)?;
+        let p = self.pending.get_mut(&id).expect("staged recipe");
+        p.managed = true;
+        p.route_ready = false;
+        p.deadline = deadline;
+        Ok(())
+    }
+    pub fn activate_managed(&mut self, id: RequestId) -> Result<(), SignError> {
+        let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
+        if !p.managed || p.route_ready {
+            return Err(SignError::InvalidRequest);
+        }
+        p.route_ready = true;
+        Ok(())
+    }
+    pub fn signature_pending(&self, id: RequestId) -> bool {
+        self.pending
+            .get(&id)
+            .is_some_and(|p| p.prepared_at.is_some())
+    }
+    pub fn is_managed(&self, id: RequestId) -> bool {
+        self.pending.get(&id).is_some_and(|p| p.managed)
     }
     pub fn request_mut(&mut self, request: RequestId) -> Option<&mut HttpRequest> {
         let p = self
@@ -374,6 +447,7 @@ impl Dispatch {
         pending.prepared_revision = None;
         pending.prepared_protocol_at = None;
         pending.receipt = Default::default();
+        pending.route_ready = !pending.managed;
         self.pending.insert(id, pending);
     }
     pub fn expire(&mut self, timer: TimerId) -> Option<(RequestId, Pending)> {
@@ -405,7 +479,7 @@ impl Dispatch {
         timers
     }
 }
-fn wipe(action: &mut Action) {
+pub(crate) fn wipe(action: &mut Action) {
     use zeroize::Zeroize;
     match action {
         Action::Http(http) => {

@@ -479,3 +479,305 @@ formatting, repository bans, root44 typecheck and28 lint tasks pass (root tasks
 cached). Both independent source/caller reviews are CLEAN. Full current-head CI,
 authenticated all-suite raw/ordered-gate comparison and a fresh separate guard
 remain required; this checkpoint is not a merge or replay-evidence claim.
+
+## Grouped and deferred row reporting — phase 2 plan
+
+Phase1 #1769 is actual `90dc6637d6e12eafecc283d0dfb9a78e7fc967d6`, with
+all43 applicable checks green on unchanged1be4, separate guard/merge, and an
+actual whole-tree audit matching the green head/trial. Its full proof retains
+strict974/976 FALSE solely for freshly authenticated ApeX/TxFlow TS request
+counts; all488 Rust and all110 ordered gates are unchanged. Persistent memory
+is shared for its first three consumers; grouped/deferred policy and the other
+seventeen bounded source files remain open, including KuCoin Spot `mod.rs`.
+
+This fresh `feat/rust-row-grouped-reporting` starts at actual90dc. The owner
+holds landing merges for RequestContext #1741. Plan, tests and implementation
+may proceed locally; integrate its actual shared inputs before final CI/proof.
+No source migration or merge claim is made by this plan.
+
+The audit identifies two different grouping contracts, not interchangeable
+count rules. Put both explicit collectors in `engine::coverage`, with private
+state and no venue names/messages:
+
+- `RowCount`: count every `add(Option<&str>)`, including duplicate known IDs.
+  Keep the first supplied label exactly. An anonymous first row remains first;
+  `Some("")` stays an empty label, distinct from `None`. Private first-state is
+  `Option<Option<String>>`, where the outer None means no row. `Default`, `add`,
+  `count() -> usize`, `any() -> bool` (native count >0) and
+  `first() -> Option<Option<&str>>` expose the existing Crypto.com policy.
+- `RowKeys`: keep nonempty known IDs uniquely in first-seen order; count every
+  anonymous or empty-ID row separately. `Default`, `add(Option<&str>)`,
+  `ids() -> &[String]`, `anonymous() -> usize`, `count() -> usize`, `any()`
+  expose WOO's existing policy. `into_ids(self) -> Vec<String>` preserves the
+  existing pagination move without cloning strings. No sorting or new limit.
+- Each collector's `summary(format: impl FnOnce(&Self) -> String)
+  -> Option<String>` calls the formatter once only for a native nonempty group.
+  RowCount tests first-state presence, preserving the existing report boundary;
+  RowKeys tests known/anonymous presence. Keep native usize arithmetic rather
+  than silently adding saturation or another financial/coverage counter.
+- `row_summary<P>(cx: &mut Cx<'_, P>, level: Level,
+  summary: Option<String>) -> bool` emits one `row_skipped` for Some and nothing
+  for None. Grouped row count is not the health counter: a summary increments
+  health once at its original site even when host delivery is filtered.
+- `RowReports::report_summary<P>(&mut self, cx: &mut Cx<'_, P>, key: K,
+  level: Level, summary: Option<String>) -> bool` uses the existing repeat path
+  for Some; None forgets only that key and reports nothing. It owns WOO's
+  existing empty-summary re-arm, with no automatic lifecycle/timer policy.
+
+Actual consumers and preserved boundaries:
+
+1. Crypto.com `lib.rs::Skipped` becomes a thin RowCount adapter. Keep `add`,
+   `any` and the exact native summary formatter/placeholder `without an id`.
+   Discovery and account consumers report at their current accepted/read/frame
+   points through `row_summary`; no per-row replacement events or changed level.
+2. WOO `account.rs::Skipped` becomes a thin RowKeys adapter. Keep exact native
+   summary punctuation, order and IDs/anonymous accessors used by retention.
+   `account_skipped` uses report_summary with its existing unbounded ChangedMessage
+   memory. Positions still report before their bad/freshness rejection; joined
+   orders keep their distinct generation/bad/envelope ordering. No admission,
+   healthy-peer, position-mode or financial behavior change.
+3. Bybit `unsupported_logged` adopts unbounded Once RowReports. Keep staging in
+   each native read and flush ONLY at the existing admitted joined-order point,
+   after rejected/fresh-row merging and before Store removal/upsert. Stored-copy
+   lookup, exact Error text, restoring known unsupported rows and emission order
+   stay native. Admitted partial joins still flush unsupported rows; only whole
+   failed, noncurrent or incomplete joins skip flushing. Known-copy restoration
+   stays outside suppression, and mapped/clean rows never re-arm Bybit memory.
+   Add `AccountState::new()` selecting unbounded Once, and replace ONLY the two
+   actual lib.rs construction sites (main account and extra product accounts).
+   Audit all default/reset/move paths; no default bounded reporter may leak into
+   a real Bybit account. Coordinate these narrow constructors/account-reporting
+   fields with RequestContext/signing owners before source edits.
+
+Phase2 scope: engine coverage; Crypto.com lib.rs, WOO account.rs, Bybit account.rs
+and the two lib.rs constructors; focused engine/native tests; existing admission,
+audit, quality and caller docs. No request/pending/Job/Rest/trading authority,
+engine dispatch/Store/token, signing/clock, metadata/history, financial reducers,
+wire payload, comparator, tape or manifest changes. Architecture gate YES:
+grouping, summary-empty/repeat and deferred emission memory are cross-cutting;
+the engine owns those policies while native formatting, identity and final
+admission timing remain native. Two different explicit engine collectors avoid
+forcing WOO's unique-ID count onto Crypto.com's duplicate-inclusive count.
+
+Commit this concrete plan before tests/source; independently audit the API,
+construction paths and architecture first. Native compatibility controls must
+pass original production, not be mislabeled defect REDs: Crypto.com duplicate
+known/anonymous/empty-first labels and exact one-summary health; WOO duplicate
+known IDs, anonymous rows, order, changed summaries and clean re-arm; Bybit
+unsupported diagnostics only after accepted joined snapshots, suppressed repeats
+and healthy/known-row retention after rejected/stale pages. New engine tests pin
+both count policies/first-label distinctions, deferred/empty summary behavior,
+repeat re-arm, exact code/level/message and filtered health. Preserve all existing
+coverage/snapshot/financial controls.
+
+Run focused engine/Crypto.com/WOO/Bybit plus Binance native tests with four Cargo
+jobs, strict all-target Clippy/fmt/bans, root checks and relevant native alias
+fixtures. Independent source/adversarial/caller reviews precede the source
+commit. Use current actual #1741/shared dependencies and post-#1762 all-suite
+CI proof: all488 Rust/full IDs and all ordered gates exact, four standing TS
+classes only with freshly authenticated complete controls. No local release
+WASM/replays/timing, threshold/profile/allowance changes or live captures. On
+full green, announce and run a fresh separate guard, merge separately, audit the
+actual tree/parents and report its pin. Remaining seventeen bounded reporter
+files are later bounded fan-out slices, not closed by this phase.
+
+Phase2 plan/API review checkpoint: both independent correctness and adversarial
+reviews are CLEAN. Preserve WOO retention/page-progress accessors and Bybit extra-
+product account swapping. Original-GREEN compatibility controls precede migration;
+no product defect or RED claim is made. Signing/RequestContext owners explicitly
+cleared these AccountState constructors and accepted-join diagnostic regions.
+
+Phase2 original compatibility checkpoint: all233 selected native account/public/
+product tests pass on byte-identical actual1769 production, including the final
+new stale-join and two-known-ID first-seen-order controls. Both native test/API
+reviews are CLEAN; the consuming RowKeys ID accessor preserves WOO pagination
+move semantics. Early extra-product fixture cadence and an intermediate WOO
+fixture edit were corrected before this exact original-GREEN run; neither is a
+product defect/RED. Native source/test/log hashes are sealed in the local receipt
+`/tmp/codex-row-grouped-original-receipt.json`; CI proof remains pending.
+
+Phase2 implementation checkpoint: the explicit collectors and optional summary
+paths now serve Crypto.com/WOO; Bybit unsupported-order memory uses unbounded
+Once at its unchanged accepted-join boundary. Both real construction paths and
+product-state swaps preserve the policy. All1345 focused five-crate tests pass;
+strict all-target Clippy, scoped fmt, bans, root44 typecheck/28 lint pass (root
+tasks cached). A Clippy-only test assertion expression was corrected; exactfinal
+233 original controls were rerun with all five original production blobs and
+byte-exact restoration of the migrated source, with receipt
+`/tmp/codex-row-grouped-original-exact-receipt.json`. Both independent source/API/
+caller reviews are CLEAN; repeat-suppressed summary health wording was tightened.
+Actual #1741 integration, current-head full CI and authenticated all-suite raw/
+ordered-gate proof remain required. No merge, live or all-venue closure claim.
+
+
+## Next reporter fan-out: BloFin and Kraken (plan, 2026-10-23)
+
+Start from actual grouped/deferred reporter merge #1775,
+`15c6334b514e9edd34ad2fa38034aab1277148ba`. Its current-head evidence is
+strict975/976 with all488 Rust outputs and110 ordered gates unchanged; the sole
+ApeX TS count variant has both complete pre-change controls authenticated. That
+completed proof does not substitute for the new slice's proof.
+
+Architecture gate: **YES, this is another consumer of cross-cutting reporting
+policy.** Use existing engine `RowReports`, `RowRepeat`, `forget`, `clear` and
+`rearm_namespace`; no new venue or engine policy. Scope is BloFin account.rs,
+Kraken futures account.rs, Kraken Spot account.rs, their existing native account
+tests and this plan/AUDITS/QUALITY/CALLERS. No execution arithmetic, row admission,
+Store/freshness, signing, request authority, WS lifecycle or history changes.
+
+1. BloFin position/order skip sets become separate bounded Once reporters.
+   Keep the thin native formatting adapter, exact skip severity and empty IDs.
+   Decode-based `forget` stays before mapping/final read acceptance, including
+   reads that later fail or become stale. Accepted position revision clearing
+   stays at its native Balance-response site; rejected Positions bypass that
+   response, and order clearing stays only
+   on its clean accepted path. Once never gains Warn-to-Error upgrades.
+2. Kraken futures skip memory becomes bounded ErrorUpgrade, explicitly selected
+   in the real `Account::new` constructor. Preserve order/position namespaces,
+   raw-symbol position labels, stale WS no-rearm and `recovered` filtering of
+   accepted/rejected duplicate identities. Use the shared namespace rearm at
+   the existing sites. Its distinct unlisted-symbol memory becomes explicit
+   **unbounded Once**, also explicitly initialized in `Account::new`: raw
+   symbols remain shared across REST/WS/orders/positions;
+   clean/mapped reads and reconnects never rearm it. Reporting stays during
+   mapping before snapshot admission: stale/held reads still consume unlisted
+   suppression, while unknown zero-quantity positions remain silent and consume
+   no memory. Malformed catalogue holds remain a separate admission decision.
+3. Kraken Spot skip memory becomes bounded Once with the native coin/order
+   namespaces, including an empty order identity. Keep diagnostics before
+   admission where native, mapped-only versus clean namespace rearm, and
+   `StaleGuard` decisions: rejected stale reads do not rearm; admitted stale
+   balance reads do. Keep REST orders' native unfiltered accepted-ID rearm
+   iterator; balance and WS use their native `allows_absence` filtering. A
+   valid-plus-rejected duplicate identity must not prompt a filtering cleanup.
+   Do not tighten admission during a reporter migration.
+
+Before production edits, add native original-GREEN compatibility controls for
+those exact ordering/duplicate/severity/identity boundaries. In particular pin
+BloFin decoded-but-unmapped and later failed/stale reads, all three order aliases,
+futures Warn/Error progression and independent keys, permanent unlisted-symbol
+suppression including stale/held and zero-quantity controls, and Spot
+rejected-stale versus admitted-clean rearm. Run the selected
+final tests against unchanged production and seal the source/test/log receipt;
+rerun unchanged controls after migration. No product defect or original-RED claim.
+
+Verification: focused engine/BloFin/Kraken/Binance native suites, all-target strict
+Clippy, scoped fmt, bans and root checks, with `CARGO_BUILD_JOBS=4`. Independent
+correctness/adversarial plan and source/caller reviews; preserve exact incoming
+docs and source on integration. Fresh full green CI, complete32-suite raw and
+ordered-gate proof with current whole-variant controls, separate porcelain guard
+then separate merge. No local release WASM builds, full replays, timing tests,
+threshold/budget/manifest changes or live captures. The #1781 clock-fixture merge
+slot comes first; integrate its actual shared inputs before final proof. Coordinate
+BloFin/Kraken whole-family signing with its owner; those signer edits remain held
+for this slice's actual pin. Re-audit the remaining bounded and unbounded reporter
+inventory after this slice; this plan makes no all-venue closure claim.
+
+
+### BloFin/Kraken implementation checkpoint
+
+The plan above is implemented using existing RowReports only: BloFin's two
+bounded Once memories, Kraken futures' explicit bounded ErrorUpgrade and
+separate unbounded Once, and Kraken Spot's bounded Once. Thin formatting/re-arm
+adapters retain the native sites and iterator choices. Eleven new native
+compatibility controls pass together with all126 account tests on unchanged
+actual #1775 production before migration. The original source/test/log receipt
+is `aa9137471325c9cb881aaa2cf4bf16f060e482db5ad4943038a5a37521489bc6`.
+Independent plan/test-design/source/caller reviews are CLEAN. Migrated checks
+pass1253 focused native tests across68 groups, strict all-target Clippy, scoped
+fmt, bans and root44 typecheck/28 lint (root tasks cached). Actual #1781
+`ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated conflict-free;
+its two incoming files and all unowned source are preserved. Fresh full
+CI/current-head raw proof, final data reviews and separate guard/merge remain
+required. This checkpoint makes no product-RED,
+private parity or all-venue fan-out completion claim.
+
+
+## AsterDEX, GRVT and TxFlow reporter fan-out (plan, 2026-10-23)
+
+Start from actual #1782 `6a7193e86688275e8888e9acec2d4bed3be2eff7`.
+Architecture gate: **YES**, another consumer fan-out of cross-cutting reporting
+policy. Reuse existing engine RowReports bounded Once, forget, clear and
+rearm_namespace; add no engine API or per-venue policy. Scope: the three existing
+account.rs files, their account tests and existing ROW_ADMISSION/AUDITS/QUALITY/
+CALLERS docs. Preserve all messages, severities, identity strings, empty keys,
+4096 clear-before-lookup and native reporting/re-arm sites. No financial reducers,
+row admission/freshness, request/signing/session/socket/history changes.
+
+1. AsterDEX: convert the position reporter field plus log_skip/reject_position
+   memory parameter types to RowReports. Keep early per-ID forgetting during
+   row mapping, before full-response validity/version admission, and the whole
+   clear only for current valid clean position reads. Keep symbol/hedged-leg/
+   anonymous labels and zero-size paths exactly native; open-order diagnostics
+   that do not use persistent memory are outside this slice.
+2. GRVT: convert its shared position/order/coin memory, thin log_skip/rearm_skips
+   adapters and Summary::currencies memory parameter. Keep position labels based
+   on symbol, native allows_absence filters for position/order re-arm, and the
+   distinct unfiltered totals.keys() coin re-arm iterator (including accepted
+   plus rejected duplicate currency). Preserve namespace isolation and currency
+   retention on unreadable lists. Use native valid outer JSON in controls; do
+   not claim a truncated inner JSON case reaches Summary::currencies without
+   proving the actual parser path. No summary/session admission cleanup.
+3. TxFlow: convert its position memory and thin adapter only. Keep literal
+   asset-number, composite joined-leg and anonymous keys. A mapped Some(position)
+   forgets exactly its p.id before the full response fence; a zero-quantity None
+   does not gain a per-key forget. Do not split composite keys or change discovery
+   holds. Whole clear remains at the existing accepted clean state publication.
+
+Before production edits add original-GREEN native compatibility controls for
+same-key Once suppression/recovery, early mapped-row forget before stale/failed
+read admission, unrelated anonymous/composite memory retention, GRVT namespaces
+and accepted/rejected duplicate coins versus filtered position/order IDs,
+TxFlow unresolved/zero-size paths, and clean re-arm. Seal original production/
+final test/log hashes before migration; these are no product defect RED claims.
+
+Verify focused engine/AsterDEX/GRVT/TxFlow/Binance native tests with
+CARGO_BUILD_JOBS=4, strict all-target Clippy, scoped fmt, bans and root checks.
+Independent correctness/adversarial plan, test and source/caller reviews; fresh
+full green CI and complete current-head 32-suite raw/ordered-gate proof, then
+fresh separate porcelain guard and separate merge in normal queue order. No
+local release WASM/replay/timing, threshold/profile/budget/manifest or live-capture
+changes. Report actual pins to dependent lanes; later landings use normal shared
+input integration rules. Do not claim all-venue reporter completion.
+
+CALLERS sections describe the landed behavior only, with no merge/proof status.
+This slice also removes the stale validation/status tail from its own existing
+#1782 CALLERS paragraph, preserving its behavior text; #1776 cleanup remains with
+its owner. Put validation and merge gates in the PR body, not the caller contract.
+Ownership coordination with signing/socket and history lanes precedes source
+implementation; no authority, recipe or request-builder edit is included.
+
+Plan audit clarification: GRVT's current-revision REST re-arm still precedes
+per-row timestamp/order rejection; a stale whole-response revision does not
+re-arm. TxFlow per-ID early forgetting belongs only to REST row mapping, not
+its WS mapping. Zero-size rows must be tested alongside another rejection so
+a whole clean-response clear cannot mask the absence of per-key forgetting.
+
+
+### AsterDEX/GRVT/TxFlow native implementation checkpoint
+
+The three account reporters now use existing bounded RowReports::default Once.
+Thin log_skip/rearm_skips adapters preserve native call sites and iterators;
+AsterDEX and TxFlow replace exactly their early per-ID remove with forget.
+All whole-response clear sites, messages, severities and identity labels remain.
+GRVT keeps its unfiltered duplicate-coin rearm versus filtered position/order
+identities, and rearm still precedes per-row timestamp rejection in an admitted
+current-revision response. TxFlow composite labels are not split, and WS mapping
+does not gain REST-only early forgetting. No engine API or financial/admission
+change is included.
+
+Nine new native compatibility controls pass within125 original account tests
+(54 AsterDEX,44 GRVT,27 TxFlow) on unchanged actual1782 production before
+migration. Source/test/five-log receipt SHA256
+`0fa028da226ab076553c0d607657ba113482547141490dd1550817ac38fb8602`.
+Earlier helper failures and a test assumption that anonymous rejection permits
+partial rearm were corrected in tests only; the final GRVT timestamp control
+uses a named unrelated rejection so the accepted symbol can rearm. No product
+RED claim. The owner-priority WOO build restore owns the separate stale1782
+CALLERS status-tail cleanup; this slice adds behavior-only caller text.
+
+Migrated focused engine/AsterDEX/GRVT/TxFlow/Binance suites pass1294 native tests
+across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
+and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
+are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
+required; no all-venue reporter-completion claim.

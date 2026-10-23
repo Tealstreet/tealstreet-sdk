@@ -79,6 +79,9 @@ impl Rig {
                         self.timers.retain(|(pending, _)| *pending != timer)
                     }
                     Action::Notice(_) => {}
+                    Action::ManagedHttp(_) => {
+                        panic!("managed HTTP requires the prepared test-driver handshake")
+                    }
                     Action::Sign { .. }
                     | Action::SignedOutbound { .. }
                     | Action::SignPayload { .. } => {

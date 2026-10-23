@@ -16,6 +16,38 @@ export interface HttpResponse {
   body: Uint8Array | AsyncIterable<Uint8Array>;
 }
 
+export class HttpPreparationError extends Error {
+  readonly code: string;
+  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network');
+}
+
+export interface HttpPacket {
+  /** Required for managed requests; absent on older transport callers. */
+  request?: number;
+  method: string;
+  route?: 'direct' | 'publicCors' | 'primary';
+  /** Remaining original lifecycle timeout, never renewed by binding. */
+  timeoutMs?: number;
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+}
+export interface PreparedHttp {
+  /** Optional absolute engine raw time. */
+  expiresAt?: number;
+  /** Validate/build synchronously; may not send or await. */
+  bind(packet: HttpPacket): BoundHttp;
+  /** Release only this prepared resource; idempotent. */
+  cancel?(): void;
+}
+export interface BoundHttp {
+  ready(): boolean;
+  /** Invoke the transport API synchronously, return its response promise. */
+  dispatch(): Promise<HttpResponse>;
+  cancel?(): void;
+}
+
 export interface Transport {
   /** Default account HTTP adapter, resolved by the routing host. */
   httpMode?: 'direct' | 'how';
@@ -36,18 +68,9 @@ export interface Transport {
     url: string,
     handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
   ): Socket;
-  request(request: {
-    method: string;
-    /** Host policy; this is metadata, never an HTTP header or parameter. */
-    route?: 'direct' | 'publicCors' | 'primary';
-    /** Whole-operation deadline; defaults to 20 seconds. */
-    timeoutMs?: number;
-    url: string;
-    headers: Record<string, string>;
-    body?: string;
-    /** Aborted on host disposal; check again after asynchronous authorization. */
-    signal?: AbortSignal;
-  }): Promise<HttpResponse>;
+  /** Explicit prepare/bind/claim support is mandatory for managed HTTP. */
+  prepareHttp?(request: HttpPacket & { intent: 'public' | 'primary' | 'secondary' }): PreparedHttp | Promise<PreparedHttp>;
+  request(request: HttpPacket): Promise<HttpResponse>;
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
 }
@@ -229,18 +252,20 @@ export class EngineDisposedError extends Error {
   readonly actualClientOrderIds?: readonly string[];
 }
 
-export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
+export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest' | 'zkLinkContract';
 export type SignPart = { kind: 'bytes'; bytes: number[] } | { kind: 'credential'; key: string }
   | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' };
 export interface SigningIdentity {
   credential: string; signing: string; passphrase?: string;
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
   stableId?: string;
+  /** Additional provider-owned signing refs; never an identity or nonce scope. */
+  extra?: { zklinkSeed?: string };
 }
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface LocalIdentityMetadata {
   stableId?: string;
-  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem';
+  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
   trimCredential?: boolean;
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
@@ -361,6 +386,8 @@ export interface EngineConstruction {
 }
 
 export interface WasmEngineLike {
+  /** Sticky native fatal state; absent only on older or test engines. */
+  failed?(): boolean;
   /** Optional native allocation cleanup; managed EngineHosts opt into ownership. */
   free?(): void;
   /** Configure before startup; optional only for older/fake engines without injection. */
@@ -391,6 +418,12 @@ export interface WasmEngineLike {
   httpChunk(request: number, data: Uint8Array, now: number): string;
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
+  signingPending?(attempt: number): boolean;
+  httpPreparationPending?(preparation: string): boolean;
+  httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
+  httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
+  /** Scalar status only: never drain work before the synchronous handoff. */
+  httpClaim?(permit: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner?(): boolean;
   useExternalSigner?(): void;

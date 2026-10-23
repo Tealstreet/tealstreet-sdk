@@ -2,12 +2,15 @@
 //! sockets open, frames and commands flow, and the engine ends in the state
 //! a direct replay of the same traffic produces.
 #![cfg(not(target_arch = "wasm32"))]
+#[path = "support/prepared.rs"]
+mod prepared;
 
 use safe_cex_engine::wire::{book_top, section, sections};
 use safe_cex_engine::{Command, HttpRequest, SocketId};
-use safe_cex_native::{Events, Host, HostEvent, Transport};
+use safe_cex_native::{BoundHttp, Events, Host, HostEvent, HttpPrepareFuture, Transport};
 use safe_cex_venue_binance::{BinanceFutures, Options};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -33,9 +36,35 @@ fn response(url: &str) -> &'static str {
 #[derive(Clone, Default)]
 struct Tape {
     sockets: Arc<Mutex<HashMap<String, (SocketId, Events)>>>,
+    prepared: Arc<AtomicUsize>,
+    dispatched: Arc<AtomicUsize>,
 }
 
 impl Transport for Tape {
+    fn prepare_http(
+        &self,
+        request: HttpRequest,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+    ) -> HttpPrepareFuture {
+        assert_eq!(
+            intent,
+            safe_cex_engine::request_context::RoutingIntent::Public
+        );
+        let boundary = prepared::Boundary::new(&request);
+        let tape = self.clone();
+        self.prepared.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move {
+            let boundary = boundary?;
+            let deadline = boundary.deadline;
+            Ok(boundary.bind_with(move |packet| {
+                Ok(Box::new(TapeBound {
+                    tape,
+                    packet,
+                    deadline,
+                }))
+            }))
+        })
+    }
     fn connect(
         &self,
         socket: SocketId,
@@ -62,6 +91,29 @@ impl Transport for Tape {
     }
 }
 
+struct TapeBound {
+    tape: Tape,
+    packet: HttpRequest,
+    deadline: tokio::time::Instant,
+}
+impl std::fmt::Debug for TapeBound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RecordedBoundHttp")
+    }
+}
+impl BoundHttp for TapeBound {
+    fn ready(&self) -> bool {
+        tokio::time::Instant::now() < self.deadline
+    }
+    fn dispatch(self: Box<Self>, events: Events) -> tokio::task::AbortHandle {
+        assert!(self.ready(), "recorded handoff exceeded original deadline");
+        self.tape.dispatched.fetch_add(1, Ordering::SeqCst);
+        self.tape.request(self.packet, events);
+        // The recorded emitter above is synchronous and has already finished.
+        tokio::spawn(async {}).abort_handle()
+    }
+}
+
 #[tokio::test]
 async fn the_native_loop_streams_startup_and_publishes_books() {
     let tape = Tape::default();
@@ -72,24 +124,35 @@ async fn the_native_loop_streams_startup_and_publishes_books() {
     let (commands, inbox) = mpsc::unbounded_channel();
     let frames = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
     let collected = frames.clone();
-    let host = tokio::spawn(Host::new(engine, tape.clone()).run(
+    let mut host = tokio::spawn(Host::new(engine, tape.clone()).run(
         inbox,
         Duration::from_millis(10),
         move |frame| collected.lock().unwrap().push(frame.to_vec()),
         |_| {},
     ));
 
-    let public = loop {
-        if let Some(socket) = tape
-            .sockets
-            .lock()
-            .unwrap()
-            .get("wss://fstream.binance.com/public/ws")
-            .cloned()
-        {
-            break socket;
+    let public = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Some(socket) = tape
+                .sockets
+                .lock()
+                .unwrap()
+                .get("wss://fstream.binance.com/public/ws")
+                .cloned()
+            {
+                break socket;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
-        tokio::time::sleep(Duration::from_millis(1)).await;
+    })
+    .await;
+    let public = match public {
+        Ok(public) => public,
+        Err(_) => {
+            host.abort();
+            let _ = host.await;
+            panic!("native recorded startup did not open its public socket");
+        }
     };
     commands
         .send(Command::SubscribeOrderBook {
@@ -108,7 +171,17 @@ async fn the_native_loop_streams_startup_and_publishes_books() {
     }
     tokio::time::sleep(Duration::from_millis(30)).await;
     drop(commands);
-    let engine = host.await.unwrap();
+    let engine = match tokio::time::timeout(Duration::from_secs(3), &mut host).await {
+        Ok(engine) => engine.unwrap(),
+        Err(_) => {
+            host.abort();
+            let _ = host.await;
+            panic!("native recorded host did not stop");
+        }
+    };
+    assert!(tape.prepared.load(Ordering::SeqCst) > 0);
+    assert!(tape.dispatched.load(Ordering::SeqCst) > 0);
+    assert!(tape.dispatched.load(Ordering::SeqCst) <= tape.prepared.load(Ordering::SeqCst));
 
     let book = engine.book("BTCUSDT").expect("synchronized book");
     assert_eq!(book.best_bid(), Some(99.0));

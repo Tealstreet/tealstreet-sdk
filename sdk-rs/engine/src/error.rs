@@ -48,8 +48,9 @@ pub enum Outcome {
     Unknown,
 }
 
-/// Orders a batch placed before it stopped at `failed_index`. A venue that
-/// cannot map its requests back to the caller's orders leaves the counts unset.
+/// Exact native order identities retained for partial or uncertain commands.
+/// With Unknown, identities are reconciliation evidence, not proof of attributed
+/// caller-leg success. Codecs unable to map rows to caller orders leave counts unset.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Partial {
@@ -197,6 +198,43 @@ impl VenueError {
     }
 }
 
+/// Local operation failure: this call dispatched nothing new. `NotSent` never proves
+/// the whole command unsent; the mutation journal overrides it from earlier
+/// releases, and an earlier released read may still have reached the venue.
+impl crate::request_context::Error {
+    pub fn kind(self) -> ErrorKind {
+        match self {
+            Self::TimedOut => ErrorKind::Timeout,
+            Self::Invalid | Self::Revoked | Self::Duplicate | Self::RetryForbidden => {
+                ErrorKind::InvalidInput
+            }
+            Self::Capacity | Self::State | Self::Stale => ErrorKind::Internal,
+        }
+    }
+
+    pub fn venue_error(self) -> VenueError {
+        VenueError::new(self.to_string())
+            .kind(self.kind())
+            .outcome(Outcome::NotSent)
+    }
+}
+
+impl fmt::Display for crate::request_context::Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::request_context::Error;
+        f.write_str(match self {
+            Error::Invalid => "Invalid request context",
+            Error::Capacity => "Too many requests in flight",
+            Error::Duplicate => "Request is already in flight",
+            Error::State => "Request is not in a sendable state",
+            Error::TimedOut => "Request context timed out",
+            Error::Stale => "Request context is stale",
+            Error::Revoked => "Request context was revoked",
+            Error::RetryForbidden => "Request may not be retried",
+        })
+    }
+}
+
 impl From<String> for VenueError {
     fn from(message: String) -> Self {
         Self::new(message)
@@ -297,6 +335,29 @@ mod tests {
             serde_json::to_string(&error).unwrap(),
             r#"{"message":"busy"}"#
         );
+    }
+
+    #[test]
+    fn request_context_refusals_are_typed_not_sent_failures() {
+        use crate::request_context::Error;
+        let error = Error::TimedOut.venue_error();
+        assert_eq!(error.message, "Request context timed out");
+        assert_eq!(error.kind, Some(ErrorKind::Timeout));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        for (reason, kind) in [
+            (Error::Invalid, ErrorKind::InvalidInput),
+            (Error::Revoked, ErrorKind::InvalidInput),
+            (Error::Duplicate, ErrorKind::InvalidInput),
+            (Error::RetryForbidden, ErrorKind::InvalidInput),
+            (Error::Capacity, ErrorKind::Internal),
+            (Error::State, ErrorKind::Internal),
+            (Error::Stale, ErrorKind::Internal),
+        ] {
+            let error = reason.venue_error();
+            assert_eq!(error.kind, Some(kind), "{reason:?}");
+            assert_eq!(error.outcome, Some(Outcome::NotSent), "{reason:?}");
+            assert!(!error.message.is_empty());
+        }
     }
 
     #[test]

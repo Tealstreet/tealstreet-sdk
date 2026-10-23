@@ -1,12 +1,14 @@
-import type { HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { DisposableAxiosAdapter } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
 import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } from './types';
 
 import { AxiosHeaders } from 'axios';
 
+import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import { socketMessages } from '@tealstreet/safe-cex-wasm/host';
+import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/host';
 import { captureProxyTokenProvider, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
@@ -58,6 +60,7 @@ export interface EngineRoutingPlan {
 }
 
 type Request = Parameters<Transport['request']>[0];
+type CredentialIntent = 'public' | 'primary' | 'secondary';
 const orderlyExchanges = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 const coinbaseExchanges = new Set<ExchangeName>(['coinbase', 'coinbasespot']);
 
@@ -225,8 +228,16 @@ export const resolveEngineRoutingPlan = (
   }
   const { routing, restRouting } = resolved(exchange, options, provider);
   const publicCorsProxy = ['asterdex', 'txflow'].includes(exchange) ? provider.publicCorsProxy() : undefined;
-  const http = (headers: Record<string, string>): EngineHttpRoute => {
-    const route = restRoute(provider, exchange, options, restRouting, { method: 'GET', url: baseURL, headers });
+  const http = (credentialIntent: CredentialIntent): EngineHttpRoute => {
+    const route = restRoute(
+      provider,
+      exchange,
+      options,
+      restRouting,
+      { method: 'GET', url: baseURL, headers: {} },
+      false,
+      credentialIntent,
+    );
     const target = route.baseURL ?? baseURL;
     if (target !== baseURL && !target.endsWith(`/${baseURL}`)) throw new Error('Unsupported native URL rewrite');
     const how =
@@ -250,7 +261,7 @@ export const resolveEngineRoutingPlan = (
     : undefined;
   const productRoutes = publicWsRoutes(exchange, options, provider);
   return {
-    http: http(exchange.startsWith('binance') ? { 'X-MBX-APIKEY': options.key ?? '' } : {}),
+    http: http(!options.publicDataOnly && options.key ? 'primary' : 'public'),
     ...(publicCorsProxy
       ? {
           publicCorsHttp: {
@@ -270,7 +281,7 @@ export const resolveEngineRoutingPlan = (
           ...(exchange === 'binancespot' && { readPublicHttp: readPlan.publicHttp }),
         }
       : {}),
-    ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http({}) } : {}),
+    ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http('public') } : {}),
     ws: {
       public: wsRoute(routing.wsPublic),
       private: wsRoute(routing.wsPrivate),
@@ -296,10 +307,10 @@ const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =
   exchange === 'paradex'
     ? !options.publicDataOnly && !options.payloadSigner
     : ['hyperliquid', 'hyperliquidspot', 'kucoin', 'kucoinspot'].includes(exchange)
-    ? !options.publicDataOnly
-    : exchange === 'bingx'
-      ? !options.publicDataOnly && options.tealstreetTunnel !== false
-      : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
+      ? !options.publicDataOnly
+      : exchange === 'bingx'
+        ? !options.publicDataOnly && options.tealstreetTunnel !== false
+        : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
 
 const restRoute = (
   provider: TransportProvider,
@@ -308,8 +319,13 @@ const restRoute = (
   routing: ResolvedRouting,
   request: Request,
   serverHeaders = false,
+  credentialIntent?: CredentialIntent,
 ): RestTransport => {
-  if (publicBinanceRequest(exchange, request)) return { baseURL: request.url, proxied: false };
+  if (
+    (credentialIntent === 'public' && ['binance', 'binancepm', 'binanceinverse'].includes(exchange)) ||
+    (credentialIntent === undefined && publicBinanceRequest(exchange, request))
+  )
+    return { baseURL: request.url, proxied: false };
   // Factories resolve a base URL, never a signed query. Keep request data out
   // of host selection and append its exact bytes after the provider rewrites it.
   const baseURL = request.url.match(/^https?:\/\/[^/?#]+/i)?.[0];
@@ -319,6 +335,7 @@ const restRoute = (
     options,
     routing,
     serverHeaders,
+    credentialIntent,
     config: { baseURL, headers: request.headers },
   });
   return { ...route, baseURL: `${route.baseURL ?? baseURL}${request.url.slice(baseURL.length)}` };
@@ -359,7 +376,12 @@ const httpTransport = (
   provider: TransportProvider,
   routing: ResolvedRouting,
   publicPrefix?: string,
-): { mode: 'direct' | 'how'; request: Transport['request']; dispose(): void } => {
+): {
+  mode: 'direct' | 'how';
+  request: Transport['request'];
+  prepareHttp: NonNullable<Transport['prepareHttp']>;
+  dispose(): void;
+} => {
   const tunnel = publicPrefix === undefined && usesTunnel(exchange, options);
   const adapter = tunnel
     ? provider.restAdapter({
@@ -374,96 +396,72 @@ const httpTransport = (
   // requests start from timers, sockets and shared public feeds, so keep the
   // provider of the context that created this account's transport.
   const proxyTokenProvider = captureProxyTokenProvider();
-  const request: Transport['request'] = async (request): Promise<HttpResponse> => {
+  const prepare = async (request: Request, intent?: CredentialIntent): Promise<PreparedHttp> => {
     if (disposed) throw new Error('Engine transport disposed');
     const controller = new AbortController();
     pending.add(controller);
     const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
     const started = Date.now();
-    const { timeoutMs, ...networkRequest } = request;
-    const deadlineMs = Math.max(1, timeoutMs ?? 20_000);
+    const deadlineMs = Math.max(1, request.timeoutMs ?? 20_000);
+    const remaining = () => Math.max(0, deadlineMs - (Date.now() - started));
+    let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
+    let bound = false;
+    let cancelBound: (() => void) | undefined;
     const cleanup = () => {
       clearTimeout(timer);
       pending.delete(controller);
-      signal.removeEventListener('abort', cleanup);
+      signal.removeEventListener('abort', onAbort);
     };
-    const timer = setTimeout(() => {
-      controller.abort(new Error('Engine transport request timed out'));
-      pending.delete(controller);
-    }, deadlineMs);
-    signal.addEventListener('abort', cleanup, { once: true });
-    try {
-      signal.throwIfAborted();
-      const signed = orderlyExchanges.has(exchange) || coinbaseExchanges.has(exchange)
-        ? { url: request.url, method: request.method, body: request.body, headers: Object.entries(request.headers) }
-        : undefined;
-      const route =
-        publicPrefix === undefined
-          ? restRoute(provider, exchange, options, routing, request, transport.serverHeaders)
-          : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
-      const aliases = httpHeaderAliases(exchange, route.proxied, Boolean(adapter));
-      const config = {
-        method: request.method,
-        url: route.baseURL ?? request.url,
-        baseURL: request.url,
-        headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
-        data: request.body,
-        timeout: deadlineMs,
-        signal,
-      } as InternalAxiosRequestConfig;
-      aliasHeaders(config.headers, aliases);
-      const originalUrl = config.url;
-      const authorize = route.proxied ? route.authorize : undefined;
-      if (authorize)
-        await untilAborted(
-          withProxyTokenProvider(proxyTokenProvider, () => authorize(config)),
-          signal,
-        );
-      signal.throwIfAborted();
-      // Proxy auth may add credentials or apply a declared host header alias;
-      // the venue's signed packet and credential bytes remain unchanged.
-      if (
-        signed &&
-        (request.url !== signed.url ||
-          request.method !== signed.method ||
-          request.body !== signed.body ||
-          config.url !== originalUrl ||
-          config.baseURL !== signed.url ||
-          config.method !== signed.method ||
-          config.data !== signed.body ||
-          config.params !== undefined ||
-          config.signal !== signal ||
-          signed.headers.some(([name, value]) =>
-            config.headers.get(
-              Object.entries(aliases).find(([source]) => source.toLowerCase() === name.toLowerCase())?.[1] ?? name,
-            ) !== value,
-          ))
-      )
-        throw new Error('Engine transport authorization changed signed request bytes or headers');
-      config.timeout = Math.max(1, deadlineMs - (Date.now() - started));
-      if (adapter) {
-        const response = await untilAborted(
-          withProxyTokenProvider(proxyTokenProvider, () => adapter(config)),
-          signal,
-        );
-        // A raw tunnel response keeps native IDs and signed decimal lexemes intact.
-        if (typeof response.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
-        cleanup();
-        return {
-          status: response.status,
-          headers: responseHeaders(response.headers),
-          body: new TextEncoder().encode(response.data),
-        };
+    let boundReleased = false;
+    let preparedReleased = false;
+    const releaseResources = () => {
+      if (cancelBound && !boundReleased) {
+        boundReleased = true;
+        try {
+          cancelBound();
+        } catch {
+          /* Continue releasing the preparation. */
+        }
       }
-      const response = await untilAborted(
-        transport.request({
-          ...networkRequest,
-          url: config.url!,
-          headers: config.headers.toJSON() as Record<string, string>,
-          signal,
-        }),
-        signal,
-      );
+      if (prepared && !preparedReleased) {
+        preparedReleased = true;
+        try {
+          prepared.cancel?.();
+        } catch {
+          /* Cleanup cannot strand this request. */
+        }
+      }
+    };
+    const onAbort = () => {
+      releaseResources();
+      cleanup();
+    };
+    const timer = setTimeout(() => controller.abort(new HttpPreparationError('timedOut')), deadlineMs);
+    signal.addEventListener('abort', onAbort, { once: true });
+    const cancel = () => {
+      controller.abort();
+      releaseResources();
+      cleanup();
+    };
+    const active = () => {
+      signal.throwIfAborted();
+      if (disposed) throw new Error('Engine transport disposed');
+      if (remaining() <= 0) throw new HttpPreparationError('timedOut');
+    };
+    const beforeRelease = <T>(operation: () => T): T => {
+      try {
+        active();
+        const result = operation();
+        active();
+        return result;
+      } catch (error) {
+        cancel();
+        if (intent !== undefined && error instanceof TradeTunnelTimeoutError)
+          throw new HttpPreparationError('timedOut');
+        throw error;
+      }
+    };
+    const wrap = (response: HttpResponse): HttpResponse => {
       if (response.body instanceof Uint8Array) {
         cleanup();
         return response;
@@ -485,14 +483,220 @@ const httpTransport = (
           }
         })(),
       };
+    };
+    try {
+      signal.throwIfAborted();
+      const original = new URL(request.url);
+      const signed =
+        intent !== undefined || orderlyExchanges.has(exchange) || coinbaseExchanges.has(exchange)
+          ? { url: request.url, method: request.method, body: request.body, headers: Object.entries(request.headers) }
+          : undefined;
+      const route =
+        publicPrefix === undefined
+          ? restRoute(provider, exchange, options, routing, request, transport.serverHeaders, intent)
+          : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
+      const target = route.baseURL ?? request.url;
+      const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
+      if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
+      const aliases = httpHeaderAliases(exchange, route.proxied, Boolean(adapter));
+      const hostHeaders = AxiosHeaders.from(venueHeaders(exchange, options));
+      const config = {
+        method: request.method,
+        url: target,
+        baseURL: request.url,
+        headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
+        data: request.body,
+        timeout: remaining(),
+        signal,
+      } as InternalAxiosRequestConfig;
+      aliasHeaders(config.headers, aliases);
+      const before = AxiosHeaders.from(config.headers.toJSON());
+      if (route.proxied && route.authorize)
+        await untilAborted(
+          withProxyTokenProvider(proxyTokenProvider, () => route.authorize!(config)),
+          signal,
+        );
+      signal.throwIfAborted();
+      if (remaining() <= 0) throw new HttpPreparationError('timedOut');
+      if (
+        signed &&
+        (request.url !== signed.url ||
+          request.method !== signed.method ||
+          request.body !== signed.body ||
+          signed.headers.some(
+            ([name, value]) =>
+              config.headers.get(
+                Object.entries(aliases).find(([source]) => source.toLowerCase() === name.toLowerCase())?.[1] ?? name,
+              ) !== value,
+          ) ||
+          config.url !== target ||
+          config.baseURL !== request.url ||
+          config.method !== request.method ||
+          config.data !== request.body ||
+          config.params !== undefined ||
+          config.signal !== signal ||
+          Object.entries(before.toJSON()).some(([name, value]) => config.headers.get(name) !== value))
+      )
+        throw new Error('Engine transport authorization changed signed request bytes or headers');
+      for (const [name, value] of Object.entries(config.headers.toJSON()))
+        if (before.get(name) !== value) hostHeaders.set(name, value);
+      config.timeout = remaining();
+      const waitForPrepared = async <T extends { cancel?(): void }>(promise: Promise<T>): Promise<T> => {
+        void promise.then(
+          (value) => {
+            if (signal.aborted) {
+              try {
+                value?.cancel?.();
+              } catch {
+                /* Late resources remain isolated. */
+              }
+            }
+          },
+          () => undefined,
+        );
+        return untilAborted(promise, signal);
+      };
+      const how = adapter as Partial<DisposableAxiosAdapter> | undefined;
+      if (adapter) {
+        const prepareTunnel = intent === undefined ? how?.prepareLegacy : how?.prepare;
+        if (prepareTunnel)
+          prepared = await waitForPrepared(
+            withProxyTokenProvider(proxyTokenProvider, () => prepareTunnel.call(adapter, config)),
+          );
+        else if (intent !== undefined) throw new HttpPreparationError('unsupported');
+      } else if (intent !== undefined) {
+        if (!transport.prepareHttp) throw new HttpPreparationError('unsupported');
+        prepared = await waitForPrepared(
+          Promise.resolve(
+            transport.prepareHttp({
+              ...request,
+              intent,
+              route: 'direct',
+              url: target,
+              headers: config.headers.toJSON() as Record<string, string>,
+              timeoutMs: remaining(),
+              signal,
+            }),
+          ),
+        );
+      }
+      signal.throwIfAborted();
+      if (intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
+        throw new HttpPreparationError('invalid');
+      const validateBound = <T extends { ready(): boolean; dispatch(): unknown; cancel?(): void }>(
+        inner: T | undefined,
+      ): T | undefined => {
+        if (inner && typeof inner.cancel === 'function') cancelBound = () => inner.cancel!();
+        if (
+          intent !== undefined &&
+          (!inner || typeof inner.ready !== 'function' || typeof inner.dispatch !== 'function')
+        )
+          throw new HttpPreparationError('invalid');
+        return inner;
+      };
+      return {
+        ...(adapter ? {} : { expiresAt: (prepared as PreparedHttp | undefined)?.expiresAt }),
+        cancel,
+        bind(packet) {
+          beforeRelease(() => {
+            if (bound) throw new HttpPreparationError('invalid');
+          });
+          if (
+            packet.request !== request.request ||
+            packet.method !== request.method ||
+            new URL(packet.url).origin !== original.origin ||
+            packet.route !== request.route ||
+            packet.signal !== request.signal
+          ) {
+            cancel();
+            throw new HttpPreparationError('invalid');
+          }
+          const headers = AxiosHeaders.from(
+            intent === undefined ? { ...packet.headers, ...venueHeaders(exchange, options) } : packet.headers,
+          );
+          aliasHeaders(headers, aliases);
+          for (const [name, value] of Object.entries(hostHeaders.toJSON())) {
+            const previous = headers.get(name);
+            if (previous !== undefined && previous !== value) {
+              cancel();
+              throw new HttpPreparationError('invalid');
+            }
+            headers.set(name, value);
+          }
+          const url = intent === undefined ? target : `${prefix}${packet.url}`;
+          const finalConfig = { ...config, url, headers, data: packet.body, timeout: remaining(), signal };
+          const network: Request = {
+            ...packet,
+            ...(intent === undefined ? {} : { route: 'direct' as const }),
+            url,
+            headers: headers.toJSON() as Record<string, string>,
+            timeoutMs: remaining(),
+            signal,
+          };
+          if (intent === undefined) delete network.timeoutMs;
+          let send: () => Promise<HttpResponse>;
+          let ready: () => boolean;
+          if (adapter) {
+            const tunnel = prepared as Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
+            const inner = beforeRelease(() => validateBound(tunnel?.bind(finalConfig)));
+            ready = inner ? () => inner.ready() : () => true;
+            send = () => {
+              const response = inner
+                ? inner.dispatch()
+                : withProxyTokenProvider(proxyTokenProvider, () => adapter(finalConfig));
+              return untilAborted(response, signal).then((value) => {
+                if (typeof value.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
+                return {
+                  status: value.status,
+                  headers: responseHeaders(value.headers),
+                  body: new TextEncoder().encode(value.data),
+                };
+              });
+            };
+          } else {
+            const inner = beforeRelease(() => validateBound((prepared as PreparedHttp | undefined)?.bind(network)));
+            ready = inner ? () => inner.ready() : () => true;
+            send = inner ? () => inner.dispatch() : () => transport.request(network);
+          }
+          bound = true;
+          let sent = false;
+          return {
+            ready() {
+              return beforeRelease(() => !sent && ready());
+            },
+            dispatch() {
+              beforeRelease(() => {
+                if (sent) throw new HttpPreparationError('invalid');
+              });
+              sent = true;
+              try {
+                const response = send();
+                return untilAborted(response, signal)
+                  .then(wrap)
+                  .catch((error) => {
+                    cancel();
+                    throw error;
+                  });
+              } catch (error) {
+                cancel();
+                throw error;
+              }
+            },
+            cancel,
+          };
+        },
+      };
     } catch (error) {
-      cleanup();
+      cancel();
+      if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw new HttpPreparationError('timedOut');
       throw error;
     }
   };
+  const request: Transport['request'] = async (request) => (await prepare(request)).bind(request).dispatch();
   return {
     mode: adapter ? 'how' : 'direct',
     request,
+    prepareHttp: (request) => prepare(request, request.intent),
     dispose: () => {
       disposed = true;
       for (const controller of pending) controller.abort(new Error('Engine transport disposed'));
@@ -507,7 +711,7 @@ export const createEngineTransport = (
   exchange: ExchangeName,
   options: ExchangeOptions,
   transport: Transport,
-  credentials?: { hasSecondary:boolean },
+  credentials?: { hasSecondary: boolean },
 ): Transport => {
   assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
@@ -563,7 +767,9 @@ export const createEngineTransport = (
     : undefined;
   const readOptions = credentials?.hasSecondary
     ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
-    : options.secondary_key ? secondaryReadOptions(options, provider) : undefined;
+    : options.secondary_key
+      ? secondaryReadOptions(options, provider)
+      : undefined;
   const readHttp = readOptions
     ? httpTransport(exchange, readOptions, transport, provider, resolved(exchange, readOptions, provider).restRouting)
     : undefined;
@@ -579,6 +785,26 @@ export const createEngineTransport = (
     now: () => transport.now(),
     setTimeout: (fn, ms) => transport.setTimeout(fn, ms),
     clearTimeout: (handle) => transport.clearTimeout(handle),
+    prepareHttp: (request) => {
+      const { route, intent, ...packet } = request;
+      if (route === 'primary' && intent === 'secondary') throw new HttpPreparationError('invalid');
+      const selected =
+        route === 'primary'
+          ? http
+          : route === 'direct'
+            ? directHttp
+            : route === 'publicCors'
+              ? publicCorsHttp
+              : intent === 'secondary'
+                ? readHttp
+                : intent === 'public' &&
+                    readHttp &&
+                    !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
+                  ? readHttp
+                  : http;
+      if (!selected) throw new HttpPreparationError('unsupported');
+      return selected.prepareHttp({ ...packet, route, intent });
+    },
     request: (request) => {
       const { route, ...nativeRequest } = request;
       if (route === 'primary') return http.request(nativeRequest);

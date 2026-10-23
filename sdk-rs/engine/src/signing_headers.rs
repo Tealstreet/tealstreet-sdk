@@ -18,6 +18,21 @@ pub enum ResultHeaderPolicy {
 }
 
 pub fn validate(headers: &[(String, String)]) -> Result<(), SignError> {
+    validate_pairs(
+        headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    )
+}
+
+/// Borrowed public declarations are checked before allocating transport values.
+pub(crate) fn validate_unsigned(headers: &[(&str, &str)]) -> Result<(), SignError> {
+    validate_pairs(headers.iter().copied())
+}
+
+fn validate_pairs<'a>(
+    headers: impl ExactSizeIterator<Item = (&'a str, &'a str)>,
+) -> Result<(), SignError> {
     if headers.len() > MAX_HEADERS {
         return Err(SignError::InvalidResult);
     }

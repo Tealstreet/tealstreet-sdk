@@ -49,7 +49,8 @@ Binance's four aliases and Bybit's five aliases. High-level credential input is 
 no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached
 construction metadata preserves `canSign`/public mode; transport receives only
-read-identity presence and uses materialised outbound headers for routing.
+read-identity presence; managed routing uses explicit credential intent before
+credentials are materialised, while legacy requests retain header-based routing.
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
 `stableId` per primary/secondary identity. It is consumed with passphrases through
@@ -324,6 +325,17 @@ the mirror, and the tier methods forward to the worker
 capability fallbacks are never wrapped, so `capabilities` keeps reporting them.
 
 ## Rust engine failure
+
+Physical socket/request/signing/timer IDs are exact JS-safe integers through
+`2^53 - 1`; command IDs and durations retain their existing bounds. Host adapters
+must not coerce resource IDs to 32 bits. WASM rejects malformed numeric IDs before
+parsing payloads or advancing clocks. Checked allocator exhaustion is sticky and
+uses the same terminal path as a trap, withholding the complete queued output
+batch. Workers retire their host and flush intervals before reporting terminal
+StartupFailed; captured pending write failures still reach their original owner
+across replacement, while stale successes and diagnostics remain suppressed.
+Native account streams settle pending owners Internal/Unknown and replay only the
+terminal notice, without constructing a frame from the failed engine.
 
 A native WASM trap makes that exchange instance terminal (`isEngineDead`),
 settles its pending commands and emits `engine-dead` after one visible error.
@@ -964,6 +976,18 @@ route. Optional HTTP `direct` / `publicCors` route hints support venue clock fal
 hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
+
+Managed engine HTTP uses `Transport.prepareHttp` to finish route/proxy-token
+and tunnel readiness before signing. `credentialIntent` (`public`, `primary`,
+`secondary`) selects the route independently of HTTP method or credential headers;
+custom routing providers must honor it. A custom HTTP/tunnel adapter without the
+prepared interface fails explicitly instead of invoking its legacy sender.
+Preparation and binding never send HTTP. Binding preserves signed URL/query/body
+bytes and rejects conflicting host headers; `ready()` rechecks the original
+request deadline and resource, and `dispatch()` invokes fetch/WebSocket.send
+synchronously after the engine release claim. Cancellation releases only that
+request's prepared/bound resources. Opaque legacy requests share the executor but
+retain their older routing and carry no managed release/outcome guarantee.
 
 Engine venue requests use native authorization headers. On Coinbase and its
 spot alias, an ordinary REST proxy owns `Authorization`, so the host moves the

@@ -62,7 +62,7 @@ impl Harness {
             private: SocketId(0),
             tick: TimerId(0),
         };
-        h.collect();
+        h.collect_at(now);
         let instrument_request = h.take("instruments");
         h.respond_at(instrument_request, instruments, now);
         let tickers = h.take("tickers");
@@ -86,8 +86,16 @@ impl Harness {
         h
     }
     pub fn collect(&mut self) {
+        let actions = self.e.drain_actions().collect::<Vec<_>>();
+        self.collect_actions(actions);
+    }
+    pub fn collect_at(&mut self, now: f64) {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut self.e, now);
+        self.collect_actions(actions);
+    }
+    fn collect_actions(&mut self, actions: Vec<Action>) {
         let mut receipts = Vec::new();
-        for a in self.e.drain_actions().collect::<Vec<_>>() {
+        for a in actions {
             if let Action::Http(r) = a {
                 let payload = r
                     .body
@@ -172,7 +180,7 @@ impl Harness {
                 },
             },
         );
-        self.collect();
+        self.collect_at(now);
     }
     pub fn modes(&mut self) {
         self.reply(

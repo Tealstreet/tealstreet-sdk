@@ -250,6 +250,7 @@ mod presentation_tests {
             signing: KeyRef("ref:owned-primary-signing".into()),
             passphrase: Some(KeyRef("ref:owned-primary-presentation".into())),
             stable_id: None,
+            extra: Default::default(),
         };
         let mut signer = LocalSigner::new();
         signer.insert(identity.credential.clone(), b"public-identity".to_vec());
@@ -326,6 +327,7 @@ mod presentation_tests {
             signing: KeyRef("ref:owned-secondary-signing".into()),
             passphrase: None,
             stable_id: None,
+            extra: Default::default(),
         };
         signer.insert(secondary.credential.clone(), b"secondary-public".to_vec());
         signer.insert(

@@ -916,3 +916,150 @@ fn balance_frames_faster_than_the_balance_read_cannot_starve_the_balance() {
             .expect("a stale read is re-read");
     }
 }
+
+fn spot_row_reports(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
+) -> Vec<String> {
+    e.drain_actions()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+            {
+                Some(event.message)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn row_report_namespaces_and_empty_order_identity_rearm_independently() {
+    let (mut e, _, private) = ready(false);
+    let socket = private.unwrap();
+    spot_row_reports(&mut e);
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
+    let balance = requests(&mut e).pop().unwrap();
+    reply(&mut e, &balance, r#"{"error":[],"result":{"ZUSD":"bad"}}"#);
+    assert_eq!(
+        spot_row_reports(&mut e),
+        ["Kraken Spot skipped malformed USD balance"]
+    );
+    let bad = r#"{"order_id":"USD","order_qty":"bad"},{"order_qty":"bad"}"#;
+    let send = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, rows: &str| {
+        message(
+            e,
+            socket,
+            &format!(r#"{{"channel":"executions","type":"snapshot","data":[{rows}]}}"#),
+        );
+        spot_row_reports(e)
+    };
+    assert_eq!(
+        send(&mut e, bad),
+        [
+            "Kraken Spot skipped unmappable execution for order USD",
+            "Kraken Spot skipped execution row without an order id"
+        ]
+    );
+    assert!(send(&mut e, bad).is_empty());
+    assert!(send(&mut e, "").is_empty());
+    assert_eq!(
+        send(&mut e, bad).len(),
+        2,
+        "clean order snapshot rearms only orders"
+    );
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"balances","type":"update","data":[]}"#,
+    );
+    let balance = requests(&mut e).pop().unwrap();
+    reply(&mut e, &balance, r#"{"error":[],"result":{"ZUSD":"bad"}}"#);
+    assert!(
+        spot_row_reports(&mut e).is_empty(),
+        "order cleanup did not forget coin:USD"
+    );
+}
+
+#[test]
+fn row_report_balance_rearm_follows_native_rejected_and_admitted_stale_reads() {
+    for stale_reads in [1, 3] {
+        let (mut e, _, private) = ready(false);
+        let socket = private.unwrap();
+        let frame = r#"{"channel":"balances","type":"update","data":[]}"#;
+        message(&mut e, socket, frame);
+        let read = requests(&mut e).pop().unwrap();
+        reply(&mut e, &read, r#"{"error":[],"result":{"ZUSD":"bad"}}"#);
+        assert_eq!(spot_row_reports(&mut e).len(), 1);
+        message(&mut e, socket, frame);
+        let mut read = requests(&mut e).pop().unwrap();
+        for _ in 0..stale_reads {
+            message(&mut e, socket, frame);
+            reply(&mut e, &read, BALANCE);
+            read = requests(&mut e)
+                .into_iter()
+                .find(|read| read.url.ends_with("/Balance"))
+                .unwrap();
+        }
+        reply(&mut e, &read, r#"{"error":[],"result":{"ZUSD":"bad"}}"#);
+        assert_eq!(
+            spot_row_reports(&mut e).len(),
+            usize::from(stale_reads == 3),
+            "only the admitted stale clean balance rearms coin:USD"
+        );
+    }
+}
+
+#[test]
+fn row_report_rest_accepted_duplicate_rearms_while_ws_rejected_duplicate_does_not() {
+    let (mut e, _, private) = ready(false);
+    let socket = private.unwrap();
+    let bad = r#"{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":"bad"}"#;
+    let good = r#"{"order_id":"O-100","symbol":"BTC/USD","order_type":"limit","side":"buy","order_qty":2,"cum_qty":0.5,"limit_price":99}"#;
+    let send = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, rows: &str| {
+        message(
+            e,
+            socket,
+            &format!(r#"{{"channel":"executions","type":"snapshot","data":[{rows}]}}"#),
+        );
+        spot_row_reports(e)
+    };
+    assert_eq!(send(&mut e, bad).len(), 1);
+    assert!(send(&mut e, &format!("{good},{bad}")).is_empty());
+    assert!(
+        send(&mut e, bad).is_empty(),
+        "WS filters the rejected identity from rearm"
+    );
+    message(
+        &mut e,
+        socket,
+        &format!(r#"{{"channel":"executions","type":"update","data":[{good},{bad}]}}"#),
+    );
+    let timer = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .next_back()
+        .unwrap();
+    e.handle(NOW + 5_000.0, Event::TimerFired { timer });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|read| read.url.ends_with("OpenOrders"))
+        .unwrap();
+    reply(
+        &mut e,
+        &read,
+        r#"{"error":[],"result":{"open":{"O-100":{"descr":{"pair":"XBTUSD","type":"buy","ordertype":"limit","price":"99"},"vol":"2","vol_exec":"0.5","opentm":1700000000},"O-100":{"vol":"bad"}}}}"#,
+    );
+    assert!(spot_row_reports(&mut e).is_empty());
+    assert_eq!(
+        send(&mut e, bad).len(),
+        1,
+        "REST preserves its native unfiltered accepted-ID rearm"
+    );
+}
