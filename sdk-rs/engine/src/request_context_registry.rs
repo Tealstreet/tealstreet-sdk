@@ -1151,6 +1151,21 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Read-only identity of this exact validated physical delivery. History
+    /// staging binds it alongside the logical leg; it grants no new rights.
+    pub(crate) fn read_http_delivery_attempt(
+        &self,
+        root: &Context,
+        leg: &Context,
+    ) -> Result<Attempt, Error> {
+        self.validate_read_http_delivery(root, leg)?;
+        self.io
+            .http_delivery
+            .as_ref()
+            .map(|delivery| delivery.attempt)
+            .ok_or(Error::Revoked)
+    }
+
     /// Validate a synchronous managed completion before publishing its companion
     /// event. This is completion authority only: no send permission or deadline
     /// extension. The caller must finish in the same callback without yielding.
