@@ -2466,3 +2466,15 @@ Bitrue42->38 occurrences,27->25 rows, five files retained. The separate history
 slice's prune composes independently. Native successful leverage joins, refresh,
 projection, account replies and signed bracket requests remain unchanged; no
 managed private-read, execution-group or whole-venue zero claim is introduced.
+
+## Phemex synchronous history/income Context ownership
+
+~~Eleven synchronous local history/income exits publish numeric terminals without
+command-entry Context admission.~~ Local branches now borrow genuine shared
+admission and immediately use its Context terminal, before active-set mutation.
+Original-source controls show full-capacity local errors lack Internal typing,
+unknown-market lookup succeeds despite full capacity, and invalid-clock errors
+lack InvalidInput typing. Finite native payloads, refusal order and outstanding
+requests are preserved. Exactly eleven Phemex occurrences/entries are removed;
+managed network/history and signer adoption remain deferred. Architecture gate:
+No lifecycle copy; the adapter consumes shared admission and finalization.
