@@ -54,14 +54,22 @@ struct Probe {
     timer: Option<TimerId>,
     /// Finish an expired entry as a read (no outcome) instead of a mutation.
     expire_as_read: bool,
-    /// Leave cancels numbered 1000 and up awaiting a reply forever.
+    /// Leave cancels and placements numbered 1000 and up awaiting a reply.
     ignore_high: bool,
+    /// Opt into order locks, so cancel-all defers behind a placement.
+    locks: bool,
 }
 
 impl Venue for Probe {
     type Pending = ();
     fn cancel_needs_stored_order(&self) -> bool {
         true
+    }
+    fn guard_pending_placements(&self) -> bool {
+        self.locks
+    }
+    fn guard_order_mutations(&self) -> bool {
+        self.locks
     }
     fn start(&mut self, _: &mut Cx<'_, ()>) {}
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
@@ -126,6 +134,7 @@ impl Venue for Probe {
             "only an expired wait may be rejected as expired"
         );
         match command {
+            Command::PlaceOrders { command, .. } if self.ignore_high && command >= 1000 => {}
             Command::PlaceOrders { command, .. } => cx.done(command, r#"["7"]"#.into()),
             Command::CancelOrders { command: 11, .. } if self.reject => {
                 let _ = cx.admit_http_command(Policy {
@@ -531,4 +540,41 @@ fn waits_a_venue_never_answers_stay_bounded() {
         1,
         "expired waits no command still carries are dropped"
     );
+}
+
+#[cfg(feature = "order-locks")]
+#[test]
+fn a_deferred_cancel_all_keeps_its_own_receipt_through_the_lock() {
+    let mut e = engine(Probe {
+        ignore_high: true,
+        locks: true,
+        ..Default::default()
+    });
+    deliver(
+        &mut e,
+        0.,
+        r#"{"op":"placeOrders","command":1000,"orders":[]}"#,
+    );
+    deliver(
+        &mut e,
+        0.,
+        r#"{"op":"cancelSymbolOrders","command":2,"symbol":"","timeoutMs":1000}"#,
+    );
+    assert!(observed(&e, 2).is_empty(), "deferred behind the placement");
+    deliver(
+        &mut e,
+        1.,
+        r#"{"op":"fetchStpMode","command":2,"timeoutMs":50000}"#,
+    );
+    assert_eq!(deadline(&e, 2), Some(1_000.), "the duplicate kept no stamp");
+    // The placement ends; the deferred cancel-all re-enters past its wait.
+    e.handle(
+        2_000.,
+        Event::WsMessage {
+            socket: SocketId(1),
+            text: "fail:1000",
+        },
+    );
+    assert_eq!(observed(&e, 2), [Some(Wait::Expired)]);
+    assert_eq!(deadline(&e, 2), None, "its own terminal cleared it");
 }
