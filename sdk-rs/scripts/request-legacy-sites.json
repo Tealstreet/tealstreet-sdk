@@ -689,8 +689,7 @@
   },
   "venues/kraken/src/spot/mod.rs": {
     "7ee70c01ddfed95c96a161f33976a8fbd5a8d529cda8bd31a364e2d8161df4ce": 1,
-    "bf0c63ade187f2ea61fdb2e369f2baa04ac8745b7d18512e1ea71a3f9955ced9": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
+    "bf0c63ade187f2ea61fdb2e369f2baa04ac8745b7d18512e1ea71a3f9955ced9": 1
   },
   "venues/kraken/src/spot/trading.rs": {
     "06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3": 1,
@@ -987,7 +986,7 @@
     "7d4810ffde4e87d757f48c273d4d175893ae758fa982469a69177d646b766026": 1,
     "b60a1032f32712ccd2c6d2715586aae49efe1eb2f61b7e91d1dff22c70f5d68b": 1,
     "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 3,
+    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
     "dee025771565e025cbca449b90666e5c20dc3c0af9834094852eae869ee83f0a": 1
   },
   "venues/orderly/src/trading.rs": {
