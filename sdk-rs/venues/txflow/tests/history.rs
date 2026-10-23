@@ -341,3 +341,161 @@ fn offset_paged_request_sequence_is_pinned() {
         ]
     );
 }
+
+fn owned_terminal(
+    e: &mut Engine<TxFlow>,
+    command: u32,
+    partial: bool,
+) -> Result<Value, safe_cex_engine::VenueError> {
+    let out: Vec<_> = e.drain_actions().collect();
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    let markers: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        markers.len(),
+        usize::from(partial),
+        "one owned incomplete warning only for recovery"
+    );
+    for marker in markers {
+        assert_eq!(marker.level, safe_cex_engine::Level::Warn);
+        assert!(marker.fields.iter().any(|(k, v)| *k == "command"
+            && matches!(v,safe_cex_engine::Value::Num(n) if *n == f64::from(command))));
+    }
+    let mut terminals = out.into_iter().filter_map(|a| match a {
+        Action::Notice(Notice::CommandDone {
+            command: id,
+            result,
+        }) if id == command => Some(Ok(serde_json::from_str(&result).unwrap())),
+        Action::Notice(Notice::CommandFailed { command: id, error }) if id == command => {
+            Some(Err(error))
+        }
+        _ => None,
+    });
+    let result = terminals.next().expect("one terminal");
+    assert!(terminals.next().is_none());
+    result
+}
+fn fail_owned(e: &mut Engine<TxFlow>, r: &safe_cex_engine::HttpRequest, failure: u8) {
+    match failure {
+        0 => reply(e,r,r#"{"success":false,"code":9,"message":"denied","data":{"data":[],"hasMore":false}}"#),
+        1 => e.handle(NOW,Event::HttpFailed {request:r.id,error:"offline"}),
+        _ => reply(e,r,&json!({"success":true,"code":0,"data":{"data":[execution(99,NOW+99.0),{"bad":true}],"hasMore":false}}).to_string()),
+    }
+}
+#[test]
+fn owned_zero_and_filtered_only_failures_are_typed() {
+    for filtered in [false, true] {
+        for failure in 0..3 {
+            let mut e = ready();
+            let mut r = query(
+                &mut e,
+                fills(if filtered { Some(NOW + 1.0) } else { None }, None),
+            );
+            if filtered {
+                reply(&mut e,&r,&json!({"success":true,"code":0,"data":{"data":[execution(1,NOW)],"hasMore":true}}).to_string());
+                r = requests(&mut e).pop().unwrap();
+            }
+            fail_owned(&mut e, &r, failure);
+            assert_eq!(
+                owned_terminal(&mut e, 91, false).unwrap_err().kind,
+                Some(safe_cex_engine::ErrorKind::Internal)
+            );
+        }
+    }
+}
+#[test]
+fn owned_later_failures_drop_current_prefix_and_keep_sorted_accepted_output() {
+    for failure in 0..3 {
+        let mut e = ready();
+        let r = query(&mut e, fills(None, Some(1)));
+        reply(&mut e,&r,&json!({"success":true,"code":0,"data":{"data":[execution(1,NOW),execution(2,NOW+1.0)],"hasMore":true}}).to_string());
+        let r = requests(&mut e).pop().unwrap();
+        fail_owned(&mut e, &r, failure);
+        let rows = owned_terminal(&mut e, 91, true).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(rows[0]["id"], "2");
+    }
+}
+#[test]
+fn owned_mixed_income_keeps_prior_stages_on_ledger_failure() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[execution(1,NOW)],"hasMore":false}})
+            .to_string(),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert!(r.body.as_ref().unwrap().contains("userFundings"));
+    reply(&mut e,&r,&json!({"success":true,"code":0,"data":{"data":[{"time":NOW as u64,"coin":"BTC","amount":"-0.12","szi":"2","fundingRate":"0.01","usdc":"-0.12"}],"hasMore":false}}).to_string());
+    let r = requests(&mut e).pop().unwrap();
+    assert!(
+        r.body
+            .as_ref()
+            .unwrap()
+            .contains("userNonFundingLedgerUpdates")
+    );
+    fail_owned(&mut e, &r, 0);
+    assert_eq!(
+        owned_terminal(&mut e, 91, true)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}
+#[test]
+fn owned_terminal_offset_cap_completes_but_required_next_offset_is_strict() {
+    for needs_more in [false, true] {
+        let mut e = ready();
+        let mut r = query(&mut e, fills(None, Some(1)));
+        for n in 0..100 {
+            assert_eq!(
+                serde_json::from_str::<Value>(r.body.as_ref().unwrap()).unwrap()["offset"],
+                n * 2000
+            );
+            reply(&mut e,&r,&json!({"success":true,"code":0,"data":{"data":[execution(n+1,NOW+n as f64)],"hasMore":true}}).to_string());
+            r = requests(&mut e).pop().unwrap();
+        }
+        assert_eq!(
+            serde_json::from_str::<Value>(r.body.as_ref().unwrap()).unwrap()["offset"],
+            200000
+        );
+        let rows = if needs_more {
+            vec![execution(101, NOW + 100.0)]
+        } else {
+            vec![]
+        };
+        reply(
+            &mut e,
+            &r,
+            &json!({"success":true,"code":0,"data":{"data":rows,"hasMore":needs_more}}).to_string(),
+        );
+        let result = owned_terminal(&mut e, 91, false);
+        if needs_more {
+            assert!(result.unwrap_err().message.contains("offset cap"));
+        } else {
+            assert_eq!(result.unwrap()[0]["id"], "100");
+        }
+    }
+}
