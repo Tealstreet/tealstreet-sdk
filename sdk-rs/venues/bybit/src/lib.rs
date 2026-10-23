@@ -147,6 +147,8 @@ pub enum Then {
     },
     Account(account::Request),
     Trade(trading::Request),
+    /// An ordinary write or mode read on the engine's Preflight/Plan core.
+    Ordinary(trading::ordinary::Request),
     History(history::Request),
     Closed(closed::Request),
 }
@@ -392,7 +394,7 @@ fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
         .max(http_pause)
 }
 
-fn signing_rejection(code: i64, message: &str) -> Option<String> {
+pub(crate) fn signing_rejection(code: i64, message: &str) -> Option<String> {
     let reason = if code == 10004 || message.to_ascii_lowercase().contains("error sign") {
         "request signature rejected"
     } else if code == 10002 || message.to_ascii_lowercase().contains("recv_window") {
@@ -1838,6 +1840,8 @@ impl BybitLinear {
             },
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Trade(request) => self.on_trade_response(cx, request, response),
+            // Ordinary responses and failures never reach the public path.
+            Then::Ordinary(_) => {}
             Then::History(request) => self.on_history_response(cx, request, response),
             Then::Closed(request) => self.on_closed_response(cx, request, response),
         }
@@ -2133,6 +2137,50 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.on_ordinary_plan_ready(cx, plan);
+    }
+
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.on_ordinary_retired(owner);
+    }
+
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        self.ordinary_reconciliation(pending)
+    }
+
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending.then {
+            Then::Ordinary(request) => self.on_ordinary_leg_failed(cx, request, error),
+            then => self.on_request_failed(
+                cx,
+                Pending {
+                    category: pending.category,
+                    rest: pending.rest,
+                    then,
+                },
+                &error.message,
+            ),
+        }
+    }
+
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_ordinary(cx);
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -2294,6 +2342,11 @@ impl Venue for BybitLinear {
             return;
         }
         self.select_category(pending.category);
+        // Ordinary writes resend only on a classified grant, never on text.
+        if let Then::Ordinary(request) = pending.then {
+            self.on_ordinary_response(cx, request, response);
+            return;
+        }
         let mut pending = Some(pending);
         if self.resend(cx, &mut pending, response.body) {
             return;
@@ -2356,6 +2409,12 @@ impl Venue for BybitLinear {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        // The engine seals an ordinary preflight or plan unless an
+        // independent-order leg retires alone.
+        if let Then::Ordinary(request) = pending.then {
+            self.on_ordinary_leg_failed(cx, request, error);
+            return;
+        }
         if pending.rest.resent {
             // This refusal concerns only the retry. The earlier dispatched
             // attempt keeps the existing conservative failure/recovery path.
@@ -2380,6 +2439,13 @@ impl Venue for BybitLinear {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Then::Ordinary(request) = pending.then {
+            // Transport loss arrives typed through on_http_failed; this is a
+            // pre-transport (signing) failure.
+            let error = VenueError::new(error).outcome(safe_cex_engine::Outcome::NotSent);
+            self.on_ordinary_leg_failed(cx, request, error);
+            return;
+        }
         if matches!(&pending.then, Then::RefreshMarkets(_)) {
             let Then::RefreshMarkets(page) = pending.then else {
                 unreachable!()
@@ -2466,6 +2532,11 @@ impl Venue for BybitLinear {
             _ => None,
         };
         let category = symbol.map_or(self.primary_category, |symbol| self.category_for(symbol));
+        // An ordinary trade command fails through its own preflight.
+        if !self.category_enabled(category) && self.ordinary_command(cx.store, &command) {
+            self.on_trade_command(cx, command);
+            return;
+        }
         if !self.category_enabled(category) {
             let id = match &command {
                 Command::FetchCandles { command, .. }

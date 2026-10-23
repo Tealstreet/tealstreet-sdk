@@ -5396,6 +5396,31 @@ The cost occurs per Store, not per message, and grows with symbol count/string
 length and hash-table capacity steps. These are native index-only measurements;
 actual process/browser/WASM costs include allocator and memory-page effects.
 
+
+### Ordinary Bybit trading on the Plan core
+
+Ordinary `bybit`, `bybitinverse`, `bybitspot` and `bybitdemo` writes (not
+`hyrotrader`, and no command on an option symbol) run as one genuine preflight
+plus one admitted native plan. Caller-visible effects:
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Absent-order cancel answers (`110001`, `170213`) are satisfied, not a local Cancelled transition (D2) | Success (`[]`); the row stays until one fresh order read, which the engine requests | Do not expect the row to disappear on the ACK; it goes when the reconcile read lands. |
+| A `PlaceOrders` batch where some orders are refused (D4) | Failure (`KnownPartial`) with `partialOrderIds` for the placed orders, instead of success with those IDs | Show partial success from `partialOrderIds`. **NX confirmation required before merge.** |
+| Any ordinary write that ends `Unknown` | Unchanged outcome; the engine now issues exactly one fresh order read to reconcile | No caller action; never resend the write. |
+| Independent orders of one `PlaceOrders` (`continue_on_error`) | A provider refusal, a native refusal or transport loss fails only that order; later orders still go, and the batch ends with the journal projection. A delivered unproven 408/5xx still seals the whole plan `Unknown` and retires the unsent orders (engine response-proof guard) until the Plan core can settle one independent call | Read the projected error, not the first failure; after an `Unknown` batch, reconcile before resending any unsent order. |
+| Failure text and kind | The journal reports the earliest order that reached the venue; a provider refusal after a sent attempt is `Unknown` with the provider's kind | Branch on `outcome`/`kind`, not text. |
+| Write resend | Only a native `10002`/`10004` refusal, once, re-signed with the same bytes; never on text or transport loss | None. |
+| Strict acknowledgements | A malformed, positional, count-mismatched or echo-mismatched ACK is `Unknown`; any IDs are evidence only and no Demo local row is published | Reconcile through reads. |
+| Margin mode `retCode 0` with any reason row | `Unknown` (was a refusal built from the text); native `3400045` stays a refusal | None. |
+| Position-mode read with positional or malformed rows | `NotSent` failure; nothing is cached | Retry the command. |
+| TP/SL `34040` not-modified | Success on any `/v5/position/trading-stop` write (placements, attached TP/SL amends, trailing and full-position stop moves, partial stops with or without a mark) (D1); a plain `/v5/order/amend` answered `34040` stays a refusal | None. |
+| Timing | Each native call and its one resend has its own 20 s window; the plan deadline is their declared sum, with no 120 s product cap; mode-read redos are unbounded (see AUDITS) | None. |
+
+Cancel-all keeps its narrow housekeeping: after a validated `retCode 0`, only
+captured rows that were already Closed/Canceled are removed. Omitted live
+orders make the command `Unknown`; this proves nothing about them.
+
 ## Engine socket lifecycle: OKX
 
 OKX authentication state, socket epochs, reconnect permission, subscription

@@ -2403,6 +2403,19 @@ that hot path. No authority policy, codec, venue-specific shortcut or legacy-sit
 exemption changes. Exact paired CI performance and family memory/size gates remain
 separate evidence from diagnostic profiles.
 
+
+## Ordinary Bybit Plan adoption
+
+Ordinary Bybit writes move from the legacy job pipeline to the shared Preflight
+and Plan core; Hyro and every option-symbol command stay on the legacy pipeline until
+their own adoption (D5, remove-before-master-merge). One const code table and a
+strict object-only acknowledgement codec record write facts before any Store or
+Demo publication; refusals that carry rows or IDs are unproven, and no text or
+transport loss authorizes a resend. The partial-stop protection-cancel leg
+needs `plan_protection_cancel_leg_context`, carried on the child until its own
+engine follow-up PR merges after #1857 and #1873. Legacy inventory: one
+`trading.rs` site pruned; the rest serves the Hyro/option pipeline.
+
 ## Draft socket lifecycle architecture adoption
 
 The shared Supervisor alone did not own current epochs, auth acceptance,

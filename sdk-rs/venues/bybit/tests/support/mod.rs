@@ -257,6 +257,34 @@ impl Harness {
         self.now = until;
     }
 
+    /// An Unknown write seal reconciles with exactly one fresh order read (one
+    /// page per settle coin) and nothing else: no write, resend or refresh.
+    pub fn reconcile_once(&mut self, empty: &str) {
+        assert!(!self.requests.is_empty(), "one reconcile order read");
+        assert!(
+            self.requests
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get
+                    && r.url.contains("/v5/order/realtime")),
+            "only the reconcile order read: {:?}",
+            self.paths()
+        );
+        let mut urls: Vec<&str> = self.requests.iter().map(|r| r.url.as_str()).collect();
+        let issued = urls.len();
+        urls.sort_unstable();
+        urls.dedup();
+        assert_eq!(urls.len(), issued, "the reconcile read is issued once");
+        let reads: Vec<RequestId> = self.requests.drain(..).map(|r| r.id).collect();
+        for read in reads {
+            self.reply(read, 200, empty);
+        }
+        assert!(
+            self.requests.is_empty(),
+            "nothing follows: {:?}",
+            self.paths()
+        );
+    }
+
     pub fn result(&self, command: u32) -> Option<&Result<String, String>> {
         self.done
             .iter()
