@@ -131,7 +131,7 @@ ratios. The execution sweep is small in this sample and is not the primary fix.
 
 489 WOO/Binance native tests across 38 targets pass, as do scoped strict Clippy,
 fmt, bash syntax and diff checks. The original 14 request-context checker controls pass; the current incoming scanner passes all 15 controls.
-Actual landing cd9580ed8231d469a3218a2033c8294c144e81cf is genuinely integrated.
+Actual landing 65b7cc5eff04a7726e87ac8d922933049e2062ec is genuinely integrated.
 The initial stale incoming Paradex/Lighter ratchet failures were resolved by
 preserving landing's source and inventory. Both request-context checks now pass;
 the inventory has zero delta against that integrated landing.
@@ -169,15 +169,15 @@ comparison policy is unchanged.
 
 ## Current landing and source-equivalent proof
 
-The local integration consumes actual book #1887 and snapshot #1787. WOO/Binance,
+The integration consumes actual book #1887, snapshot #1787, cached Lighter reads #1900 and Script API partial-error handling #1895. WOO/Binance,
 engine, crypto, registry, hosts, Cargo/config and harness inputs remain identical
-to tested f564. Incoming changes affect unrelated venue crates, documentation,
+to tested f564. Incoming changes affect unrelated venue crates, Script API code, documentation,
 the inventory and its scanner's exact Paradex rehash transition plus regression
 control. The updated scanner and its 15 controls pass locally; the manifest is
 incoming-exact, with zero WOO delta. The three own shared-ledger sections retain
 incoming content first and the reviewed WOO appendix once.
 
-The overseer instructed integration of current landing after f564 became green,
+The overseer granted TRAIN GO #1898 and instructed current landing integration after f564 became green,
 with a train slot after #1895 and before #1869's final integration. CI success is
 attributed to f564; no fresh-CI pass is claimed for a later integrated head.
 Independent reviews and a fresh separate guard must validate source equivalence
