@@ -151,6 +151,14 @@ Engine, through real decode and dispatch (a probe venue records
 7. Decode: absent is `None`; `null`, 0, -1, 1.5, "1" and 2147483648 are
    errors; 2147483647 is accepted. `handle_command` refuses a non-finite
    `now` and an out-of-range wait with no dispatch.
+   - The public `handle` at a raw clock where `now + 120000` is not finite
+     or does not advance dispatches unstamped, and the getter answers `None`.
+
+API fit: uufub4 CLEAR for decode and entry custody at `de14dd30926`,
+including Fresh-only pre-effect expiry, existing authority after admission,
+floor and sub-millisecond expiry, a finite advancing deadline, and exact
+receipt-sequence cleanup. No getter grants authority. Host clearance belongs
+to 5c57jl. Source still needs an adversarial custody review.
 
 Host:
 
