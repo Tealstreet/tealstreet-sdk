@@ -350,3 +350,30 @@ fn accepted_revision_conflicted_orders_snapshot_preserves_newer_order_and_comple
     );
     assert_eq!(h.e.store().order("one").unwrap().price, 69000.);
 }
+
+#[test]
+fn account_ping_and_aop_require_accepted_login() {
+    let mut h = Harness::new();
+    let socket = h.socket();
+    h.open();
+    assert_eq!(h.sent_to(socket, "user.auth"), 1);
+    assert_eq!(
+        h.sent_to(socket, "server.ping"),
+        0,
+        "opening cannot release account ping before accepted login"
+    );
+    assert_eq!(h.sent_to(socket, "aop_p.subscribe"), 0);
+    h.message(AUTHED);
+    let sent: Vec<_> = h
+        .sent
+        .iter()
+        .filter(|(s, _)| *s == socket)
+        .map(|(_, text)| text.as_str())
+        .collect();
+    assert_eq!(sent.len(), 3);
+    assert_eq!(
+        sent[1],
+        r#"{"id":1202,"method":"aop_p.subscribe","params":[]}"#
+    );
+    assert_eq!(sent[2], r#"{"id":1201,"method":"server.ping","params":[]}"#);
+}

@@ -40,13 +40,18 @@ suppresses public transport without suppressing a configured private socket.
 
 Private role uses the same ws URL and existing login recipe. Connect timeout is
 15s. Idle is 12.5s with ONLY native pong evidence refreshing it; ordinary data
-and malformed messages do not keep the socket alive. Ping starts on accepted
-open, then every 5s. Retry is jittered 1s, 2s, 4s, 8s, 16s cap; stable 30s
+and malformed messages do not keep the socket alive. The accepted-login ruling
+supersedes the original immediate opening ping: account ping/private sends wait
+for accepted login; the shared periodic watch remains armed throughout. Retry is jittered 1s, 2s, 4s, 8s, 16s cap; stable 30s
 resets failure count. Retirement clears authenticated/physical identity and
 invalidates current stream readiness before reconnect.
 
-Opening sends exact native user.auth with id999, then server.ping id1201.
-Successful id999 status=success sends aop_p.subscribe id1202. A duplicate ACK
+Opening sends exact native user.auth with id999 and reserves the native opening
+ping id1201 in shared send_after_socket_interests custody. Successful id999
+status=success permits the encoded aop_p.subscribe id1202, then the retained
+server.ping id1201. Before ACK, neither AOP nor account ping may leave. This is
+an intentional order change from the original auth,ping,ACK,AOP sequence;
+all individual JSON bytes and RPC identities remain pinned. A duplicate ACK
 must not become another subscription authority. Native failed auth reports the
 existing AUTH_REJECTED notice and closes/retries, without invented terminal
 startup policy or an HTTP fallback. The credential/signing recipe stays exact.
@@ -168,3 +173,39 @@ accepted revision-conflicted empty orders snapshot preserves the newer order
 and ends the barrier, allowing pongs/current state beyond connect+20s.
 Expanded receipt:12 executed,6 original assertion RED,6 working GREEN,0ignored.
 The original ten-control receipt remains identifiable at81fc6001a6b.
+
+## Reviewed prerequisite and accepted-login adoption
+
+Plain merge4e679fd493a stacks reviewed #1970 headde8106fd6d0, including actual
+#1943 and current venue landingf324. Engine/host/OKX blobs match that prerequisite
+exactly. The dependency is unmerged; actual1970 is required before final consumer
+proof/merge. Shared-doc conflicts retain the incoming documents with the Phemex
+plan index row appended once. Incoming credential-selection whitespace is kept.
+
+Overseer explicitly requires no account ping/private subscription before login
+ACCEPTED. Original accepted_open_preserves_auth_then_ping_and_aop_wire remains
+identifiable atc8812e4e85a (and the original native861462 archive). The next RED
+is the intentional policy change: opening must emit auth alone, then accepted
+login emits AOP followed by the shared queued ping. When that RED is adopted,
+update the older positive's order assertion explicitly; preserve all auth,
+signature/expiry, ping and AOP byte assertions. No implicit assertion weakening.
+
+Private transport mapping: one FeedId with the declared snapshot policy,
+PongOnly traffic and a native control classifier limited to id999 auth proof and
+native pong evidence. No financial payload predecode. Shared Opened releases
+only login and retains the opening ping through shared one-shot custody;
+Authenticated(first) updates the native authenticated fact and proposes the
+fixed AOP interest. The immutable connect-origin snapshot barrier remains live.
+Shared Ping uses the native checked RPC formatter; shared Reconnect reacquires
+the same feed; Retired clears native open/auth/snapshot facts. Remove the private
+Supervisor, connected_at, raw SocketId and legacy timer/send ownership. Native
+orders_ready continues to depend on accepted-open/auth/snapshot facts; none is
+transport admission authority. Whole-family feature mode must include Phemex.
+
+The account reducer retains one existing fallible prepare/validate path. Once
+all known-row validation and position preparation succeeds, but before sequence
+or any Store publication changes, an accepted orders snapshot calls shared
+complete_socket_snapshot. Failure returns without publication. Positions-only,
+accounts-only and rejected snapshots do not call it; accepted revision conflicts
+do, preserving the original safe_snapshot behavior. No financial code/table,
+request builder, signing recipe or REST callback change belongs in this slice.
