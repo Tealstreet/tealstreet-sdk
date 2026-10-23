@@ -2511,3 +2511,12 @@ owner isolation, synchronous retirement and unchanged fallthrough controls.
 Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
 history13->11). Private history/signing and spot REST capabilities stay native.
 Architecture gate: No; existing engine admission and completion choke points.
+
+## KuCoin local Read ownership
+
+Eight local terminal expressions use genuine initial Read command admission.
+The original root is validated immediately before cached-result publication or
+Spot leverage projection. No HTTP attempt is fabricated and no owner is acquired
+on private/pager fallthrough. Existing credential precedence, successful setter
+no-ops and accountMarginType capability are preserved. The exact ratchet removes
+eight occurrences/seven rows; remaining signing/history/Session sites remain held.
