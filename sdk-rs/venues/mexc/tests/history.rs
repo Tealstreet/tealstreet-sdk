@@ -609,3 +609,50 @@ fn owned_order_specific_fills_stay_single_page_and_global_limit_is_exact() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["id"], "739113577038255616");
 }
+
+#[test]
+fn owned_native_window_budget_resets_after_terminal_page_thousand() {
+    let mut e = ready();
+    let mut r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(1.0),
+            to_ms: Some(100.0 * 86_400_000.0),
+            limit: Some(101),
+        },
+    );
+    let newest = EXEC.replace("1700000000123", "8639999999");
+    let full = format!(
+        r#"{{"success":true,"code":0,"data":[{}]}}"#,
+        vec![newest.as_str(); 100].join(",")
+    );
+    for number in 1..1000 {
+        response(&mut e, &r, &full);
+        r = requests(&mut e).remove(0);
+        assert!(r.url.contains(&format!("page_num={}&", number + 1)));
+    }
+    response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("end_time=864000000") && r.url.contains("page_num=1&"));
+    let older = EXEC
+        .replace("1700000000123", "100")
+        .replace("739113577038255616", "739113577038255618");
+    let full = format!(
+        r#"{{"success":true,"code":0,"data":[{}]}}"#,
+        vec![older.as_str(); 100].join(",")
+    );
+    response(&mut e, &r, &full);
+    let r = requests(&mut e).remove(0);
+    assert!(
+        r.url.contains("page_num=2&"),
+        "second window has its own budget"
+    );
+    response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&owned_terminal(&mut e, 99, false).unwrap()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["id"], "739113577038255616");
+    assert_eq!(rows[1]["id"], "739113577038255618");
+}
