@@ -492,7 +492,8 @@ fn streamed_prefix_is_never_published_and_progress_cannot_extend_deadline() {
         assert_eq!(
             error.kind,
             match failure {
-                0 => None,
+                // A stream that ends mid-array is a malformed reply, not loss.
+                0 => Some(ErrorKind::Internal),
                 1 => Some(ErrorKind::Network),
                 _ => Some(ErrorKind::Timeout),
             }
@@ -528,7 +529,7 @@ fn capacity_denial_precedes_invalid_input_and_does_not_retire_a_peer() {
     let error = done[0].as_ref().unwrap_err();
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.outcome, None);
-    assert_eq!(error.message, "Too many requests in flight");
+    assert_eq!(error.message, "Engine request capacity reached");
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::Http(_)

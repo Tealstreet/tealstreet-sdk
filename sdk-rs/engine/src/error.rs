@@ -224,7 +224,7 @@ impl fmt::Display for crate::request_context::Error {
         use crate::request_context::Error;
         f.write_str(match self {
             Error::Invalid => "Invalid request context",
-            Error::Capacity => "Too many requests in flight",
+            Error::Capacity => "Engine request capacity reached",
             Error::Duplicate => "Request is already in flight",
             Error::State => "Request is not in a sendable state",
             Error::TimedOut => "Request context timed out",

@@ -282,3 +282,51 @@ bans and both ratchets; CI runs WASM/replays/timing. Three independent plan and
 implementation reviews are required; architecture answer should be No, an
 adapter to existing shared choke points. Document concrete caller metadata,
 20-second preparation-inclusive bound and spot scope in CALLERS/AUDITS/QUALITY.
+
+## 2026-10-24: local client-order lookup completion
+
+Base: actual Store landing `c55a6a760443bf1531eb536bfc504a312cee1356`.
+The full inventory and destination map above remain the family map. Current
+manifest: Hyperliquid 50 sites, history.rs 13. This slice removes only the two
+local `OrderByClientId` completion fingerprints below, leaving 48 / 11:
+
+- `95ca4237828f8435d55e2d1e464bad969c28ac05efed94d2a1de945845738d75`
+  (one): matching cached symbol and client ID returns the complete native Order.
+- `da539b025b1000762173bebe5cbd496d99e02923664484e6f40e183ee7ff9118`
+  (one): invalid client ID or missing account identity returns the exact native
+  `{"found":false,"definitive":false}` payload.
+
+Only these synchronous returns enter the shared `admit_http_command` choke
+point, with Read, 20,000ms, no credential/pacing, RetryPolicy::Never. Decide the
+native local branch without effects, admit before serializing or publishing its
+result, then call `done_context`; rejected/revoked admission returns immediately
+without numeric completion or a fabricated owner. Cached lookup keeps precedence
+over ID validation, missing identity and the spot capability branch. Use a cached
+order index across admission and serialize the unchanged borrowed Order afterward;
+no clone, new result schema or venue finalizer is needed. Valid uncached perps
+lookups retain the native public-only refusal or private REST path; the public-only
+refusal keeps its exact text even at full Context capacity. Spot uncached lookups keep their existing
+non-definitive local result. Neither gets a new unused Context.
+
+Files: history.rs, a new tests/request_context_cached_lookup.rs, this appendix,
+CALLERS/AUDITS/QUALITY, and only the two manifest entries. The fresh open-PR map
+shows these source/new-test paths clear; candle fixtures and signing/trading
+files are held and stay outside the slice. No Paradex signing changes.
+
+Original RED commit precedes source: both local branches reject NaN/infinite
+entry clocks and full 256-owner capacity, emit exactly one typed correlated Read
+failure with no financial outcome, no HTTP/WS/timer/marker/store publication;
+freeing one parked genuine perps-candle peer enables exact native results and
+cannot complete another owner. Controls cover perps/spot, mainnet/testnet,
+public/missing identity, full cached Order wire equality and cache precedence,
+non-matching symbol/ID, duplicate active command ownership, finite ID reuse,
+300 synchronous retirements, and valid uncached perps REST fallthrough. Keep
+existing native history assertions unchanged. Tests must fail for the original
+admission assertions, rather than compilation or altered native expectations.
+
+Verify scoped Hyperliquid + Binance native tests (CARGO_BUILD_JOBS=2), strict
+all-target/all-feature Hyperliquid Clippy, scoped fmt, bans and both request-context
+checks. Independently review plan then source/adversarial, caller and full-map
+preservation. Architecture gate: No; only consumes existing shared entry and
+terminal authority. Draft PR and background CI; request a serialized train slot
+only after clean reviews and green exact-head CI. No engine or signer work.
