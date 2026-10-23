@@ -57,10 +57,10 @@ which rejected a fixed refusal count.
      warning and no error report. Backoff (not an immediate dial) bounds a host
      that ignores `reject_route` and never reports exhaustion.
    - **Exhaustion:** `on_route_exhausted` for the current private socket reports
-     the typed `AuthPermission` egress refusal once per streak: as a startup
-     failure before startup (no deactivation, as for REST 40018), else as an
-     error notice. As in TS, the socket then keeps retrying the last route, so a
-     later whitelist fix recovers; an authenticated login ends the streak.
+     the native egress refusal once per streak as an `AUTH_REJECTED` error
+     notice, never a startup failure or deactivation (REST startup has its own
+     egress). As in TS, the socket then keeps retrying the last route, paced by
+     backoff, so a later whitelist fix recovers; a login ends the streak.
    - **Non-terminal until exhaustion:** 40018/40024 are not a permanent auth
      failure until then.
    - **Separate counters:** carried over from TS. These are
@@ -83,7 +83,8 @@ which rejected a fixed refusal count.
 - **Bitget venue.**
   - 40018 or 40024 before login reconnects with `reject_route` and reports
     nothing.
-  - Exhaustion reports exactly once and stops reconnecting. That holds for a
+  - Exhaustion reports once per streak, then redials the last route with
+    backoff; a later login succeeds with no second report. That holds for a
     two-candidate chain (relay off) and a three-candidate chain.
   - One relay strike does not exhaust the relay.
   - The 2 and 6 counter thresholds hold.

@@ -996,10 +996,8 @@ impl BitgetFutures {
             &msg,
             ErrorKind::AuthPermission,
         );
-        // An IP whitelist refusal is not a refused key: never deactivate.
-        if !self.startup_ready(cx) {
-            return self.reject_startup(cx, error, false);
-        }
+        // Not a startup failure: REST startup proceeds through its own egress,
+        // and a later whitelist fix must recover this socket without a restart.
         cx.notice(Level::Error, code::AUTH_REJECTED, error.message.clone());
         self.disconnected(cx, 3);
     }

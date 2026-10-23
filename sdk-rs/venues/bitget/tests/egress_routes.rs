@@ -3,7 +3,7 @@
 //! the socket keeps retrying the last route as TS does.
 mod support;
 
-use safe_cex_engine::{ErrorKind, Event, SocketId};
+use safe_cex_engine::{Event, SocketId};
 use safe_cex_venue_bitget::Options;
 use support::*;
 
@@ -168,24 +168,43 @@ fn a_host_without_routing_paces_repeated_refusals_with_backoff() {
 }
 
 #[test]
-fn startup_exhaustion_reports_once_without_deactivating() {
+fn exhaustion_before_startup_reports_once_then_redials_until_a_login() {
     let mut h = to_login();
     refuse(&mut h, IP_BOUND);
     let refused = private(&h);
     h.event(Event::WsRouteExhausted { socket: refused });
-    assert_eq!(h.startup_failures.len(), 1);
-    let failure = &h.startup_failures[0];
-    assert_eq!(failure.kind, Some(ErrorKind::AuthPermission));
-    assert_eq!(failure.venue_code.as_deref(), Some("40018"));
-    assert!(failure.message.contains("Current IP does not match"));
+    assert_eq!(auth_rejections(&h), 1);
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains("(40018): Current IP does not match the bound IP"))
+    );
+    // Duplicate exhaustion for the spent socket is inert.
+    h.event(Event::WsRouteExhausted { socket: refused });
+    // The last route is redialled, paced, and a repeat walk stays silent.
+    let socket = next_private(&mut h);
+    assert!(!rejects_route(&h, socket));
+    h.event(Event::WsOpened { socket });
+    refuse(&mut h, IP_BOUND);
+    h.event(Event::WsRouteExhausted {
+        socket: private(&h),
+    });
+    assert_eq!(auth_rejections(&h), 1);
+    // The user fixes the whitelist: the redial logs in, with no second report.
+    let socket = next_private(&mut h);
+    h.event(Event::WsOpened { socket });
+    h.private_message(r#"{"event":"login","code":0,"msg":""}"#);
+    assert!(
+        h.sent
+            .iter()
+            .any(|(s, t)| *s == socket && t.contains("subscribe"))
+    );
+    assert_eq!(auth_rejections(&h), 1);
+    assert!(h.startup_failures.is_empty());
     assert_eq!(
         h.deactivations, 0,
         "a whitelist refusal is not a refused key"
     );
-    // Duplicate exhaustion for the spent socket is inert.
-    h.event(Event::WsRouteExhausted { socket: refused });
-    run_for(&mut h, 600_000.);
-    assert_eq!(h.startup_failures.len(), 1);
 }
 
 #[test]
@@ -202,7 +221,7 @@ fn walk_across_three_routes_reports_only_at_the_end() {
     h.event(Event::WsRouteExhausted {
         socket: private(&h),
     });
-    assert_eq!(h.startup_failures.len(), 1);
+    assert_eq!(auth_rejections(&h), 1);
 }
 
 #[test]
