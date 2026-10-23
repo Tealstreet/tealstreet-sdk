@@ -99,3 +99,41 @@ Any eventual profile-policy change needs the unchanged fixed size budget,
 correctness/replay gates and exact-head CI. If this experiment fails to improve
 Rust cost materially or exceeds size, return to the named evidence and shared
 owner coordination rather than inventing a WOO-specific shared-path substitute.
+
+## Opt3 experiment results and restart checkpoint
+
+The unchanged9aef source was rebuilt with the single experimental override
+profile.release.package.safe-cex-venue-woo.opt-level=3. No production build policy
+or runtime source has been edited. Evidence is under
+/tmp/codex-ih35js-woo-profile-opt3; baseline evidence remains under
+/tmp/codex-ih35js-woo-profile-9aef.
+
+Five alternating candidate TS/Rust pairs produced medians TS17.729ms and
+Rust10.031ms (ratio1.7674). Rust values were10.145,10.031,9.774,9.258,12.130ms;
+TS values were23.456,19.472,16.613,16.028,17.729ms. All runs served77 frames with
+zero unserved requests and no protocol errors. The normal candidate artifact is
+1,203,818 bytes, versus baseline1,142,442, within the unchanged1,343,488 ceiling.
+Candidate WASM SHA256 is
+5c099e62745b95734de474fcf60bf4c5ec78b68206c89dbc4f928d65ee00cbb3.
+
+The candidate named profile has77 samples, with4.332ms sampled WASM ingress,
+1.998ms inclusive Tick deserialization,0.542ms hashing and0.291ms Numeric.
+These sparse, overlapping samples have changed inlining boundaries and do not
+support exact function speed ratios. TS median shifted substantially between
+baseline and candidate phases, so neither sequential-phase ratio establishes
+restored CI headroom. No performance goal or correctness gate is claimed passed.
+
+Next, before production code: run five interleaved baseline/candidate Rust pairs
+with alternating order to control phase drift, then one correctness replay per
+artifact and compare full snapshots/checkpoints using snapshot-compare.mjs.
+Preserve the tape, books, clocks and budgets. Record literal build/bind/wasm-opt
+commands and environment alongside receipts: current hashes authenticate files,
+not a complete rebuild provenance chain. Only after these controls consider the
+existing family-only build.sh override, refreshing open-PR file ownership first.
+Native WOO/Binance gates and independent final reviews follow the timing window.
+
+Independent source review of b5b54c3170a found no blocking interpretation or
+architecture issue. It verified baseline raw values, warm/stop boundaries and
+that this family-only compiler experiment bypasses no shared path. No production
+change, new correctness replay, candidate acceptance or final CI has occurred.
+Restart requested by the overseer stops further experiments and builds here.
