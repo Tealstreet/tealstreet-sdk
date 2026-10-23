@@ -247,7 +247,6 @@ impl safe_cex_engine::signing::Signer for ExternalSigner {
 }
 
 /// A JS provider's declared algorithms: a JSON array of SignAlgorithm names.
-#[cfg(feature = "dispatch-signing")]
 fn host_algorithms(
     json: &str,
 ) -> Result<Vec<safe_cex_engine::signing::Algorithm>, safe_cex_engine::VenueError> {
