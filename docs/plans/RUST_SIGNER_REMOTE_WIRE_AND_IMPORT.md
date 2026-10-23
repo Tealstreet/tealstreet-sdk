@@ -226,7 +226,7 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
    - L1 `ClobAuth` EIP-712 is a recipe: `Secp256k1Digest` over the venue
      digest, with the `l1Wallet` role.
 2. **Import request.**
-   - `Cx::request_import(context, url, step, ImportSpec)` stages the derive GET
+   - `Cx::request_import(context, method, url, step, ImportSpec)` stages the derive GET
      like any signed managed request.
    - `ImportSpec` names the JSON fields to install and their roles:
      `apiKey → credential`, `secret → signing` (base64url, declared),
@@ -255,8 +255,9 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
    - `Signer::drop_imported(slot, generation)` is called by
      `retire_session` (claude-55ao7t) and on engine disposal. It is
      idempotent and fire-and-forget, and it runs again on re-open.
-   - Provider-issued ref names embed the generation. The engine checks it at
-     sign time, as does the provider.
+   - The engine records each receipt's refs per authority tuple and checks
+     membership at sign time, as does the provider. It never parses ref
+     names.
    - Recipes that reference a retired ref fail with `Unavailable`, and the
      session core re-derives.
 5. **Provider surface.**
@@ -295,7 +296,8 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      Command and Background contexts are refused `Invalid`. The derive GET is
      a deterministic session Read, so it needs no write facts.
    - **Retirement order.** `retire_session` drains waiters, then discards
-     in-flight HTTP, then revokes, and only then drops imported refs. The
+     in-flight HTTP, then drops imported refs, then revokes the registry
+     entry, as claude-55ao7t specified for the hunk. The
      engine checks generation liveness immediately before routing a body to
      `Signer::import`, so a late 2xx for a retired generation is never
      imported.
@@ -370,8 +372,9 @@ moves the venue onto session contexts, wires the recipes and import, removes
 every in-venue key and secret use (listed in phase 7), and carries the
 real-venue positive proof (trading tests 161 and 441 through refs). This
 mirrors the P8 per-family obligation. Sam's "no in-venue derivation" is met
-when that conversion lands, and this PR's body says so. **Polymarket keeps no L1 private key, no L2 API
-secret and no passphrase in venue state, and derives nothing from them.**
+when that conversion lands, and this PR's body says so. **Target state, once
+the conversion lands: Polymarket keeps no L1 private key, no L2 API secret and
+no passphrase in venue state, and derives nothing from them.**
 
 **Phases.** Each phase is a commit with focused tests.
 
