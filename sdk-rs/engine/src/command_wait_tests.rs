@@ -452,3 +452,23 @@ fn a_duplicate_refused_before_its_entry_keeps_the_live_stamp() {
         );
     }
 }
+
+#[test]
+fn a_held_command_keeps_its_own_receipt_past_a_same_id_arrival() {
+    let mut e = engine(Probe::default());
+    deliver(
+        &mut e,
+        0.,
+        r#"{"op":"placeOrders","command":1,"orders":[]}"#,
+    );
+    deliver(&mut e, 0., &cancel(2, "7", Some(1_000)));
+    assert!(observed(&e, 2).is_empty(), "held until the order is stored");
+    // The duplicate's arrival releases the original at its hold cap.
+    deliver(&mut e, 10_000., &cancel(2, "7", Some(50_000)));
+    assert_eq!(
+        observed(&e, 2),
+        [Some(Wait::Expired), None],
+        "the original reads its own receipt; the duplicate has none"
+    );
+    assert_eq!(deadline(&e, 2), None, "the original's terminal cleared it");
+}
