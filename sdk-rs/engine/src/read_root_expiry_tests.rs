@@ -46,6 +46,13 @@ struct Probe {
     parked: HashMap<CommandId, Walk>,
     roots: HashMap<CommandId, Context>,
     finalized: Rc<Cell<usize>>,
+    /// Hold cancellations behind unstored placements (placement acks).
+    hold: bool,
+    /// After admission, try a Mutation sibling under the same command.
+    mutation_sibling: bool,
+    sibling: Option<Result<Context, crate::request_context::Error>>,
+    /// Each retirement hook call: the owner and how many continuations.
+    retired: Vec<(crate::request_context::Owner, usize)>,
 }
 
 impl Probe {
@@ -85,14 +92,33 @@ fn encode(rows: &[String]) -> Result<String, VenueError> {
 impl Venue for Probe {
     type Pending = Box<Walk>;
     fn start(&mut self, _: &mut Cx<'_, Box<Walk>>) {}
+    fn cancel_needs_stored_order(&self) -> bool {
+        self.hold
+    }
+    fn read_root_retired(&mut self, owner: crate::request_context::Owner, pending: Vec<Box<Walk>>) {
+        self.parked.retain(|_, walk| walk.root.owner() != owner);
+        self.retired.push((owner, pending.len()));
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Box<Walk>>, command: Command) {
         let id = command.completion_id().unwrap();
         if self.legacy_from.is_some_and(|from| id >= from) {
             return;
         }
+        if let Command::PlaceOrders { command, .. } = command {
+            cx.done(command, r#"["7"]"#.into());
+            return;
+        }
         let Some(root) = admit_root(cx) else {
             return;
         };
+        if self.mutation_sibling {
+            // Within the root's bound, so only the plain-Read rule can refuse.
+            let mut policy = leg_policy();
+            policy.operation = Operation::Mutation;
+            policy.timeout_ms = 500;
+            self.sibling =
+                Some(cx.http_context(crate::request_context::Scope::Command(id), policy));
+        }
         let completion = ReadCompletion::from_context(cx, id, root.clone()).unwrap();
         self.roots.insert(id, root.clone());
         let walk = Walk {
@@ -466,4 +492,264 @@ fn a_duplicate_legacy_receipt_is_refused_without_a_default_root() {
 #[test]
 fn an_exhausted_receipt_sequence_is_refused_without_a_default_root() {
     missing_receipt(false);
+}
+
+// New-API controls, written with the implementation.
+
+#[test]
+fn an_expired_in_flight_root_hands_its_pending_back_and_the_queue_continues() {
+    let (mut e, _) = second_page_in_flight(true);
+    let owner = e.venue.roots[&7].owner();
+    tick(&mut e, 30_000.);
+    e.drain_actions().for_each(drop);
+    assert_eq!(
+        e.venue.retired,
+        [(owner, 1)],
+        "one continuation, once, by exact owner"
+    );
+    receive(&mut e, 30_001., 9, 300_000);
+    let page = released(&mut e, 30_001.)
+        .pop()
+        .expect("unrelated query proceeds");
+    respond(&mut e, 30_002., &page, "row-a");
+    let page = released(&mut e, 30_002.).pop().expect("its second page");
+    respond(&mut e, 30_003., &page, "row-b");
+    let (terminals, _) = outcome(&e.drain_actions().collect::<Vec<_>>(), 9);
+    assert!(matches!(terminals.as_slice(), [Ok(rows)] if rows == r#"["row-a","row-b"]"#));
+}
+
+#[test]
+fn an_expired_parked_root_is_dropped_from_the_venue_queue_only() {
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    receive(&mut e, 0., 8, 60_000);
+    let owner = e.venue.roots[&7].owner();
+    tick(&mut e, 1_000.);
+    assert_eq!(e.venue.retired, [(owner, 0)]);
+    assert!(!e.venue.parked.contains_key(&7));
+    assert!(e.venue.parked.contains_key(&8));
+}
+
+#[test]
+fn the_old_root_timer_is_inert_after_a_same_id_arrival() {
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    let old_timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == 1_000. => Some(timer),
+            _ => None,
+        })
+        .expect("one engine root timer");
+    receive(&mut e, 1_000., 7, 5_000);
+    let new = e.venue.roots[&7].clone();
+    e.drain_actions().for_each(drop);
+    e.handle(1_500., Event::TimerFired { timer: old_timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        outcome(&actions, 7).0.is_empty(),
+        "the stale timer ends nothing"
+    );
+    let cx = Cx {
+        now: 1_500.,
+        store: &mut e.store,
+        io: &mut e.io,
+    };
+    assert_eq!(cx.validate_read_root_context(&new), Ok(()));
+}
+
+#[test]
+fn a_late_bind_after_expiry_releases_nothing() {
+    use crate::request_context::{HttpAction, Prepared};
+    let mut e = engine(Probe::default());
+    receive(&mut e, 0., 7, 30_000);
+    let page = released(&mut e, 0.).pop().expect("first page");
+    respond(&mut e, 10_000., &page, "row-1");
+    e.prepare_dispatch(10_000.);
+    let token = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("second page awaits preparation");
+    tick(&mut e, 30_000.);
+    e.drain_actions().for_each(drop);
+    e.http_prepared(
+        30_001.,
+        token,
+        Prepared {
+            id: token.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_))
+                && !matches!(a,
+        Action::ManagedHttp(action) if matches!(**action, HttpAction::Cancel { .. })))
+    );
+    assert!(outcome(&actions, 7).0.is_empty(), "already sealed once");
+}
+
+#[test]
+fn a_tracked_owner_refuses_a_mutation_sibling_and_still_expires() {
+    let mut e = engine(Probe {
+        park: true,
+        mutation_sibling: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    assert_eq!(
+        e.venue.sibling.as_ref().map(|r| r.as_ref().err().copied()),
+        Some(Some(crate::request_context::Error::Invalid))
+    );
+    e.drain_actions().for_each(drop);
+    tick(&mut e, 1_000.);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_strict_timeout(&actions, 7, 0, "plain Read root");
+}
+
+#[test]
+fn a_full_registry_refuses_admission_atomically_and_recovers() {
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 1, 1_000);
+    for command in 2..=256 {
+        receive(&mut e, 0., command, 300_000);
+    }
+    e.drain_actions().for_each(drop);
+    receive(&mut e, 0., 300, 300_000);
+    let (terminals, _) = outcome(&e.drain_actions().collect::<Vec<_>>(), 300);
+    assert!(matches!(terminals.as_slice(), [Err(error)]
+        if error.kind == Some(ErrorKind::Internal) && error.outcome.is_none()));
+    assert!(!e.venue.roots.contains_key(&300));
+    assert!(!e.io.read_roots.iter().any(|(_, id, _)| *id == 300));
+    assert_eq!(e.io.read_roots.len(), 256);
+    tick(&mut e, 1_000.);
+    receive(&mut e, 1_000., 301, 300_000);
+    assert!(
+        e.venue.roots.contains_key(&301),
+        "a freed slot admits again"
+    );
+    assert_eq!(e.io.read_roots.len(), 256);
+}
+
+#[test]
+fn an_expired_fresh_capture_stays_fresh_for_the_sole_expiry_helper() {
+    let mut e = engine(Probe {
+        hold: true,
+        ..Default::default()
+    });
+    e.handle_command(
+        0.,
+        Command::PlaceOrders {
+            command: 1,
+            orders: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    e.handle_command(
+        0.,
+        Command::CancelOrders {
+            command: 2,
+            ids: vec!["7".into()],
+        },
+        Some(1_000),
+    )
+    .unwrap();
+    assert!(!e.venue.roots.contains_key(&2), "held behind the placement");
+    e.drain_actions().for_each(drop);
+    e.store_mut().upsert_order(crate::model::Order {
+        id: "7".into(),
+        parent_id: None,
+        status: crate::model::OrderStatus::Open,
+        symbol: "BTCUSD".into(),
+        kind: crate::model::OrderType::Limit,
+        side: crate::model::OrderSide::Buy,
+        price: 1.,
+        amount: 1.,
+        filled: 0.,
+        remaining: 1.,
+        reduce_only: false,
+        close: None,
+        client_order_id: None,
+        time_in_force: None,
+        last_update: 0.,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    });
+    tick(&mut e, 999.5);
+    let (terminals, _) = outcome(&e.drain_actions().collect::<Vec<_>>(), 2);
+    assert!(!e.venue.roots.contains_key(&2), "no root at under 1 ms");
+    assert!(matches!(terminals.as_slice(), [Err(error)]
+        if error.kind == Some(ErrorKind::Timeout) && error.outcome.is_none()));
+}
+
+#[test]
+fn an_unstamped_mutation_is_refused_not_sent() {
+    struct Unstamped(Option<Result<(), crate::request_context::CommandEntryError>>);
+    impl Venue for Unstamped {
+        type Pending = ();
+        fn start(&mut self, _: &mut Cx<'_, ()>) {}
+        fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
+            self.0 = Some(cx.reject_unstamped_command(Operation::Mutation));
+        }
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    let mut e = crate::test_support::seeded_engine(Unstamped(None));
+    e.start(0.);
+    e.handle_command(0., query(5), Some(1_000)).unwrap();
+    assert_eq!(
+        e.venue.0,
+        Some(Err(crate::request_context::CommandEntryError::Revoked)),
+        "a stamped receipt is not refused"
+    );
+    e.io.command_waits.exhaust_receipts();
+    e.drain_actions().for_each(drop);
+    e.handle_command(1., query(6), Some(1_000)).unwrap();
+    assert_eq!(e.venue.0, Some(Ok(())));
+    let (terminals, _) = outcome(&e.drain_actions().collect::<Vec<_>>(), 6);
+    assert!(matches!(terminals.as_slice(), [Err(error)]
+        if error.outcome == Some(crate::Outcome::NotSent)));
+}
+
+#[test]
+fn drain_actions_expires_at_the_last_observed_engine_time() {
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    e.drain_actions().for_each(drop);
+    e.io.dispatch_now = 1_000.;
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_strict_timeout(&actions, 7, 0, "drain at dispatch_now");
 }
