@@ -2346,6 +2346,28 @@ not claimed as production defects. Capture exhaustion admits no unfenced read
 and preserves native account-cycle progress. Final current-head CI, actual queued
 integration and full authenticated raw proof remain separate merge gates.
 
+### Lighter cached reads: remove legacy numeric completion
+
+The cached FetchLeverage and FetchAccountTier branches consume shared initial
+Read admission and Context terminals. This closes their capacity/invalid-clock
+admission bypass without fabricating HTTP or financial evidence. Rejected and
+revoked entries return without numeric fallback; cache data and native errors
+remain unchanged after admission. Exactly three lexical sites are removed:
+Lighter46→43, lib5→3, limits6→5. SetAccountTier's separate identical numeric fail
+fingerprint remains counted. No held trading or engine source is changed.
+
+## WOO family ticker decoding compiler policy
+
+The WOO family retained shared speed defaults, while its explicit venue package
+profile still used opt-level z. A names-preserved profile identified generated
+Tick deserialization as the main sampled ingress cost. The existing family build
+mechanism now overrides only the WOO venue package to opt-level3; no second
+parser, Store lookup, numeric codec or engine policy is introduced. Original
+regression evidence is the reported landing CPU miss at28.838ms versus27.68ms.
+Interleaved unchanged-source artifacts show a local median23.105→18.957ms;
+exact-head CI's fixed public/private, CPU, memory and size gates remain acceptance
+requirements. [Scope, raw evidence and limitations](RUST_WOO_PUBLIC_CPU.md).
+
 ## SDK master Hyperliquid/Lighter parity
 
 ~~Public or unresolved Hyperliquid startup asks userFees with an absent subject,
