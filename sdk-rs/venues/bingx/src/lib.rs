@@ -89,7 +89,39 @@ pub(crate) fn issue(
     } else {
         pending
     };
-    sign::stage(cx, credentials, method, path, params, at, pending)
+    stage(cx, credentials, method, path, params, at, pending)
+}
+
+/// Stage native intent; only shared dispatch can materialize credentials.
+/// This is the one temporary legacy provider staging site.
+pub fn stage<P>(
+    cx: &mut Cx<'_, P>,
+    credentials: Option<&Credentials>,
+    method: Method,
+    path: &'static str,
+    params: Params,
+    at: Option<safe_cex_engine::json::ArrayAt>,
+    pending: P,
+) -> safe_cex_engine::RequestId {
+    let recipe = credentials.map(|c| {
+        sign::dispatch::Http::new(c.identity(method).clone(), method, path, params.clone())
+    });
+    let (url, headers, body) = params.render(
+        method,
+        path,
+        vec![(
+            sign::unsigned_headers(method)[0].0,
+            sign::unsigned_headers(method)[0].1.into(),
+        )],
+    );
+    let id = match at {
+        Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
+        None => cx.request(method, url, headers, body, pending),
+    };
+    if let Some(recipe) = recipe {
+        cx.sign_http(id, Box::new(recipe));
+    }
+    id
 }
 
 pub(crate) fn signature_rejected(body: &str) -> bool {
@@ -349,7 +381,7 @@ impl Bingx {
             resent: true,
             context: None,
         }));
-        let id = sign::stage(
+        let id = stage(
             cx,
             self.credentials.as_ref(),
             method,
@@ -1183,10 +1215,7 @@ impl Venue for Bingx {
                 self.on_sign_error(cx, signed.inner, error);
                 managed::finish(cx, context);
             }
-            Pending::Identity(command) => {
-                cx.command_error(command, &error.message);
-                cx.fail(command, error);
-            }
+            Pending::Identity(command) => identity::fail_command(cx, command, error),
             Pending::History(request) => self.history.on_sign_failed(cx, request, error),
             Pending::Trade(request) => {
                 self.trading

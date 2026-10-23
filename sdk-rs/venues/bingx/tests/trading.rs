@@ -28,7 +28,22 @@ fn issue(
     _at: Option<safe_cex_engine::json::ArrayAt>,
     pending: Pending,
 ) {
-    sign::stage(cx, credentials, method, path, params, None, pending);
+    // Mirrors the crate's legacy staging transport for the source-included modules.
+    let recipe = credentials.map(|c| {
+        sign::dispatch::Http::new(c.identity(method).clone(), method, path, params.clone())
+    });
+    let (url, headers, body) = params.render(
+        method,
+        path,
+        vec![(
+            sign::unsigned_headers(method)[0].0,
+            sign::unsigned_headers(method)[0].1.into(),
+        )],
+    );
+    let id = cx.request(method, url, headers, body, pending);
+    if let Some(recipe) = recipe {
+        cx.sign_http(id, Box::new(recipe));
+    }
 }
 struct TestVenue {
     trading: Trading,

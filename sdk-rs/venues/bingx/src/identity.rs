@@ -70,11 +70,19 @@ fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity,
         .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
     match result {
         Ok(data) => cx.done(command, data),
-        Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
-        }
+        Err(error) => fail_command(cx, command, error),
     }
+}
+
+/// Native and signer identity failures share one command completion.
+pub(crate) fn fail_command(
+    cx: &mut Cx<'_, Pending>,
+    command: CommandId,
+    error: impl Into<safe_cex_engine::VenueError>,
+) {
+    let error = error.into();
+    cx.command_error(command, &error.message);
+    cx.fail(command, error);
 }
 impl Bingx {
     pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {

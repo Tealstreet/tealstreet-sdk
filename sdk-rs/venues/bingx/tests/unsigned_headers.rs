@@ -22,7 +22,7 @@ struct NativeProbe {
 impl Venue for NativeProbe {
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
-        safe_cex_venue_bingx::sign::stage(
+        safe_cex_venue_bingx::stage(
             cx,
             self.credentials.as_ref(),
             self.method,

@@ -101,7 +101,7 @@ impl Params {
             .join("&")
     }
     /// Native wire shape, shared by legacy construction and dispatch recipes.
-    fn render(
+    pub(crate) fn render(
         self,
         method: Method,
         path: &str,
@@ -132,34 +132,4 @@ impl Params {
 /// Listen-key requests carry only the API key; every other path is signed.
 pub fn signs(path: &str) -> bool {
     path != "/openApi/user/auth/userDataStream"
-}
-
-/// Stage native intent; only shared dispatch can materialize credentials.
-pub fn stage<P>(
-    cx: &mut safe_cex_engine::Cx<'_, P>,
-    credentials: Option<&Credentials>,
-    method: Method,
-    path: &'static str,
-    params: Params,
-    at: Option<safe_cex_engine::json::ArrayAt>,
-    pending: P,
-) -> safe_cex_engine::RequestId {
-    let recipe = credentials
-        .map(|c| dispatch::Http::new(c.identity(method).clone(), method, path, params.clone()));
-    let (url, headers, body) = params.render(
-        method,
-        path,
-        vec![(
-            unsigned_headers(method)[0].0,
-            unsigned_headers(method)[0].1.into(),
-        )],
-    );
-    let id = match at {
-        Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
-        None => cx.request(method, url, headers, body, pending),
-    };
-    if let Some(recipe) = recipe {
-        cx.sign_http(id, Box::new(recipe));
-    }
-    id
 }

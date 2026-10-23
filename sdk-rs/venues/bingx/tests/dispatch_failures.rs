@@ -80,7 +80,7 @@ impl Harness {
                             1_000.,
                             preparation,
                             Prepared {
-                                id: u64::from(request.id.0),
+                                id: request.id.0,
                                 expires_at: None,
                             },
                         );

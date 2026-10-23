@@ -322,17 +322,17 @@ impl Account {
         let native = market.id.clone();
         let generation = self.metadata_generations.entry(symbol.clone()).or_default();
         *generation = generation.wrapping_add(1);
-        let generation = *generation;
-        self.request(
+        Self::request(
             cx,
             credentials,
-            (Method::Get, crate::paths::LEVERAGE),
+            Method::Get,
+            crate::paths::LEVERAGE,
             Params::new().str("symbol", &native),
             Request::Metadata {
                 command,
                 symbol,
                 revision: self.settings_revision,
-                generation,
+                generation: *generation,
                 publish,
                 leverage: None,
             },
@@ -392,16 +392,39 @@ impl Account {
         self.poll = Some(cx.set_poll_timer(POLL_MS));
     }
 
+    /// Session and metadata requests keep their legacy signed transport.
     fn request(
-        &mut self,
         cx: &mut Cx<'_, Pending>,
         credentials: &Credentials,
-        target: (Method, &'static str),
+        method: Method,
+        path: &'static str,
         params: Params,
         request: Request,
         stream: bool,
     ) {
-        let (method, path) = target;
+        let at = stream.then_some(ArrayAt::EnvelopeField("data"));
+        crate::issue(
+            cx,
+            Some(credentials),
+            method,
+            path,
+            params,
+            at,
+            Pending::Account(request),
+        );
+    }
+
+    /// Account snapshot reads run under an engine-issued background Context.
+    fn read_snapshot(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: &Credentials,
+        path: &'static str,
+        params: Params,
+        request: Request,
+        stream: bool,
+    ) {
+        let scope = auth_scope(&request);
         let at = stream.then(|| {
             if path == OPEN_ORDERS {
                 ArrayAt::EnvelopeFieldOrNested("data", "orders")
@@ -409,42 +432,33 @@ impl Account {
                 ArrayAt::EnvelopeField("data")
             }
         });
-        let scope = auth_scope(&request);
-        if let Some(scope) = scope {
-            match crate::managed::read(
-                cx,
-                credentials,
-                crate::managed::Read {
-                    method,
-                    path,
-                    params,
-                    at,
-                },
-                Pending::Account(request),
-                safe_cex_engine::request_context::Scope::Background,
-            ) {
-                Ok(id) => tag_read(cx, id, method, credentials, scope),
-                Err((pending, error)) => {
-                    let (pending, context) = match *pending {
-                        Pending::Signed(signed) => (signed.inner, signed.context),
-                        pending => (pending, None),
-                    };
-                    if let Pending::Account(request) = pending {
-                        self.on_sign_failed(cx, request, error, credentials);
-                    }
-                    crate::managed::finish(cx, context);
-                }
-            }
-        } else {
-            crate::issue(
-                cx,
-                Some(credentials),
-                method,
+        match crate::managed::read(
+            cx,
+            credentials,
+            crate::managed::Read {
+                method: Method::Get,
                 path,
                 params,
                 at,
-                Pending::Account(request),
-            );
+            },
+            Pending::Account(request),
+            safe_cex_engine::request_context::Scope::Background,
+        ) {
+            Ok(id) => {
+                if let Some(scope) = scope {
+                    tag_read(cx, id, Method::Get, credentials, scope);
+                }
+            }
+            Err((pending, error)) => {
+                let (pending, context) = match *pending {
+                    Pending::Signed(signed) => (signed.inner, signed.context),
+                    pending => (pending, None),
+                };
+                if let Pending::Account(request) = pending {
+                    self.on_sign_failed(cx, request, error, credentials);
+                }
+                crate::managed::finish(cx, context);
+            }
         }
     }
 
@@ -454,10 +468,11 @@ impl Account {
         }
         self.key_in_flight = true;
         self.supervisor.connecting(cx);
-        self.request(
+        Self::request(
             cx,
             credentials,
-            (Method::Post, LISTEN_KEY),
+            Method::Post,
+            LISTEN_KEY,
             Params::new(),
             Request::ListenKey { epoch: self.epoch },
             false,
@@ -468,10 +483,10 @@ impl Account {
             return;
         }
         self.mode_in_flight = true;
-        self.request(
+        self.read_snapshot(
             cx,
             credentials,
-            (Method::Get, POSITION_MODE),
+            POSITION_MODE,
             Params::new(),
             Request::PositionMode {
                 revision: self.positions_revision,
@@ -484,10 +499,10 @@ impl Account {
             return;
         }
         self.balance_in_flight = Some(self.balance_revision);
-        self.request(
+        self.read_snapshot(
             cx,
             credentials,
-            (Method::Get, BALANCE),
+            BALANCE,
             Params::new(),
             Request::Balance {
                 revision: self.balance_revision,
@@ -504,10 +519,10 @@ impl Account {
         }
         self.last_positions = cx.now;
         self.positions_in_flight = Some(self.positions_revision);
-        self.request(
+        self.read_snapshot(
             cx,
             credentials,
-            (Method::Get, POSITIONS),
+            POSITIONS,
             Params::new(),
             Request::Positions {
                 revision: self.positions_revision,
@@ -524,10 +539,10 @@ impl Account {
             return;
         }
         self.orders_in_flight = Some(self.orders_revision);
-        self.request(
+        self.read_snapshot(
             cx,
             credentials,
-            (Method::Get, OPEN_ORDERS),
+            OPEN_ORDERS,
             Params::new(),
             Request::OpenOrders {
                 revision: self.orders_revision,
@@ -621,10 +636,11 @@ impl Account {
         if self.keepalive == Some(timer) {
             self.keepalive = None;
             if let Some(key) = self.key.as_deref() {
-                self.request(
+                Self::request(
                     cx,
                     credentials,
-                    (Method::Put, LISTEN_KEY),
+                    Method::Put,
+                    LISTEN_KEY,
                     Params::new().str("listenKey", key),
                     Request::Keepalive { epoch: self.epoch },
                     false,
@@ -925,10 +941,11 @@ impl Account {
                         );
                         return;
                     };
-                    self.request(
+                    Self::request(
                         cx,
                         credentials,
-                        (Method::Get, "/openApi/swap/v2/trade/marginType"),
+                        Method::Get,
+                        "/openApi/swap/v2/trade/marginType",
                         Params::new().str("symbol", &market.id),
                         Request::Metadata {
                             command,
@@ -1149,7 +1166,7 @@ impl Account {
         credentials: &Credentials,
     ) {
         if let Request::Metadata { command, .. } = request {
-            cx.fail(command, error);
+            fail_metadata(cx, command, error);
             return;
         }
         let owns_read = match &request {
@@ -1192,7 +1209,7 @@ impl Account {
                 }
                 self.keepalive = Some(cx.set_timer(RETRY_MS));
             }
-            Request::Metadata { command, .. } => cx.fail(command, metadata_error(error)),
+            Request::Metadata { command, .. } => fail_metadata(cx, command, error),
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
@@ -1796,8 +1813,25 @@ impl crate::Bingx {
 }
 
 /// Metadata reads do not submit a trading effect, including failed confirmations.
-pub(crate) fn metadata_error(message: impl Into<String>) -> safe_cex_engine::VenueError {
-    safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
+pub(crate) fn metadata_error(
+    error: impl Into<safe_cex_engine::VenueError>,
+) -> safe_cex_engine::VenueError {
+    let error = error.into();
+    // Typed signer failures already declare their outcome and keep it.
+    if error.outcome.is_some() {
+        error
+    } else {
+        error.outcome(safe_cex_engine::Outcome::NotSent)
+    }
+}
+
+/// Native and signer metadata failures share one command completion.
+fn fail_metadata(
+    cx: &mut Cx<'_, Pending>,
+    command: safe_cex_engine::CommandId,
+    error: impl Into<safe_cex_engine::VenueError>,
+) {
+    cx.fail(command, metadata_error(error));
 }
 
 #[cfg(test)]
@@ -1807,25 +1841,15 @@ mod sign_failure_owners {
 
     struct Probe {
         native: crate::Bingx,
-        request: Option<Request>,
+        queued: Option<Request>,
     }
     impl Venue for Probe {
         type Pending = Pending;
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-            cx.request(
-                Method::Get,
-                "fixture".into(),
-                vec![],
-                None,
-                Pending::Account(self.request.take().unwrap()),
-            );
+            cx.set_timer(1.);
         }
-        fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, _: Response<'_>) {
-            self.native.on_sign_error(
-                cx,
-                p,
-                safe_cex_engine::signing::SignError::Refused.venue_error(),
-            );
+        fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {
+            panic!("fixture issues no request")
         }
         fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {
             panic!("fixture is not a network failure")
@@ -1835,7 +1859,13 @@ mod sign_failure_owners {
             self.native.on_message(cx, socket, text);
         }
         fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
-        fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
+        fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, _: TimerId) {
+            self.native.on_sign_error(
+                cx,
+                Pending::Account(self.queued.take().unwrap()),
+                safe_cex_engine::signing::SignError::Refused.venue_error(),
+            );
+        }
         fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
         fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
             None
@@ -1905,17 +1935,17 @@ mod sign_failure_owners {
         };
         let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
             native,
-            request: Some(request),
+            queued: Some(request),
         });
         engine.start(1_000.);
-        let requests: Vec<_> = engine
+        let timers: Vec<_> = engine
             .drain_actions()
             .filter_map(|a| match a {
-                Action::Http(r) => Some(r),
+                Action::SetTimer { timer, .. } => Some(timer),
                 _ => None,
             })
             .collect();
-        assert_eq!(requests.len(), 1);
+        assert_eq!(timers.len(), 1);
         if kind == 5 {
             engine.handle(
                 1_000.5,
@@ -1925,17 +1955,7 @@ mod sign_failure_owners {
                 },
             );
         }
-        engine.handle(
-            1_001.,
-            Event::HttpResponse {
-                request: requests[0].id,
-                response: Response {
-                    status: 200,
-                    headers: "",
-                    body: "",
-                },
-            },
-        );
+        engine.handle(1_001., Event::TimerFired { timer: timers[0] });
         engine
     }
     #[test]
