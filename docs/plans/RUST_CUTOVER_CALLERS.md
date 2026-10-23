@@ -5684,3 +5684,10 @@ and remote-only key sentinel, with no HTTP before Signed. SDK/browser signing,
 registry admission, account/startup/session presentation and internal repair
 signing remain OPEN. Raw legacy credentials alone do not admit a managed write;
 a trusted identity is required and missing admission fails before write I/O.
+
+Managed Backpack write admission and window selection use only the trusted
+identity and Options. The delegated cancel proof uses a venue with no raw key or
+secret. Account/startup remains a separate legacy scope. Automatic trigger repair
+still uses that legacy account signer; identity-only mode gates it before job
+creation/I/O and reports that managed account signing is pending. An owned RED
+pins the repair dispatch obligation for the next account/background adoption.

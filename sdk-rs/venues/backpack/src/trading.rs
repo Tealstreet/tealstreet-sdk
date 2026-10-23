@@ -440,6 +440,14 @@ impl Backpack {
             }) else {
                 return;
             };
+            if self.options.public_data_only {
+                let _ = cx.fail_preflight(
+                    &preflight,
+                    not_sent("Backpack writes are disabled in public-data-only mode")
+                        .kind(ErrorKind::AuthInvalid),
+                );
+                return;
+            }
             if self.options.identity.is_none() {
                 let _ = cx.fail_preflight(
                     &preflight,
@@ -566,14 +574,6 @@ impl Backpack {
             }
             _ => return,
         };
-        if self.account.credentials.is_none() {
-            let error = not_sent("Backpack credentials unavailable");
-            let _ = cx.fail_preflight(
-                preflight.as_ref().unwrap(),
-                error.kind(ErrorKind::AuthInvalid),
-            );
-            return;
-        }
         if self.trading.jobs.contains_key(&u64::from(id)) {
             let _ = cx.fail_preflight(
                 preflight.as_ref().unwrap(),
@@ -890,10 +890,10 @@ impl Backpack {
             .expect("admitted identity")
             .clone();
         let window = self
-            .account
-            .credentials
-            .as_ref()
-            .map_or(60000, |credentials| credentials.window);
+            .options
+            .recv_window
+            .filter(|window| window.is_finite() && *window > 0.)
+            .map_or(60000, |window| window.min(60000.) as u32);
         let recipe = crate::sign::Http::new(
             identity,
             crate::sign::Request {
@@ -1408,6 +1408,14 @@ impl Backpack {
         })
     }
     pub(crate) fn start_repair(&mut self, cx: &mut Cx<'_, Pending>, repair: Repair) {
+        if self.account.credentials.is_none() {
+            cx.notice(
+                Level::Warn,
+                code::ORDER_REJECTED,
+                "Backpack automatic trigger repair awaits managed account signing",
+            );
+            return;
+        }
         let command = (u64::from(u32::MAX) + 1..u64::MAX)
             .rev()
             .find(|id| !self.trading.jobs.contains_key(id))
@@ -1693,5 +1701,49 @@ impl Request {
         })
         .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
         ReconciliationData::new(text)
+    }
+}
+
+#[cfg(test)]
+mod managed_repair_gate_tests {
+    use super::*;
+    #[test]
+    fn identity_only_account_repair_stops_before_job_creation_or_write() {
+        use safe_cex_engine::signing::{Identity, KeyRef};
+        use safe_cex_engine::test_support::ProbeVenue;
+        let venue = Backpack::new(crate::Options {
+            identity: Some(Identity {
+                credential: KeyRef("credential".into()),
+                signing: KeyRef("signing".into()),
+                passphrase: None,
+                stable_id: None,
+                extra: Default::default(),
+            }),
+            ..Default::default()
+        });
+        let probe = ProbeVenue::new(venue, |venue: &mut Backpack, cx: &mut Cx<'_, Pending>| {
+            venue.start_repair(
+                cx,
+                Repair {
+                    old_id: "old".into(),
+                    order: NativeOrder::default(),
+                },
+            );
+            assert!(venue.trading.jobs.is_empty());
+            assert!(venue.trading.cancels.is_empty());
+        });
+        let mut e = safe_cex_engine::test_support::seeded_engine(probe);
+        e.start(1000.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|action| matches!(action,
+            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message == "Backpack automatic trigger repair awaits managed account signing")));
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, safe_cex_engine::Action::ManagedHttp(_)))
+        );
+        assert!(!actions.iter().any(|action| matches!(action,
+            safe_cex_engine::Action::Http(http) if http.method != Method::Get)));
     }
 }

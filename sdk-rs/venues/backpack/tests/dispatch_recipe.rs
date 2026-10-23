@@ -458,3 +458,19 @@ fn get_query_and_transport_route_are_bound_exactly() {
             .any(|action| matches!(action, Action::Http(_)))
     );
 }
+
+#[test]
+fn duplicate_body_fields_cannot_disagree_with_the_canonical_instruction() {
+    let mut e = engine(
+        sign::Request {
+            method: Method::Delete,
+            path: "/api/v1/order".into(),
+            rows: vec![row(&[("orderId", "123"), ("symbol", "SOL_USDC_PERP")])],
+            body: Some(r#"{"orderId":"123","symbol":"OTHER","symbol":"SOL_USDC_PERP"}"#.into()),
+            window: 60000,
+        },
+        false,
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+}

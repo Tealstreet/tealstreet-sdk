@@ -154,17 +154,43 @@ impl SignStep for Http {
     }
 }
 
+struct SigningRow(BTreeMap<String, Box<serde_json::value::RawValue>>);
+impl<'de> serde::Deserialize<'de> for SigningRow {
+    fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = SigningRow;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an order object with unique fields")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut fields: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut values = BTreeMap::new();
+                while let Some((key, value)) = fields.next_entry()? {
+                    if values.insert(key, value).is_some() {
+                        return Err(serde::de::Error::custom("duplicate order field"));
+                    }
+                }
+                Ok(SigningRow(values))
+            }
+        }
+        decoder.deserialize_map(Visitor)
+    }
+}
+
 fn json_rows(body: Option<&str>, batch: bool) -> Result<Vec<Params>, SignError> {
-    type Row = BTreeMap<String, Box<serde_json::value::RawValue>>;
     let body = body.ok_or(SignError::InvalidRequest)?;
-    let rows: Vec<Row> = if batch {
+    let rows: Vec<SigningRow> = if batch {
         serde_json::from_str(body).map_err(|_| SignError::InvalidRequest)?
     } else {
         vec![serde_json::from_str(body).map_err(|_| SignError::InvalidRequest)?]
     };
     rows.into_iter()
         .map(|row| {
-            row.into_iter()
+            row.0
+                .into_iter()
                 .map(|(key, value)| {
                     let raw = value.get();
                     let value = if raw.starts_with('"') {

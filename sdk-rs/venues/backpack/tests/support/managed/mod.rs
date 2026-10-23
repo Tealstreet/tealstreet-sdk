@@ -93,10 +93,38 @@ pub fn ws(engine: &mut Driver, socket: SocketId, stream: &str, data: &str) {
     );
 }
 
-pub fn ready_orders_with_signer(
+pub fn identity_only_orders(
     orders: &str,
-    signer: std::sync::Arc<dyn safe_cex_engine::signing::Signer>,
-) -> (Driver, SocketId) {
-    let (inner, socket) = super::ready_orders_with_signer(orders, signer);
-    (Driver { inner, now: 1000.0 }, socket)
+    identity: safe_cex_engine::signing::Identity,
+    provider: std::sync::Arc<dyn safe_cex_engine::signing::Signer>,
+    recv_window: Option<f64>,
+) -> Driver {
+    identity_only_orders_mode(orders, identity, provider, recv_window, false)
+}
+pub fn identity_only_orders_mode(
+    orders: &str,
+    identity: safe_cex_engine::signing::Identity,
+    provider: std::sync::Arc<dyn safe_cex_engine::signing::Signer>,
+    recv_window: Option<f64>,
+    public_data_only: bool,
+) -> Driver {
+    let (snapshot, _) = super::ready_orders(orders);
+    let options = Options {
+        identity: Some(identity),
+        public_data_only,
+        recv_window,
+        ..Default::default()
+    };
+    assert!(options.key.is_none() && options.secret.is_none());
+    let mut inner = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
+    inner.set_signer(Some(provider)).unwrap();
+    inner.start(1000.);
+    inner.drain_actions().for_each(drop);
+    inner
+        .store_mut()
+        .set_markets(snapshot.store().markets().to_vec());
+    for order in snapshot.store().orders() {
+        inner.store_mut().upsert_order(order.clone());
+    }
+    Driver { inner, now: 1000. }
 }

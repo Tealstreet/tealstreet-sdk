@@ -447,3 +447,30 @@ metadata/prior IDs on 408/5xx, and the real asynchronous cancel.
 Exact legacy inventory change: trading.rs ten occurrences become three (the
 internal repair sender and two local unsupported-setting refusals). Other
 Backpack paths remain unchanged. No exemption or inventory addition is used.
+
+Signer review tightened the implementation before readiness: managed admission
+and receive-window selection now depend only on the opaque identity and Options,
+not on legacy account credentials. The actual asynchronous cancel proof uses a
+separate venue constructed with key=None and secret=None; only non-secret market
+and order rows are copied from the native fixture. That proof originally failed
+before removing the account-credential dependency and passes after the fix.
+
+Automatic trigger repair is explicitly the legacy account path, not migrated by
+this foreground slice. Without legacy account credentials it stops before job
+creation or I/O, with an account-signing-pending notice. Existing legacy account
+fixtures retain their repair behavior. The owned ignored RED
+legacy_account_repair_must_adopt_dispatch_signing_before_account_cutover fails on
+the actual legacy sender and belongs to codex-hcmq3f's subsequent account/background
+Plan and signer adoption; it must be un-ignored in that adoption. No private
+account, automatic repair or whole-family signer readiness is claimed here.
+
+Duplicate native body fields are refused by the canonicalizer, rather than
+letting a map silently select one value. The adversarial duplicate-symbol control
+originally released a request and now refuses it before I/O.
+
+Public-data-only mode remains unable to mutate even with a trusted identity.
+Its original regression issued managed work instead of a terminal; the explicit
+mode refusal now returns NotSent before any write preparation. Identity-only
+local signing also pins the declared 5,000 ms receive window, and the repair
+cutover RED matches the exact native cancel preparation rather than unrelated
+managed polling.

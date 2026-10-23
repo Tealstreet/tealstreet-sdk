@@ -1000,3 +1000,32 @@ fn snapshot_pair_ack_fence(accepted: bool, stored: bool) {
         "only a fully accepted pair ACK supersedes the old read"
     );
 }
+
+#[test]
+#[ignore = "Backpack account/background Plan and signer adoption (codex-hcmq3f), after #1946"]
+fn legacy_account_repair_must_adopt_dispatch_signing_before_account_cutover() {
+    let (mut e, socket) = ready();
+    e.handle(1000., Event::WsOpened { socket });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|request| request.url.ends_with("/orders"))
+        .unwrap();
+    let old = ORDER.replace(
+        "\"orderType\":\"Limit\"",
+        "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\"",
+    );
+    reply(&mut e, &read, 200, &format!("[{old}]"));
+    let out = e.drain_actions().collect::<Vec<_>>();
+    assert!(out.iter().any(|action| matches!(action,
+        Action::ManagedHttp(action) if matches!(action.as_ref(),
+            safe_cex_engine::request_context::HttpAction::Prepare { request, .. }
+            if request.method == Method::Delete
+                && request.url == "https://api.backpack.exchange/api/v1/order"
+                && request.body.as_deref() == Some(r#"{"orderId":"123","symbol":"SOL_USDC_PERP"}"#)))),
+        "account repair must use shared dispatch signing before its cutover");
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.method == Method::Delete))
+    );
+}

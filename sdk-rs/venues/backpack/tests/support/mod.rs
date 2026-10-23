@@ -56,18 +56,12 @@ pub fn ready_window(
     position_body: &str,
     auth_window: Option<(f64, u32)>,
 ) -> (Driver, SocketId) {
-    let (e, socket, _, _) = ready_snapshot(
-        MARKETS,
-        position_status,
-        position_body,
-        auth_window,
-        "[]",
-        None,
-    );
+    let (e, socket, _, _) =
+        ready_snapshot(MARKETS, position_status, position_body, auth_window, "[]");
     (e, socket)
 }
 pub fn ready_orders(orders: &str) -> (Driver, SocketId) {
-    let (e, socket, _, _) = ready_snapshot(MARKETS, 200, POSITIONS, None, orders, None);
+    let (e, socket, _, _) = ready_snapshot(MARKETS, 200, POSITIONS, None, orders);
     (e, socket)
 }
 /// Startup against a custom market catalogue; also returns the startup logs and timers.
@@ -81,7 +75,7 @@ pub fn ready_catalogue(
     Vec<String>,
     Vec<(safe_cex_engine::TimerId, f64)>,
 ) {
-    ready_snapshot(markets, 200, positions, None, orders, None)
+    ready_snapshot(markets, 200, positions, None, orders)
 }
 pub const MARKETS: &str = r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"},{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001","priceIncrement":"0.1"}]"#;
 fn ready_snapshot(
@@ -90,7 +84,6 @@ fn ready_snapshot(
     position_body: &str,
     auth_window: Option<(f64, u32)>,
     orders: &str,
-    delegated: Option<std::sync::Arc<dyn safe_cex_engine::signing::Signer>>,
 ) -> (
     Driver,
     SocketId,
@@ -119,10 +112,7 @@ fn ready_snapshot(
         secret: Some(secret),
         recv_window: auth_window.map(|w| w.0),
     }));
-    e.set_signer(Some(
-        delegated.unwrap_or_else(|| std::sync::Arc::new(provider)),
-    ))
-    .unwrap();
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, 200, markets);
@@ -189,12 +179,4 @@ fn ready_snapshot(
         }
     }
     (e, private.expect("private socket"), logs, timers)
-}
-
-pub fn ready_orders_with_signer(
-    orders: &str,
-    signer: std::sync::Arc<dyn safe_cex_engine::signing::Signer>,
-) -> (Driver, SocketId) {
-    let (e, socket, _, _) = ready_snapshot(MARKETS, 200, POSITIONS, None, orders, Some(signer));
-    (e, socket)
 }

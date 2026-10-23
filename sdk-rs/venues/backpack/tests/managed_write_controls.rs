@@ -198,7 +198,20 @@ fn remote_actions(engine: &mut Driver) -> Vec<Action> {
 fn real_cancel_uses_the_out_of_band_remote_ed25519_answer() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use safe_cex_engine::signing::{Algorithm, Operation, PayloadPart, SignResult};
-    let (mut e, _) = ready_orders_with_signer(&format!("[{ORDER}]"), std::sync::Arc::new(Remote));
+    use safe_cex_engine::signing::{Identity, KeyRef};
+    let identity = Identity {
+        credential: KeyRef("remote-credential".into()),
+        signing: KeyRef("remote-signing".into()),
+        passphrase: None,
+        stable_id: None,
+        extra: Default::default(),
+    };
+    let mut e = identity_only_orders(
+        &format!("[{ORDER}]"),
+        identity.clone(),
+        std::sync::Arc::new(Remote),
+        None,
+    );
     e.handle(
         NOW,
         Event::Command(Command::CancelOrders {
@@ -216,6 +229,9 @@ fn real_cancel_uses_the_out_of_band_remote_ed25519_answer() {
         })
         .unwrap();
     assert_eq!(work.receipt.stamp_ms, Some(NOW));
+    assert!(
+        matches!(&work.operations[0], Operation::Present { key } if key == &identity.credential)
+    );
     let Operation::Sign {
         algorithm: Algorithm::Ed25519,
         payload,
@@ -311,5 +327,76 @@ fn real_cancel_uses_the_out_of_band_remote_ed25519_answer() {
     assert_eq!(
         e.store().order("123").unwrap().status,
         OrderStatus::Canceled
+    );
+}
+
+#[test]
+fn identity_only_local_write_preserves_the_declared_receive_window() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: Some(LocalIdentity {
+            key: Secret::new("provider-only-key".into()),
+            secret: Secret::new(STANDARD.encode([7u8; 32])),
+            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+            ..Default::default()
+        }),
+        secondary: None,
+    })
+    .unwrap();
+    let mut e = identity_only_orders(
+        &format!("[{ORDER}]"),
+        identities.primary.unwrap(),
+        std::sync::Arc::new(provider),
+        Some(5000.),
+    );
+    e.handle(
+        2000.,
+        Event::Command(Command::CancelOrders {
+            command: 724,
+            ids: vec!["123".into()],
+        }),
+    );
+    let http = requests(&mut e).pop().unwrap();
+    assert!(
+        http.headers
+            .iter()
+            .any(|(key, value)| *key == "X-Window" && value == "5000")
+    );
+    assert!(
+        http.headers
+            .iter()
+            .any(|(key, value)| *key == "X-API-Key" && value == "provider-only-key")
+    );
+}
+
+#[test]
+fn public_data_only_mode_refuses_even_a_trusted_signing_identity() {
+    use safe_cex_engine::signing::{Identity, KeyRef};
+    let mut e = identity_only_orders_mode(
+        &format!("[{ORDER}]"),
+        Identity {
+            credential: KeyRef("remote-credential".into()),
+            signing: KeyRef("remote-signing".into()),
+            passphrase: None,
+            stable_id: None,
+            extra: Default::default(),
+        },
+        std::sync::Arc::new(Remote),
+        None,
+        true,
+    );
+    e.handle(
+        2000.,
+        Event::Command(Command::CancelOrders {
+            command: 725,
+            ids: vec!["123".into()],
+        }),
+    );
+    let out = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(failure(&out, 725).outcome, Some(Outcome::NotSent));
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
     );
 }
