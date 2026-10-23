@@ -1,5 +1,9 @@
 use safe_cex_engine::Method;
-use safe_cex_venue_bingx::sign::{Credentials, Params};
+use safe_cex_venue_bingx::paths;
+#[allow(dead_code)]
+#[path = "support/oracle.rs"]
+mod oracle;
+use oracle::{Credentials, Params};
 use serde::Deserialize;
 
 fn credentials() -> Credentials {
@@ -107,15 +111,17 @@ fn secondary_get_keeps_primary_posted_reads_and_mutations() {
 
 #[test]
 fn invalid_secondary_identity_is_rejected_even_without_a_primary_private_account() {
-    use safe_cex_engine::{Action, ReadCredentials};
+    use safe_cex_engine::Action;
+    use safe_cex_engine::signing::{Identity, KeyRef};
     use safe_cex_venue_bingx::{Bingx, Options};
     for public_data_only in [true, false] {
         let options = Options {
             public_data_only,
-            read_credentials: Some(ReadCredentials {
-                key: "read-key".into(),
-                secret: String::new(),
+            read_credentials: Some(Identity {
+                credential: KeyRef("ref:owned-read".into()),
+                signing: KeyRef(String::new()),
                 passphrase: None,
+                stable_id: None,
             }),
             ..Options::default()
         };

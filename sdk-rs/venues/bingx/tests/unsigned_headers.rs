@@ -1,5 +1,6 @@
 //! Static native codec compatibility plus an explicitly synthetic managed
 //! recipe. This does not admit BingX production managed or hosted requests.
+use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
     Credential, HttpAction, Operation, Policy, Prepared, RetryPolicy, Scope,
@@ -13,13 +14,82 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_bingx::sign::{Credentials, Params, unsigned_headers};
 
+struct NativeProbe {
+    method: Method,
+    path: &'static str,
+    credentials: Option<Credentials>,
+}
+impl Venue for NativeProbe {
+    type Pending = ();
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        safe_cex_venue_bingx::stage(
+            cx,
+            self.credentials.as_ref(),
+            self.method,
+            self.path,
+            Params::new(),
+            None,
+            (),
+        );
+    }
+    fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), error: &str) {
+        panic!("{error}");
+    }
+    fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+    fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+    fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+    fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+    fn book(&self, _: &str) -> Option<&Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+fn native_request(
+    method: Method,
+    path: &'static str,
+    signed: bool,
+) -> safe_cex_engine::HttpRequest {
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: Some(LocalIdentity {
+            key: Secret::new("fixture-primary".into()),
+            secret: Secret::new("fixture-signing-material".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(NativeProbe {
+        method,
+        path,
+        credentials: signed.then(|| Credentials {
+            primary: identities.primary.unwrap(),
+            read: None,
+        }),
+    });
+    engine
+        .set_signer(Some(std::sync::Arc::new(provider)))
+        .unwrap();
+    engine.start(12.);
+    let mut requests = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Http(http) => Some(http),
+            Action::Sign { .. } | Action::SignedOutbound { .. } => {
+                panic!("local provider must complete inline")
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 1);
+    requests.pop().unwrap()
+}
+
 #[test]
 fn legacy_public_and_signed_vectors_keep_native_order_for_every_method_class() {
-    let credentials = Credentials {
-        read: None,
-        key: "fixture-primary".into(),
-        secret: "fixture-signing-material".into(),
-    };
     for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
         let content = if method == Method::Post {
             "application/json"
@@ -30,16 +100,8 @@ fn legacy_public_and_signed_vectors_keep_native_order_for_every_method_class() {
             ("X-SOURCE-KEY", "Tealstreet".into()),
             ("Content-Type", content.into()),
         ];
-        assert_eq!(
-            Params::new().into_request(method, "/native", None, 12.).1,
-            public
-        );
-        let (_, headers, _) = Params::new().into_request(
-            method,
-            "/openApi/user/auth/userDataStream",
-            Some(&credentials),
-            12.,
-        );
+        assert_eq!(native_request(method, "/native", false).headers, public);
+        let headers = native_request(method, "/openApi/user/auth/userDataStream", true).headers;
         assert_eq!(
             headers,
             vec![
@@ -48,8 +110,7 @@ fn legacy_public_and_signed_vectors_keep_native_order_for_every_method_class() {
                 ("Content-Type", content.into()),
             ]
         );
-        let (_, headers, _) =
-            Params::new().into_request(method, "/native", Some(&credentials), 12.);
+        let headers = native_request(method, "/native", true).headers;
         assert_eq!(
             headers,
             vec![

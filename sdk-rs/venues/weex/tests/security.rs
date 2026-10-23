@@ -1,17 +1,23 @@
-use safe_cex_crypto::secrets::EraseSecrets;
+use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_venue_weex::Options;
 
 #[test]
-fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
-    let mut options = Options {
-        key: Some("audit-secret-sentinel".into()),
-        secret: Some("audit-secret-sentinel".into()),
-        passphrase: Some("audit-secret-sentinel".into()),
+fn venue_options_hold_only_opaque_identity_refs() {
+    let sentinel = || Secret::new("audit-secret-sentinel".into());
+    let (_provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: Some(LocalIdentity {
+            key: sentinel(),
+            secret: sentinel(),
+            passphrase: Some(sentinel()),
+            ..Default::default()
+        }),
+        secondary: None,
+    })
+    .unwrap();
+    let options = Options {
+        credentials: identities.primary,
         ..Options::default()
     };
+    assert!(options.credentials.is_some());
     assert!(!format!("{options:?}").contains("audit-secret-sentinel"));
-    options.erase_secrets();
-    assert!(options.key.as_ref().is_none_or(String::is_empty));
-    assert!(options.secret.as_ref().is_none_or(String::is_empty));
-    assert!(options.passphrase.as_ref().is_none_or(String::is_empty));
 }
