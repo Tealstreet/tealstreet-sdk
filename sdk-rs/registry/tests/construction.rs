@@ -622,8 +622,9 @@ fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics(
         type Output = Vec<safe_cex_engine::Action>;
         fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
             engine.start(1_000.0);
-            let request = engine
-                .drain_actions()
+            // The fee read is managed: the fixture driver completes its preparation.
+            let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     safe_cex_engine::Action::Http(request)
                         if request.url.contains("/v5/account/fee-rate") =>

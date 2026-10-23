@@ -217,8 +217,8 @@ fn all_aliases_prepare_get_at_dispatch_using_selected_key_and_clamped_window() {
                     },
                 }),
             );
-            engine.prepare_dispatch(1234.75);
-            let actions: Vec<_> = engine.drain_actions().collect();
+            // Account reads are managed: the fixture driver prepares and signs them.
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1234.75);
             let mut signed = 0;
             for action in actions {
                 if let Action::Http(request) = action {

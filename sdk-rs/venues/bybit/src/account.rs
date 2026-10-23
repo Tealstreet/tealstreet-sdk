@@ -1363,7 +1363,7 @@ impl BybitLinear {
             self.startup.account_info = true;
             return;
         }
-        self.send(
+        self.send_read(
             cx,
             Rest::get("/v5/account/info", Query::new()).signed(),
             Then::Account(Request::AccountInfo),
@@ -1521,7 +1521,7 @@ impl BybitLinear {
             "UNIFIED"
         };
         let query = Query::new().str("accountType", account_type);
-        self.send(
+        self.send_read(
             cx,
             Rest::get("/v5/account/wallet-balance", query).signed(),
             Then::Account(Request::Wallet {
