@@ -1393,7 +1393,7 @@ impl Venue for Bingx {
         }
         match command {
             Command::FetchLeverage { command, symbol } => {
-                let publish = true;
+                let publish = !cx.store.metadata_write_pending(&symbol);
                 self.account.fetch_metadata(
                     cx,
                     self.credentials.as_ref(),

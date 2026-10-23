@@ -705,3 +705,23 @@ and position-fence controls remain. All 13 dispatch-failure tests pass and the
 BingX all-target check passes; the scanner passes. The four original entry
 blocks remain verbatim. This checkpoint supplies the native managed Plan path,
 not the full-key execution coalescing/source conversion, which remains required.
+
+
+### Pending-write handoff regression control
+
+Independent source review found that the native Plan handoff passed publish=true
+without consulting Store pending-write ownership. The tests-first checkpoint
+5084ac1b133 reproduces publication of 12/34 isolated settings over the existing
+20/20 cross settings while a leverage write is pending. Its final Store-equality
+assertion fails on unchanged ecff production. A later fixture-only correction
+clears positions/orders for the position-mode case so that native preflight
+really issues that write; the original leverage assertion is unchanged.
+
+FetchLeverage now captures !metadata_write_pending(symbol) at entry, restoring
+the native sticky publication restriction. Account-wide None-scoped mode writes
+therefore fence all symbols. The new regression covers leverage, margin and mode
+writes with retirement before and after metadata DATA. It and the existing
+per-rail fallback and typed provider-refusal/pending-retirement controls pass.
+The native request declarations, signer recipe and supplied typed failures are
+unchanged. This restores the documented nonpublication contract; full typed-key
+execution coalescing and its remaining gates are still separate pending work.
