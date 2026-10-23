@@ -99,7 +99,7 @@ impl<P> Cx<'_, P> {
         let http = HttpRequest {
             id: request,
             method,
-            route: None,
+            route: context.route(),
             timeout_ms: Some((context.deadline() - self.now).ceil().max(1.) as u32),
             url,
             headers,
@@ -1328,6 +1328,53 @@ mod tests {
         fn freshness_ms(&self) -> f64 {
             3_000.
         }
+    }
+
+    #[test]
+    fn managed_prepare_carries_the_issued_public_egress_route() {
+        let (mut engine, _) = start(Probe::default());
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let context = cx
+            .http_context_with_egress(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 1_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+                crate::request_context::Egress::PublicCors,
+            )
+            .unwrap();
+        cx.request_managed(
+            context.clone(),
+            Method::Post,
+            "https://venue.test/candles".into(),
+            None,
+            Pending(context),
+        )
+        .unwrap();
+        let prepared = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Prepare {
+                        intent, request, ..
+                    } => Some((intent, request.route)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(prepared.contains(&(
+            crate::request_context::RoutingIntent::Public,
+            Some(crate::RequestRoute::PublicCors)
+        )));
     }
 
     #[test]

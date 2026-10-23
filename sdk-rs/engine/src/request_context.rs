@@ -87,6 +87,17 @@ pub enum RoutingIntent {
     Secondary,
 }
 
+/// Egress declared at trusted issuance, independent of HTTP method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Egress {
+    /// Primary account egress: keyless reads, or confirming a primary credential.
+    Primary,
+    /// Unsigned public reads through the host's public CORS egress.
+    PublicCors,
+    /// Unsigned public reads sent directly, bypassing account proxies.
+    Direct,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RetryPolicy {
     #[default]
@@ -139,7 +150,7 @@ pub struct Context {
     operation: Operation,
     credential: Option<Credential>,
     /// Egress declared at issuance; it may only confirm a credential's intent.
-    egress: Option<RoutingIntent>,
+    egress: Option<Egress>,
     deadline: f64,
     pacing: Option<Pacing>,
     retry: RetryPolicy,
@@ -200,30 +211,38 @@ impl Context {
     }
 
     /// Capture explicit egress before issuer binding. A credentialed context
-    /// may only confirm its slot's intent; an unsigned read may declare only
-    /// Primary (keyless primary-egress reads). Public is the default. Once
-    /// declared it is kept, so every descendant stays on the same egress.
-    pub(crate) fn with_egress(mut self, egress: Option<RoutingIntent>) -> Result<Self, Error> {
-        let Some(intent) = egress else {
+    /// may only confirm a primary slot; only unsigned reads declare any egress.
+    /// Once declared it is kept, so every descendant stays on the same egress.
+    /// Egress never creates credential, nonce or identity authority.
+    pub(crate) fn with_egress(mut self, egress: Option<Egress>) -> Result<Self, Error> {
+        let Some(egress) = egress else {
             return Ok(self);
         };
-        let valid = match self.credential {
-            Some(_) => intent == self.credential_intent(),
-            None => match intent {
-                RoutingIntent::Public => true,
-                RoutingIntent::Primary => self.operation == Operation::Read,
-                RoutingIntent::Secondary => false,
-            },
+        let valid = match self.credential.as_ref() {
+            Some(credential) => {
+                egress == Egress::Primary && credential.slot == CredentialSlot::Primary
+            }
+            None => self.operation == Operation::Read,
         };
         if !valid {
             return Err(Error::Invalid);
         }
-        self.egress = (intent != RoutingIntent::Public).then_some(intent);
+        self.egress = Some(egress);
         Ok(self)
     }
 
-    pub(crate) fn egress(&self) -> Option<RoutingIntent> {
+    pub(crate) fn egress(&self) -> Option<Egress> {
         self.egress
+    }
+
+    /// Explicit host route for the managed Prepare packet; None keeps the
+    /// host's intent-based routing.
+    pub fn route(&self) -> Option<crate::RequestRoute> {
+        match self.egress? {
+            Egress::Primary => None,
+            Egress::PublicCors => Some(crate::RequestRoute::PublicCors),
+            Egress::Direct => Some(crate::RequestRoute::Direct),
+        }
     }
 
     fn credential_intent(&self) -> RoutingIntent {
@@ -255,7 +274,11 @@ impl Context {
         self.credential.as_ref()
     }
     pub fn routing_intent(&self) -> RoutingIntent {
-        self.egress.unwrap_or_else(|| self.credential_intent())
+        match self.egress {
+            Some(Egress::Primary) => RoutingIntent::Primary,
+            Some(Egress::PublicCors | Egress::Direct) => RoutingIntent::Public,
+            None => self.credential_intent(),
+        }
     }
     pub fn deadline(&self) -> f64 {
         self.deadline

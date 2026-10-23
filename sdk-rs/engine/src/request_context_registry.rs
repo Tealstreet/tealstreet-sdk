@@ -3,8 +3,8 @@
 use super::{CommandId, Cx, RequestId};
 use crate::VenueError;
 use crate::request_context::{
-    Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RejectionReports,
-    RetryEvidence, RoutingIntent, Scope, WriteResult,
+    Attempt, CommandWrites, Context, Egress, Error, Operation, Owner, Policy, RejectionReports,
+    RetryEvidence, Scope, WriteResult,
 };
 use std::collections::HashMap;
 
@@ -124,7 +124,7 @@ impl ContextRegistry {
         policy: Policy,
         now: f64,
         parent: Option<&Context>,
-        egress: Option<RoutingIntent>,
+        egress: Option<Egress>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
             self.validate(parent, now)?;
@@ -647,13 +647,13 @@ impl<P> Cx<'_, P> {
         self.make_http_context(scope, policy, None, None)
     }
 
-    /// As `http_context`, with egress declared at issuance. Unsigned requests
-    /// may declare only Primary; credentialed ones only their slot's intent.
+    /// As `http_context`, with egress declared at issuance. Only unsigned
+    /// reads declare egress; a credentialed context may only confirm Primary.
     pub fn http_context_with_egress(
         &mut self,
         scope: Scope,
         policy: Policy,
-        egress: RoutingIntent,
+        egress: Egress,
     ) -> Result<Context, Error> {
         self.make_http_context(scope, policy, None, Some(egress))
     }
@@ -674,7 +674,7 @@ impl<P> Cx<'_, P> {
         scope: Scope,
         policy: Policy,
         parent: Option<&Context>,
-        egress: Option<RoutingIntent>,
+        egress: Option<Egress>,
     ) -> Result<Context, Error> {
         if !self.io.entry_context_allowed(scope) {
             return Err(Error::Revoked);
@@ -1150,9 +1150,9 @@ mod tests {
 
     #[test]
     fn issuance_captures_egress_that_legs_and_retries_cannot_widen() {
-        use crate::CredentialSlot;
-        use crate::request_context::Credential;
+        use crate::request_context::{Credential, RoutingIntent};
         use crate::signing::KeyRef;
+        use crate::{CredentialSlot, RequestRoute};
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
         let mut cx = Cx {
@@ -1169,58 +1169,28 @@ mod tests {
         };
         // Keyless primary egress (Bitrue catalog) without a fabricated credential.
         let keyless = cx
-            .http_context_with_egress(Scope::Background, policy(), RoutingIntent::Primary)
+            .http_context_with_egress(Scope::Background, policy(), Egress::Primary)
             .unwrap();
         assert_eq!(keyless.routing_intent(), RoutingIntent::Primary);
+        assert_eq!(keyless.route(), None);
         assert!(keyless.credential().is_none());
         cx.io.request_contexts.validate(&keyless, cx.now).unwrap();
         // Retries clone it; legs inherit it and may not change or widen it.
         let retry = cx
             .http_retry_context(&keyless, RetryEvidence::ReadFailure)
             .unwrap();
-        assert_eq!(retry.routing_intent(), RoutingIntent::Primary);
+        assert_eq!(retry.egress(), Some(Egress::Primary));
         let leg = cx.http_leg_context(&keyless, policy()).unwrap();
         assert_eq!(leg.routing_intent(), RoutingIntent::Primary);
         assert_eq!(
             cx.http_leg_context(&keyless, signed(CredentialSlot::Secondary)),
             Err(Error::Invalid)
         );
-        assert_eq!(
-            cx.http_leg_context(&keyless, signed(CredentialSlot::Primary))
-                .map(|c| c.routing_intent()),
-            Ok(RoutingIntent::Primary)
-        );
-        // Unsigned requests never choose the read egress themselves.
-        assert_eq!(
-            cx.http_context_with_egress(Scope::Background, policy(), RoutingIntent::Secondary),
-            Err(Error::Invalid)
-        );
-        // A credentialed context may only confirm its slot's intent.
-        for slot in [CredentialSlot::Primary, CredentialSlot::Secondary] {
-            let plain = cx.http_context(Scope::Background, signed(slot)).unwrap();
-            let intent = plain.routing_intent();
-            let confirmed = cx
-                .http_context_with_egress(Scope::Background, signed(slot), intent)
-                .unwrap();
-            assert_eq!(confirmed.routing_intent(), intent);
-            assert_eq!(confirmed.egress(), Some(intent));
-            for other in [
-                RoutingIntent::Primary,
-                RoutingIntent::Secondary,
-                RoutingIntent::Public,
-            ] {
-                if other != intent {
-                    assert_eq!(
-                        cx.http_context_with_egress(Scope::Background, signed(slot), other),
-                        Err(Error::Invalid)
-                    );
-                }
-            }
-        }
         // A keyed leg under a keyless primary root keeps the pin for its own legs.
         let keyed = cx
             .http_leg_context(&keyless, signed(CredentialSlot::Primary))
             .unwrap();
+        assert_eq!(keyed.egress(), Some(Egress::Primary));
         assert_eq!(
             cx.http_leg_context(&keyed, policy())
                 .map(|c| c.routing_intent()),
@@ -1230,30 +1200,75 @@ mod tests {
             cx.http_leg_context(&keyed, signed(CredentialSlot::Secondary)),
             Err(Error::Invalid)
         );
-        // Keyless primary egress is for reads only.
+        // Public CORS and direct egress (TxFlow candles) project an explicit route.
+        for (egress, route) in [
+            (Egress::PublicCors, RequestRoute::PublicCors),
+            (Egress::Direct, RequestRoute::Direct),
+        ] {
+            let public = cx
+                .http_context_with_egress(Scope::Background, policy(), egress)
+                .unwrap();
+            assert_eq!(
+                (public.routing_intent(), public.route()),
+                (RoutingIntent::Public, Some(route))
+            );
+            let leg = cx.http_leg_context(&public, policy()).unwrap();
+            assert_eq!(leg.route(), Some(route));
+            // A credential can never ride a public egress.
+            assert_eq!(
+                cx.http_leg_context(&public, signed(CredentialSlot::Primary)),
+                Err(Error::Invalid)
+            );
+            assert_eq!(
+                cx.http_context_with_egress(
+                    Scope::Background,
+                    signed(CredentialSlot::Primary),
+                    egress
+                ),
+                Err(Error::Invalid)
+            );
+        }
+        // A credentialed context may only confirm a primary slot.
+        let confirmed = cx
+            .http_context_with_egress(
+                Scope::Background,
+                signed(CredentialSlot::Primary),
+                Egress::Primary,
+            )
+            .unwrap();
+        assert_eq!(confirmed.routing_intent(), RoutingIntent::Primary);
+        assert_eq!(
+            cx.http_context_with_egress(
+                Scope::Background,
+                signed(CredentialSlot::Secondary),
+                Egress::Primary
+            ),
+            Err(Error::Invalid)
+        );
+        // Keyless egress is for reads only.
         let write = Policy {
             operation: Operation::Mutation,
             retry: RetryPolicy::Never,
             ..policy()
         };
-        assert_eq!(
-            cx.http_context_with_egress(Scope::Command(9), write, RoutingIntent::Primary),
-            Err(Error::Invalid)
-        );
+        for egress in [Egress::Primary, Egress::PublicCors, Egress::Direct] {
+            assert_eq!(
+                cx.http_context_with_egress(Scope::Command(9), write.clone(), egress),
+                Err(Error::Invalid)
+            );
+        }
         // A command's completion root holds the egress; its retry still validates.
         let root = cx
-            .http_context_with_egress(Scope::Command(7), policy(), RoutingIntent::Primary)
+            .http_context_with_egress(Scope::Command(7), policy(), Egress::PublicCors)
             .unwrap();
         let retry = cx
             .http_retry_context(&root, RetryEvidence::ReadFailure)
             .unwrap();
         cx.io.request_contexts.validate(&retry, cx.now).unwrap();
         assert_eq!(retry, root);
-        // Public is the default and records nothing.
-        let public = cx
-            .http_context_with_egress(Scope::Background, policy(), RoutingIntent::Public)
-            .unwrap();
-        assert_eq!(public.egress(), None);
+        // No declaration keeps the credential-derived intent and host routing.
+        let plain = cx.http_context(Scope::Background, policy()).unwrap();
+        assert_eq!((plain.egress(), plain.route()), (None, None));
     }
 
     #[test]
