@@ -4487,6 +4487,13 @@ correlation IDs cannot consume the next owner. Rejected/malformed heads fail onc
 and allow the next live owner to proceed. No HTTP operation or joined group is
 introduced for these single-owner native reads.
 
+
+### Kraken Spot managed command OHLC
+
+Spot FetchCandles requires managed prepare/bind/final release under one raw 20-second deadline, including all four possible transport attempts. Native GET pair aliases, interval and floor-seconds since remain; limit/to_ms and native last remain ignored. Malformed rows reject the whole response, and successful results stay sorted. Native API/row failures remain message-only.
+
+Three retries now re-enter managed preparation immediately rather than waiting in a zero-delay native timer queue, so expiry stays engine-owned while routing is parked. Exhaustion retains its native warning and the engine-supplied typed failure kind, including actual #1838 integrity errors. Preparation denial never spends a network retry. Expired/retired callbacks cannot publish results or diagnostics or complete a reused command. A shared context error's local notSent does not prove that earlier physical reads were never sent. Initial pre-context failure, unsupported interval, background discovery and signed/futures paths remain separate migration tails.
+
 ## Paradex independent public startup Read Contexts
 
 Paradex catalog `/markets` and ticker `/markets/summary?market=ALL` GETs use the
