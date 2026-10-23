@@ -38,6 +38,7 @@ fn terminal_batch_reports_and_error_text_follow_original_leg_registration_not_re
     writes
         .result_with_reports(RequestId(1), refused("old A"), reports(&["old A"]))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(3)).unwrap();
     writes.released(RequestId(3)).unwrap();
     writes
@@ -65,6 +66,7 @@ fn historical_retry_reports_consume_command_budget_but_capacity_failure_does_not
             RejectionReports::new(vec!["x".repeat(7_000); 8]).unwrap(),
         )
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     writes.released(RequestId(2)).unwrap();
     let bytes = writes.report_bytes;
@@ -108,6 +110,7 @@ fn message_count_is_command_wide_including_historical_retries() {
             RejectionReports::new(vec![String::new(); 255]).unwrap(),
         )
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     writes.released(RequestId(2)).unwrap();
     assert_eq!(
@@ -164,6 +167,7 @@ fn accepted_facts_cannot_publish_rejection_reports_and_recovered_attempts_are_si
     writes
         .result_with_reports(RequestId(1), refused("transient"), reports(&["transient"]))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     writes.released(RequestId(2)).unwrap();
     writes
