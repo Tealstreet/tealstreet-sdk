@@ -307,14 +307,17 @@ fn background_failure_retires_only_its_generation_and_next_poll_can_recover() {
             })
             .unwrap();
         if timeout {
-            let timer = actions
+            let timers: Vec<_> = actions
                 .iter()
-                .find_map(|a| match a {
+                .filter_map(|a| match a {
                     Action::SetTimer { timer, at_ms } if *at_ms == NOW + 140_000. => Some(*timer),
                     _ => None,
                 })
-                .unwrap();
-            engine.handle(NOW + 140_000., Event::TimerFired { timer });
+                .collect();
+            assert!(!timers.is_empty());
+            for timer in timers {
+                engine.handle(NOW + 140_000., Event::TimerFired { timer });
+            }
         } else {
             engine.http_preparation_failed(
                 NOW + 120_001.,

@@ -5,6 +5,7 @@ use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
@@ -286,8 +287,17 @@ impl History {
             return;
         }
         if public_only && !matches!(query, Query::PublicTrades { .. }) {
-            cx.done(
-                command,
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.done_context(
+                &context,
                 if matches!(query, Query::OrderByClientId { .. }) {
                     "{\"found\":false,\"definitive\":false}".into()
                 } else {
@@ -303,7 +313,16 @@ impl History {
                 || client_order_id.chars().count() > 64
                 || client_order_id.contains(['\r', '\n']))
         {
-            cx.fail(command, "invalid Paradex client order ID");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "invalid Paradex client order ID");
             return;
         }
         let bounds = match &query {
@@ -319,11 +338,29 @@ impl History {
             .any(|v| !v.is_finite() || v < 0.)
             || matches!(bounds, (Some(a),Some(b)) if a>b)
         {
-            cx.fail(command, "invalid Paradex history time range");
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "invalid Paradex history time range");
             return;
         }
         if matches!(query, Query::Fills { symbol: None, .. }) {
-            cx.done(command, "[]".into());
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
             return;
         }
         let request = Request {

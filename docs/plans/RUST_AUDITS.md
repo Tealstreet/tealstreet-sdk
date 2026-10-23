@@ -2512,6 +2512,91 @@ Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
 history13->11). Private history/signing and spot REST capabilities stay native.
 Architecture gate: No; existing engine admission and completion choke points.
 
+## KuCoin local Read ownership
+
+Eight local terminal expressions use genuine initial Read command admission.
+The original root is validated immediately before cached-result publication or
+Spot leverage projection. No HTTP attempt is fabricated and no owner is acquired
+on private/pager fallthrough. Existing credential precedence, successful setter
+no-ops and accountMarginType capability are preserved. The exact ratchet removes
+eight occurrences/seven rows; remaining signing/history/Session sites remain held.
+
+### Lighter ticker seed Background custody
+
+The exchangeStats physical read now carries a mandatory managed Background Read
+Context. Shared ownership gates staging/publication and retires on success,
+strict stream failure, preparation/network denial and original deadline expiry.
+Native partial-row acceptance and per-symbol WS revision dominance are retained.
+Six original legacy-dispatch assertion REDs precede the move; controls cover four
+deployments/six envelopes, early response/stream fencing, malformed prefixes,
+route/transport/expiry recovery, capacity peer isolation and300 retirements.
+Only2bbebb…:1 is pruned (Lighter42→41/lib2→1); catalog remains counted.
+Architecture No: existing shared Context/HTTP authority and startup Backoff.
+
+
+
+## BloFin PublicTrades history authority
+
+The PublicTrades owner now adopts shared ReadCompletion/ReadCursorHistory,
+managed HTTP delivery and borrowed page admission. Exact physical delivery is
+checked before row mutation or page acceptance; typed shared terminals own both
+preflight and asynchronous cleanup. The adapter supplies only its native wire
+codec and result shaping. Independent source/adversarial, caller and full-map
+reviews answer the architecture gate No.
+
+The legacy inventory remains 24 BloFin occurrences: the shared private-history
+dispatcher and conservative query macro matches remain inventoried. This slice
+adds no exemption and makes no zero-legacy claim. Signed/private history, trading
+and the existing candle entry refusal remain separately tracked.
+
+## BloFin PublicTrades current inventory scope
+
+The actual-#1848 PublicTrades integration preserves all incoming engine and
+venue code outside its declared slice. The earlier 24-occurrence snapshot above
+predates #1867; current BloFin is 23 occurrences /19 rows /four files, unchanged
+by PublicTrades adoption. Its private dispatcher and conservative history macro
+sites remain explicit debt; neither the actual bridge nor the capacity assertion
+update claims a ratchet removal or private signer/Plan readiness.
+
+## WOO local history admission
+
+The three synchronous pre-I/O history refusal sites use genuine engine Read
+entry and Context completion. The separately committed original tests reproduce
+three typed-admission assertion failures and four compatibility passes on native
+source; the narrow cutover passes all seven assertions unchanged. Exact inventory
+shrink is three fingerprints/three occurrences, WOO34/37 to31/34. HTTP pagination,
+private signing and socket ownership are separate conversion targets.
+
+### Paradex local history terminal custody
+
+Plan `987e5ea81e2`; original test-only checkpoint `45c743903b8`. With production
+and inventory byte-identical to actual `c473342d483`, the new target compiles
+and has three native/control passes plus five intended assertion REDs: four
+capacity cases and invalid-clock admission. The adapter adopts genuine Read
+command entry plus context done/fail in only those four synchronous branches.
+The same eight tests pass after source adoption, without assertion changes.
+
+Native controls retain public-only precedence, exact JSON and error metadata,
+Unicode client-ID bounds, all three history range validators, pre-auth no-symbol
+Fills, PublicTrades bypass, real256-peer isolation and recovery, duplicate-owner
+protection, and300 fixed-clock completions followed by full capacity refill.
+Inventory removes four single-occurrence hashes only in Paradex `history.rs`:
+55->51 total,13->9 in that file. Other paths and same-hash trading siblings stay
+intact. The rejected settings proposal remains held on genuine keyless Mutation
+no-op terminal authority; no signing, credential or outcome workaround was added.
+Broader native gates, independent implementation review and CI are separate.
+
+Local history verification on reviewed integration `56dacc36562` genuinely
+includes actual landing `23d0d490009` (#1892 background executions and #1817
+credential selection). All513 Paradex/Binance tests pass across42 targets,
+none ignored, including the same eight original local-history controls.
+Strict all-target/all-feature Paradex Clippy, scoped formatting, bans, the
+request-context scanner and all15 ratchet tests pass. Source/adversarial,
+caller and full-map reviews are CLEAN on this actual integration; architecture
+No. The seven-path diff preserves every unowned incoming blob and all foreign
+manifest entries, with only the four planned Paradex history occurrences pruned.
+CI and an authorized train slot remain separate gates.
+
 
 ## Subscription handoff custody boundary
 
