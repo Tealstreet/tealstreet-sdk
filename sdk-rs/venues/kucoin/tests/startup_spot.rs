@@ -15,8 +15,8 @@ fn public_engine() -> Engine<KucoinSpot> {
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
             _ => None,
@@ -47,8 +47,8 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             .expect("shared exponential retry timer");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
                 _ => None,
@@ -81,8 +81,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
         ..Default::default()
     }));
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
             _ => None,
@@ -101,8 +101,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let reads = engine
-        .drain_actions()
+    let reads = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -136,8 +136,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         for cached in [false, true] {
             let mut engine = public_engine();
             engine.start(0.0);
-            let catalogue = engine
-                .drain_actions()
+            let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) => Some(request),
                     _ => None,
@@ -154,8 +154,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                     },
                 },
             );
-            let ticker = engine
-                .drain_actions()
+            let ticker = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url.contains("/market/allTickers") => {
                         Some(request)
@@ -188,16 +188,16 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
             );
             assert_eq!(engine.store().tickers(), before);
             assert_eq!(engine.store().loaded().tickers, cached);
-            let timer = engine
-                .drain_actions()
+            let timer = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                     _ => None,
                 })
                 .expect("unusable successful HTTP body must back off");
             engine.handle(1000.0, Event::TimerFired { timer });
-            let retry = engine
-                .drain_actions()
+            let retry = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url == ticker.url => Some(request),
                     _ => None,
@@ -235,16 +235,16 @@ fn funded_wallet_usd_balance_waits_for_its_quote() {
         ..Default::default()
     }));
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
             _ => None,
         })
         .unwrap();
     reply(&mut engine, catalogue, CATALOGUE);
-    let mut reads = engine
-        .drain_actions()
+    let mut reads = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -267,8 +267,8 @@ fn funded_wallet_usd_balance_waits_for_its_quote() {
         tickers,
         r###"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100"}]}}"###,
     );
-    let balance = engine
-        .drain_actions()
+    let balance = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/api/v1/accounts") => Some(request),
             _ => None,
@@ -292,15 +292,15 @@ fn private_with_catalogue(catalogue: &str) -> Private {
         ..Default::default()
     }));
     engine.start(0.0);
-    let request = engine
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
             _ => None,
         })
         .unwrap();
     reply(&mut engine, request, catalogue);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0);
     let poll = actions
         .iter()
         .find_map(|action| match action {
@@ -406,8 +406,8 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         assert_ne!(body, CATALOGUE);
         let mut engine = public_engine();
         engine.start(0.0);
-        let request = engine
-            .drain_actions()
+        let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
                 _ => None,
