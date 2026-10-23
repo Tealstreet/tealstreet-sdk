@@ -572,8 +572,11 @@ proposals. The private registry hooks stay private.
 ### One admission transaction
 
 `Cx::begin_planned_execution(preflight, steps, plan_policy, window, key)`
-runs in the founder's genuine entry callback, after the founder's
-`begin_preflight` and reads. It is a single engine transaction that either
+does not need a fresh entry callback. `begin_preflight` already spent the
+founder's genuine entry, and its preflight reads return in later callbacks
+(uufub4 API-fit review). It transitions that exact retained `Preflight` under
+validated handoff custody, the same custody `admit_plan` uses. There is no
+reborrow and no second entry. It is a single engine transaction that either
 commits all of the following or none of them:
 - the Plan, with whole-plan credit-aware reservation, exactly as `admit_plan`;
 - an `Owner::Execution` physical root whose deadline is the Plan-minted
@@ -582,7 +585,8 @@ commits all of the following or none of them:
   generation;
 - the execution's journal, which is the Plan's journal.
 
-It returns `(PlanHandle, ExecutionHandle)`. Refusal leaves no Plan, root,
+It returns `(PlanHandle, ExecutionHandle, Observer)`; the founder's observer
+handle is explicit so the founder can later detach. Refusal leaves no Plan, root,
 observer, reservation credit or action. The founder's entry is spent by this
 one transaction; the founder never admits a Plan and begins an execution
 separately, and there is no Plan-to-Context cast.
