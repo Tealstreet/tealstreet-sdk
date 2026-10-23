@@ -7,8 +7,9 @@ Branch: `feat/rust-selected-read-root-legs`.
 
 This is a separate plan-first follow-up AFTER standalone #1962. Its reviewed
 source is `f1671230ce8`; its frozen actual-integrated head is
-`74d0fef3ff7255faa3bbb548d4e5c4a3fc13ed23`. Do not grow that head. No runtime,
-API, test-execution, native migration or inventory prune is claimed here.
+`74d0fef3ff7255faa3bbb548d4e5c4a3fc13ed23`. Do not grow that head. The standalone is now actual9f405e55403. Local dependency ce54ab9357b is
+explicitly authorized; no mergeable PR until #1976 freezes. No native migration
+or inventory prune is claimed by this engine follow-up.
 
 ## Need and native boundary
 
@@ -73,9 +74,6 @@ These are a proposal, not exported/frozen APIs. New contract controls and exact
 signature review precede any runtime edit. Existing aliases refer to #1962.
 
 ```rust
-pub struct ReadRootPolicy {
-    pub timeout_ms: u32, // explicit caller remaining wait, not a helper default
-}
 pub struct ReadLegPolicy {
     pub timeout_ms: u32, // consumer declares 20_000 for these native page calls
     pub pacing: Option<Pacing>,
@@ -85,7 +83,7 @@ pub struct ReadLeg { /* private child Context + same selection/root identity */ 
 
 impl SelectedRead {
     pub fn command_root<P>(cx: &mut Cx<'_, P>,
-        selected: Result<Self, CredentialUnavailable>, policy: ReadRootPolicy,
+        selected: Result<Self, CredentialUnavailable>,
         missing: LocalRefusal) -> Result<ReadRoot, CommandReadError>;
 }
 impl ReadRoot {
@@ -246,3 +244,35 @@ plus pending leg and query_item streaming. The subsequent native re-send,
 unsigned-history boundary and 40085 discard/re-queue controls above refine the
 proposal; core/consumer review of the exact final dependency composition remains
 required. No runtime or new-contract execution follows from that review alone.
+
+## Actual dependency composition (implementation checkpoint)
+
+Integrated actual landing87bf458ba90 (contains actual1962) and the explicitly
+authorized local ce54ab9357b root-expiry source by plain merges. Source merged
+without conflicts; docs retain current landing plus dependency additions.
+#1976 is not frozen, so this is local implementation evidence only.
+
+The exact command_root signature above now omits ReadRootPolicy. It calls
+Cx::admit_caller_read_root(selected credential, None), which captures the genuine
+raw receipt deadline itself without rounding or caller override. The caller
+observes command_wait before admission and uses shared reject_expired_command
+or reject_unstamped_command when appropriate. Rejected is already terminal;
+Revoked grants no fallback. Missing selection uses the same None-credential
+tracked root, optional checked diagnostic and single typed fail as the standalone.
+ReadRootPolicy and a guessed remaining-wait conversion are not exported.
+
+Only selected_read.rs, isolated selected_read_legs.rs controls and owned docs
+change in this slice. Root and children share one immutable Arc<SelectedRead>:
+no new identity selector, owner registry, timer, local expiry or finalizer.
+New children are Read/Never, with explicit physical policy, derived only from
+the original root. ReadRoot::validate_delivery first checks Arc snapshot
+identity, then delegates exact root/leg/attempt custody to the core validator.
+The borrowed Context remains existing generic core authority.
+
+Tests are NEW-CONTRACT specifications committed before source, not missing-API
+compile failures claimed as original REDs. They cover exact fractional receipt,
+page-relative 20-second bounds, immutable selected provider refs/route/headers,
+physical versus root timeout, diagnostic/refusal custody, wrong root/engine,
+discard-and-resend with stale delivery, pending preservation and streaming.
+Shared history admission remains core-owned; no local accepted-prefix finalizer
+is introduced. No production consumer source or manifest is changed.
