@@ -118,6 +118,7 @@ impl Driver {
         let config = policy.supervision;
         let feed = self.state.register(policy)?;
         let supervisor = Supervisor::new(config);
+        debug_assert_eq!(feed.index(), self.runtimes.len());
         self.runtimes.push(Runtime {
             feed,
             supervisor,
@@ -129,10 +130,9 @@ impl Driver {
     }
 
     fn runtime_mut(&mut self, feed: FeedId) -> &mut Runtime {
-        self.runtimes
-            .iter_mut()
-            .find(|r| r.feed == feed)
-            .expect("registered lifecycle feed has runtime")
+        let runtime = &mut self.runtimes[feed.index()];
+        debug_assert_eq!(runtime.feed, feed);
+        runtime
     }
 
     pub(crate) fn begin<P>(
@@ -270,27 +270,20 @@ impl Driver {
         socket: SocketId,
         ingress: Ingress,
     ) -> IngressResult {
-        if let Some(runtime) = self.runtimes.iter().find(|r| {
-            self.state
-                .epoch(r.feed)
-                .is_some_and(|e| e.socket() == socket)
-        }) && !Self::valid_time(
-            self.state.policy(runtime.feed).expect("registered feed"),
-            cx.now,
-        ) {
-            return IngressResult {
-                admission: Admission::Denied,
-                effects: Vec::new(),
-            };
-        }
-        let expired = self.runtimes.iter().find_map(|r| {
-            (self
-                .state
-                .epoch(r.feed)
-                .is_some_and(|e| e.socket() == socket))
-            .then(|| r.supervisor.expired(cx.now))
-            .flatten()
-        });
+        let expired = if let Some(epoch) = self.state.socket_epoch(socket) {
+            let policy = self.state.policy(epoch.feed()).expect("registered feed");
+            if !Self::valid_time(policy, cx.now) {
+                return IngressResult {
+                    admission: Admission::Denied,
+                    effects: Vec::new(),
+                };
+            }
+            self.runtimes[epoch.feed().index()]
+                .supervisor
+                .expired(cx.now)
+        } else {
+            None
+        };
         let admission = self.state.admit(socket, ingress, expired);
         let mut effects = Vec::new();
         match admission {
@@ -1014,6 +1007,29 @@ mod tests {
         );
         h.text(0, "accepted");
         assert!(h.engine.venue().driver.state.authenticated(epoch.feed()));
+    }
+
+    #[test]
+    fn current_ingress_uses_its_own_supervisor_among_expired_neighbors() {
+        let mut healthy = policy(AuthMode::None);
+        healthy.traffic = TrafficPolicy::AnyText;
+        healthy.supervision.idle_timeout_ms = 100_000.;
+        let mut h = Harness::new(vec![policy(AuthMode::Required), healthy], true);
+        h.open(0);
+        h.open(1);
+        let expired = h.epoch(0);
+        let current = h.epoch(1);
+        h.now = 10_000.; // Neighbor auth expires; healthy socket remains live.
+        h.text(1, "ordinary");
+        assert!(h.engine.venue().driver.state.current(current));
+        assert!(h.engine.venue().driver.state.current(expired));
+        assert!(h.closes.is_empty());
+        h.text(0, "accepted");
+        assert!(!h.engine.venue().driver.state.current(expired));
+        assert!(h.engine.venue().driver.state.current(current));
+        assert_eq!(h.closes, [expired.socket()]);
+        h.text(1, "ordinary");
+        assert_eq!(h.epoch(1), current);
     }
 
     #[test]

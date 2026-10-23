@@ -6,7 +6,7 @@
 //! expiry result; this module does not implement a second clock/backoff loop.
 use crate::socket::{Config, Timeout};
 use crate::{ErrorKind, SocketChannel, SocketId, VenueError};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 
 pub const MAX_FEEDS: usize = 512;
@@ -18,6 +18,12 @@ pub const MAX_INTEREST_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FeedId(usize);
+impl FeedId {
+    /// Feeds and their driver runtimes are append-only for one engine lifetime.
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Epoch {
@@ -321,6 +327,9 @@ impl InterestInput {
 #[derive(Default)]
 pub(crate) struct Lifecycle {
     feeds: Vec<Feed>,
+    // Only live physical epochs. Central retirement removes entries before any
+    // native invalidation/retry callback; size is bounded by registered feeds.
+    current_sockets: HashMap<SocketId, Epoch>,
     external_queue_bytes: usize,
 }
 impl Lifecycle {
@@ -352,9 +361,10 @@ impl Lifecycle {
         (0..self.feeds.len()).map(FeedId).collect()
     }
     pub(crate) fn socket_epoch(&self, socket: SocketId) -> Option<Epoch> {
-        self.feeds
-            .iter()
-            .find_map(|f| f.epoch.filter(|e| e.socket == socket))
+        self.current_sockets
+            .get(&socket)
+            .copied()
+            .filter(|epoch| self.current(*epoch))
     }
     pub(crate) fn has_pending_frames(&self) -> bool {
         self.feeds
@@ -425,12 +435,7 @@ impl Lifecycle {
     }
     pub(crate) fn begin(&mut self, feed: FeedId, socket: SocketId) -> Result<Epoch, SocketError> {
         self.can_begin(feed)?;
-        if socket.0 == 0
-            || self
-                .feeds
-                .iter()
-                .any(|f| f.epoch.is_some_and(|e| e.socket == socket))
-        {
+        if socket.0 == 0 || self.current_sockets.contains_key(&socket) {
             return Err(SocketError::NotPermitted);
         }
         let f = self.feeds.get_mut(feed.0).ok_or(SocketError::Stale)?;
@@ -447,6 +452,7 @@ impl Lifecycle {
         f.pong_seen = false;
         f.interests.released.clear();
         f.interests.queue.clear();
+        self.current_sockets.insert(socket, epoch);
         Ok(epoch)
     }
     pub(crate) fn can_begin(&self, feed: FeedId) -> Result<(), SocketError> {
@@ -482,14 +488,13 @@ impl Lifecycle {
         if !self.enabled() {
             return Admission::Legacy;
         }
-        let Some(index) = self
-            .feeds
-            .iter()
-            .position(|f| f.epoch.is_some_and(|e| e.socket == socket))
-        else {
+        let Some(epoch) = self.socket_epoch(socket) else {
             return Admission::Denied;
         };
-        let f = &self.feeds[index];
+        let f = &self.feeds[epoch.feed.0];
+        if f.epoch != Some(epoch) {
+            return Admission::Denied;
+        }
         if matches!(ingress, Ingress::Open | Ingress::Connect) && f.phase != Phase::Connecting
             || matches!(ingress, Ingress::Message | Ingress::Send)
                 && !matches!(f.phase, Phase::Authenticating | Phase::Ready)
@@ -497,10 +502,10 @@ impl Lifecycle {
             return Admission::Denied;
         }
         if let Some(timeout) = expired {
-            let retired = self.retire(FeedId(index)).expect("admitted epoch");
+            let retired = self.retire(epoch.feed).expect("admitted epoch");
             return Admission::Expired(retired, timeout);
         }
-        Admission::Current(f.epoch.expect("current epoch"))
+        Admission::Current(epoch)
     }
     pub(crate) fn opened(&mut self, epoch: Epoch) -> Result<Option<bool>, SocketError> {
         let f = self.feeds.get_mut(epoch.feed.0).ok_or(SocketError::Stale)?;
@@ -593,6 +598,8 @@ impl Lifecycle {
     pub(crate) fn retire(&mut self, feed: FeedId) -> Option<Retirement> {
         let f = self.feeds.get_mut(feed.0)?;
         let epoch = f.epoch.take()?;
+        let removed = self.current_sockets.remove(&epoch.socket);
+        debug_assert_eq!(removed, Some(epoch));
         f.retiring = Some(epoch);
         f.phase = Phase::Quarantined;
         f.authenticated = false;
@@ -1236,6 +1243,105 @@ mod tests {
             Admission::Current(e)
         );
     }
+    #[test]
+    fn current_socket_lookup_is_revoked_before_retirement_ack_and_never_resurrects() {
+        let mut l = Lifecycle::default();
+        let a = l.register(policy(AuthMode::None)).unwrap();
+        let b = l.register(policy(AuthMode::None)).unwrap();
+        let neighbor = l.begin(b, SocketId(9000)).unwrap();
+        l.opened(neighbor).unwrap();
+        for id in 1..=128 {
+            let old = l.begin(a, SocketId(id)).unwrap();
+            assert_eq!(l.socket_epoch(old.socket()), Some(old));
+            assert_eq!(l.begin(b, old.socket()), Err(SocketError::NotPermitted));
+            l.opened(old).unwrap();
+            l.retire(a).unwrap();
+            assert_eq!(l.socket_epoch(old.socket()), None);
+            assert_eq!(
+                l.admit(old.socket(), Ingress::Message, None),
+                Admission::Denied
+            );
+            assert_eq!(l.socket_epoch(neighbor.socket()), Some(neighbor));
+            l.retired(old, true).unwrap();
+            l.grant_retry(a).unwrap();
+        }
+        l.stop_all();
+        assert_eq!(l.socket_epoch(neighbor.socket()), None);
+        assert_eq!(
+            l.admit(neighbor.socket(), Ingress::Message, None),
+            Admission::Denied
+        );
+    }
+
+    #[test]
+    fn refused_begin_preserves_current_socket_and_other_feed_generation() {
+        let mut l = Lifecycle::default();
+        let a = l.register(policy(AuthMode::None)).unwrap();
+        let b = l.register(policy(AuthMode::None)).unwrap();
+        let current = l.begin(a, SocketId(41)).unwrap();
+        assert_eq!(l.begin(b, current.socket()), Err(SocketError::NotPermitted));
+        assert_eq!(l.begin(b, SocketId(0)), Err(SocketError::NotPermitted));
+        assert_eq!(l.feeds[b.0].generation, 0);
+        assert_eq!(l.socket_epoch(current.socket()), Some(current));
+        assert_eq!(l.epoch(b), None);
+        l.feeds[b.0].generation = u64::MAX;
+        assert_eq!(l.begin(b, SocketId(42)), Err(SocketError::Capacity));
+        assert_eq!(l.socket_epoch(SocketId(42)), None);
+        assert_eq!(l.socket_epoch(current.socket()), Some(current));
+        l.retire_group(1); // Unrelated group cannot clear another current socket.
+        assert_eq!(l.socket_epoch(current.socket()), Some(current));
+    }
+
+    #[test]
+    fn current_socket_index_is_bounded_and_all_retire_paths_remove_ownership() {
+        let mut l = Lifecycle::default();
+        let mut epochs = Vec::new();
+        for id in 1..=MAX_FEEDS {
+            let mut p = policy(AuthMode::None);
+            p.permanent_refusal_group = (id % 2 == 0).then_some(7);
+            let feed = l.register(p).unwrap();
+            epochs.push(l.begin(feed, SocketId(id as u64)).unwrap());
+        }
+        assert_eq!(l.current_sockets.len(), MAX_FEEDS);
+        assert_eq!(
+            l.register(policy(AuthMode::None)),
+            Err(SocketError::Capacity)
+        );
+        let group = l.retire_group(7);
+        assert_eq!(group.len(), MAX_FEEDS / 2);
+        assert_eq!(l.current_sockets.len(), MAX_FEEDS / 2);
+        for retirement in group {
+            assert_eq!(l.socket_epoch(retirement.epoch.socket()), None);
+            l.retired(retirement.epoch, true).unwrap();
+            assert_eq!(
+                l.grant_retry(retirement.epoch.feed()),
+                Err(SocketError::NotPermitted)
+            );
+        }
+        l.stop_feed(epochs[0].feed()).unwrap();
+        assert_eq!(l.socket_epoch(epochs[0].socket()), None);
+        let expired = epochs[2];
+        l.opened(expired).unwrap();
+        assert!(matches!(
+            l.admit(expired.socket(), Ingress::Message, Some(Timeout::Idle)),
+            Admission::Expired(_, Timeout::Idle)
+        ));
+        assert_eq!(l.socket_epoch(expired.socket()), None);
+        l.retired(expired, false).unwrap();
+        assert_eq!(
+            l.grant_retry(expired.feed()),
+            Err(SocketError::NotPermitted)
+        );
+        l.stop_all();
+        assert!(l.current_sockets.is_empty());
+        for epoch in epochs {
+            assert_eq!(
+                l.admit(epoch.socket(), Ingress::Message, None),
+                Admission::Denied
+            );
+        }
+    }
+
     #[test]
     fn accepted_auth_grants_readiness_once_per_epoch() {
         let (mut l, f, e) = started(AuthMode::Required);

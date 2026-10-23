@@ -755,3 +755,19 @@ OKX and Bitunix retain the existing exact wire and ordering assertions. All
 both independent correctness and adversarial reviews are CLEAR. This checkpoint
 makes no measured memory or CPU claim; the indexed lookup phase and fresh CI
 measurements remain required.
+
+### Indexed current-socket lookup checkpoint
+
+Lifecycle owns one bounded current-socket-to-Epoch index. Begin inserts after
+all existing preflight checks; central retirement removes ownership before any
+native callback. Lookup revalidates the full Epoch against the current feed.
+Driver runtime indexing follows append-only FeedId registration, and ingress
+reads only that runtime's Supervisor. Fresh representable-time, phase, epoch and
+expiry checks remain at ingress and again at control handling; no admission is
+cached. Three new compatibility controls pass on the original linear code;
+the added 512-feed index control covers all retirement paths and bounded storage.
+All 1,388 four-crate all-target tests and strict all-feature/all-target Clippy
+pass; both independent correctness/adversarial reviews are CLEAR. The ban check
+correctly refuses the older ApeX legacy-request inventory against the newly
+landed #1772; actual integration is required before CI, with no exemption or
+manual inventory growth. Performance remains unmeasured on this checkpoint.
