@@ -78,7 +78,7 @@ impl<'a> Reconciliation<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Owner {
     Command {
         id: CommandId,
@@ -87,10 +87,56 @@ pub enum Owner {
     Background {
         generation: u64,
     },
+    /// Venue-maintained authentication session (listen key, WS token, login).
+    /// Retiring the session revokes every context and attempt it owns.
+    Session {
+        generation: u64,
+    },
     /// One physical execution serving several command observers.
     Execution {
         generation: u64,
     },
+}
+
+/// Engine-issued session authority. Holds no key, token or credential value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Session {
+    issuer: std::sync::Arc<()>,
+    generation: u64,
+}
+
+impl Session {
+    pub(crate) fn new(issuer: &std::sync::Arc<()>, generation: u64) -> Self {
+        Self {
+            issuer: issuer.clone(),
+            generation,
+        }
+    }
+    pub(crate) fn issued_by(&self, issuer: &std::sync::Arc<()>) -> bool {
+        std::sync::Arc::ptr_eq(&self.issuer, issuer)
+    }
+    pub fn owner(&self) -> Owner {
+        Owner::Session {
+            generation: self.generation,
+        }
+    }
+}
+
+/// A continuation parked behind a session, returned when the venue drains it.
+#[derive(Debug)]
+pub enum Waiter<P> {
+    Ready(Context, P),
+    /// Nothing was sent for this owner; the error's outcome is NotSent.
+    Failed(Context, P, VenueError),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionPolicy {
+    /// Every context issued for the session must use exactly this credential.
+    pub credential: Option<Credential>,
+    /// The venue contract makes a new create/keepalive harmless while an
+    /// earlier one is unresolved (cite it at the declaration site).
+    pub repeat_safe: bool,
 }
 
 /// Independent of HTTP method: private POST snapshots are still reads.
@@ -1007,30 +1053,10 @@ impl CommandWrites {
     /// Only a typed definitive refusal may authorize another write attempt.
     /// The request context's policy/deadline must also authorize this retry.
     pub fn retry(&mut self, previous: RequestId, id: RequestId) -> Result<(), Error> {
-        if self.sealed {
-            return Err(Error::State);
-        }
-        if self.attempts.iter().any(|a| a.id == id) {
+        if self.attempts.iter().any(|a| a.id == id) && !self.sealed {
             return Err(Error::Duplicate);
         }
-        if self.occupied() >= self.capacity {
-            return Err(Error::Capacity);
-        }
-        let old = self
-            .attempts
-            .iter()
-            .find(|a| a.id == previous)
-            .ok_or(Error::Invalid)?;
-        if !self.active(old.leg)
-            || old.id_overflow
-            || !old.resend_granted
-            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
-            || self.attempts.iter().rposition(|a| a.leg == old.leg)
-                != self.attempts.iter().position(|a| a.id == previous)
-        {
-            return Err(Error::RetryForbidden);
-        }
-        let leg = old.leg;
+        let leg = self.retry_admissible(previous)?;
         // Each grant authorizes exactly one resend.
         if let Some(old) = self.attempts.iter_mut().find(|a| a.id == previous) {
             old.resend_granted = false;
@@ -1211,6 +1237,37 @@ impl CommandWrites {
                 None => return false,
             }
         }
+    }
+
+    /// Journal side of `retry`, without allocating the new attempt.
+    fn retry_admissible(&self, previous: RequestId) -> Result<u64, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        if self.occupied() >= self.capacity {
+            return Err(Error::Capacity);
+        }
+        let old = self
+            .attempts
+            .iter()
+            .find(|a| a.id == previous)
+            .ok_or(Error::Invalid)?;
+        if !self.active(old.leg)
+            || old.id_overflow
+            || !old.resend_granted
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self.attempts.iter().rposition(|a| a.leg == old.leg)
+                != self.attempts.iter().position(|a| a.id == previous)
+        {
+            return Err(Error::RetryForbidden);
+        }
+        Ok(old.leg)
+    }
+
+    /// An owner may park for a re-send only when `retry` would accept it.
+    pub(crate) fn resend_blocked(&self, leg: u64) -> bool {
+        self.latest(leg)
+            .is_some_and(|latest| self.retry_admissible(latest).is_err())
     }
 
     pub(crate) fn leg_attempts(&self, leg: u64) -> usize {
