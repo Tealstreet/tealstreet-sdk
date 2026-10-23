@@ -384,3 +384,15 @@ before this operation, and keep a normal two-call positive. Add wrong slot,
 Mutation, absent delivery, another active call and post-settlement/replay controls.
 The native adapter still owns validated-success decoding and the exact captured
 publication/fallback policy; the terminal operation does not warm its cache.
+
+## Shared binary size containment
+
+The first integrated CI build exceeds Aster's fixed WASM budget by 20,415 bytes.
+Keep that failure as evidence and preserve the budget. First contain cold owner
+retirement and failure paths: move Plan seal validation/journal projection into
+one non-generic registry function and keep cold shared finalizers out of line.
+Do not add a venue-specific policy, allocation workaround or new permission.
+Keep the existing validation, callback and cleanup order byte-for-byte in the
+extracted bodies. Run the full feature-on/off engine controls and strict checks,
+review the source delta, then measure the unchanged Aster budget in normal CI.
+A size reduction is not claimed until that CI measurement exists.
