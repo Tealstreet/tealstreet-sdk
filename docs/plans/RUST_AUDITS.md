@@ -2530,4 +2530,3 @@ Inventory removes four single-occurrence hashes only in Paradex `history.rs`:
 intact. The rejected settings proposal remains held on genuine keyless Mutation
 no-op terminal authority; no signing, credential or outcome workaround was added.
 Broader native gates, independent implementation review and CI are separate.
-

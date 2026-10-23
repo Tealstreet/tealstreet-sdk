@@ -5642,4 +5642,3 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
-

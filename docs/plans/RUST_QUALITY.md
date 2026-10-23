@@ -1128,4 +1128,3 @@ refill exercise owner retirement without deadline expiry hiding a leak.
 The original managed public-trades and private history suite stays unchanged.
 Exact inventory target is Paradex55->51/history13->9; broader native, strict,
 ratchet, independent review and CI evidence will be recorded separately.
-

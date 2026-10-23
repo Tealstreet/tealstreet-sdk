@@ -460,4 +460,3 @@ was not counted as a RED. The source adoption then passes all eight tests with
 the committed RED assertions unchanged. It changes only the four local history
 Read terminals and their four exact manifest occurrences. Full verification,
 actual-landing integration, implementation reviews and CI remain separate gates.
-
