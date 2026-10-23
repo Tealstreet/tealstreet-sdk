@@ -764,6 +764,57 @@ unsupported capabilities remain unsupported and no numeric managed fallback is
 introduced. Caller polling guidance retains coverage while deduplicating UI
 alerts.
 
+
+## Paradex managed REST book area
+
+The independent Paradex public snapshot query adopts the existing engine
+preparation/claim, original read bound, exact delivery check and Context
+completion. Public wire/codec behavior and the existing eight snapshot contract
+tests remain; fixture adaptation uses shared prepared-actions and explicitly
+checks the one new original-deadline timer before preserving outbound-only
+assertions. Original-RED controls cover premature delivery, typed denial,
+expiry, reused/concurrent owners, duplicates and capacity refusal/recovery.
+No private credential, Starknet, candle fallback or live-book mechanism moves.
+The venue-only inventory loses five occurrences; pre-authority refusal remains
+counted for the shared engine entry seam rather than hidden in another API.
+
+The existing public-SBE and private-JWT snapshot isolation fixtures also use the
+shared prepared-action helper for this query only. Both keep their original
+clocks, request bodies, native-state and protocol assertions; the public fixture
+checks the new original-deadline timer explicitly before its no-extra-actions
+control. Held account/trading source and tests/account are untouched.
+
+## Lighter command-entry regression proof
+
+The separately committed candle controls reproduce two native admission errors:
+capacity returned a generic adapter message, and invalid clock admission reported
+Internal instead of the engine's InvalidInput. Both are assertion-RED on the
+original implementation. The live-duplicate control allows the pre-existing
+COMMAND_DUPLICATE diagnostic and proves no request/terminal replacement; it is a
+compatibility control, not an original failure. All seven earlier candle controls
+remain. New controls exercise both aliases/networks, denial before invalid market
+validation, one terminal/no resource allocation, peer completion, freed-slot
+reuse and NaN/positive-infinity/negative-infinity admission followed by a finite
+command. The adapter uses shared command entry only for its genuine command
+caller; background generation cleanup and native query/stream behavior remain.
+
+## KuCoin Spot candle managed-read controls
+
+Tests-first controls distinguish unreleased, bound-but-unclaimed and claimed
+responses, timer-first and response-first exact-deadline expiry, typed preparation
+and transport failures, initial admission refusal and immediate physical queue
+refusal. Genuine saturation fixtures assert256 separate background roots or256
+queued physical requests under one background root in a prior no-ID callback, then explicitly retire them and recover at
+one clock. Fixed-clock repetition pins preflight and success retirement, duplicate
+command preservation and stale-generation rejection.
+
+Native compatibility controls preserve complete candle fields, both timestamp
+units, duplicate timestamps, oversized responses, volume column5 with extra columns, permissive
+unknown symbols, exact headers/query calculations and separate malformed-row
+versus envelope error timelines. Corrected native fixtures ran unchanged source
+with eleven RED and three compatibility GREEN controls before the managed source
+made all fourteen GREEN.
+
 ## MEXC initial Plan refusal regressions
 
 Separate original-source tests reproduce two failures: no typed initial Plan
