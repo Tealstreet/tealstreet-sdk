@@ -240,6 +240,160 @@ fn empty_declaration_keeps_managed_preparation_empty() {
     assert!(request.headers.is_empty() && request.signer_headers.is_empty());
 }
 
+#[test]
+fn public_headers_keep_duplicate_order_and_absent_or_empty_body_without_signing() {
+    for headers in [
+        &[][..],
+        &[("Content-Type", "application/json")][..],
+        &[("x-public", "one\ttwo"), ("X-public", "three")][..],
+    ] {
+        for body in [None, Some(String::new()), Some("{}".into())] {
+            let (mut engine, _, calls) = start_count(&[], 0);
+            let result = {
+                let mut cx = Cx {
+                    now: 0.,
+                    store: &mut engine.store,
+                    io: &mut engine.io,
+                };
+                let context = cx
+                    .http_context(
+                        Scope::Background,
+                        Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 1_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                cx.request_managed_with_headers(
+                    context,
+                    Method::Post,
+                    "https://public.test/info".into(),
+                    headers,
+                    body.clone(),
+                    41,
+                )
+            };
+            assert!(result.is_ok());
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            let (_, request) = prepared(&actions);
+            assert_eq!(request.headers, owned(headers));
+            assert_eq!(request.body, body);
+            assert!(request.signer_headers.is_empty());
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_) | Action::Sign { .. }))
+            );
+            assert_eq!(engine.io.signing.next_id(), RequestId(1));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[test]
+fn invalid_public_headers_return_original_pending_before_any_transport_allocation() {
+    for headers in [
+        declaration(vec![
+            ("valid".into(), "first".into()),
+            ("bad name".into(), "last".into()),
+        ]),
+        declaration(vec![("x".into(), "line\r\nbreak".into())]),
+        declaration(vec![("x".into(), "v".into()); 33]),
+        declaration(vec![("x".into(), "v".repeat(8192) + "x")]),
+    ] {
+        let (mut engine, _, _) = start_count(&[], 0);
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let context = cx
+            .http_context(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 1_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        let before = cx.io.next_id;
+        assert_eq!(
+            cx.request_managed_with_headers(
+                context,
+                Method::Post,
+                "https://public.test/info".into(),
+                headers,
+                None,
+                41
+            ),
+            Err((41, Error::Invalid))
+        );
+        assert_eq!(cx.io.next_id, before);
+        assert!(cx.io.pending.is_empty() && cx.io.managed_http.is_empty());
+        assert!(cx.io.actions.is_empty() && cx.io.timers.is_empty());
+        assert_eq!(cx.io.signing.next_id(), RequestId(1));
+    }
+}
+
+#[test]
+fn public_header_entry_preserves_private_expired_and_capacity_refusals() {
+    for (private, now, capacity, expected) in [
+        (true, 0., false, Error::Invalid),
+        (false, 1_000., false, Error::TimedOut),
+        (false, 0., true, Error::Capacity),
+    ] {
+        let (mut engine, _, _) = start_count(&[], 0);
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        };
+        let context = cx
+            .http_context(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: private.then(|| Credential {
+                        slot: CredentialSlot::Primary,
+                        reference: KeyRef("ref:owned-primary".into()),
+                    }),
+                    timeout_ms: 1_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        cx.now = now;
+        if capacity {
+            cx.io.next_id = crate::resource_ids::ResourceIds::starting_at(
+                crate::resource_ids::MAX_RESOURCE_ID - 1,
+            );
+        }
+        let before = cx.io.next_id;
+        assert_eq!(
+            cx.request_managed_with_headers(
+                context,
+                Method::Post,
+                "https://public.test/info".into(),
+                PUBLIC,
+                Some("{}".into()),
+                41
+            ),
+            Err((41, expected))
+        );
+        assert_eq!(cx.io.next_id, before);
+        assert!(cx.io.pending.is_empty() && cx.io.managed_http.is_empty());
+        assert!(cx.io.actions.is_empty() && cx.io.timers.is_empty());
+        assert_eq!(cx.io.signing.next_id(), RequestId(1));
+    }
+}
+
 // Leaked values are bounded synthetic test declarations, never credentials.
 fn declaration(values: Vec<(String, String)>) -> &'static [(&'static str, &'static str)] {
     Box::leak(
