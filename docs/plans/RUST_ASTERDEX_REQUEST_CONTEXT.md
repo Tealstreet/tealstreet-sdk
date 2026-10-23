@@ -279,3 +279,12 @@ owned by `codex-sy8pn5` (after ApeX); listen-key adoption is owned by
 retry-delay requirements were sent to those owners through Aimux. These named
 assignments supersede the provisional routing above; source adoption and shared
 API availability remain unclaimed.
+
+Overseer lane-ID correction: the original signer/session Codex lanes died at
+startup. Their replacements are `claude-19pt8s` for non-HMAC signing, including
+ApeX then Aster V1/V3, and `claude-55ao7t` for background-session Context. The
+codec/routing and listen-key requirements were resent to these replacement
+owners through Aimux; the earlier messages to the dead IDs did not establish
+delivery. Shared error-classification ownership is now `claude-dazzy3`; this
+checkpoint has no outstanding request to its predecessor. Retry scheduling
+remains with `codex-uufub4`.
