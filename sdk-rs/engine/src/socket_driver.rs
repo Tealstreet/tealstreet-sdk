@@ -128,6 +128,13 @@ impl Driver {
             && !barrier
             && self.valid_time(epoch.feed(), now)
     }
+    pub(crate) fn handoff_ready(&self, epoch: Epoch, now: f64, barrier: bool) -> bool {
+        self.one_shot_ready(epoch, now, barrier)
+            && self
+                .runtimes
+                .get(epoch.feed().index())
+                .is_some_and(|runtime| runtime.supervisor.expired(now).is_none())
+    }
     /// Fresh representability only. Supervisor still owns all deadlines/backoff.
     fn valid_time(&self, feed: FeedId, now: f64) -> bool {
         self.runtimes
