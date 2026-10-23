@@ -2346,6 +2346,16 @@ not claimed as production defects. Capture exhaustion admits no unfenced read
 and preserves native account-cycle progress. Final current-head CI, actual queued
 integration and full authenticated raw proof remain separate merge gates.
 
+### Lighter cached reads: remove legacy numeric completion
+
+The cached FetchLeverage and FetchAccountTier branches consume shared initial
+Read admission and Context terminals. This closes their capacity/invalid-clock
+admission bypass without fabricating HTTP or financial evidence. Rejected and
+revoked entries return without numeric fallback; cache data and native errors
+remain unchanged after admission. Exactly three lexical sites are removed:
+Lighter46→43, lib5→3, limits6→5. SetAccountTier's separate identical numeric fail
+fingerprint remains counted. No held trading or engine source is changed.
+
 ## Shared ticker lookup CPU headroom
 
 A named WASM profile identifies indirect symbol comparisons in Store::ticker_index
