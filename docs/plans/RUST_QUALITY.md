@@ -815,6 +815,36 @@ versus envelope error timelines. Corrected native fixtures ran unchanged source
 with eleven RED and three compatibility GREEN controls before the managed source
 made all fourteen GREEN.
 
+## MEXC initial Plan refusal regressions
+
+Separate original-source tests reproduce two failures: no typed initial Plan
+startup terminal, and resumed HTTP through late pagination/asset refresh. Two
+negative controls already pass on original production, preserving transient and
+post-startup retries. Coverage includes AuthInvalid/AuthExpired/AuthPermission,
+native code/message, deactivation policy, exactly one startup terminal, stale
+poll delivery, late sibling failure/login, a 100-row late page and asset timers.
+Both normal empty-list error envelopes and errors missing data are covered;
+successful missing/null lists retain retry behavior. Existing account assertions remain
+intact, and the legacy request inventory has no venue delta.
+
+Verification on the integrated startup fix passes456 MEXC+Binance tests across
+40 targets, including all44 account tests. Scoped fmt/strict all-target Clippy
+and both ratchets (14 controls) pass. Three independent reviews are clean;
+architecture No. Source/test files held by history #1793 remain untouched.
+
+## Phemex unsigned candle request regressions
+
+Committed plan05988416603 precedes separate original-source tests2a1a008bc7c:
+six lifecycle regressions fail and primary/secondary/dual signing compatibility
+already passes. Controls cover preparation/binding/one release, parked and
+released expiry, stale callbacks with ID reuse, typed setup/network failures,
+genuine invalid-time admission and native sorted output. Additional native
+error/malformed-row/missing-list comparisons match the credentialed path, and
+an expired429 reply cannot pause another read. Existing public assertions are
+retained with the shared prepared fixture; only the daily response clock moves
+forward to its command's timestamp. No scanner/manifest change or credentialed
+signer migration is included.
+
 ## KuCoin local history authority controls
 
 Tests precede production. The fixture delegates the native mutation guard so
