@@ -57,8 +57,10 @@ pub struct Supervisor {
     phase: Phase,
     since: f64,
     received: f64,
+    idle_enabled: bool,
     next_ping: Option<f64>,
     watch: Option<TimerId>,
+    watch_at: Option<f64>,
     retry: Option<TimerId>,
     failures: u32,
 }
@@ -87,8 +89,10 @@ impl Supervisor {
             phase: Phase::Stopped,
             since: 0.0,
             received: 0.0,
+            idle_enabled: true,
             next_ping: None,
             watch: None,
+            watch_at: None,
             retry: None,
             failures: 0,
         }
@@ -137,6 +141,59 @@ impl Supervisor {
         }
     }
 
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn idle_enabled(&self) -> bool {
+        self.idle_enabled
+    }
+
+    /// Activate receive supervision only after the declared liveness proof.
+    /// Existing callers start enabled. Repeated activation does not refresh
+    /// the receive timestamp; traffic admission remains a separate operation.
+    pub fn set_idle_enabled<P>(&mut self, cx: &mut Cx<'_, P>, enabled: bool) {
+        if self.idle_enabled == enabled {
+            return;
+        }
+        self.idle_enabled = enabled;
+        if enabled {
+            self.received = cx.now;
+        }
+        if enabled
+            && self
+                .watch_at
+                .zip(self.next_watch_at(cx.now))
+                .is_some_and(|(old, new)| old <= new)
+        {
+            return;
+        }
+        self.rearm(cx);
+    }
+
+    /// The same absolute expiry predicate used by timer delivery. Managed
+    /// ingress checks it before admitting an open, ACK or liveness frame, so
+    /// delayed timer delivery cannot revive an expired connection. This query
+    /// does not consume the timer or change phase.
+    pub fn expired(&self, now: f64) -> Option<Timeout> {
+        match self.phase {
+            Phase::Connecting if now >= self.since + self.config.connect_timeout_ms => {
+                Some(Timeout::Connect)
+            }
+            Phase::Authenticating
+                if self
+                    .config
+                    .auth_timeout_ms
+                    .is_some_and(|ms| now >= self.since + ms) =>
+            {
+                Some(Timeout::Auth)
+            }
+            Phase::Authenticating | Phase::Ready
+                if self.idle_enabled && now >= self.received + self.config.idle_timeout_ms =>
+            {
+                Some(Timeout::Idle)
+            }
+            _ => None,
+        }
+    }
+
     pub fn set_ping_interval<P>(&mut self, cx: &mut Cx<'_, P>, interval_ms: Option<f64>) {
         assert!(interval_ms.is_none_or(|ms| ms.is_finite() && ms > 0.0));
         self.config.ping_interval_ms = interval_ms;
@@ -182,6 +239,7 @@ impl Supervisor {
         if let Some(timer) = self.retry.take() {
             cx.clear_timer(timer);
         }
+        self.watch_at = None;
         self.phase = Phase::Stopped;
         self.next_ping = None;
     }
@@ -204,26 +262,8 @@ impl Supervisor {
             return Tick::Unhandled;
         }
         self.watch = None;
-        let timeout = match self.phase {
-            Phase::Connecting if cx.now >= self.since + self.config.connect_timeout_ms => {
-                Some(Timeout::Connect)
-            }
-            Phase::Authenticating
-                if self
-                    .config
-                    .auth_timeout_ms
-                    .is_some_and(|ms| cx.now >= self.since + ms) =>
-            {
-                Some(Timeout::Auth)
-            }
-            Phase::Authenticating | Phase::Ready
-                if cx.now >= self.received + self.config.idle_timeout_ms =>
-            {
-                Some(Timeout::Idle)
-            }
-            _ => None,
-        };
-        if let Some(timeout) = timeout {
+        self.watch_at = None;
+        if let Some(timeout) = self.expired(cx.now) {
             // Retire first; late activity cannot rescue an expired connection.
             self.phase = Phase::Stopped;
             self.next_ping = None;
@@ -245,15 +285,34 @@ impl Supervisor {
     }
 
     fn arm<P>(&mut self, cx: &mut Cx<'_, P>) {
+        if let Some(at) = self.next_watch_at(cx.now) {
+            self.watch = Some(cx.set_timer(at - cx.now));
+            self.watch_at = Some(at);
+        } else {
+            self.watch_at = None;
+        }
+    }
+    fn next_watch_at(&self, now: f64) -> Option<f64> {
+        let idle = self
+            .idle_enabled
+            .then_some(self.received + self.config.idle_timeout_ms);
         let deadline = match self.phase {
-            Phase::Connecting => self.since + self.config.connect_timeout_ms,
-            Phase::Authenticating => (self.since + self.config.auth_timeout_ms.unwrap())
-                .min(self.received + self.config.idle_timeout_ms),
-            Phase::Ready => self.received + self.config.idle_timeout_ms,
-            Phase::Stopped | Phase::Waiting => return,
+            Phase::Connecting => Some(self.since + self.config.connect_timeout_ms),
+            Phase::Authenticating => {
+                let auth = self.config.auth_timeout_ms.map(|ms| self.since + ms);
+                match (auth, idle) {
+                    (Some(a), Some(i)) => Some(a.min(i)),
+                    (auth, idle) => auth.or(idle),
+                }
+            }
+            Phase::Ready => idle,
+            Phase::Stopped | Phase::Waiting => return None,
         };
-        let deadline = self.next_ping.map_or(deadline, |ping| deadline.min(ping));
-        self.watch = Some(cx.set_timer((deadline - cx.now).clamp(0.0, 5_000.0)));
+        let deadline = match (deadline, self.next_ping) {
+            (Some(at), Some(ping)) => Some(at.min(ping)),
+            (deadline, ping) => deadline.or(ping),
+        };
+        deadline.map(|deadline| now + (deadline - now).clamp(0.0, 5_000.0))
     }
 }
 
@@ -304,6 +363,8 @@ mod tests {
                 "stop" => self.supervisor.cancel(cx),
                 "short-ping" => self.supervisor.set_ping_interval(cx, Some(100.0)),
                 "short-auth" => self.supervisor.set_auth_timeout(cx, Some(1_000.0)),
+                "idle-disable" => self.supervisor.set_idle_enabled(cx, false),
+                "idle-enable" => self.supervisor.set_idle_enabled(cx, true),
                 "rate-limit" => {
                     if let Some(socket) = self.socket.take() {
                         cx.close(socket);
@@ -635,5 +696,114 @@ mod tests {
             idle.advance(start + 60_000.0);
             assert_eq!(idle.closed.len(), 1);
         }
+    }
+
+    #[test]
+    fn ingress_expiry_query_is_absolute_and_does_not_consume_watchdog() {
+        let mut h = Harness::new(
+            Config {
+                auth_timeout_ms: Some(10_000.0),
+                ..Config::default()
+            },
+            0.25,
+        );
+        let supervisor = &h.engine.venue().supervisor;
+        assert_eq!(supervisor.expired(10_000.249), None);
+        assert_eq!(supervisor.expired(10_000.25), Some(Timeout::Connect));
+        let timer = supervisor.watch;
+        assert_eq!(supervisor.expired(20_000.0), Some(Timeout::Connect));
+        assert_eq!(supervisor.watch, timer);
+        h.open();
+        assert_eq!(h.engine.venue().supervisor.expired(10_000.249), None);
+        assert_eq!(
+            h.engine.venue().supervisor.expired(10_000.25),
+            Some(Timeout::Auth)
+        );
+        // Merely querying leaves the ordinary timer path intact.
+        h.advance(10_000.25);
+        assert_eq!(h.closed.len(), 1);
+        assert!(
+            h.engine
+                .venue()
+                .ticks
+                .contains(&Tick::TimedOut(Timeout::Auth))
+        );
+    }
+
+    #[test]
+    fn idle_activation_starts_at_proof_and_repeated_activation_does_not_extend_it() {
+        let mut h = Harness::new(
+            Config {
+                idle_timeout_ms: 45_000.0,
+                ..Config::default()
+            },
+            0.0,
+        );
+        h.message("idle-disable");
+        h.open();
+        h.advance(500_000.0);
+        assert!(h.closed.is_empty());
+        assert!(h.timers.is_empty());
+        assert_eq!(h.engine.venue().supervisor.expired(h.now), None);
+        h.message("idle-enable");
+        h.advance(530_000.0);
+        h.message("idle-enable");
+        assert_eq!(h.engine.venue().supervisor.expired(544_999.0), None);
+        assert_eq!(
+            h.engine.venue().supervisor.expired(545_000.0),
+            Some(Timeout::Idle)
+        );
+        h.advance(545_000.0);
+        assert_eq!(h.closed.len(), 1);
+    }
+
+    #[test]
+    fn disabled_idle_preserves_connect_auth_bounds_and_ping_cadence() {
+        let config = Config {
+            connect_timeout_ms: 1_000.0,
+            auth_timeout_ms: Some(2_000.0),
+            idle_timeout_ms: 100.0,
+            ping_interval_ms: Some(500.0),
+            ..Config::default()
+        };
+        let mut unopened = Harness::new(config, 0.0);
+        unopened.message("idle-disable");
+        unopened.advance(1_000.0);
+        assert!(
+            unopened
+                .engine
+                .venue()
+                .ticks
+                .contains(&Tick::TimedOut(Timeout::Connect))
+        );
+        let mut auth = Harness::new(config, 0.0);
+        auth.message("idle-disable");
+        auth.open();
+        auth.advance(1_999.0);
+        assert_eq!(auth.pings.len(), 3);
+        assert!(auth.closed.is_empty());
+        auth.advance(2_000.0);
+        assert!(
+            auth.engine
+                .venue()
+                .ticks
+                .contains(&Tick::TimedOut(Timeout::Auth))
+        );
+    }
+
+    #[test]
+    fn traffic_refresh_after_activation_and_disabled_idle_without_ping_are_independent() {
+        let mut h = Harness::new(Config::default(), 0.0);
+        h.open();
+        h.advance(1_000.0);
+        h.message("idle-disable");
+        assert!(h.timers.is_empty());
+        h.advance(100_000.0);
+        h.message("idle-enable");
+        h.advance(120_000.0);
+        h.message("valid");
+        assert_eq!(h.engine.venue().supervisor.expired(160_000.0), None);
+        h.advance(180_000.0);
+        assert_eq!(h.closed.len(), 1);
     }
 }
