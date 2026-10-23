@@ -43,16 +43,34 @@ impl Harness {
         now: f64,
         fill: Option<safe_cex_engine::entropy::Fill>,
     ) -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
+        let options = Options {
             broker_attribution,
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("pass".into()),
             ..Options::default()
-        }));
+        };
+        Self::with_setup(options, None, instruments, now, fill)
+    }
+    #[allow(dead_code)] // Used by the dispatch-signing suite.
+    pub fn with_options_and_signer(
+        options: Options,
+        signer: Option<safe_cex_engine::signing::Provider>,
+    ) -> Self {
+        Self::with_setup(options, signer, INSTRUMENT, 0.0, None)
+    }
+    fn with_setup(
+        options: Options,
+        signer: Option<safe_cex_engine::signing::Provider>,
+        instruments: &str,
+        now: f64,
+        fill: Option<safe_cex_engine::entropy::Fill>,
+    ) -> Self {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(options));
         if let Some(fill) = fill {
             e.set_signing_entropy(fill).unwrap();
         }
+        e.set_signer(signer).unwrap();
         e.start(now);
         let mut h = Self {
             e,
