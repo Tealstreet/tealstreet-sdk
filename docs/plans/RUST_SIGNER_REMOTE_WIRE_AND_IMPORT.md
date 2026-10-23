@@ -290,8 +290,8 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
    - **Nonce.** The ClobAuth nonce `0` and timestamp stay protocol data.
      Imported refs never key a nonce domain.
    - **Generation.** A selection made before retirement never signs with
-     dropped refs. A stale-generation recipe refuses `Unavailable` before
-     sending (`notSent`).
+     dropped refs. A recipe naming refs outside a live recorded
+     `ImportAuthority` refuses `Unavailable` before sending (`notSent`).
 7. **Session-core conditions (claude-55ao7t, 2026-10-23).**
    - **Binding.** Imported refs bind to the `ImportAuthority` (issuer,
      identity, selected slot, the opaque engine
@@ -325,7 +325,8 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
 
 **Import fencing (codex-hcmq3f, 2026-10-23):**
 - Before routing a body, the engine validates the exact current session
-  Context and attempt, not just the generation.
+  Context and the full `ImportAuthority` (issuer, identity, slot,
+  generation, attempt), not just the generation.
 - Installation is atomic: either every declared ref is installed or none is,
   and a partial install refuses and wipes.
 - Async, late and duplicate import receipts are fenced by the full
@@ -342,7 +343,7 @@ create fallback, and this plan adds none.
   assertion on every venue callback);
 - refs bound to an `ImportAuthority` are dropped by its `ImportScope` on
   retirement;
-- a stale-generation recipe refuses;
+- a recipe naming refs outside a live `ImportAuthority` refuses;
 - malformed, oversized and duplicate-field bodies fail closed;
 - import is refused when the provider lacks it;
 - the L2 HMAC through the imported refs matches the upstream base64url vector.
@@ -445,7 +446,8 @@ no passphrase in venue state, and derives nothing from them.**
      confuses their imports.
    - The engine records each receipt's refs per `ImportAuthority` and
      checks membership before signing. It does not parse ref names. A
-     stale-generation recipe refuses `Unavailable` before sending.
+     recipe naming refs outside a live recorded `ImportAuthority` refuses
+     `Unavailable` before sending.
 5. **Provider and host.**
    - `Signer::import -> ImportFuture` plus `import_ready` for the local
      provider. Host providers get `Action::Import { authority, spec, body }`
@@ -494,8 +496,9 @@ no passphrase in venue state, and derives nothing from them.**
    - Atomic install and partial-install refusal.
    - Duplicate receipts, and late arrival after retirement for both the
      local provider and a host promise settling after `DropImported`.
-   - Exact Context/attempt/generation checks and read delivery.
-   - Stale-generation refusal.
+   - Exact Context and full `ImportAuthority` checks, and read delivery.
+   - Refusal of refs outside a live `ImportAuthority` (retired generation,
+     other account, other attempt).
    - Address and v-mapping vectors.
    - Padded (`AAA…=`) and unpadded (`-__-AQ`) secret fixtures.
    - The supplied-L2 path.
@@ -522,7 +525,7 @@ no passphrase in venue state, and derives nothing from them.**
   - The import body never enters evidence, logs or the venue, even on parse
     failure.
   - A provider refusal or timeout produces exactly one terminal outcome.
-- codex-uufub4: import stays bound to trusted session-generation authority,
+- codex-uufub4: import stays bound to the trusted `ImportAuthority`,
   never exposes material, never infers identity or nonce, and grants no
   entry loan from late callbacks.
 
