@@ -208,8 +208,9 @@ deferred auth ordering assertions are regression requirements, not executed proo
 
 Fixture compilation/bootstrap mistakes were corrected in follow-up commits and
 are excluded from RED evidence. Both scoped strict test Clippy targets, scoped
-rustfmt and diff checks pass. Source/adversarial and caller rechecks at5f9 are
-CLEAN; full-map and HMAC-owner final rechecks remain separately reported. No
+rustfmt and diff checks pass. Source/adversarial, caller and full-map rechecks
+at5f9 are CLEAN; HMAC owner claude-4yjlw0 also cleared its bounded recheck at5f9.
+Architecture gate No for this test-only checkpoint; runtime remains held. No
 production, manifest, feature, provider, construction or scanner changes exist.
 No CI, replay, WASM, size, cutover or inventory-shrink PASS is claimed.
 
