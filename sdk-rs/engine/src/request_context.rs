@@ -6,11 +6,14 @@
 use crate::signing::{KeyRef, SignReceipt};
 use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
 
+#[cfg(feature = "http-plans")]
 #[path = "request_context_plan.rs"]
 pub mod plan;
 
+#[cfg(feature = "http-plans")]
 #[path = "request_context_owner.rs"]
 mod ownership;
+#[cfg(feature = "http-plans")]
 pub use ownership::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };

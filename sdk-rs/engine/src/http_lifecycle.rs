@@ -127,6 +127,7 @@ impl<P> Cx<'_, P> {
         recipe: ManagedRecipe,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        #[cfg(feature = "http-plans")]
         let admission = match self
             .io
             .request_contexts
@@ -142,8 +143,10 @@ impl<P> Cx<'_, P> {
             body,
             recipe,
             pending,
+            #[cfg(feature = "http-plans")]
             admission.as_ref(),
         );
+        #[cfg(feature = "http-plans")]
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
             self.fail_owned_admission(admission, *error);
         }
@@ -159,6 +162,7 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         recipe: ManagedRecipe,
         pending: P,
+        #[cfg(feature = "http-plans")]
         admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
         let (step, public_headers) = match recipe {
@@ -188,12 +192,17 @@ impl<P> Cx<'_, P> {
             .collect();
         // Preflight both namespaces before committing either. An admission
         // refusal must not partially allocate a request, generation or timer.
-        if admission.is_none()
+        #[cfg(feature = "http-plans")]
+        let needs_ids = admission.is_none();
+        #[cfg(not(feature = "http-plans"))]
+        let needs_ids = true;
+        if needs_ids
             && (!self.io.next_id.available(3)
                 || (step.is_some() && !self.io.signing.available_id()))
         {
             return Err((pending, Error::Capacity));
         }
+        #[cfg(feature = "http-plans")]
         let (request, generation, timer, deadline) = if let Some(admission) = admission {
             if !self.now.is_finite() || self.now >= admission.deadline {
                 return Err((pending, Error::TimedOut));
@@ -213,6 +222,11 @@ impl<P> Cx<'_, P> {
                 context.deadline(),
             )
         };
+        #[cfg(not(feature = "http-plans"))]
+        let (request, generation, timer, deadline) = {
+            let ids = self.io.reserve_ids(3).expect("preflighted HTTP identities");
+            (RequestId(ids.start), ids.start + 1, TimerId(ids.start + 2), context.deadline())
+        };
         let http = HttpRequest {
             id: request,
             method,
@@ -224,9 +238,12 @@ impl<P> Cx<'_, P> {
             body,
         };
         let signing_attempt = if let Some(step) = step {
+            #[cfg(feature = "http-plans")]
             let attempt = admission
                 .and_then(|admission| admission.signing)
                 .unwrap_or_else(|| self.io.signing.next_id());
+            #[cfg(not(feature = "http-plans"))]
+            let attempt = self.io.signing.next_id();
             if let Err(error) = self.io.signing.stage_managed(
                 attempt,
                 Action::Http(http.clone()),
@@ -1033,6 +1050,7 @@ impl<V: Venue> Engine<V> {
                     |evidence| venue.unproven_http_evidence(&pending.value, response, evidence),
                 );
                 if recorded.is_ok() {
+                    #[cfg(feature = "http-plans")]
                     let plan = self
                         .io
                         .request_contexts
@@ -1042,12 +1060,17 @@ impl<V: Venue> Engine<V> {
                         store: &mut self.store,
                         io: &mut self.io,
                     };
+                    #[cfg(feature = "http-plans")]
                     let sealed = if let Some(plan) = &plan {
                         cx.fail_plan(plan, error)
                     } else {
                         cx.fail_context(&delivery.context, error)
                     };
-                    if sealed.is_ok() && plan.is_none() {
+                    #[cfg(feature = "http-plans")]
+                    let context_sealed = sealed.is_ok() && plan.is_none();
+                    #[cfg(not(feature = "http-plans"))]
+                    let context_sealed = cx.fail_context(&delivery.context, error).is_ok();
+                    if context_sealed {
                         self.venue
                             .discard_unproven_http_command(delivery.context.owner());
                     }
@@ -1116,7 +1139,9 @@ impl<V: Venue> Engine<V> {
 mod tests {
     use super::*;
     use crate::request_context::{Admission, Pacing, Policy, RetryPolicy, Scope};
+    #[cfg(feature = "http-plans")]
     include!("request_context_preflight_call_tests.rs");
+    #[cfg(feature = "http-plans")]
     include!("request_context_planned_tests.rs");
 
     #[derive(Debug)]
