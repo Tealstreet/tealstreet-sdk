@@ -274,13 +274,13 @@ Contract:
     - **Fault controls:** four compiled faults fail the exact tests (journal
       for every mutation, retirement without discard, no unresolved gate,
       in-operation retry).
-    - **Gates:** engine 646 tests with order locks and 553 without, Binance
+    - **Gates:** engine 646 tests with order locks and 627 without, Binance
       293, strict Clippy both ways, fmt, bans.
     - **Review:** the independent review found a context issued before a write
       became unresolved could still send a second write on a session that is
       not repeat-safe, and a venue fact could overwrite an engine-recorded
       failure. Both are fixed, with the review probes as regressions that fail
-      on `47c98d53c78`.
+      on `47c98d53c78`. Re-review is CLEAN; architecture gate No.
     - **Ordering rule:** record the codec fact before `finish_http_context`;
       finishing first leaves the write unknown (fail-safe, pinned).
     - **Not yet:** no venue adopts sessions at this checkpoint.
