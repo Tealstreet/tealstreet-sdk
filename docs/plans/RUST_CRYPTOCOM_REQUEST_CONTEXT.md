@@ -229,3 +229,17 @@ planned genuine command-entry custody API, `Cx::admit_http_command(Policy)`: no
 numeric command argument, engine-owned exactly-once Rejected publication, and
 Revoked outside/repeated/already-owned use. Reviewed source/PR is not yet pinned;
 keep the exact existing pre-issuance fingerprint until that seam actually lands.
+
+## Standalone-depth implementation audit
+
+The full native suite also exercises standalone depth against an active book in
+`tests/public.rs`; its existing isolation fixture adopts the same shared prepared
+executor at its original clocks. All result, live-book, ticker and account
+assertions remain unchanged. This adds that unclaimed fixture to the slice's
+file list; it does not move discovery/subscription requests onto managed HTTP.
+The five original-RED controls are committed separately at `af049f62be4`.
+Reviewed #1808 head `9b639939e378ee3d582c06b24fd068c095eded0b` supplies shared
+refusal conversion, integrated by porcelain merge under overseer authorization.
+The released-expiry control exposed a shared string-failure loss of Timeout;
+the error-core owner is supplying typed post-release delivery. No venue clock or
+string-based reclassification is introduced to bypass that regression.
