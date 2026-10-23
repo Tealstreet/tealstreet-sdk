@@ -60,3 +60,29 @@ Exact703 engine supplies typed released HTTP failures through Venue::on_http_fai
 The source/adversarial plan review is CLEAN after this clarification: no missing bridge or error primitive, no engine edit, no local finalizer. The bridge owner independently reviewed the committed plan as API-compatible. All three required plan reviews are now satisfied before tests-first.
 
 Current reviewed bridge pin: ee8cdb6e79b15263b7d8b829ed0dd4cef3529b79, announced by the overseer after actual1820 integration. The earlier703 bridge remains an ancestor with unchanged bridge API/source/tests. The composed engine/source/inventory now matches ee8 exactly; only this consumer plan and its README row differ. Every previous CALLERS paragraph remains in the incoming version. Original RED assertions remain unchanged.
+
+## Executed native consumer proof
+
+Tests-first c158897781f and the fixture correction8eb3aced08b ran against
+unchanged production, including genuine actual1837 at e2d0a048f36: six assertion
+RED controls and five compatibility GREEN controls. Production faa39dde455 makes
+all eleven controls GREEN. The frozen dedicated test file is unchanged by the
+production commit. Existing history test helpers now use shared prepared_actions
+at the exact query timestamp; their native payloads and quantities stay pinned.
+The existing mixed private/public failure matrix now expects Network solely for
+released PublicTrades transport failure; private Internal expectations remain.
+
+Actual1854/e2b03d5592a is genuinely integrated at3dbd753e95e. Independent
+preservation review is CLEAN: all four bridge blobs exactly match reviewed ee8,
+the registry delta is the same original fifteen-line bridge delta, the complete
+BloFin crate matches faa39dde455, and every incoming unowned file and inventory
+entry is preserved. No bridge/core source was edited by this consumer.
+
+Executed on this actual1854 integration: 501 BloFin/Binance native tests across
+44 targets; strict scoped all-target/all-feature Clippy; scoped formatting; bans;
+request-context checker and all13 checker regressions PASS. Source/adversarial,
+caller, documentation and full-map reviews are CLEAN; architecture answer No.
+The manifest remains unchanged at24 BloFin occurrences across20 hash rows.
+No actual1848 landing, final integration CI, merge readiness or zero-legacy claim
+is implied by this native consumer receipt. Actual1857 integration and fresh CI
+follow the overseer's stable venue-phase schedule.
