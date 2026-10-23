@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { verifyGateSuite, loadGateLedger } from './verify-gates.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
-import { performanceFailures } from './performance-policy.mjs';
+import { performanceFailures, performanceOrder } from './performance-policy.mjs';
+import { createHash } from 'node:crypto';
 const manifest = { schema: 1, failures: [] };
 const metric = (amount, mode) => ({
   baselineKind: 'idle-loaded', measuredMode: mode, cpuMs: amount, steadyCpuMs: amount, processCpuMs: amount,
@@ -97,4 +98,38 @@ test('collecting a declared private incomplete replay does not demand nonexisten
   assert.equal(loaded[0].report.status, 'FAIL'); assert.equal(loaded[0].raw, undefined);
   report.private = false; writeFileSync(reportPath, JSON.stringify(report));
   assert.throws(() => loadGateLedger({ root: directory, includeRaw: true }), /ENOENT/);
+});
+
+test('enabled Bitget collection retains an eligible miss as unresolved without rewriting strict evidence', () => {
+  const item = expectedGateCases('bitget')[0];
+  const raw = [];
+  const add = (impl, mode, run) => {
+    const output = { impl, frames: 10, commands: [], transportReceipt: { frames: 10 }, protocolErrors: [],
+      markets: [{ symbol: 'BTCUSDT' }], tickers: [{ symbol: 'BTCUSDT', last: 1 }],
+      books: Object.fromEntries(item.books.split(',').map((symbol) => [symbol, { bids: [[1, 1]] }])),
+      metrics: metric(impl === 'ts' ? 200 : 183.6, mode) };
+    if (impl === 'ts') Object.assign(output.metrics, { heapUsedBytes: 200, heapRetainedBytes: 100, retainedBytes: 100 });
+    const bytes = JSON.stringify(output);
+    raw.push({ impl, mode, run, bytes, sha256: createHash('sha256').update(bytes).digest('hex') });
+  };
+  for (const impl of ['ts', 'rust']) add(impl, 'correctness', 0);
+  for (let run = 0; run < 9; run++) for (const impl of performanceOrder(run)) add(impl, 'performance', run);
+  const samples = Object.fromEntries(['ts', 'rust'].map((impl) => [impl,
+    raw.filter((value) => value.impl === impl && value.mode === 'performance').map((value) => JSON.parse(value.bytes).metrics)]));
+  const report = { ...item, schema: 1, tapeSha256: 'a'.repeat(64), private: false, runs: 9, correctnessRuns: 1,
+    requiredImprovement: .1, samples, fixers: [], status: 'FAIL', failures: performanceFailures(samples.ts, samples.rust).sort(),
+    artifacts: raw.map(({ impl, mode, run }) => ({ impl, mode, run, path: `out/${impl}-${mode}-${run}` })) };
+  const values = [{ report, raw, exitCode: 1 }, ...expectedGateCases('bitget').slice(1).map((value, index) => ({
+    report: { ...entries()[1].report, ...value, tapeSha256: String(index + 1).repeat(64) }, exitCode: 0,
+  }))];
+  const before = JSON.stringify(values);
+  const collected = verifyGateSuite({ suite: 'bitget', entries: values, manifest, mode: 'collect' });
+  assert.deepEqual(collected.errors, []);
+  assert.equal(collected.pending.length, 1);
+  assert.equal(collected.passes, 2, 'only the two ordinary strict private passes count');
+  assert.equal(collected.strictFailures, 1);
+  assert.equal(collected.rows[0].label, 'UNRESOLVED CPU MISS (not certification)');
+  assert.equal(JSON.stringify(values), before, 'strict FAIL, exit1 and original raw remain unchanged');
+  assert.ok(verifyGateSuite({ suite: 'bitget', entries: values, manifest }).errors.length, 'default strict still rejects');
+  assert.ok(verifyGateSuite({ suite: 'bitgetusdc', entries: values, manifest, mode: 'collect' }).errors.length, 'no alias rollout');
 });

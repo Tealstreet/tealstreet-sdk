@@ -6,6 +6,8 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { validateCiWasm } from './ci-wasm.mjs';
+import { verifyRuntime } from './cpu-runtime.mjs';
+import { resolve } from 'node:path';
 import { createRecordedReplay } from './recorded-replay.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
@@ -32,11 +34,18 @@ const { values } = parseArgs({
     report: { type: 'string' },
     'ci-wasm': { type: 'string' },
     'recorded-evidence': { type: 'string' },
+    'runtime-capsule': { type: 'string' },
     'no-egress': { type: 'boolean', default: false },
   },
 });
 // Validate before spawning either implementation; a bad artifact has no fallback.
 const ciWasm = values['ci-wasm'] !== undefined ? validateCiWasm({ directory: values['ci-wasm'], venue: values.venue }) : null;
+if (values['runtime-capsule'] && values['ci-wasm']) throw new Error('select one explicit replay module contract');
+const cpuRuntime = values['runtime-capsule'] ? verifyRuntime({ root: process.cwd(), directory: resolve(values['runtime-capsule']) }) : null;
+if (cpuRuntime && resolve(process.execPath) !== cpuRuntime.nodePath) throw new Error('CPU replay must use its sealed Node executable');
+const sealedWasm = cpuRuntime ? resolve('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm.js') : null;
+if (cpuRuntime && !cpuRuntime.manifest.entries.some((entry) => entry.path === 'sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm.js' && entry.type === 'file'))
+  throw new Error('sealed replay module is missing; no fallback');
 const tapeBytes = readFileSync(values.tape);
 const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
   .toString('utf8')
@@ -82,7 +91,7 @@ const replay = (impl, run, performanceRun = false) => {
     '--out',
     out,
   );
-  if (impl === 'rust' && ciWasm) args.push('--wasm', ciWasm.path);
+  if (impl === 'rust' && (ciWasm || sealedWasm)) args.push('--wasm', sealedWasm ?? ciWasm.path);
   if (values['no-egress']) args.push('--no-egress');
   if (performanceRun) args.push('--performance');
   // TSX's compiler worker retains shared buffers independently of engine work.
