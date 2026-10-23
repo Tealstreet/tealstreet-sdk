@@ -1,10 +1,10 @@
 //! Indexed history is paged independently of live reconciliation.
 use crate::{Pending, TxFlow};
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
-use safe_cex_engine::paging::{OffsetStep, OffsetWalk};
-use safe_cex_engine::{CommandId, Cx, Query, Response, json::ArrayAt};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::{CommandId, Cx, Query, Response, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -16,22 +16,20 @@ enum Kind {
 }
 /// Pages of the venue's 2000-row limit, up to offset 200000 like the TS
 /// reference; the venue serves full pages while it reports more.
-fn offset_walk() -> OffsetWalk {
-    OffsetWalk::new(u32::MAX)
-        .fixed_step(2000)
-        .max_offset(200_000)
+fn cursor_walk() -> CursorWalk {
+    // Native offsets 0..=200000 in fixed 2000-row steps: 101 pages per stage.
+    CursorWalk::starting_at(101, "0".into())
+        .stall_on_empty_page()
         .stall_on_no_new_rows()
 }
 
 pub struct Request {
-    command: CommandId,
+    owner: Box<CursorHistory<Row>>,
     kind: Kind,
-    walk: OffsetWalk,
+    offset: u32,
     count: u32,
     fresh: u32,
     valid: bool,
-    seen: HashSet<String>,
-    rows: Vec<Row>,
     limit: usize,
     from: Option<f64>,
     to: Option<f64>,
@@ -199,7 +197,7 @@ impl Request {
             && self.symbol.as_deref().is_none_or(|s| s == symbol)
     }
     fn push(&mut self, time: u64, id: String, value: &impl Serialize) {
-        self.rows.push(Row {
+        self.owner.stage(Row {
             time: time as f64,
             id,
             json: serde_json::to_string(value).unwrap(),
@@ -284,14 +282,17 @@ impl TxFlow {
             return;
         }
         let mut request = Request {
-            command,
+            owner: Box::new(CursorHistory::new(
+                Completion::new(command),
+                cursor_walk(),
+                |_| "Incomplete TxFlow history: stalled page or offset cap".into(),
+                encode_rows,
+            )),
             kind,
-            walk: offset_walk(),
+            offset: 0,
             count: 0,
             fresh: 0,
             valid: true,
-            seen: HashSet::new(),
-            rows: Vec::new(),
             limit: limit.map_or(usize::MAX, |n| n as usize),
             from,
             to,
@@ -319,7 +320,9 @@ impl TxFlow {
     }
     fn history_page(&self, cx: &mut Cx<'_, Pending>, request: Request) {
         let Some(user) = self.user() else {
-            cx.fail(request.command, "TxFlow account identity required");
+            request
+                .owner
+                .reject(cx, VenueError::new("TxFlow account identity required"));
             return;
         };
         let kind = match request.kind {
@@ -345,7 +348,7 @@ impl TxFlow {
             end_time_ms: request.to.map(|n| n as u64),
             delta_types: (request.kind == Kind::Ledger).then_some(["deposit", "withdraw"]),
             // The offset cap bounds it far below u32::MAX.
-            offset: request.walk.offset() as u32,
+            offset: request.offset,
             limit: 2000,
         })
         .unwrap();
@@ -380,7 +383,7 @@ impl TxFlow {
                     .history_symbol(&f.instrument_id.to_string())
                     .ok_or("Unknown TxFlow history instrument")?;
                 let key = format!("fill:{}", f.tid);
-                if !r.seen.insert(key) {
+                if !r.owner.fresh(key) {
                     return Ok(());
                 }
                 r.fresh += 1;
@@ -446,7 +449,7 @@ impl TxFlow {
                     .history_symbol(&o.instrument_id.to_string())
                     .ok_or("Unknown TxFlow history instrument")?;
                 let key = format!("order:{}", o.oid);
-                if !r.seen.insert(key) {
+                if !r.owner.fresh(key) {
                     return Ok(());
                 }
                 r.fresh += 1;
@@ -496,7 +499,7 @@ impl TxFlow {
                 number(f.szi)?;
                 number(f.funding_rate)?;
                 number(f.usdc)?;
-                if !r.seen.insert(id.clone()) {
+                if !r.owner.fresh(id.clone()) {
                     return Err("Ambiguous TxFlow funding identity; range may be incomplete".into());
                 }
                 r.fresh += 1;
@@ -523,7 +526,7 @@ impl TxFlow {
                     return Err("Missing TxFlow ledger identity".into());
                 }
                 let id = format!("ledger:{}:{}", row.hash, row.delta.r#type);
-                if !r.seen.insert(id.clone()) {
+                if !r.owner.fresh(id.clone()) {
                     return Ok(());
                 }
                 r.fresh += 1;
@@ -582,28 +585,31 @@ impl TxFlow {
         let page = match valid {
             Ok(p) => p,
             Err(e) => {
-                cx.fail(r.command, e);
+                self.history_failed(cx, r, &e);
                 return;
             }
         };
-        match r
-            .walk
-            .advance(r.count as usize, r.fresh as usize, page.has_more)
-        {
-            OffsetStep::More(_) => {
+        match r.owner.advance(CursorPage {
+            next: page.has_more.then(|| (r.offset + 2000).to_string()),
+            rows: r.count as usize,
+            fresh: r.fresh as usize,
+            want_more: page.has_more,
+        }) {
+            CursorStep::More(_) => {
+                r.offset += 2000;
                 r.count = 0;
                 r.fresh = 0;
                 self.history_page(cx, r);
                 return;
             }
-            OffsetStep::Stalled(_) => {
-                cx.fail(
-                    r.command,
-                    "Incomplete TxFlow history: stalled page or offset cap",
+            CursorStep::Stalled(_) => {
+                r.owner.reject(
+                    cx,
+                    VenueError::new("Incomplete TxFlow history: stalled page or offset cap"),
                 );
                 return;
             }
-            OffsetStep::Done => {}
+            CursorStep::Done => {}
         }
         let next = match r.kind {
             Kind::IncomeFills if r.include("FUNDING_FEE") => Some(Kind::Funding),
@@ -616,37 +622,47 @@ impl TxFlow {
         };
         if let Some(kind) = next {
             r.kind = kind;
-            r.walk.restart();
+            if !r.owner.restart_stage() {
+                r.owner
+                    .reject(cx, VenueError::new("TxFlow history stage lifecycle failed"));
+                return;
+            }
+            r.offset = 0;
             r.count = 0;
             r.fresh = 0;
             self.history_page(cx, r);
             return;
         }
-        r.rows
-            .sort_by(|a, b| b.time.total_cmp(&a.time).then(a.id.cmp(&b.id)));
-        if r.kind == Kind::Fills {
-            r.rows.sort_by(|a, b| {
-                b.time.total_cmp(&a.time).then_with(|| {
-                    b.id.parse::<u64>()
-                        .unwrap()
-                        .cmp(&a.id.parse::<u64>().unwrap())
-                })
-            });
-        }
-        r.rows.truncate(r.limit);
-        cx.done(
-            r.command,
-            format!(
-                "[{}]",
-                r.rows
-                    .iter()
-                    .map(|r| r.json.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-        );
+        self.history_finish(cx, r, Ok(()));
+    }
+    fn history_finish(&self, cx: &mut Cx<'_, Pending>, r: Request, result: Result<(), VenueError>) {
+        let kind = r.kind;
+        let limit = r.limit;
+        r.owner.finish_with(cx, result, |mut rows| {
+            rows.sort_by(|a, b| b.time.total_cmp(&a.time).then(a.id.cmp(&b.id)));
+            if kind == Kind::Fills {
+                rows.sort_by(|a, b| {
+                    b.time.total_cmp(&a.time).then_with(|| {
+                        b.id.parse::<u64>()
+                            .unwrap()
+                            .cmp(&a.id.parse::<u64>().unwrap())
+                    })
+                });
+            }
+            rows.truncate(limit);
+            encode_rows(&rows)
+        });
     }
     pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
-        cx.fail(r.command, error);
+        self.history_finish(cx, r, Err(VenueError::new(error)));
     }
+}
+fn encode_rows(rows: &[Row]) -> Result<String, VenueError> {
+    Ok(format!(
+        "[{}]",
+        rows.iter()
+            .map(|r| r.json.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    ))
 }
