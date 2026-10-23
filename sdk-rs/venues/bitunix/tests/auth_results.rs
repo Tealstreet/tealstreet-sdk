@@ -63,7 +63,7 @@ fn started_at(secondary: bool, now: f64) -> (TestEngine, Vec<Action>) {
         ..Options::default()
     }));
     e.start(now);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
     let markets = http(&actions, "/trading_pairs");
     let actions = answer(&mut e, &markets, now, 200, "", PAIRS);
     assert!(

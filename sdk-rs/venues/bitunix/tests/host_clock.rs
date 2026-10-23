@@ -16,7 +16,14 @@ fn first_authenticated_rest_and_private_login_use_the_supplied_engine_time() {
         ..Options::default()
     }));
     engine.start(1_760_000_000_000.0);
-    let catalogue = support::requests(&mut engine).remove(0);
+    let catalogue =
+        safe_cex_engine::test_support::prepared_actions(&mut engine, 1_760_000_000_000.0)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
     assert!(
         !catalogue
             .headers

@@ -786,11 +786,11 @@ impl Venue for BitunixFutures {
             Pending::Markets {
                 context, mut rows, ..
             } if !rows.is_empty() => {
+                rows.shrink_to_fit();
+                cx.store.set_markets(rows);
                 if cx.finish_http_context(&context).is_err() {
                     return;
                 }
-                rows.shrink_to_fit();
-                cx.store.set_markets(rows);
                 self.discovery.succeeded(cx, DiscoveryRead::Markets);
                 self.connect(cx, Feed::Futures);
                 self.tickers(cx);
@@ -799,11 +799,11 @@ impl Venue for BitunixFutures {
             Pending::Tickers {
                 context, mut rows, ..
             } if !rows.is_empty() => {
+                rows.shrink_to_fit();
+                cx.store.set_tickers(rows);
                 if cx.finish_http_context(&context).is_err() {
                     return;
                 }
-                rows.shrink_to_fit();
-                cx.store.set_tickers(rows);
                 self.discovery.succeeded(cx, DiscoveryRead::Tickers);
                 let count = cx.store.markets().len();
                 for start in (0..count).step_by(300) {

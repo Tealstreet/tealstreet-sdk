@@ -747,3 +747,110 @@ fn both_background_seed_failures_retire_prepared_and_released_owners() {
         }
     }
 }
+
+#[test]
+fn success_messages_cannot_hide_empty_seed_or_candle_decoder_failures() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(venue(false));
+    e.start(0.);
+    let r = released(&mut e, 0., "/trading_pairs");
+    response(
+        &mut e,
+        0.,
+        r.id,
+        200,
+        "",
+        r#"{"code":0,"msg":"Success","data":[]}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Event(event))
+        if event.message.contains("no eligible rows")))
+    );
+    for (status, body) in [
+        (200, r#"{"code":0,"msg":"Success","data":[false]}"#),
+        (500, r#"{"code":0,"msg":"Success","data":[]}"#),
+    ] {
+        let mut e = seeded(venue(false));
+        candles(&mut e, 100., 7, Interval::M1, None, None, None);
+        let r = released(&mut e, 100., "/kline?");
+        response(&mut e, 100., r.id, status, "", body);
+        let error = failed(&e.drain_actions().collect::<Vec<_>>(), 7);
+        assert_ne!(error.message, "Success");
+        if status == 500 {
+            assert_eq!(error.message, "Bitunix HTTP 500");
+        } else {
+            assert!(error.message.contains("invalid type"));
+        }
+    }
+}
+
+#[test]
+fn malformed_discovery_stream_preserves_rate_headers_without_raw_preview() {
+    for tickers in [false, true] {
+        let mut e = safe_cex_engine::test_support::seeded_engine(venue(false));
+        e.start(0.);
+        let mut r = released(&mut e, 0., "/trading_pairs");
+        if tickers {
+            response(&mut e, 0., r.id, 200, "", PAIRS);
+            r = released(&mut e, 0., "/tickers");
+        }
+        response(
+            &mut e,
+            0.,
+            r.id,
+            429,
+            "Retry-After: 15",
+            r#"{"data":[{"RAW_BODY_SENTINEL":"secret"},"#,
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!format!("{actions:?}").contains("RAW_BODY_SENTINEL"));
+        assert_eq!(
+            actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::SetTimer { at_ms, .. } => Some(*at_ms),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![15_000.]
+        );
+    }
+}
+
+#[test]
+fn a_fresh_native_initialization_recovers_after_each_public_auth_refusal() {
+    let mut e = seeded(Probe {
+        venue: venue(false),
+        held: vec![],
+    });
+    for _ in 0..270 {
+        probe_command(&mut e, "restart");
+        let r = released(&mut e, 100., "/trading_pairs");
+        response(
+            &mut e,
+            100.,
+            r.id,
+            200,
+            "",
+            r#"{"code":10007,"msg":"bad signature","data":[]}"#,
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.message.contains("bad signature"))));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::Http(_)))
+        );
+        assert_eq!(e.health().auth_failures, 0);
+    }
+    probe_command(&mut e, "restart");
+    let r = released(&mut e, 100., "/trading_pairs");
+    response(&mut e, 100., r.id, 200, "", PAIRS);
+    let r = released(&mut e, 100., "/tickers");
+    response(&mut e, 100., r.id, 200, "", TICKERS);
+    e.drain_actions().for_each(drop);
+    probe_command(&mut e, "hold");
+    probe_command(&mut e, "release");
+}

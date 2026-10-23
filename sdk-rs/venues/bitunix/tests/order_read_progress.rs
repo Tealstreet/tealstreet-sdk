@@ -444,7 +444,7 @@ fn initial_halves() -> (TestEngine, SocketId, Vec<HttpRequest>) {
     let mut halves = Vec::new();
     let mut private = None;
     loop {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
         if actions.is_empty() {
             break;
         }
