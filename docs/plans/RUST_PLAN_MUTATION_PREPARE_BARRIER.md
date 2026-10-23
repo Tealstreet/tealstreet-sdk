@@ -337,8 +337,9 @@ credits. Signature reprepare consumes only a fresh preparation/signing generatio
 not a new physical attempt. These remain mandatory runtime assertions, not
 claims proven by the current baseline REDs.
 
-The per-member Mutation order_locks.note_command_write marking belongs inside
-commit_claim, never prepare_claim. The second-provider-refusal control must assert
+The per-member Mutation order_locks.note_command_write marking belongs in the
+Engine commit transaction that calls commit_claim, never prepare_claim. It stays
+outside the Lifecycle-only helper. The second-provider-refusal control must assert
 unchanged order locks, zero venue reconciliation calls and unchanged auth health.
 Final signing-release observation and raw-expiry projection remain one shared
 projector; publish each member's release metadata only after the entire group
