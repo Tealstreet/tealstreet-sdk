@@ -3321,6 +3321,9 @@ impl<V: Venue> Engine<V> {
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
             let was_releasing = std::mem::replace(&mut self.releasing, true);
+            self.io
+                .command_waits
+                .batch(released.iter().map(|(_, receipt)| *receipt));
             for (command, receipt) in released {
                 let carried = command.completion_id().map(|id| (id, receipt));
                 let outer = self.io.command_waits.carry(carried);
@@ -3768,7 +3771,13 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "order-locks")]
         let order_response = self.io.order_response_token.take();
         #[cfg(feature = "order-locks")]
-        for (command, failed, receipt) in self.io.order_locks.ready() {
+        let ready = self.io.order_locks.ready();
+        #[cfg(feature = "order-locks")]
+        self.io
+            .command_waits
+            .batch(ready.iter().map(|(.., receipt)| *receipt));
+        #[cfg(feature = "order-locks")]
+        for (command, failed, receipt) in ready {
             let carried = command.completion_id().map(|id| (id, receipt));
             let outer = self.io.command_waits.carry(carried);
             if failed && self.venue.fence_uncertain_cancel_all() {

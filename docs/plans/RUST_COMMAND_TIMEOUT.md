@@ -78,9 +78,12 @@ Revised after uufub4's API-fit review (2026-10-24).
      that command's own terminal, so the command still reads `Expired` past its
      deadline. A terminal outside any entry cannot remove it, because the
      carrying command has not run.
-   - Beyond 4096 stamps, expired stamps that nothing carries are dropped.
-     Without that, a venue that never answers a command would grow the table
-     without bound.
+   - A released batch's later commands count as carried until their own
+     dispatch begins.
+   - 4096 stamps is the threshold for dropping expired stamps, not a hard cap.
+     At that size, expired stamps that nothing carries are dropped, so a venue
+     that never answers cannot grow the table without bound. Unexpired
+     unanswered waits stay until they expire.
    - The receipt sequence never wraps: once exhausted, a receipt goes
      unstamped and the getter answers `None`.
 4. **API.** `Cx::command_wait() -> Option<CommandWait>`, with `enum

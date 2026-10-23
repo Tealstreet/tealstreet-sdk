@@ -21,7 +21,8 @@ pub enum CommandWait {
     Expired,
 }
 
-/// Stamps kept before expired, uncarried ones are dropped.
+/// The stamp count at which expired, uncarried stamps are dropped. Not a hard
+/// cap: unexpired waits a venue never answers stay until they expire.
 const WAIT_STAMPS: usize = 4096;
 
 /// The SDK's documented default caller wait, used when the host sends none.
@@ -39,6 +40,8 @@ pub(super) struct Waits {
     /// The exact receipt the current dispatch carries into its entry: an
     /// external receipt, or the one a held or deferred command arrived with.
     pending: Option<(CommandId, Option<u64>)>,
+    /// Receipts of a released batch whose dispatch has not begun yet.
+    batched: Vec<u64>,
 }
 
 impl Waits {
@@ -84,7 +87,17 @@ impl Waits {
         &mut self,
         pending: Option<(CommandId, Option<u64>)>,
     ) -> Option<(CommandId, Option<u64>)> {
+        if let Some((_, Some(receipt))) = pending
+            && let Some(index) = self.batched.iter().position(|held| *held == receipt)
+        {
+            self.batched.swap_remove(index);
+        }
         std::mem::replace(&mut self.pending, pending)
+    }
+
+    /// A released batch's receipts stay carried until each one's dispatch.
+    pub(super) fn batch(&mut self, receipts: impl Iterator<Item = Option<u64>>) {
+        self.batched.extend(receipts.flatten());
     }
 
     /// Remove `command`'s stamp at its terminal. Inside its entry only that
@@ -163,7 +176,10 @@ impl<P> Io<P> {
 
     /// Receipts that held cancellations and deferred cancel-alls still carry.
     fn carried_receipts(&self) -> impl Iterator<Item = u64> + '_ {
-        let held = self.placement_acks.receipts();
+        let held = self
+            .placement_acks
+            .receipts()
+            .chain(self.command_waits.batched.iter().copied());
         #[cfg(feature = "order-locks")]
         let held = held.chain(self.order_locks.receipts());
         held
