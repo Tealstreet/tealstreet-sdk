@@ -1878,11 +1878,11 @@ mod sign_failure_owners {
         let credentials = Credentials {
             read: None,
             primary: safe_cex_engine::signing::Identity {
+                extra: Default::default(),
                 credential: safe_cex_engine::signing::KeyRef("ref:owned-credential".into()),
                 signing: safe_cex_engine::signing::KeyRef("ref:owned-signing".into()),
                 passphrase: None,
                 stable_id: None,
-                extra: Default::default(),
             },
         };
         let mut native = crate::Bingx::new(crate::Options {
@@ -2064,13 +2064,13 @@ mod tests {
                 &Credentials {
                     read: None,
                     primary: safe_cex_engine::signing::Identity {
+                        extra: Default::default(),
                         credential: safe_cex_engine::signing::KeyRef(
                             "ref:fixture-credential".into(),
                         ),
                         signing: safe_cex_engine::signing::KeyRef("ref:fixture-signing".into()),
                         passphrase: None,
                         stable_id: None,
-                        extra: Default::default(),
                     },
                 },
             );
