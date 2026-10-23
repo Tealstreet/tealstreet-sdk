@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256, Sha512};
 use std::collections::{BTreeMap, HashMap};
 use zeroize::Zeroizing;
 mod key_material;
+mod primitives;
 pub use key_material::KeyEncoding;
 
 /// Trusted provider setup only. Never place these values in venue/engine options.
@@ -460,12 +461,12 @@ impl LocalSigner {
                         }
                         #[cfg(not(feature = "zklink"))]
                         Algorithm::ZkLinkContract => return Err(SignError::Unsupported),
-                        // Vocabulary is not a claim that the local provider implements it.
-                        Algorithm::Ed25519
-                        | Algorithm::Es256
-                        | Algorithm::Secp256k1Digest
-                        | Algorithm::StarkDigest
-                        | Algorithm::SchnorrDigest => return Err(SignError::Unsupported),
+                        Algorithm::Ed25519 => primitives::ed25519(key, &message)?,
+                        Algorithm::Es256 => primitives::es256(key, &message)?,
+                        Algorithm::Secp256k1Digest => primitives::secp256k1_digest(key, &message)?,
+                        Algorithm::StarkDigest => primitives::stark_digest(key, &message)?,
+                        // Reserved: no Schnorr contract is defined yet.
+                        Algorithm::SchnorrDigest => return Err(SignError::Unsupported),
                     }
                 }
             };
