@@ -2,7 +2,7 @@
 mod account;
 mod funding;
 mod history;
-mod sign;
+pub mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
