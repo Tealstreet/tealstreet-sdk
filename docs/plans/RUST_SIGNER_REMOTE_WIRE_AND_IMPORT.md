@@ -314,8 +314,8 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      (`NotSent` fan-out), then applies its backoff.
    - **Credentials.** `SessionPolicy.credential` stays the L1 wallet ref.
      Contexts that sign with imported refs name them in their own Credential.
-     The engine rejects a context naming refs from a dead generation before
-     the provider, as pre-send `Unavailable`.
+     The engine rejects a context naming refs outside a live recorded
+     `ImportAuthority` before the provider, as pre-send `Unavailable`.
 8. **Ownership.**
    - Engine changes (`Cx::request_import`, response routing, the
      `Signer::import` and `drop_imported` trait methods) need uufub4 sign-off
@@ -448,7 +448,8 @@ no passphrase in venue state, and derives nothing from them.**
 5. **Provider and host.**
    - `Signer::import -> ImportFuture` plus `import_ready` for the local
      provider. Host providers get `Action::Import { authority, spec, body }`
-     and `Event::Imported` / `Event::ImportFailed`, fenced by attempt id, with
+     and `Event::Imported` / `Event::ImportFailed`, fenced by the full
+     `ImportAuthority`, with
      a host.mjs `import` callback using the same timeout and cancel as
      primitive signing. Host providers implement `import` and drop
      together or not at all.
@@ -509,8 +510,10 @@ no passphrase in venue state, and derives nothing from them.**
   there; the echo is non-authoritative.
 - claude-55ao7t: the retirement hunk, the readiness calls, and both fences.
 - codex-uufub4, source gates:
-  - Import and drop authority is the full tuple (engine issuer, identity or
-    subject, slot, session generation, exact attempt). A numeric slot plus
+  - Import authority is the full tuple (engine issuer, identity or subject,
+    slot, session generation, exact attempt): `ImportAuthority`. Drop
+    authority is the same tuple without the attempt (`ImportScope`), so one
+    drop covers every attempt of the generation. A numeric slot plus
     generation alone collides across accounts.
   - The tuple is rechecked on async commit, and a stale install is wiped and
     disposed atomically.
