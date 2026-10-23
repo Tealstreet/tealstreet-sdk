@@ -276,8 +276,8 @@ impl PlacementAcks {
     }
 
     /// Caller-wait receipts the held commands carry.
-    pub fn receipts(&self) -> impl Iterator<Item = u64> + '_ {
-        self.held.iter().filter_map(|(.., receipt)| *receipt)
+    pub fn carries(&self, receipt: u64) -> bool {
+        self.held.iter().any(|(.., held)| *held == Some(receipt))
     }
 
     /// Whether an earlier held write names the same order; it goes first.

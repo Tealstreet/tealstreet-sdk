@@ -35,7 +35,8 @@ pub const MAX_COMMAND_WAIT_MS: u32 = 2_147_483_647;
 /// dropped: a venue that never answers cannot grow this without bound.
 #[derive(Default)]
 pub(super) struct Waits {
-    stamps: HashMap<CommandId, (u64, f64)>,
+    /// (command, receipt, deadline); few live at once, so a scan is cheapest.
+    stamps: Vec<(CommandId, u64, f64)>,
     receipts: u64,
     /// The exact receipt the current dispatch carries into its entry: an
     /// external receipt, or the one a held or deferred command arrived with.
@@ -49,11 +50,11 @@ impl Waits {
     /// a duplicate never replaces it and gets no stamp of its own.
     /// An exhausted receipt sequence never wraps: the receipt goes unstamped.
     pub(super) fn receive(&mut self, command: CommandId, deadline: Option<f64>) {
-        let own = if self.stamps.contains_key(&command) {
+        let own = if self.stamp(command).is_some() {
             None
         } else if let Some((deadline, receipt)) = deadline.zip(self.receipts.checked_add(1)) {
             self.receipts = receipt;
-            self.stamps.insert(command, (receipt, deadline));
+            self.stamps.push((command, receipt, deadline));
             Some(receipt)
         } else {
             None
@@ -96,8 +97,8 @@ impl Waits {
     }
 
     /// A released batch's receipts stay carried until each one's dispatch.
-    pub(super) fn batch(&mut self, receipts: impl Iterator<Item = Option<u64>>) {
-        self.batched.extend(receipts.flatten());
+    pub(super) fn batch(&mut self, receipt: Option<u64>) {
+        self.batched.extend(receipt);
     }
 
     /// Remove `command`'s stamp at its terminal. Inside its entry only that
@@ -106,15 +107,22 @@ impl Waits {
     /// kept: that command has not run, so the terminal is another receipt's.
     fn finish(&mut self, command: CommandId, entry_receipt: Option<Option<u64>>, carried: bool) {
         let matches = self
-            .stamps
-            .get(&command)
+            .stamp(command)
             .is_some_and(|(receipt, _)| match entry_receipt {
-                Some(own) => own == Some(*receipt),
+                Some(own) => own == Some(receipt),
                 None => !carried,
             });
-        if matches {
-            self.stamps.remove(&command);
+        if matches && let Some(index) = self.stamps.iter().position(|(held, ..)| *held == command) {
+            self.stamps.swap_remove(index);
         }
+    }
+
+    /// `command`'s live (receipt, deadline).
+    pub(super) fn stamp(&self, command: CommandId) -> Option<(u64, f64)> {
+        self.stamps
+            .iter()
+            .find(|(held, ..)| *held == command)
+            .map(|(_, receipt, deadline)| (*receipt, *deadline))
     }
 
     #[cfg(test)]
@@ -129,7 +137,7 @@ impl Waits {
 
     #[cfg(test)]
     pub(super) fn deadline(&self, command: CommandId) -> Option<f64> {
-        self.stamps.get(&command).map(|(_, at)| *at)
+        self.stamp(command).map(|(_, at)| at)
     }
 }
 
@@ -165,7 +173,7 @@ impl<P> Io<P> {
         {
             return Err(Error::Revoked);
         }
-        let (receipt, deadline) = *self.command_waits.stamps.get(&entry.command).ok_or({
+        let (receipt, deadline) = self.command_waits.stamp(entry.command).ok_or({
             if self.command_waits.receipts == u64::MAX {
                 Error::Capacity
             } else {
@@ -198,21 +206,19 @@ impl<P> Io<P> {
             .map(|entry| entry.receipt);
         let carried = self
             .command_waits
-            .stamps
-            .get(&command)
-            .is_some_and(|(receipt, _)| self.carried_receipts().any(|held| held == *receipt));
+            .stamp(command)
+            .is_some_and(|(receipt, _)| self.carries(receipt));
         self.command_waits.finish(command, entry, carried);
     }
 
-    /// Receipts that held cancellations and deferred cancel-alls still carry.
-    fn carried_receipts(&self) -> impl Iterator<Item = u64> + '_ {
-        let held = self
-            .placement_acks
-            .receipts()
-            .chain(self.command_waits.batched.iter().copied());
+    /// Whether a held cancellation, deferred cancel-all or released batch
+    /// still carries `receipt`.
+    fn carries(&self, receipt: u64) -> bool {
         #[cfg(feature = "order-locks")]
-        let held = held.chain(self.order_locks.receipts());
-        held
+        if self.order_locks.carries(receipt) {
+            return true;
+        }
+        self.placement_acks.carries(receipt) || self.command_waits.batched.contains(&receipt)
     }
 
     /// Stamp one external receipt; past capacity, first drop expired stamps
@@ -224,10 +230,14 @@ impl<P> Io<P> {
         now: f64,
     ) {
         if self.command_waits.stamps.len() >= WAIT_STAMPS {
-            let carried: Vec<u64> = self.carried_receipts().collect();
-            self.command_waits
-                .stamps
-                .retain(|_, (receipt, at)| *at > now || carried.contains(receipt));
+            let mut index = 0;
+            while let Some(&(_, receipt, at)) = self.command_waits.stamps.get(index) {
+                if at > now || self.carries(receipt) {
+                    index += 1;
+                } else {
+                    self.command_waits.stamps.swap_remove(index);
+                }
+            }
         }
         self.command_waits.receive(command, deadline);
     }
@@ -272,13 +282,9 @@ impl<P> Io<P> {
 impl<P> Cx<'_, P> {
     /// An engine refusal before the venue's entry ends under this receipt's
     /// own entry, so a duplicate id never clears the live command's wait.
-    pub(super) fn refuse_before_entry(
-        &mut self,
-        command: CommandId,
-        refuse: impl FnOnce(&mut Self),
-    ) {
+    pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: &str) {
         self.io.begin_command_entry(Some(command));
-        refuse(self);
+        self.fail(command, error);
         self.io.end_command_entry();
     }
 
