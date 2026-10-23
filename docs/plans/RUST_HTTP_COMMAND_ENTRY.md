@@ -144,3 +144,68 @@ and no-I/O terminal path to the original Read root rather than a same-owner chil
 Keep existing expiry/completion semantics and full Context/issuer equality. Test
 real issued root/child, foreign issuer, mutation sibling and post-terminal reuse;
 the history owner consumes only a reviewed committed pin. No history.rs edits.
+
+
+Entry-retention refinement, before implementation (owner approved 2026-10-23).
+
+Problem: an admitted native WS read has no managed-HTTP pending/delivery count.
+After its immutable deadline, unrelated Context issuance can prune its owner
+before the native timer callback. The exact root then loses completion rights
+and the caller receives no terminal result. Root provenance alone does not hold
+its generation. Cached same-callback completion and managed attempt registration
+are distinct cases.
+
+Use the existing bounded CommandOwner registry as the sole authority. Add one
+private `entry_owned` bit, false for generic http_context owners. On successful
+`admit_http_command`, bind it synchronously to the exact newly issued original
+root before returning; validate issuer/generation/root invariants privately.
+No public retain API, synthetic Context, timer, deadline, counter or venue state.
+Initial refusal never marks an owner retained and keeps existing typed cleanup.
+
+All existing command-owner pruning/live/expired-owner checks include entry_owned:
+- Registry issuance may expire Context metadata, but cannot evict the retained
+  generation until its existing typed terminal path removes it.
+- command_live and prepare_command_entry refuse duplicate/reissued initial
+  ownership even after deadline. Generic same-command issuance after expiry
+  refuses State instead of extending or replacing that root.
+- Existing done_context/fail_context/command retirement removes the owner/hold.
+  Read completion expiry tolerance remains separate from send/publication rights;
+  no child, retry, HTTP publication or request deadline is renewed.
+- The existing 256-owner bound still applies. If an adapter abandons an owned
+  command without terminal cleanup, admission refuses Capacity; it never steals
+  the outstanding caller's generation to reclaim space. Native WS timers keep
+  their exact 5000ms deadline and remain responsible for native queue cleanup.
+- Generic unowned http_context/background metadata keeps existing expiry cleanup.
+  The later Plan phase can fold this predicate into its existing retained-owner
+  phase; do not add a second retention registry or counter.
+
+Commit plan, then real Engine assertion REDs before code:
+1. Native read admitted at2/deadline5002, unrelated command admission at5003,
+   then original native TimerFired: one Timeout terminal, no hang.
+2. Same command ID repeated after expiry but before native timer: duplicate only,
+   no native callback/timer/I/O; after old typed terminal, reuse gets fresh owner.
+3. At256 retained owners after expiry, fresh command gets one typed Capacity
+   failure; completing one exact generation frees one slot, unrelated owners
+   remain. Generic expired same-command issuance cannot remint/extend root.
+4. Preserve synchronous cached completion, original clocks/native timer IDs,
+   unchanged send denial at/after deadline, all prior entry/typed expiry/integrity
+   controls, normal native Binance behavior and legacy inventory byte-exact.
+
+Verify failing controls first, implement only existing registry + entry-success
+binding, re-run controls/full engine + focused native suites and strict/fmt/bans.
+Independent source/inventory/preservation audit before publishing the ONE composed
+#1830 pin (includes reviewed #1816/#1838). Caller docs distinguish retained
+completion authority from live send permission; no claim of a new timeout owner.
+
+Independent plan-audit refinements before implementation:
+
+- The same private entry-owned bit also denies legacy numeric completion outside
+  the initial callback. Only the issued root may retire this held generation;
+  generic unowned Read handles retain their existing legacy compatibility. Pin a
+  native timer numeric wrong-finalizer denial followed by typed-root completion.
+- An entry-owned command retains its immutable original root bound. Generic
+  unparented siblings may not extend that bound; issuance refuses an attempted
+  extension or issuance at/after the original root deadline. This does not change
+  generic unowned command behavior or renew send/publication rights. Test a longer
+  sibling refusal before expiry, then expired same-command refusal, while the
+  original native timer still finishes exactly once.
