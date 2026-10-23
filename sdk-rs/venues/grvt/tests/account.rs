@@ -1674,3 +1674,135 @@ fn ip_whitelist_rejection_keeps_its_actionable_message() {
                 && event.message.starts_with("GRVT IP is not whitelisted")
     )));
 }
+
+fn reporter_summary(h: &mut Harness, coins: &str) {
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms }
+                if *at_ms >= h.now + 50_000. && *at_ms <= h.now + 60_000. =>
+            {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("native summary poll");
+    h.timer(timer, at);
+    h.reply(
+        "aggregated_account_summary",
+        &format!(r#"{{"r":{{"te":"100","sb":{coins}}}}}"#),
+        "",
+    );
+}
+#[test]
+fn reporter_coin_duplicate_rearms_its_key_but_non_array_retains_coins_and_memory() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    reporter_summary(&mut h, r#"[{"c":"ETH","b":"2"}]"#);
+    let mixed = r#"[{"c":"ETH","b":"bad"},{"c":"ETH","b":"9"},{}]"#;
+    reporter_summary(&mut h, mixed);
+    assert_eq!(skip_warnings(&h, "spot balance"), 2);
+    assert_eq!(
+        h.engine.store().currency_balances().unwrap()[0]
+            .balance
+            .total,
+        2.
+    );
+    reporter_summary(&mut h, mixed);
+    // Native coin totals rearm ETH even though rejection retains the stored 2.
+    assert_eq!(skip_warnings(&h, "spot balance"), 3);
+    reporter_summary(&mut h, r#"[{"c":"ETH","b":"bad"},{}]"#);
+    assert_eq!(skip_warnings(&h, "spot balance"), 4);
+    reporter_summary(&mut h, "{}"); // Valid outer JSON, unreadable coin list.
+    assert_eq!(
+        h.engine.store().currency_balances().unwrap()[0]
+            .balance
+            .total,
+        2.
+    );
+    reporter_summary(&mut h, r#"[{"c":"ETH","b":"bad"},{}]"#);
+    assert_eq!(skip_warnings(&h, "spot balance"), 4);
+    reporter_summary(&mut h, "null"); // Native clean-empty namespace rearm.
+    assert!(h.engine.store().currency_balances().unwrap().is_empty());
+    reporter_summary(&mut h, r#"[{"c":"ETH","b":"bad"},{}]"#);
+    assert_eq!(skip_warnings(&h, "spot balance"), 6);
+}
+#[test]
+fn reporter_clean_coin_namespace_does_not_rearm_rejected_duplicate_order_identity() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    h.reply("open_orders", &format!(r#"{{"r":[{OPEN}]}}"#), "");
+    let bad = OPEN.replace(r#""lp":"100""#, r#""lp":"bad""#);
+    let mixed = format!(r#"{{"r":[{bad},{OPEN},{{}}]}}"#);
+    reporter_reconcile(&mut h, "v1.order", "open_orders", 1000., &mixed);
+    assert_eq!(skip_warnings(&h, "order"), 2);
+    assert_eq!(h.engine.store().orders().len(), 1);
+    reporter_summary(&mut h, "[]");
+    reporter_reconcile(&mut h, "v1.order", "open_orders", 1000., &mixed);
+    // Unlike coin totals, rejected IDs are filtered out of order rearm.
+    assert_eq!(skip_warnings(&h, "order"), 2);
+    reporter_reconcile(&mut h, "v1.order", "open_orders", 1000., r#"{"r":[]}"#);
+    reporter_reconcile(&mut h, "v1.order", "open_orders", 1000., &mixed);
+    assert_eq!(skip_warnings(&h, "order"), 4);
+}
+
+fn reporter_reconcile(h: &mut Harness, stream: &str, path: &str, delay: f64, rows: &str) {
+    h.ws(&format!(r#"{{"s":"{stream}","f":{{}}}}"#));
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + delay => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("malformed event schedules native reconciliation");
+    h.timer(timer, at);
+    h.reply(path, rows, "");
+}
+
+#[test]
+fn reporter_position_duplicate_filters_rearm_but_older_mapped_row_rearms_before_timestamp_check() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let old = r#"{"i":"BTC_USDT_Perp","s":"-2","ep":"100","n":"200","l":"20","el":"140","up":"-2","mt":"CROSS","et":"1700000000000000900"}"#;
+    let newer = old
+        .replace("1700000000000000900", "1700000001000000900")
+        .replace(r#""s":"-2""#, r#""s":"-3""#);
+    reporter_reconcile(
+        &mut h,
+        "v1.position",
+        "positions",
+        500.,
+        &format!(r#"{{"r":[{newer}]}}"#),
+    );
+    let bad = old.replace(r#""s":"-2""#, r#""s":null"#);
+    let foreign = bad.replace("BTC_USDT_Perp", "DOGE_USDT_Perp");
+    let rejected = format!(r#"{{"r":[{bad},{foreign}]}}"#);
+    reporter_reconcile(&mut h, "v1.position", "positions", 500., &rejected);
+    assert_eq!(skip_warnings(&h, "position"), 2);
+    reporter_reconcile(
+        &mut h,
+        "v1.position",
+        "positions",
+        500.,
+        &format!(r#"{{"r":[{bad},{old},{foreign}]}}"#),
+    );
+    assert_eq!(skip_warnings(&h, "position"), 2);
+    // Current response, but an older mapped row: native rearm precedes its
+    // timestamp check. The unrelated named rejection remains remembered.
+    reporter_reconcile(
+        &mut h,
+        "v1.position",
+        "positions",
+        500.,
+        &format!(r#"{{"r":[{old},{foreign}]}}"#),
+    );
+    assert_eq!(h.engine.store().positions()[0].contracts, 3.);
+    reporter_reconcile(&mut h, "v1.position", "positions", 500., &rejected);
+    assert_eq!(skip_warnings(&h, "position"), 3);
+}
