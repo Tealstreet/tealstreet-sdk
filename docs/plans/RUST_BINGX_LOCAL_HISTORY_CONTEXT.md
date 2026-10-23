@@ -57,3 +57,14 @@ managed FetchAccount reads through Prepare/Sign/Bind/Claim. The local branches
 then returned their numeric native result/error instead of exact Capacity; NaN
 entry time still published []. The finite native message/precedence/reuse control
 passed. Production, manifest and fixtures are unchanged at this checkpoint.
+
+
+## Implementation receipt
+
+Independent plan/control review CLEAR at 1b242ee416c preceded source. One local
+helper now admits and settles exact Read Context authority at the four exits.
+The unchanged original target is 5 GREEN, 0 ignored; all 20 native history tests
+also pass. The strengthened capacity control completes an earlier managed
+identity owner after refusal and then reuses the local command ID successfully.
+Remote methods/codecs from History::next onward are byte-identical to the parent.
+Exact history inventory is 4F/4O; every other manifest key remains unchanged.

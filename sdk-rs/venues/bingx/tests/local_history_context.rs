@@ -1,5 +1,7 @@
 //! Native synchronous history replies must acquire genuine Read authority.
-use safe_cex_engine::{Action, Command, Engine, ErrorKind, Event, Notice, Query, VenueError};
+use safe_cex_engine::{
+    Action, Command, Engine, ErrorKind, Event, Notice, Query, RequestId, Response, VenueError,
+};
 use safe_cex_venue_bingx::Bingx;
 mod support;
 
@@ -106,7 +108,7 @@ fn invalid_clock_refuses_each_local_terminal_before_its_native_reply() {
     }
 }
 
-fn fill_capacity(engine: &mut Engine<Bingx>) {
+fn fill_capacity(engine: &mut Engine<Bingx>) -> RequestId {
     let mut requests = Vec::new();
     for command in 1_000..1_256 {
         engine.handle(NOW, Event::Command(Command::FetchAccount { command }));
@@ -128,17 +130,42 @@ fn fill_capacity(engine: &mut Engine<Bingx>) {
         256,
         "all occupied roots are real managed reads"
     );
+    requests[0]
 }
 
 #[test]
 fn full_registry_refuses_unsupported_lookup_without_replacing_its_typed_error() {
     let mut e = engine(true);
-    fill_capacity(&mut e);
+    let occupied = fill_capacity(&mut e);
     let actions = query(&mut e, NOW, lookup());
     let error = result(&actions).expect_err("capacity must refuse");
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.message, "Engine request capacity reached");
     assert_eq!(error.outcome, None);
+    e.handle(
+        NOW + 1.,
+        Event::HttpResponse {
+            request: occupied,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":0,"data":[{"asset":"USDT","userId":"original-owner"}]}"#,
+            },
+        },
+    );
+    let original = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1.);
+    assert_eq!(
+        original
+            .iter()
+            .filter(|a| matches!(a,
+        Action::Notice(Notice::CommandDone { command: 1_000, result })
+            if result == r#"{"userId":"original-owner"}"#))
+            .count(),
+        1,
+        "local capacity refusal must not retire an unrelated occupied owner"
+    );
+    let actions = query(&mut e, NOW + 2., lookup());
+    assert_eq!(result(&actions).unwrap_err().message, LOOKUP);
 }
 
 #[test]

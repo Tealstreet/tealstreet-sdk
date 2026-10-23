@@ -5756,3 +5756,16 @@ Caller-visible changes:
   empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
   Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
   caller migration.
+
+
+## BingX synchronous history terminals acquire Read authority
+
+Keyless private history and credentialed Fills without a symbol still return
+exact []; keyless precedence, unsupported client lookup and invalid normalized
+range messages remain native. These four local exits now require genuine Read
+admission without a transport credential. Invalid entry clocks and full Context
+capacity emit one typed Read refusal (no financial outcome), with no provider,
+HTTP, timer or Store effect. A refused entry never emits a second numeric reply
+or retires an unrelated pending owner. Completed local command IDs remain reusable.
+Remote history selection, page geometry, signing, streaming and native finalizers
+are unchanged; this slice does not claim managed remote history adoption.
