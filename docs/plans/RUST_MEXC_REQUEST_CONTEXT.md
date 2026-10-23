@@ -411,3 +411,15 @@ Run full MEXC+Binance suites, scoped fmt/strict Clippy and both ratchets; CI and
 an overseer window are required. Architecture No: native codec adopts existing
 shared command custody, managed lifecycle and typed completion. History #1793
 is actual and its remaining paths stay untouched; account #1872 is stack-only.
+
+### Standalone book verification checkpoint
+
+All7 original RED controls pass with the managed adapter. Full MEXC+Binance
+suites pass472 tests across41 targets; scoped fmt/strict all-target Clippy pass.
+Independent reviews preserve native totals-before-truncation and restore the
+original no-timer refusal assertions alongside managed-dispatch exclusions.
+Only the queued request expects the engine deadline. Public/native fixtures
+retain result/auth checks and use forward callback clocks. The exact scanner
+shows29 occurrences /29 entries, an8-occurrence/7-entry reduction. Incoming
+landing integration and both ratchets precede CI/readiness; no merge window is
+claimed. Actual #1872 integration remains required before final merge proof.
