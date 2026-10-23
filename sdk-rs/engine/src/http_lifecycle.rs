@@ -433,13 +433,7 @@ impl<V: Venue> Engine<V> {
         let delivery = managed.delivery();
         error.outcome = Some(crate::Outcome::NotSent);
         if error.kind.is_none() {
-            error.kind = Some(match reason {
-                Error::TimedOut => ErrorKind::Timeout,
-                Error::Invalid | Error::Revoked | Error::Duplicate | Error::RetryForbidden => {
-                    ErrorKind::InvalidInput
-                }
-                _ => ErrorKind::Internal,
-            });
+            error.kind = Some(reason.kind());
         }
         if delivery.context.operation() == Operation::Mutation {
             let _ = self.io.request_contexts.result(
@@ -689,6 +683,7 @@ impl<V: Venue> Engine<V> {
             return true;
         }
         if managed.lifecycle.release().is_some() {
+            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -696,6 +691,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP request timed out",
                 },
             );
+            self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
         } else {
             self.http_preparation_failed(
@@ -907,6 +903,8 @@ impl<V: Venue> Engine<V> {
     fn fail_write_collection(&mut self, now: f64, request: RequestId, _reason: Error) {
         self.io.http_responses.remove(request);
         if self.io.managed_http.contains_key(&request) {
+            // The venue answered (non-UTF-8 or oversize reply): never transport loss.
+            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Internal);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -914,6 +912,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP mutation response failed integrity bounds",
                 },
             );
+            self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
@@ -2723,7 +2722,7 @@ mod tests {
             },
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
-        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown) && error.kind == Some(ErrorKind::Internal))).count(), 1);
         assert_eq!(engine.venue.responses, 0);
         assert!(engine.io.pending.is_empty());
         assert!(engine.io.managed_http.is_empty());
