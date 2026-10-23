@@ -2718,3 +2718,12 @@ Native signed public/private, income, identity, trading and socket paths remain
 held consumers. Their shared legacy fingerprints are retained. Only the public
 tuple codec's conservative f913fd4f macro occurrence is removed (1F/1O); this is
 not a claim that the shared physical request funnel has migrated.
+
+## Selected managed signed Read composition
+
+Shared admission/selection/queue/refusal composition is additive in engine
+selected_read.rs, with genuine callback and original-generation controls. The
+original BingX/WEEX copies erase capacity denial fields; those two native
+assertion REDs are retained for separate consumer adoption, not marked fixed by
+engine probes. No venue P0, private signer, Plan history or inventory-zero
+claim is closed by this library seam.

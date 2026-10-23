@@ -1327,3 +1327,13 @@ use the shared prepared-action driver and monotonic response clocks; only the
 unsigned transport-kind expectation changes to Network, while strict financial
 rows, errors, no-prefix/no-gap and signed-path assertions remain. Rebuilt CI
 continues to own replay, CPU, size and retained-memory certification.
+
+## Selected managed signed Read custody
+
+One non-Clone engine wrapper retains selected opaque identity, egress/evidence
+and original Context through queue and retry, with exact typed refusal and
+pending return. Missing-selection command diagnostics precede a single typed
+terminal under genuine local authority. Provider/prepare metadata and ordered
+recipe headers remain unchanged. Genuine engine controls cover capacity,
+duplicate entry, phase custody, expiry, retry, streaming and account evidence;
+native compatibility controls do not substitute for later venue adoption.
