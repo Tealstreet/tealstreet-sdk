@@ -314,7 +314,8 @@ fn backpack_provider(
     if options.public_data_only || !present(&options.key) || !present(&options.secret) {
         return Ok((None, Identities::default()));
     }
-    let refused = || invalid("Backpack requires a base64 32-byte Ed25519 seed");
+    let undecodable = || invalid("Invalid Backpack base64 seed");
+    let wrong_width = || invalid("Backpack Ed25519 seed must be 32 bytes");
     let setup = LocalSetup {
         primary: Some(LocalIdentity {
             key: Secret::new(options.key.clone().unwrap_or_default()),
@@ -324,8 +325,8 @@ fn backpack_provider(
         }),
         secondary: None,
     };
-    let (signer, identities) = LocalSigner::from_setup(setup).map_err(|_| refused())?;
-    let primary = identities.primary.as_ref().ok_or_else(refused)?;
+    let (signer, identities) = LocalSigner::from_setup(setup).map_err(|_| undecodable())?;
+    let primary = identities.primary.as_ref().ok_or_else(undecodable)?;
     let probe = safe_cex_engine::signing::SignRequest {
         receipt: Default::default(),
         context: Default::default(),
@@ -335,7 +336,7 @@ fn backpack_provider(
             payload: vec![PayloadPart::Bytes { bytes: Vec::new() }],
         }],
     };
-    signer.sign_now(&probe).map_err(|_| refused())?;
+    signer.sign_now(&probe).map_err(|_| wrong_width())?;
     Ok((Some(std::sync::Arc::new(signer)), identities))
 }
 

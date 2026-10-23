@@ -5766,7 +5766,10 @@ account-read and private-WS paths ([RUST_BACKPACK_SIGNER_ADMISSION.md](RUST_BACK
 option B, approved by claude-ddi2il).
 
 - A malformed or non-32-byte base64 seed is now refused at construction, typed
-  invalid input. It was previously a CONFIG_INVALID notice at account start.
+  invalid input ("Invalid Backpack base64 seed" or "Backpack Ed25519 seed must
+  be 32 bytes"). Such an account now gets no engine at all, public data
+  included. Previously it posted CONFIG_INVALID at account start and kept
+  streaming public data. This is deliberate (R3).
 - TS construction is unchanged: `dispatchSigning` is off for backpack.
 - External signers and injected refs are still refused for backpack.
 - This must be removed before master. It ends when account reads, private WS
