@@ -51,7 +51,10 @@ session token or #1842 prerequisite wait is required for a no-session venue.
 The public name BackgroundGeneration is a typed read-lifetime view over that
 existing Session anchor, not another numeric generation counter. Its exact Rust
 wrapper/constructor is pending session/core API fit. No deadline or dummy Context
-is minted for the lifetime.
+is minted for the lifetime. Construct the view only through validate_session
+(exact issuer and live generation), never from a raw generation. I/O-free
+open_session(None, None) still consumes one of the shared 64 Session slots;
+retire before reopen on a configuration change.
 
 Proposed spelling, not an available production API:
 
@@ -83,7 +86,11 @@ invalidation or eligible retry into an opaque BackgroundActivation. Only the
 exact on_background_task_ready callback holds its loan. Admission validates the
 issuer, parent, task, activation and still-live demand before IDs; all fallible
 preparation precedes the one-use activation consumption and admission commit.
-Failure cannot leave half-consumed custody or resources. No progress retires
+Failure cannot leave half-consumed custody or resources. Only a successful
+admission commit consumes an attempt. The active one-use demand/loan is cleared
+before entering the callback, with its private validation record retained, so
+reentrant or foreign callbacks cannot claim it. Selecting a leg without submitting
+it is not progress. No progress retires
 that activation through the shared typed failure path, without a command notice.
 
 A live handle or delivery=None is NOT admission custody. A command callback,
@@ -106,11 +113,22 @@ reopens the generation. No runtime override or token swap is permitted.
 
 Children retain their selected egress, including Secondary, rather than inherit
 the Session's Primary route. The Selection helper is a typed placeholder until
-claude-4yjlw0 freezes its exact signature. No slot_for(method), raw key carrier or
+codex-9czdjh freezes its exact signature, with claude-4yjlw0 reviewing. Today's
+Selection/Credential does not itself prove subject/config-generation provenance;
+that trusted snapshot and revocation contract remains an explicit shared gate. No slot_for(method), raw key carrier or
 second account-lifetime registry is introduced.
 
+Session live is not JWT/login ready. A generic task prerequisite needs an
+explicit task-readiness bridge; no-Context task activation cannot borrow #1842's
+Context wait. BloFin's I/O-free anchor does not require that bridge.
+
 Session prerequisites finish BEFORE Plan admission. The #1842 gate accepts only
-Context-phase owners, so an admitted child Plan cannot park on that gate.
+Context-phase owners, so an admitted child Plan must be refused by that gate. This needs an explicit
+Background-owner phase arm: #1842 currently returns context_phase=true for every
+non-Command owner, and hold_wait only holds Commands. Pin the new Plan-phase
+Background refusal with the same oracle as a_planned_command_is_refused_a_session_wait_instead_of_parking.
+If a future Context-phase child can wait, its prune hold must also be declared;
+this phase does not grant that path.
 
 ## Finite traversal attempts, not 450 reserved calls
 
@@ -178,14 +196,23 @@ cannot reach Store reducers, auth observers, retry scheduling or publication.
 
 Already released HTTP may have reached the venue; cancellation is not an unsent
 claim. These are Read cycles: no command outcome, command terminal, order write
-journal or Accepted fact is fabricated. Cleanup clears only the matching native
-busy/attempt state and is idempotent. Panic uses the existing sticky poison;
+journal or Accepted fact is fabricated. discard_managed is silent today and cannot clear native busy state. Queue a
+typed retired-child notification to the venue, without success/DATA/send rights,
+so cleanup clears only the matching native busy/attempt state exactly once.
+The parent-dead checks must still permit private failure-only seal/cleanup in
+the common funnel; retirement cannot strand a child merely because its parent
+is already dead. Panic uses the existing sticky poison;
 no successor activates before predecessor cleanup has completed.
 
 The parent->child cascade does NOT exist in #1832 today. Implement it at the
 session registry choke point, with claude-55ao7t reviewing that hook. A separate
 child owner cannot rely on today's owner==Session retirement filter. Do not
-edit the frozen parent PR to obtain the hook.
+edit the frozen parent PR to obtain the hook. Validate parent liveness once in
+validate_handle; inherited validate_send and managed_response_live then fence
+queue/Prepare/Sign/Bind/Claim/reprepare/DATA without new per-site checks. Replace
+retire_http_owner's equality-only lookup with an indexed parent-child cascade.
+These hooks collide with #1897 session_context.rs/request_context_registry.rs;
+runtime must use the combo-5 landing or coordinate order with claude-55ao7t.
 
 ## Source scope and implementation sequence
 
@@ -235,3 +262,12 @@ is no financial outcome or synthetic command terminal. Startup/polling remains
 unbounded across finite cycles; native census publication and retry/page limits
 are preserved. Architecture gate: shared background custody and scheduling,
 not a venue-local lifetime, retry or signing implementation.
+
+## Review checkpoint
+
+Consumer claude-4yjlw0 cleared bdf688's geometry and timing. Core codex-uufub4
+bounded API fit cleared the max150 one-attempt traversal with task-owned max3
+admissions/1s/2s across full retirements, not a recycled450-call envelope. Session
+owner claude-55ao7t approved the lifetime shape and identified the explicit gate,
+issuer, parent cascade, 64-anchor capacity and cleanup notification requirements
+above. These are design reviews, not runtime clearance or a frozen API claim.
