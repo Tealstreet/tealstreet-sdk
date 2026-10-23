@@ -569,3 +569,14 @@ once:43→42/lib3→2; ticker2bbebb and catalog1edfac remain exact. The held can
 fixture does not subscribe to order books, so depth adds no timer to its poll.
 Confirm this with all three plan reviews before source. Shared unheld test drivers
 may receive prepared drains with actual event clocks, retaining all assertions.
+
+Depth driver audit also adds unheld tests/public_supervision.rs. Its suppressed-
+feed test currently counts exactly one tracked timer and300 total SetTimer
+operations after subscribing a depth read. Managed read deadlines/recovery now
+add legitimate timers. Retain every timer and action; explicitly distinguish and
+assert the20s Context deadlines/recovery from the original2s poll count, keeping
+all original no-WS-connect/no-ping/no-reconnect-supervision guarantees. Never drop
+unknown timers, manufacture completion or alter runtime order/deadlines to keep
+an old total. Public/public-review direct depth drains use prepared_actions at
+the actual event clock; shared support only where required. Ticker-only drivers,
+held candle/trading tests and production ticker logic remain unchanged.
