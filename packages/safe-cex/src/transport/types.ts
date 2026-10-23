@@ -27,6 +27,8 @@ export interface ResolvedRouting {
   wsPublic: ResolvedWs;
   wsPrivate: ResolvedWs;
   wsBusiness: ResolvedWs;
+  /** Present only for venues that declare a separate UTA private socket (bitget). */
+  wsPrivateUta?: ResolvedWs;
 }
 
 export interface RestTransportContext {
