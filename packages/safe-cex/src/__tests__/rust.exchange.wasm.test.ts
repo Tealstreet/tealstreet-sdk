@@ -1533,6 +1533,7 @@ describe('RustEngineExchange', () => {
       collateral: '{"netEquity":"1000","netEquityAvailable":"900","netEquityLocked":"100","pnlUnrealized":"0"}',
     };
     const transport: Transport = {
+      prepareHttp: prepareRecordedHttp,
       now: () => correctedTime,
       connect: (_url, { onOpen, onMessage }) => {
         sockets.push(onMessage);
@@ -1568,6 +1569,9 @@ describe('RustEngineExchange', () => {
       }
       request(...args: Parameters<Transport['request']>) {
         return this.#inner.request(...args);
+      }
+      prepareHttp(...args: Parameters<NonNullable<Transport['prepareHttp']>>) {
+        return this.#inner.prepareHttp!(...args);
       }
       setTimeout(...args: Parameters<Transport['setTimeout']>) {
         return this.#inner.setTimeout(...args);

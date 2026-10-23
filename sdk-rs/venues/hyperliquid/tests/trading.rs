@@ -756,7 +756,7 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
 #[test]
 fn resting_core_ack_can_be_canceled_before_websocket_update() {
     let (mut e, socket) = ready("disabled");
-    e.handle(1900.0, Event::WsOpened { socket });
+    let (_replacement, _) = reconnect(&mut e, socket, 1900.0);
     let older_orders = e
         .drain_plain()
         .find_map(|a| match a {
@@ -765,7 +765,7 @@ fn resting_core_ack_can_be_canceled_before_websocket_update() {
         })
         .unwrap();
     e.handle(
-        2000.0,
+        3000.0,
         Event::Command(Command::PlaceOrders {
             command: 1,
             orders: vec![opts(
@@ -781,10 +781,10 @@ fn resting_core_ack_can_be_canceled_before_websocket_update() {
     reply_at(
         &mut e,
         &placed,
-        2001.0,
+        3001.0,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":9}}]}}}"#,
     );
-    reply_at(&mut e, &older_orders, 2001.5, "[]");
+    reply_at(&mut e, &older_orders, 3001.5, "[]");
     let acknowledged = e.store().order("9").unwrap();
     assert_eq!(
         acknowledged.status,
@@ -798,7 +798,7 @@ fn resting_core_ack_can_be_canceled_before_websocket_update() {
     assert_eq!(acknowledged.price, 90.0);
     e.drain_plain().for_each(drop);
     e.handle(
-        2002.0,
+        3002.0,
         Event::Command(Command::CancelOrders {
             command: 2,
             ids: vec!["9".into()],
@@ -926,7 +926,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
 #[test]
 fn prewrite_rest_revision_blocks_future_clock_settings_but_updates_position_size() {
     let (mut e, socket) = ready("disabled");
-    e.handle(1900.0, Event::WsOpened { socket });
+    let (_replacement, _) = reconnect(&mut e, socket, 1900.0);
     let snapshot = e
         .drain_plain()
         .find_map(|a| match a {
@@ -935,7 +935,7 @@ fn prewrite_rest_revision_blocks_future_clock_settings_but_updates_position_size
         })
         .unwrap();
     e.handle(
-        2000.0,
+        3000.0,
         Event::Command(Command::SetMarginType {
             command: 1,
             symbol: "BTC-PERP".into(),
@@ -946,13 +946,13 @@ fn prewrite_rest_revision_blocks_future_clock_settings_but_updates_position_size
     reply_at(
         &mut e,
         &first,
-        2002.0,
+        3002.0,
         r#"{"status":"ok","response":{"type":"default"}}"#,
     );
     let future = STATE
         .replace("1000}", "4000}")
         .replace(r#""szi":"2""#, r#""szi":"3""#);
-    reply_at(&mut e, &snapshot, 2003.0, &future);
+    reply_at(&mut e, &snapshot, 3003.0, &future);
     assert_eq!(e.store().positions()[0].contracts, 3.0);
     assert_eq!(
         e.store().setting("BTC-PERP").unwrap().margin_type,

@@ -3,6 +3,211 @@ use safe_cex_crypto::ed25519;
 use safe_cex_engine::url;
 use std::collections::BTreeMap;
 
+use safe_cex_engine::signing::{
+    Algorithm, Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
+    SignResult,
+};
+use safe_cex_engine::{Action, DispatchContext, Method, SignStep};
+
+/// Immutable native transport and canonical signing facts, without credentials.
+#[derive(Clone)]
+pub struct Request {
+    pub method: Method,
+    pub path: String,
+    pub rows: Vec<Params>,
+    pub body: Option<String>,
+    pub window: u32,
+}
+
+pub fn instruction(method: Method, path: &str) -> Result<&'static str, SignError> {
+    match (method, path) {
+        (Method::Get, "/api/v1/account") => Ok("accountQuery"),
+        (Method::Patch, "/api/v1/account") => Ok("accountUpdate"),
+        (Method::Get, "/api/v1/position") => Ok("positionQuery"),
+        (Method::Get, "/api/v1/capital/collateral") => Ok("collateralQuery"),
+        (Method::Get, "/api/v1/orders") => Ok("orderQueryAll"),
+        (Method::Post, "/api/v1/order" | "/api/v1/orders") => Ok("orderExecute"),
+        (Method::Delete, "/api/v1/order") => Ok("orderCancel"),
+        (Method::Delete, "/api/v1/orders") => Ok("orderCancelAll"),
+        (Method::Get, "/wapi/v1/history/fills") => Ok("fillHistoryQueryAll"),
+        (Method::Get, "/wapi/v1/history/orders") => Ok("orderHistoryQueryAll"),
+        (Method::Get, "/wapi/v1/history/funding") => Ok("fundingHistoryQueryAll"),
+        _ => Err(SignError::InvalidRequest),
+    }
+}
+
+/// The provider presents the public API key and signs exact Ed25519 bytes.
+pub struct Http {
+    identity: Identity,
+    declaration: Request,
+    timestamp: String,
+}
+
+impl Http {
+    pub fn new(identity: Identity, declaration: Request) -> Self {
+        Self {
+            identity,
+            declaration,
+            timestamp: String::new(),
+        }
+    }
+}
+
+impl SignStep for Http {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let declaration = &self.declaration;
+        let instruction = instruction(declaration.method, &declaration.path)?;
+        let is_batch = declaration.method == Method::Post && declaration.path == "/api/v1/orders";
+        if declaration.rows.is_empty()
+            || (!is_batch && declaration.rows.len() != 1)
+            || declaration.window == 0
+            || http.method != declaration.method
+            || http.body != declaration.body
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        if declaration.method == Method::Get {
+            if declaration.body.is_some() {
+                return Err(SignError::InvalidRequest);
+            }
+        } else if json_rows(declaration.body.as_deref(), is_batch)? != declaration.rows {
+            return Err(SignError::InvalidRequest);
+        }
+        let query = if declaration.method == Method::Get {
+            query(&declaration.rows[0])
+        } else {
+            String::new()
+        };
+        let path = if query.is_empty() {
+            declaration.path.clone()
+        } else {
+            format!("{}?{query}", declaration.path)
+        };
+        if http.url != format!("https://api.backpack.exchange{path}") {
+            return Err(SignError::InvalidRequest);
+        }
+        let stamp = dispatch.stamp_ms();
+        self.timestamp = safe_cex_engine::num::format(stamp);
+        let text = payload(instruction, &declaration.rows, stamp, declaration.window);
+        Ok(SignRequest {
+            receipt: SignReceipt {
+                stamp_ms: Some(stamp),
+                expiry_ms: None,
+            },
+            context: Context {
+                venue: "backpack".into(),
+                method: http.method.as_str().into(),
+                host: "api.backpack.exchange".into(),
+                path,
+            },
+            operations: vec![
+                Operation::Present {
+                    key: self.identity.credential.clone(),
+                },
+                Operation::Sign {
+                    algorithm: Algorithm::Ed25519,
+                    key: self.identity.signing.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: text.into_bytes(),
+                    }],
+                },
+            ],
+        })
+    }
+
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        if result.values.len() != 2 {
+            return Err(SignError::InvalidResult);
+        }
+        let key = std::str::from_utf8(&result.values[0])
+            .ok()
+            .filter(|key| !key.is_empty() && !key.contains(['\r', '\n']))
+            .ok_or(SignError::InvalidResult)?;
+        if result.values[1].len() != 64 {
+            return Err(SignError::InvalidResult);
+        }
+        http.headers = vec![
+            ("X-API-Key", key.into()),
+            ("X-Broker-Id", "1200".into()),
+            ("X-Signature", STANDARD.encode(&result.values[1])),
+            ("X-Timestamp", self.timestamp.clone()),
+            ("X-Window", self.declaration.window.to_string()),
+            ("Content-Type", "application/json".into()),
+        ];
+        Ok(())
+    }
+
+    fn freshness_ms(&self) -> f64 {
+        // X-Window is the venue acceptance bound; queued material is refreshed
+        // after five seconds even when that native bound is longer.
+        f64::from(self.declaration.window.clamp(1, 5000))
+    }
+}
+
+struct SigningRow(BTreeMap<String, Box<serde_json::value::RawValue>>);
+impl<'de> serde::Deserialize<'de> for SigningRow {
+    fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = SigningRow;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an order object with unique fields")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut fields: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut values = BTreeMap::new();
+                while let Some((key, value)) = fields.next_entry()? {
+                    if values.insert(key, value).is_some() {
+                        return Err(serde::de::Error::custom("duplicate order field"));
+                    }
+                }
+                Ok(SigningRow(values))
+            }
+        }
+        decoder.deserialize_map(Visitor)
+    }
+}
+
+fn json_rows(body: Option<&str>, batch: bool) -> Result<Vec<Params>, SignError> {
+    let body = body.ok_or(SignError::InvalidRequest)?;
+    let rows: Vec<SigningRow> = if batch {
+        serde_json::from_str(body).map_err(|_| SignError::InvalidRequest)?
+    } else {
+        vec![serde_json::from_str(body).map_err(|_| SignError::InvalidRequest)?]
+    };
+    rows.into_iter()
+        .map(|row| {
+            row.0
+                .into_iter()
+                .map(|(key, value)| {
+                    let raw = value.get();
+                    let value = if raw.starts_with('"') {
+                        serde_json::from_str::<String>(raw)
+                            .map_err(|_| SignError::InvalidRequest)?
+                    } else if raw == "true" || raw == "false" || raw.parse::<u32>().is_ok() {
+                        raw.into()
+                    } else {
+                        return Err(SignError::InvalidRequest);
+                    };
+                    Ok((key, value))
+                })
+                .collect()
+        })
+        .collect()
+}
+
 pub type Params = BTreeMap<String, String>;
 
 pub fn query(params: &Params) -> String {
