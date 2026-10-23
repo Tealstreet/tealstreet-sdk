@@ -138,3 +138,12 @@ reconnect cleanup and invalid envelopes alongside byte-exact native route/signin
 
 This table exhausts this venue’s current ratchet rows. Planning changes no source,
 tests, capability flags, caller behavior, or inventory entries.
+
+## Paired error-classification adoption proof
+
+Bitunix adoption must fix the shared error-classification spec #1814 row 33:
+private read 401/403/404 must not be flattened to network failure, and native
+10007 must not disagree as authInvalid on writes versus invalidInput on reads. Consume the shared
+classifier with decoded native-code precedence and its read-auth result, after
+its reviewed API pin. Add RED then GREEN coverage; do not add a per-venue status
+ladder or broaden resend/unknown-write recovery.

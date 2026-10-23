@@ -157,3 +157,13 @@ with the corresponding pending representation and preserve matched test assertio
 
 This table exhausts this venue’s current ratchet rows. Planning changes no source,
 tests, capability flags, caller behavior, or inventory entries.
+
+## Paired error-classification adoption proof
+
+The error-classification owner reserves shared classifier work in #1814. Bitrue
+write adoption must fix its documented P0/P1 rows through that core: native -1022
+must not resend at arbitrary HTTP statuses, malformed 2xx must not become outcome
+None, and partial accepted IDs must remain structured journal evidence rather than
+text only (spec rows 8, 22 and 21). Preserve eligible native retries only within
+reviewed shared refusal/resend rules. Add RED then GREEN proofs with the owner’s
+reviewed API pin; do not encode these corrections in a venue status ladder.
