@@ -241,4 +241,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Shared live Plan admission | Implementation plan | Before consuming Preflight, native whole-plan roots, reserved call slots or owned readiness. | [RUST_LIVE_PLAN_ADMISSION.md](RUST_LIVE_PLAN_ADMISSION.md) |
 | KuCoin Spot steady CPU | Profiling plan | Before attributing public steady-state CPU cost or proposing shared-path performance changes. | [RUST_KUCOIN_SPOT_STEADY_PROFILE.md](RUST_KUCOIN_SPOT_STEADY_PROFILE.md) |
+| Context-bearing history completion | Original Read-root completion and guarded page admission | Before migrating history admission or finalization to RequestContext ownership. | [RUST_HISTORY_CONTEXT_BRIDGE.md](RUST_HISTORY_CONTEXT_BRIDGE.md) |
 | [Bitget CPU option-B follow-up](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md) | Shared second-runner CPU remeasurement, two-run mean and fail-closed certification; enabled for every CPU-gated suite, with unchanged tapes and thresholds. |
