@@ -282,11 +282,18 @@ impl<V: Venue> Engine<V> {
                 venue.encode_socket_interests(store, feed, subscribe, items, emit)
             })
     }
+    #[inline]
     pub(super) fn process_socket_work(&mut self, now: f64) {
         self.assert_live();
         if !self.io.managed_sockets {
             return;
         }
+        if self.io.socket_effects.is_empty() && self.io.socket_proposals.is_empty() {
+            return;
+        }
+        self.process_pending_socket_work(now);
+    }
+    fn process_pending_socket_work(&mut self, now: f64) {
         let mut processed = 0usize;
         loop {
             self.assert_live();
