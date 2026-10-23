@@ -239,3 +239,15 @@ that Cell rpc_id to describe its native purpose. Prune only those three removed
 lexical occurrences; this is NOT an HTTP RequestContext migration or new allowance.
 Every actual HTTP builder/legacy call remains unchanged. Exact public wire-ID
 controls prove the counter still starts at1 and preserves accepted send order.
+
+## Independent checkpoint and scoped verification
+
+At893d3241d1d, shared-owner API/custody source review is CLEAR and an independent
+immutable git-archive run passes private16/16 plus public9/9,0ignored. The REST
+owner independently clears native financial/HTTP/wire/fixture preservation at
+the same checkpoint without a test-execution claim. Later15a3 is a public-codec
+collapsible-if lint cleanup;76a0 is the explicitly documented RPC-counter naming
+and lexical prune. Actualcab37 session landings are genuinely integrated atf61b.
+Current scoped native219tests/15targets, strict all-target/all-feature Clippy and
+full bans/ratchets PASS. No actual1970, CI/performance or train-ready claim follows
+from these local/independent results. Full fresh CI measures unchanged budgets.
