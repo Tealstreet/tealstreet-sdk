@@ -436,3 +436,96 @@ the BingX/WEEX signers), and a second production consumer. Consumers call
 existing or spent custody (no fresh first entry), so returning without a new
 terminal is correct (confirmed with uufub4).
 
+
+## Hyro on RequestContext: plan (claude-fe7lgm, 2026-10-23)
+
+Obligation: Hyro onto RequestContext with shared observer fan-out and a same-ID
+retry proven by reconciliation; it blocks cutover. Branch
+`feat/rust-hyro-execution`, stacked on #1886. Ordinary Bybit Plan adoption is
+claude-dazzy3's scope; Hyro is excluded from it. Coordinate `bybit/src/lib.rs`,
+`trading.rs`, `sign.rs` and the reconciliation codec with dazzy3, and engine
+request-context/registry seams with uufub4.
+
+### Original REDs (committed failing on the stacked head)
+
+`venues/bybit/tests/dispatch_signer.rs`:
+
+1. `hyro_retry_refused_after_a_released_create_stays_unknown`: a create is
+   released, its reply is lost, and both reconciliation axes come back
+   complete and empty. The same-ID retry is then refused by the signer. Today
+   the owner gets `NotSent` for a write that may have reached the venue, which
+   invites a duplicate order. Required: `Unknown`.
+2. `hyro_joined_owners_each_settle_once_when_the_venue_never_answers`: two
+   identical PlaceOrders join one Hyro group, and the venue never answers.
+   Today neither owner ever gets a terminal (legacy Hyro has no deadline).
+   Required: each owner settles once, with `Unknown`, by its own deadline.
+
+### Engine work (one choke point; no Hyro-local copies)
+
+1. **Mutation executions.** `begin_execution` / `join_execution` accept
+   `Operation::Mutation` for command roots only. Each execution owns one
+   `CommandWrites` journal: legs register, release and record results into it
+   exactly as single-command writes do. Observer seals project that one
+   journal (choices 5 and 8): the terminal is sealed once, a pre-terminal
+   detach or timeout gets a non-consuming projection, and order-lock
+   `manage`/`managed_resolved` runs per observer. Late-ACK custody is keyed by
+   `Owner::Execution`.
+2. **Retained intent across executions.** A Hyro group outlives one execution:
+   a paused group keeps its planned lots, orderLinkIds and uncertainty, and a
+   later identical call resumes it. That later call begins a new execution
+   (new bound) and attaches the retained journal facts, so prior releases
+   stay `Unknown` and accepted IDs stay accepted. No reset sent flags, no new
+   identities, and the old execution is never reopened (choice 10).
+3. **Same-ID retry authority.** A resend of a released leg with the same
+   orderLinkId needs a typed engine fact: complete two-axis absence observed
+   by this execution's own read legs, delivered after the uncertain release
+   (`RetryEvidence::ReconciledAbsence`). The engine checks the absence
+   delivery came after the leg's last release and within the same execution.
+   Native absence text alone cannot authorize it. At most two physical
+   attempts per leg, bounded across resumed executions.
+4. **Deadline.** Hyro executions use a 110 s bound, below the SDK's 120 s
+   command wait, so the engine's typed `Unknown`/`Timeout` reaches callers
+   before the host gives up.
+
+### Hyro adoption
+
+`start_hyro_place` admits each command's entry root (Mutation, signed
+policy). An identical intent joins the live execution (`UntilTerminal`) or
+resumes the retained group in a new execution. Creates, position-stops and
+lookups become execution legs through `request_signed_managed` with the
+existing Bybit `SignStep`. Lookups are Read legs under the Mutation execution.
+`pause_hyro`, `on_hyro_sign_failed` and the done loop become `abort_execution`
+and `complete_execution`, and `waiters` is removed. Identity receipts use
+`execution_progress` with retained replay. The legacy inventory entries for
+`hyro.rs` are pruned.
+
+### Prerequisites and coordination
+
+- A Bybit reconciliation codec (`capture_http_reconciliation`), which managed
+  mutations need before they can be released. Confirm with dazzy3 whether
+  ordinary Bybit adoption lands it first; if not, Hyro supplies only its own
+  narrow codec through the same Venue hook.
+- `RetryEvidence::ReconciledAbsence` and the execution journal touch
+  `request_context.rs` / `request_context_registry.rs`, so the hook list goes to
+  uufub4 before any edit.
+
+### Acceptance (beyond the REDs)
+
+These existing controls are preserved:
+- identical concurrent submissions share one dispatch;
+- a lost ACK recovers without recreating;
+- two complete absences reuse the ID but never loop;
+- a cyclic lookup stays `Unknown`;
+- a definitive rejection allows a new identity;
+- receipts cover the shared write and late waiter.
+
+New engine controls:
+- a mutation observer joining after release projects prior uncertainty;
+- a detach or timeout before terminal leaves the shared leg running for its peers;
+- a same-ID resend is refused without the absence fact, or with absence from
+  before the release or from another execution;
+- a resumed execution keeps the old execution's journal facts.
+
+Architecture gate: No. Every new mechanism (mutation journal, retained intent,
+retry evidence) is engine-owned and generic; Hyro only declares its intent key
+and native codecs.
