@@ -303,3 +303,12 @@ caller reviews. Draft once clean. CI/proof watches for1784–1787 remain running
 all merges stay after ApeX1772 and1783 in owner queue order. Future shared actual
 integration/current full CI/proof/separate guard/separate merge remain required.
 No local release WASM/replay/timing/size sweep or comparator/budget relaxation.
+
+Both independent plan audits are CLEAN with these explicit continuation rules:
+Crypto.com clears token/regular half only on terminal abandonment; bounded40101
+and transport retries retain the exact original token plus regular builder,
+including when an ACK crossed the failed attempt. WOO metadata refresh and
+stop_awaiting_price consumption/immediate reread run only after accepted commit;
+a rejected token waits ordinary poll cadence. Preserve mapping-time diagnostic
+forget/report timing and the existing stop-price flag (no reporter repair).
+BloFin's bootstrap seeding is a separate design item; no BloFin source changes.
