@@ -114,6 +114,7 @@ impl ContextRegistry {
         }
         if owner.pending != 0
             || owner.deliveries != 0
+            || owner.waits != 0
             || owner.writes.is_some()
             // A Plan seal projects the founder's journal; the member has none.
             || (owner.mutation_declared && !planned)

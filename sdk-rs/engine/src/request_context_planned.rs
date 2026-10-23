@@ -526,6 +526,7 @@ impl<P> Cx<'_, P> {
                     credentialed: owner.credentialed,
                     pending: 0,
                     deliveries: 0,
+                    waits: 0,
                     intent: owner.intent,
                     leg_intents,
                 };

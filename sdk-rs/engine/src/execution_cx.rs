@@ -302,7 +302,7 @@ impl<P> Cx<'_, P> {
     /// Retire a sealed physical Plan owner. It has no command: no notice,
     /// order lock or entry completion; observers are sealed separately.
     pub(super) fn finish_physical_plan(&mut self, owner: Owner, retired: Vec<RequestId>) {
-        self.io.retire_http_owner(owner, retired);
+        self.io.retire_physical_owner(owner, retired);
         if !self.io.request_contexts.finish_physical(owner) {
             self.io.http_owner_poison = true;
             panic!("HTTP physical owner retirement bookkeeping failed");

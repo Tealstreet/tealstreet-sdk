@@ -176,11 +176,15 @@ No family source edit depends on an unlanded prerequisite.
   `l1_chain_id`, so its sequencing is an open question for P4 review.
 - **P5. Nonce domains (claude-m26ps4).**
   - The Aster V3 per-signer static map and HL/TxFlow `ethereum_agent` move to
-    the shared nonce core, keyed by setup `stableId`, never an address or key
-    hash.
-    - Today, HL and TxFlow engines share a sequence automatically because it is
-      keyed by address. After the move, sharing requires callers to assign the
-      same `stableId`. That is an explicit caller contract, listed for cutover.
+    the shared nonce core, keyed by a non-secret domain key: setup `stableId`,
+    or a public identifier when the venue's own sequence is public (Aster V3:
+    the configured signer address). The key is never a hash of key material,
+    and never an address derived from a key inside a venue.
+    - HL and TxFlow keep sharing one sequence per public agent address. Until
+      their signer migration supplies that address from setup (P4
+      `PublicAddress`), #1852's `reserve_agent_nonce` still derives it inside
+      the venue from the raw secret. That is a listed interim, removed with the
+      migration.
   - Draws happen at preparation and stay process-wide monotonic.
   - Lighter's tx nonce is server-sequenced. The engine owns the allocated
     counter.

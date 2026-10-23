@@ -7,6 +7,8 @@ use safe_cex_engine::signing::{
 
 /// The window and payload are already serialized by the caller. Preserve their
 /// bytes; the shared receipt validator checks the supplied integer wire stamp.
+/// Bybit refuses a request once server time passes `stamp + recv_window`, so
+/// that is the receipt's expiry (none unless the window is a positive number).
 pub fn http_work(
     identity: &Identity,
     payload: String,
@@ -14,6 +16,11 @@ pub fn http_work(
     recv_window: String,
     context: Context,
 ) -> SignRequest {
+    let expiry_ms = recv_window
+        .parse::<std::num::NonZeroU32>()
+        .ok()
+        .map(|window| window.get())
+        .map(|window| stamp_ms + f64::from(window));
     hmac_sha256_work(
         identity,
         vec![
@@ -33,7 +40,7 @@ pub fn http_work(
         context,
         SignReceipt {
             stamp_ms: Some(stamp_ms),
-            expiry_ms: None,
+            expiry_ms,
         },
     )
 }
@@ -95,11 +102,12 @@ mod tests {
             context.clone(),
         );
         assert_eq!(work.context, context);
+        // Bybit refuses a request once server time passes stamp + recv_window.
         assert_eq!(
             work.receipt,
             SignReceipt {
                 stamp_ms: Some(1_709_209_849_123.),
-                expiry_ms: None
+                expiry_ms: Some(1_709_209_854_123.)
             }
         );
         assert_eq!(
