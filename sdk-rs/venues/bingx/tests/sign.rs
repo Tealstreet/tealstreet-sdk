@@ -118,6 +118,7 @@ fn invalid_secondary_identity_is_rejected_even_without_a_primary_private_account
         let options = Options {
             public_data_only,
             read_credentials: Some(Identity {
+                extra: Default::default(),
                 credential: KeyRef("ref:owned-read".into()),
                 signing: KeyRef(String::new()),
                 passphrase: None,
