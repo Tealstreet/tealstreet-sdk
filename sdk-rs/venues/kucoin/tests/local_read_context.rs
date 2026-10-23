@@ -506,6 +506,69 @@ fn genuine_capacity_refusal_covers_futures_local_terminal_and_recovery() {
     );
 }
 #[test]
+fn saturated_leverage_read_cannot_mutate_the_native_setting() {
+    let mut e = spot(false);
+    assert!(control(&mut e, Some("saturate")).is_empty());
+    assert_eq!(e.venue().held.len(), 256);
+    let before = e.store().setting(SYMBOL).unwrap();
+    assert_eq!(before.leverage, 9.);
+    assert_eq!(before.buy_leverage, Some(8.));
+    assert_eq!(before.sell_leverage, Some(7.));
+    let a = run(&mut e, 100., leverage(SYMBOL));
+    assert_eq!(
+        e.store().setting(SYMBOL),
+        Some(before),
+        "capacity denial must precede the local projection"
+    );
+    typed(&a, &Error::Capacity.to_string(), ErrorKind::Internal, None);
+    assert_eq!(e.venue().held.len(), 256);
+    assert!(control(&mut e, None).is_empty());
+    assert!(e.venue().held.is_empty());
+    assert_eq!(done(&run(&mut e, 100., leverage(SYMBOL))), json!(1));
+}
+#[test]
+fn nonfinite_clock_leverage_read_cannot_mutate_the_native_setting() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut e = spot(true);
+        let before = e.store().setting(SYMBOL).unwrap();
+        assert_eq!(before.leverage, 9.);
+        assert_eq!(before.buy_leverage, Some(8.));
+        assert_eq!(before.sell_leverage, Some(7.));
+        let a = run(&mut e, now, leverage(SYMBOL));
+        assert_eq!(
+            e.store().setting(SYMBOL),
+            Some(before),
+            "clock denial must precede the local projection"
+        );
+        let error = failure(&a);
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, None);
+        assert_eq!(done(&run(&mut e, 100., leverage(SYMBOL))), json!(1));
+    }
+}
+#[test]
+fn saturated_cached_hit_cannot_publish_the_native_order() {
+    let mut e = spot(true);
+    assert!(control(&mut e, Some("saturate")).is_empty());
+    assert_eq!(e.venue().held.len(), 256);
+    let before = e.store().orders().to_vec();
+    let a = run(&mut e, 100., lookup(SYMBOL, "client-1"));
+    assert_eq!(e.store().orders(), before.as_slice());
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. }))),
+        "a cached hit cannot publish without admission: {a:?}"
+    );
+    typed(&a, &Error::Capacity.to_string(), ErrorKind::Internal, None);
+    assert_eq!(e.venue().held.len(), 256);
+    assert!(control(&mut e, None).is_empty());
+    assert!(e.venue().held.is_empty());
+    assert_eq!(
+        done(&run(&mut e, 100., lookup(SYMBOL, "client-1"))),
+        json!({"found": true, "order": order()})
+    );
+}
+#[test]
 fn fixed_clock_reuse_retires_all_local_owners_beyond_registry_capacity() {
     for keyed in [false, true] {
         let mut e = spot(keyed);
