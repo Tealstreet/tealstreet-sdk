@@ -334,14 +334,19 @@ fn send(cx: &mut Cx<'_, Pending>, credentials: &Credentials, leg: Leg) {
     }
 }
 
-/// Native current-settings answer after a superseded read. Gated: it needs the
-/// shared ReadOnly early terminal (uufub4, done_read_plan_after_data); until that
-/// reviewed API exists it refuses rather than issuing or extending anything.
-fn answer_current(cx: &mut Cx<'_, Pending>, leg: &Leg, _read: (f64, f64)) {
-    fail(
-        cx,
-        leg,
-        metadata_error("BingX metadata superseded; shared early completion is pending")
-            .kind(ErrorKind::Unsupported),
-    );
+/// Native current-settings answer after a superseded read: the newer settings
+/// win, with this read's rails only where the store has none. The shared
+/// ReadOnly early terminal settles this call and retires the unissued remainder.
+fn answer_current(cx: &mut Cx<'_, Pending>, leg: &Leg, read: (f64, f64)) {
+    let setting = cx.store.setting(&leg.symbol);
+    let valid = |value: &f64| value.is_finite() && *value > 0.0;
+    let buy = setting
+        .and_then(|s| s.buy_leverage)
+        .filter(valid)
+        .unwrap_or(read.0);
+    let sell = setting
+        .and_then(|s| s.sell_leverage)
+        .filter(valid)
+        .unwrap_or(read.1);
+    let _ = cx.done_read_plan_after_data(&leg.plan, &leg.slot, &leg.context, result((buy, sell)));
 }
