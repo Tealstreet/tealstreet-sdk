@@ -109,3 +109,18 @@ and KCS timing are required before an explicit venue slot, fresh separate guard
 and head-matched merge. #1888's engine window takes priority; no venue merge ahead
 of it. Architecture gate: direct shared authority, no venue-specific cross-cutting
 mechanism; no local finalizer, fake credential/HTTP, retry, clock or owner registry.
+
+## Tests-first receipt
+
+Plan bfbe1458072 received three independent CLEAN reviews before tests/source.
+Tests-first352e80e6677 plus c12cc3b792b run on unchanged frozen6614 production:
+ten assertion REDs and six compatibility GREENs. The three standalone REDs prove
+denied leverage mutates9/8/7 to1/1/1 and denied cached lookup publishes the full
+order. The duplicate-owner control is GREEN on the baseline because the engine
+already rejects duplicate commands; no new duplicate-policy claim is made.
+
+The unchanged sixteen controls pass after adoption. KuCoin Spot-on plus Binance
+591 tests/43 targets and KuCoin feature-off162/17 pass; strict scoped Clippy,
+formatting, bans and both request-context checks (15 checker controls) pass.
+Independent source/adversarial, caller and full-map reviews are CLEAN. Final
+actual #1873/#1888 integration and current CI remain required before a train slot.

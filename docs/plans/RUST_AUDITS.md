@@ -2367,3 +2367,12 @@ regression evidence is the reported landing CPU miss at28.838ms versus27.68ms.
 Interleaved unchanged-source artifacts show a local median23.105→18.957ms;
 exact-head CI's fixed public/private, CPU, memory and size gates remain acceptance
 requirements. [Scope, raw evidence and limitations](RUST_WOO_PUBLIC_CPU.md).
+
+## KuCoin local Read ownership
+
+Eight local terminal expressions use genuine initial Read command admission.
+The original root is validated immediately before cached-result publication or
+Spot leverage projection. No HTTP attempt is fabricated and no owner is acquired
+on private/pager fallthrough. Existing credential precedence, successful setter
+no-ops and accountMarginType capability are preserved. The exact ratchet removes
+eight occurrences/seven rows; remaining signing/history/Session sites remain held.

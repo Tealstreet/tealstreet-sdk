@@ -921,3 +921,18 @@ and zero unexpected failures. This does not establish private authenticated
 lifecycle parity. The tested head has 43 successful checks and one browser skip;
 source-equivalent current integration, final guard and merge GO remain separate.
 The fixed gates and comparison policies are unchanged.
+
+## KuCoin local Read original-source controls
+
+Tests committed before production on frozen661427d10b3 produce ten assertion
+failures and six passing compatibility controls. Standalone failures show
+capacity/invalid-clock leverage mutation and saturated cached publication before
+adoption. Genuine256-owner saturation, fixed-clock recovery/reuse and duplicate
+command protection use real callbacks, not fabricated Context or HTTP authority.
+
+Compatibility controls preserve cache aliases/sentinels, full order results,
+constant leverage fields and unknown-symbol handling, successful setting no-ops
+and capability declarations. Private/pager requests preserve native URLs, headers
+and completion while all256 background roots can coexist without an added owner.
+No steady WS/ticker/book path changes; current post-#1888 CI must verify the
+KuCoin Spot >=1.20x median target before a venue merge.
