@@ -647,10 +647,68 @@ fn retired_mode_handoff_never_starts_its_spot_read() {
         })
         .unwrap();
     engine.handle(2001.0, Event::WsClosed { socket, code: 1006 });
-    engine.drain_actions().for_each(drop);
+    let retired: Vec<_> = engine.drain_actions().collect();
     engine.handle(2002.0, Event::TimerFired { timer: wake });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(engine.store().balance().total, 0.0);
+    let (retry, at) = retired
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > 2001.0 && *at_ms <= 18001.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(at, Event::TimerFired { timer: retry });
+    let replacement = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let mut released: Vec<_> = engine.drain_actions().collect();
+    assert!(!released.iter().any(|a| matches!(a, Action::Http(_))));
+    let fresh = released
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(fresh, wake);
+    engine.handle(at, Event::TimerFired { timer: fresh });
+    released.extend(engine.drain_actions());
+    let reads: Vec<_> = released
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(request) if support::kind(request) == "spotClearinghouseState" => {
+                Some(request)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reads.len(),
+        1,
+        "retired native mode work resumes once after fresh handoff"
+    );
+    engine.handle(at, Event::TimerFired { timer: wake });
+    engine.handle(at, Event::TimerFired { timer: fresh });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(at,Event::HttpResponse{
+        request:reads[0].id,
+        response:Response{status:200,headers:"",body:r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#},
+    });
+    assert_eq!(engine.store().balance().total, 1100.0);
+    assert_eq!(engine.store().balance().free, 1050.0);
 }
 
 #[test]
