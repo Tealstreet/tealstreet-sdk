@@ -1302,3 +1302,38 @@ blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
 full bans and both request-context checks (15tests) PASS. Three independent
 implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
 prune is verified; the parallel #1951 history prune is not credited here.
+
+### Binance identity preflight Read admission
+
+Plan `3a0598f1892` precedes original-control commit `84e327e2c8f`.
+With unchanged production, four real full-registry controls are assertion RED:
+missing/disabled/incomplete-primary/incomplete-secondary identity preflights
+publish local messages rather than the engine's capacity refusal. The existing
+valid-command capacity control and all six identity compatibility controls are
+GREEN, including 300 same-clock/same-command local refusals and exact selected
+signer request bytes. The same eleven tests pass after conversion, with no
+transport, extra diagnostic or Store mutation on initial admission refusal.
+No manufactured Context or fixture bypass is used.
+
+## Phemex unsigned public-trades custody controls
+
+Original checkpoint fc1b87973fa compiles13 controls on unchanged15bd production:
+8 behavioral assertion REDs and5 native passes, zero ignored. The dedicated
+public target retains those selected assertions; held signed REDs remain on
+feat/rust-phemex-bounded-history-context at321992b680c. Additional controls pin
+invalid-entry refusal, typed route metadata without auth evidence and cleanup
+after a pause exceeds the original20s root. Existing native history fixtures
+use the shared prepared-action driver and monotonic response clocks; only the
+unsigned transport-kind expectation changes to Network, while strict financial
+rows, errors, no-prefix/no-gap and signed-path assertions remain. Rebuilt CI
+continues to own replay, CPU, size and retained-memory certification.
+
+## Selected managed signed Read custody
+
+One non-Clone engine wrapper retains selected opaque identity, egress/evidence
+and original Context through queue and retry, with exact typed refusal and
+pending return. Missing-selection command diagnostics precede a single typed
+terminal under genuine local authority. Provider/prepare metadata and ordered
+recipe headers remain unchanged. Genuine engine controls cover capacity,
+duplicate entry, phase custody, expiry, retry, streaming and account evidence;
+native compatibility controls do not substitute for later venue adoption.
