@@ -910,3 +910,9 @@ pass, with six original supervision tests and held candle fixtures unchanged.
 Unheld public drivers use shared prepared_actions at their existing event clocks,
 retaining every old data/error/continuity assertion. No local transport helper,
 retry policy or outcome mechanism is added; broad CI remains a separate gate.
+
+Depth frozen source81ac295d25a passes511 Lighter+Binance native tests (49 result
+groups), strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both
+request checks/15 controls. Held request_context_candles.rs and trading.rs remain
+byte-exact to actualdb32; ticker/catalog runtime remains unchanged. Independent
+implementation review and CI do not derive readiness solely from native tests.

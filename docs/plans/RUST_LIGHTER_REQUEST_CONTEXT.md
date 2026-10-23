@@ -608,3 +608,11 @@ cover exact four-deployment wire, preclaim fencing, parked/released original
 expiry and recovery, route/transport/malformed cleanup, resubscribed generation,
 WS revision precedence, capacity peer isolation and300 successful retirements.
 Full native/strict/ratchet/CI and independent source reviews remain final gates.
+
+Depth verification on source81ac295d25a:511 Lighter+Binance native tests across49
+result groups PASS, including all7 new controls, all8 cached-read controls and
+unchanged held candle tests. Strict all-target/all-feature Lighter Clippy, scoped
+fmt, bans and both current request checks/15 controls PASS. Ticker/catalog,
+private/account/signing/trading and shared engine source stay unchanged; only9
+own paths differ from actualdb32. Independent implementation reviews and broad
+CI remain separate gates. No local WASM release/replay/timing sweep was run.
