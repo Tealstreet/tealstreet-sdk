@@ -417,8 +417,8 @@ no passphrase in venue state, and derives nothing from them.**
      live session-owned Read context whose credential is the primary slot
      with `CredentialRole::SessionAuth`. Anything else, including Command
      and Background contexts, is `Invalid`.
-   - Before routing, the engine checks the exact Context, attempt and
-     generation. A retired session has already discarded the managed entry,
+   - Before routing, the engine checks the exact Context and the full
+     `ImportAuthority`. A retired session has already discarded the managed entry,
      so this check is the second fence.
    - A 2xx body accumulates in a pre-reserved, capped zeroizing buffer
      (fail closed over the cap) and goes to the provider import. It never
