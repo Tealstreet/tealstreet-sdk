@@ -270,6 +270,20 @@ fn done(actions: &[Action], result: &str) -> usize {
         })
         .count()
 }
+fn total_terminals(actions: &[Action]) -> usize {
+    actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                Action::Notice(
+                    Notice::CommandDone { command: 7, .. }
+                        | Notice::CommandFailed { command: 7, .. }
+                )
+            )
+        })
+        .count()
+}
 #[test]
 #[ignore = "adoption #1894, owner codex-hcmq3f; runtime waits for reviewed #1873 feature pin"]
 fn original_red_cancel_success_can_retire_unissued_replacement_once() {
@@ -289,10 +303,13 @@ fn original_red_cancel_success_can_retire_unissued_replacement_once() {
         1,
         "declared native conditional terminal must complete once"
     );
+    assert_eq!(total_terminals(&actions), 1);
     assert_eq!(e.venue().completion, Some(Ok(())));
     assert_eq!(e.venue().retired, 1);
     reply(&mut e, &cancel, 3., "cancelled");
-    assert_eq!(done(&prepared_actions(&mut e, 3.), "[]"), 0);
+    let late = prepared_actions(&mut e, 3.);
+    assert_eq!(total_terminals(&late), 0);
+    assert!(!late.iter().any(|action| matches!(action, Action::Http(_))));
     assert_eq!(e.venue().replies, 1);
 }
 #[test]
@@ -303,10 +320,9 @@ fn ordinary_full_amend_preserves_native_identity_and_root() {
     let replacement = request(&mut e, 2.);
     assert!(replacement.url.ends_with("/replace"));
     reply(&mut e, &replacement, 3., "replacement-native-id");
-    assert_eq!(
-        done(&prepared_actions(&mut e, 3.), "[\"replacement-native-id\"]"),
-        1
-    );
+    let completed = prepared_actions(&mut e, 3.);
+    assert_eq!(done(&completed, "[\"replacement-native-id\"]"), 1);
+    assert_eq!(total_terminals(&completed), 1);
     assert_eq!(e.venue().completion, Some(Ok(())));
     assert_eq!(e.venue().retired, 1);
 }
