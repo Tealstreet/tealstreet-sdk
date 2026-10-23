@@ -362,3 +362,25 @@ makes a delayed Plan ready but leaves uncertainty fenced; a valid read callback
 can still reconcile; a Place Plan with a queued cancel completes that cancel at
 root expiry and at readiness queue refusal without another event. Preserve all
 prior readiness, panic, observer and deferred-command assertions.
+
+## Native Read early success
+
+BingX's paired metadata walk can return the current cached settings after the
+first validated leverage response when publication becomes ineligible. It then
+issues no margin-type read. Keep the original declared root; do not add a call,
+re-admit a plan, or infer fresh-cache publication from structural completion.
+
+Add `done_read_plan_after_data(plan, slot, context, result)` as a narrow terminal
+transaction. Require a live Read Plan, the exact current released DATA attempt
+and slot, and no other selected/queued/in-flight call. Validate every refusal
+before settling the current call. The operation settles that call and retires
+remaining unissued declarations through the existing owner/journal cleanup;
+it grants no new send, retry, publication, group or financial authority.
+Mutation, absent/foreign/stale/expired delivery, a settled replay and another
+issued call all refuse without changing Plan state, IDs, actions or credits.
+
+Prove the native two-step early-success shape with an original assertion RED
+before this operation, and keep a normal two-call positive. Add wrong slot,
+Mutation, absent delivery, another active call and post-settlement/replay controls.
+The native adapter still owns validated-success decoding and the exact captured
+publication/fallback policy; the terminal operation does not warm its cache.

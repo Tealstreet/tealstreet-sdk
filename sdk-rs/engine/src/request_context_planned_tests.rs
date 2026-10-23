@@ -26,6 +26,13 @@ mod planned_calls {
         timeout: u32,
         fallback: bool,
         idle: bool,
+        early_read: bool,
+        early_checks: bool,
+        settle_before_early: bool,
+        parallel: bool,
+        peer_queued: bool,
+        early_replayed: Option<Result<(), Error>>,
+        early_result: Option<Result<(), Error>>,
         responses: usize,
         timers: usize,
         retired: usize,
@@ -162,10 +169,14 @@ mod planned_calls {
                 retry_window: RetryWindow::FreshAttempt,
                 after_refusal: if self.fallback { &fallback_steps } else { &[] },
             }];
-            let steps = (0..if self.long { 8 } else { 2 })
+            let parallel_calls = std::array::from_fn::<_, 2, _>(|_| CallBound {
+                timeout_ms: timeout, attempts: 2,
+                retry_window: RetryWindow::FreshAttempt, after_refusal: &[],
+            });
+            let steps = (0..if self.parallel { 1 } else if self.long { 8 } else { 2 })
                 .map(|_| StepBound {
                     wait_ms: self.wait,
-                    calls: &calls,
+                    calls: if self.parallel { &parallel_calls } else { &calls },
                 })
                 .collect::<Vec<_>>();
             self.plan = Some(
@@ -190,7 +201,13 @@ mod planned_calls {
                 .unwrap(),
             );
             if !self.idle {
-                self.queue(cx)
+                self.queue(cx);
+                if self.parallel {
+                    let plan = self.plan.as_ref().unwrap();
+                    let peer = cx.plan_slots(plan).unwrap().remove(0);
+                    let context = cx.plan_leg_context(plan, &peer).unwrap();
+                    if self.peer_queued { queue(cx, context, self.write).unwrap(); }
+                }
             }
         }
     }
@@ -297,6 +314,37 @@ mod planned_calls {
                 return;
             }
             self.responses += 1;
+            if self.early_read {
+                if self.early_checks {
+                    let snapshot = (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage());
+                    let delivery = cx.io.http_delivery.take();
+                    assert_eq!(complete_native_early_read(cx, &plan, &slot, &context), Err(Error::Revoked));
+                    cx.io.http_delivery = delivery;
+                    let now = cx.now;
+                    for expired in [20_000., plan.deadline()] {
+                        cx.now = expired;
+                        assert_eq!(complete_native_early_read(cx, &plan, &slot, &context), Err(Error::TimedOut));
+                    }
+                    cx.now = now;
+                    let other = self.other_plan.as_ref().unwrap();
+                    assert_eq!(complete_native_early_read(cx, other, &slot, &context), Err(Error::Revoked));
+                    let other_slot = self.wrong_resend_slot.as_ref().unwrap();
+                    assert_eq!(complete_native_early_read(cx, &plan, other_slot, &context), Err(Error::Revoked));
+                    assert_eq!(snapshot, (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage()));
+                    cx.validate_plan_delivery(&plan, &context).unwrap();
+                }
+                if self.settle_before_early { cx.finish_plan_call(&plan, &slot, &context).unwrap(); }
+                let snapshot = (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage());
+                let result = complete_native_early_read(cx, &plan, &slot, &context);
+                if result.is_err() {
+                    assert_eq!(snapshot, (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage()));
+                    if !self.settle_before_early { cx.validate_plan_delivery(&plan, &context).unwrap(); }
+                } else {
+                    self.early_replayed = Some(complete_native_early_read(cx, &plan, &slot, &context));
+                }
+                self.early_result = Some(result);
+                return;
+            }
             if self.write {
                 cx.http_write_result(
                     &context,
@@ -326,6 +374,13 @@ mod planned_calls {
             self.retired += 1
         }
         fn on_request_failed(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: &str) {
+            if self.early_read {
+                let plan = self.plan.as_ref().unwrap();
+                let slot = self.slot.as_ref().unwrap();
+                let before = (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage());
+                self.early_result = Some(complete_native_early_read(cx, plan, slot, &context));
+                assert_eq!(before, (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage()));
+            }
             if self.continue_failure {
                 let plan = self.plan.as_ref().unwrap();
                 cx.finish_plan_failed_call(plan, self.slot.as_ref().unwrap(), &context)
@@ -373,6 +428,113 @@ mod planned_calls {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+    // The native current-settings branch consumes its DATA directly and never
+    // settles separately or issues the remaining read.
+    fn complete_native_early_read(cx: &mut Cx<'_, Context>, plan: &Plan, slot: &Slot,
+        context: &Context) -> Result<(), Error> {
+        cx.done_read_plan_after_data(plan, slot, context, "current-settings".into())
+    }
+    #[test]
+    fn validated_first_read_can_return_current_settings_without_issuing_second_read() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            early_read: true, ..Default::default()
+        });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        let reserved = e.io.next_id;
+        release(&mut e, first, 0.);
+        response(&mut e, first, 19_000., "current-settings");
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(e.venue.early_result, Some(Ok(())), "native early Read success must retire unissued work");
+        assert_eq!(e.venue.responses, 1);
+        assert_eq!(e.venue.early_replayed, Some(Err(Error::Revoked)));
+        assert_eq!(e.venue.retired, 1);
+        assert_eq!(e.io.next_id, reserved);
+        assert_eq!(e.io.request_contexts.plan_context_storage().0, 0);
+        assert_eq!(e.io.request_contexts.plan_context_storage().2, 0);
+        assert!(e.io.request_contexts.plan_timer(7).is_none());
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "current-settings")).count(), 1);
+        assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))));
+        response(&mut e, first, 19_001., "late");
+        assert!(e.drain_actions().next().is_none());
+        assert_eq!(e.venue.responses, 1);
+    }
+    #[test]
+    fn early_read_refusals_preserve_current_data_and_reserved_work() {
+        let mut foreign = crate::test_support::seeded_engine(Plans { idle: true, ..Default::default() });
+        start(&mut foreign, 0.);
+        let other = foreign.venue.plan.clone().unwrap();
+        let foreign_slot = Cx { now: 0., store: &mut foreign.store, io: &mut foreign.io }
+            .plan_slots(&other).unwrap().remove(0);
+        let mut e = crate::test_support::seeded_engine(Plans {
+            early_read: true, early_checks: true, other_plan: Some(other),
+            wrong_resend_slot: Some(foreign_slot), ..Default::default()
+        });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        response(&mut e, first, 19_000., "ok");
+        assert_eq!(e.venue.early_result, Some(Ok(())));
+        assert_eq!(e.venue.retired, 1);
+    }
+    #[test]
+    fn early_read_rejects_mutations_settled_delivery_and_selected_peers() {
+        for (write, settled, parallel, peer_queued, expected) in [
+            (true, false, false, false, Error::Invalid),
+            (false, true, false, false, Error::Revoked),
+            (false, false, true, false, Error::State),
+            (false, false, true, true, Error::State),
+        ] {
+            let mut e = crate::test_support::seeded_engine(Plans {
+                early_read: true, write, settle_before_early: settled,
+                parallel, peer_queued, ..Default::default()
+            });
+            start(&mut e, 0.);
+            let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, first, 0.);
+            response(&mut e, first, 19_000., "ok");
+            assert_eq!(e.venue.early_result, Some(Err(expected)));
+            assert_eq!(e.venue.retired, 0);
+            assert!(e.io.request_contexts.plan_timer(7).is_some());
+            assert!(!e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))));
+        }
+    }
+    #[test]
+    fn early_read_never_converts_transport_failure_into_data_success() {
+        let mut e = crate::test_support::seeded_engine(Plans { early_read: true, ..Default::default() });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        e.handle(19_000., Event::HttpFailed { request: first.attempt().request, error: "network" });
+        assert_eq!(e.venue.early_result, Some(Err(Error::Revoked)));
+        assert_eq!(e.venue.responses, 0);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))));
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))).count(), 1);
+        assert_eq!(e.venue.retired, 1);
+        assert_eq!(e.io.request_contexts.plan_context_storage().2, 0);
+    }
+    #[test]
+    fn early_read_after_fresh_read_retry_retains_original_plan_bound() {
+        let mut e = crate::test_support::seeded_engine(Plans { early_read: true, ..Default::default() });
+        start(&mut e, 0.);
+        let plan = e.venue.plan.clone().unwrap();
+        assert_eq!(plan.deadline(), 80_000.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        response(&mut e, first, 19_000., "retry");
+        let (second, packet) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        assert_eq!(packet.timeout_ms, Some(20_000));
+        release(&mut e, second, 19_000.);
+        response(&mut e, second, 38_000., "current-settings");
+        assert_eq!(e.venue.early_result, Some(Ok(())));
+        assert_eq!(e.venue.retired, 1);
+        assert_eq!(plan.deadline(), 80_000.);
+        assert_eq!(e.io.request_contexts.plan_context_storage().2, 0);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))).count(), 1);
+        assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))));
     }
     fn start(engine: &mut Engine<Plans>, now: f64) {
         engine.start(now);
