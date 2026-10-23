@@ -5611,6 +5611,25 @@ expiry Timeout, while native malformed/status errors retain Internal. Capacity
 admission precedes missing-market completion. Callers treat a rejected read as
 unavailable history, not an authoritative empty snapshot; no SDK signature changes.
 
+## Hyperliquid local order lookup admission
+
+Perps and spot local `OrderByClientId` results require genuine command admission.
+A cached symbol/client-ID match still returns the complete native Order, including
+optional fields, before validating the client ID or account identity. An invalid
+client ID or absent trading identity still returns exactly
+`{"found":false,"definitive":false}`. These synchronous reads emit no request,
+signing, timer, history marker or Store update.
+
+Invalid entry clocks and full shared owner capacity now return one correlated
+Read failure (`InvalidInput` / `Internal`, respectively), with no financial
+outcome. Callers must handle that failure instead of treating a local lookup as
+unconditionally successful. Reusing the command ID after completion remains valid;
+an active duplicate cannot complete or replace its existing owner. The valid-ID
+uncached spot miss, public-only perps refusal and private perps REST lookup retain
+their native behavior. The exchange-server order reconciliation caller consumes
+the same complete cached result and must retain non-definitive miss handling.
+
+
 
 ## BloFin PublicTrades managed history
 
