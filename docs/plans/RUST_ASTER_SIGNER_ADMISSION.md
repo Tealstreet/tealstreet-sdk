@@ -145,6 +145,21 @@ the current hosted and remote shape.
   and Bybit; only the `cfg(test)` oracle and test literals are frozen.
 - **`userId`.** The V1 fallback to the API key is gone (empty string). V3 falls
   back to the public signer address. Recorded in RUST_CUTOVER_CALLERS.
+- **Review decisions.**
+  - A malformed read secret (V3 non-hex) or an empty read secret now refuses
+    setup, as every admitted family does for incomplete secondary credentials;
+    the legacy venue failed only the signed reads.
+  - Read-key requests now route `Secondary` and primary requests `Primary` once
+    a read key exists (C1 `Selection::sign`). That matches the TS secondary
+    client Aster already wires through `createXhrWithSecondaryKey`.
+  - A read slot's V3 wallet error fails its own requests, not startup.
+  - `signingFromPrimary` is not venue-gated: it only aliases the caller's own
+    primary material, and TS never takes it from caller metadata.
+  - Per-venue fix of a cross-cutting concern? Partly. The `0x` decoding and the
+    alias are shared. Version resolution and the per-version encoding are Aster
+    protocol semantics, mirrored once in TS and once natively and pinned by the
+    golden. If a second family needs shape-dependent encoding or secret
+    trimming, move both into `CredentialSetupPolicy`.
 - **REDs shown.** R1: with the base rules the registry refuses refs ("Injected
   signing is not supported for this venue yet"). R2: with the base rules TS
   derives `dispatchSigning: false`. R3: `0x` hex fails decoding. R6 is

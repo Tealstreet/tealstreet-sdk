@@ -86,6 +86,19 @@
           "primary": {"key": "0x1111111111111111111111111111111111111111", "secret": "<hex32:12>", "secretEncoding": "utf8"}
         }
       }
+    },
+    {
+      "name": "keyless public account installs nothing",
+      "input": {},
+      "expected": {"apiVersion": "v1", "setup": {}}
+    },
+    {
+      "name": "blank v1 secret is absent and passphrases are ignored",
+      "input": {"key": "api-key", "secret": "  ", "passphrase": "unused", "secondary_passphrase": "unused"},
+      "expected": {
+        "apiVersion": "v1",
+        "setup": {"primary": {"key": "api-key", "secretEncoding": "utf8"}}
+      }
     }
   ]
 }

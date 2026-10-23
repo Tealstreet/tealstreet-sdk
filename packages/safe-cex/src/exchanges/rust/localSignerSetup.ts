@@ -41,8 +41,9 @@ export const parseLocalSignerMetadata = (input: unknown): LocalSignerMetadata =>
 
 // Match Rust str::trim's Unicode White_Space semantics. JS String.trim also
 // removes BOM and keeps NEL, which would disagree with the provider's key bytes.
+export const rustTrim = (value: string): string => value.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '');
 const credentialPresent = (key: string | undefined, trim: boolean): boolean =>
-  typeof key === 'string' && (trim ? key.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '') : key).length > 0;
+  typeof key === 'string' && (trim ? rustTrim(key) : key).length > 0;
 
 export const effectiveIdentityMetadata = (
   metadata: LocalIdentityMetadata | undefined,

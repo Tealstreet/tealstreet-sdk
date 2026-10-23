@@ -210,7 +210,8 @@ impl AsterDex {
         }
     }
 
-    /// Setup must resolve the version, and V3 needs both public wallets.
+    /// Setup must resolve the version, and the primary needs both V3 wallets.
+    /// A read slot's error fails its own requests, as before, not startup.
     fn signing_config_error(&self) -> Option<String> {
         if !self.credentials.has_primary() && !self.credentials.secondary_supplied() {
             return None;
@@ -218,17 +219,8 @@ impl AsterDex {
         if self.options.api_version.is_none() {
             return Some("Aster signing requires a resolved API version".into());
         }
-        for role in [
-            CredentialRole::Mutation,
-            CredentialRole::Read { scope: None },
-        ] {
-            if let Ok((_, slot)) = self.credentials.select(role)
-                && let Err(error) = self.auth(slot)
-            {
-                return Some(error);
-            }
-        }
-        None
+        let (_, primary) = self.credentials.select(CredentialRole::Mutation).ok()?;
+        self.auth(primary).err()
     }
 
     /// The recipe contract for one selected slot.

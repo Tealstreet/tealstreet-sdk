@@ -37,6 +37,7 @@ fn engine_options(input: &Value) -> EngineOptions {
         "key": input["key"],
         "secret": input["secret"],
         "applicationId": input["applicationId"],
+        "passphrase": input["passphrase"],
         "asterdex": {
             "apiVersion": input["apiVersion"],
             "userAddress": auth["userAddress"],
@@ -49,7 +50,11 @@ fn engine_options(input: &Value) -> EngineOptions {
     .unwrap()
 }
 
-fn signatures(provider: &Provider, identity: &Identity, algorithm: Algorithm) -> Vec<Vec<u8>> {
+fn signatures(
+    provider: &Provider,
+    identity: &Identity,
+    algorithm: Algorithm,
+) -> Result<Vec<Vec<u8>>, safe_cex_engine::signing::SignError> {
     let request = SignRequest {
         receipt: Default::default(),
         context: Default::default(),
@@ -66,12 +71,11 @@ fn signatures(provider: &Provider, identity: &Identity, algorithm: Algorithm) ->
             },
         ],
     };
+    // An incomplete identity (blank secret) must fail the same way on both.
     provider
         .sign_ready(&request)
         .unwrap()
-        .unwrap()
-        .values
-        .clone()
+        .map(|result| result.values.clone())
 }
 
 #[test]
@@ -88,6 +92,7 @@ fn native_setup_matches_the_ts_mapping_golden() {
         assert!(options.asterdex.private_key.is_none(), "{name}");
         assert!(options.asterdex.read_key.is_none(), "{name}");
         assert!(options.asterdex.read_secret.is_none(), "{name}");
+        assert!(options.passphrase.is_none(), "{name}");
         let version = match options.asterdex.api_version {
             Some(safe_cex_venue_asterdex::sign::Version::V1) => "v1",
             Some(safe_cex_venue_asterdex::sign::Version::V3) => "v3",

@@ -7,6 +7,7 @@ import {
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
+import { rustTrim } from './localSignerSetup';
 
 /** Public config trusted setup resolves; the venue never sees key material. */
 export type AsterDEXPublicSetup = Readonly<{
@@ -15,7 +16,7 @@ export type AsterDEXPublicSetup = Readonly<{
   readSignerAddress?: string;
 }>;
 
-const trimmed = (value?: string): string | undefined => value?.trim() || undefined;
+const trimmed = (value?: string): string | undefined => (value === undefined ? undefined : rustTrim(value) || undefined);
 
 /** TS half of AsterDEX trusted setup (RUST_ASTER_SIGNER_ADMISSION.md decisions
  * 4-5). Native setup maps identically; asterdex-signer-setup.golden.json pins both. */
@@ -39,16 +40,21 @@ export const mapAsterDEXSignerSetup = (options: ExchangeOptions): Readonly<{
   const secretEncoding = v3 ? 'hex' : 'utf8';
   const metadata = options.localSigner ?? {};
   const secondary = options.secondary_key !== undefined && options.secondary_secret !== undefined;
+  // Blank is absent. V3 wallet keys are trimmed hex, as the legacy venue read
+  // them; V1 HMAC secrets stay byte-exact.
+  const secret = trimmed(wallet) === undefined ? undefined : v3 ? trimmed(wallet) : wallet;
+  const primary = options.key !== undefined || secret !== undefined;
   return {
     setupOptions: {
       ...options,
-      // Blank is absent. V3 wallet keys are trimmed hex, as the legacy venue
-      // read them; V1 HMAC secrets stay byte-exact.
-      secret: trimmed(wallet) === undefined ? undefined : v3 ? trimmed(wallet) : wallet,
+      secret,
+      // Aster has no passphrase slot.
+      passphrase: undefined,
+      secondary_passphrase: undefined,
       secondary_key: secondary ? options.secondary_key : undefined,
       secondary_secret: secondary && !aliased ? options.secondary_secret : undefined,
       localSigner: {
-        primary: { ...metadata.primary, secretEncoding },
+        ...(primary ? { primary: { ...metadata.primary, secretEncoding } } : {}),
         ...(secondary ? { secondary: { ...metadata.secondary, secretEncoding } } : {}),
       },
     } as ExchangeOptions,

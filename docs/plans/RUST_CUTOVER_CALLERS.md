@@ -4589,6 +4589,8 @@ Caller-visible changes:
   revocation point), as before. Otherwise it signs with its own secret.
 - **Main-wallet hint.** The V1 "API Wallet keys require the Main Wallet Address"
   refusal now happens at setup, with the same message.
+- **Read agent errors fail closed.** An empty read secret, or a V3 read secret
+  that is not hex, refuses setup instead of failing only the signed reads.
 - **`fetchAccount().userId`.** Without an `accountAlias`, V3 falls back to the
   public signer address. V1 previously fell back to the API key and now returns
   an empty string, because the venue no longer holds the key.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import golden from '../../exchanges/rust/asterdex-signer-setup.golden.json';
 import { mapAsterDEXSignerSetup } from '../../exchanges/rust/asterdexSignerSetup';
+import { signHostedHttp } from '../../exchanges/rust/legacySigning';
 import { LocalSignerSetup, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
 import { deriveBridgeConstruction } from '../../exchanges/rust/construction';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
@@ -76,5 +77,14 @@ describe('AsterDEX trusted setup mapping', () => {
     } as ExchangeOptions;
     expect(withoutSigningCredentials(options)).toEqual({ auth: { userAddress: '0xuser', signerAddress: '0xsigner' } });
     expect(options.auth?.privateKey).toBe('wallet-material');
+  });
+
+  it('refuses hosted HTTP signing for AsterDEX instead of using another family codec', async () => {
+    const host = { hostedSigning: () => Promise.reject(new Error('provider must not be asked')) };
+    const response = await signHostedHttp('asterdex', {} as ExchangeOptions, true, host as never, {
+      id: 'request-1',
+      config: { method: 'get', url: 'https://fapi.asterdex.com/fapi/v1/account' },
+    } as never);
+    expect(response).toEqual({ id: 'request-1', error: 'Hosted HTTP signing is not supported for this venue yet' });
   });
 });

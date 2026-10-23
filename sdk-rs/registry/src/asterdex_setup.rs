@@ -7,12 +7,12 @@ use safe_cex_venue_asterdex::sign::{Version, is_address, is_private_key};
 
 use crate::{ASTERDEX_MAIN_WALLET_REQUIRED, EngineOptions, VenueError, invalid};
 
-fn nonempty(value: &Option<String>) -> Option<String> {
+/// Borrowed, so key material is never copied outside a `Secret`.
+fn trimmed(value: &Option<String>) -> Option<&str> {
     value
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .map(str::to_owned)
 }
 
 fn take(value: &mut Option<String>) -> Secret {
@@ -24,13 +24,12 @@ pub(crate) fn local_setup(
     public_data_only: bool,
 ) -> Result<LocalSetup, VenueError> {
     let version = options.aster_version(options.asterdex.api_version);
-    let key = nonempty(&options.key);
     let secret = options.secret.as_deref().unwrap_or_default();
-    let user = nonempty(&options.asterdex.user_address).or(nonempty(&options.application_id));
+    let user = trimmed(&options.asterdex.user_address).or(trimmed(&options.application_id));
     // V3 wallet credentials under V1 mean the API wallet sits where the main wallet goes.
     if !public_data_only
         && version == Version::V1
-        && key.as_deref().is_some_and(is_address)
+        && trimmed(&options.key).is_some_and(is_address)
         && is_private_key(secret)
         && user.is_none()
     {
@@ -40,13 +39,16 @@ pub(crate) fn local_setup(
     let (encoding, aliased) = match version {
         Version::V1 => (KeyEncoding::Utf8, false),
         Version::V3 => {
-            let auth_signer = nonempty(&options.asterdex.signer_address);
-            options.asterdex.signer_address = auth_signer.clone().or(key);
-            options.asterdex.read_signer_address =
-                auth_signer.or(nonempty(&options.asterdex.read_key));
+            // V3 keys are the API wallets' public addresses.
+            let auth_signer = trimmed(&options.asterdex.signer_address).map(str::to_owned);
+            options.asterdex.read_signer_address = auth_signer
+                .clone()
+                .or(trimmed(&options.asterdex.read_key).map(str::to_owned));
+            options.asterdex.signer_address =
+                auth_signer.or(trimmed(&options.key).map(str::to_owned));
             (
                 KeyEncoding::Hex,
-                nonempty(&options.asterdex.private_key).is_some(),
+                trimmed(&options.asterdex.private_key).is_some(),
             )
         }
     };
@@ -58,15 +60,14 @@ pub(crate) fn local_setup(
         drop(take(&mut options.asterdex.private_key));
         &mut options.secret
     };
-    // A blank wallet or secret is absent, as Aster's legacy rule trimmed it.
+    // Blank is absent. V3 wallet keys are trimmed hex, as the legacy venue
+    // read them; V1 HMAC secrets stay byte-exact.
     let blank = wallet.as_deref().is_none_or(|text| text.trim().is_empty());
-    // V3 wallet keys are trimmed hex, as the legacy venue read them; V1 HMAC
-    // secrets stay byte-exact.
     if version == Version::V3
         && let Some(text) = wallet.as_mut()
     {
-        let trimmed = text.trim().to_owned();
-        drop(Secret::new(std::mem::replace(text, trimmed)));
+        let exact = text.trim().to_owned();
+        drop(Secret::new(std::mem::replace(text, exact)));
     }
     let wallet = take(wallet);
     let wallet = if blank {
@@ -81,6 +82,8 @@ pub(crate) fn local_setup(
         secret_encoding: encoding,
         ..Default::default()
     });
+    // Aster has no passphrase slot.
+    drop(take(&mut options.passphrase));
     // The uniform `readCredentials` blob is inert here; the agent is `asterdex.readKey`.
     if let Some(mut inert) = options.read_credentials.take() {
         inert.erase_secrets();
