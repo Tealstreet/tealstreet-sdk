@@ -608,9 +608,11 @@ bounded by the existing 256-attempt limit avoids adding Hash implementations or
 encoding credential references into an execution tag. The index retains only a
 full key, freshness token and shared ExecutionHandle, never numeric waiters,
 observer lists, its own timers or terminal authority. The engine group key is
-limited to 128 bytes; the proposal is a closed metadata projection tag while
-full typed-key equality selects the handle. Confirm that tag contract with the
-group owner before implementation; do not widen the limit or hash credentials.
+limited to 128 bytes. The group owner confirmed a closed `metadata-settings`
+projection tag for both begin and join while full typed-key equality selects the
+handle. The tag contains no account or credential data. Pin different full keys
+with the same tag to distinct handles/Plans, and only call join after full-key
+equality. Do not widen the limit or hash credentials.
 
 ### Entry, admission and supersession
 
@@ -642,7 +644,8 @@ Remove the metadata core's numeric waiter vector, Joined admission variant and
 Completion::finish numeric fan-out in the same conversion. Store resolves a
 validated proposal into publication status and a native value/error only.
 Shared Plan sealing projects the uniform result once to its actual observers;
-there is no second completion owner. Adapt core publication-only tests, keeping
+there is no second completion owner. CALLERS must state this uniform per-observer
+terminal, independent detach/expiry behavior and removal of numeric fan-out. Adapt core publication-only tests, keeping
 actual native joined-caller result/failure assertions and all original entry
 RED test bodies unchanged.
 
