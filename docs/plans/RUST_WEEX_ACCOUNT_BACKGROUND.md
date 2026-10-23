@@ -64,8 +64,10 @@ remain unchanged except mechanical managed-action draining where required.
 
 ## Inventory, callers and validation
 
-Regenerate actual WEEX inventory from source in incoming order; require a strict
-removal-only prune of send_account's signed_request site. Never widen/rekey/add
+Compare actual WEEX inventory from source with incoming fingerprints. The
+checker does not count signed_request calls: account.rs has other frozen sites,
+but this helper call is not one. Expected inventory delta is zero; never claim
+a lexical prune from retiring this semantic caller. Never widen/rekey/add
 STAGING_BOOTSTRAPS. Its lib.rs staging entry remains until all remaining legacy
 callers migrate; this slice retires one blocker, not the entire staging helper.
 
@@ -76,3 +78,13 @@ account/auth/dispatch native targets, strict WEEX all-target Clippy, fmt and
 request-context inventory/checker controls. CI supplies full suites and WEEX
 WASM/replay size/CPU gates. Independent native/source and preservation review
 precedes readiness; open a draft PR targeting feat/rust-rewrite and do not merge.
+
+## Original release evidence
+
+At plan `f52fd9d00be`, unchanged production with the new account_background target
+runs one native wire/snapshot compatibility control GREEN and two assertion REDs.
+Both primary and secondary variants observe `(legacy, prepared, claimed) =
+(6, 0, 0)` rather than `(0, 6, 6)`. The same fixtures already publish balance,
+positions and orders, prove GET identity/passphrase fallback, and check sorted
+normal/algo queries. No harness or compilation failure is counted as RED.
+Log: `/tmp/codex-weex-account-background-original.log`.
