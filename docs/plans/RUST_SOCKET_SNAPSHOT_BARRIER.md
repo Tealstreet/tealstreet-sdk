@@ -219,12 +219,14 @@ policy refusal. Four scoped socket feature modes and strict Clippy passed the
 initial implementation; repeat them after subsequent source changes/integration
 before certification. No source-review/full-CI/performance claim at this checkpoint.
 
-Signer-lane integration gate: moving synchronous native user.auth to an async
-provider can release the ordinary opening ping first. Preserve exact native
-auth-before-immediate-ping using reviewed shared signing-release custody; no
-venue queue/timer and no silent delay-until-ACK substitution. The Phemex signer
-lane is plan/RED-only pending shared raw-signature expiry. This snapshot
-prerequisite does not claim to resolve that separate ordering/expiry contract.
+Signer-lane integration ruling: for this snapshot opt-in, no account ping or
+private subscription/send is released before login ACCEPTED. Login itself must
+remain releasable. Native one-shot private frames use the existing shared
+send_after_socket_interests custody; private interest batches already require
+accepted login. Suppress Supervisor ping callbacks until accepted login, while
+retaining the original watch/deadline. This intentionally replaces the old
+immediate-post-auth-send ping expectation. No local signing queue/timer is added.
+The signer lane remains gated separately on shared raw-signature expiry.
 
 ## Independent source review
 

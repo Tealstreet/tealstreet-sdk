@@ -132,6 +132,12 @@ impl Venue for Native {
     }
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
         self.deliveries.fetch_add(1, Ordering::SeqCst);
+        if text == "stage-private-work" {
+            cx.send_after_socket_interests(self.feed.unwrap(), "account-ping".into())
+                .unwrap();
+            cx.send_after_socket_interests(self.feed.unwrap(), "private-send".into())
+                .unwrap();
+        }
         if text == "schedule-proof-probe" {
             let required = vec![Interest::from_wire_args("aop")];
             cx.set_socket_interests_then(self.feed.unwrap(), required, &["aop"], ())
@@ -492,4 +498,45 @@ fn reconnect_uses_fresh_bound_and_old_epoch_cannot_complete_it() {
         "fresh epoch remains valid past the original epoch bound"
     );
     assert!(!h.closed());
+}
+
+#[test]
+fn account_ping_and_private_frames_wait_for_accepted_login() {
+    let mut h = Harness::new();
+    h.event(4_000., Event::WsOpened { socket: h.socket });
+    h.message(4_001., "stage-private-work");
+    let timer = h
+        .output
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 9_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("real opening ping watch");
+    h.event(9_000., Event::TimerFired { timer });
+    let sends: Vec<_> = h
+        .output
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sends, ["login"], "login is the only pre-auth frame");
+    h.message(9_001., "login-accepted");
+    let sends: Vec<_> = h
+        .output
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sends, ["login", "aop", "account-ping", "private-send"]);
+    assert_eq!(h.snapshots.load(Ordering::SeqCst), 0);
+    assert!(
+        !h.closed(),
+        "login releases native work before snapshot completion"
+    );
 }
