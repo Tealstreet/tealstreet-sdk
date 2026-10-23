@@ -788,6 +788,7 @@ export const createEngineTransport = (
     prepareHttp: (request) => {
       const { route, intent, ...packet } = request;
       if (route === 'primary' && intent === 'secondary') throw new HttpPreparationError('invalid');
+      if (route === 'secondary' && intent !== 'secondary') throw new HttpPreparationError('invalid');
       const selected =
         route === 'primary'
           ? http
@@ -808,6 +809,8 @@ export const createEngineTransport = (
     request: (request) => {
       const { route, ...nativeRequest } = request;
       if (route === 'primary') return http.request(nativeRequest);
+      // A declared read-key request; same fallback as an inferred read.
+      if (route === 'secondary') return (readHttp ?? http).request(nativeRequest);
       if (route === 'direct') return directHttp.request(nativeRequest);
       if (route === 'publicCors')
         return publicCorsHttp
