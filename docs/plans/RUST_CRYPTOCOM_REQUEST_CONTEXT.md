@@ -229,3 +229,69 @@ planned genuine command-entry custody API, `Cx::admit_http_command(Policy)`: no
 numeric command argument, engine-owned exactly-once Rejected publication, and
 Revoked outside/repeated/already-owned use. Reviewed source/PR is not yet pinned;
 keep the exact existing pre-issuance fingerprint until that seam actually lands.
+
+## Standalone-depth implementation audit
+
+The full native suite also exercises standalone depth against an active book in
+`tests/public.rs`; its existing isolation fixture adopts the same shared prepared
+executor at its original clocks. All result, live-book, ticker and account
+assertions remain unchanged. This adds that unclaimed fixture to the slice's
+file list; it does not move discovery/subscription requests onto managed HTTP.
+The five original-RED controls are committed separately at `af049f62be4`.
+Reviewed #1808 head `9b639939e378ee3d582c06b24fd068c095eded0b` supplies shared
+refusal conversion, integrated by porcelain merge under overseer authorization.
+The released-expiry control exposed a shared string-failure loss of Timeout;
+the error-core owner is supplying typed post-release delivery. No venue clock or
+string-based reclassification is introduced to bypass that regression.
+
+## Green native depth checkpoint
+
+The error-core owner confirmed frozen reviewed #1816 head
+`ff6a9f8255111b228817d0ae1368e297d2e28ee3`; its exact source was integrated by
+porcelain merge. BookQuery now consumes `on_http_failed`'s typed cause and
+declares only the existing read NotSent outcome. All five original-RED controls
+pass unchanged, including the previously blocked late-response/reused-ID path.
+The complete Crypto.com/Binance native run passes 408 tests across 37 suites;
+scoped formatting and strict all-target Clippy pass. Both request-context checks
+pass, including 13 adversarial controls. Inventory shrinks35 to31 occurrences
+and31 to28 entries; every unowned map remains identical. Final independent
+source/adversarial, caller and full-map reviews are clean, architecture No.
+Actual landing integration, fresh CI/raw/size/timing proof and the overseer's
+merge window remain separate requirements; no merge/deployment is claimed.
+
+### Canonical command-entry follow-up plan
+
+Actual #1808 landing `73d04380dd9` is integrated. Consume only reviewed composed
+#1830 `66cb32e89588e60bd736d3ff121f5ce52bfc4f3b` (already includes reviewed
+#1816/#1838); genuine ingress uses `admit_http_command(Policy)` without a numeric
+argument. Both Rejected and Revoked return without adapter completion; Rejected
+already published the one engine failure. Remove the numeric command parameter
+from the public-depth helper and its caller, and delete the last pre-Context
+`cx.fail` and obsolete Scope/CommandId imports. No source edits to shared APIs.
+
+Before this move, separately commit original-RED controls for nonfinite command
+time and the 257th owner after filling the existing 256-owner bound. Each must
+emit one typed InvalidInput/Internal initial read rejection, no write outcome,
+no transport/sign work or credential evidence; existing owners remain usable.
+The invalid-time command ID can be reused through a later valid Context. Keep
+all prior five lifecycle controls and every native depth assertion unchanged.
+Then prune only the now-empty depth_query.rs inventory map, making Crypto totals
+30 occurrences/27 entries (35/31 at the original plan pin). Original raw budget,
+public route/no-retry and read transport/expiry behavior remain unchanged.
+
+Canonical-entry implementation: the two separately committed controls at
+`c307c1f1c01` both failed on the old pre-Context NotSent fallback. The adapter now
+returns on either shared command-entry error without a numeric finalizer, and
+its helper/caller carry no numeric command argument. The last depth_query.rs
+manifest entry is removed; Crypto totals30 occurrences/27 entries. Independent
+source/adversarial, caller and full-map reviews are clean, architecture No.
+Scoped fmt, strict all-target Clippy and both ratchets (13 controls) pass; full
+native suites and new-head CI remain the final proof for the dependency change.
+
+Final canonical-entry native receipt: Crypto.com+Binance411 tests across38
+suites pass, including the two initial-admission regressions and original five
+lifecycle controls. No failed tests. All three follow-up reviews, strict
+all-target Clippy, scoped fmt and both ratchets are clean. Future venue slices
+keep seam adoption in a fresh follow-up when possible; this already-completed
+slice retains the authorized canonical stack and awaits actual seam landing.
+MEXC phase one does not fold in this new command-entry adoption.
