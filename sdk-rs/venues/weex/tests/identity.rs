@@ -2,11 +2,13 @@
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, ReadCredentials, Response,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
+use support::setup::Options;
 
 const NOW: f64 = 1_700_000_000_000.;
 fn engine(options: Options) -> Engine<WeexFutures> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(options));
+    let mut e = support::setup::engine(options);
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.,
         free: 100.,
@@ -17,11 +19,14 @@ fn engine(options: Options) -> Engine<WeexFutures> {
 }
 fn ask(e: &mut Engine<WeexFutures>) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
 }
 fn take(actions: Vec<Action>) -> HttpRequest {
-    let mut iter = actions.into_iter();
-    let Some(Action::Http(r)) = iter.next() else {
+    let mut iter = actions.into_iter().filter_map(|a| match a {
+        Action::Http(r) => Some(r),
+        _ => None,
+    });
+    let Some(r) = iter.next() else {
         panic!("identity requires exactly one HTTP action");
     };
     assert!(iter.next().is_none());
@@ -92,6 +97,7 @@ fn options() -> Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         passphrase: Some("primary-pass".into()),
+        stable_id: Some("weex-account-7".into()),
         ..Default::default()
     }
 }
@@ -119,7 +125,7 @@ fn header<'a>(r: &'a HttpRequest, name: &str) -> &'a str {
         .as_str()
 }
 #[test]
-fn identity_primary_hmac_and_hash_vector_preserve_existing_account_settings_and_state() {
+fn identity_primary_hmac_and_stable_id_preserve_existing_account_settings_and_state() {
     let mut e = engine(options());
     let before = e.account_snapshot_frame(NOW).to_vec();
     let r = request(&mut e);
@@ -132,7 +138,7 @@ fn identity_primary_hmac_and_hash_vector_preserve_existing_account_settings_and_
     );
     assert_eq!(
         result(respond(&mut e, &r, 200, CONFIG), false).unwrap(),
-        r#"{"userId":"weex:64a04c6ee432d0c9370920d0"}"#
+        r#"{"userId":"weex-account-7"}"#
     );
     assert_eq!(e.account_snapshot_frame(NOW), before);
     assert!(respond(&mut e, &r, 200, CONFIG).is_empty());
@@ -152,7 +158,7 @@ fn identity_secondary_get_key_and_passphrase_validate_without_changing_primary_n
     );
     assert_eq!(
         result(respond(&mut e, &r, 200, CONFIG), false).unwrap(),
-        r#"{"userId":"weex:64a04c6ee432d0c9370920d0"}"#
+        r#"{"userId":"weex-account-7"}"#
     );
 }
 #[test]
@@ -170,20 +176,46 @@ fn identity_secondary_missing_passphrase_retains_existing_primary_passphrase_fal
     result(respond(&mut e, &r, 200, CONFIG), false).unwrap();
 }
 #[test]
-fn identity_hashes_raw_primary_bytes_and_allows_complete_read_signer_without_primary_secret() {
+fn identity_requires_trusted_primary_stable_id_without_key_hash_fallback() {
+    for read in [None, Some(read())] {
+        let mut e = engine(Options {
+            stable_id: None,
+            read_credentials: read,
+            ..options()
+        });
+        let before = e.account_snapshot_frame(NOW).to_vec();
+        let error = result(ask(&mut e), true).unwrap_err();
+        assert!(error.contains("trusted primary stableId"), "{error}");
+        assert_eq!(e.account_snapshot_frame(NOW), before);
+    }
+}
+#[test]
+fn identity_unavailable_is_typed_not_sent() {
+    let mut e = engine(Options {
+        stable_id: None,
+        ..options()
+    });
+    let error = ask(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+}
+#[test]
+fn read_credentials_never_stand_in_for_an_unusable_primary_identity() {
     let mut e = engine(Options {
         key: Some(" primary-key ".into()),
         secret: None,
         passphrase: None,
         read_credentials: Some(read()),
-        ..Default::default()
+        ..options()
     });
-    let r = request(&mut e);
-    assert_eq!(header(&r, "ACCESS-KEY"), "read-key");
-    assert_eq!(
-        result(respond(&mut e, &r, 200, CONFIG), false).unwrap(),
-        r#"{"userId":"weex:8103f888c531840bd2978455"}"#
-    );
+    let error = result(ask(&mut e), true).unwrap_err();
+    assert!(error.contains("non-public primary key"), "{error}");
 }
 #[test]
 fn identity_disabled_trading_missing_or_malformed_config_and_business_errors_reject_without_state_commit()
@@ -244,6 +276,11 @@ fn identity_public_only_missing_primary_or_invalid_selected_auth_fails_before_io
             ..options()
         },
     ] {
+        // Trusted setup refuses required material it can see; otherwise the venue
+        // refuses its unusable identity before any I/O.
+        if opts.clone().try_build().is_err() {
+            continue;
+        }
         let mut e = engine(opts);
         let before = e.account_snapshot_frame(NOW).to_vec();
         result(ask(&mut e), true).unwrap_err();

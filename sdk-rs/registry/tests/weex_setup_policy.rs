@@ -1,4 +1,4 @@
-//! WEEX policy declaration exercises the shared trusted resolver, not admission.
+//! WEEX trusted setup policy and injected-provider construction.
 #![cfg(all(feature = "weex", feature = "dispatch-signing"))]
 
 use safe_cex_engine::signing::{
@@ -141,28 +141,49 @@ fn credential_passphrase_and_stable_ids_remain_exact_independent_metadata() {
         assert_eq!(result.values, vec![key.to_vec(), passphrase.to_vec()]);
     }
 }
-struct NotAdmitted;
-impl Visit for NotAdmitted {
+struct Admitted;
+impl Visit for Admitted {
     type Output = ();
-    fn visit<V: Venue + 'static>(self, _: Engine<V>) {
-        panic!("WEEX dispatch adoption is a later checkpoint");
-    }
+    fn visit<V: Venue + 'static>(self, _: Engine<V>) {}
 }
 #[test]
-fn setup_policy_does_not_enable_weex_provider_construction() {
+fn trusted_setup_constructs_weex_with_the_injected_provider() {
+    let (provider, identities) = local_signer_from_json_for_mode(
+        "weex",
+        r#"{"primary":{"key":"k","secret":"s","passphrase":"p","stableId":"account-primary"}}"#
+            .into(),
+        false,
+    )
+    .unwrap();
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    options.signing = Some(identities.clone());
+    build_with_signer(
+        "weex",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(provider),
+        Admitted,
+    )
+    .unwrap();
+    // Opaque identities without a provider cannot sign anything.
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    options.signing = Some(identities);
+    let error = build_with_signer("weex", options, None, None, Admitted).unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+}
+#[test]
+fn raw_credentials_beside_injected_identities_are_refused() {
     let (provider, identities) = local_signer_from_json_for_mode(
         "weex",
         r#"{"primary":{"key":"k","secret":"s","passphrase":"p"}}"#.into(),
         false,
     )
     .unwrap();
-    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    let mut options: EngineOptions = serde_json::from_str(r#"{"key":"k"}"#).unwrap();
     options.signing = Some(identities);
-    let result = build_with_signer("weex", options, None, Some(provider), NotAdmitted);
-    let error = result.expect_err("provider injection remains unsupported");
-    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    let error = build_with_signer("weex", options, None, Some(provider), Admitted).unwrap_err();
     assert_eq!(
         error.message,
-        "Injected signing is not supported for this venue yet"
+        "WEEX credentials belong in signer setup, not engine options"
     );
 }

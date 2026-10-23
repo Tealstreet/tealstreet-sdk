@@ -1028,13 +1028,14 @@ impl WeexFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        error: impl Into<VenueError>,
     ) {
         let command = request.command;
+        let error = error.into();
         if matches!(self.history.reads.get(&command), Some(Read::Income { .. })) {
-            self.finish_income(cx, command, Err(VenueError::new(error)), false);
+            self.finish_income(cx, command, Err(error), false);
         } else if matches!(self.history.reads.get(&command), Some(Read::List { .. })) {
-            self.finish_list(cx, command, Err(VenueError::new(error)), false);
+            self.finish_list(cx, command, Err(error), false);
         }
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

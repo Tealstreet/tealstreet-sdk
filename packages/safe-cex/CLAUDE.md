@@ -44,7 +44,7 @@ package setting; measured performance evidence covers WASM.
 
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
-Binance's four aliases and Bybit's five aliases. High-level credential input is consumed by a trusted
+Binance's four aliases, Bybit's five aliases and WEEX (hosted admission disabled). High-level credential input is consumed by a trusted
 `LocalSignerSetup` before `BaseExchange` retains options; generic options contain
 no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached

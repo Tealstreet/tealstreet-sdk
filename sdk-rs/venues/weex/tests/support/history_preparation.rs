@@ -31,13 +31,15 @@ impl Venue for Revoke {
 }
 #[test]
 fn preparation_refusal_after_accepted_orders_is_strict_typed_not_sent() {
-    let mut engine =
-        safe_cex_engine::test_support::seeded_engine(Revoke(WeexFutures::new(crate::Options {
+    let mut engine = crate::setup::with_venue(
+        crate::setup::Options {
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("passphrase".into()),
             ..Default::default()
-        })));
+        },
+        Revoke,
+    );
     let now = 1_764_505_700_000.0;
     engine.handle(
         now,

@@ -18,7 +18,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const TERMINAL_LIMIT: usize = 20_000;
 const RECONCILIATION_DEADLINE_MS: f64 = 20_000.0;
-const PRIVATE_WS: &str = "wss://ws-contract.weex.com/v3/ws/private";
 const SKIP_LOG_LIMIT: usize = 4_096;
 #[derive(Clone, Copy)]
 pub enum Kind {
@@ -329,13 +328,9 @@ impl WeexFutures {
     }
     fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(credentials) = &self.credentials {
-            self.account.socket = Some(
-                cx.connect(
-                    safe_cex_engine::SocketSpec::new(PRIVATE_WS)
-                        .headers(credentials.ws_headers(cx.now))
-                        .channel(safe_cex_engine::SocketChannel::Private),
-                ),
-            );
+            // The upgrade is signed with the primary identity at dispatch time.
+            let step = crate::dispatch_signing::Upgrade::new(credentials.primary.clone());
+            self.account.socket = Some(cx.connect_signed(step.unsigned(), Box::new(step)));
             self.account.supervisor.connecting(cx);
         }
     }

@@ -2,18 +2,20 @@
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Query, RequestId, Response,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
 use serde::Deserialize;
+use support::setup::Options;
 
 const NOW: f64 = 1_764_505_700_000.0;
 const DAY: f64 = 86_400_000.0;
 fn engine() -> Engine<WeexFutures> {
-    safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    support::setup::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
         ..Options::default()
-    }))
+    })
 }
 fn command(e: &mut Engine<WeexFutures>, query: Query) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::Query { command: 7, query }));
@@ -507,7 +509,7 @@ struct PublicTrade {
 }
 #[test]
 fn public_trades_need_no_credentials_and_keep_milliseconds() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options::default()));
+    let mut e = support::setup::engine(Options::default());
     let actions = command(
         &mut e,
         Query::PublicTrades {
@@ -709,7 +711,7 @@ fn malformed_streamed_fill_rows_fail_the_whole_query() {
 }
 #[test]
 fn private_queries_without_credentials_complete_without_http() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options::default()));
+    let mut e = support::setup::engine(Options::default());
     let actions = command(&mut e, income(Some(NOW), Some(NOW + 100.0)));
     assert_eq!(result(&actions).unwrap(), "[]");
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));

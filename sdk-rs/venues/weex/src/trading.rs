@@ -1222,7 +1222,11 @@ impl WeexFutures {
                 self.refresh_account(cx);
             }
             if let Some(mut error) = job.error {
-                if job.effective && error.outcome == Some(Outcome::Rejected) {
+                // An earlier accepted step means the command as a whole was neither
+                // rejected nor unsent; a later refusal cannot claim either outcome.
+                if job.effective
+                    && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                {
                     error.outcome = None;
                 }
                 reject(cx, command, error);

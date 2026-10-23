@@ -4,20 +4,40 @@ use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
 use serde_json::{Value, json};
+use support::setup::Options;
 
 fn engine() -> Engine<WeexFutures> {
     engine_with_private_ws(false)
 }
 fn engine_with_private_ws(private_ws_headers: bool) -> Engine<WeexFutures> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        private_ws_headers,
-        ..Options::default()
-    }));
+    engine_with(private_ws_headers, |local| local)
+}
+/// The provider signs `allow` requests, then refuses before any release.
+fn gated_engine(allow: usize) -> Engine<WeexFutures> {
+    engine_with(false, |inner| {
+        std::sync::Arc::new(support::setup::Gated {
+            inner,
+            allow: allow.into(),
+        })
+    })
+}
+fn engine_with(
+    private_ws_headers: bool,
+    wrap: impl FnOnce(safe_cex_engine::signing::Provider) -> safe_cex_engine::signing::Provider,
+) -> Engine<WeexFutures> {
+    let mut e = support::setup::engine_with_provider(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            private_ws_headers,
+            ..Options::default()
+        },
+        wrap,
+    );
     e.store_mut().set_markets(vec![Market {
         id: "BTCUSDT".into(),
         symbol: "BTCUSDT".into(),
@@ -107,7 +127,7 @@ fn order(id: &str, kind: OrderType) -> Order {
 }
 fn command(e: &mut Engine<WeexFutures>, command: Command) -> Vec<Action> {
     e.handle(1000.0, Event::Command(command));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 1000.0)
 }
 fn writes(actions: &[Action]) -> Vec<HttpRequest> {
     actions
@@ -1945,4 +1965,85 @@ fn leverage_read_needs_a_known_market() {
     );
     assert_eq!(done(&actions), Err("unknown market ETHUSDT".into()));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}
+
+fn auth_notices(actions: &[Action]) -> usize {
+    actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::Notice(Notice::AccountAuth { .. } | Notice::Deactivate)
+            )
+        })
+        .count()
+}
+
+#[test]
+fn provider_refusal_of_a_first_write_is_typed_not_sent_and_never_released() {
+    let mut e = gated_engine(0);
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 61,
+            orders: vec![opts("refused")],
+        },
+    );
+    assert!(
+        writes(&actions).is_empty(),
+        "a refused write is never released"
+    );
+    let mut actions = actions;
+    actions.extend(e.drain_actions());
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert_eq!(
+        auth_notices(&actions),
+        0,
+        "provider refusal is not venue auth"
+    );
+}
+
+#[test]
+fn provider_refusal_after_an_accepted_lot_is_neither_not_sent_nor_rejected() {
+    let mut e = gated_engine(1);
+    let orders: Vec<_> = (0..6).map(|i| opts(&format!("lot-{i}"))).collect();
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 62,
+            orders,
+        },
+    );
+    let first = writes(&actions).pop().unwrap();
+    let ack = batch_ack(&first, 100);
+    let actions = response(&mut e, &first, ack);
+    assert!(
+        writes(&actions).is_empty(),
+        "the second lot is refused before release"
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, None, "the first lot was accepted: {error:?}");
+}
+
+#[test]
+fn provider_refusal_of_a_leverage_read_is_typed_and_keeps_settings() {
+    let mut e = gated_engine(0);
+    let before = e.store().setting("BTCUSDT");
+    let actions = command(
+        &mut e,
+        Command::FetchLeverage {
+            command: 63,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
+        "a refused read is never released"
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(auth_notices(&actions), 0);
+    assert_eq!(e.store().setting("BTCUSDT"), before);
 }
