@@ -961,3 +961,41 @@ than landing. It does not establish a CPU fix. The holder and its pointer-only
 invariants are reverted; the independent no-ID/no-watchdog-rearm, fresh-admission,
 fatal and HTTP-isolation controls remain. Subsequent work follows sampled native
 profiles rather than the storage hypothesis.
+
+### Phase G — profile the shared idle socket-work boundary
+
+The four native release samples compare exact landing `7641650e7b1` with the
+pre-holder socket head `a31c3ff2a07` on one Mac in landing/socket/socket/landing
+order. Each process replays the same 28,687 public frames for 40 seconds after
+three warmups; macOS `sample` captures 20 seconds at 1 ms. Compiler, release
+profiles, frame-pointer setting, dependencies, tape, driver and final native
+facts match. Both independent profile readers validate the raw callgraph self
+counts and the resulting function deltas.
+
+Native CPU per tape averages 30.144 ms at landing and 35.113 ms with the socket
+core. The new `process_socket_work` function accounts for 0.768/0.784 ms of
+estimated self CPU per tape in the two socket samples; ingress and dispatch
+account for about 0.696 and 0.441 ms. The apparent 1.074 ms increase under
+`Message::from_str` is offset by 1.261 ms less under its `on_message` caller:
+changed inlining is not evidence of an additional parse. Native whole-tape
+setup/HTTP/drop stacks and sampled self estimates identify targets; they are
+not measurements of WASM/Linux steady-state savings.
+
+Concrete change: retain `process_socket_work` as a thin inline wrapper. Its
+existing fatal check stays first, followed by the existing managed-socket
+check and an exact `effects.is_empty() && proposals.is_empty()` return. Move
+the original nonempty work loop unchanged into one private helper. Preserve
+all call sites, each loop's fatal checks, capacity behavior, retirement order,
+reentrant work and the existing HTTP-delivery/fresh-admission/final-drain
+boundaries. Pending subscription frames and one-shot frames keep their current
+release path; they were not processed by this loop. No cached admission,
+additional allocator, venue workaround or gate/profile policy change.
+
+Validation: retain the healthy no-ID/no-watchdog test and all existing socket
+queue, effect, timer, expiry, fatal and HTTP-isolation controls; run the engine,
+OKX, Bitunix and Binance tests and strict checks. Then repeat the same native
+ABBA sampling against the saved landing binary and report the remaining gap
+and next actual function delta before another change. If a large gap remains,
+continue profiling before fresh CI. Final performance evidence still requires
+the fixed same-runner CI-WASM comparison and fresh full CI, not native results
+or favorable reruns.
