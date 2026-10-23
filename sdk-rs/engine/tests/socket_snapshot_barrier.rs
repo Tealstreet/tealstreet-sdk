@@ -1,5 +1,6 @@
 //! Assertion-first controls for independent login and native snapshot facts.
 #![cfg(feature = "managed-sockets")]
+mod support;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
@@ -183,7 +184,7 @@ impl Harness {
     fn with_policy(snapshot_policy: bool) -> Self {
         let snapshots = Arc::new(AtomicUsize::new(0));
         let deliveries = Arc::new(AtomicUsize::new(0));
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Native {
+        let mut engine = support::seeded_engine(Native {
             feed: None,
             snapshot_policy,
             snapshots: snapshots.clone(),
