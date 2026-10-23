@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase } from './cpu-ci.mjs';
+import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite } from './cpu-ci.mjs';
 import { GATE_SUITES, expectedGateCases } from './ci-gate-suites.mjs';
 
 const dispositions = (decision) => [{ key: 'a'.repeat(64), decision,
@@ -98,4 +98,17 @@ test('declared public diagnostics keep their strict FAIL and never request a CPU
   assert.equal(report.status, 'FAIL');
   report.failures.push('performance main-thread CPU: fake');
   assert.throws(() => classifyInitialCase({ report }, manifest));
+});
+
+
+test('required check wrappers accept only successful complete same-run same-checkout certification', () => {
+  const args = { suite: 'bitgetusdc', result: 'success', runId: 1, checkoutSha: 'a'.repeat(40),
+    results: { schema: 1, runId: 1, checkoutSha: 'a'.repeat(40), suites: Object.fromEntries(GATE_SUITES.map(suite => [suite, true])) } };
+  assert.equal(requireCertifiedSuite(args), true);
+  for (const change of [value => { value.result = 'failure'; }, value => { value.result = 'skipped'; },
+    value => { value.results = null; }, value => { value.results.runId = 2; }, value => { value.results.checkoutSha = 'b'.repeat(40); },
+    value => { delete value.results.suites.woo; }, value => { value.results.suites.woo = false; },
+    value => { value.results.suites.unknown = true; }, value => { value.suite = 'unknown'; }]) {
+    const bad = structuredClone(args); change(bad); assert.throws(() => requireCertifiedSuite(bad));
+  }
 });

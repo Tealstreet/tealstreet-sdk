@@ -150,7 +150,7 @@ The request-budget control exercises the production paginated reader and upload
 adapter with every registered suite, extra job/package rows and all-second worst
 case. It includes initial preparation, planner, each selected second, shared
 certification and fresh boundary checks. Expected totals are310 requests for no
-second and918 for all32 seconds, below the ordinary1000/hour repository token
+second and886 for all32 seconds, below the ordinary1000/hour repository token
 limit before concurrent activity. This is not a reservation against other CI;
 rate-limit, unavailable evidence and HTTP errors fail closed. No history scanner
 or token-limit exemption is introduced.

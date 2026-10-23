@@ -59,7 +59,7 @@ function cohort() {
       await bundle(ctx, name, `Rust / replay measurement (${suite})`, step);
   };
   const plan = ctx => bundle(ctx, 'cpu-plan', 'Rust / CPU remeasurement plan', CPU_COHORT_STEPS.plan);
-  return { context, bundle, first, plan, counters, jobs, artifacts };
+  return { context, bundle, first, plan, counters, jobs, artifacts, run };
 }
 
 async function exercise(allSecond) {
@@ -88,15 +88,15 @@ async function exercise(allSecond) {
 test('actual paginated authority adapter stays bounded for all-PASS and worst all-second cohorts', async () => {
   const ordinary = await exercise(false), worst = await exercise(true);
   assert.equal(ordinary.requests, 310);
-  assert.equal(worst.requests, 918);
+  assert.equal(worst.requests, 886);
   assert(worst.requests < 1000, 'one complete cohort must fit the ordinary repository token budget before concurrent activity');
   assert.equal(worst.certifier.bindings.length, 129);
 });
 
 test('batching still freshly rejects late duplicate artifacts/jobs and run-attempt drift', async () => {
   for (const mutation of [value => value.artifacts.push({ ...value.artifacts[0], id: 9999 }),
-    value => value.jobs.push({ ...value.jobs[0], id: 9999 })]) {
+    value => value.jobs.push({ ...value.jobs[0], id: 9999 }), value => { value.run.run_attempt = 2; }]) {
     const value = await exercise(false); mutation(value);
-    await assert.rejects(evidenceEndCheck(value.certifier), /duplicate\/changed/);
+    await assert.rejects(evidenceEndCheck(value.certifier), /duplicate\/changed|attempt changed/);
   }
 });
