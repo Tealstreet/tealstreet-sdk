@@ -417,4 +417,24 @@ Each PR lists its exact deltas under [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALL
 - A batch whose only effects are `Satisfied` items records `KnownPartial`
   without partial counts. The journal already treats that as known effects
   without IDs.
+- 2026-10-23, phase 2c (#1857): engine-owned reconcile of uncertain writes,
+  plus three items from the Bybit adoption rulings (claude-ddi2il):
+  - narrowing Amend→Setting (attached TP/SL legs);
+  - a separately declared `http_write_protection_cancel_leg` (Amend→Cancel,
+    only for a cancel-then-recreate whose replacement is position-bound);
+  - Satisfied(Cancel) reconcile marking: the command's symbols are fenced in
+    the order-lock uncertainty map and exactly one `reconcile_uncertain` read is
+    queued. It is not a Cancelled transition, and only `orders_reconciled`
+    clears the fence.
+- Managed logical order reads (prerequisite for Bybit slice 1d): an order-read
+  token used to belong to one physical attempt, so a multi-page read whose first
+  page was released before a fence cleared it on its last page's delivery. A
+  managed Command or Background owner now keeps the epoch of its first released
+  Read, and every later leg's delivery reconciles from that mark. A venue whose
+  logical read spans pages, coins or products issues them as legs of one owner.
+  The mark lives while its owner does (a live context, or a command owner in
+  any phase, so a serial Plan keeps it between steps) and is dropped when the
+  command or Plan retires. A mark only keeps a fence longer, so a reconcile
+  read that must clear one uses a fresh owner, never a leg of a read already
+  in flight.
 

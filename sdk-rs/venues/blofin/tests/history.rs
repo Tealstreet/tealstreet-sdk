@@ -4,7 +4,7 @@ use support::*;
 fn query(h: &mut Harness, query: Query) {
     h.ws("pong");
     h.e.handle(1.0, Event::Command(Command::Query { command: 7, query }));
-    h.collect();
+    h.collect_at(1.0);
 }
 fn result(h: &Harness) -> Result<serde_json::Value, String> {
     h.actions

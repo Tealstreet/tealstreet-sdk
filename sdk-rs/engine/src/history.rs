@@ -2,6 +2,7 @@
 //! account diagnostics have an explicit scope and never claim a query owner.
 use crate::log::code;
 use crate::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Stall, Step};
+use crate::request_context::{Attempt, Context, Error as ContextError, Owner};
 use crate::{CommandId, Cx, ErrorKind, Level, Value, VenueError};
 
 /// Missing coverage in automatic account reconciliation, not a user query.
@@ -29,23 +30,201 @@ impl BackgroundCoverage {
     }
 }
 
+mod authority_sealed {
+    pub trait Sealed {}
+}
+
+/// Explicit unmanaged ownership for history sites which have not migrated.
+/// The default preserves their constructor and terminal signatures.
+/// It cannot be constructed to call the sealed terminal trait directly.
+///
+/// ```compile_fail,E0451
+/// use safe_cex_engine::history::LegacyAuthority;
+/// let _ = LegacyAuthority { _private: () };
+/// ```
+pub struct LegacyAuthority {
+    _private: (),
+}
+impl authority_sealed::Sealed for LegacyAuthority {}
+
+/// Engine-owned history authority. Venue crates cannot invent an implementation.
+#[doc(hidden)]
+pub trait HistoryAuthority: authority_sealed::Sealed {
+    type Terminal;
+    fn validate<P>(&self, cx: &Cx<'_, P>) -> Result<(), ContextError>;
+    fn denied(error: ContextError) -> Self::Terminal;
+    fn discard_page(&mut self);
+    fn finish<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        command: CommandId,
+        incomplete: Option<String>,
+        result: Result<String, VenueError>,
+    ) -> Self::Terminal;
+}
+
+impl HistoryAuthority for LegacyAuthority {
+    type Terminal = ();
+    fn validate<P>(&self, _: &Cx<'_, P>) -> Result<(), ContextError> {
+        Ok(())
+    }
+    fn denied(_: ContextError) {}
+    fn discard_page(&mut self) {}
+    fn finish<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        command: CommandId,
+        incomplete: Option<String>,
+        result: Result<String, VenueError>,
+    ) {
+        match result {
+            Ok(result) => {
+                if let Some(message) = incomplete {
+                    cx.event(
+                        Level::Warn,
+                        code::HISTORY_INCOMPLETE,
+                        message,
+                        vec![("command", Value::Num(f64::from(command)))],
+                    );
+                }
+                cx.done(command, result);
+            }
+            Err(mut error) => {
+                if error.kind.is_none() {
+                    error.kind = Some(ErrorKind::Internal);
+                }
+                cx.fail(command, error);
+            }
+        }
+    }
+}
+
+/// Opaque original Read-root ownership. Only the engine may construct it.
+pub struct ReadAuthority {
+    root: Box<Context>,
+    page: Option<(Context, Attempt)>,
+    identities: PageIdentities,
+}
+
+#[derive(Default)]
+struct PageIdentities(std::collections::HashSet<String>);
+
+impl PageIdentities {
+    fn fresh(&mut self, walk: &CursorWalk, identity: String) -> bool {
+        !walk.contains_identity(&identity) && self.0.insert(identity)
+    }
+
+    fn commit(&mut self, walk: &mut CursorWalk) {
+        for identity in self.0.drain() {
+            walk.fresh(identity);
+        }
+    }
+
+    fn discard(&mut self) {
+        self.0.clear();
+    }
+}
+impl authority_sealed::Sealed for ReadAuthority {}
+impl HistoryAuthority for ReadAuthority {
+    type Terminal = Result<(), ContextError>;
+    fn validate<P>(&self, cx: &Cx<'_, P>) -> Result<(), ContextError> {
+        cx.validate_read_completion_context(&self.root)
+    }
+    fn denied(error: ContextError) -> Self::Terminal {
+        Err(error)
+    }
+    fn discard_page(&mut self) {
+        self.page = None;
+        self.identities.discard();
+    }
+    fn finish<P>(
+        self,
+        cx: &mut Cx<'_, P>,
+        command: CommandId,
+        incomplete: Option<String>,
+        result: Result<String, VenueError>,
+    ) -> Self::Terminal {
+        // Both success and failure need the read companion check. Generic
+        // Context terminals do not reject a newly declared mutation sibling.
+        self.validate(cx)?;
+        match result {
+            Ok(result) => {
+                if let Some(message) = incomplete {
+                    cx.event(
+                        Level::Warn,
+                        code::HISTORY_INCOMPLETE,
+                        message,
+                        vec![("command", Value::Num(f64::from(command)))],
+                    );
+                }
+                cx.done_context(&self.root, result)
+            }
+            Err(mut error) => {
+                if error.kind.is_none() {
+                    error.kind = Some(ErrorKind::Internal);
+                }
+                cx.fail_context(&self.root, error)
+            }
+        }
+    }
+}
+
+/// Read completion has no numeric constructor or fallback.
+///
+/// ```compile_fail,E0599
+/// use safe_cex_engine::history::ReadCompletion;
+/// let _ = ReadCompletion::new(7);
+/// ```
+pub type ReadCompletion = Completion<ReadAuthority>;
+/// Managed rows require an admitted delivery before any row mutation.
+///
+/// ```compile_fail,E0599
+/// use safe_cex_engine::history::ReadHistoryRows;
+/// fn unchecked(mut rows: ReadHistoryRows<String>) {
+///     rows.stage("unvalidated".into());
+/// }
+/// ```
+pub type ReadHistoryRows<T> = HistoryRows<T, ReadAuthority>;
+/// Cursor admission and identity mutation also require the delivery guard.
+///
+/// ```compile_fail,E0599
+/// use safe_cex_engine::history::ReadCursorHistory;
+/// fn unchecked(mut history: ReadCursorHistory<String>) {
+///     history.fresh("unvalidated".into());
+/// }
+/// ```
+pub type ReadCursorHistory<T> = CursorHistory<T, ReadAuthority>;
+/// Range geometry selection does not authorize unchecked response admission.
+///
+/// ```compile_fail,E0599
+/// use safe_cex_engine::history::ReadRangeHistory;
+/// fn unchecked(mut history: ReadRangeHistory<String>) {
+///     history.accept_page();
+/// }
+/// ```
+pub type ReadRangeHistory<T> = RangeHistory<T, ReadAuthority>;
+
 /// One query owner, retained across all pages and composite stages. Consuming
 /// completion prevents finishing this owner twice; legacy `Cx` APIs still exist
 /// for operations which have not migrated.
 #[must_use = "history must finish or fail through its owner"]
-pub struct Completion {
+pub struct Completion<A = LegacyAuthority> {
     command: CommandId,
     incomplete: Option<String>,
+    authority: A,
 }
 
-impl Completion {
+impl Completion<LegacyAuthority> {
     pub fn new(command: CommandId) -> Self {
         Self {
             command,
             incomplete: None,
+            authority: LegacyAuthority { _private: () },
         }
     }
+}
 
+impl<A: HistoryAuthority> Completion<A> {
     pub fn command(&self) -> CommandId {
         self.command
     }
@@ -60,43 +239,24 @@ impl Completion {
 
     /// Serialization failures belong in `result` too, so they cannot publish
     /// retained rows or claim successful completion.
-    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<String, VenueError>) {
-        match result {
-            Ok(result) => {
-                if let Some(message) = self.incomplete {
-                    cx.event(
-                        Level::Warn,
-                        code::HISTORY_INCOMPLETE,
-                        message,
-                        vec![("command", Value::Num(f64::from(self.command)))],
-                    );
-                }
-                cx.done(self.command, result);
-            }
-            Err(mut error) => {
-                // Unclassified legacy page failures remain visible typed failures;
-                // preserve specific native/transport kinds when supplied.
-                if error.kind.is_none() {
-                    error.kind = Some(ErrorKind::Internal);
-                }
-                cx.fail(self.command, error);
-            }
-        }
+    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<String, VenueError>) -> A::Terminal {
+        self.authority
+            .finish(cx, self.command, self.incomplete, result)
     }
 }
 
 /// Stages rows until a response is validated. A later failed page can return
 /// only previously accepted rows; rejected response bodies never enter coverage.
 #[must_use = "history rows must finish through their owner"]
-pub struct HistoryRows<T> {
-    completion: Completion,
+pub struct HistoryRows<T, A = LegacyAuthority> {
+    completion: Completion<A>,
     accepted: Vec<T>,
     pending: Vec<T>,
     encode: fn(&[T]) -> Result<String, VenueError>,
 }
 
-impl<T> HistoryRows<T> {
-    pub fn new(completion: Completion, encode: fn(&[T]) -> Result<String, VenueError>) -> Self {
+impl<T, A: HistoryAuthority> HistoryRows<T, A> {
+    pub fn new(completion: Completion<A>, encode: fn(&[T]) -> Result<String, VenueError>) -> Self {
         Self {
             completion,
             accepted: Vec::new(),
@@ -118,7 +278,7 @@ impl<T> HistoryRows<T> {
     }
 
     /// Rows may be streamed before the final HTTP/envelope verdict is known.
-    pub fn stage(&mut self, row: T) {
+    fn stage_inner(&mut self, row: T) {
         self.pending.push(row);
     }
 
@@ -126,11 +286,13 @@ impl<T> HistoryRows<T> {
     /// its completion/coverage authority are never rolled back.
     pub fn discard_staged_page(&mut self) {
         self.pending.clear();
+        self.completion.authority.discard_page();
     }
 
     /// Call only after the page's HTTP, envelope and row validation succeeds.
-    pub fn accept_page(&mut self) {
+    fn accept_page_inner(&mut self) {
         self.accepted.append(&mut self.pending);
+        self.completion.authority.discard_page();
     }
 
     /// Range selection is validated before mutating either row set. Indices
@@ -154,18 +316,19 @@ impl<T> HistoryRows<T> {
                 }
             }
         }
+        self.completion.authority.discard_page();
         true
     }
 
-    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) -> A::Terminal {
         let encode = self.encode;
-        self.finish_with(cx, result, |rows| encode(&rows));
+        self.finish_with(cx, result, |rows| encode(&rows))
     }
 
     /// Strict endpoint-policy rejection is not a recoverable failed page, even
     /// when earlier pages were accepted. Never publish its rows or marker.
-    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) {
-        self.completion.finish(cx, Err(error));
+    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) -> A::Terminal {
+        self.completion.finish(cx, Err(error))
     }
 
     /// Final query shaping may sort/dedupe/limit accepted rows, using captured
@@ -175,7 +338,12 @@ impl<T> HistoryRows<T> {
         cx: &mut Cx<'_, P>,
         result: Result<(), VenueError>,
         encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
-    ) {
+    ) -> A::Terminal {
+        // A managed owner must be live before a captured finalizer can touch
+        // native state. The terminal revalidates before any companion notice.
+        if let Err(error) = self.completion.authority.validate(cx) {
+            return A::denied(error);
+        }
         if let Err(error) = result {
             if self.accepted.is_empty() {
                 return self.completion.finish(cx, Err(error));
@@ -192,15 +360,15 @@ impl<T> HistoryRows<T> {
             );
         }
         // Encoding failure still rejects; it cannot publish malformed partial rows.
-        self.completion.finish(cx, encode(self.accepted));
+        self.completion.finish(cx, encode(self.accepted))
     }
 }
 
 /// Cursor paging and accepted rows share one owner. Stalls record missing
 /// coverage here; a venue never constructs marker fields or a replacement owner.
 #[must_use = "cursor history must finish or fail through its owner"]
-pub struct CursorHistory<T> {
-    rows: HistoryRows<T>,
+pub struct CursorHistory<T, A = LegacyAuthority> {
+    rows: HistoryRows<T, A>,
     walk: CursorWalk,
     stall_message: fn(Stall) -> String,
     finished: bool,
@@ -208,9 +376,9 @@ pub struct CursorHistory<T> {
     lifecycle_error: Option<&'static str>,
 }
 
-impl<T> CursorHistory<T> {
+impl<T, A: HistoryAuthority> CursorHistory<T, A> {
     pub fn new(
-        completion: Completion,
+        completion: Completion<A>,
         walk: CursorWalk,
         stall_message: fn(Stall) -> String,
         encode: fn(&[T]) -> Result<String, VenueError>,
@@ -245,18 +413,18 @@ impl<T> CursorHistory<T> {
         self.walk.pages()
     }
 
-    pub fn fresh(&mut self, identity: String) -> bool {
+    fn fresh_inner(&mut self, identity: String) -> bool {
         self.walk.fresh(identity)
     }
 
-    pub fn stage(&mut self, row: T) {
-        self.rows.stage(row);
+    fn stage_inner(&mut self, row: T) {
+        self.rows.stage_inner(row);
     }
 
     /// A transport or session retry may replace an unvalidated response body,
     /// never an already completed stage or a poisoned cursor lifecycle.
-    /// This clears output staging only: direct `fresh` observations are not
-    /// rolled back. Keep retryable page identities local until validation.
+    /// Legacy direct `fresh` observations are not rolled back. Read admission
+    /// keeps identities local until advance, so it drops those with staging.
     #[must_use]
     pub fn discard_staged_page(&mut self) -> bool {
         if self.finished || self.lifecycle_error.is_some() {
@@ -276,13 +444,14 @@ impl<T> CursorHistory<T> {
             self.lifecycle_error = Some("history cursor stage restarted before completion");
             return false;
         }
+        self.rows.completion.authority.discard_page();
         self.walk.restart();
         self.finished = false;
         self.stage_has_rows = false;
         true
     }
 
-    pub fn advance(&mut self, page: CursorPage) -> CursorStep {
+    fn advance_page(&mut self, page: CursorPage) -> CursorStep {
         self.advance_inner(page, true)
     }
 
@@ -290,7 +459,7 @@ impl<T> CursorHistory<T> {
     /// coverage. Preserve cursor-cycle checks and lifecycle admission, but do
     /// not label its page budget as missing result rows. Its caller must retain
     /// the incomplete proof (for example, a nondefinitive lookup miss).
-    pub fn advance_probe(&mut self, page: CursorPage) -> CursorStep {
+    fn advance_probe_inner(&mut self, page: CursorPage) -> CursorStep {
         if self.stage_has_rows || self.rows.staged_len() > 0 {
             self.lifecycle_error = Some("history probe cannot admit result rows");
             return CursorStep::Done;
@@ -303,7 +472,7 @@ impl<T> CursorHistory<T> {
             return CursorStep::Done;
         }
         self.stage_has_rows |= self.rows.staged_len() > 0;
-        self.rows.accept_page();
+        self.rows.accept_page_inner();
         let step = self.walk.advance(page);
         self.finished = !matches!(step, CursorStep::More(_));
         if let CursorStep::Stalled(reason) = step
@@ -319,7 +488,7 @@ impl<T> CursorHistory<T> {
     /// A fully validated native page can still advertise coverage the adapter
     /// cannot consume. Record that fact atomically with admission, never from a
     /// failed response or after the owner has completed.
-    pub fn advance_with_coverage(&mut self, page: CursorPage, gap: Option<String>) -> CursorStep {
+    fn advance_coverage_inner(&mut self, page: CursorPage, gap: Option<String>) -> CursorStep {
         if self.finished || self.lifecycle_error.is_some() {
             self.lifecycle_error
                 .get_or_insert("history cursor coverage admitted after completion");
@@ -328,19 +497,19 @@ impl<T> CursorHistory<T> {
         if let Some(message) = gap {
             self.rows.completion.incomplete(message);
         }
-        self.advance(page)
+        self.advance_page(page)
     }
 
-    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) -> A::Terminal {
         let encode = self.rows.encode;
-        self.finish_with(cx, result, |rows| encode(&rows));
+        self.finish_with(cx, result, |rows| encode(&rows))
     }
 
-    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) {
+    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) -> A::Terminal {
         let error = self.lifecycle_error.map_or(error, |message| {
             VenueError::new(message).kind(ErrorKind::Internal)
         });
-        self.rows.reject(cx, error);
+        self.rows.reject(cx, error)
     }
 
     pub fn finish_with<P>(
@@ -348,7 +517,7 @@ impl<T> CursorHistory<T> {
         cx: &mut Cx<'_, P>,
         result: Result<(), VenueError>,
         encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
-    ) {
+    ) -> A::Terminal {
         let lifecycle_error = self.lifecycle_error.or_else(|| {
             (result.is_ok() && !self.finished)
                 .then_some("history cursor completed with a page still pending")
@@ -359,15 +528,15 @@ impl<T> CursorHistory<T> {
                 .completion
                 .finish(cx, Err(VenueError::new(message).kind(ErrorKind::Internal)));
         }
-        self.rows.finish_with(cx, result, encode);
+        self.rows.finish_with(cx, result, encode)
     }
 }
 
 /// Range splitting, identity selection and accepted-row completion share one
 /// owner. A page can affect range coverage/dedupe only after admission.
 #[must_use = "range history must finish or fail through its owner"]
-pub struct RangeHistory<T> {
-    rows: HistoryRows<T>,
+pub struct RangeHistory<T, A = LegacyAuthority> {
+    rows: HistoryRows<T, A>,
     walk: RangeWalk,
     pending_facts: Vec<PageRow>,
     active: Option<(f64, f64)>,
@@ -379,9 +548,9 @@ pub struct RangeHistory<T> {
     started: bool,
 }
 
-impl<T> RangeHistory<T> {
+impl<T, A: HistoryAuthority> RangeHistory<T, A> {
     pub fn new(
-        completion: Completion,
+        completion: Completion<A>,
         walk: RangeWalk,
         incomplete_message: fn(u32) -> String,
         encode: fn(&[T]) -> Result<String, VenueError>,
@@ -443,6 +612,7 @@ impl<T> RangeHistory<T> {
         self.retired_requests = self
             .retired_requests
             .saturating_add(u64::from(self.walk.requests));
+        self.rows.completion.authority.discard_page();
         self.walk = walk;
         self.finished = false;
         self.started = true;
@@ -461,6 +631,7 @@ impl<T> RangeHistory<T> {
     /// Bind a selected fetch to narrower native request bounds before issuing
     /// it. Inclusive endpoints may pad a zero-width walk only internally;
     /// coverage must use the range actually requested from the venue.
+    /// Bounds come from the command or selected geometry, never response data.
     #[must_use]
     pub fn restrict_active_range(&mut self, from: f64, to: f64) -> bool {
         let valid = self.active.is_some_and(|(selected_from, selected_to)| {
@@ -483,32 +654,14 @@ impl<T> RangeHistory<T> {
     }
 
     /// Row and native range facts are staged together, never independently.
-    pub fn stage(&mut self, row: T, facts: PageRow) {
+    fn stage_inner(&mut self, row: T, facts: PageRow) {
         if self.active.is_none() || self.finished || self.lifecycle_error.is_some() {
             self.lifecycle_error
                 .get_or_insert("history range row staged without an active fetch");
             return;
         }
-        self.rows.stage(row);
+        self.rows.stage_inner(row);
         self.pending_facts.push(facts);
-    }
-
-    /// Call only after HTTP/native status and the entire page parse succeed.
-    /// A malformed page must finish with Err instead; its prefix stays staged.
-    pub fn accept_page(&mut self) {
-        self.accept_page_with_coverage(None);
-    }
-
-    /// Coverage sees every validated native row before output filtering. Only
-    /// retained selected rows can authorize partial recovery after a later error.
-    pub fn accept_page_where(&mut self, retain: impl FnMut(&T) -> bool) {
-        self.accept_page_inner(None, retain);
-    }
-
-    /// Missing native cursor coverage is an admitted page fact. Validate all
-    /// lifecycle and row/fact invariants before retaining it or advancing bounds.
-    pub fn accept_page_with_coverage(&mut self, gap: Option<String>) {
-        self.accept_page_inner(gap, |_| true);
     }
 
     fn accept_page_inner(&mut self, gap: Option<String>, retain: impl FnMut(&T) -> bool) {
@@ -568,16 +721,16 @@ impl<T> RangeHistory<T> {
     }
 
     /// Signing/policy/lifecycle errors are strict, even after accepted rows.
-    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) {
+    pub fn reject<P>(self, cx: &mut Cx<'_, P>, error: VenueError) -> A::Terminal {
         let error = self.lifecycle_error.map_or(error, |message| {
             VenueError::new(message).kind(ErrorKind::Internal)
         });
-        self.rows.reject(cx, error);
+        self.rows.reject(cx, error)
     }
 
-    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) {
+    pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<(), VenueError>) -> A::Terminal {
         let encode = self.rows.encode;
-        self.finish_with(cx, result, |rows| encode(&rows));
+        self.finish_with(cx, result, |rows| encode(&rows))
     }
 
     pub fn finish_with<P>(
@@ -585,7 +738,7 @@ impl<T> RangeHistory<T> {
         cx: &mut Cx<'_, P>,
         result: Result<(), VenueError>,
         encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
-    ) {
+    ) -> A::Terminal {
         let lifecycle_error = self.lifecycle_error.or_else(|| {
             if result.is_ok() && !self.finished {
                 Some("history range completed before its final step")
@@ -601,7 +754,273 @@ impl<T> RangeHistory<T> {
                 .reject(cx, VenueError::new(message).kind(ErrorKind::Internal));
         }
         self.record_range_gap();
-        self.rows.finish_with(cx, result, encode);
+        self.rows.finish_with(cx, result, encode)
+    }
+}
+
+// Legacy call sites retain their exact mutation signatures. Read callers reach
+// these shared private algorithms only through an admitted delivery guard.
+impl<T> HistoryRows<T, LegacyAuthority> {
+    pub fn stage(&mut self, row: T) {
+        self.stage_inner(row);
+    }
+    pub fn accept_page(&mut self) {
+        self.accept_page_inner();
+    }
+}
+impl<T> CursorHistory<T, LegacyAuthority> {
+    pub fn fresh(&mut self, identity: String) -> bool {
+        self.fresh_inner(identity)
+    }
+    pub fn stage(&mut self, row: T) {
+        self.stage_inner(row);
+    }
+    pub fn advance(&mut self, page: CursorPage) -> CursorStep {
+        self.advance_page(page)
+    }
+    pub fn advance_probe(&mut self, page: CursorPage) -> CursorStep {
+        self.advance_probe_inner(page)
+    }
+    pub fn advance_with_coverage(&mut self, page: CursorPage, gap: Option<String>) -> CursorStep {
+        self.advance_coverage_inner(page, gap)
+    }
+}
+impl<T> RangeHistory<T, LegacyAuthority> {
+    pub fn stage(&mut self, row: T, facts: PageRow) {
+        self.stage_inner(row, facts);
+    }
+    pub fn accept_page(&mut self) {
+        self.accept_page_inner(None, |_| true);
+    }
+    pub fn accept_page_where(&mut self, retain: impl FnMut(&T) -> bool) {
+        self.accept_page_inner(None, retain);
+    }
+    pub fn accept_page_with_coverage(&mut self, gap: Option<String>) {
+        self.accept_page_inner(gap, |_| true);
+    }
+}
+
+impl ReadCompletion {
+    /// Bind the matching command's exact original engine-issued Read root.
+    /// This read-only check allocates no work or send rights. Duplicate bindings
+    /// are allowed; only the first valid context terminal can complete the owner.
+    /// Plan/observer handles and physical child legs are not original roots.
+    pub fn from_context<P>(
+        cx: &Cx<'_, P>,
+        command: CommandId,
+        root: Context,
+    ) -> Result<Self, ContextError> {
+        cx.validate_read_root_context(&root)?;
+        if !matches!(root.owner(), Owner::Command { id, .. } if id == command) {
+            return Err(ContextError::Invalid);
+        }
+        Ok(Self {
+            command,
+            incomplete: None,
+            authority: ReadAuthority {
+                root: Box::new(root),
+                page: None,
+                identities: PageIdentities::default(),
+            },
+        })
+    }
+
+    pub fn root(&self) -> &Context {
+        &self.authority.root
+    }
+    pub fn validate_delivery<P>(&self, cx: &Cx<'_, P>, leg: &Context) -> Result<(), ContextError> {
+        self.delivery_attempt(cx, leg).map(|_| ())
+    }
+    fn delivery_attempt<P>(&self, cx: &Cx<'_, P>, leg: &Context) -> Result<Attempt, ContextError> {
+        let attempt = cx.read_http_delivery_attempt(self.root(), leg)?;
+        if self
+            .authority
+            .page
+            .as_ref()
+            .is_some_and(|(page, bound)| page != leg || *bound != attempt)
+        {
+            return Err(ContextError::State);
+        }
+        Ok(attempt)
+    }
+    fn bind_page(&mut self, leg: &Context, attempt: Attempt) {
+        if self.authority.page.is_none() {
+            self.authority.page = Some((leg.clone(), attempt));
+        }
+    }
+}
+
+/// Synchronous data admission. Drop the immutable Cx borrow before diagnostics,
+/// Store publication or terminal completion; re-admit if more staging follows.
+///
+/// ```no_run
+/// use safe_cex_engine::{Cx, Level};
+/// use safe_cex_engine::history::ReadHistoryRows;
+/// use safe_cex_engine::request_context::{Context, Error};
+/// fn accepted<P>(rows: &mut ReadHistoryRows<String>, cx: &mut Cx<'_, P>, leg: &Context)
+///     -> Result<(), Error>
+/// {
+///     {
+///         let mut page = rows.admit(cx, leg)?;
+///         page.stage("validated row".into());
+///     }
+///     cx.event(Level::Warn, "row.skipped", "native diagnostic", vec![]);
+///     rows.admit(cx, leg)?.accept_page();
+///     Ok(())
+/// }
+/// ```
+pub struct RowsAdmission<'a, 'io, T, P> {
+    owner: &'a mut ReadHistoryRows<T>,
+    _cx: &'a Cx<'io, P>,
+    leg: &'a Context,
+    attempt: Attempt,
+}
+pub struct CursorAdmission<'a, 'io, T, P> {
+    owner: &'a mut ReadCursorHistory<T>,
+    _cx: &'a Cx<'io, P>,
+    leg: &'a Context,
+    attempt: Attempt,
+}
+pub struct RangeAdmission<'a, 'io, T, P> {
+    owner: &'a mut ReadRangeHistory<T>,
+    _cx: &'a Cx<'io, P>,
+    leg: &'a Context,
+    attempt: Attempt,
+}
+
+impl<T> ReadHistoryRows<T> {
+    pub fn root(&self) -> &Context {
+        self.completion.root()
+    }
+    pub fn validate_delivery<P>(&self, cx: &Cx<'_, P>, leg: &Context) -> Result<(), ContextError> {
+        self.completion.validate_delivery(cx, leg)
+    }
+    pub fn admit<'a, 'io, P>(
+        &'a mut self,
+        cx: &'a Cx<'io, P>,
+        leg: &'a Context,
+    ) -> Result<RowsAdmission<'a, 'io, T, P>, ContextError> {
+        let attempt = self.completion.delivery_attempt(cx, leg)?;
+        Ok(RowsAdmission {
+            owner: self,
+            _cx: cx,
+            leg,
+            attempt,
+        })
+    }
+}
+impl<T> ReadCursorHistory<T> {
+    pub fn root(&self) -> &Context {
+        self.rows.root()
+    }
+    pub fn validate_delivery<P>(&self, cx: &Cx<'_, P>, leg: &Context) -> Result<(), ContextError> {
+        self.rows.validate_delivery(cx, leg)
+    }
+    pub fn admit<'a, 'io, P>(
+        &'a mut self,
+        cx: &'a Cx<'io, P>,
+        leg: &'a Context,
+    ) -> Result<CursorAdmission<'a, 'io, T, P>, ContextError> {
+        let attempt = self.rows.completion.delivery_attempt(cx, leg)?;
+        Ok(CursorAdmission {
+            owner: self,
+            _cx: cx,
+            leg,
+            attempt,
+        })
+    }
+}
+impl<T> ReadRangeHistory<T> {
+    pub fn root(&self) -> &Context {
+        self.rows.root()
+    }
+    pub fn validate_delivery<P>(&self, cx: &Cx<'_, P>, leg: &Context) -> Result<(), ContextError> {
+        self.rows.validate_delivery(cx, leg)
+    }
+    pub fn admit<'a, 'io, P>(
+        &'a mut self,
+        cx: &'a Cx<'io, P>,
+        leg: &'a Context,
+    ) -> Result<RangeAdmission<'a, 'io, T, P>, ContextError> {
+        let attempt = self.rows.completion.delivery_attempt(cx, leg)?;
+        Ok(RangeAdmission {
+            owner: self,
+            _cx: cx,
+            leg,
+            attempt,
+        })
+    }
+}
+impl<T, P> RowsAdmission<'_, '_, T, P> {
+    pub fn stage(&mut self, row: T) {
+        self.owner.completion.bind_page(self.leg, self.attempt);
+        self.owner.stage_inner(row);
+    }
+    pub fn accept_page(&mut self) {
+        self.owner.completion.bind_page(self.leg, self.attempt);
+        self.owner.accept_page_inner();
+    }
+}
+impl<T, P> CursorAdmission<'_, '_, T, P> {
+    fn commit_page_identities(&mut self) {
+        if self.owner.finished || self.owner.lifecycle_error.is_some() {
+            return;
+        }
+        self.owner
+            .rows
+            .completion
+            .authority
+            .identities
+            .commit(&mut self.owner.walk);
+    }
+
+    pub fn fresh(&mut self, identity: String) -> bool {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        self.owner
+            .rows
+            .completion
+            .authority
+            .identities
+            .fresh(&self.owner.walk, identity)
+    }
+    pub fn stage(&mut self, row: T) {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        self.owner.stage_inner(row);
+    }
+    pub fn advance(&mut self, page: CursorPage) -> CursorStep {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        self.commit_page_identities();
+        self.owner.advance_page(page)
+    }
+    pub fn advance_probe(&mut self, page: CursorPage) -> CursorStep {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        if !self.owner.stage_has_rows && self.owner.rows.staged_len() == 0 {
+            self.commit_page_identities();
+        }
+        self.owner.advance_probe_inner(page)
+    }
+    pub fn advance_with_coverage(&mut self, page: CursorPage, gap: Option<String>) -> CursorStep {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        self.commit_page_identities();
+        self.owner.advance_coverage_inner(page, gap)
+    }
+}
+impl<T, P> RangeAdmission<'_, '_, T, P> {
+    pub fn stage(&mut self, row: T, facts: PageRow) {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        self.owner.stage_inner(row, facts);
+    }
+    pub fn accept_page(&mut self) {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        self.owner.accept_page_inner(None, |_| true);
+    }
+    pub fn accept_page_where(&mut self, retain: impl FnMut(&T) -> bool) {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        self.owner.accept_page_inner(None, retain);
+    }
+    pub fn accept_page_with_coverage(&mut self, gap: Option<String>) {
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
+        self.owner.accept_page_inner(gap, |_| true);
     }
 }
 
@@ -907,3 +1326,42 @@ mod range_stage_tests {
         assert_eq!(history.active, Some((0., 10.)));
     }
 }
+
+#[cfg(test)]
+mod read_page_identity_tests {
+    use super::{CursorWalk, PageIdentities};
+
+    #[test]
+    fn unvalidated_read_page_does_not_enter_committed_cursor_identities() {
+        let walk = CursorWalk::new(3);
+        let mut pending = PageIdentities::default();
+        assert!(pending.fresh(&walk, "unvalidated".into()));
+        assert!(!pending.fresh(&walk, "unvalidated".into()));
+        assert!(!walk.contains_identity("unvalidated"));
+    }
+
+    #[test]
+    fn failed_read_page_discard_keeps_its_rows_fresh_for_a_retry() {
+        let walk = CursorWalk::new(3);
+        let mut pending = PageIdentities::default();
+        assert!(pending.fresh(&walk, "retry".into()));
+        pending.discard();
+        assert!(pending.fresh(&walk, "retry".into()));
+    }
+
+    #[test]
+    fn admitted_read_identities_remain_deduped_across_later_stages() {
+        let mut walk = CursorWalk::new(3);
+        let mut pending = PageIdentities::default();
+        assert!(pending.fresh(&walk, "accepted".into()));
+        pending.commit(&mut walk);
+        assert!(walk.contains_identity("accepted"));
+        walk.restart();
+        assert!(!pending.fresh(&walk, "accepted".into()));
+        assert!(pending.fresh(&walk, "new".into()));
+    }
+}
+
+#[cfg(test)]
+#[path = "history_context_tests.rs"]
+mod context_tests;

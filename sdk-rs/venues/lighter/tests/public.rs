@@ -148,8 +148,8 @@ fn book_nonce_chain_ignores_offsets_and_rejects_gap() {
 fn rest_book_seed_cannot_replace_newer_ws_and_depth_is_not_truncated() {
     let (mut e, s) = seeded();
     book(&mut e);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r.id)
@@ -317,8 +317,8 @@ fn subscription_can_be_cancelled_before_markets_arrive() {
 fn rest_book_cannot_establish_websocket_nonce_continuity() {
     let (mut e, s) = seeded();
     book(&mut e);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r.id)
@@ -402,8 +402,8 @@ fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors(
 fn disconnect_clears_old_book_and_fences_inflight_rest_seed() {
     let (mut e, s) = seeded();
     book(&mut e);
-    let rest = e
-        .drain_actions()
+    let rest = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
@@ -450,8 +450,8 @@ fn disconnect_clears_old_book_and_fences_inflight_rest_seed() {
 fn silent_book_is_cleared_while_other_channels_keep_socket_alive() {
     let (mut e, socket, poll) = seeded_with_poll();
     book(&mut e);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
@@ -474,7 +474,7 @@ fn silent_book_is_cleared_while_other_channels_keep_socket_alive() {
             == safe_cex_engine::wire::section::BOOK
             && payload[4..12] == [0; 8])
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 93001.0);
     assert!(
         actions
             .iter()

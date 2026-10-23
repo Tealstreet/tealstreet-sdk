@@ -157,7 +157,7 @@ fn capacity_refusal(read: Cached) {
                 .expect_err("cached reads require bounded admission");
             assert_eq!(error.kind, Some(ErrorKind::Internal));
             assert_eq!(error.outcome, None);
-            assert_eq!(error.message, "Too many requests in flight");
+            assert_eq!(error.message, "Engine request capacity reached");
             engine.http_preparation_failed(
                 NOW + 1.,
                 peers[0],

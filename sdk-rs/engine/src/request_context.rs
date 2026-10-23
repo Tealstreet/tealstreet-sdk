@@ -78,7 +78,7 @@ impl<'a> Reconciliation<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Owner {
     Command {
         id: CommandId,
@@ -120,6 +120,14 @@ impl Session {
             generation: self.generation,
         }
     }
+}
+
+/// A continuation parked behind a session, returned when the venue drains it.
+#[derive(Debug)]
+pub enum Waiter<P> {
+    Ready(Context, P),
+    /// Nothing was sent for this owner; the error's outcome is NotSent.
+    Failed(Context, P, VenueError),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1077,6 +1085,18 @@ pub struct CommandWrites {
     report_messages: usize,
     evidence: evidence::EvidenceBudget,
 }
+// Private synchronous terminal preparation. Never exposed as a venue grant.
+#[cfg(feature = "http-plans")]
+pub(crate) struct PreparedWriteSeal {
+    failure: Option<VenueError>,
+    evidence: evidence::EvidenceBudget,
+}
+#[cfg(feature = "http-plans")]
+impl PreparedWriteSeal {
+    pub(crate) fn is_failure(&self) -> bool {
+        self.failure.is_some()
+    }
+}
 impl CommandWrites {
     /// Prepare the full declared journal before plan admission. Logical legs
     /// include unselected fallback branches; neither registration nor retry
@@ -1152,30 +1172,10 @@ impl CommandWrites {
     /// Only a typed definitive refusal may authorize another write attempt.
     /// The request context's policy/deadline must also authorize this retry.
     pub fn retry(&mut self, previous: RequestId, id: RequestId) -> Result<(), Error> {
-        if self.sealed {
-            return Err(Error::State);
-        }
-        if self.attempts.iter().any(|a| a.id == id) {
+        if self.attempts.iter().any(|a| a.id == id) && !self.sealed {
             return Err(Error::Duplicate);
         }
-        if self.occupied() >= self.capacity {
-            return Err(Error::Capacity);
-        }
-        let old = self
-            .attempts
-            .iter()
-            .find(|a| a.id == previous)
-            .ok_or(Error::Invalid)?;
-        if !self.active(old.leg)
-            || old.id_overflow
-            || !old.resend_granted
-            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
-            || self.attempts.iter().rposition(|a| a.leg == old.leg)
-                != self.attempts.iter().position(|a| a.id == previous)
-        {
-            return Err(Error::RetryForbidden);
-        }
-        let leg = old.leg;
+        let leg = self.retry_admissible(previous)?;
         // Each grant authorizes exactly one resend.
         if let Some(old) = self.attempts.iter_mut().find(|a| a.id == previous) {
             old.resend_granted = false;
@@ -1356,6 +1356,37 @@ impl CommandWrites {
                 None => return false,
             }
         }
+    }
+
+    /// Journal side of `retry`, without allocating the new attempt.
+    fn retry_admissible(&self, previous: RequestId) -> Result<u64, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        if self.occupied() >= self.capacity {
+            return Err(Error::Capacity);
+        }
+        let old = self
+            .attempts
+            .iter()
+            .find(|a| a.id == previous)
+            .ok_or(Error::Invalid)?;
+        if !self.active(old.leg)
+            || old.id_overflow
+            || !old.resend_granted
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self.attempts.iter().rposition(|a| a.leg == old.leg)
+                != self.attempts.iter().position(|a| a.id == previous)
+        {
+            return Err(Error::RetryForbidden);
+        }
+        Ok(old.leg)
+    }
+
+    /// An owner may park for a re-send only when `retry` would accept it.
+    pub(crate) fn resend_blocked(&self, leg: u64) -> bool {
+        self.latest(leg)
+            .is_some_and(|latest| self.retry_admissible(latest).is_err())
     }
 
     pub(crate) fn leg_attempts(&self, leg: u64) -> usize {
@@ -1584,6 +1615,12 @@ impl CommandWrites {
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.
     pub fn succeed(&mut self) -> Result<(), Error> {
+        self.validate_success()?;
+        self.sealed = true;
+        Ok(())
+    }
+
+    fn validate_success(&self) -> Result<(), Error> {
         if self.sealed || self.attempts.is_empty() || self.attempts.iter().any(|a| a.id_overflow) {
             return Err(Error::State);
         }
@@ -1597,7 +1634,6 @@ impl CommandWrites {
         if !accepted {
             return Err(Error::State);
         }
-        self.sealed = true;
         Ok(())
     }
 
@@ -1729,6 +1765,35 @@ impl CommandWrites {
             evidence::mark_id_overflow(&mut error);
         }
         Ok((error, projected_budget))
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn prepare_seal(
+        &self,
+        error: Option<VenueError>,
+    ) -> Result<PreparedWriteSeal, Error> {
+        if error.is_none() && self.validate_success().is_ok() {
+            return Ok(PreparedWriteSeal {
+                failure: None,
+                evidence: self.evidence,
+            });
+        }
+        let (error, evidence) =
+            self.failure_projection(error.unwrap_or_else(|| {
+                VenueError::new("Command writes are not all confirmed accepted")
+            }))?;
+        Ok(PreparedWriteSeal {
+            failure: Some(error),
+            evidence,
+        })
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn commit_seal(&mut self, prepared: PreparedWriteSeal) -> Option<VenueError> {
+        assert!(!self.sealed, "prepared journal seals exactly once");
+        self.sealed = true;
+        self.evidence = prepared.evidence;
+        prepared.failure
     }
 
     /// Retain each terminal logical-leg refusal for the existing reporting path.

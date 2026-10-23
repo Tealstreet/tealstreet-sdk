@@ -5,7 +5,11 @@ import rules from './construction-rules.json';
 import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
-export type IdentitySetupPolicy = { trimCredential?: boolean; passphrase?: PassphraseSetupPolicy };
+export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
+export type ExtraKeyPolicy = { key: 'zklinkSeed'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+export type IdentitySetupPolicy = {
+  trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
+};
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;
 export type RemoteSigningPolicy = Readonly<{
@@ -22,12 +26,17 @@ type Rule = {
   canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string;
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
+  /** Family-specific trusted setup mapping, declared rather than name-matched. */
+  setupMapping?: 'asterdex';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 
 /** Trusted setup policy; unspecified fields retain explicit caller metadata. */
 export const deriveSignerSetupPolicy = (name: ExchangeName): CredentialSetupPolicy =>
   (rules.venues as Record<string, Rule>)[name]?.signerSetup ?? {};
+
+export const deriveSignerSetupMapping = (name: ExchangeName): Rule['setupMapping'] =>
+  (rules.venues as Record<string, Rule>)[name]?.setupMapping;
 
 export const deriveRemoteSigningPolicy = (name: ExchangeName): RemoteSigningPolicy | undefined =>
   (rules.venues as Record<string, Rule>)[name]?.remoteSigning;

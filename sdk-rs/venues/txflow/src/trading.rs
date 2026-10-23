@@ -680,9 +680,9 @@ impl TxFlow {
             self.finish_trade(cx, Err(not_sent("TxFlow market is halted")));
             return;
         }
-        let nonce = match safe_cex_crypto::nonce::ethereum_agent(
+        let nonce = match safe_cex_venue_hyperliquid::sign::reserve_agent_nonce(
+            cx,
             self.options.secret.as_deref().unwrap_or(""),
-            cx.now,
         ) {
             Ok(n) => n,
             Err(e) => {
