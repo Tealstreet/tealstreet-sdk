@@ -866,6 +866,139 @@ mod tests {
         }
     }
 
+    fn stable_driver_lease(controls: ControlPolicy) {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            controls,
+            ..Probe::default()
+        });
+        e.start(0.);
+        let socket = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        let feed = e.venue.feed.unwrap();
+        let epoch = e.io.socket_driver.state.epoch(feed).unwrap();
+        let before = std::ptr::from_ref(&e.io.socket_driver.state);
+        let queries = e.io.socket_driver.state.socket_lookup_count();
+        let mut cx = Cx {
+            now: 100.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        let inside = cx.with_socket_driver(|driver, cx| {
+            let admission = driver.ingress(cx, socket, Ingress::Message);
+            assert_eq!(admission.admission, Admission::Current(epoch));
+            assert!(admission.effects.is_empty());
+            assert!(driver.control(cx, epoch, Control::Other, false).is_empty());
+            assert_eq!(driver.state.socket_lookup_count(), queries + 2);
+            std::ptr::from_ref(&driver.state)
+        });
+        let after = std::ptr::from_ref(&e.io.socket_driver.state);
+        assert!(std::ptr::eq(before, after));
+        assert_eq!(e.io.socket_driver.state.epoch(feed), Some(epoch));
+        assert!(
+            std::ptr::eq(before, inside),
+            "registered lifecycle must stay in the same storage during a Cx lease"
+        );
+    }
+
+    #[test]
+    fn native_control_driver_lease_keeps_registered_storage() {
+        stable_driver_lease(ControlPolicy::Native);
+    }
+
+    #[test]
+    fn control_free_driver_lease_keeps_registered_storage() {
+        stable_driver_lease(ControlPolicy::None);
+    }
+
+    #[test]
+    fn driver_lease_restores_registered_owner_after_normal_error() {
+        let (mut e, socket) = engine();
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        let feed = e.venue.feed.unwrap();
+        let epoch = e.io.socket_driver.state.epoch(feed).unwrap();
+        let before = std::ptr::from_ref(&e.io.socket_driver.state);
+        let mut cx = Cx {
+            now: 100.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        let result = cx.with_socket_driver(|driver, _| {
+            assert!(driver.state.current(epoch));
+            Err::<(), _>(SocketError::NotPermitted)
+        });
+        assert_eq!(result, Err(SocketError::NotPermitted));
+        assert!(std::ptr::eq(
+            before,
+            std::ptr::from_ref(&e.io.socket_driver.state)
+        ));
+        assert!(e.io.socket_driver.state.current(epoch));
+    }
+
+    #[test]
+    fn healthy_current_text_keeps_resource_ids_and_watchdog_timer() {
+        for controls in [ControlPolicy::Native, ControlPolicy::None] {
+            let mut e = crate::test_support::seeded_engine(Probe {
+                controls,
+                ..Probe::default()
+            });
+            e.start(0.);
+            let socket = e
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::WsConnect { socket, .. } => Some(socket),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(0., Event::WsOpened { socket });
+            e.drain_actions().for_each(drop);
+            let ids = e.io.next_id;
+            let mut timers = e.io.timers.keys().copied().collect::<Vec<_>>();
+            timers.sort_by_key(|timer| timer.0);
+            assert!(!timers.is_empty(), "opened feed must own a watchdog");
+            let queries = e.io.socket_driver.state.socket_lookup_count();
+            for n in 1..=64 {
+                e.handle(
+                    n as f64,
+                    Event::WsMessage {
+                        socket,
+                        text: "ordinary-data",
+                    },
+                );
+                let actions = e.drain_actions().collect::<Vec<_>>();
+                assert!(
+                    actions
+                        .iter()
+                        .all(|action| matches!(action, Action::Notice(_)))
+                );
+            }
+            let mut after = e.io.timers.keys().copied().collect::<Vec<_>>();
+            after.sort_by_key(|timer| timer.0);
+            assert_eq!(e.io.next_id, ids);
+            assert_eq!(after, timers);
+            assert_eq!(e.venue.messages, 64);
+            assert_eq!(
+                e.venue.control_calls.get(),
+                if controls == ControlPolicy::Native {
+                    64
+                } else {
+                    0
+                }
+            );
+            assert_eq!(
+                e.io.socket_driver.state.socket_lookup_count(),
+                queries + 128
+            );
+        }
+    }
+
     #[test]
     fn caught_fatal_socket_callback_stops_all_later_callbacks_and_output() {
         let (mut e, socket) = engine();
