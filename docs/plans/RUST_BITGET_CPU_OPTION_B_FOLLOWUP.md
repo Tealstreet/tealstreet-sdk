@@ -208,3 +208,15 @@ restores the authenticated original runtime before importing collection code.
 Add workflow controls that reject missing or late coordinator bootstrap and any
 bootstrap added to second/wrapper jobs. Keep original failed logs and remeasure
 only in fresh corrected-source CI; no dependency fallback or comparison rewrite.
+
+### Physical marker framing
+
+The first complete planner rejects Backpack's retained end marker because a large
+book diagnostic ends without a newline and shares its physical log line. A real
+artifact/job/log reproduction fails; an unchanged Bitget control passes. Keep
+exact standalone-marker, identity, unique-count and clock-window validation.
+Extract one shared producer formatter used by both first and second BEGIN/END
+markers, then prefix a newline so arbitrary child output cannot absorb a marker.
+Commit the non-newline regression before correcting framing. Reuse all existing
+negative controls and independently review the four call sites. The old malformed
+cohort stays failed; no tape, raw hash, metric, threshold or verdict is rewritten.
