@@ -683,32 +683,12 @@ impl BybitLinear {
     /// key for GETs (else the primary). A refused admission or queue fails the
     /// read like transport loss, so it takes the caller's own retry path.
     fn send_read(&mut self, cx: &mut Cx<'_, Pending>, rest: Rest, then: Then) {
-        use safe_cex_engine::request_context::{Credential, Policy, RetryPolicy, Scope};
+        use safe_cex_engine::request_context::Scope;
         if self.config_error.is_some() {
             return;
         }
-        let credential = if rest.signed {
-            let slot = match (&self.read_credentials, &self.credentials) {
-                (Some(read), _) => (safe_cex_engine::CredentialSlot::Secondary, read),
-                (None, Some(primary)) => (safe_cex_engine::CredentialSlot::Primary, primary),
-                (None, None) => return,
-            };
-            Some(Credential {
-                slot: slot.0,
-                reference: slot.1.credential.clone(),
-            })
-        } else {
-            None
-        };
-        let policy = Policy {
-            credential,
-            // A signed read is re-read once after a native signature refusal.
-            retry: if rest.signed {
-                RetryPolicy::ReadFailure
-            } else {
-                RetryPolicy::Never
-            },
-            ..candles::read_policy()
+        let Some(policy) = self.read_policy(rest.signed, candles::read_policy().timeout_ms) else {
+            return;
         };
         let context = match cx.http_context(Scope::Background, policy) {
             Ok(context) => context,
@@ -719,7 +699,41 @@ impl BybitLinear {
         self.queue_read(cx, context, rest, then);
     }
 
-    fn queue_read(
+    /// Read authority: public, or signed with the read key for GETs (else the
+    /// primary); `None` when a signed read has no credential. A signed read is
+    /// re-read once after a native signature refusal.
+    pub(crate) fn read_policy(
+        &self,
+        signed: bool,
+        timeout_ms: u32,
+    ) -> Option<safe_cex_engine::request_context::Policy> {
+        use safe_cex_engine::request_context::{Credential, Policy, RetryPolicy};
+        let credential = if signed {
+            let (slot, identity) = match (&self.read_credentials, &self.credentials) {
+                (Some(read), _) => (safe_cex_engine::CredentialSlot::Secondary, read),
+                (None, Some(primary)) => (safe_cex_engine::CredentialSlot::Primary, primary),
+                (None, None) => return None,
+            };
+            Some(Credential {
+                slot,
+                reference: identity.credential.clone(),
+            })
+        } else {
+            None
+        };
+        Some(Policy {
+            credential,
+            timeout_ms,
+            retry: if signed {
+                RetryPolicy::ReadFailure
+            } else {
+                RetryPolicy::Never
+            },
+            ..candles::read_policy()
+        })
+    }
+
+    pub(crate) fn queue_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         context: safe_cex_engine::request_context::Context,

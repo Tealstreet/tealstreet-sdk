@@ -26,6 +26,8 @@ const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
 /// A failed order snapshot is retried this often until one succeeds.
 const ORDERS_RETRY_MS: f64 = 15_000.0;
 const ORDERS_PAGE_LIMIT: u32 = 50;
+/// The window for a whole paged account read; each page keeps its own 20 s.
+const ACCOUNT_READ_WINDOW_MS: u32 = 60_000;
 const POSITIONS_PAGE_LIMIT: u32 = 200;
 const EXECUTION_CACHE_LIMIT: usize = 4096;
 const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
@@ -149,6 +151,8 @@ pub struct MappedPosition {
 }
 
 struct PositionsJoin {
+    /// One Background owner for every page and settle coin of this read.
+    root: Option<safe_cex_engine::request_context::Context>,
     generation: u32,
     /// Position-event count when the reads were issued; a newer stream event
     /// makes the snapshot stale.
@@ -161,6 +165,8 @@ struct PositionsJoin {
 }
 
 struct OrdersJoin {
+    /// One Background owner for every page and settle coin of this read.
+    root: Option<safe_cex_engine::request_context::Context>,
     generation: u32,
     revision: u32,
     issued_at: f64,
@@ -1400,7 +1406,7 @@ impl BybitLinear {
     }
 
     fn request_orders_page(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         generation: u32,
         coin: &'static str,
@@ -1416,15 +1422,12 @@ impl BybitLinear {
             invalid: false,
             rejected: RowAdmission::default(),
         };
-        self.send(
-            cx,
-            Rest::get("/v5/order/realtime", query).streamed().signed(),
-            Then::Account(request),
-        );
+        let rest = Rest::get("/v5/order/realtime", query).streamed().signed();
+        self.send_page(cx, generation, rest, Then::Account(request));
     }
 
     fn request_positions_page(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         generation: u32,
         coin: &'static str,
@@ -1444,20 +1447,63 @@ impl BybitLinear {
             invalid: false,
             rejected: RowAdmission::default(),
         };
-        self.send(
-            cx,
-            Rest::get("/v5/position/list", query).streamed().signed(),
-            Then::Account(request),
-        );
+        let rest = Rest::get("/v5/position/list", query).streamed().signed();
+        self.send_page(cx, generation, rest, Then::Account(request));
     }
 
-    /// A fresh order read: a follow-up when one is already out.
-    pub(crate) fn refetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.orders.is_some() {
-            self.account.orders_follow_up = true;
-        } else {
-            self.fetch_orders(cx);
+    /// A Background root for one paged read: its legs share one owner, so the
+    /// engine counts the read only from its earliest released page.
+    fn account_read_root(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+    ) -> Option<safe_cex_engine::request_context::Context> {
+        let policy = self.read_policy(true, ACCOUNT_READ_WINDOW_MS)?;
+        cx.http_context(safe_cex_engine::request_context::Scope::Background, policy)
+            .ok()
+    }
+
+    /// One page as a leg of its join's root; a refused leg fails the page.
+    fn send_page(&mut self, cx: &mut Cx<'_, Pending>, generation: u32, rest: Rest, then: Then) {
+        let root = match &then {
+            Then::Account(Request::Orders { .. }) => self
+                .account
+                .orders
+                .as_ref()
+                .filter(|join| join.generation == generation)
+                .and_then(|join| join.root.clone()),
+            _ => self
+                .account
+                .positions
+                .as_ref()
+                .filter(|join| join.generation == generation)
+                .and_then(|join| join.root.clone()),
+        };
+        let leg = root
+            .zip(self.read_policy(true, crate::candles::read_policy().timeout_ms))
+            .and_then(|(root, policy)| cx.http_leg_context(&root, policy).ok());
+        match leg {
+            Some(leg) => self.queue_read(cx, leg, rest, then),
+            None => self.on_public_response(cx, then, Err("Bybit account read was not admitted")),
         }
+    }
+
+    fn finish_read_root(
+        cx: &mut Cx<'_, Pending>,
+        root: Option<safe_cex_engine::request_context::Context>,
+    ) {
+        if let Some(root) = root {
+            let _ = cx.finish_http_context(&root);
+        }
+    }
+
+    /// Reconcile an uncertain write with a fresh order read: an older read
+    /// still out predates the write, so it is abandoned rather than joined.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(old) = self.account.orders.take() {
+            Self::finish_read_root(cx, old.root);
+        }
+        self.account.orders_follow_up = false;
+        self.fetch_orders(cx);
     }
 
     pub(crate) fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1467,7 +1513,9 @@ impl BybitLinear {
         self.account.orders_generation += 1;
         let generation = self.account.orders_generation;
         let coins = self.settle_coins();
+        let root = self.account_read_root(cx);
         self.account.orders = Some(OrdersJoin {
+            root,
             generation,
             revision: self.account.revision,
             issued_at: cx.now,
@@ -1494,7 +1542,9 @@ impl BybitLinear {
         self.account.positions_generation += 1;
         let generation = self.account.positions_generation;
         let coins = self.settle_coins();
+        let root = self.account_read_root(cx);
         self.account.positions = Some(PositionsJoin {
+            root,
             generation,
             version: self.account.position_version,
             pending: coins.len(),
@@ -2588,7 +2638,8 @@ impl BybitLinear {
         if !join.failed && join.pending > 0 {
             return;
         }
-        let join = self.account.orders.take().expect("checked above");
+        let mut join = self.account.orders.take().expect("checked above");
+        Self::finish_read_root(cx, join.root.take());
         if std::mem::take(&mut self.account.orders_follow_up) {
             self.fetch_orders(cx);
         }
@@ -2765,7 +2816,8 @@ impl BybitLinear {
         if !join.failed && join.pending > 0 {
             return;
         }
-        let join = self.account.positions.take().expect("checked above");
+        let mut join = self.account.positions.take().expect("checked above");
+        Self::finish_read_root(cx, join.root.take());
         if std::mem::take(&mut self.account.positions_follow_up) {
             self.fetch_positions(cx);
         }

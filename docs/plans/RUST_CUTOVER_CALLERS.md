@@ -5872,3 +5872,11 @@ No other venue inventory, shared checker, allowance or signer source changes.
 | Re-reads after a signature/timestamp refusal | Once, re-signed, only on a native `10002`/`10004`; a message that merely mentions `recv_window` under another code is a plain failure (was a text-matched resend). Bybit's server clock is still observed from the refusal | None. |
 | Hyro | Unchanged: no account-info read and an empty fee map; its wallet read takes the same managed path | None. |
 
+### Bybit order and position snapshots on managed authority (slice 1d-ii)
+
+| Change | Outcome | NX handling |
+| --- | --- | --- |
+| Each order or position snapshot is one Background owner: every page, settle coin and cursor is a leg with a 20 s window, inside a 60 s window for the whole read | A snapshot that cannot finish in time fails like any other read and is retried by the existing cadence; rows and staleness rules are unchanged | None. |
+| The reconcile read after an uncertain or absent-order write | Always a fresh read; an older snapshot still in flight is abandoned (its late pages are ignored) instead of joined, so the fence clears only on rows read after the write | An order row may stay until that fresh read lands. |
+| Signed snapshot reads after a signature/timestamp refusal | Re-read once, only on a native `10002`/`10004` (no text match) | None. |
+

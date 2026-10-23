@@ -1392,8 +1392,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    // Account reads are managed: the fixture driver prepares and signs them.
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1470,8 +1471,8 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
                 },
             );
         }
-        reads = engine
-            .drain_actions()
+        reads = safe_cex_engine::test_support::prepared_actions(engine, now)
+            .into_iter()
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,
