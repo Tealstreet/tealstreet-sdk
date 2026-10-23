@@ -120,6 +120,14 @@ impl Okx {
         self.closed.delayed.push((timer, request));
     }
 
+    pub(crate) fn closed_sign_failed(
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        request.history.finish(cx, Err(error));
+    }
+
     pub(crate) fn closed_failed(cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         request
             .history

@@ -15,6 +15,7 @@ pub(super) struct State {
 
 struct Body {
     handle: Plan,
+    receipt_cap: Option<(u64, f64)>,
     policy: PlanPolicy,
     timer: TimerId,
     schedule: Schedule,
@@ -220,6 +221,10 @@ impl ContextRegistry {
         (prepared.owner, seal)
     }
 
+    pub(super) fn initial_plan_custody(&self, handle: &Plan) -> Result<bool, Error> {
+        Ok(self.plan_body(handle)?.initial_custody)
+    }
+
     fn plan_body(&self, handle: &Plan) -> Result<&Body, Error> {
         if !handle.issued_by(&self.issuer) {
             return Err(Error::Revoked);
@@ -233,7 +238,11 @@ impl ContextRegistry {
             return Err(Error::Revoked);
         };
         let body = &state.body[0];
-        if body.handle.deadline() != handle.deadline() {
+        if body.handle.deadline() != handle.deadline()
+            || body
+                .receipt_cap
+                .is_some_and(|(receipt, cap)| receipt == 0 || handle.deadline() > cap)
+        {
             return Err(Error::Revoked);
         }
         Ok(body)
@@ -349,10 +358,18 @@ impl<P> Cx<'_, P> {
         if policy.operation != operation || policy.credential != credential {
             return Err(Error::Invalid);
         }
+        let receipt_cap = self.io.request_contexts.preflight_receipt_cap(preflight)?;
+        if receipt_cap.is_some() && operation != Operation::Read {
+            return Err(Error::Invalid);
+        }
+        if receipt_cap.is_some_and(|(_, cap)| !self.now.is_finite() || cap - self.now < 1.) {
+            return Err(Error::TimedOut);
+        }
         let schedule = Schedule::from_steps(steps)?;
         let terminals = terminal_ordinals(steps, &policy, terminals)?;
         let bound = schedule.bound();
-        let deadline = bound.deadline(self.now)?;
+        let native_deadline = bound.deadline(self.now)?;
+        let deadline = receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap));
         Context::new(
             preflight.owner(),
             1,
@@ -497,6 +514,7 @@ impl<P> Cx<'_, P> {
         });
         body.push(Body {
             handle: handle.clone(),
+            receipt_cap,
             policy,
             timer,
             schedule,
@@ -617,7 +635,9 @@ impl<P> Cx<'_, P> {
                 .is_some_and(|delivery| body.handoff.as_ref() == Some(delivery))
                 || (body.initial_custody
                     && self.io.http_delivery.is_none()
-                    && self.io.http_plan_ready.is_none())
+                    && self.io.http_plan_ready.is_none()
+                    // A ready founder's own physical Plan counts as the ready owner.
+                    && self.validate_preflight_ready_owner(plan.owner()).is_ok())
                 || (self.io.http_delivery.is_none()
                     && self
                         .io
@@ -845,6 +865,7 @@ impl<P> Cx<'_, P> {
     /// Only a structurally complete plan may request success. Journal facts
     /// convert known-partial, refused or unresolved writes into terminal failure.
     pub fn done_plan(&mut self, plan: &Plan, result: String) -> Result<(), Error> {
+        self.validate_preflight_ready_owner(plan.owner())?;
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
         if !body.schedule.is_complete() {
             return Err(Error::State);
@@ -921,6 +942,8 @@ impl<P> Cx<'_, P> {
         error: Option<VenueError>,
         result: Option<&str>,
     ) -> Result<conditional::PreparedPlanSeal, Error> {
+        // Ready-loop custody first: no effect before the owner is confirmed.
+        self.validate_preflight_ready_owner(plan.owner())?;
         let physical = matches!(plan.owner(), Owner::Execution { .. });
         // Observers already past their own bound expire against the live
         // journal before any terminal preparation (host callbacks seal first).

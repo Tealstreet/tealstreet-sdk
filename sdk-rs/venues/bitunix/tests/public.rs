@@ -23,11 +23,13 @@ fn ready() -> (Engine<BitunixFutures>, SocketId) {
         ..Options::default()
     }));
     e.start(0.0);
-    let Action::Http(r) = e.drain_actions().next().unwrap() else {
-        panic!()
-    };
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    let Action::Http(r) = r else { panic!() };
     response(&mut e, r.id, PAIRS);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
     let mut futures = None;
     for a in actions {
         match a {
@@ -157,9 +159,11 @@ fn incomplete_stream_never_commits_a_partial_market_list() {
     let mut e =
         safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options::default()));
     e.start(0.0);
-    let Action::Http(r) = e.drain_actions().next().unwrap() else {
-        panic!()
-    };
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    let Action::Http(r) = r else { panic!() };
     response(&mut e, r.id, &PAIRS[..PAIRS.len() - 2]);
     assert!(e.store().markets().is_empty());
     assert!(!e.store().loaded().markets);
@@ -179,8 +183,8 @@ fn candle_reads_use_quote_volume_and_seconds() {
             to_ms: Some(1000.0),
         }),
     );
-    let r = e
-        .drain_actions()
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -207,9 +211,11 @@ fn rejects_http_200_failure_envelopes_even_with_an_empty_data_array() {
         let mut e =
             safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options::default()));
         e.start(0.0);
-        let Action::Http(r) = e.drain_actions().next().unwrap() else {
-            panic!()
-        };
+        let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .unwrap();
+        let Action::Http(r) = r else { panic!() };
         response(&mut e, r.id, body);
         assert!(!e.store().loaded().markets);
     }
@@ -220,11 +226,13 @@ fn ticker_seed_failure_retries_only_seed_and_public_streams_wait_for_it() {
     let mut e =
         safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options::default()));
     e.start(0.0);
-    let Action::Http(r) = e.drain_actions().next().unwrap() else {
-        panic!()
-    };
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    let Action::Http(r) = r else { panic!() };
     response(&mut e, r.id, PAIRS);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
     assert_eq!(
         actions
             .iter()
@@ -258,7 +266,7 @@ fn ticker_seed_failure_retries_only_seed_and_public_streams_wait_for_it() {
         })
         .unwrap();
     e.handle(5000.0, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 5000.);
     assert!(
         !actions
             .iter()
@@ -437,8 +445,8 @@ fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() 
                 to_ms: Some(100_000_000.0),
             }),
         );
-        let request = e
-            .drain_actions()
+        let request = safe_cex_engine::test_support::prepared_actions(&mut e, 100_000_000.)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -449,6 +457,18 @@ fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() 
                 .url
                 .contains(&format!("startTime={}", 100_000_000 - duration * 2))
         );
+        e.handle(
+            100_000_000.,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"code":0,"data":[]}"#,
+                },
+            },
+        );
+        e.drain_actions().for_each(drop);
     }
 }
 #[test]
@@ -474,7 +494,20 @@ fn candle_interest_without_credentials_reads_no_symbol_settings() {
     )));
 }
 
-fn pending_http(actions: &[Action], path: &str) -> safe_cex_engine::HttpRequest {
+fn pending_http(
+    e: &mut Engine<BitunixFutures>,
+    now: f64,
+    path: &str,
+) -> safe_cex_engine::HttpRequest {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains(path) => Some(r),
+            _ => None,
+        })
+        .expect(path)
+}
+fn pending_http_actions(actions: &[Action], path: &str) -> safe_cex_engine::HttpRequest {
     actions
         .iter()
         .find_map(|a| match a {
@@ -495,7 +528,7 @@ fn public_engine(credentials: bool) -> Engine<BitunixFutures> {
 #[test]
 fn a_malformed_public_row_does_not_starve_valid_market_or_ticker_peers() {
     let mut e = public_engine(false);
-    let market = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    let market = pending_http(&mut e, 0., "trading_pairs");
     let pair: serde_json::Value = serde_json::from_str(PAIRS).unwrap();
     response(
         &mut e,
@@ -507,9 +540,9 @@ fn a_malformed_public_row_does_not_starve_valid_market_or_ticker_peers() {
     );
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 1);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::ROW_SKIPPED)));
-    let ticker = pending_http(&actions, "/tickers");
+    let ticker = pending_http_actions(&actions, "/tickers");
     let tick: serde_json::Value = serde_json::from_str(TICKERS).unwrap();
     response(
         &mut e,
@@ -526,9 +559,9 @@ fn a_malformed_public_row_does_not_starve_valid_market_or_ticker_peers() {
 #[test]
 fn a_bad_ticker_row_cannot_discard_the_rest_of_a_usable_seed() {
     let mut e = public_engine(false);
-    let r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    let r = pending_http(&mut e, 0., "trading_pairs");
     response(&mut e, r.id, PAIRS);
-    let r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+    let r = pending_http(&mut e, 0., "/tickers");
     let ticks: serde_json::Value = serde_json::from_str(TICKERS).unwrap();
     response(
         &mut e,
@@ -542,10 +575,10 @@ fn a_bad_ticker_row_cannot_discard_the_rest_of_a_usable_seed() {
 fn all_malformed_required_seeds_retry_without_loaded_empty_state() {
     for ticker in [false, true] {
         let mut e = public_engine(false);
-        let mut r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+        let mut r = pending_http(&mut e, 0., "trading_pairs");
         if ticker {
             response(&mut e, r.id, PAIRS);
-            r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+            r = pending_http(&mut e, 0., "/tickers");
         }
         response(&mut e, r.id, r#"{"code":0,"data":[null,{}]}"#);
         assert!(
@@ -564,9 +597,9 @@ fn all_malformed_required_seeds_retry_without_loaded_empty_state() {
 #[test]
 fn private_initialization_starts_before_tickers_and_seed_recovery_never_restarts_it() {
     let mut e = public_engine(true);
-    let r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    let r = pending_http(&mut e, 0., "trading_pairs");
     response(&mut e, r.id, PAIRS);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
     assert_eq!(
         out.iter()
             .filter(|a| matches!(a,Action::WsConnect {url,..} if url.contains("/private/")))
@@ -574,10 +607,10 @@ fn private_initialization_starts_before_tickers_and_seed_recovery_never_restarts
         1,
         "private socket must not wait for ticker seed"
     );
-    let balance = pending_http(&out, "/account");
-    let positions = pending_http(&out, "get_pending_positions");
-    let orders = pending_http(&out, "get_pending_orders");
-    let ticker = pending_http(&out, "/tickers");
+    let balance = pending_http_actions(&out, "/account");
+    let positions = pending_http_actions(&out, "get_pending_positions");
+    let orders = pending_http_actions(&out, "get_pending_orders");
+    let ticker = pending_http_actions(&out, "/tickers");
     assert!(!e.store().loaded().tickers);
     // The account can establish settings independently from the pending seed.
     response(
@@ -616,7 +649,7 @@ fn private_initialization_starts_before_tickers_and_seed_recovery_never_restarts
         })
         .unwrap();
     e.handle(at, Event::TimerFired { timer });
-    let r = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+    let r = pending_http(&mut e, at, "/tickers");
     response(&mut e, r.id, TICKERS);
     let out: Vec<_> = e.drain_actions().collect();
     assert!(e.store().loaded().tickers);
@@ -649,7 +682,7 @@ fn private_initialization_starts_before_tickers_and_seed_recovery_never_restarts
 #[test]
 fn public_failures_use_capped_shared_backoff_and_report_recovery() {
     let mut e = public_engine(false);
-    let mut request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    let mut request = pending_http(&mut e, 0., "trading_pairs");
     let mut now = 0.0;
     let mut degraded = 0;
     for nominal in [1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0, 30000.0] {
@@ -676,7 +709,7 @@ fn public_failures_use_capped_shared_backoff_and_report_recovery() {
         );
         now = at;
         e.handle(now, Event::TimerFired { timer });
-        request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+        request = pending_http(&mut e, now, "trading_pairs");
         e.handle(now, Event::TimerFired { timer });
         assert!(
             !e.drain_actions().any(|a| matches!(a, Action::Http(_))),
@@ -685,7 +718,7 @@ fn public_failures_use_capped_shared_backoff_and_report_recovery() {
     }
     assert_eq!(degraded, 1);
     response(&mut e, request.id, PAIRS);
-    let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+    let request = pending_http(&mut e, 0., "/tickers");
     response(&mut e, request.id, TICKERS);
     assert_eq!(e.drain_actions().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code==safe_cex_engine::log::code::STARTUP_RECOVERED)).count(),1);
 }
@@ -699,7 +732,7 @@ fn discovery_rate_limits_honor_headers_and_native_codes_without_misclassifying_n
         (200, 10001, "", 0.0),
     ] {
         let mut e = public_engine(false);
-        let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+        let request = pending_http(&mut e, 0., "trading_pairs");
         let body = format!(r#"{{"code":{code},"msg":"temporary failure","data":[]}}"#);
         e.handle(
             0.0,
@@ -732,9 +765,9 @@ fn discovery_rate_limits_honor_headers_and_native_codes_without_misclassifying_n
 #[test]
 fn a_truncated_ticker_stream_never_commits_its_valid_prefix() {
     let mut e = public_engine(false);
-    let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+    let request = pending_http(&mut e, 0., "trading_pairs");
     response(&mut e, request.id, PAIRS);
-    let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+    let request = pending_http(&mut e, 0., "/tickers");
     response(&mut e, request.id, &TICKERS[..TICKERS.len() - 2]);
     assert!(!e.store().loaded().tickers);
     assert!(e.store().tickers().is_empty());
@@ -743,7 +776,7 @@ fn a_truncated_ticker_stream_never_commits_its_valid_prefix() {
 fn intentionally_empty_or_filtered_catalogues_are_distinct_from_malformed_rows() {
     for filtered in [false, true] {
         let mut e = public_engine(false);
-        let request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+        let request = pending_http(&mut e, 0., "trading_pairs");
         let pairs: serde_json::Value = serde_json::from_str(PAIRS).unwrap();
         let body = if filtered {
             format!(r#"{{"code":0,"data":[{}]}}"#, pairs["data"][1])
@@ -771,11 +804,10 @@ fn discovery_stream_business_rate_limits_without_arrays_keep_the_native_pause() 
         for code in [10005, 10006] {
             for data in ["", r#", "data":null"#, r#", "data":{}"#] {
                 let mut e = public_engine(false);
-                let mut request =
-                    pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+                let mut request = pending_http(&mut e, 0., "trading_pairs");
                 if ticker {
                     response(&mut e, request.id, PAIRS);
-                    request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
+                    request = pending_http(&mut e, 0., "/tickers");
                 }
                 response(
                     &mut e,
@@ -803,10 +835,10 @@ fn discovery_stream_errors_never_echo_raw_envelopes_into_failure_or_degradation(
         ] {
             let mut e = public_engine(false);
             let path = if ticker { "/tickers" } else { "trading_pairs" };
-            let mut request = pending_http(&e.drain_actions().collect::<Vec<_>>(), "trading_pairs");
+            let mut request = pending_http(&mut e, 0., "trading_pairs");
             if ticker {
                 response(&mut e, request.id, PAIRS);
-                request = pending_http(&e.drain_actions().collect::<Vec<_>>(), path);
+                request = pending_http(&mut e, 0., path);
             }
             let mut degraded = 0;
             for _ in 0..6 {
@@ -822,7 +854,7 @@ fn discovery_stream_errors_never_echo_raw_envelopes_into_failure_or_degradation(
                     })
                     .unwrap();
                 e.handle(at, Event::TimerFired { timer });
-                request = pending_http(&e.drain_actions().collect::<Vec<_>>(), path);
+                request = pending_http(&mut e, at, path);
             }
             assert_eq!(degraded, 1);
             assert!(

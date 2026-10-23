@@ -5,6 +5,9 @@ use super::*;
 mod call;
 pub(super) use call::State;
 
+#[path = "request_context_preflight_ready.rs"]
+mod ready;
+
 impl ContextRegistry {
     fn prepare_preflight(
         &mut self,
@@ -32,6 +35,12 @@ impl ContextRegistry {
             + 1;
         self.retirements
             .try_reserve_exact(required.saturating_sub(self.retirements.len()))
+            .map_err(|_| Error::Capacity)?;
+        self.preflight_ready
+            .try_reserve_exact(required.saturating_sub(self.preflight_ready.len()))
+            .map_err(|_| Error::Capacity)?;
+        self.preflight_initial
+            .try_reserve_exact(required.saturating_sub(self.preflight_initial.len()))
             .map_err(|_| Error::Capacity)?;
         Ok(())
     }
@@ -64,7 +73,9 @@ impl ContextRegistry {
                 credentialed,
             },
         );
-        Preflight::new(&self.issuer, command, generation)
+        let handle = Preflight::new(&self.issuer, command, generation);
+        self.preflight_initial.push(handle.clone());
+        handle
     }
 
     fn preflight_owner(&self, preflight: &Preflight) -> Result<&CommandOwner, Error> {
@@ -135,7 +146,10 @@ impl ContextRegistry {
         if !self.retirement_current(token) {
             return false;
         }
-        match token.preflight().owner() {
+        let owner = token.preflight().owner();
+        self.preflight_ready.retain(|held| held.owner() != owner);
+        self.preflight_initial.retain(|held| held.owner() != owner);
+        match owner {
             Owner::Command { id, .. } => {
                 self.commands.remove(&id);
             }
@@ -165,6 +179,34 @@ impl<P> Cx<'_, P> {
             PreflightPurpose::WriteAfterReads => Operation::Mutation,
         };
         self.with_command_entry(operation, |cx, command| cx.issue_preflight(command, policy))
+    }
+
+    /// Opt into the exact caller receipt cap before asynchronous Read work.
+    /// Missing receipt uses the shared typed refusal. Expired capture is Revoked
+    /// without effects; Fresh custody remains for reject_expired_command(Read).
+    pub fn begin_preflight_with_command_wait(
+        &mut self,
+        policy: PreflightPolicy,
+    ) -> Result<Preflight, crate::request_context::CommandEntryError> {
+        use crate::request_context::CommandEntryError;
+        if policy.purpose != PreflightPurpose::ReadOnly || !self.io.fresh_command_entry() {
+            return Err(CommandEntryError::Revoked);
+        }
+        let cap = match self.io.command_receipt() {
+            Ok(cap) => cap,
+            Err(reason) => return self.with_command_entry(Operation::Read, |_, _| Err(reason)),
+        };
+        if !self.now.is_finite() || cap.1 - self.now < 1. {
+            return Err(CommandEntryError::Revoked);
+        }
+        self.with_command_entry(Operation::Read, |cx, command| {
+            let preflight = cx.issue_preflight(command, policy)?;
+            cx.io
+                .request_contexts
+                .bind_preflight_receipt(&preflight, cap)
+                .expect("newly issued preflight");
+            Ok(preflight)
+        })
     }
 
     // Private issuer shared with pure engine state fixtures. Public initial
@@ -204,6 +246,7 @@ impl<P> Cx<'_, P> {
     /// Cached ReadOnly completion. Outstanding read-call and write-plan
     /// completion use their own authority operations; they cannot bypass this.
     pub fn done_preflight(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
+        self.validate_preflight_activation(preflight)?;
         let seal = self.io.request_contexts.seal_preflight(
             preflight,
             self.now,
@@ -223,6 +266,7 @@ impl<P> Cx<'_, P> {
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        self.validate_preflight_failure_custody(preflight)?;
         let seal = self.io.request_contexts.seal_preflight(
             preflight,
             self.now,

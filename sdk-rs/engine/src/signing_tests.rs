@@ -1897,3 +1897,64 @@ fn admission_is_evidence_only_release_still_validates_and_earlier_effects_stand(
     assert_eq!(released, [cancel]);
     assert_eq!(engine.venue.failed, 1);
 }
+
+#[test]
+fn public_operations_validate_refs_algorithms_and_exact_result_widths() {
+    let key = || KeyRef("primary.signing".into());
+    let request = |operations| SignRequest {
+        receipt: Default::default(),
+        operations,
+        context: Default::default(),
+    };
+    let public = request(vec![
+        Operation::PublicAddress { key: key() },
+        Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::StarkDigest,
+            key: key(),
+        },
+    ]);
+    assert_eq!(public.validate(), Ok(()));
+    let answer = |widths: [usize; 3]| {
+        SignResult::new(
+            widths.map(|width| vec![1; width]).to_vec(),
+            Default::default(),
+        )
+    };
+    assert_eq!(public.validate_result(&answer([20, 32, 32])), Ok(()));
+    for widths in [[32, 32, 32], [20, 33, 32], [20, 32, 31]] {
+        assert_eq!(
+            public.validate_result(&answer(widths)),
+            Err(SignError::InvalidResult)
+        );
+    }
+    for operation in [
+        Operation::PublicAddress {
+            key: KeyRef(String::new()),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: KeyRef(String::new()),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Es256,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::Secp256k1Digest,
+            key: key(),
+        },
+        Operation::PublicKey {
+            algorithm: Algorithm::HmacSha256,
+            key: key(),
+        },
+    ] {
+        assert_eq!(
+            request(vec![operation]).validate(),
+            Err(SignError::InvalidRequest)
+        );
+    }
+}

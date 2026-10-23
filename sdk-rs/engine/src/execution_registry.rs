@@ -547,6 +547,30 @@ impl ContextRegistry {
         Ok(root)
     }
 
+    /// Whether `owner` is the live physical Plan that exactly `founder`
+    /// (command and generation) founded; never another execution's member.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn founded_by(&self, owner: Owner, founder: Owner) -> bool {
+        let (
+            Owner::Execution {
+                generation: identity,
+            },
+            Owner::Command { id, generation },
+        ) = (owner, founder)
+        else {
+            return false;
+        };
+        self.physical_owner(owner)
+            && self
+                .executions
+                .roots
+                .get(&identity)
+                .is_some_and(|execution| {
+                    self.executions.groups.planned(*execution)
+                        && self.executions.groups.member(id) == Some((*execution, generation))
+                })
+    }
+
     /// The commands observing a physical Plan owner's execution.
     #[cfg(all(feature = "http-plans", feature = "order-locks"))]
     pub(in crate::engine) fn physical_observers(&self, owner: Owner) -> Vec<CommandId> {

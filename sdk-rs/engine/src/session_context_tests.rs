@@ -1372,3 +1372,26 @@ fn a_planned_command_is_refused_a_session_wait_instead_of_parking() {
         "readiness has no planned leg to re-dispatch"
     );
 }
+
+/// Session egress policy (#1833): a session operation is a root with no
+/// explicit egress (none can be declared), so routing derives from its
+/// credential; its legs inherit the root's egress and cannot widen it.
+#[test]
+fn session_roots_declare_no_egress_and_their_legs_inherit_it() {
+    use crate::request_context::RoutingIntent;
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let root = with(&mut engine, 1., |cx| {
+        cx.session_context(&session, policy(Operation::Read))
+    })
+    .unwrap();
+    assert_eq!(root.egress(), None);
+    assert_eq!(root.routing_intent(), RoutingIntent::Public);
+    let leg = with(&mut engine, 2., |cx| {
+        cx.http_leg_context(&root, policy(Operation::Read))
+    })
+    .unwrap();
+    assert!(matches!(leg.owner(), Owner::Session { .. }));
+    assert_eq!(leg.egress(), root.egress());
+    assert_eq!(leg.routing_intent(), RoutingIntent::Public);
+}
