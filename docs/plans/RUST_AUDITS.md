@@ -2457,3 +2457,12 @@ Context completion directly. Bitrue inventory shrinks42->37 occurrences,
 The still-legacy signed fill/HistoryRows/Completion path and account lookup stay
 held for their shared prerequisites, even where the scanner no longer lists the
 history source. No private read, group or whole-venue zero claim is introduced.
+
+## Bitrue local leverage terminal provenance
+
+Four synchronous account-command refusals adopt shared Read admission and Context
+failure. This independent slice prunes only two count-two account hashes:
+Bitrue42->38 occurrences,27->25 rows, five files retained. The separate history
+slice's prune composes independently. Native successful leverage joins, refresh,
+projection, account replies and signed bracket requests remain unchanged; no
+managed private-read, execution-group or whole-venue zero claim is introduced.

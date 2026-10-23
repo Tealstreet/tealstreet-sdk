@@ -1033,3 +1033,14 @@ terminal cleanup. Invalid raw clocks and typed local metadata are distinguished
 from native text/precedence, Store stability and signed-fill preservation.
 Aliases, fractional-time flooring, default/clamped limits, native headers and
 empty results remain covered; no fake HTTP or command origin supplies authority.
+
+## Bitrue local leverage admission controls
+
+Tests-first fixtures delegate both native guards and use genuine commands for
+all four local refusals. Original production gives four assertion REDs and three
+compatibility GREENs. The bounded owner probe allocates256 Background roots in
+a separate no-ID callback, repeatedly denies work while preserving peers, then
+explicitly retires roots and recovers at one clock. Fixed-clock reuse and invalid
+raw clocks distinguish shared admission from native messages and Store stability.
+Valid bracket/account requests retain their signed dispatch; existing account
+suite assertions continue to own successful caller completion/group behavior.

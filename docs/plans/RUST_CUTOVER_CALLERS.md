@@ -5533,3 +5533,13 @@ kinds gain Unsupported/NotSent; local input or missing credential errors gain
 InvalidInput/NotSent. Shared admission refusal emits its one engine-owned typed
 failure, with no adapter fallback or Read financial outcome. Valid private fills,
 lookup and WS FIFO delegates keep their existing separate transport contracts.
+
+## Bitrue local leverage preflight authority
+
+FetchLeverage and FetchMaxLeverage retain unknown-market-before-credential
+validation and their exact native messages. Those four local refusals now use
+shared initial Read authority and Context completion, adding InvalidInput/NotSent
+metadata without a companion, transport or Store mutation. Admission refusal
+emits exactly one shared typed failure with no adapter fallback or Read financial
+outcome. Valid bracket requests and leverage-query joining/refresh/fan-out keep
+their existing separate contracts and remain held for shared signer/group work.
