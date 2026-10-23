@@ -72,7 +72,10 @@ The failures are wrong-live-peer native publication, socket borrowing and the
 absent-delivery authority matrix. No compile/fixture failure is counted as RED.
 Raw local log: `/tmp/codex-background-delivery-original-red-final.log`.
 
-## Local implementation verification
+## Historical implementation verification
+
+The following receipt describes the original implementation checkpoint before
+the eighth Execution compatibility control and the current landing integration.
 
 The new read-only gate changes only the baseline authority call and comments;
 all regression assertions remain byte-for-byte unchanged. All seven controls
@@ -91,3 +94,21 @@ method and test hook reproduces the actual #1830 registry verbatim. Session
 coordination confirms the narrow region is clear and Session must be rejected.
 Architecture: no per-venue workaround. Native venue adoption and whole-plan/
 observer authority are not implemented by these engine fixtures.
+
+## Ownership transfer and current landing integration
+
+On 2026-10-24 codex-ih35js took ownership of #1856. Integration commit
+`ef257d1cdf5bfec4a9ce82074c9c42ec809f323b` genuinely merges landing
+`c473342d48363a057c98c59292abb957462f3590`. The engine source merges without
+conflict. The shared CALLERS appendix keeps all incoming text first and the
+existing Background section once. The original method, test hook and eight
+current test bodies remain unchanged; no venue, inventory or dispatch changes
+are introduced. The scope remains the original additive shared authority seam.
+
+At that integration, the eight focused Background controls pass with default
+features. Strict all-target/all-feature engine Clippy, bans, the request-context
+checker and its 15 controls pass. The earlier seven-control and native-suite
+counts above remain historical evidence. Fresh exact-head CI and the shared API
+owner review are pending; this receipt does not claim merge readiness or native
+MEXC adoption. The intended MEXC consumer must separately fence streamed native
+side effects, response validity, freshness and startup continuation.
