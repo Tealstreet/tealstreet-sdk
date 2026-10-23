@@ -812,3 +812,25 @@ per-call bounds, attempts/retry window, retry, publication and fallback policy.
 The native Plan constants and dispatch recipe remain unchanged. Observer-specific
 and caller-boundary controls, strict/feature checks and independent source review
 remain readiness gates; no merge or final CI readiness is claimed.
+
+The first native review identified a missing-token terminal gap. Original tests
+at 66219b1ef4c retire the Store token while the managed Plan remains live; both
+current-settings fallback and final-margin paths then produce zero terminals,
+with a fresh native query completing as a control. The fix fails that exact
+Plan through the supplied Internal lifecycle error on either missing resolution.
+Account85 and dispatch-provider13 controls pass; the two entry-capacity and
+three coalescing original assertions remain unchanged. The work descriptor's
+static arrays are now named consts, and the scanner prunes only two account.rs
+fingerprints (9 to7 occurrences), without reordering or an exemption. Native and
+independent source delta reviews are CLEAR at 92c7616455f.
+
+The new metadata_execution engine target executes five genuine managed Read
+Plan/group controls: founder detach between slots with a live follower plus a
+fresh-attempt retry; all-observer detach refusing the next queue before Prepare;
+short follower expiry with the founder still publishing; different publication
+policies sharing a closed tag but retaining distinct Plans; and all-observer
+detach in flight suppressing the late codec, then pruning the dead handle/token
+before fresh same-key admission. All five pass. These are shared-engine consumer
+composition controls, distinct from the executed signed BingX native adapter
+controls. The pure full-key/index checks and existing metadata release tests
+remain required alongside strict/feature and family CI gates.
