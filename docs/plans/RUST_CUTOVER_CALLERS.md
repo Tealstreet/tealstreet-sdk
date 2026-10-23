@@ -5099,3 +5099,13 @@ Hyperliquid's existing earlier cache-hit and identity/client-ID shortcuts remain
 Live Store/cache access stays separate from history. No REST capability, result
 wrapper, managed-request migration or NX runtime adoption is added.
 [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## WOO family WASM venue throughput
+
+Standalone WOO family builds compile the WOO venue crate at opt-level3. This
+applies to public and private WOO execution in browser/Worker and Node family
+artifacts. Callers download a larger module within the existing fixed size cap;
+SDK construction, endpoints, signing, transports, row shapes and errors retain
+their contracts. Combined/native builds continue using the package size profile;
+this supersedes the earlier package-profile description for the WOO family only.
+[Profile and controls](RUST_WOO_PUBLIC_CPU.md).

@@ -2230,3 +2230,15 @@ staged or accepted and no native endpoint is fabricated. Public trades reject
 through Completion with typed pre-I/O Unsupported/NotSent, while lookup's
 nondefinitive contract remains separate. Hyperliquid perpetual history and all
 native trading/signing/account paths retain their existing behavior.
+
+## WOO family ticker decoding compiler policy
+
+The WOO family retained shared speed defaults, while its explicit venue package
+profile still used opt-level z. A names-preserved profile identified generated
+Tick deserialization as the main sampled ingress cost. The existing family build
+mechanism now overrides only the WOO venue package to opt-level3; no second
+parser, Store lookup, numeric codec or engine policy is introduced. Original
+regression evidence is the reported landing CPU miss at28.838ms versus27.68ms.
+Interleaved unchanged-source artifacts show a local median23.105→18.957ms;
+exact-head CI's fixed public/private, CPU, memory and size gates remain acceptance
+requirements. [Scope, raw evidence and limitations](RUST_WOO_PUBLIC_CPU.md).

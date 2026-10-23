@@ -763,3 +763,17 @@ mutation, distinct command IDs and explicit pre-I/O Unsupported/NotSent. Native
 unsupported capabilities remain unsupported and no numeric managed fallback is
 introduced. Caller polling guidance retains coverage while deduplicating UI
 alerts.
+
+## WOO family compiler throughput controls
+
+A plan and baseline named profile preceded the WOO-only compiler change.
+Five interleaved baseline/candidate Rust pairs alternate execution order:
+medians23.105/18.957ms, four of five pairs improve. Every run serves77 frames
+without protocol errors or unserved requests. One correctness replay per
+artifact has identical final snapshots and all five checkpoints; every
+nonmetric output field also matches. The normal candidate grows61,376 bytes
+(1,142,442→1,203,818), within the unchanged1,343,488-byte ceiling. Inventory,
+tape, clocks, budgets, comparison rules and runtime/shared paths are unchanged.
+Local medians and sparse overlapping profiles do not establish the TS/Rust1.10x
+CI target or private runtime proof. The exact-head CI build and replay gates
+remain required. [Reproduction and evidence](RUST_WOO_PUBLIC_CPU.md).

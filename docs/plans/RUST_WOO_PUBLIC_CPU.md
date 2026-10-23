@@ -1,167 +1,139 @@
 # WOO public steady CPU headroom
 
-Lane codex-ih35js, overseer claude-ddi2il,2026-10-23. Work follows the MEXC book
-slice #1887. Plan and profile precede production edits; no merge without a window.
+Lane codex-ih35js, overseer claude-ddi2il, 2026-10-23. The candidate changes only
+WOO family WASM compilation. Local controls and independent reviews are complete;
+current landing integration and exact-head CI remain required. No merge without
+an explicit window.
 
-## Target and baseline
+## Problem and scope
 
-Restore at least1.10x median TS/Rust public steady CPU on the unchanged WOO tape
-and policy. Reported landinged9bdd96ba2 missed at Rust28.838ms versus27.68ms limit;
-recent WOO ratios range0.91-1.06x. This report is context, not our measurement.
-The FIRST local measurement is pinned to actual landing9aef6bca90b9633cfa3e8d1a3d4fcac96ef8994d,
-which includes actual #1796 b627e1bf6e9857158e41e14a49e1faa05572efc5. Do not measure
-an older WOO history tree or mix another branch's unlanded runtime into baseline.
+Reported landing ed9bdd96ba2 missed the fixed public steady CPU limit at
+28.838 ms versus 27.68 ms. Recent TS/Rust ratios ranged 0.91–1.06x. The objective
+is at least 1.10x median TS/Rust on the unchanged WOO tape and CI policy. The
+reported miss is the original regression evidence; local timings do not replace
+CI's nine-run performance, correctness, memory or size gates.
 
-CI uses woo-public.jsonl.gz and books BTCUSDT,ETHUSDT, with the normal first-quarter
-warm mark and nine performance runs. Keep fixture, books, clock/polling, comparison
-policy, budgets and shared transport/Store/engine paths unchanged. The ticker
-path already uses cached ticker_indexes/update_ticker_at; the pending shared
-Store symbol-index optimization is not assumed to solve this venue's cost.
+The first local measurement uses actual landing
+9aef6bca90b9633cfa3e8d1a3d4fcac96ef8994d, including actual WOO history #1796
+b627e1bf6e9857158e41e14a49e1faa05572efc5. WOO already uses cached ticker indexes;
+the separate shared Store lookup optimization is not the fix for this path.
 
-## Profile method and evidence
+Although WOO retained family speed defaults, its explicit venue package profile
+still used opt-level z. Profiling identified generated Tick deserialization as
+the main sampled ingress cost. The candidate uses the existing Aster family
+mechanism to override safe-cex-venue-woo to opt-level 3 for WOO family artifacts.
+This compiles public and private WOO code for browser/Worker and Node families.
+Combined/native profiles and other families retain their settings. Runtime,
+parser, Store, hashing, Numeric, signing, transport, clocks and error paths are
+unchanged. Request inventory has zero delta. No cross-cutting concern receives
+a second implementation.
 
-Reuse codex-9czdjh's direct named-WASM method: Rust1.99.0 aarch64, Node22.23.3 from
-NVM, wasm-bindgen0.2.129 and Binaryen132. WOO retains its actual speed-default
-family build plus serde_json opt-level3; no new compiler-profile change is planned.
-Build only WOO with CARGO_BUILD_JOBS=2, outside any local native-gate/profiling load.
-The overseer expressly authorizes this bounded local profiling exception to the
-usual CI-only WASM/replay rule; no other venue matrix or release sweep is run.
+## Plan-first checkpoints
 
-Keep an untouched-source normal stripped artifact and a separate names-preserved
-diagnostic artifact in /tmp, with source/tool/fixture/hash receipts. Use the
-normal artifact for a bounded five paired TS/Rust baseline sample and candidate
-comparison. These local medians guide diagnosis; exact-head CI's nine-run gate
-remains merge evidence. Do not compare a profiled run's CPU metric to gate limits.
+- be1340319739729d5413461108b53895a9f8a66a: profiling plan before any experiment.
+- b5b54c3170ad09160f8fe65aba863742344cb036: baseline findings and compiler
+  experiment plan before candidate measurement.
+- 35c72b780f50f623fd1956faa0eb2c2a4d6294c5: candidate results saved for restart,
+  before any production edit.
+- 239f9cb920a: interleaved phase control and correctness results committed before
+  the three-line build.sh implementation.
 
-A preload inspector samples at100us, starts at Tape.play's existing warm-mark
-threadCpuUsage and stops just before replay.mjs's steady delta read (currently
-line133; verify the source each time). Record and exclude inspector.post overhead.
-Attribute direct named frames from this exact artifact, aggregate repeated names
-across paths and avoid recursive double-counting. Do not map numeric function
-indices from a different stripped build. One initial profile is planned; repeat
-only if sparse sampling leaves the dominant cost unresolved. No production,
-harness, tape, polling or budget edit is used to collect the profile.
+Open-PR file lists were checked before editing: 43 PRs, no build.sh claim. Shared
+execution-sweep and Store work stays with its owners. The overseer explicitly
+authorized the bounded local WOO build/profile/timing exception; CPU windows
+were coordinated with codex-9czdjh. No other venue replay matrix ran locally.
 
-Coordinate CPU windows with codex-9czdjh. Its candidate profile is complete and
-its local gates/build are idle before this first WOO build/profile begins.
+## Method and evidence
 
-## Fix boundary and review gates
+Use Rust 1.99.0 aarch64, Node 22.23.3 from NVM, wasm-bindgen 0.2.129 and
+Binaryen 132, with CARGO_BUILD_JOBS=2 and no concurrent local heavy workload.
+Use corepack yarn node, ESBUILD_WORKER_THREADS=0, the unchanged
+woo-public.jsonl.gz and books BTCUSDT,ETHUSDT. Keep the original warm mark,
+clocks, tape, comparison policy and every fixed budget.
 
-Identify the dominant steady cost before code. If shared, fix or extend the
-shared engine/Store/decoder path; no WOO-local bypass or second implementation.
-Open-PR source collisions remain binding. In particular execution-sweep #1886,
-Store metadata #1747 and the wider engine seams own shared files: coordinate
-source ownership and consume a reviewed pin rather than guessing their changes.
-Native WOO codec work is permitted only if the profile identifies native codec
-cost, preserving every wire/financial/error/recovery semantic and shared path.
+Normal stripped artifacts supply unprofiled comparisons; separate named artifacts
+supply diagnosis. Inspector samples at 100 us from Tape.play's first-quarter
+warm-mark threadCpuUsage to just before replay.mjs's steady delta read (line 133
+in the pinned source). This includes final settle and flush. Exclude inspector
+frames and avoid adding overlapping or recursively repeated inclusive costs.
+Names and stripped builds differ in function/code ordering; never transfer
+numeric function indices between them. Profiled timings are not gate metrics.
 
-Commit reproducible baseline/profile findings and a narrow implementation plan
-before production changes. Add meaningful regression/RED controls for the
-identified defect or lost work, preserve existing assertions, and run full
-WOO+Binance native suites, scoped fmt/strict Clippy and both request-context
-checks. Any optimization must retain public/private behavior, fixed size/memory
-budgets and exact inventory; no exemptions or ignored timing gate are introduced.
-Obtain independent source/adversarial, caller and full-map/architecture reviews.
-CI, actual dependency integration and a separate revert guard precede the
-head-matched merge in an overseer window. Until evidence exists, no improvement,
-1.10x target achievement or complete replay proof is claimed.
+Evidence roots:
 
-## First unchanged-source findings (9aef)
+- /tmp/codex-ih35js-woo-profile-9aef: build.log, build-receipt.json,
+  steady-names.cpuprofile, names-attribution.json, paired-baseline.json and raw
+  replay outputs.
+- /tmp/codex-ih35js-woo-profile-opt3: equivalent candidate evidence,
+  paired-candidate.json, interleaved-rust-control.json, raw per-run outputs,
+  correctness-baseline.json, correctness-candidate.json and
+  correctness-comparison.json.
+- Artifacts: /tmp/codex-ih35js-woo-{names,stripped}-9aef and -opt3.
 
-Build receipt and raw evidence are under /tmp/codex-ih35js-woo-profile-9aef.
-The first names profile has211 samples and58.5ms sampled wall intervals;25.333ms
-of inspector frames are excluded. Named WASM ingress occupies19.252ms, of which
-TickerMessage/Vec<Tick> deserialization occupies11.918ms inclusively. Default
-string hashing occupies3.834ms; shared numeric deserialization1.333ms. These are
-nested sampled wall costs, not additive CPU totals or gate metrics. The empty
-execution timer/sweep path is small in this sample, not a supported primary fix.
+Artifact hashes authenticate the saved files, not an independently established
+complete rebuild provenance chain. The following reproduction recipe is recorded
+after the experiment, rather than presented as a contemporaneous shell log.
+Final exact-head CI must build and test the actual build.sh change.
 
-Five alternating normal stripped-artifact pairs have medians TS31.517ms and
-Rust25.085ms (TS/Rust1.2564), with all77 frames served and no protocol errors.
-TS ranges16.787-34.770ms; Rust21.229-25.873ms. Local variance and the reported CI
-miss prevent claiming restored headroom from this baseline. The normal WOO
-artifact is1,142,442 bytes against the unchanged1,343,488-byte venue ceiling;
-names-preserved1,403,405 bytes is diagnostic and never a shipped artifact.
+```bash
+export PATH=/Users/sam/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bin:/Users/sam/.cargo/bin:/Users/sam/.nvm/versions/node/v22.23.3/bin:$PATH
+export DYLD_LIBRARY_PATH=/Users/sam/.rustup/toolchains/1.99.0-aarch64-apple-darwin/lib
+export CARGO_BUILD_JOBS=2
+# Candidate; omit the second --config for the frozen-source baseline.
+cargo build --manifest-path sdk-rs/Cargo.toml --locked --release   -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features   --features woo --config profile.release.package.serde_json.opt-level=3   --config profile.release.package.safe-cex-venue-woo.opt-level=3
+/Users/sam/.cargo/bin/wasm-bindgen --remove-name-section --remove-producers-section   --target nodejs --out-dir /tmp/woo-reproduce-normal   sdk-rs/target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+/tmp/codex-binaryen132/binaryen-version_132/bin/wasm-opt -Oz   --enable-bulk-memory --enable-bulk-memory-opt --enable-mutable-globals   --enable-sign-ext --enable-nontrapping-float-to-int --enable-reference-types   --enable-multivalue /tmp/woo-reproduce-normal/safe_cex_wasm_bg.wasm   -o /tmp/woo-reproduce-normal/safe_cex_wasm_bg.wasm
+# The node output directory also needs package.json containing {"type":"commonjs"}.
+# For a diagnostic named build omit bindgen's two removal flags and add wasm-opt -g.
+ESBUILD_WORKER_THREADS=0 corepack yarn node --expose-gc --import tsx   sdk-rs/harness/replay.mjs --impl rust --performance --venue woo   --tape sdk-rs/harness/fixtures/woo-public.jsonl.gz --books BTCUSDT,ETHUSDT   --wasm /tmp/woo-reproduce-normal/safe_cex_wasm.js --out /tmp/woo-reproduce.json
+```
 
-### Next bounded compiler experiment, before production code
+## Results and limits
 
-WOO uses family speed defaults, but its venue crate is explicitly opt-level z
-in Cargo.toml. The dominant generated native Tick visitor therefore remains
-size-optimized even though shared serde_json is already opt-level3. Test ONE
-unchanged-source WOO-only build overriding safe-cex-venue-woo to opt-level3,
-using the existing family-profile mechanism as with Aster. Native/shared/combined
-profiles remain unchanged, and no parser/Store/engine path is bypassed. Reject
-an oversize candidate; only then consider a narrower compiler setting. Compare
-five alternating unprofiled candidate pairs and the same named profile boundary.
-Do not adopt or claim1.10x from names timings or a favorable TS outlier.
+| Control | Baseline | Candidate |
+| --- | --- | --- |
+| First five-pair Rust median | 25.085 ms | 10.031 ms |
+| TS median in those respective phases | 31.517 ms | 17.729 ms |
+| Five interleaved Rust-pair median | 23.105 ms | 18.957 ms |
+| Normal WASM size | 1,142,442 bytes | 1,203,818 bytes |
+| Final correctness snapshots | Identical | Identical |
+| Correctness checkpoints | Five | Five, identical |
 
-Any eventual profile-policy change needs the unchanged fixed size budget,
-correctness/replay gates and exact-head CI. If this experiment fails to improve
-Rust cost materially or exceeds size, return to the named evidence and shared
-owner coordination rather than inventing a WOO-specific shared-path substitute.
+TS phase drift prevents treating the initial 10 ms candidate result as stable.
+The subsequent interleaved control alternated baseline/candidate order. Four of
+five pairs favored the candidate; one favored baseline. The 1.2188x median ratio
+is a 17.95% local Rust CPU reduction. It does not prove the TS/Rust CI objective.
+All performance runs served 77 frames, without unserved requests or protocol
+errors. Correctness replays also served 77 frames; existing snapshot/checkpoint
+comparators found zero differences. Every nonmetric output field matches exactly.
+Private replay behavior remains a CI requirement.
 
-## Opt3 experiment results and restart checkpoint
-
-The unchanged9aef source was rebuilt with the single experimental override
-profile.release.package.safe-cex-venue-woo.opt-level=3. No production build policy
-or runtime source has been edited. Evidence is under
-/tmp/codex-ih35js-woo-profile-opt3; baseline evidence remains under
-/tmp/codex-ih35js-woo-profile-9aef.
-
-Five alternating candidate TS/Rust pairs produced medians TS17.729ms and
-Rust10.031ms (ratio1.7674). Rust values were10.145,10.031,9.774,9.258,12.130ms;
-TS values were23.456,19.472,16.613,16.028,17.729ms. All runs served77 frames with
-zero unserved requests and no protocol errors. The normal candidate artifact is
-1,203,818 bytes, versus baseline1,142,442, within the unchanged1,343,488 ceiling.
-Candidate WASM SHA256 is
+The candidate grows 61,376 bytes and leaves 139,670 bytes below the unchanged
+1,343,488-byte ceiling. Normal candidate WASM SHA256:
 5c099e62745b95734de474fcf60bf4c5ec78b68206c89dbc4f928d65ee00cbb3.
+Baseline SHA256:
+7519afbd9ee72a8ae48db7543539267ec402fe8dbf7b6ea7a0c389e3d8a6b6f0.
 
-The candidate named profile has77 samples, with4.332ms sampled WASM ingress,
-1.998ms inclusive Tick deserialization,0.542ms hashing and0.291ms Numeric.
-These sparse, overlapping samples have changed inlining boundaries and do not
-support exact function speed ratios. TS median shifted substantially between
-baseline and candidate phases, so neither sequential-phase ratio establishes
-restored CI headroom. No performance goal or correctness gate is claimed passed.
+The baseline profile has 211 samples: 19.252 ms inclusive WASM ingress,
+11.918 ms Tick deserialization, 3.834 ms hashing and 1.333 ms Numeric. These
+nested sampled wall costs are not additive CPU totals. The candidate profile
+has 77 samples: 4.332 ms WASM, 1.998 ms Tick, 0.542 ms hashing and 0.291 ms
+Numeric. Sparse sampling and changed inlining prohibit exact function speed
+ratios. The execution sweep is small in this sample and is not the primary fix.
 
-Next, before production code: run five interleaved baseline/candidate Rust pairs
-with alternating order to control phase drift, then one correctness replay per
-artifact and compare full snapshots/checkpoints using snapshot-compare.mjs.
-Preserve the tape, books, clocks and budgets. Record literal build/bind/wasm-opt
-commands and environment alongside receipts: current hashes authenticate files,
-not a complete rebuild provenance chain. Only after these controls consider the
-existing family-only build.sh override, refreshing open-PR file ownership first.
-Native WOO/Binance gates and independent final reviews follow the timing window.
+## Verification and remaining gates
 
-Independent source review of b5b54c3170a found no blocking interpretation or
-architecture issue. It verified baseline raw values, warm/stop boundaries and
-that this family-only compiler experiment bypasses no shared path. No production
-change, new correctness replay, candidate acceptance or final CI has occurred.
-Restart requested by the overseer stops further experiments and builds here.
+489 WOO/Binance native tests across 38 targets pass, as do scoped strict Clippy,
+fmt, bash syntax and diff checks. The 14 request-context checker controls pass.
+The production inventory is byte-identical to the frozen source. The main
+request-context checker currently reports stale incoming Paradex/Lighter entries
+against newer origin landing; genuine integration is required before rerunning
+it and obtaining exact-head CI. No inventory entries may be restored or exempted.
 
-## Resumed controls and implementation decision
-
-On the same unchanged9aef artifacts, five interleaved Rust baseline/candidate
-pairs alternated execution order. Baseline median23.105ms versus candidate
-18.957ms is1.2188x, an approximately18% median reduction. Baseline values were
-19.531,17.970,23.514,23.105,23.894ms; candidate11.483,21.724,18.957,17.898,20.374ms.
-Four pairs favored the candidate; one favored baseline. This confirms a smaller
-local improvement under the phase control, without treating the earlier10ms
-median as stable or asserting the TS/Rust CI target has passed. Every run served
-77 frames, with zero unserved requests and no protocol errors. Raw outputs and
-artifact hashes are in interleaved-rust-control.json under the opt3 evidence root.
-
-One correctness replay per normal artifact also served77 frames and captured
-five checkpoints each. Existing compareSnapshots and compareCheckpoints report
-zero differences in final markets/tickers/books/account and every checkpoint;
-protocol/signature/write diagnostics agree. This is a compiler-artifact control,
-not a replacement for the exact-head public/private replay gates.
-
-Proceed with only a WOO family override in sdk-rs/harness/build.sh:
-profile.release.package.safe-cex-venue-woo.opt-level=3. Keep Cargo.toml, all
-runtime/shared paths, combined/native profiles, budgets and inventories unchanged.
-The current open-PR file-list snapshot (43 PRs) has no build.sh collision. This
-uses the existing Aster family-profile mechanism; the generated venue visitor
-identified by profiling is the code whose compiler policy changes. No new parser,
-hashing, Numeric or engine implementation is justified. The reported original CI
-CPU miss supplies regression evidence; preserve the unchanged performance and
-size gates for acceptance instead of adding a test that repeats a compiler flag.
+Independent source/adversarial, caller and full-map reviews are clean.
+Architecture gate: no per-venue replacement of a cross-cutting concern; this uses
+the existing family compiler policy and retains shared paths. Final ledger review,
+current landing integration, both inventory checks and exact-head CI remain
+required. Preserve the fixed public/private correctness, CPU, memory and size
+acceptance gates. A separate fresh revert guard and head-matched PR merge require
+an explicit overseer window and the post-restart merge GO.
