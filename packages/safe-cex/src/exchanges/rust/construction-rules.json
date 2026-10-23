@@ -11,6 +11,12 @@
     "bitget": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "ACCESS-PASSPHRASE"}},
     "bitgetinverse": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "ACCESS-PASSPHRASE"}},
     "bitgetusdc": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "ACCESS-PASSPHRASE"}},
+    "bitunix": {
+      "signerSetup": {
+        "primary": { "trimCredential": true, "trimSigning": true },
+        "secondary": { "trimCredential": true, "trimSigning": true }
+      }
+    },
     "mexc": {"signerSetup": {"primary": {"trimCredential": true}, "secondary": {"trimCredential": false}}},
     "coinbase": {"canSign": [["key"]], "bridge": {"primaryCredentialsOnly": true}},
     "coinbasespot": {"canSign": [["key"]], "bridge": {"spot": true, "primaryCredentialsOnly": true}},

@@ -78,6 +78,7 @@ struct CredentialSetupPolicy {
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 struct IdentitySetupPolicy {
     trim_credential: Option<bool>,
+    trim_signing: Option<bool>,
     passphrase: Option<SetupFieldPolicy>,
     secret_encoding: Option<KeyEncoding>,
     extra: Option<ExtraKeyPolicy>,
@@ -212,8 +213,8 @@ fn rule(value: &Rule) -> String {
                 },
             );
             format!(
-                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra} }})",
-                value.trim_credential
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, trim_signing: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra} }})",
+                value.trim_credential, value.trim_signing
             )
         }
         None => "None".into(),
@@ -337,8 +338,8 @@ mod tests {
                 "empty":{"signerSetup":{"primary":{}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), trim_signing: None, passphrase: None, secret_encoding: None, extra: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), trim_signing: None, passphrase: None, secret_encoding: None, extra: None }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, trim_signing: None, passphrase: None, secret_encoding: None, extra: None }), secondary: None }"));
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
     }
 
@@ -383,6 +384,16 @@ mod tests {
             );
             assert!(generate(&rules).is_err());
         }
+    }
+
+    #[test]
+    fn declared_signing_trim_compiles_per_slot() {
+        let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "bitunix":{"signerSetup":{"primary":{"trimCredential":true,"trimSigning":true},"secondary":{"trimCredential":true,"trimSigning":true}}}
+        }}"#).unwrap();
+        assert!(output.contains("IdentitySetupPolicy { trim_credential: Some(true), trim_signing: Some(true), passphrase: None, secret_encoding: None, extra: None }"));
+        let rules = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"trimSigning":"yes"}}}}}"#;
+        assert!(generate(rules).is_err());
     }
 
     #[test]

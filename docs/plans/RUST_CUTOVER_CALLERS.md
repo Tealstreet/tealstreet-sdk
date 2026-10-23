@@ -3452,6 +3452,16 @@ persisted MEXC key-derived user IDs. Those mappings are later cutover work.
 
 [Provider contract and prerequisites](RUST_SIGNER_PREREQUISITES.md).
 
+**Bitunix signing-key trim (overseer decision, 2026-10-23).**
+- Setup policy `trimSigning` trims the signing-key text once at trusted setup,
+  alongside `trimCredential`. Bitunix declares both for the primary and
+  secondary slots, so REST and WS login sign with the same trimmed material.
+- This changes behaviour for Bitunix REST with a whitespace-padded key or
+  secret, which previously signed exactly. Such keys could not authenticate
+  REST at the exchange anyway.
+- Callers need no change; the declaration is inert until Bitunix adopts
+  dispatch signing.
+
 
 ### BloFin general histories: owned cursor completion
 
