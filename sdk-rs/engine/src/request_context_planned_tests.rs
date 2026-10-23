@@ -15,6 +15,7 @@ mod planned_calls {
         readiness: usize,
         panic_ready: bool,
         bad_retry: bool,
+        check_generic_resend: bool,
         other_plan: Option<Plan>,
         cross_owner_denied: usize,
         wait: u32,
@@ -188,20 +189,25 @@ mod planned_calls {
                 return;
             }
             if response.body == "retry" {
-                if self.write {
-                    cx.http_write_result(
-                        &context,
-                        crate::request_context::WriteResult::Rejected(
-                            VenueError::new("refused").outcome(crate::Outcome::Rejected),
-                        ),
-                    )
-                    .unwrap();
-                }
-                if self.write {
-                    // This internal state-machine fixture models a classified
-                    // grant; production consumers must use WriteFact APIs.
-                    let delivery = cx.io.http_delivery.clone().unwrap();
-                    cx.io.request_contexts.grant_resend(&delivery).unwrap();
+                let _grant = if self.write {
+                    use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+                    const TABLE: CodeTable = CodeTable {
+                        rows: &[Row { key: Key::Int(10002), verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid), only: None }],
+                        success: &[Key::Int(0)], unlisted: Verdict::Unknown(None), status: &[],
+                    };
+                    let native = Native { code: NativeCode::Int(10002), message: "request timestamp refused" };
+                    let (verdict, grant) = cx.http_write_failure(&context, &TABLE, Some(&native), "refused", None).unwrap();
+                    assert_eq!(verdict, Verdict::RefusedResend(ErrorKind::AuthInvalid));
+                    Some(grant.expect("first classified effects-free refusal"))
+                } else { None };
+                if self.check_generic_resend {
+                    let ids = cx.io.next_id;
+                    let actions = cx.io.actions.len();
+                    assert_eq!(cx.plan_retry_context(&plan, &slot, &context,
+                        crate::request_context::RetryEvidence::DefinitiveRefusal), Err(Error::RetryForbidden));
+                    assert_eq!(cx.io.next_id, ids);
+                    assert_eq!(cx.io.actions.len(), actions);
+                    cx.validate_plan_delivery(&plan, &context).unwrap();
                 }
                 let context = cx
                     .plan_retry_context(
@@ -941,6 +947,20 @@ mod planned_calls {
         }
         assert!(!e.signing_pending(RequestId(1)));
         assert_eq!(e.venue.readiness, 1);
+    }
+    #[test]
+    fn generic_plan_retry_refuses_a_real_classified_write_grant() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            write: true, check_generic_resend: true, ..Default::default()
+        });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        response(&mut e, first, 19_000., "retry");
+        let (second, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        assert_ne!(first.attempt(), second.attempt());
+        assert_eq!(e.venue.responses, 0);
+        assert_eq!(e.venue.retired, 0);
     }
     #[test]
     fn selected_retry_queue_refusal_keeps_prior_send_unknown() {
