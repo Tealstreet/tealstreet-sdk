@@ -976,6 +976,14 @@ export class EngineHost {
               this.socketClosed(id, code ?? 1006);
               this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
             },
+            // Typed host feedback, never a peer close code; older engines close.
+            onRouteExhausted: () => {
+              if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
+              this.sockets.delete(id);
+              this.socketClosed(id, 1006);
+              if (engine.wsRouteExhausted) this.run(this.invoke(engine.wsRouteExhausted, id, transport.now()));
+              else this.run(this.invoke(engine.wsClose, id, 1006, transport.now()));
+            },
           });
         } catch {
           connecting = false;

@@ -16,8 +16,10 @@ export interface ResolvedWs {
   initialSilentConnects?: number;
   /** Frames still reach the engine, but do not prove the current route works. */
   ignoredMessages?: string[];
-  /** Exact upstream URLs which bypass every fallback and recovery policy. */
-  directUrls?: string[];
+  /** Venue URLs a host routes through this route instead of the channel default. */
+  matchUrls?: string[];
+  /** The relay is the egress a venue binds keys to, so hosts offer it ungated. */
+  relayRequired?: boolean;
 }
 
 export interface ResolvedRouting {

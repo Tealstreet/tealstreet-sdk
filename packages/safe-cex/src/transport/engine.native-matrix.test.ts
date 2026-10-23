@@ -424,13 +424,16 @@ const buildCase = async (input: Case) => {
   const sockets = socketInputs.map(({ channel, url, context }) => {
     const declared =
       productRouting(url) ??
+      (channel === 'private' && routing.wsPrivateUta?.matchUrls?.some((match) => url.includes(match))
+        ? routing.wsPrivateUta
+        : undefined) ??
       routing[channel === 'public' ? 'wsPublic' : channel === 'private' ? 'wsPrivate' : 'wsBusiness'];
     // TS Bitunix socket classes select fallback immediately on this explicit flag.
     const forced = input.exchange === 'bitunix' && options.tealstreetWsRoute && declared.fallback;
-    const route: Partial<ResolvedWs> = declared.directUrls?.includes(url) ? {} : forced ? { host: declared.fallback } : declared;
+    const route: Partial<ResolvedWs> = forced ? { host: declared.fallback } : declared;
     const candidates = [
       route.host ?? url,
-      ...(input.relay && route.relay ? [route.relay] : []),
+      ...((input.relay || route.relayRequired) && route.relay ? [route.relay] : []),
       ...(route.fallback ? [route.fallback] : []),
     ];
     const attempts = Array.from({ length: 5 }, (_, attempt) => {

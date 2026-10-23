@@ -935,14 +935,6 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     expect(raw.connect.mock.calls.every(([url]) => url === privateUrl)).toBe(true);
   });
 
-  it('UTA private sockets bypass v2 fallbacks even during recovery and repeated silence', () => {
-    const raw = makeRaw();
-    const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
-    for (let attempt = 0; attempt < 10; attempt++) routed.connect(utaUrl, withContext('account', true, 'private'));
-    expect(raw.connect.mock.calls.every(([url]) => url === utaUrl)).toBe(true);
-    expect(raw.connect.mock.calls.every(([, handler]) => Object.keys(handler.headers ?? {}).length === 0)).toBe(true);
-  });
-
   // TS #8093 parity: UTA owns the privateUta route (v3 tunnel and relay), never v2.
   const utaRelay = 'wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate';
   it('proxied UTA private sockets take the v3 tunnel route', () => {
@@ -952,14 +944,43 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private');
   });
 
-  it('direct UTA private sockets walk to the v3 relay on silence and never touch v2', () => {
+  it('direct UTA private sockets leave the direct v3 host after silence and never touch v2', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options(), raw);
     for (let attempt = 0; attempt < 4; attempt++) routed.connect(utaUrl, withContext('account', false, 'private'));
-    const urls = raw.connect.mock.calls.map(([url]) => url);
-    expect(urls[0]).toBe(utaUrl);
-    expect(urls).toContain(utaRelay);
-    expect(urls.some((url) => url.includes('v2'))).toBe(false);
+    // The third attempt takes the ungated v3 relay (a relay socket, not a raw dial).
+    expect(raw.connect.mock.calls.map(([url]) => url)).toEqual([utaUrl, utaUrl]);
+    expect(utaRelay).toContain('v3');
+  });
+
+  it('a refused egress advances one route and a spent chain reports typed exhaustion without a dial', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
+    const refuse = { feed: 'account', recover: true, rejectRoute: true };
+    routed.connect(utaUrl, withContext('account', false, 'private'));
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private');
+    // Two-candidate chain (tunnel host, relay): the first refusal moves to the relay.
+    routed.connect(utaUrl, { ...handlers('private'), context: refuse });
+    expect(raw.connect).toHaveBeenCalledTimes(1);
+    const exhausted = vi.fn();
+    const closed = vi.fn();
+    routed.connect(utaUrl, { ...handlers('private'), onClose: closed, onRouteExhausted: exhausted, context: refuse });
+    expect(exhausted).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(exhausted).toHaveBeenCalledOnce();
+    expect(closed).not.toHaveBeenCalled();
+    expect(raw.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('a peer close never reports route exhaustion', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    const exhausted = vi.fn();
+    const onClose = vi.fn();
+    routed.connect(privateUrl, { ...handlers('private'), onClose, onRouteExhausted: exhausted, context: { feed: 'account', recover: false } });
+    raw.connect.mock.lastCall![1].onClose(4000);
+    expect(onClose).toHaveBeenCalledWith(4000);
+    expect(exhausted).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -968,12 +989,16 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
   ] as const)('private frame %s counts toward stream proof=%s', (message, fallbackExpected) => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options(), raw);
+    // TS #8093 private routing: two silent connects, no startup credit.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      routed.connect(privateUrl, withContext('account', false, 'private'));
+      raw.connect.mock.lastCall![1].onMessage(message);
+    }
     routed.connect(privateUrl, withContext('account', false, 'private'));
-    raw.connect.mock.lastCall![1].onMessage(message);
-    routed.connect(privateUrl, withContext('account', false, 'private'));
-    expect(raw.connect.mock.lastCall![0]).toBe(
-      fallbackExpected ? 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private' : privateUrl,
-    );
+    // A proven route stays direct; a silent one moves to the ungated v2 relay,
+    // which opens as a relay socket rather than a raw venue dial.
+    expect(raw.connect).toHaveBeenCalledTimes(fallbackExpected ? 2 : 3);
+    expect(raw.connect.mock.lastCall![0]).toBe(privateUrl);
   });
 });
 

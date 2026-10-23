@@ -303,6 +303,11 @@ impl Transport for NetworkTransport {
         } else {
             (None, headers)
         };
+        // Queued host feedback: delivered after this call returns, never dialled.
+        if selected.as_ref().is_some_and(|selected| selected.exhausted) {
+            let _ = events.send(HostEvent::WsRouteExhausted(socket));
+            return outgoing;
+        }
         tokio::spawn(async move {
             let canceled = events.clone();
             let operation = async move {

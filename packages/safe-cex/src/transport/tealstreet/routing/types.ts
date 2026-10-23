@@ -71,7 +71,9 @@ export type WsStrategy =
     relayWhenTunnelled?: boolean;
     initialSilentConnects?: number;
     ignoredMessages?: string[];
-    directUrls?: string[];
+    // Venue URLs that take this strategy instead of their channel's default
+    // (Bitget UTA's v3 private socket on the privateUta strategy).
+    matchUrls?: string[];
   };
 
 export interface ExchangeWsRouting {

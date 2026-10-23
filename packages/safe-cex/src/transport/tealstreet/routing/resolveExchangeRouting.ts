@@ -32,17 +32,20 @@ const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions, egress: 
   const resolved = resolveWsKind(strategy, o);
   // Declared fallback candidates ride along only on a DIRECT resolution (see WsStrategy),
   // except a relay the strategy explicitly offers to tunnelled sockets too.
+  // URL scope and an egress-bound relay hold whichever way the route resolves.
+  const scoped: ResolvedWs = {
+    ...resolved,
+    ...(strategy.matchUrls ? { matchUrls: strategy.matchUrls } : {}),
+    ...(strategy.relayWhenTunnelled ? { relayRequired: true } : {}),
+  };
   if (resolved.tunnelled) {
-    // Declared direct URLs bypass this channel's route whichever way it resolves.
-    const tunnelled = strategy.directUrls ? { ...resolved, directUrls: strategy.directUrls } : resolved;
     return strategy.relayWhenTunnelled && strategy.relayUpstream
-      ? { ...tunnelled, relay: buildRelayUrl(egress, strategy.relayUpstream) }
-      : tunnelled;
+      ? { ...scoped, relay: buildRelayUrl(egress, strategy.relayUpstream) }
+      : scoped;
   }
-  const out = { ...resolved };
+  const out = { ...scoped };
   if (strategy.initialSilentConnects !== undefined) out.initialSilentConnects = strategy.initialSilentConnects;
   if (strategy.ignoredMessages) out.ignoredMessages = strategy.ignoredMessages;
-  if (strategy.directUrls) out.directUrls = strategy.directUrls;
   if (strategy.fallback && !out.fallback) out.fallback = strategy.fallback;
   if (strategy.relayUpstream) out.relay = buildRelayUrl(egress, strategy.relayUpstream);
   return out;

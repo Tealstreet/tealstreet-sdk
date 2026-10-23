@@ -12272,12 +12272,9 @@
         },
         "private": {
           "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-          "initialSilentConnects": 1,
+          "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -12311,6 +12308,18 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "wss://ws.bitget.com/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
@@ -12521,8 +12530,15 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+            "url": "wss://ws.bitget.com/v2/ws/private",
             "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12530,17 +12546,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep",
-              "Origin": "https://preview.tealstreet.io",
-              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-            }
-          },
-          {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12578,12 +12585,9 @@
         },
         "private": {
           "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-          "initialSilentConnects": 1,
+          "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -12617,6 +12621,18 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "wss://ws.bitget.com/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
@@ -12652,10 +12668,12 @@
         },
         "attempts": [
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             },
             "context": {
               "feed": "private",
@@ -12663,31 +12681,39 @@
             }
           },
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           },
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           },
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           },
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           }
         ]
@@ -12712,12 +12738,9 @@
         },
         "private": {
           "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-          "initialSilentConnects": 1,
+          "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -12751,6 +12774,18 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "wss://ws.bitget.com/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
@@ -12794,8 +12829,16 @@
             "message": "pong"
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+            "url": "wss://ws.bitget.com/v2/ws/private",
             "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep"
+            },
+            "message": "pong"
+          },
+          {
+            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12804,18 +12847,8 @@
             "message": "pong"
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
-            "headers": {
-              "X-Venue-Header": "keep",
-              "Origin": "https://preview.tealstreet.io",
-              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-            },
-            "message": "pong"
-          },
-          {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12855,12 +12888,9 @@
         },
         "private": {
           "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-          "initialSilentConnects": 1,
+          "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -12894,6 +12924,18 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "wss://ws.bitget.com/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
@@ -12990,12 +13032,9 @@
         },
         "private": {
           "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-          "initialSilentConnects": 1,
+          "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -13029,6 +13068,18 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "wss://ws.bitget.com/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },

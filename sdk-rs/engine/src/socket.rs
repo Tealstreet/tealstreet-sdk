@@ -637,3 +637,123 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod route_exhaustion {
+    use crate::book::Book;
+    use crate::{Command, Cx, Engine, Event, Response, SocketId, SocketSpec, TimerId, Venue};
+
+    /// Records socket callbacks; `opt_in` overrides the route-exhaustion hook.
+    struct Recorder<const OPT_IN: bool> {
+        socket: Option<SocketId>,
+        closes: Vec<(SocketId, u16)>,
+        exhausted: Vec<SocketId>,
+    }
+    impl<const OPT_IN: bool> Venue for Recorder<OPT_IN> {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            self.socket = Some(
+                cx.connect(
+                    SocketSpec::new("wss://socket.test")
+                        .channel(crate::SocketChannel::Private)
+                        .feed("private", false)
+                        .reject_route(),
+                ),
+            );
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, socket: SocketId, code: u16) {
+            self.closes.push((socket, code));
+        }
+        fn on_route_exhausted(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
+            if OPT_IN {
+                self.exhausted.push(socket);
+            } else {
+                self.on_close(cx, socket, 1006);
+            }
+        }
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    fn engine<const OPT_IN: bool>() -> Engine<Recorder<OPT_IN>> {
+        let mut engine = Engine::new(
+            Recorder::<OPT_IN> {
+                socket: None,
+                closes: vec![],
+                exhausted: vec![],
+            },
+            Some(crate::test_support::seeded_entropy(5)),
+        )
+        .unwrap();
+        engine.start(1_000.);
+        engine.drain_actions().for_each(drop);
+        engine
+    }
+
+    #[test]
+    fn the_reject_route_hint_is_carried_on_the_connect_context() {
+        let spec = SocketSpec::new("wss://socket.test")
+            .feed("private", true)
+            .reject_route();
+        let context = spec.context.unwrap();
+        assert!(context.reject_route && context.recover);
+        let json = serde_json::to_string(&context).unwrap();
+        assert_eq!(
+            json,
+            r#"{"feed":"private","recover":true,"rejectRoute":true}"#
+        );
+        let plain = SocketSpec::new("wss://socket.test").feed("private", false);
+        assert_eq!(
+            serde_json::to_string(&plain.context.unwrap()).unwrap(),
+            r#"{"feed":"private","recover":false}"#,
+            "absent hint keeps the old wire"
+        );
+    }
+
+    #[test]
+    fn exhaustion_reaches_an_opted_in_venue_exactly_once_and_stale_feedback_is_inert() {
+        let mut engine = engine::<true>();
+        let socket = engine.venue().socket.unwrap();
+        engine.handle(1_001., Event::WsRouteExhausted { socket });
+        engine.handle(1_002., Event::WsRouteExhausted { socket });
+        engine.handle(
+            1_003.,
+            Event::WsRouteExhausted {
+                socket: SocketId(999_999),
+            },
+        );
+        assert_eq!(engine.venue().exhausted, [socket]);
+        assert!(engine.venue().closes.is_empty());
+    }
+
+    #[test]
+    fn exhaustion_maps_to_an_abnormal_close_for_venues_without_a_refusal_walk() {
+        let mut engine = engine::<false>();
+        let socket = engine.venue().socket.unwrap();
+        engine.handle(1_001., Event::WsRouteExhausted { socket });
+        engine.handle(1_002., Event::WsClosed { socket, code: 4000 });
+        assert_eq!(engine.venue().closes, [(socket, 1006), (socket, 4000)]);
+    }
+
+    #[test]
+    fn a_peer_close_with_any_code_is_never_exhaustion() {
+        let mut engine = engine::<true>();
+        let socket = engine.venue().socket.unwrap();
+        engine.handle(1_001., Event::WsClosed { socket, code: 4999 });
+        engine.handle(1_002., Event::WsRouteExhausted { socket });
+        assert_eq!(engine.venue().closes, [(socket, 4999)]);
+        assert!(
+            engine.venue().exhausted.is_empty(),
+            "a closed socket is stale"
+        );
+    }
+}

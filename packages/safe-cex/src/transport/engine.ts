@@ -38,7 +38,6 @@ export interface EngineWsRoute {
   relay?: string;
   initialSilentConnects?: number;
   ignoredMessages?: string[];
-  directUrls?: string[];
 }
 
 /** Serializable host policy; contains no venue credentials or proxy JWT. */
@@ -57,6 +56,8 @@ export interface EngineRoutingPlan {
   socketChannels: Array<{ contains: string; channel: 'public' | 'private' | 'business' }>;
   /** Public sockets whose native URL names a product with its own route. */
   publicWsRoutes?: Array<{ contains: string; route: EngineWsRoute }>;
+  /** Private sockets whose native URL takes a declared route (Bitget UTA). */
+  privateWsRoutes?: Array<{ contains: string; route: EngineWsRoute }>;
 }
 
 type Request = Parameters<Transport['request']>[0];
@@ -173,11 +174,16 @@ const socketChannels: EngineRoutingPlan['socketChannels'] = [
 const wsRoute = (route: ResolvedWs): EngineWsRoute => ({
   ...(route.tunnelled && route.host ? { host: route.host } : {}),
   ...(route.fallback ? { fallback: route.fallback } : {}),
-  ...(isWsRelayEnabled() && route.relay ? { relay: route.relay } : {}),
+  ...((isWsRelayEnabled() || route.relayRequired) && route.relay ? { relay: route.relay } : {}),
   ...(route.initialSilentConnects !== undefined ? { initialSilentConnects: route.initialSilentConnects } : {}),
   ...(route.ignoredMessages ? { ignoredMessages: route.ignoredMessages } : {}),
-  ...(route.directUrls ? { directUrls: route.directUrls } : {}),
 });
+
+// Declared URL-scoped private routes, e.g. a Bitget UTA account's v3 socket.
+const privateWsRoutes = (routing: ResolvedRouting): EngineRoutingPlan['privateWsRoutes'] =>
+  routing.wsPrivateUta?.matchUrls?.length
+    ? routing.wsPrivateUta.matchUrls.map((contains) => ({ contains, route: wsRoute(routing.wsPrivateUta!) }))
+    : undefined;
 
 // One Bybit account streams inverse and option products from their own native
 // URLs; TS routes inverse through `bybitinverse`'s hosts. No option proxy exists.
@@ -291,6 +297,7 @@ export const resolveEngineRoutingPlan = (
     venueWsHeaders: venueHeaders(exchange, options),
     socketChannels,
     ...(productRoutes ? { publicWsRoutes: productRoutes } : {}),
+    ...(privateWsRoutes(routing) ? { privateWsRoutes: privateWsRoutes(routing) } : {}),
   };
 };
 
@@ -722,6 +729,7 @@ export const createEngineTransport = (
     business: wsRoute(routing.wsBusiness),
   };
   const productRoutes = publicWsRoutes(exchange, options, provider) ?? [];
+  const privateRoutes = privateWsRoutes(routing) ?? [];
   // Relay sockets read the proxy token on open; see `httpTransport`.
   const proxyTokenProvider = captureProxyTokenProvider();
   const requireSocketHeaders = (url: string) => {
@@ -752,7 +760,7 @@ export const createEngineTransport = (
       ]);
     }
     for (const [url, route] of urls) {
-      const candidates = route.directUrls?.includes(url) ? [url] : [route.host ?? url, route.relay, route.fallback];
+      const candidates = [route.host ?? url, route.relay, route.fallback];
       for (const candidate of candidates) if (candidate) requireSocketHeaders(candidate);
     }
   }
@@ -830,19 +838,29 @@ export const createEngineTransport = (
     connect: (url, handlers) => {
       const channel =
         handlers.channel ?? socketChannels.find((rule) => url.includes(rule.contains))?.channel ?? 'public';
-      const declared =
-        (channel === 'public' ? productRoutes.find((rule) => url.includes(rule.contains))?.route : undefined) ??
-        routes[channel];
-      const bypass = declared.directUrls?.includes(url);
-      const route: EngineWsRoute = bypass ? {} : declared;
+      const scoped = channel === 'public' ? productRoutes : channel === 'private' ? privateRoutes : [];
+      const route: EngineWsRoute = scoped.find((rule) => url.includes(rule.contains))?.route ?? routes[channel];
       const key = `${channel}:${handlers.context?.feed ?? ''}:${url.split('?')[0]}`;
-      let fallback = bypass ? undefined : fallbacks.get(key);
-      if (!bypass && !fallback) {
+      let fallback = fallbacks.get(key);
+      if (!fallback) {
         fallback = new WsDirectFallback(2, route.initialSilentConnects);
         fallbacks.set(key, fallback);
       }
-      if (handlers.context?.recover && route.fallback) fallback?.preferFallback();
-      const target = fallback?.resolveUrl(route.host ?? url, route.relay, route.fallback) ?? url;
+      // Refused egress advances exactly one candidate and wins over recovery. A
+      // spent chain is reported back as typed host feedback, never dialled.
+      if (handlers.context?.rejectRoute) {
+        if (!fallback.rejectCurrent()) {
+          let exhausted = false;
+          queueMicrotask(() => {
+            if (exhausted) return;
+            exhausted = true;
+            if (handlers.onRouteExhausted) handlers.onRouteExhausted();
+            else handlers.onClose(1006);
+          });
+          return { send: () => {}, close: () => { exhausted = true; } };
+        }
+      } else if (handlers.context?.recover && route.fallback) fallback.preferFallback();
+      const target = fallback.resolveUrl(route.host ?? url, route.relay, route.fallback);
       const connection = requireSocketHeaders(target);
       const upgrade = AxiosHeaders.from(handlers.headers ?? {});
       if (transport.webSocketHeaders) {

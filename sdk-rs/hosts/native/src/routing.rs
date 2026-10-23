@@ -93,8 +93,6 @@ pub struct WsRoute {
     pub initial_silent_connects: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignored_messages: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub direct_urls: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -151,6 +149,9 @@ pub struct RoutingPlan {
     pub socket_channels: Vec<SocketChannelRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub public_ws_routes: Vec<PublicWsRoute>,
+    /// URL-scoped private routes (Bitget UTA), the same data shape as public.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub private_ws_routes: Vec<PublicWsRoute>,
 }
 
 pub(crate) struct RoutingState {
@@ -173,6 +174,8 @@ pub(crate) struct SelectedSocket {
     pub headers: Vec<(String, String)>,
     pub key: String,
     pub relay: Option<String>,
+    /// A `reject_route` connect found no further candidate: do not dial.
+    pub exhausted: bool,
 }
 
 impl RoutingState {
@@ -305,23 +308,21 @@ impl RoutingState {
                 .iter()
                 .find(|rule| original.contains(&rule.contains))
                 .map_or(&self.plan.ws.public, |rule| &rule.route),
-            SocketChannel::Private => &self.plan.ws.private,
+            SocketChannel::Private => self
+                .plan
+                .private_ws_routes
+                .iter()
+                .find(|rule| original.contains(&rule.contains))
+                .map_or(&self.plan.ws.private, |rule| &rule.route),
             SocketChannel::Business => &self.plan.ws.business,
         };
         let feed = context.as_ref().map_or("", |context| context.feed.as_str());
         let recover = context.as_ref().is_some_and(|context| context.recover);
+        let reject = context.as_ref().is_some_and(|context| context.reject_route);
         let key = format!(
             "{channel:?}:{feed}:{}",
             original.split('?').next().unwrap_or(original)
         );
-        if route.direct_urls.iter().any(|url| url == original) {
-            return SelectedSocket {
-                url: original.into(),
-                headers,
-                key: format!("direct:{key}"),
-                relay: None,
-            };
-        }
         let mut sockets = self.sockets.lock().unwrap();
         let attempts = sockets
             .entry(key.clone())
@@ -330,7 +331,8 @@ impl RoutingState {
                 ignored_messages: route.ignored_messages.clone(),
                 ..SocketAttempts::default()
             });
-        if attempts.connected {
+        // Refusal evidence is a reply, not silence: it never counts as silent.
+        if attempts.connected && !reject {
             attempts.silent = if attempts.message {
                 0
             } else {
@@ -347,7 +349,17 @@ impl RoutingState {
                 .flatten()
                 .filter(|url| !url.is_empty()),
         );
-        if recover && fallback.is_some() {
+        // Refused egress advances exactly one candidate and wins over recovery;
+        // an exhausted chain is reported back instead of dialled.
+        let mut exhausted = false;
+        if reject {
+            if attempts.candidate + 1 < candidates.len() {
+                attempts.candidate += 1;
+            } else {
+                exhausted = true;
+            }
+            attempts.silent = 0;
+        } else if recover && fallback.is_some() {
             attempts.candidate = candidates.len() - 1;
             attempts.silent = 0;
         } else if attempts.silent >= 2 && attempts.candidate + 1 < candidates.len() {
@@ -383,6 +395,7 @@ impl RoutingState {
             headers,
             key,
             relay,
+            exhausted,
         }
     }
 
@@ -1123,6 +1136,87 @@ mod tests {
         assert!(round_trip.public_http.is_none());
     }
 
+    fn context(reject_route: bool, recover: bool) -> Option<safe_cex_engine::SocketContext> {
+        Some(safe_cex_engine::SocketContext {
+            feed: "private".into(),
+            recover,
+            reject_route,
+        })
+    }
+
+    #[test]
+    fn url_scoped_private_routes_take_their_declared_route() {
+        let mut plan = RoutingPlan::default();
+        plan.ws.private.host = Some("wss://proxy.invalid/v2/private".into());
+        plan.private_ws_routes = vec![PublicWsRoute {
+            contains: "wss://venue.invalid/v3/private".into(),
+            route: WsRoute {
+                host: Some("wss://proxy.invalid/v3/private".into()),
+                ..WsRoute::default()
+            },
+        }];
+        let state = state(plan);
+        let private = Some(safe_cex_engine::SocketChannel::Private);
+        assert_eq!(
+            state
+                .socket(
+                    "wss://venue.invalid/v3/private",
+                    vec![],
+                    private.clone(),
+                    None
+                )
+                .url,
+            "wss://proxy.invalid/v3/private"
+        );
+        assert_eq!(
+            state
+                .socket("wss://venue.invalid/v2/private", vec![], private, None)
+                .url,
+            "wss://proxy.invalid/v2/private"
+        );
+    }
+
+    #[test]
+    fn rejected_egress_advances_one_candidate_then_reports_exhaustion_without_a_dial() {
+        let mut plan = RoutingPlan::default();
+        plan.ws.private.fallback = Some("wss://fallback.invalid/private".into());
+        let state = state(plan);
+        let url = "wss://venue.invalid/private";
+        let private = Some(safe_cex_engine::SocketChannel::Private);
+        let first = state.socket(url, vec![], private.clone(), context(false, false));
+        assert_eq!((first.url.as_str(), first.exhausted), (url, false));
+        // Refusal wins over recovery and advances exactly one candidate.
+        let next = state.socket(url, vec![], private.clone(), context(true, true));
+        assert_eq!(
+            (next.url.as_str(), next.exhausted),
+            ("wss://fallback.invalid/private", false)
+        );
+        let spent = state.socket(url, vec![], private.clone(), context(true, false));
+        assert!(
+            spent.exhausted,
+            "a two-candidate chain is spent after one refusal"
+        );
+        // A refusal is a reply, not silence: plain connects keep the last route.
+        assert_eq!(
+            state
+                .socket(url, vec![], private, context(false, false))
+                .url,
+            "wss://fallback.invalid/private"
+        );
+    }
+
+    #[test]
+    fn a_single_candidate_chain_is_exhausted_by_its_first_refusal() {
+        let state = state(RoutingPlan::default());
+        let selected = state.socket(
+            "wss://venue.invalid/private",
+            vec![],
+            Some(safe_cex_engine::SocketChannel::Private),
+            context(true, false),
+        );
+        assert!(selected.exhausted);
+    }
+
     #[test]
     fn any_venue_message_resets_silence_and_channel_counters_are_independent() {
         let mut plan = RoutingPlan::default();
@@ -1246,6 +1340,8 @@ mod tests {
             feed: &'a str,
             #[serde(default)]
             recover: bool,
+            #[serde(default, rename = "rejectRoute")]
+            reject_route: bool,
         }
         #[derive(Deserialize)]
         struct ExpectedSocket<'a> {
@@ -1343,6 +1439,7 @@ mod tests {
                             .map(|context| safe_cex_engine::SocketContext {
                                 feed: context.feed.into(),
                                 recover: context.recover,
+                                reject_route: context.reject_route,
                             }),
                     );
                     assert_eq!(
