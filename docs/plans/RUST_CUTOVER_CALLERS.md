@@ -5901,3 +5901,50 @@ option B, approved by claude-ddi2il).
   auth and repair adopt the provider (codex-hcmq3f). The raw fields are then
   dropped from venue options.
 
+## Backpack managed foreground write results
+
+Foreground place/cancel/amend/leverage uses shared Plan custody, send-time
+provider signing and one journal terminal. A failed explicit cancel no longer
+returns success; optional child failure returns a failure with all accepted IDs.
+A malformed or partially failed Pair retains correlated IDs as partial evidence;
+missing acknowledgement rows do not invent total or failed-index counts.
+Unlisted native errors and undocumented HTTP statuses cannot prove refusal.
+
+A delivered 408/5xx currently stops the batch as Unknown, preserves native
+code/message and prior IDs, and retires unsent legs: reconcile before resending.
+Restoring native independent optional-child continuation remains OPEN until the
+shared independent_calls policy is available and adopted. Each attempt now has
+an explicit 20-second managed bound; the root is derived from declared steps.
+
+Callers preserve partial IDs and reconcile uncertainty before retrying. A typed
+pre-send refusal restores only unchanged optimistic cancellation state. Late
+replies have bounded correlation and no Store or new-terminal authority. Native
+cancel/leverage empty-object acknowledgements remain accepted; malformed JSON
+cannot prove a successful managed acknowledgement. Legacy internal repair keeps
+its original response behavior.
+
+The native out-of-band Ed25519 cancel proof uses a fixed independent signature
+and remote-only key sentinel, with no HTTP before Signed. SDK/browser signing,
+registry admission, account/startup/session presentation and internal repair
+signing remain OPEN. Raw legacy credentials alone do not admit a managed write;
+a trusted identity is required and missing admission fails before write I/O.
+
+Managed Backpack write admission and window selection use only the trusted
+identity and Options. The delegated cancel proof uses a venue with no raw key or
+secret. Account/startup remains a separate legacy scope. Automatic trigger repair
+still uses that legacy account signer; identity-only mode gates it before job
+creation/I/O and reports that managed account signing is pending. An owned RED
+pins the repair dispatch obligation for the next account/background adoption.
+
+## Backpack transitional SDK custody (owner ruling, 2026-10-24)
+
+Authorized admission preserves current account/private-WS behavior while trusted
+setup supplies a provider and opaque identity for managed foreground writes. Raw
+material remains only in the unadopted legacy account/WS scope, temporarily beside
+the provider copy. Managed writes have no raw/eager fallback. dispatchSigning
+remains off and TS setup is unchanged; SDK/browser remote readiness stays open.
+
+This is a remove-before-master obligation owned by codex-hcmq3f. Account/WS and
+legacy account-repair adoption must remove retained raw material, end dual custody
+and complete ref-only admission. The admission implementation is separate work
+owned by claude-m26ps4; this ruling alone claims no SDK availability or merge.

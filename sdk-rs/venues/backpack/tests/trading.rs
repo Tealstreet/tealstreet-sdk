@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::model::{OrderIdentityKind, OrderStatus};
 use safe_cex_engine::{Action, Command, Event, Method, Notice};
-use support::*;
+use support::managed::*;
 fn place(e: &mut Driver, id: u32, orders: &str) {
     let orders = serde_json::from_str(orders).unwrap();
     e.handle(
@@ -38,7 +38,7 @@ fn caller_or_generated_pair_identities(generated: bool) {
         r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"clientOrderId":"4294967295"}]"#
     };
     place(&mut e, 91, orders);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = actions(&mut e);
     let (progress_at, receipts) = actions
         .iter()
         .enumerate()
@@ -94,7 +94,7 @@ fn a_single_native_order_without_client_id_does_not_invent_a_receipt() {
         92,
         r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140}]"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = actions(&mut e);
     assert!(
         actions
             .iter()
@@ -206,7 +206,8 @@ fn limit_bracket_waits_for_entry_and_keeps_a_successful_leg_if_other_leg_fails()
             .contains("\"triggerPrice\":\"130.00\"")
     );
     reply(&mut e, &sl, 200, r#"{"id":"stop"}"#);
-    assert_eq!(done(&mut e).unwrap(), r#"["entry","stop"]"#);
+    let error = done(&mut e).unwrap_err();
+    assert!(error.contains(r#""partialOrderIds":["entry","stop"]"#));
 }
 #[test]
 fn market_attached_brackets_and_standalone_trigger_payloads() {
@@ -486,15 +487,15 @@ fn missing_trigger_by_is_repaired_and_does_not_reopen_a_replacement_filled_befor
 fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-    use safe_cex_venue_backpack::{Backpack, Options};
-    let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
-        identity: None,
+    use safe_cex_venue_backpack::Options;
+    let mut e = Driver::new(Options {
         read_credentials: None,
         public_data_only: false,
         key: Some("public-test-key".into()),
         secret: Some(STANDARD.encode([7u8; 32])),
         recv_window: None,
-    }));
+        identity: None,
+    });
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
     reply(
@@ -652,7 +653,7 @@ fn concurrent_cancel_is_rejected_until_the_first_command_completes() {
             if status == 200 {
                 OrderStatus::Canceled
             } else {
-                OrderStatus::Open
+                OrderStatus::Canceling
             }
         );
     }
@@ -778,7 +779,7 @@ fn amend_replaces_only_the_unfilled_total_including_fills_during_cancel() {
             200,
             &format!(r#"{{"id":"123","status":"Cancelled","executedQuantity":"{later}"}}"#),
         );
-        let out: Vec<_> = e.drain_actions().collect();
+        let out = actions(&mut e);
         let writes: Vec<_> = out
             .iter()
             .filter_map(|a| match a {
@@ -838,20 +839,30 @@ fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome, Response};
     let market = r#"[{"symbol":"SOL_USDC_PERP","type":"market","side":"buy","amount":1}]"#;
     for (status, body, kind, outcome) in [
-        (503, "unavailable", None, Some(Outcome::Unknown)),
+        (
+            503,
+            "unavailable",
+            Some(ErrorKind::VenueUnavailable),
+            Some(Outcome::Unknown),
+        ),
         (
             400,
             r#"{"code":"INVALID_ORDER","message":"bad"}"#,
-            Some(ErrorKind::Rejected),
-            Some(Outcome::Rejected),
+            None,
+            Some(Outcome::Unknown),
         ),
         (
             200,
             r#"{"code":"INSUFFICIENT_MARGIN","message":"margin"}"#,
             None,
-            None,
+            Some(Outcome::Unknown),
         ),
-        (200, r#"{"id":""}"#, None, Some(Outcome::Unknown)),
+        (
+            200,
+            r#"{"id":""}"#,
+            Some(ErrorKind::Internal),
+            Some(Outcome::Unknown),
+        ),
     ] {
         let (mut e, _) = ready();
         place(&mut e, 1, market);
@@ -987,5 +998,34 @@ fn snapshot_pair_ack_fence(accepted: bool, stored: bool) {
         e.store().order("123").is_some(),
         if accepted { stored } else { !stored },
         "only a fully accepted pair ACK supersedes the old read"
+    );
+}
+
+#[test]
+#[ignore = "Backpack account/background Plan and signer adoption (codex-hcmq3f), after #1946"]
+fn legacy_account_repair_must_adopt_dispatch_signing_before_account_cutover() {
+    let (mut e, socket) = ready();
+    e.handle(1000., Event::WsOpened { socket });
+    let read = requests(&mut e)
+        .into_iter()
+        .find(|request| request.url.ends_with("/orders"))
+        .unwrap();
+    let old = ORDER.replace(
+        "\"orderType\":\"Limit\"",
+        "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\"",
+    );
+    reply(&mut e, &read, 200, &format!("[{old}]"));
+    let out = e.drain_actions().collect::<Vec<_>>();
+    assert!(out.iter().any(|action| matches!(action,
+        Action::ManagedHttp(action) if matches!(action.as_ref(),
+            safe_cex_engine::request_context::HttpAction::Prepare { request, .. }
+            if request.method == Method::Delete
+                && request.url == "https://api.backpack.exchange/api/v1/order"
+                && request.body.as_deref() == Some(r#"{"orderId":"123","symbol":"SOL_USDC_PERP"}"#)))),
+        "account repair must use shared dispatch signing before its cutover");
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.method == Method::Delete))
     );
 }
