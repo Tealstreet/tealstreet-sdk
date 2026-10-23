@@ -1103,6 +1103,17 @@ request checks/14 controls and bans pass on the integrated head; bridge blobs
 remain exact to authorized f471. This is executed native consumer evidence, not
 an actual bridge landing or complete WASM/replay/size proof.
 
+## Hyperliquid local lookup entry controls
+
+Six original REDs require clock/capacity refusal before cached or non-definitive
+local lookup success. Companion controls preserve the entire cached Order wire,
+cache precedence in perps/spot and public/private deployments, symbol/client-ID
+matching, private REST and public-only/spot fallthrough, active-owner isolation,
+finite ID reuse and 900 synchronous retirements followed by 256 real parked
+managed candle owners. No marker or Store mutation is introduced. Exact inventory
+removes only two local done sites; native/strict checks and independent reviews
+are required on the committed source before merge readiness.
+
 ## WOO local history custody controls
 
 Real Engine<Woo> controls cover each original local refusal at invalid engine
