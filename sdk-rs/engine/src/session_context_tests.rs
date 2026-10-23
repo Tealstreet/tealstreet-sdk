@@ -27,6 +27,7 @@ struct Probe {
     command_fact: bool,
     items: usize,
     settle_in_response: Option<(crate::request_context::Context, u32)>,
+    refuse_in_response: Option<u32>,
     facts: Vec<Result<(), Error>>,
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
@@ -45,6 +46,7 @@ impl Default for Probe {
             command_fact: false,
             items: 0,
             settle_in_response: None,
+            refuse_in_response: None,
             facts: vec![],
             responses: vec![],
             failures: vec![],
@@ -90,6 +92,14 @@ impl Venue for Probe {
             self.facts
                 .push(cx.fail_context(&waiter, VenueError::new("login failed")));
             cx.fail(legacy, VenueError::new("login failed"));
+        }
+        if session && let Some(managed) = self.refuse_in_response.take() {
+            self.facts
+                .push(cx.fail_context(&pending.0, VenueError::new("not a command")));
+            cx.fail(
+                managed,
+                VenueError::new("numeric completion of a managed write"),
+            );
         }
         if !session && self.command_fact && pending.0.operation() == Operation::Mutation {
             self.facts.push(
@@ -1430,4 +1440,33 @@ fn a_session_callback_settles_the_commands_waiting_on_it() {
         "a session delivery is no command's authority, so it blocks none"
     );
     assert_eq!(failed, [7, 9], "managed and legacy waiters both settle");
+}
+
+#[test]
+fn a_session_callback_settles_like_a_delivery_less_callback() {
+    let mut engine = engine();
+    let session = open_private(&mut engine);
+    let write = with(&mut engine, 1., |cx| {
+        cx.http_context(Scope::Command(11), policy(Operation::Mutation))
+    })
+    .unwrap();
+    {
+        let token = queue(&mut engine, &write, 1.);
+        release(&mut engine, token, 1.);
+    }
+    engine.venue.refuse_in_response = Some(11);
+    let login = {
+        let token = session_write(&mut engine, &session, 1.);
+        release(&mut engine, token, 1.)
+    };
+    respond(&mut engine, login, 2., "{}");
+    assert_eq!(
+        engine.venue.facts,
+        [Err(Error::Invalid)],
+        "a session Context is never command authority"
+    );
+    assert!(
+        engine.io.request_contexts.commands.contains_key(&11),
+        "a managed write is never sealed numerically"
+    );
 }
