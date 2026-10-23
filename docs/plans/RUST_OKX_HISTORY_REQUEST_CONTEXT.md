@@ -187,8 +187,10 @@ REDs prove missing managed private/public/primary-lookup preparation, invalid
 entry bypass by a local empty answer, short-root expiry during native pacing,
 default120s expiry across eight individually valid pages, and expired lookup
 returning native51603 absence. Five positives prove finite precedence/sentinels,
-soft failed later query page, strict lookup transport failure/Primary route,
-20s child born at dequeue and a180s override allowing130s work. The explicit
+soft failed later query page and strict lookup transport failure/Primary route.
+They also establish native response eligibility after enqueue+20s but before
+dequeue+20s, and native130s completion with an unpropagated180s fixture argument.
+They do not prove child construction or override propagation on this baseline. The explicit
 wait adapter deliberately lacks core propagation; these assertions must be
 re-proven with actual #1945 before attributing remaining failures to adoption.
 Secondary-wire/provider behavior is not newly proven by these five controls.
@@ -197,3 +199,10 @@ Source/adversarial, caller and full-map reviewers independently verified the
 original-source boundary and test reachability. Production, engine, inventories,
 ratchets and all existing fixture/test files remain byte-exact to aa556. The
 phase is intentionally RED and not merge-ready. No legacy site is pruned.
+
+Strict all-target OKX Clippy and fmt pass for this original-control checkpoint.
+The checker tests pass15/15. The current-remote provenance check refuses the
+user-pinned older manifest because incoming Paradex history entries were pruned
+after aa556; the manifest here remains byte-exact to aa556, with no growth from
+this branch. This is not a current-landing ratchet PASS. Re-integrate all incoming
+prunes with actual #1945 before claiming adoption checks or merge readiness.
