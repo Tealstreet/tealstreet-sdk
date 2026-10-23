@@ -705,7 +705,13 @@ fn signature_headers_cover_sorted_query_and_exact_body() {
         }),
     );
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
     reply(&mut e, r.id, PAIRS);
     let r = requests(&mut e)
         .into_iter()
@@ -1070,11 +1076,17 @@ fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, 
         }),
     );
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
     reply(&mut e, r.id, PAIRS);
     let mut timers = vec![];
     loop {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
         if actions.is_empty() {
             return (e, timers);
         }

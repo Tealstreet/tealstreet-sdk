@@ -123,6 +123,55 @@ fn ready_identity_policy(
 pub fn message(e: &mut Engine<Hyperliquid>, s: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket: s, text });
 }
+
+/// Drive a real close, its native retry, accepted replacement and handoff wake.
+pub fn reconnect(e: &mut Engine<Hyperliquid>, socket: SocketId, now: f64) -> (SocketId, f64) {
+    e.handle(now, Event::WsClosed { socket, code: 1006 });
+    let (retry, at) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if at_ms > now && at_ms <= now + 16000.0 => {
+                Some((timer, at_ms))
+            }
+            _ => None,
+        })
+        .expect("native bounded reconnect backoff");
+    e.handle(at, Event::TimerFired { timer: retry });
+    let replacement = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("replacement socket");
+    assert_ne!(replacement, socket);
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let batch: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !batch.iter().any(|action| matches!(action, Action::Http(_))),
+        "refresh must wait for handoff"
+    );
+    assert!(
+        batch
+            .iter()
+            .any(|action| matches!(action, Action::WsSend { .. })),
+        "real private subscription handoff"
+    );
+    let (wake, wake_at) = batch
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == at => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("ordinary handoff ingress");
+    e.handle(wake_at, Event::TimerFired { timer: wake });
+    (replacement, wake_at)
+}
 /// Drains actions with failures as the plain text the host renders.
 pub trait Plain {
     fn drain_plain(&mut self) -> std::vec::IntoIter<safe_cex_engine::Action>;
