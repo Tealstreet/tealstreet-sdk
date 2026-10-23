@@ -58,6 +58,8 @@ struct Probe {
     ignore_high: bool,
     /// Opt into order locks, so cancel-all defers behind a placement.
     locks: bool,
+    /// Cancel 2's entry fails this other command, outside that one's entry.
+    fail_from_2: Option<CommandId>,
 }
 
 impl Venue for Probe {
@@ -133,6 +135,11 @@ impl Venue for Probe {
             Err(crate::request_context::CommandEntryError::Revoked),
             "only an expired wait may be rejected as expired"
         );
+        if let Command::CancelOrders { command: 2, .. } = &command
+            && let Some(other) = self.fail_from_2.take()
+        {
+            cx.fail(other, "late");
+        }
         match command {
             Command::PlaceOrders { command, .. } if self.ignore_high && command >= 1000 => {}
             Command::PlaceOrders { command, .. } => cx.done(command, r#"["7"]"#.into()),
@@ -577,4 +584,28 @@ fn a_deferred_cancel_all_keeps_its_own_receipt_through_the_lock() {
     );
     assert_eq!(observed(&e, 2), [Some(Wait::Expired)]);
     assert_eq!(deadline(&e, 2), None, "its own terminal cleared it");
+}
+
+#[test]
+fn a_released_batch_keeps_each_later_receipt_until_its_entry() {
+    let mut e = engine(Probe {
+        fail_from_2: Some(3),
+        ..Default::default()
+    });
+    deliver(
+        &mut e,
+        0.,
+        r#"{"op":"placeOrders","command":1,"orders":[]}"#,
+    );
+    deliver(&mut e, 0., &cancel(2, "7", Some(300_000)));
+    deliver(&mut e, 0., &cancel(3, "7", Some(300_000)));
+    // One release dispatches both; cancel 2's entry fails 3 outside 3's entry.
+    e.handle(
+        5_000.,
+        Event::WsMessage {
+            socket: SocketId(1),
+            text: "7",
+        },
+    );
+    assert_eq!(observed(&e, 3), [Some(Wait::Remaining(295_000))]);
 }
