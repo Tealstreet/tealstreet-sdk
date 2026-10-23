@@ -2,6 +2,7 @@
 import type { EntropyProvider, WasmEngineLike } from './host.mjs';
 
 export class WasmEngine implements WasmEngineLike {
+  failed(): boolean;
   capabilities(): string;
   construction(): string;
   /** Native construction failures throw Error with JSON-encoded venueError detail. */

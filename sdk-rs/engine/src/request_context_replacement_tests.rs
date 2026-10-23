@@ -4,7 +4,7 @@ fn rejected(message: &str) -> WriteResult {
     WriteResult::Rejected(VenueError::new(message).outcome(Outcome::Rejected))
 }
 
-fn accept(writes: &mut CommandWrites, request: u32, id: &str) {
+fn accept(writes: &mut CommandWrites, request: u64, id: &str) {
     writes.released(RequestId(request)).unwrap();
     writes
         .result(
@@ -228,7 +228,7 @@ fn nested_single_child_groups_remain_bounded_without_packed_order_overflow() {
     let mut writes = parent(32);
     let mut previous = RequestId(1);
     for request in 2..=32 {
-        let leg = u64::MAX - u64::from(request);
+        let leg = u64::MAX - request;
         writes.replace(previous, &[leg]).unwrap();
         writes.register(RequestId(request), leg).unwrap();
         writes.released(RequestId(request)).unwrap();
