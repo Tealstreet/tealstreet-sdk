@@ -3785,6 +3785,13 @@ impl<V: Venue> Engine<V> {
         assert!(!self.failed(), "engine resource identities exhausted");
     }
 
+    /// Test-only counter of Plan scheduling cells visited by this engine.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn plan_scan_visits(&self) -> usize {
+        self.io.request_contexts.plan_scan_visits()
+    }
+
     fn flush_http_plans(&mut self, now: f64) {
         self.io.request_contexts.end_plan_admission();
         if !now.is_finite()

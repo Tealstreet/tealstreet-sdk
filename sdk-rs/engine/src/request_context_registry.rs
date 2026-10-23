@@ -155,6 +155,8 @@ pub(super) struct ContextRegistry {
     delivery_depth: usize,
     /// Logical identities promised to admitted plans but not yet issued.
     reserved_contexts: usize,
+    #[cfg(any(test, feature = "test-support"))]
+    plan_scan_visits: std::cell::Cell<usize>,
 }
 
 impl ContextRegistry {

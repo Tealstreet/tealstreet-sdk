@@ -111,6 +111,11 @@ impl State {
 }
 
 impl ContextRegistry {
+    #[cfg(any(test, feature = "test-support"))]
+    pub(in super::super) fn plan_scan_visits(&self) -> usize {
+        self.plan_scan_visits.get()
+    }
+
     // Share cold terminal authority/journal work across all venue Pending types.
     #[inline(never)]
     fn plan_seal(
@@ -862,6 +867,8 @@ impl<P> Cx<'_, P> {
 impl ContextRegistry {
     pub(in super::super) fn end_plan_admission(&mut self) {
         for owner in self.commands.values_mut() {
+            #[cfg(any(test, feature = "test-support"))]
+            self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             if let CommandPhase::Planned(state) = &mut owner.phase {
                 state.body[0].initial_custody = false;
             }
@@ -874,6 +881,8 @@ impl ContextRegistry {
 
     pub(in super::super) fn next_plan_ready(&mut self, now: f64) -> Option<Plan> {
         for owner in self.commands.values_mut() {
+            #[cfg(any(test, feature = "test-support"))]
+            self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             let CommandPhase::Planned(state) = &mut owner.phase else {
                 continue;
             };
@@ -900,6 +909,8 @@ impl ContextRegistry {
 
     pub(in super::super) fn plan_for_timer(&self, timer: TimerId) -> Option<Plan> {
         self.commands.values().find_map(|owner| {
+            #[cfg(any(test, feature = "test-support"))]
+            self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             let CommandPhase::Planned(state) = &owner.phase else {
                 return None;
             };
