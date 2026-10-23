@@ -6212,41 +6212,6 @@ Raising a caller's timeout lengthens an adopting venue's root but never
 renews it. Plan consumers are not capped by the caller wait until the
 separate receipt-cap seam (#1949) lands.
 
-## Caller command wait in the engine (#1945)
-
-The WASM host now adds the effective caller wait to every reply command's
-native envelope as `timeoutMs`. The effective wait is the per-call
-`options.timeoutMs` if given, else the configured `rustCommandTimeoutMs`, and
-it is the same validated number that arms the host's own timer. No-reply
-controls send no field.
-
-- **Receipt stamp.** The engine stamps one absolute deadline per external
-  receipt. Native hosts and envelopes without the field get the SDK default of
-  120000 ms, stamped at receipt. Held and deferred commands keep the receipt
-  they arrived with.
-- **Refusals.** A present but invalid `timeoutMs` (null, non-integer, zero,
-  negative or over 2147483647) is refused at decode. A non-finite clock is
-  refused by `handle_command`, with a `JsError` and no dispatch.
-- **Venue behaviour.** Nothing changes until a venue adopts
-  `Cx::command_wait`.
-
-Two separate events, which callers must not conflate:
-
-- **Caller abandonment.** The host timer rejects the promise with
-  `COMMAND_TIMEOUT`. The engine keeps any in-flight transport, and a late
-  native reply is dropped by the host.
-- **Engine-root expiry.** An adopting venue uses the `Remaining` wait as its
-  original Read root and stops issuing work at that same absolute deadline. A
-  Fresh entry that is already expired ends through
-  `reject_expired_command`: one typed Timeout terminal with zero HTTP, timer or
-  Store effects, `NotSent` for a mutation and no outcome for a Read. After
-  admission, expiry ends through the existing Context or Plan authority and
-  never claims `NotSent`.
-
-Raising a caller's timeout lengthens an adopting venue's root but never
-renews it. Plan consumers are not capped by the caller wait until the
-separate receipt-cap seam (#1949) lands.
-
 ## Opt-in Read Plans retain the caller receipt deadline
 
 `begin_preflight_with_command_wait` opts a Read command into the original caller
