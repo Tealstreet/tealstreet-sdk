@@ -689,7 +689,8 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
             engine.start(1700000000000.0);
             let mut private = Vec::new();
             loop {
-                let actions: Vec<_> = engine.drain_actions().collect();
+                let actions =
+                    safe_cex_engine::test_support::prepared_actions(&mut engine, 1700000000000.0);
                 if actions.is_empty() {
                     break;
                 }
