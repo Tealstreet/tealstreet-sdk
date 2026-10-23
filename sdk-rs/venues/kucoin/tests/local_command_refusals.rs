@@ -612,3 +612,126 @@ fn valid_futures_candles_keep_public_wire_fallthrough() {
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
     );
 }
+
+fn owner_lifetime<V: Venue>(mut e: Engine<Probe<V>>, cases: &[Case]) {
+    let before = snapshot(&e);
+    assert!(control(&mut e, Some("hold-next")).is_empty());
+    assert!(run(&mut e, 100., cases[0].command()).is_empty());
+    for &case in cases {
+        let actions = run(&mut e, 100., case.command());
+        assert!(
+            matches!(&actions[..], [Action::Notice(Notice::Event(event))]
+            if event.code == safe_cex_engine::log::code::COMMAND_DUPLICATE),
+            "{actions:?}"
+        );
+        assert_eq!(snapshot(&e), before);
+        assert!(e.venue().original.is_some());
+    }
+    let actions = control(&mut e, Some("finish-original"));
+    assert!(
+        matches!(&actions[..], [Action::Notice(Notice::CommandDone { command: COMMAND, result })]
+        if result == "\"original\""),
+        "{actions:?}"
+    );
+    assert!(e.venue().original.is_none());
+    // More than the registry bound at one clock proves each local terminal retires its owner.
+    for _ in 0..270 {
+        for &case in cases {
+            assert_eq!(
+                failure(&run(&mut e, 100., case.command())),
+                &case.expected()
+            );
+        }
+    }
+    assert_eq!(snapshot(&e), before);
+}
+#[test]
+fn futures_duplicate_and_fixed_clock_reuse_keep_original_owner() {
+    owner_lifetime(
+        seeded(Kucoin::new(options(false))),
+        &[
+            Case::CandleRange,
+            Case::CandleInterval,
+            Case::FuturesValidation,
+            Case::FuturesCredentials,
+        ],
+    );
+}
+#[cfg(feature = "spot")]
+#[test]
+fn spot_duplicate_and_fixed_clock_reuse_keep_original_owner() {
+    owner_lifetime(
+        spot(false),
+        &[
+            Case::SpotAmendTarget,
+            Case::SpotUnsupportedRead,
+            Case::SpotUnsupportedBook,
+            Case::SpotUnsupportedWrite,
+            Case::SpotCredentials,
+        ],
+    );
+    owner_lifetime(spot(true), &[Case::SpotBuild]);
+}
+
+fn private_fallthrough<V: Venue>(mut e: Engine<Probe<V>>, command: Command, path: &str) {
+    assert!(control(&mut e, Some("saturate")).is_empty());
+    let actions = run(&mut e, 101., command);
+    let requests: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        requests.len(),
+        1,
+        "valid private path must not acquire a local owner: {actions:?}"
+    );
+    let request = requests[0];
+    assert_eq!(request.method, Method::Delete);
+    assert!(request.url.ends_with(path), "{}", request.url);
+    assert!(request.body.is_none());
+    assert_eq!(
+        request
+            .headers
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>(),
+        [
+            "KC-API-KEY",
+            "KC-API-TIMESTAMP",
+            "KC-API-KEY-VERSION",
+            "KC-API-SIGN",
+            "KC-API-PASSPHRASE",
+            "Content-Type",
+            "X-CHANNEL-API-CODE"
+        ]
+    );
+    assert_eq!(request.headers[0].1, "fixture-key");
+    assert!(!request.headers[3].1.is_empty());
+    assert!(!request.headers[4].1.is_empty());
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
+    assert_eq!(e.venue().held.len(), 256);
+}
+#[test]
+fn valid_futures_private_wire_ignores_local_refusal_capacity() {
+    private_fallthrough(
+        seeded(Kucoin::new(options(true))),
+        Case::FuturesCredentials.command(),
+        "/api/v1/orders/native-1?symbol=BTC-USDT",
+    );
+}
+#[cfg(feature = "spot")]
+#[test]
+fn valid_spot_private_wire_ignores_local_refusal_capacity() {
+    private_fallthrough(
+        spot(true),
+        Case::SpotCredentials.command(),
+        "/api/v1/hf/orders?symbol=BTC-USDT",
+    );
+}

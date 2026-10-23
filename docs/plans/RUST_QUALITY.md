@@ -1345,3 +1345,12 @@ venue admission or numeric fallback. Exact managed delivery is checked before
 native response decoding/publication. Local config precedence and 20s/Never
 remain native; typed transport/refusal errors keep checked diagnostic ordering.
 Only identity.rs loses two legacy terminal occurrences; other inventory is intact.
+
+## KuCoin refusal admission controls
+
+Ten original assertion REDs cover eight lexical local refusals, including all
+three Spot unsupported variants. They pass after admission conversion, alongside
+native error/credential ordering, UUID entropy, Store preservation and public
+wire controls. Duplicate ownership and more than 256 fixed-clock reuses pin
+retirement; saturated-registry valid private wire controls pin unchanged signed
+fallthrough. The isolated suite contains 18 executed controls, with no ignores.

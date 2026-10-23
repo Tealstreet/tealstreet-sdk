@@ -125,3 +125,17 @@ four native/wire/entropy compatibility controls pass. The fixture was corrected
 before this checkpoint for Store access and distinct supplied batch client IDs;
 those earlier fixture errors are not regression RED evidence. Production remains
 unchanged at this separate test commit.
+
+Implementation checkpoint: all eight refusal branches use genuine shared
+admission and fail_context, with the exact eight-row prune. The original ten
+semantic REDs and four compatibility controls now pass. Four added controls pin
+duplicate/retirement behavior and unchanged futures/Spot signed wire under real
+registry saturation: 18 controls total. Review requested the private-wire controls;
+they check exact header order, fixture key, nonempty signatures and native route.
+Successful settings, private helpers, signing and WS paths remain unchanged.
+
+Focused verification: KuCoin 323 tests all-features and 181 feature-off PASS;
+strict Clippy all-targets in both modes, scoped fmt, Binance request-context 23,
+request-context checker and its 15 tests PASS. Three independent source/caller/
+full-map reviews are CLEAR, including the private-wire follow-up. Full CI and
+actual landing integration remain separate; no merge readiness is claimed here.

@@ -2735,3 +2735,11 @@ and admission-error fallback. Its two identity terminal fingerprints are removed
 family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
 typed Network/Timeout assertions pass alongside native wire/config/codec controls.
 The generic managed helper and all other family callers remain with their owners.
+
+## KuCoin local command refusal ownership
+
+Eight numeric local failure sites now use shared genuine command admission and
+Context failure, reducing KuCoin from 56 to 48 lexical occurrences (51 to 43
+fingerprints). No signer, private request helper, successful no-I/O setting or
+remote completion is converted. Source and inventory reviews found no venue-local
+retry, classifier, owner registry or completion algorithm.
