@@ -36,13 +36,15 @@ family_args() {
   # Use size defaults unless measured CPU margin requires speed defaults.
   # KuCoin Spot and WOO retain speed defaults after measured margin misses. Aster
   # takes size defaults since dispatch signing, with its venue crate at speed below.
-  # CI-only Bitget throughput measurement; adoption requires separate evidence review.
-  if [[ $family != kucoinspot && $family != woo && $family != bitget ]]; then
+  if [[ $family != kucoinspot && $family != woo ]]; then
     build_args+=("${wasm_profile_args[@]}")
   fi
   if [[ $family == asterdex ]]; then
     # Restore pre-#1656 venue throughput only for this family, not combined/native.
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level=3')
+  elif [[ $family == bitget ]]; then
+    # Size defaults fit dispatch signing; the engine stays at speed for the CPU gate.
+    build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level=3')
   elif [[ $family == woo ]]; then
     # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
     build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
