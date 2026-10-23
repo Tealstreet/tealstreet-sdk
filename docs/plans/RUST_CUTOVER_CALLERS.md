@@ -5845,3 +5845,14 @@ Discovery keeps native rate floors (429 Retry-After15s versus business10005/6
 no retry. Recovery requires fresh caller-owned initialization. Public auth
 failure spends no private auth budget after actual1923. No private P0#33 closure,
 signer readiness or managed socket claim. Exact inventory18->10; only8own sites.
+
+### WEEX synchronous local history Read terminals
+
+WEEX Futures keyless Fills, OrderHistory and Income retain exact `[]` before
+private input validation. Client-order lookup remains unsupported. Invalid
+family bounds and income/list budgets retain the existing messages, ordering
+and unclassified Read errors. These seven local terminals now require genuine
+engine command Read admission: shared capacity and invalid clock policy emit
+one correlated typed refusal without a financial outcome. Admitted terminals
+create no HTTP, signer, timer, Store mutation or history marker. Remote history,
+its credential selection and paging retain their existing paths and wire bytes.
