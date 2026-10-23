@@ -1,5 +1,5 @@
 //! Typed rare reads; Aster executions carry cumulative PnL, unlike Binance.
-use crate::{AsterDex, Pending, account, sign::Query};
+use crate::{AsterDex, Pending, account, local_read_policy, sign::Query};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
@@ -296,7 +296,10 @@ fn normalize(rows: &mut [Execution]) {
 impl AsterDex {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
         if !self.credentials.has_primary() && !matches!(read, Read::PublicTrades { .. }) {
-            cx.done(command, "[]".into());
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
             return;
         }
         let (from, to, bounded, income) = match &read {
@@ -317,7 +320,10 @@ impl AsterDex {
                 .zip(to)
                 .is_some_and(|(from, to)| to < from || (income && to == from))
         {
-            cx.fail(command, "Invalid Aster history time range");
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "Invalid Aster history time range");
             return;
         }
         if bounded
@@ -325,15 +331,21 @@ impl AsterDex {
                 .zip(to)
                 .is_some_and(|(from, to)| to - from > MAX_WINDOW_MS)
         {
-            cx.fail(
-                command,
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
                 "Aster order history requires a time window of at most seven days",
             );
             return;
         }
         let (endpoint, query, pending, private) = match read {
             Read::OrderByClientId { .. } => {
-                cx.fail(command, "Aster does not support caller client order IDs");
+                let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                    return;
+                };
+                let _ = cx.fail_context(&context, "Aster does not support caller client order IDs");
                 return;
             }
             Read::Fills {
@@ -344,12 +356,18 @@ impl AsterDex {
                 limit,
             } => {
                 let Some(symbol) = symbol.filter(|symbol| !symbol.is_empty()) else {
-                    cx.done(command, "[]".into());
+                    let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                        return;
+                    };
+                    let _ = cx.done_context(&context, "[]".into());
                     return;
                 };
                 if let Some((from, to)) = from_ms.zip(to_ms) {
                     if to + 1.0 <= to {
-                        cx.fail(command, "Invalid Aster history time range");
+                        let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                            return;
+                        };
+                        let _ = cx.fail_context(&context, "Invalid Aster history time range");
                         return;
                     }
                     let limit = limit.unwrap_or(500).clamp(1, 1000);
@@ -402,7 +420,10 @@ impl AsterDex {
                 if self.version == crate::sign::Version::V1
                     && symbol.as_deref().is_none_or(str::is_empty)
                 {
-                    cx.done(command, "[]".into());
+                    let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                        return;
+                    };
+                    let _ = cx.done_context(&context, "[]".into());
                     return;
                 }
                 (

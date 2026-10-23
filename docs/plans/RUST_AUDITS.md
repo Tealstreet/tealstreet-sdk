@@ -2757,3 +2757,18 @@ two-attempt retrieval budget with socket recovery. Exact artifact size/digest,
 producer/source, archive and restored-runtime ownership are unchanged. The failed
 Bybit attempt remains failed and supplies no timing or mean; transport recovery
 creates no physical retry or third sample.
+
+## AsterDEX local Read command custody
+
+Seven synchronous history terminals, the unsupported candle interval and both
+cached-leverage outcomes use shared genuine entry and Context completion.
+The original unchanged-source checkpoint records20 assertion REDs and six native
+positives; the managed target passes all26. Full-capacity controls retain256
+genuine peer roots and validate their liveness before/after refusal, then free
+one through its actual timer and verify admission succeeds. Exact inventory
+shrink is five complete fingerprints and ten occurrences; remote request, clock,
+retry, paging, signing and write paths stay explicit legacy targets.
+
+Architecture gate: No. The adapter consumes engine admission, typed refusal and
+terminal authority directly, with one pure policy declaration and no local
+issuer, owner map, timer, retry loop or numeric completion fallback.

@@ -17,6 +17,7 @@ use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
@@ -29,6 +30,16 @@ use std::collections::{HashMap, VecDeque};
 use wire::*;
 
 const INTEREST_MS: f64 = 15_000.0;
+
+fn local_read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct Options {
@@ -1110,7 +1121,10 @@ impl Venue for AsterDex {
                 to_ms,
             } => {
                 if !supported(interval) {
-                    cx.fail(command, interval.unsupported("AsterDEX"));
+                    let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                        return;
+                    };
+                    let _ = cx.fail_context(&context, interval.unsupported("AsterDEX"));
                     return;
                 }
                 let mut path = format!(
@@ -1151,7 +1165,10 @@ impl Venue for AsterDex {
                 self.get(cx, &path, Pending::DepthRead { command });
             }
             Command::FetchAccount { command } => self.fetch_account_info(cx, command),
-            Command::FetchLeverage { command, symbol } => {
+            Command::FetchLeverage { symbol, .. } => {
+                let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                    return;
+                };
                 let result = cx
                     .store
                     .setting(&symbol)
@@ -1164,9 +1181,9 @@ impl Venue for AsterDex {
                         )
                     })
                     .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}"));
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                let _ = match result {
+                    Ok(data) => cx.done_context(&context, data),
+                    Err(error) => cx.fail_context(&context, error),
                 };
             }
             Command::Query { command, query } => self.start_query(cx, command, query),

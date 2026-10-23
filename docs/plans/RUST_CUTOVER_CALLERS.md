@@ -6326,3 +6326,24 @@ distinguish the following:
 | --- | --- |
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
+
+## AsterDEX synchronous Read admission
+
+Low-level Aster Query commands that finish locally (keyless private history,
+invalid history bounds, order windows wider than seven days, unsupported client
+ID lookup, missing fills symbol, unrepresentable inclusive end and V1 unscoped
+orders), cached FetchLeverage and unsupported FetchCandles intervals complete
+through a genuine command-owned Read Context. Native result/error strings,
+untyped local errors and keyless-before-validation precedence are preserved.
+PublicTrades remains exempt from the keyless private-history shortcut.
+
+An invalid engine clock or full request capacity produces one typed Read
+admission failure with no financial outcome, rather than the cached/empty result
+or local validation error. These local calls issue no HTTP or timers and change
+no Store data. A live duplicate command ID retains the shared diagnostic without
+completing its existing owner; a completed synchronous ID can be reused.
+
+SDK RustExchange callers keep their existing capability behavior: Aster's
+Settings leverage path can return cache/null without a low-level FetchLeverage,
+and clientOrderLookup=false uses the existing open-order fallback. This entry
+describes the low-level command terminals, not additional SDK dispatches.

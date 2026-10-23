@@ -148,3 +148,21 @@ shared diagnostic, and keyless PublicTrades remaining remote. The full-capacity
 fixture retains256 genuine Read roots, checks public root validation around the
 callback, and frees one by its actual timer before retrying the selected command.
 No source or inventory changes are part of this checkpoint.
+
+## Runtime checkpoint
+
+The seven local history terminals and the unsupported candle interval use
+direct shared admission at their original branch; FetchLeverage admits before
+reading/formatting the cached result. All finish through that exact Context.
+The one policy declaration is pure Read/None/20000/Never. Rejected/Revoked
+admission returns without a numeric fallback. The original26 controls now pass.
+Only the two selected source files and their exact manifest counts change;
+remote expressions, reducers, signers and every existing test remain untouched.
+
+Local verification on the actual landing composition:492 Aster + Binance tests
+across37 targets pass, scoped all-target/all-feature strict Clippy and fmt pass,
+both request-context checks (15 checker controls) and full bans pass. The initial
+unittest discovery glob selected zero checker tests; the correct dedicated
+check-request-context.test.py target was then run and all15 passed.
+Independent source/adversarial, caller and complete-map reviews are requested
+on the committed runtime checkpoint before final CI/readiness.
