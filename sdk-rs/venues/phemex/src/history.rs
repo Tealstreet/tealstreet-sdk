@@ -3,6 +3,7 @@
 use crate::{Pending, PhemexPerpetuals};
 use safe_cex_engine::history::{Completion, HistoryRows};
 use safe_cex_engine::model::{OrderStatus, OrderType};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -196,6 +197,25 @@ fn milliseconds(ns: u64) -> f64 {
 }
 
 impl PhemexPerpetuals {
+    pub(crate) fn finish_local_history(cx: &mut Cx<'_, Pending>, result: Result<&str, &str>) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        match result {
+            Ok(data) => {
+                let _ = cx.done_context(&context, data.into());
+            }
+            Err(error) => {
+                let _ = cx.fail_context(&context, error);
+            }
+        }
+    }
     pub(crate) fn history_query(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -213,11 +233,11 @@ impl PhemexPerpetuals {
                 client_order_id,
             } => {
                 if !crate::trading::valid_client(&client_order_id) {
-                    cx.fail(command, "Invalid Phemex client order ID");
+                    Self::finish_local_history(cx, Err("Invalid Phemex client order ID"));
                     return;
                 }
                 if cx.store.market(&symbol).is_none() {
-                    cx.done(command, r#"{"found":false,"definitive":false}"#.into());
+                    Self::finish_local_history(cx, Ok(r#"{"found":false,"definitive":false}"#));
                     return;
                 }
                 client_id = Some(client_order_id);
@@ -270,19 +290,19 @@ impl PhemexPerpetuals {
         if (self.options.public_data_only || self.credentials.is_none())
             && !matches!(rows, Rows::Trades(_))
         {
-            cx.fail(command, "Phemex private history requires credentials");
+            Self::finish_local_history(cx, Err("Phemex private history requires credentials"));
             return;
         }
         let Some(symbol) = symbol.filter(|s| cx.store.market(s).is_some()) else {
-            cx.fail(command, "Phemex history requires a known symbol");
+            Self::finish_local_history(cx, Err("Phemex history requires a known symbol"));
             return;
         };
         if !bounds(from, to) {
-            cx.fail(command, "Invalid Phemex history time range");
+            Self::finish_local_history(cx, Err("Invalid Phemex history time range"));
             return;
         }
-        if self.history.active.len() >= 16 || !self.history.active.insert(command) {
-            cx.fail(command, "Too many active Phemex history queries");
+        if self.history.active.len() >= 16 || self.history.active.contains(&command) {
+            Self::finish_local_history(cx, Err("Too many active Phemex history queries"));
             return;
         }
         let native_symbol = self.native_symbol(&symbol).to_owned();
@@ -290,10 +310,10 @@ impl PhemexPerpetuals {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_')
         {
-            cx.fail(command, "Unsupported Phemex native history symbol");
-            self.history.active.remove(&command);
+            Self::finish_local_history(cx, Err("Unsupported Phemex native history symbol"));
             return;
         }
+        self.history.active.insert(command);
         let limit = limit.unwrap_or(100).clamp(1, MAX_ROWS) as usize;
         let request = Request {
             command,
