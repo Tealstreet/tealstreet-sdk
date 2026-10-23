@@ -1878,6 +1878,85 @@ fn metadata_race_with_newer_settings_returns_current_rails_without_publication()
 }
 
 #[test]
+fn metadata_read_started_during_any_pending_write_never_publishes() {
+    for kind in 0..3 {
+        for finish_before_data in [false, true] {
+            let mut h = Harness::ready();
+            let before = h.engine.store().setting("BTCUSDT").unwrap();
+            let (command, path) = match kind {
+                0 => (
+                    Command::SetLeverage {
+                        command: 947,
+                        symbol: "BTCUSDT".into(),
+                        leverage: 25.,
+                        side: None,
+                    },
+                    "/trade/leverage",
+                ),
+                1 => (
+                    Command::SetMarginType {
+                        command: 947,
+                        symbol: "BTCUSDT".into(),
+                        isolated: true,
+                    },
+                    "/trade/marginType",
+                ),
+                _ => (
+                    Command::SetPositionMode {
+                        command: 947,
+                        symbol: None,
+                        hedged: true,
+                    },
+                    "/positionSide/dual",
+                ),
+            };
+            h.event(Event::Command(command));
+            let write = h.take(path);
+            assert!(h.engine.store().metadata_write_pending("BTCUSDT"));
+            let read = metadata(&mut h, 948);
+            assert_eq!(read.method, Method::Get);
+            if finish_before_data {
+                h.event(Event::HttpFailed {
+                    request: write.id,
+                    error: "scripted write failure",
+                });
+                assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+            }
+            h.reply(read.id, 200, RAILS);
+            if h.requests
+                .iter()
+                .any(|request| request.url.contains("/trade/marginType"))
+            {
+                let margin = h.take("/trade/marginType");
+                h.reply(margin.id, 200, ISOLATED);
+            }
+            if !finish_before_data {
+                h.event(Event::HttpFailed {
+                    request: write.id,
+                    error: "scripted write failure",
+                });
+            }
+            assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+            assert_eq!(
+                h.engine.store().setting("BTCUSDT"),
+                Some(before),
+                "a read issued during pending write {kind} must stay nonpublishing after write retirement"
+            );
+            assert_eq!(
+                metadata_rails(&h, 948),
+                (before.buy_leverage.unwrap(), before.sell_leverage.unwrap())
+            );
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 948).count(), 1);
+            assert!(
+                !h.requests
+                    .iter()
+                    .any(|r| r.url.contains("/trade/marginType"))
+            );
+        }
+    }
+}
+
+#[test]
 fn metadata_race_with_pending_write_returns_cached_rails_or_read_fallback() {
     for (buy, sell, expected) in [
         (Some(20.0), Some(20.0), (20.0, 20.0)),
