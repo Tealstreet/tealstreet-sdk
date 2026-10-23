@@ -616,3 +616,71 @@ fmt, bans and both current request checks/15 controls PASS. Ticker/catalog,
 private/account/signing/trading and shared engine source stay unchanged; only9
 own paths differ from actualdb32. Independent implementation reviews and broad
 CI remain separate gates. No local WASM release/replay/timing sweep was run.
+
+### 2026-10-24: ticker hold released after depth landing
+
+Base actual1912 `5ce4b13fb7edadcf188a49f435663091e9596807`, including actual1877.
+The public-seed plan above already maps and specifies ticker ownership; resume
+only its ticker half. Fresh open-PR file lists show no Lighter lib/test collision
+except the unrelated trading.rs nonce lane. Current inventory42/lib2 becomes41/1
+by pruning only ticker fingerprint
+`2bbebb7465e83aac90aeda0b54e32b996272c805baa3f70ed2fafc69a8e73268`:1.
+Catalog `1edfac` remains counted; its primary/fallback relationship is separate.
+
+Add mandatory Context to Pending::Tickers. Before setting ticker_in_flight,
+issue Background Read/no credential/20s/Never/no pacing. Refusal goes through
+existing startup Backoff without a stranded latch or command terminal. Replace
+only its request_streamed with request_managed followed by the exact same
+stream_response Envelope aliases and empty headers/body. Validate live ownership
+before item staging. Before native response publication, capture liveness and
+retire the Context once; failures retire then clear the latch and use existing
+startup.failed(false). Preserve native usable partial rows (failed && rows.empty
+is the existing rejection predicate), per-symbol ticker_sources/revision dominance,
+all field conversions and the original poll/backoff cadence. Malformed streamed
+envelopes discard staged prefixes through the existing stream-error cleanup.
+No new row framework, retry budget, native fallback or local authority seam.
+
+Original REDs before production: all four deployments Prepare exact GET bytes;
+unclaimed complete/streamed responses publish nothing; parked/released20s deadline
+and typed route/transport failure retire the seed and permit native recovery;
+malformed envelopes/prefixes do not escape; usable partial rows retain native
+semantics; newer WS rows dominate only their symbol; Context capacity admission
+cannot strand the latch or retire unrelated candle owners; repeat300 successful
+cycles leave no Background owner leak. No user command terminal/financial outcome.
+
+The previously held candle fixture is now editable. Its timeout branch currently
+fires only the first NOW+140000 SetTimer, which becomes ticker's timer when both
+seeds are managed. Change only host driving to deliver every captured timer due
+at that same deadline, as a real host does; preserve its exact time and every
+candle generation/recovery assertion. Run this driver-only correction against
+legacy ticker source first (GREEN). Preparation selection is already URL-scoped
+to candles. Add no production ordering/deadline workaround or duplicate test.
+Existing ticker-native fixture drivers may use shared prepared_actions at their
+original event clocks, retaining every wire, value, failure and revision assertion.
+Only drivers that actually encounter ticker Prepare may change; no trade/signing
+source, engine or held files. Document each required driver correction.
+
+Files: lib.rs, new tests/request_context_tickers.rs, affected existing public/
+startup fixture drivers and shared test support, request_context_candles.rs host
+clock driver, exact manifest key and append-only plan/CALLERS/AUDITS/QUALITY.
+Original tests must compile and fail on actual legacy dispatch assertions. Run
+Lighter+Binance native (CARGO_BUILD_JOBS=2), strict touched-crate Clippy, scopedfmt,
+bans and both inventory checks/15controls; three independent plan then implementation
+reviews, architecture No (existing shared Context/managed HTTP), draft/background
+CI at120s and serialized train slot only when green. No catalog/private/signing
+or whole-family-zero claim.
+
+Ticker execution receipt: original six compiled admission assertions are RED at
+85eec6c0675; all six pass on managed source. Driver-only24a7c15952e first passes
+all10 candle Context controls with legacy ticker source. Full native verification
+identified five fixture targets still relying on immediate ticker transport:
+public-review and public_feed now use shared prepared drains at their original
+clocks; shared support restores the startup ticker before trading protection
+assertions. Two depth-capacity controls first settle the genuine public ticker
+before filling all256 command-owner slots, preserving the original depth/free-slot
+and WS-revision assertions. The supervision driver completes empty ticker reads
+and counts actual TimerFired deliveries (exact300 polls), rather than counting
+created-but-cancelled Context deadline timers as fires. All original supervision
+assertions and timestamps remain. The five affected targets now pass; production
+trading/account, catalog and engine code are unchanged. Full final native/strict,
+legacy-driver compatibility, ratchet and independent review gates follow.

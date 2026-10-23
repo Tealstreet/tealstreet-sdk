@@ -875,23 +875,23 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 
 
 Known nonce limits (owner decision: document only; no production change):
-`crypto/src/nonce.rs:9,19–28` keeps signer-domain history and allocates
-`max(floor(now), previous + 1)`. `ethereum_agent` keys that history by the
-signer's public-address digest (`nonce.rs:33–44`); Hyperliquid writes use it at
-`venues/hyperliquid/src/trading.rs:641–644`. Engine recreation and backward clock
+`engine/src/nonce.rs` `reserve` keeps signer-domain history and allocates
+`max(floor(now), previous + 1)`. The `hyperliquid-agent` domain keys that history
+by the signer's public-address digest (`NonceKey::ethereum_address`); Hyperliquid and TxFlow writes reserve through
+`venues/hyperliquid/src/sign.rs` `reserve_agent_nonce`. Engine recreation and backward clock
 resynchronization within the same native process or Wasm memory preserve that
 history. The synchronized SDK clock is passed at
 `packages/safe-cex/src/exchanges/rust/rust.exchange.ts:892,917`; it can move
 backward (`packages/safe-cex/src/utils/virtualClock.ts:98–110,151`).
 
 - Fresh process, worker or Wasm-memory restarts lose the history, as documented
-  in `sdk-rs/crypto/src/nonce.rs:1–2`. A same-ms restart after the previous counter
+  in the `sdk-rs/engine/src/nonce.rs` header. A same-ms restart after the previous counter
   ran ahead of wall time can reuse a nonce. Deployment boundaries must coordinate
   signers if they need continuity across those restarts; TS Date.now-based
   signing has the same restart limitation.
 - The allocator checks finite/nonnegative time and the safe-integer ceiling,
   rather than the venue's T−2-day/T+1-day freshness window
-  (`sdk-rs/crypto/src/nonce.rs:24–26,33–44`). A >1-day forward clock excursion, or
+  (`sdk-rs/engine/src/nonce.rs` `floor` and the `HYPERLIQUID_AGENT` limit). A >1-day forward clock excursion, or
   sustained >1000 writes/s for one signer, can leave its counter ahead of the
   allowed future window even after clock correction. These are known limits,
   not regressions from #1693; synchronized time reduces ordinary skew rejections.
@@ -2511,6 +2511,52 @@ owner isolation, synchronous retirement and unchanged fallthrough controls.
 Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
 history13->11). Private history/signing and spot REST capabilities stay native.
 Architecture gate: No; existing engine admission and completion choke points.
+
+## KuCoin local Read ownership
+
+Eight local terminal expressions use genuine initial Read command admission.
+The original root is validated immediately before cached-result publication or
+Spot leverage projection. No HTTP attempt is fabricated and no owner is acquired
+on private/pager fallthrough. Existing credential precedence, successful setter
+no-ops and accountMarginType capability are preserved. The exact ratchet removes
+eight occurrences/seven rows; remaining signing/history/Session sites remain held.
+
+### Lighter ticker seed Background custody
+
+The exchangeStats physical read now carries a mandatory managed Background Read
+Context. Shared ownership gates staging/publication and retires on success,
+strict stream failure, preparation/network denial and original deadline expiry.
+Native partial-row acceptance and per-symbol WS revision dominance are retained.
+Six original legacy-dispatch assertion REDs precede the move; controls cover four
+deployments/six envelopes, early response/stream fencing, malformed prefixes,
+route/transport/expiry recovery, capacity peer isolation and300 retirements.
+Only2bbebb…:1 is pruned (Lighter42→41/lib2→1); catalog remains counted.
+Architecture No: existing shared Context/HTTP authority and startup Backoff.
+
+
+
+## BloFin PublicTrades history authority
+
+The PublicTrades owner now adopts shared ReadCompletion/ReadCursorHistory,
+managed HTTP delivery and borrowed page admission. Exact physical delivery is
+checked before row mutation or page acceptance; typed shared terminals own both
+preflight and asynchronous cleanup. The adapter supplies only its native wire
+codec and result shaping. Independent source/adversarial, caller and full-map
+reviews answer the architecture gate No.
+
+The legacy inventory remains 24 BloFin occurrences: the shared private-history
+dispatcher and conservative query macro matches remain inventoried. This slice
+adds no exemption and makes no zero-legacy claim. Signed/private history, trading
+and the existing candle entry refusal remain separately tracked.
+
+## BloFin PublicTrades current inventory scope
+
+The actual-#1848 PublicTrades integration preserves all incoming engine and
+venue code outside its declared slice. The earlier 24-occurrence snapshot above
+predates #1867; current BloFin is 23 occurrences /19 rows /four files, unchanged
+by PublicTrades adoption. Its private dispatcher and conservative history macro
+sites remain explicit debt; neither the actual bridge nor the capacity assertion
+update claims a ratchet removal or private signer/Plan readiness.
 
 ## WOO local history admission
 

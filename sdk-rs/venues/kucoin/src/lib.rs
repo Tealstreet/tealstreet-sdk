@@ -28,6 +28,17 @@ use wire::*;
 const REST: &str = "https://api-futures.kucoin.com";
 const SNAPSHOT_SHARD: usize = 380;
 
+fn local_read_command_policy() -> safe_cex_engine::request_context::Policy {
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
@@ -1225,8 +1236,15 @@ impl Venue for Kucoin {
         }
         match command {
             Command::SetTickerSymbols { .. } => {}
-            Command::FetchLeverage { command, .. } => {
-                cx.fail(command, "KuCoin leverage query is unsupported");
+            Command::FetchLeverage { .. } => {
+                let Ok(context) = cx.admit_http_command(local_read_command_policy()) else {
+                    return;
+                };
+                let _ = cx.fail_context(
+                    &context,
+                    not_sent("KuCoin leverage query is unsupported")
+                        .kind(safe_cex_engine::ErrorKind::Unsupported),
+                );
             }
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
