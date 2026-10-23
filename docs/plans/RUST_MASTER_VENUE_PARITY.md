@@ -63,3 +63,14 @@ replay/timing sweeps. Do not re-tape unless a demonstrated TS-reference change
 requires it; the supplied #1869 harness already reflects Robinhood attribution.
 Architecture gate: No; existing venue protocol identity/index encoding is aligned
 with master through existing helpers, with no new cross-cutting mechanism.
+
+Review correction: Rust's existing user() must also skip empty vault and
+applicationId strings, matching TypeScript's `vault || applicationId` truthiness.
+Normalize only emptiness (never trim or reinterpret the address) in that existing
+selector; do not introduce a fee-only parallel selector. Empty vault falls back
+to a valid applicationId; empty applicationId is unresolved and must not produce
+an empty-subject fee read. Existing role discovery can establish a real trading
+identity before private bootstrap. Since other account reads share user(), they
+also use the nonempty trading identity rather than an empty vault. Add explicit
+empty-vault fallback and empty-applicationId/no-premature-fees controls. This is
+necessary for the requested master fee-subject parity and is included in CALLERS.
