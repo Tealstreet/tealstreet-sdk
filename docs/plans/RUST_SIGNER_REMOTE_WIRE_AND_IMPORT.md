@@ -165,9 +165,22 @@ content allowlist before signing.
 | `exchangeAccountController.ts` | Add a third arm for `type: 'op'` on the main-thread path. |
 | Custom-script sandbox (`PostMessageRemoteSigner.ts`) | Unchanged. It may opt in later. |
 
-Open item for the NX owners: Paradex and Polymarket keep signing material in
-`key`, which is in `INIT_FIELDS`. Hosted accounts may already send it to the
-server. This needs verification, independent of this plan.
+**Confirmed today (NX lane, read-only, 2026-10-23).**
+- Hosted Paradex accounts already send the Stark subkey or ETH private key to
+  exchange-server: `options.key` is in `INIT_FIELDS` (`secret` is dropped,
+  `key` is not), and the server maps it to `apiKey`.
+- Polymarket would send its wallet private key the same way. Polymarket is
+  disabled, so there is no production exposure.
+- claude-ddi2il has raised this with Sam; this plan makes no NX change.
+
+Consequences for this plan:
+- Before P8 admits keyless hosted signing for either family, NX must stop
+  sending their signing material, for example by moving it out of `key` or
+  excluding it from `INIT_FIELDS`.
+- **SDK guard.** Hosted (`hostedMode` / `remoteSigner`) Rust construction for
+  Paradex and Polymarket is refused when `key` parses as private-key
+  material. The engine would otherwise hold a key it is meant never to see.
+  The refusal is typed (`invalidInput` / `notSent`) and never echoes the key.
 
 ### Proof
 
