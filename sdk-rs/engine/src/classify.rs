@@ -356,6 +356,7 @@ impl WriteFact {
                 Verdict::Satisfied(_) if !known_effects => WriteResult::Accepted {
                     order_ids: Vec::new(),
                 },
+                Verdict::Unknown(_) if known_effects => WriteResult::PartialUnknown(fact.error),
                 Verdict::Unknown(_) => WriteResult::Failed(fact.error),
                 _ if known_effects => WriteResult::KnownPartial(fact.error),
                 _ => WriteResult::Rejected(fact.error),
@@ -404,7 +405,7 @@ pub enum BatchItem<'a> {
 }
 
 /// Engine projection of one batch acknowledgement: count check, accepted-ID
-/// join and the Accepted / Rejected / KnownPartial / Failed choice.
+/// join and the Accepted / Rejected / KnownPartial / PartialUnknown / Failed choice.
 pub(crate) fn batch(
     table: &CodeTable,
     intent: Intent,
@@ -465,12 +466,15 @@ pub(crate) fn batch(
         .copied()
         .unwrap_or(first);
     let error = self::error(verdict, intent, released, Some(native), message);
+    let partial_unknown = matches!(verdict, Verdict::Unknown(_)) && effected;
     let error = if ids.is_empty() {
         error
     } else {
         error.partial(&ids, expected, index)
     };
-    Ok(if matches!(verdict, Verdict::Unknown(_)) {
+    Ok(if partial_unknown {
+        WriteResult::PartialUnknown(error)
+    } else if matches!(verdict, Verdict::Unknown(_)) {
         WriteResult::Failed(error)
     } else if effected {
         WriteResult::KnownPartial(error)
