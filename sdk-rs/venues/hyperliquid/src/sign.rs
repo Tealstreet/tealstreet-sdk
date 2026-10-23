@@ -50,6 +50,20 @@ pub fn sign(
 
 // The phantom agent has a fixed EIP-712 schema. Encode its ABI words here so
 // the venue does not pull the general JSON typed-data parser into the host.
+/// One nonce domain per agent address, shared by Hyperliquid and TxFlow
+/// (including vaults): raw host milliseconds within the safe-integer range.
+pub fn agent_nonce<P>(cx: &safe_cex_engine::Cx<'_, P>, secret: &str) -> Result<u64, String> {
+    use safe_cex_engine::nonce::{NonceFloor, NonceKey};
+    let address = ethereum::private_key_address(secret)?;
+    cx.reserve_nonce(
+        "hyperliquid-agent",
+        &NonceKey::ethereum_address(&address),
+        NonceFloor::RawMs { scale: 1 },
+        (1 << 53) - 1,
+    )
+    .map_err(|error| error.message().into())
+}
+
 fn agent_digest(connection_id: [u8; 32], mainnet: bool) -> [u8; 32] {
     let mut domain = [0u8; 160];
     domain[..32].copy_from_slice(&ethereum::keccak256(
@@ -71,6 +85,18 @@ fn agent_digest(connection_id: [u8; 32], mainnet: bool) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn agent_key_hex_case_does_not_create_a_new_nonce_domain() {
+        use safe_cex_engine::nonce::NonceKey;
+        let key = "00000000000000000000000000000000000000000000000000000000000000ab";
+        let upper = format!("0x{}", key.to_uppercase());
+        let lower = ethereum::private_key_address(key).unwrap();
+        assert_eq!(lower, ethereum::private_key_address(&upper).unwrap());
+        assert_eq!(
+            NonceKey::ethereum_address(&lower),
+            NonceKey::ethereum_address(&lower.to_ascii_uppercase().replacen("0X", "0x", 1))
+        );
+    }
     #[test]
     fn fixed_agent_words_match_dynamic_eip712_for_both_networks() {
         for connection_id in [[0u8; 32], [0xff; 32], core::array::from_fn(|i| i as u8)] {

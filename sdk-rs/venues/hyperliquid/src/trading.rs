@@ -638,10 +638,8 @@ impl Hyperliquid {
             self.pump_trades(cx);
             return;
         }
-        let nonce = match safe_cex_crypto::nonce::ethereum_agent(
-            self.options.secret.as_deref().unwrap_or(""),
-            cx.now,
-        ) {
+        let nonce = match crate::sign::agent_nonce(cx, self.options.secret.as_deref().unwrap_or(""))
+        {
             Ok(nonce) => nonce,
             Err(error) => {
                 self.restore_cancel(cx, &effect);
