@@ -953,6 +953,7 @@ mod tests {
         capture_auth_details: bool,
         auth_observations: std::cell::Cell<usize>,
         hold_write_fact: Option<bool>,
+        reconciles: Vec<Option<Vec<String>>>,
     }
     const GROUP: Pacing = Pacing {
         group: 1,
@@ -1186,6 +1187,9 @@ mod tests {
             } else {
                 panic!("unexpected transport failure");
             }
+        }
+        fn reconcile_uncertain(&mut self, _: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
+            self.reconciles.push(symbols.map(<[String]>::to_vec));
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
             if let Command::FetchLeverage { command, .. }
@@ -2714,6 +2718,56 @@ mod tests {
                     Some(crate::Outcome::Unknown)
                 ][state]
             );
+        }
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn an_unknown_placement_asks_the_venue_once_to_reconcile_after_any_rate_wait() {
+        for rate_limited in [false, true] {
+            let (mut engine, _) = start(Probe::default());
+            let place = Command::PlaceOrders {
+                command: 7,
+                orders: vec![],
+            };
+            engine
+                .io
+                .order_locks
+                .acquire(&place, &engine.store, true)
+                .unwrap();
+            let (context, token, _) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            engine.claim_http(2., permit).unwrap();
+            let mut fallback = VenueError::new("lost answer");
+            if rate_limited {
+                fallback = fallback
+                    .kind(crate::ErrorKind::RateLimited)
+                    .retry_after_ms(3_000.);
+            }
+            Cx {
+                now: 6.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            }
+            .fail_context(&context, fallback)
+            .unwrap();
+            engine.finish_event_scope(6.);
+            engine.finish_event_scope(7.);
+            if !rate_limited {
+                assert_eq!(
+                    engine.venue.reconciles,
+                    vec![None],
+                    "once, for every symbol"
+                );
+                assert!(engine.reconcile_timer.is_none());
+                continue;
+            }
+            assert!(engine.venue.reconciles.is_empty(), "rate limit waits");
+            let (timer, at) = engine.reconcile_timer.unwrap();
+            assert_eq!(at, 3_006.);
+            engine.handle(at, Event::TimerFired { timer });
+            assert_eq!(engine.venue.reconciles, vec![None]);
+            assert!(engine.reconcile_timer.is_none());
         }
     }
 

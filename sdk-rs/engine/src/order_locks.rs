@@ -181,7 +181,10 @@ impl OrderLocks {
         ready
     }
 
-    pub fn finish(&mut self, command: CommandId, failed: bool) {
+    /// Returns the symbols this finish newly marks uncertain (an empty symbol
+    /// means every symbol); the engine schedules their reconcile read.
+    pub fn finish(&mut self, command: CommandId, failed: bool) -> Vec<String> {
+        let mut marked = Vec::new();
         if failed
             && let Some((_, scope)) = self
                 .active
@@ -196,8 +199,10 @@ impl OrderLocks {
                     .cloned()
                     .map(|symbol| (symbol, self.epoch)),
             );
+            marked.clone_from(&scope.symbols);
             if scope.symbols.is_empty() {
                 self.uncertain.insert(String::new(), self.epoch);
+                marked.push(String::new());
             }
             for (waiting, failed) in &mut self.waiting {
                 if matches!(waiting, Command::CancelSymbolOrders { symbol, .. }
@@ -208,6 +213,7 @@ impl OrderLocks {
             }
         }
         self.active.retain(|(id, _)| *id != command);
+        marked
     }
     pub fn resolved(&mut self, command: CommandId) {
         if let Some((_, scope)) = self

@@ -1431,6 +1431,10 @@ struct Io<P> {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    // Uncertain-write reconcile reads the engine owes the venue: symbols
+    // (empty = all) and the earliest time to ask.
+    #[cfg(feature = "order-locks")]
+    reconcile_due: Vec<(Vec<String>, f64)>,
     command_entry: Option<command_entry::Entry>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
@@ -1484,6 +1488,8 @@ impl<P> Default for Io<P> {
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_due: Vec::new(),
             command_entry: None,
             http_responses: Default::default(),
             http_write_revision: 0,
@@ -2197,7 +2203,22 @@ impl<P> Cx<'_, P> {
             {
                 self.io.order_locks.managed_resolved(command);
             }
-            self.io.order_locks.finish(command, result.is_err());
+            let uncertain = self.io.order_locks.finish(command, result.is_err());
+            if !uncertain.is_empty() {
+                // A rate limit or credential refusal must not fan out reads now.
+                let delay = match result.as_ref().err().and_then(|error| error.kind) {
+                    Some(ErrorKind::RateLimited) => result
+                        .as_ref()
+                        .err()
+                        .and_then(|error| error.retry_after_ms)
+                        .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS),
+                    Some(
+                        ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission,
+                    ) => crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
+                    _ => 0.,
+                };
+                self.io.reconcile_due.push((uncertain, self.now + delay));
+            }
             self.io.active_commands.remove(&command);
         }
         #[cfg(not(feature = "order-locks"))]
@@ -2337,6 +2358,16 @@ pub trait Venue {
         error: VenueError,
     ) {
         self.on_sign_error(cx, pending, error);
+    }
+
+    /// Reconcile writes whose outcome is unknown: issue a fresh order read for
+    /// these symbols (`None`: all) and report it through `orders_reconciled`.
+    /// The engine asks once per uncertain seal, after any rate-limit wait.
+    fn reconcile_uncertain(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _symbols: Option<&[String]>,
+    ) {
     }
 
     /// Defer symbol cancellation until placement native identities are known.
@@ -2539,6 +2570,8 @@ pub struct Engine<V: Venue> {
     startup_watch_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
+    #[cfg(feature = "order-locks")]
+    reconcile_timer: Option<(TimerId, f64)>,
     /// Set while dispatching released commands, which must not be held again.
     releasing: bool,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
@@ -2585,6 +2618,8 @@ impl<V: Venue> Engine<V> {
             started: false,
             startup_watch_at: None,
             ack_timer: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_timer: None,
             releasing: false,
             account_startup: false,
             shared_books: HashMap::new(),
@@ -2939,6 +2974,14 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            return;
+        }
+        #[cfg(feature = "order-locks")]
+        if let Event::TimerFired { timer } = &event
+            && self.reconcile_timer.is_some_and(|(own, _)| own == *timer)
+        {
+            self.reconcile_timer = None;
+            self.reconcile_uncertain(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
@@ -3372,7 +3415,53 @@ impl<V: Venue> Engine<V> {
             }
         }
         self.io.http_delivery = delivery;
+        #[cfg(feature = "order-locks")]
+        self.reconcile_uncertain(now);
         self.restore_shared_tickers(false, now);
+    }
+
+    /// Ask the venue once for each due uncertain-write reconcile read, then
+    /// re-arm one wake-up for deferred ones. A fresh read the venue reports
+    /// through `orders_reconciled` clears the order-lock fence as before.
+    #[cfg(feature = "order-locks")]
+    fn reconcile_uncertain(&mut self, now: f64) {
+        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.io.reconcile_due)
+            .into_iter()
+            .partition(|(_, at)| *at <= now);
+        self.io.reconcile_due = later;
+        if !due.is_empty() {
+            let mut symbols: Vec<String> = Vec::new();
+            for symbol in due.into_iter().flat_map(|(symbols, _)| symbols) {
+                if !symbols.contains(&symbol) {
+                    symbols.push(symbol);
+                }
+            }
+            let all = symbols.iter().any(String::is_empty);
+            let mut cx = Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            };
+            self.venue
+                .reconcile_uncertain(&mut cx, (!all).then_some(symbols.as_slice()));
+        }
+        let next = self
+            .io
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp);
+        if self.reconcile_timer.map(|(_, at)| at) == next {
+            return;
+        }
+        if let Some((timer, _)) = self.reconcile_timer.take() {
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        if let Some(at_ms) = next {
+            let timer = TimerId(self.io.next());
+            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.reconcile_timer = Some((timer, at_ms));
+        }
     }
 
     fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {
