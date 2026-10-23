@@ -5,6 +5,7 @@ import axios from 'axios';
 import qs from 'qs';
 
 import { signHttpCapture } from '../../utils/signHttpCapture';
+import { createAsterDEXV1RequestInterceptor, isAsterDEXPublicEndpoint } from '../asterdex/asterdex.signing';
 import { createBinanceRequestInterceptor, isBinancePublicSigningRequest } from '../binance/binance.signing';
 import { createBybitRequestInterceptor, isBybitUnsignedSigningRequest } from '../bybit/bybit.signing';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site';
@@ -24,12 +25,14 @@ export const signHostedHttp = async (
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
-  // Other dispatch families (AsterDEX until its hosted half) have no request codec here.
-  if (!BINANCE.has(name) && !BYBIT.has(name))
+  // Other dispatch families have no request codec here.
+  const aster = name === 'asterdex';
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !aster)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   const unsigned = binance ? isBinancePublicSigningRequest(name, request.config.url)
-    : isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
+    : aster ? isAsterDEXPublicEndpoint(request.config.url)
+      : isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
   const needsCredential = primaryComplete && !unsigned;
   const credential = needsCredential ? (await host.hostedSigning({ kind: 'credential' })).credential : undefined;
   if (needsCredential && !credential) throw new Error('Signing credential is unavailable');
@@ -53,6 +56,12 @@ export const signHostedHttp = async (
     },
   };
   const siteHeaders = isBybitSiteIdExchange(name) ? getBybitSiteHeaders(options) : {};
+  if (aster) {
+    // AsterDEX V1 only: the host admits no V3 wallet account to hosted signing.
+    const xhr = axios.create({ timeout: 10_000, headers: { 'Content-Type': 'application/json' } });
+    xhr.interceptors.request.use(createAsterDEXV1RequestInterceptor(signingOptions, now));
+    return signHttpCapture(xhr, request);
+  }
   const xhr = axios.create({
     timeout: 20_000,
     paramsSerializer: {
