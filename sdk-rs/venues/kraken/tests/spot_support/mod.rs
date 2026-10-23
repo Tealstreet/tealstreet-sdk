@@ -31,7 +31,8 @@ pub fn reply_at(e: &mut Engine<KrakenSpot>, now: f64, r: &HttpRequest, body: &st
     );
 }
 pub fn requests(e: &mut Engine<KrakenSpot>) -> Vec<HttpRequest> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
