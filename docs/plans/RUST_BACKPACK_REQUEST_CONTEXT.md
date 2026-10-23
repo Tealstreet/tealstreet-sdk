@@ -490,7 +490,8 @@ SDK/browser delegated signing readiness is not implied by local admission. The
 registry must register the SAME identities it gives the venue; externally supplied
 providers cannot silently fall back to a local signer. #1946 stacks on m26ps4's
 reviewed admission PR, with the scoped recorded prepareHttp/PrototypeTransport
-fixture carry. The ruling authorizes this design; admission is not yet landed.
+fixture carry. This child now integrates reviewed #1964 at 9aa317fc3ae. Its actual landing
+remains pending; this stack alone claims no SDK/browser remote readiness.
 
 REMOVE BEFORE MASTER: codex-hcmq3f owns account/WS/background repair adoption,
 which removes the retained raw fields and ends dual custody. That cutover uses
