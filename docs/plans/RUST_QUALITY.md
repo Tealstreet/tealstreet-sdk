@@ -997,3 +997,17 @@ groups), strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both
 request checks/15 controls. Held request_context_candles.rs and trading.rs remain
 byte-exact to actualdb32; ticker/catalog runtime remains unchanged. Independent
 implementation review and CI do not derive readiness solely from native tests.
+
+## KuCoin local history authority controls
+
+Tests precede production. The fixture delegates the native mutation guard so
+Query tracking follows real KuCoin, then exercises genuine Engine callbacks.
+Corrected original source produces five assertion REDs and six compatibility
+GREENs: missing typed local metadata, capacity bypass, invalid-clock bypass and
+fixed-clock metadata/reuse assertions. Saturation genuinely allocates all256
+Background roots in a separate no-ID callback, repeatedly denies every reachable
+local path, explicitly retires those roots and recovers at one clock. No fake
+command-origin or opaque request is used to manufacture admission pressure.
+Native precedence, numeric boundaries, both zero-limit results, Store stability,
+signed order/funding wire requests and clipped long-range paging are preserved.
+Three defensive branches remain explicitly outside native witness claims.
