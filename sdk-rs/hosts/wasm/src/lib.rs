@@ -624,11 +624,12 @@ fn hosted_error(error: safe_cex_engine::signing::SignError) -> js_sys::Error {
     construction_error(error.venue_error())
 }
 
-#[cfg(feature = "dispatch-signing")]
 /// A captured hosted HTTP stamp is usable for this long after capture; the
 /// remaining window is also the provider deadline.
+#[cfg(feature = "dispatch-signing")]
 const HOSTED_HTTP_FRESHNESS_MS: f64 = 5000.;
 
+#[cfg(feature = "dispatch-signing")]
 #[wasm_bindgen]
 impl WasmEngine {
     /// Clock capture only: does not start the venue or emit any action.
