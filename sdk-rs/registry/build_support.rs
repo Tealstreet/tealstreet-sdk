@@ -98,7 +98,17 @@ enum KeyEncoding {
 struct ExtraKeyPolicy {
     key: ExtraKey,
     #[serde(default)]
-    field: Option<SetupFieldPolicy>,
+    field: ExtraFieldPolicy,
+    #[serde(default)]
+    encoding: Option<KeyEncoding>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ExtraFieldPolicy {
+    #[default]
+    Optional,
+    RequiredForPrivate,
 }
 
 #[derive(Debug, Deserialize)]
@@ -191,10 +201,13 @@ fn rule(value: &Rule) -> String {
             let extra = value.extra.as_ref().map_or_else(
                 || "None".into(),
                 |extra| {
+                    let encoding = extra.encoding.as_ref().map_or_else(
+                        || "None".into(),
+                        |encoding| format!("Some(safe_cex_engine::signing::KeyEncoding::{encoding:?})"),
+                    );
                     format!(
-                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: SetupFieldPolicy::{:?} }})",
-                        extra.key,
-                        extra.field.as_ref().unwrap_or(&SetupFieldPolicy::Optional)
+                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding} }})",
+                        extra.key, extra.field
                     )
                 },
             );
@@ -353,15 +366,17 @@ mod tests {
     #[test]
     fn declared_encoding_and_extra_key_compile_and_unknown_values_fail_closed() {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
-            "v":{"signerSetup":{"primary":{"secretEncoding":"base64Text","extra":{"key":"zklinkSeed","field":"requiredForPrivate"}}}},
+            "v":{"signerSetup":{"primary":{"secretEncoding":"base64Text","extra":{"key":"zklinkSeed","field":"requiredForPrivate","encoding":"hex"}}}},
             "o":{"signerSetup":{"primary":{"extra":{"key":"zklinkSeed"}}}}
         }}"#).unwrap();
-        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: SetupFieldPolicy::RequiredForPrivate })"));
-        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: SetupFieldPolicy::Optional })"));
+        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
+        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
         for field in [
             r#"{"secretEncoding":"base58"}"#,
             r#"{"extra":{"key":"l1Wallet"}}"#,
             r#"{"extra":{"key":"zklinkSeed","name":"x"}}"#,
+            r#"{"extra":{"key":"zklinkSeed","field":"requiredWithPrimaryFallback"}}"#,
+            r#"{"extra":{"key":"zklinkSeed","field":null}}"#,
         ] {
             let rules = format!(
                 r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"signerSetup":{{"primary":{field}}}}}}}}}"#

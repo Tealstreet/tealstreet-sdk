@@ -175,7 +175,9 @@ impl DecodedIdentity {
         }
         for (name, bytes) in self.extra {
             if !bytes.is_empty() {
-                signer.keys.insert(Self::extra_ref(slot, name), bytes);
+                let reference = Self::extra_ref(slot, name);
+                signer.roles.insert(reference.clone(), name);
+                signer.keys.insert(reference, bytes);
             }
         }
     }
@@ -184,6 +186,9 @@ impl DecodedIdentity {
 #[derive(Default)]
 pub struct LocalSigner {
     keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
+    /// Extra refs are usable only by their own algorithm, never presented,
+    /// interpolated or used as an ordinary MAC/digest key.
+    roles: HashMap<KeyRef, ExtraKey>,
 }
 impl LocalSigner {
     pub fn new() -> Self {
@@ -221,6 +226,12 @@ impl LocalSigner {
                 }
                 if let Some(encoding) = rule.and_then(|rule| rule.secret_encoding) {
                     identity.secret_encoding = encoding;
+                }
+                if let Some(extra) = rule.and_then(|rule| rule.extra)
+                    && let Some(encoding) = extra.encoding
+                    && let Some(material) = identity.extra.0.get_mut(&extra.key)
+                {
+                    material.encoding = encoding;
                 }
             }
         }
@@ -294,8 +305,22 @@ impl LocalSigner {
     }
     pub fn remove(&mut self, reference: &KeyRef) {
         self.keys.remove(reference);
+        self.roles.remove(reference);
     }
+    /// Ordinary material only; extra refs require `role_key`.
     fn key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
+        if self.roles.contains_key(reference) {
+            return Err(SignError::InvalidRequest);
+        }
+        self.raw_key(reference)
+    }
+    fn role_key(&self, reference: &KeyRef, role: ExtraKey) -> Result<&[u8], SignError> {
+        if self.roles.get(reference) != Some(&role) {
+            return Err(SignError::InvalidRequest);
+        }
+        self.raw_key(reference)
+    }
+    fn raw_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         self.keys
             .get(reference)
             .map(|key| key.as_slice())
@@ -400,7 +425,10 @@ impl LocalSigner {
                     payload,
                 } => {
                     let message = self.expand(payload, &result)?;
-                    let key = self.key(key)?;
+                    let key = match algorithm {
+                        Algorithm::ZkLinkContract => self.role_key(key, ExtraKey::ZklinkSeed)?,
+                        _ => self.key(key)?,
+                    };
                     match algorithm {
                         Algorithm::HmacSha256 => {
                             let mut mac = Hmac::<Sha256>::new_from_slice(key)
@@ -1010,13 +1038,14 @@ mod tests {
     }
 
     fn zklink_policy() -> CredentialSetupPolicy {
-        use safe_cex_engine::signing::{IdentitySetupPolicy, SetupFieldPolicy};
+        use safe_cex_engine::signing::IdentitySetupPolicy;
         CredentialSetupPolicy {
             primary: Some(IdentitySetupPolicy {
                 secret_encoding: Some(KeyEncoding::Base64Text),
                 extra: Some(safe_cex_engine::signing::ExtraKeyPolicy {
                     key: ExtraKey::ZklinkSeed,
-                    field: SetupFieldPolicy::RequiredForPrivate,
+                    field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate,
+                    encoding: Some(KeyEncoding::Hex),
                 }),
                 ..Default::default()
             }),
@@ -1049,6 +1078,15 @@ mod tests {
         format!(
             r#"{{"primary":{{"key":"apex-key","secret":"apex-secret","extra":{{"zklinkSeed":{{"value":"{seed}","encoding":"hex"}}}}}}}}"#
         )
+    }
+    #[cfg(feature = "zklink")]
+    fn ids_signing(seed: &str) -> KeyRef {
+        LocalSigner::from_json_with_policy(zklink_setup(seed), zklink_policy())
+            .unwrap()
+            .1
+            .primary
+            .unwrap()
+            .signing
     }
     fn zklink_request(key: KeyRef, payload: Vec<u8>) -> SignRequest {
         SignRequest {
@@ -1139,18 +1177,55 @@ mod tests {
         let result = signer.sign_now(&request).unwrap();
         request.validate_result(&result).unwrap();
         assert_eq!(crate::hex(&result.values[0]), expected);
+        // The declared seed encoding wins over contrary caller metadata.
+        let utf8 = zklink_setup(&seed).replace(r#""encoding":"hex""#, r#""encoding":"utf8""#);
+        let (caller, ids) = LocalSigner::from_json_with_policy(utf8, zklink_policy()).unwrap();
+        let caller_key = ids.primary.unwrap().extra[&ExtraKey::ZklinkSeed].clone();
+        assert_eq!(
+            caller
+                .sign_now(&zklink_request(caller_key, payload.clone()))
+                .unwrap(),
+            result
+        );
         for bad in [payload[..35].to_vec(), [payload.clone(), vec![0]].concat()] {
             assert_eq!(
                 signer.sign_now(&zklink_request(key.clone(), bad)),
                 Err(SignError::InvalidRequest)
             );
         }
-        let mut short = LocalSigner::new();
-        short.insert(key.clone(), vec![1; 64]);
+        let (short, _) =
+            LocalSigner::from_json_with_policy(zklink_setup(&"01".repeat(64)), zklink_policy())
+                .unwrap();
         assert_eq!(
-            short.sign_now(&zklink_request(key, payload)),
+            short.sign_now(&zklink_request(key.clone(), payload.clone())),
             Err(SignError::InvalidRequest)
         );
+        // The seed is never ordinary material, nor is ordinary material a seed.
+        let signing = ids_signing(&seed);
+        assert_eq!(
+            signer.sign_now(&zklink_request(signing, payload.clone())),
+            Err(SignError::InvalidRequest)
+        );
+        for misuse in [
+            Operation::Present { key: key.clone() },
+            Operation::Sha256 {
+                payload: vec![PayloadPart::Credential { key: key.clone() }],
+            },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: key.clone(),
+                payload: vec![PayloadPart::Bytes {
+                    bytes: payload.clone(),
+                }],
+            },
+        ] {
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![misuse],
+            };
+            assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
+        }
     }
 
     #[cfg(not(feature = "zklink"))]

@@ -145,8 +145,14 @@ This PR enables no family.
     account subject, or a stable-id, account or slot fallback.
   - Extra refs travel inside the selected slot's identity.
 - **Setup policy.**
-  - A family declares its extra key in `IdentitySetupPolicy.extra`
-    (`{ key, field }`, where `field` is the existing `SetupFieldPolicy`).
+  - A family declares its extra key in `IdentitySetupPolicy.extra` as
+    `{ key, field, encoding }`.
+    - `field` is `optional` or `requiredForPrivate`. There is no fallback
+      variant, because extras never cross slots.
+    - A declared `encoding` is authoritative over caller metadata.
+  - The local provider binds each extra ref to its own algorithm. A
+    `zklinkSeed` ref is refused for `Present`, credential interpolation and
+    every other algorithm, and `ZkLinkContract` refuses ordinary refs.
   - Trusted setup rejects duplicate JSON names and any undeclared extra.
   - Required extras follow the passphrase rules for complete slots.
 - **Key encodings (P1).**
@@ -170,12 +176,30 @@ This PR enables no family.
   - SDK `construction.ts` and `localSignerSetup.ts` policy and metadata
     types;
   - the registry `build_support.rs` policy generator.
+- **Not yet wired:** SDK `LocalSignerSetup` and the delegated identities do
+  not yet carry `extra`. The ApeX adoption PR adds that capsule input with
+  its family declaration.
 - **Proof.**
   - ZkLink: independent npm-1.0.2 vectors already pinned for ApeX, plus
     exact-length refusals.
   - Base64Text: an independent Node vector.
   - Duplicate and undeclared extra refusals.
   - A redaction check that no extra material appears in refs or errors.
-  - Feature-off `Unsupported`.
+  - Feature-off `Unsupported`. CI also runs the crypto signer tests without
+    workspace feature unification.
   - Focused engine, crypto, registry and SDK checks run locally; CI owns
     WASM size and timing.
+
+Implementation checkpoint: the engine, crypto, registry generator, WASM types
+and SDK types are implemented as above, plus the derived zkLink seed wipe.
+Focused checks pass locally:
+- engine lib (542 tests);
+- crypto signer without and with `zklink` (16 and 44 tests);
+- registry (71 tests);
+- Binance, Bybit and ApeX (801 tests);
+- SDK signer setup tests, typecheck and lint;
+- strict workspace Clippy, fmt and bans.
+
+Independent adversarial review: CLEAN. Its minor findings are addressed:
+policy-owned seed encoding, the narrowed field vocabulary, the CI feature-off
+step, the seed wipe and role binding. CI owns the WASM size and timing gates.

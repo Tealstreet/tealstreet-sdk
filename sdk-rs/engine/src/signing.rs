@@ -32,7 +32,19 @@ pub struct IdentitySetupPolicy {
 pub struct ExtraKeyPolicy {
     pub key: ExtraKey,
     #[serde(default)]
-    pub field: SetupFieldPolicy,
+    pub field: ExtraFieldPolicy,
+    /// Declared decoding of the extra material; authoritative over caller metadata.
+    #[serde(default)]
+    pub encoding: Option<KeyEncoding>,
+}
+
+/// Extra refs never fall back across slots, so there is no fallback variant.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExtraFieldPolicy {
+    #[default]
+    Optional,
+    RequiredForPrivate,
 }
 
 /// Trusted setup decoding of supplied key material. Nothing here is inferred.
@@ -104,11 +116,8 @@ impl CredentialSetupPolicy {
             }
             if let Some(declared) = declared {
                 let required = match declared.field {
-                    SetupFieldPolicy::Optional => false,
-                    SetupFieldPolicy::RequiredForPrivate => !(primary && public_data_only),
-                    SetupFieldPolicy::RequiredWithPrimaryFallback => {
-                        return Err(SignError::InvalidRequest);
-                    }
+                    ExtraFieldPolicy::Optional => false,
+                    ExtraFieldPolicy::RequiredForPrivate => !(primary && public_data_only),
                 };
                 if required
                     && complete(identity)
@@ -734,6 +743,7 @@ mod setup_field_policy_tests {
                 extra: Some(ExtraKeyPolicy {
                     key: ExtraKey::ZklinkSeed,
                     field,
+                    encoding: None,
                 }),
                 ..Default::default()
             }),
@@ -755,11 +765,11 @@ mod setup_field_policy_tests {
                 secondary: Some(seeded.clone()),
             };
             assert_eq!(
-                declared(SetupFieldPolicy::Optional).apply_to_identities(&mut secondary, public),
+                declared(ExtraFieldPolicy::Optional).apply_to_identities(&mut secondary, public),
                 Err(SignError::InvalidRequest)
             );
         }
-        let required = declared(SetupFieldPolicy::RequiredForPrivate);
+        let required = declared(ExtraFieldPolicy::RequiredForPrivate);
         required
             .apply_to_identities(&mut ids(seeded.clone()), false)
             .unwrap();
@@ -770,13 +780,14 @@ mod setup_field_policy_tests {
         required
             .apply_to_identities(&mut ids(legacy.clone()), true)
             .unwrap();
-        declared(SetupFieldPolicy::Optional)
+        declared(ExtraFieldPolicy::Optional)
             .apply_to_identities(&mut ids(legacy.clone()), false)
             .unwrap();
-        assert_eq!(
-            declared(SetupFieldPolicy::RequiredWithPrimaryFallback)
-                .apply_to_identities(&mut ids(seeded.clone()), false),
-            Err(SignError::InvalidRequest),
+        assert!(
+            serde_json::from_str::<ExtraKeyPolicy>(
+                r#"{"key":"zklinkSeed","field":"requiredWithPrimaryFallback"}"#
+            )
+            .is_err(),
             "extra refs never fall back across slots"
         );
         let mut applied = ids(seeded.clone());

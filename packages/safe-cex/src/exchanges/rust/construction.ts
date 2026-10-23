@@ -6,7 +6,7 @@ import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
 export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
-export type ExtraKeyPolicy = { key: 'zklinkSeed'; field?: PassphraseSetupPolicy };
+export type ExtraKeyPolicy = { key: 'zklinkSeed'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
 export type IdentitySetupPolicy = {
   trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
 };
