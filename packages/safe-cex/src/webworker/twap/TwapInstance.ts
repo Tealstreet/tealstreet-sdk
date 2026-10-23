@@ -20,6 +20,7 @@ export class TwapInstance {
   private exchange: Exchange;
   private ctx: Worker;
   private trackedChaserOrderIds: string[] = [];
+  private trackedLimitOrderIds: string[] = [];
   /** Per-slice timeout timers used by `twap chase` policy enforcement.
    *  Stored so terminate() can cancel them. */
   private sliceTimers: ReturnType<typeof setTimeout>[] = [];
@@ -43,6 +44,10 @@ export class TwapInstance {
     } else {
       this.state = this.createNewState();
     }
+  }
+
+  get currentOrderIds(): string[] {
+    return this.trackedLimitOrderIds;
   }
 
   private updateState(state: Partial<TwapState>) {
@@ -116,7 +121,7 @@ export class TwapInstance {
       const ticker = this.exchange.store.tickers.find((ticker) => ticker.symbol === this.options.activeMarket.symbol);
       const price =
         this.options.side === OrderSide.Buy ? ticker?.bid || ticker?.last || 0 : ticker?.ask || ticker?.last || 0;
-      await this.exchange.placeOrder({
+      const orderIds = await this.exchange.placeOrder({
         symbol: this.options.activeMarket.symbol,
         side: this.options.side,
         type: price ? OrderType.Limit : OrderType.Market,
@@ -124,6 +129,9 @@ export class TwapInstance {
         amount: orderSize,
         reduceOnly: Boolean(this.options.reduceOnly),
       });
+      if (price && orderIds.length > 0) {
+        this.trackedLimitOrderIds.push(...orderIds);
+      }
     } else {
       await this.exchange.placeOrder({
         symbol: this.options.activeMarket.symbol,
