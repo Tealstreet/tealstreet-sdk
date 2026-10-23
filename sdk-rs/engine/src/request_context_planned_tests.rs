@@ -12,6 +12,7 @@ mod planned_calls {
         long: bool,
         write: bool,
         leg_intent: Option<crate::classify::Intent>,
+        check_intent_refusals: bool,
         expected_intents: std::collections::VecDeque<crate::classify::Intent>,
         continue_failure: bool,
         readiness: usize,
@@ -82,19 +83,29 @@ mod planned_calls {
             panic!("bad metadata reached provider result")
         }
     }
-    // Baseline adapter exposes the missing pre-registration seam without
-    // granting a venue any private journal or command-intent access.
     fn context_with_intent(cx: &mut Cx<'_, Context>, plan: &Plan, slot: &Slot,
         intent: crate::classify::Intent) -> Result<Context, Error> {
-        let context = cx.plan_leg_context(plan, slot)?;
-        cx.http_write_leg_intent(&context, intent)?;
-        Ok(context)
+        cx.plan_leg_context_with_intent(plan, slot, intent)
     }
     impl Plans {
         fn queue(&mut self, cx: &mut Cx<'_, Context>) {
             let plan = self.plan.as_ref().unwrap();
             let slots = cx.plan_slots(plan).unwrap();
             if let Some(slot) = slots.into_iter().next() {
+                if self.check_intent_refusals {
+                    let ids = cx.io.next_id;
+                    let actions = cx.io.actions.len();
+                    let storage = cx.io.request_contexts.plan_context_storage();
+                    let available = cx.plan_slots(plan).unwrap().len();
+                    for invalid in [crate::classify::Intent::Read, crate::classify::Intent::Amend] {
+                        assert_eq!(cx.plan_leg_context_with_intent(plan, &slot, invalid), Err(Error::Invalid));
+                        assert_eq!(cx.io.next_id, ids);
+                        assert_eq!(cx.io.actions.len(), actions);
+                        assert_eq!(cx.io.request_contexts.plan_context_storage(), storage);
+                        assert_eq!(cx.plan_slots(plan).unwrap().len(), available);
+                    }
+                }
+
                 let context = if let Some(intent) = self.leg_intent.take() {
                     let result = context_with_intent(cx, plan, &slot, intent);
                     assert!(result.is_ok(), "declared Plan intent must precede journal registration: {result:?}");
@@ -996,6 +1007,23 @@ mod planned_calls {
         }
         assert!(!e.signing_pending(RequestId(1)));
         assert_eq!(e.venue.readiness, 1);
+    }
+    #[test]
+    fn invalid_plan_intents_leave_declared_slots_and_context_credits_available() {
+        for write in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Plans {
+                write, check_intent_refusals: true, ..Default::default()
+            });
+            start(&mut e, 0.);
+            let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, first, 0.);
+            response(&mut e, first, 1., "ok");
+            let (second, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, second, 1.);
+            response(&mut e, second, 2., "ok");
+            assert_eq!(e.venue.responses, 2);
+            assert_eq!(e.venue.retired, 1);
+        }
     }
     #[test]
     fn plan_narrows_a_cancel_leg_before_registration_and_keeps_parent_place_intent() {

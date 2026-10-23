@@ -235,6 +235,12 @@ impl<P> Cx<'_, P> {
         } else {
             None
         };
+        let mut leg_intents = Vec::new();
+        if operation == Operation::Mutation {
+            leg_intents
+                .try_reserve_exact(count)
+                .map_err(|_| Error::Capacity)?;
+        }
         let mut body = Vec::new();
         body.try_reserve_exact(1).map_err(|_| Error::Capacity)?;
         self.io.request_contexts.prune(self.now);
@@ -320,6 +326,7 @@ impl<P> Cx<'_, P> {
         assert_eq!(owner.generation, generation);
         owner.phase = CommandPhase::Planned(State { body });
         owner.writes = writes;
+        owner.leg_intents = leg_intents;
         owner.last_deadline = deadline;
         self.io.request_contexts.reserved_contexts = future;
         self.io.timers.insert(timer, ());
@@ -351,6 +358,26 @@ impl<P> Cx<'_, P> {
 impl<P> Cx<'_, P> {
     /// Consume one declared slot using only resources reserved at plan admission.
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
+        self.make_plan_leg_context(plan, slot, None)
+    }
+
+    /// Narrow a write leg using the common engine intent rules before its first
+    /// journal registration. No method, endpoint or transport can infer intent.
+    pub fn plan_leg_context_with_intent(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        intent: crate::classify::Intent,
+    ) -> Result<Context, Error> {
+        self.make_plan_leg_context(plan, slot, Some(intent))
+    }
+
+    fn make_plan_leg_context(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        intent: Option<crate::classify::Intent>,
+    ) -> Result<Context, Error> {
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
         let index = body.schedule.ordinal(slot)?;
         let entry = &body.entries[index];
@@ -413,18 +440,27 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id, .. } = plan.owner() else {
             unreachable!()
         };
+        let owner = self.io.request_contexts.commands.get_mut(&id).unwrap();
+        let narrowed = match intent {
+            Some(intent) if owner.prepare_leg_intent(&context, intent)? => Some(intent),
+            _ => None,
+        };
         // Journal enrollment precedes headers, recipe preparation and all queue
-        // refusals. A selected retry can never disappear from prior-send proof.
+        // refusals. Narrowing is checked first, but committed only after the
+        // fallible registration succeeds; no callback can intervene.
         if context.operation() == Operation::Mutation {
-            self.io
-                .request_contexts
-                .commands
-                .get_mut(&id)
-                .unwrap()
+            owner
                 .writes
                 .as_mut()
                 .expect("admitted write journal")
                 .register(call.admission.attempt.request, context.leg())?;
+        }
+        if let Some(intent) = narrowed {
+            assert!(
+                owner.leg_intents.len() < owner.leg_intents.capacity(),
+                "reserved Plan intent backing"
+            );
+            owner.leg_intents.push((context.leg(), intent));
         }
         let body = self.io.request_contexts.plan_body_mut(plan).unwrap();
         body.schedule.start(slot).expect("available plan slot");

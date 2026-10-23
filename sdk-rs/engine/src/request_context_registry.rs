@@ -55,6 +55,45 @@ enum CommandPhase {
 }
 
 impl CommandOwner {
+    /// One policy for issued Contexts and prospective Plan legs. Callers hold
+    /// the exact live owner and commit synchronously, without a callback gap.
+    fn prepare_leg_intent(
+        &self,
+        context: &Context,
+        intent: crate::classify::Intent,
+    ) -> Result<bool, Error> {
+        use crate::classify::Intent;
+        if self
+            .leg_intents
+            .iter()
+            .any(|(leg, _)| *leg == context.leg())
+        {
+            return Err(Error::Duplicate);
+        }
+        if self
+            .writes
+            .as_ref()
+            .is_some_and(|writes| writes.latest(context.leg()).is_some())
+        {
+            return Err(Error::State);
+        }
+        if self.intent == Some(intent) && context.operation() == Operation::Mutation {
+            return Ok(false);
+        }
+        let allowed = matches!(
+            (self.intent, intent),
+            (Some(Intent::Amend), Intent::Place)
+                | (Some(Intent::Place), Intent::Cancel | Intent::Setting)
+        );
+        if !allowed || context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        if self.leg_intents.len() >= CAPACITY {
+            return Err(Error::Capacity);
+        }
+        Ok(true)
+    }
+
     fn context_root(&self) -> Option<&Context> {
         match &self.phase {
             CommandPhase::Context { root, .. } => Some(root),
@@ -1395,7 +1434,6 @@ impl<P> Cx<'_, P> {
         context: &Context,
         intent: crate::classify::Intent,
     ) -> Result<(), Error> {
-        use crate::classify::Intent;
         self.io.request_contexts.validate(context, self.now)?;
         let Owner::Command { id, generation } = context.owner() else {
             return Err(Error::Invalid);
@@ -1407,35 +1445,9 @@ impl<P> Cx<'_, P> {
             .get_mut(&id)
             .filter(|owner| owner.generation == generation)
             .ok_or(Error::Revoked)?;
-        if owner
-            .leg_intents
-            .iter()
-            .any(|(leg, _)| *leg == context.leg())
-        {
-            return Err(Error::Duplicate);
+        if owner.prepare_leg_intent(context, intent)? {
+            owner.leg_intents.push((context.leg(), intent));
         }
-        if owner
-            .writes
-            .as_ref()
-            .is_some_and(|writes| writes.latest(context.leg()).is_some())
-        {
-            return Err(Error::State);
-        }
-        if owner.intent == Some(intent) && context.operation() == Operation::Mutation {
-            return Ok(());
-        }
-        let allowed = matches!(
-            (owner.intent, intent),
-            (Some(Intent::Amend), Intent::Place)
-                | (Some(Intent::Place), Intent::Cancel | Intent::Setting)
-        );
-        if !allowed || context.operation() != Operation::Mutation {
-            return Err(Error::Invalid);
-        }
-        if owner.leg_intents.len() >= CAPACITY {
-            return Err(Error::Capacity);
-        }
-        owner.leg_intents.push((context.leg(), intent));
         Ok(())
     }
 
