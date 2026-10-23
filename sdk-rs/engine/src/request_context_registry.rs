@@ -462,6 +462,7 @@ impl ContextRegistry {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn commit(
         &mut self,
         owner: Owner,
