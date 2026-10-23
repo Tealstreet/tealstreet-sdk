@@ -259,3 +259,67 @@ Signing fingerprints and destinations:
 | `20861b679b7c10377687b03415921648e95232082ba70cf253fa5e92dd5cce5a` | `secret: read.secret.clone(),` | Opaque Options/provider-owned setup; remove old material site |
 | `9b258d4209b1982036d0bf8c004a7a1eb3eccabf81a295ecdc197d522623498d` | `secret: Some("private-secret".into()),` | Trusted test setup/oracle |
 | `0c34e33203af9f5eb6bf128257c8bdf5caaab04d5808e870fcb70cc22a59a7c6` | `let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;` | Trusted test setup/oracle |
+
+
+## Resumed full cutover: actual release metadata and frozen socket consumers
+
+Fresh branch `feat/rust-phemex-signer-cutover` retains original `78fb392c0ed`.
+Actual landing `89b6a91efc5` (including actual #1968 `87bf458ba903`) was plain-
+merged in `cfb257820cc`. Exact reviewed #1970 `04b0078dd29` was plain-merged
+in `c901b3b62f3`; its four engine source blobs have no local policy edits.
+The socket owner confirmed the API alone does not activate native Phemex. The
+overseer therefore explicitly authorized exact reviewed whole-adapter #1974
+`85fa7f5f939edf602c12c0df50488b1f76e165c7`, plain-merged in `d1915456576`.
+Our PR must land after actual #1970 and #1974. Only the cleared authentication
+recipe hunk changes the adapter; lifecycle/codec/reducers and accepted-snapshot
+custody remain its owner's bytes/logic. Current unsigned PublicTrades #1969 and
+its pre-429 delivery guard remain incoming-exact; ih35js has no additional claim.
+
+Actual #1968 exports immutable `SigningRelease::{receipt,time,raw_expiry_ms}`
+and `Venue::on_signing_release(SigningTarget, SigningRelease)`. REST/WS recipes
+always declare the exact rounded signed seconds multiplied by1000 as receipt
+expiry; provider echo and recipe application reject missing/wrong records before
+release. The no-Cx observation hook updates ONLY Pending::Trade's raw expiry
+from `raw_expiry_ms`, never from protocol UTC or capped HttpRelease. Request
+metadata begins absent and is set only at the exact final release; retries or
+repreparation never publish an intermediate receipt. Unknown-write native repair
+keeps the existing5s skew after that actual uncapped raw bound. Missing metadata
+cannot authorize early repair; the recipe/engine rejects it before outbound.
+The callback itself grants no refusal/send/repair authority.
+
+Options become testnet/public mode plus opaque primary/secondary Identity only.
+Registry gets the approved Phemex-only provider arm/feature edge and one separate
+construction dispatchSigning row, keeping hosted/delegated admission disabled.
+No crypto feature change. All legacy tests move raw input into trusted test
+setup; fixed raw-signing oracles live under tests/support rather than production.
+No old secret holder or local-signing fallback is retained. Existing financial,
+query, header, stream, routing and native optional-auth assertions stay intact.
+Fixture changes in #1974 files are trusted-setup adapters only; account_open's
+replacement is `send_signed` on the existing accepted epoch. The supervisor owns
+all auth acceptance, queued one-shots and AOP1202 then ping1201 ordering.
+
+Additional original controls use only the landed release API on unchanged
+stacked native production: delayed/calibrated write release metadata, uncapped
+expiry beyond the20s lifecycle, clock-revision reprepare, and no observation on
+refusal. Exact provider refusal must survive into initial unsent-write failure,
+remove that optimistic order or restore Canceling only if the native revision
+still matches. A later refused leg retains accepted native IDs and cannot tell
+the whole job NotSent. Keep existing native aggregation semantics, no HTTP status
+classifier/retry rewrite; review the exact signer-only adaptation with4yjlw0.
+Phemex has no separate protection-rollback error accumulator to invent.
+
+Original WS tests' former immediate opening ping expectation is deliberately
+superseded by the overseer's accepted-login ruling: before provider completion,
+no auth/private send; after completion, auth999 only; after accepted ACK,
+AOP1202 followed by retained ping1201. Preserve the original assertions in git
+history and strengthen the active controls to this explicit approved contract;
+never describe that contract update as a previously native behavior.
+
+Before source, commit these refreshed gates and native release/aggregation REDs,
+then independent source/caller/full-map and HMAC-owner review. The exact funnel
+staging fingerprint set and before/after counts are frozen from actual source
+with the approved checker row, not guessed. Any changed native trading issuance
+fingerprint is the same physical site and needs an explicit owner-approved exact
+re-expression map. The 14 old material sites are removed; new provider descriptor
+fingerprints are separately reviewed, not raw-crypto exceptions. Recompute both
+inventories against this actual+authorized stack, preserving all foreign rows.
