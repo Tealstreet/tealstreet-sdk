@@ -692,6 +692,96 @@ CI/current-head raw proof, final data reviews and separate guard/merge remain
 required. This checkpoint makes no product-RED,
 private parity or all-venue fan-out completion claim.
 
+
+## AsterDEX, GRVT and TxFlow reporter fan-out (plan, 2026-10-23)
+
+Start from actual #1782 `6a7193e86688275e8888e9acec2d4bed3be2eff7`.
+Architecture gate: **YES**, another consumer fan-out of cross-cutting reporting
+policy. Reuse existing engine RowReports bounded Once, forget, clear and
+rearm_namespace; add no engine API or per-venue policy. Scope: the three existing
+account.rs files, their account tests and existing ROW_ADMISSION/AUDITS/QUALITY/
+CALLERS docs. Preserve all messages, severities, identity strings, empty keys,
+4096 clear-before-lookup and native reporting/re-arm sites. No financial reducers,
+row admission/freshness, request/signing/session/socket/history changes.
+
+1. AsterDEX: convert the position reporter field plus log_skip/reject_position
+   memory parameter types to RowReports. Keep early per-ID forgetting during
+   row mapping, before full-response validity/version admission, and the whole
+   clear only for current valid clean position reads. Keep symbol/hedged-leg/
+   anonymous labels and zero-size paths exactly native; open-order diagnostics
+   that do not use persistent memory are outside this slice.
+2. GRVT: convert its shared position/order/coin memory, thin log_skip/rearm_skips
+   adapters and Summary::currencies memory parameter. Keep position labels based
+   on symbol, native allows_absence filters for position/order re-arm, and the
+   distinct unfiltered totals.keys() coin re-arm iterator (including accepted
+   plus rejected duplicate currency). Preserve namespace isolation and currency
+   retention on unreadable lists. Use native valid outer JSON in controls; do
+   not claim a truncated inner JSON case reaches Summary::currencies without
+   proving the actual parser path. No summary/session admission cleanup.
+3. TxFlow: convert its position memory and thin adapter only. Keep literal
+   asset-number, composite joined-leg and anonymous keys. A mapped Some(position)
+   forgets exactly its p.id before the full response fence; a zero-quantity None
+   does not gain a per-key forget. Do not split composite keys or change discovery
+   holds. Whole clear remains at the existing accepted clean state publication.
+
+Before production edits add original-GREEN native compatibility controls for
+same-key Once suppression/recovery, early mapped-row forget before stale/failed
+read admission, unrelated anonymous/composite memory retention, GRVT namespaces
+and accepted/rejected duplicate coins versus filtered position/order IDs,
+TxFlow unresolved/zero-size paths, and clean re-arm. Seal original production/
+final test/log hashes before migration; these are no product defect RED claims.
+
+Verify focused engine/AsterDEX/GRVT/TxFlow/Binance native tests with
+CARGO_BUILD_JOBS=4, strict all-target Clippy, scoped fmt, bans and root checks.
+Independent correctness/adversarial plan, test and source/caller reviews; fresh
+full green CI and complete current-head 32-suite raw/ordered-gate proof, then
+fresh separate porcelain guard and separate merge in normal queue order. No
+local release WASM/replay/timing, threshold/profile/budget/manifest or live-capture
+changes. Report actual pins to dependent lanes; later landings use normal shared
+input integration rules. Do not claim all-venue reporter completion.
+
+CALLERS sections describe the landed behavior only, with no merge/proof status.
+This slice also removes the stale validation/status tail from its own existing
+#1782 CALLERS paragraph, preserving its behavior text; #1776 cleanup remains with
+its owner. Put validation and merge gates in the PR body, not the caller contract.
+Ownership coordination with signing/socket and history lanes precedes source
+implementation; no authority, recipe or request-builder edit is included.
+
+Plan audit clarification: GRVT's current-revision REST re-arm still precedes
+per-row timestamp/order rejection; a stale whole-response revision does not
+re-arm. TxFlow per-ID early forgetting belongs only to REST row mapping, not
+its WS mapping. Zero-size rows must be tested alongside another rejection so
+a whole clean-response clear cannot mask the absence of per-key forgetting.
+
+
+### AsterDEX/GRVT/TxFlow native implementation checkpoint
+
+The three account reporters now use existing bounded RowReports::default Once.
+Thin log_skip/rearm_skips adapters preserve native call sites and iterators;
+AsterDEX and TxFlow replace exactly their early per-ID remove with forget.
+All whole-response clear sites, messages, severities and identity labels remain.
+GRVT keeps its unfiltered duplicate-coin rearm versus filtered position/order
+identities, and rearm still precedes per-row timestamp rejection in an admitted
+current-revision response. TxFlow composite labels are not split, and WS mapping
+does not gain REST-only early forgetting. No engine API or financial/admission
+change is included.
+
+Nine new native compatibility controls pass within125 original account tests
+(54 AsterDEX,44 GRVT,27 TxFlow) on unchanged actual1782 production before
+migration. Source/test/five-log receipt SHA256
+`0fa028da226ab076553c0d607657ba113482547141490dd1550817ac38fb8602`.
+Earlier helper failures and a test assumption that anonymous rejection permits
+partial rearm were corrected in tests only; the final GRVT timestamp control
+uses a named unrelated rejection so the accepted symbol can rearm. No product
+RED claim. The owner-priority WOO build restore owns the separate stale1782
+CALLERS status-tail cleanup; this slice adds behavior-only caller text.
+
+Migrated focused engine/AsterDEX/GRVT/TxFlow/Binance suites pass1294 native tests
+across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
+and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
+are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
+required; no all-venue reporter-completion claim.
+
 ## Next bounded Once consumers: MEXC, Phemex, Polymarket (2026-10-23)
 
 Start from actual #1780 `02340e17712780fa526f4e07a029cd4e20fb00f5`.

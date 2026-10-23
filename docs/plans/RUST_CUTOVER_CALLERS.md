@@ -4323,6 +4323,19 @@ without constructing a snapshot from the failed engine. Recreate the engine to
 resume work; neither adapter restarts it automatically.
 
 
+## AsterDEX, GRVT and TxFlow row-reporting adoption (2026-10-23)
+
+AsterDEX position, GRVT coin/order/position and TxFlow position diagnostics use
+the existing bounded engine Once reporter. Native notice text, severity and
+repeat/re-arm ordering remain. AsterDEX and TxFlow keep early REST per-ID
+forgetting before full snapshot admission, and zero-size rows do not gain a
+per-key rearm. TxFlow retains exact composite/asset/anonymous labels and its
+separate WS behavior. GRVT retains namespace isolation, unfiltered duplicate
+coin rearm, filtered order/position rearm and rearming before per-row timestamp
+rejection on a current response. Callers retain the same account data, command
+outcomes, health policy, transports, signing and snapshot/financial authority.
+
+
 ## MEXC, Phemex and Polymarket bounded row reporting
 
 MEXC, Phemex and Polymarket use the engine's bounded Once diagnostic memory
