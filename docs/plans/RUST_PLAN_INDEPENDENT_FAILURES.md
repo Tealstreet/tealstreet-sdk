@@ -103,3 +103,10 @@ when native evidence exceeded its ID budget. Original assertion RED 6a6efe66725
 reproduces it. Callback error retrieval now retains the bounded IDs and overflow
 marker independently of settlement; finish_plan_failed_call still refuses State,
 so the wrapper auto-seals once and never submits a sibling after overflow.
+
+First-consumer hardening adds an unowned-delivery regression. Assertion RED
+24dcc857e2e uses a real released Plan but no callback delivery: the prior wrapper
+lent the callback and left the Plan unsealed. Independent routing now records
+owned failure before lending the callback; refusal goes directly to fail_plan.
+The common recorded-failure tail is shared with existing typed failure paths,
+and still checks the original delivery after callback settlement.
