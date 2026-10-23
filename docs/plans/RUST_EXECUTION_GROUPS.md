@@ -521,16 +521,17 @@ its code table, strict ACK DTOs (`trading/acknowledgement.rs`) and classified
 8. **Store publication (F11).** Lookup rows publish only after the
    execution's read-delivery gate. Order-lock `manage` runs for every observer
    at join, and `managed_resolved` runs from the Plan journal seal.
-9. **Legacy text resend (F12).** `resendable` / `resend` in `lib.rs`, kept live
-   for Hyro by the Plan D5 carve-out, are replaced by the Plan core's typed
-   10004 resend grant. `Rest.resent` is removed with the legacy branch.
+9. **Legacy text resend (F12).** The Hyro arms of `resendable` / `resend` in
+   `lib.rs` (kept live by the Plan D5 carve-out) are replaced by the Plan
+   core's typed 10004 resend grant. The non-trading signed-read arms stay with
+   their own owners until those reads adopt managed retry.
 
 ### Prerequisites and coordination
 
-- A Bybit reconciliation codec (`capture_http_reconciliation`), which managed
-  mutations need before they can be released. Confirm with dazzy3 whether
-  ordinary Bybit adoption lands it first; if not, Hyro supplies only its own
-  narrow codec through the same Venue hook.
+- Hard prerequisite: the Bybit reconciliation codec
+  (`capture_http_reconciliation` / `reconcile_http`). Managed mutations cannot
+  be released without it, and dazzy3's ordinary adoption lands it with a Hyro
+  arm that refuses until the four hooks below exist.
 - Agreed with claude-dazzy3 (ordinary Bybit Plan, `feat/rust-bybit-plan-adoption`).
   The split is the first branch of `trading.rs` `on_trade_command`. Their
   `lib.rs` Venue arms match `Pending { then: Then::Trade(Request { call:
@@ -561,3 +562,119 @@ Architecture gate: No, conditionally. Hyro reuses the Plan core's code table,
 strict ACKs and resend grants, plus the shared execution groups. The intent
 ledger and recovery facts are new engine mechanisms, generic and not
 Hyro-local. Re-run the gate on the implementation PR.
+
+## Plan/execution composition contract (draft by claude-fe7lgm for uufub4 review)
+
+Design only; no composition source until uufub4 approves. It targets #1873's
+reviewed head `0f06f289fe4` and landed #1854. The API names below are
+proposals. The private registry hooks stay private.
+
+### One admission transaction
+
+`Cx::begin_planned_execution(preflight, steps, plan_policy, window, key)`
+runs in the founder's genuine entry callback, after the founder's
+`begin_preflight` and reads. It is a single engine transaction that either
+commits all of the following or none of them:
+- the Plan, with whole-plan credit-aware reservation, exactly as `admit_plan`;
+- an `Owner::Execution` physical root whose deadline is the Plan-minted
+  deadline;
+- the founder as the initial observer, keeping the founder's command
+  generation;
+- the execution's journal, which is the Plan's journal.
+
+It returns `(PlanHandle, ExecutionHandle)`. Refusal leaves no Plan, root,
+observer, reservation credit or action. The founder's entry is spent by this
+one transaction; the founder never admits a Plan and begins an execution
+separately, and there is no Plan-to-Context cast.
+
+### Ownership, root, timer, terminal, capacity
+
+- **Ownership:** one physical owner (`Owner::Execution`) holds every Plan slot
+  and the one journal. Observers hold only their own command generations.
+  Followers join with `join_execution` from their own genuine entry callback.
+- **Root:** the physical root deadline is the Plan-minted whole-plan deadline
+  (declared steps, retries and fallbacks; no fixed product cap). The founder's
+  root does not cap it; the founder is just an observer. Each observer's
+  effective deadline is `min(own root, physical root)`. Nothing renews the
+  physical root: not a join, not a resume, not progress. Hyro declares per lot,
+  up front: create, the two `orderLinkId` reads, one reconciliation resend, its
+  two reads, and the position-stop read.
+- **Timer:** the existing single execution timer covers observer deadlines
+  earlier than the root, and the root while no slot is in flight. Plan slot
+  timers stay Plan-owned. The event-entry sweep runs before any slot
+  delivery.
+- **Terminal:** the Plan seal (`done_plan` / `fail_plan` semantics, journal
+  projection) seals the execution once. Each surviving observer is finished
+  through `finish_command_as(observer)` with that one projection. A
+  pre-terminal detach or timeout gets a non-consuming projection and never
+  retires shared slots while a peer survives. With no observer left, unsent
+  slots are revoked as a typed pre-send denial; sent slots keep custody.
+- **Capacity:** the execution root and every slot leg are inside the Plan's
+  reserved credit. Observers count against the 256 command owners, at most
+  64 per execution. A refused join or begin changes nothing.
+
+### Public surface vs private
+
+Public: begin, `join_execution`, `detach_execution_observer`; Plan-slot
+issuance, delivery validation and settlement through the existing
+`plan_leg_context`, `validate_plan_delivery`, `finish_plan_call`,
+`plan_retry_context` and `plan_resend_context` with the Plan handle; observer
+projection read-only. Private: credit commit, journal import/projection,
+custody and root checks, the observer seal path.
+
+### Amendments to #1873 this needs (each requires uufub4 agreement)
+
+1. **Proof-gated reconciliation continuation.** Today an unproven Mutation
+   response (408/5xx/lost) fails the call, and only *independent* steps may
+   continue. Hyro needs a declared dependent continuation for that one slot:
+   the two `orderLinkId` reads, then either an accepted settlement or one
+   proof-gated resend, all inside the declared budget. If this is refused, a
+   single call ends `Unknown` and recovery happens only on resume, and the
+   Hyro acceptance cases are rewritten to match.
+2. **Reconciliation resend grant.** A new grant kind, minted by the engine
+   only in the exact delivery of a complete two-axis `orderLinkId` read over a
+   `Failed` (unproven) attempt, under these conditions:
+   - the read was released after the attempt was terminal and after its
+     signed timestamp + recv_window + skew;
+   - the private session and snapshot boundary were unchanged.
+   It is distinct from code-table `ResendGrant`s; it cannot be selected
+   freely, and the journal still consumes one resend. Assumption to verify:
+   the HyroTrader proxy forwards the signed timestamp and Bybit enforces
+   recv_window. Skew comes from the shared protocol clock.
+3. **Imported journal facts.** A resumed execution's Plan journal starts from
+   the intent ledger's facts (uncertainty, effects, accepted IDs, budgets,
+   dedup) and never extends any root.
+
+### Intent ledger (single source of truth)
+
+The engine-owned ledger is keyed by credential subject + variant + canonical
+orders, per leg.
+- **Single writer:** a Plan journal imports ledger facts at begin and writes
+  its recovery facts back once, at seal.
+- **Attempt count:** the ledger's per-leg count is the only authority. Each
+  Plan slot's attempt budget is capped at the ledger's remaining count.
+- **Credential change:** intents are frozen as non-resumable but kept until
+  reconciled or expired.
+- **Resolution without a caller retry:** private order observations
+  (`observe_hyro_order`, WS) record reconciled facts into the ledger.
+- **Capacity:** a count cap, plus a lifetime after which an unresolved leg is
+  kept refused, not forgotten. New intents beyond the cap are refused with
+  typed `Capacity`.
+
+### Two-venue acceptance
+
+- **Hyro (writes):** RED 1 and RED 2 turn green, and the existing Hyro controls
+  are preserved (shared dispatch, lost-ACK recovery, two-absence bound, cyclic
+  lookup Unknown, definitive rejection allows a new identity, receipts).
+- **Metadata (reads, cxxyqr):** a BingX two-leg joined metadata read as a
+  Plan-backed execution. Leverage then margin are Plan slots, observers join
+  until terminal, and the second leg inherits the Plan bound.
+
+Engine controls for both:
+- the transaction is atomic under every refusal;
+- followers keep their own generations;
+- a founder's expiry or detach leaves the shared Plan running for peers;
+- the root never renews;
+- the journal is sealed once;
+- a stale delivery cannot complete either venue.
+

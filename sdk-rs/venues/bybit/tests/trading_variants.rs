@@ -2013,7 +2013,9 @@ fn hyro_resumed_call_cannot_exceed_two_same_id_creates() {
     }
     assert!(h.result(1).unwrap().is_err());
     place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    let mut reads = 0;
     while h.has_request("/v5/order/realtime") || h.has_request("/v5/order/history") {
+        reads += 1;
         let path = if h.has_request("/v5/order/realtime") {
             "/v5/order/realtime"
         } else {
@@ -2032,7 +2034,9 @@ fn hyro_resumed_call_cannot_exceed_two_same_id_creates() {
         h.respond("/v5/order/history", 200, EMPTY);
     }
     assert_eq!(sends, 2, "same orderLinkId physically sent more than twice");
-    assert!(h.result(2).unwrap().is_err());
+    assert!(reads > 0, "the resumed call must reconcile before answering");
+    let error = h.result(2).unwrap().as_ref().unwrap_err();
+    assert!(error.contains(id.as_deref().unwrap()), "identity retained: {error}");
     assert!(h.unknown.contains(&2));
 }
 
