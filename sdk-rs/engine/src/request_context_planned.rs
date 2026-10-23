@@ -98,6 +98,9 @@ impl State {
         }
         false
     }
+    pub(super) fn handle(&self) -> Plan {
+        self.body[0].handle.clone()
+    }
     pub(super) fn timer(&self) -> TimerId {
         self.body[0].timer
     }
@@ -128,15 +131,12 @@ impl ContextRegistry {
         now: f64,
         delivery: Option<&Delivery>,
         error: Option<VenueError>,
-    ) -> Result<(CommandId, Seal), Error> {
+    ) -> Result<(Owner, Seal), Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
         }
         let body = self.plan_body(plan)?;
-        let Owner::Command { id, .. } = plan.owner() else {
-            unreachable!()
-        };
-        let owner = &self.commands[&id];
+        let owner = self.owner_entry(plan.owner()).expect("live Plan owner");
         let admitted = delivery.is_none() && owner.deliveries == 0
             || delivery.is_some_and(|delivery| {
                 body.handoff.as_ref() == Some(delivery)
@@ -151,7 +151,7 @@ impl ContextRegistry {
         if !admitted {
             return Err(Error::Revoked);
         }
-        let owner = self.commands.get_mut(&id).unwrap();
+        let owner = self.owner_entry_mut(plan.owner()).unwrap();
         let seal = if let Some(writes) = owner.writes.as_mut() {
             if error.is_none() && writes.succeed().is_ok() {
                 Seal::Success
@@ -164,21 +164,18 @@ impl ContextRegistry {
         } else {
             Seal::Legacy(error)
         };
-        Ok((id, seal))
+        Ok((plan.owner(), seal))
     }
 
     fn plan_body(&self, handle: &Plan) -> Result<&Body, Error> {
         if !handle.issued_by(&self.issuer) {
             return Err(Error::Revoked);
         }
-        let Owner::Command { id, generation } = handle.owner() else {
+        if !matches!(handle.owner(), Owner::Command { .. }) && !self.physical_owner(handle.owner())
+        {
             return Err(Error::Invalid);
-        };
-        let owner = self
-            .commands
-            .get(&id)
-            .filter(|owner| owner.generation == generation)
-            .ok_or(Error::Revoked)?;
+        }
+        let owner = self.owner_entry(handle.owner()).ok_or(Error::Revoked)?;
         let CommandPhase::Planned(state) = &owner.phase else {
             return Err(Error::Revoked);
         };
@@ -191,10 +188,8 @@ impl ContextRegistry {
 
     fn plan_body_mut(&mut self, handle: &Plan) -> Result<&mut Body, Error> {
         self.plan_body(handle)?;
-        let Owner::Command { id, .. } = handle.owner() else {
-            unreachable!()
-        };
-        let CommandPhase::Planned(state) = &mut self.commands.get_mut(&id).unwrap().phase else {
+        let CommandPhase::Planned(state) = &mut self.owner_entry_mut(handle.owner()).unwrap().phase
+        else {
             unreachable!()
         };
         Ok(&mut state.body[0])
@@ -204,14 +199,17 @@ impl ContextRegistry {
         if !context.issued_by(&self.issuer) {
             return None;
         }
-        let Owner::Command { id, generation } = context.owner() else {
+        if !matches!(context.owner(), Owner::Command { .. })
+            && !self.physical_owner(context.owner())
+        {
             return None;
-        };
-        let owner = self.commands.get(&id)?;
+        }
+        let owner = self.owner_entry(context.owner())?;
         let CommandPhase::Planned(state) = &owner.phase else {
             return None;
         };
-        (owner.generation == generation && state.context_current(context))
+        state
+            .context_current(context)
             .then(|| state.body[0].handle.clone())
     }
 
@@ -236,6 +234,22 @@ impl<P> Cx<'_, P> {
         steps: &[StepBound<'_>],
         policy: PlanPolicy,
     ) -> Result<Plan, Error> {
+        self.admit_plan_owned(preflight, steps, policy, false)
+            .map(|(plan, _)| plan)
+    }
+
+    /// `physical` moves the admitted Plan, its slots and journal from the
+    /// founder to a new execution-owned physical owner, and turns the founder
+    /// into an entry-owned observer root bounded by the Plan root. Returns
+    /// that execution identity and founder root. One transaction either way.
+    pub(in super::super) fn admit_plan_owned(
+        &mut self,
+        preflight: &Preflight,
+        steps: &[StepBound<'_>],
+        policy: PlanPolicy,
+        physical: bool,
+    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
+        let extra = if physical { 2 } else { 0 };
         let (intent, old_read) = self.preflight_plan_origin(preflight)?;
         let (operation, credential) = match intent.purpose {
             PreflightPurpose::ReadOnly => (Operation::Read, intent.read_credential),
@@ -319,6 +333,7 @@ impl<P> Cx<'_, P> {
             .len()
             .checked_sub(old_slot)
             .and_then(|len| len.checked_add(future))
+            .and_then(|len| len.checked_add(extra))
             .is_none_or(|total| total > CAPACITY)
         {
             return Err(Error::Capacity);
@@ -326,7 +341,7 @@ impl<P> Cx<'_, P> {
         self.io
             .request_contexts
             .contexts
-            .try_reserve(future)
+            .try_reserve(future + extra)
             .map_err(|_| Error::Capacity)?;
         self.io.timers.try_reserve(1).map_err(|_| Error::Capacity)?;
         self.io
@@ -334,7 +349,7 @@ impl<P> Cx<'_, P> {
             .plan_index
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
-        let io_count = 1 + count as u64 + 3 * attempts as u64;
+        let io_count = 1 + count as u64 + 3 * attempts as u64 + extra as u64;
         let signed = policy.credential.is_some();
         if !self.io.next_id.available(io_count)
             || (signed && !self.io.signing.available_ids(attempts as u64))
@@ -361,7 +376,33 @@ impl<P> Cx<'_, P> {
                 .as_mut()
                 .map(|ids| take(ids, u64::from(entry.terms.attempts)));
         }
-        let handle = Plan::new(preflight, deadline);
+        // The execution identity and the founder's observer root leg.
+        let moved = physical.then(|| (take(&mut ids, 1).start, take(&mut ids, 1).start));
+        let handle = match moved {
+            Some((identity, _)) => Plan::with_owner(
+                preflight,
+                Owner::Execution {
+                    generation: identity,
+                },
+                deadline,
+            ),
+            None => Plan::new(preflight, deadline),
+        };
+        let founder_root = moved.map(|(_, leg)| {
+            let mut root = Context::new(
+                preflight.owner(),
+                leg,
+                operation,
+                policy.credential.clone(),
+                self.now,
+                deadline,
+                policy.pacing,
+            )
+            .and_then(|root| root.with_retry(policy.retry))
+            .expect("validated with the Plan root above");
+            root.bind_issuer(&self.io.request_contexts.issuer);
+            root
+        });
         body.push(Body {
             handle: handle.clone(),
             policy,
@@ -378,22 +419,47 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id, generation } = preflight.owner() else {
             unreachable!()
         };
-        let owner = self
-            .io
-            .request_contexts
-            .commands
-            .get_mut(&id)
-            .expect("validated preflight");
+        let registry = &mut self.io.request_contexts;
+        let owner = registry.commands.get_mut(&id).expect("validated preflight");
         assert_eq!(owner.generation, generation);
-        owner.phase = CommandPhase::Planned(State { body });
-        owner.writes = writes;
-        owner.leg_intents = leg_intents;
-        owner.last_deadline = deadline;
-        self.io.request_contexts.reserved_contexts = future;
-        self.io.request_contexts.plan_index.push(id);
+        let execution = match (moved, founder_root) {
+            (Some((identity, _)), Some(root)) => {
+                let physical = CommandOwner {
+                    generation: identity,
+                    phase: CommandPhase::Planned(State { body }),
+                    last_deadline: deadline,
+                    writes,
+                    mutation_declared: owner.mutation_declared,
+                    pending: 0,
+                    deliveries: 0,
+                    intent: owner.intent,
+                    leg_intents,
+                };
+                // The founder keeps its own pending/delivery accounting and
+                // becomes an observer: it holds no journal or send right.
+                owner.phase = CommandPhase::Context {
+                    root: root.clone(),
+                    entry_owned: true,
+                };
+                owner.last_deadline = deadline;
+                registry.contexts.insert(root.leg(), root.clone());
+                registry.physical.insert(identity, physical);
+                registry.plan_index.push(handle.owner());
+                Some((identity, root))
+            }
+            _ => {
+                owner.phase = CommandPhase::Planned(State { body });
+                owner.writes = writes;
+                owner.leg_intents = leg_intents;
+                owner.last_deadline = deadline;
+                registry.plan_index.push(preflight.owner());
+                None
+            }
+        };
+        registry.reserved_contexts = future;
         self.io.timers.insert(timer, ());
         self.rearm_plan(&handle);
-        Ok(handle)
+        Ok((handle, execution))
     }
 
     /// Structural availability only; issuing a slot requires its exact Plan,
@@ -499,10 +565,11 @@ impl<P> Cx<'_, P> {
             stage: Stage::Ready,
         };
         call.select(self.now, self.io.http_delivery.clone())?;
-        let Owner::Command { id, .. } = plan.owner() else {
-            unreachable!()
-        };
-        let owner = self.io.request_contexts.commands.get_mut(&id).unwrap();
+        let owner = self
+            .io
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .unwrap();
         let narrowed = match intent {
             Some(intent) if owner.prepare_leg_intent(&context, intent)? => Some(intent),
             _ => None,
@@ -581,10 +648,10 @@ impl<P> Cx<'_, P> {
             .filter(|call| call.context == *context)
             .ok_or(Error::Revoked)?;
         if context.operation() == Operation::Mutation {
-            let Owner::Command { id, .. } = plan.owner() else {
-                unreachable!()
-            };
-            self.io.request_contexts.commands[&id]
+            self.io
+                .request_contexts
+                .owner_entry(plan.owner())
+                .unwrap()
                 .writes
                 .as_ref()
                 .ok_or(Error::State)?
@@ -654,16 +721,12 @@ impl<P> Cx<'_, P> {
         }
         call.window.physical_deadline(self.now)?;
         let next = RequestId(call.ids.start);
-        let Owner::Command { id, .. } = plan.owner() else {
-            unreachable!()
-        };
         let previous = delivery.attempt.request;
         let predecessor = delivery.clone();
         if context.operation() == Operation::Mutation {
             self.io
                 .request_contexts
-                .commands
-                .get_mut(&id)
+                .owner_entry_mut(plan.owner())
                 .unwrap()
                 .writes
                 .as_mut()
@@ -740,13 +803,31 @@ impl<P> Cx<'_, P> {
         result: Option<String>,
         error: Option<VenueError>,
     ) -> Result<(), Error> {
-        let (id, seal) = self.io.request_contexts.plan_seal(
+        // Observers already past their own bound expire against the live
+        // journal, before this seal consumes it (host callbacks seal first).
+        if matches!(plan.owner(), Owner::Execution { .. }) {
+            self.sweep_executions();
+        }
+        let (owner, seal) = self.io.request_contexts.plan_seal(
             plan,
             self.now,
             self.io.http_delivery.as_ref(),
             error,
         )?;
-        self.finish_sealed_command(id, result, seal)
+        let (projection, reports) = match &seal {
+            Seal::Success | Seal::Legacy(None) => (Ok(result.clone().unwrap_or_default()), &[][..]),
+            Seal::Failure(error, reports) => (Err(error.clone()), reports.as_slice()),
+            Seal::Legacy(Some(error)) => (Err(error.clone()), &[][..]),
+            Seal::Stale => return Err(Error::Revoked),
+        };
+        let reports = reports.to_vec();
+        match owner {
+            Owner::Command { id, .. } => self.finish_sealed_command(id, result, seal)?,
+            _ => self.finish_physical_plan(owner),
+        }
+        // The one execution hook: every observer gets this exact projection.
+        self.seal_planned_execution(plan, projection, &reports);
+        Ok(())
     }
 
     fn rearm_plan(&mut self, plan: &Plan) {
@@ -789,6 +870,16 @@ impl Body {
 impl ContextRegistry {
     pub(in super::super) fn plan_timer(&self, command: CommandId) -> Option<TimerId> {
         let CommandPhase::Planned(state) = &self.commands.get(&command)?.phase else {
+            return None;
+        };
+        Some(state.timer())
+    }
+
+    pub(in super::super) fn physical_plan_timer(&self, owner: Owner) -> Option<TimerId> {
+        if !self.physical_owner(owner) {
+            return None;
+        }
+        let CommandPhase::Planned(state) = &self.owner_entry(owner)?.phase else {
             return None;
         };
         Some(state.timer())
@@ -852,10 +943,10 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         if context.operation() == Operation::Mutation {
-            let Owner::Command { id, .. } = plan.owner() else {
-                unreachable!()
-            };
-            self.io.request_contexts.commands[&id]
+            self.io
+                .request_contexts
+                .owner_entry(plan.owner())
+                .unwrap()
                 .writes
                 .as_ref()
                 .ok_or(Error::State)?
@@ -880,10 +971,12 @@ impl ContextRegistry {
     }
 
     pub(in super::super) fn end_plan_admission(&mut self) {
-        for command in &self.plan_index {
-            let owner = self.commands.get_mut(command).expect("indexed Plan owner");
+        for index in 0..self.plan_index.len() {
             #[cfg(any(test, feature = "test-support"))]
             self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
+            let owner = self
+                .owner_entry_mut(self.plan_index[index])
+                .expect("indexed Plan owner");
             if let CommandPhase::Planned(state) = &mut owner.phase {
                 state.body[0].initial_custody = false;
             }
@@ -895,10 +988,12 @@ impl ContextRegistry {
     }
 
     pub(in super::super) fn next_plan_ready(&mut self, now: f64) -> Option<Plan> {
-        for command in &self.plan_index {
-            let owner = self.commands.get_mut(command).expect("indexed Plan owner");
+        for index in 0..self.plan_index.len() {
             #[cfg(any(test, feature = "test-support"))]
             self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
+            let owner = self
+                .owner_entry_mut(self.plan_index[index])
+                .expect("indexed Plan owner");
             let CommandPhase::Planned(state) = &mut owner.phase else {
                 continue;
             };
@@ -924,8 +1019,8 @@ impl ContextRegistry {
     }
 
     pub(in super::super) fn plan_for_timer(&self, timer: TimerId) -> Option<Plan> {
-        self.plan_index.iter().find_map(|command| {
-            let owner = self.commands.get(command).expect("indexed Plan owner");
+        self.plan_index.iter().find_map(|plan_owner| {
+            let owner = self.owner_entry(*plan_owner).expect("indexed Plan owner");
             #[cfg(any(test, feature = "test-support"))]
             self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             let CommandPhase::Planned(state) = &owner.phase else {
@@ -1018,13 +1113,9 @@ impl<P> Cx<'_, P> {
             children.push(body.entries[body.schedule.ordinal(slot)?].logical);
         }
         let previous = call.admission.attempt.request;
-        let Owner::Command { id, .. } = plan.owner() else {
-            unreachable!()
-        };
         self.io
             .request_contexts
-            .commands
-            .get_mut(&id)
+            .owner_entry_mut(plan.owner())
             .unwrap()
             .writes
             .as_mut()

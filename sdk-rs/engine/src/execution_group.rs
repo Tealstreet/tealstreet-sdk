@@ -40,6 +40,13 @@ pub(crate) enum Root {
     Background {
         deadline: f64,
     },
+    /// An admitted Plan's physical owner: its root bounds the group and only
+    /// its seal completes it. The founder is the first ordinary observer.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    Planned {
+        deadline: f64,
+        founder: Member,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +73,12 @@ pub(crate) struct Sealed {
     pub generation: u64,
     pub result: Result<String, VenueError>,
     pub journal: bool,
+    /// Carries the Plan journal's own projection; the observer has no journal.
+    pub projected: bool,
+    /// A planned observer sealed before its Plan: the registry substitutes
+    /// the physical journal's non-consuming projection for its outcome.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    pub early: Option<Execution>,
 }
 
 #[derive(Clone)]
@@ -83,6 +96,7 @@ struct Group {
     window: Window,
     deadline: f64,
     background: bool,
+    planned: bool,
     legs: usize,
     released: bool,
     terminal: bool,
@@ -127,9 +141,11 @@ impl Group {
     /// shared journal unless this seal proves nothing was or will be sent.
     fn seal(&self, entry: Entry, result: Result<String, VenueError>, settled: bool) -> Sealed {
         let journal = self.operation == Operation::Mutation;
-        let unsent = settled && !self.released && self.legs == 0;
+        // A planned group never sees its Plan's releases; only the Plan seal
+        // (`complete`) knows the write outcome.
+        let keep = !self.planned && settled && !self.released && self.legs == 0;
         let result = result.map_err(|mut error| {
-            if journal && !unsent {
+            if journal && !keep {
                 error.outcome = None;
             }
             error
@@ -139,12 +155,14 @@ impl Group {
             generation: entry.generation,
             result,
             journal,
+            projected: self.planned,
+            early: self.planned.then_some(entry.token),
         }
     }
 
     fn timeout(&self) -> VenueError {
         let error = VenueError::new("Execution deadline expired").kind(ErrorKind::Timeout);
-        if self.operation == Operation::Mutation && !self.released {
+        if self.operation == Operation::Mutation && !self.released && !self.planned {
             error.outcome(Outcome::NotSent)
         } else {
             error
@@ -210,6 +228,7 @@ impl Groups {
             return Err(Error::Invalid);
         }
         let bound = now + f64::from(timeout_ms);
+        let planned = matches!(root, Root::Planned { .. });
         let (deadline, founder, background) = match root {
             Root::Command(member) => {
                 if member.operation != operation {
@@ -228,6 +247,17 @@ impl Groups {
                     return Err(Error::TimedOut);
                 }
                 (deadline.min(bound), None, true)
+            }
+            Root::Planned { deadline, founder } => {
+                if window != Window::UntilTerminal
+                    || !deadline.is_finite()
+                    || founder.operation != operation
+                {
+                    return Err(Error::Invalid);
+                }
+                let entry = Entry::new(founder.clone(), Execution(0), deadline, now)?;
+                self.admit(&founder)?;
+                (deadline, Some(entry), false)
             }
         };
         let id = self.issue()?;
@@ -251,6 +281,7 @@ impl Groups {
                 window,
                 deadline,
                 background,
+                planned,
                 legs: 0,
                 released: false,
                 terminal: false,
@@ -362,7 +393,7 @@ impl Groups {
 
     pub(crate) fn leg_issued(&mut self, execution: Execution) -> Result<(), Error> {
         let group = self.open(execution)?;
-        if !group.background && group.observers.is_empty() {
+        if group.planned || (!group.background && group.observers.is_empty()) {
             return Err(Error::Revoked);
         }
         group.legs = group.legs.checked_add(1).ok_or(Error::Capacity)?;
@@ -391,6 +422,37 @@ impl Groups {
             .is_ok_and(|group| !group.terminal && (group.background || !group.observers.is_empty()))
     }
 
+    /// The checks `begin`/`join` would make for this member, without state.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    pub(crate) fn admissible(&self, command: CommandId, key: &str) -> Result<(), Error> {
+        if key.len() > MAX_KEY {
+            return Err(Error::Invalid);
+        }
+        if self.members.contains_key(&command) {
+            return Err(Error::State);
+        }
+        if self.members.len() >= MAX_MEMBERS {
+            return Err(Error::Capacity);
+        }
+        Ok(())
+    }
+
+    /// Live observer commands of one execution, in join order.
+    #[cfg_attr(
+        not(all(feature = "http-plans", feature = "order-locks")),
+        allow(dead_code)
+    )]
+    pub(crate) fn observer_commands(&self, execution: Execution) -> Vec<CommandId> {
+        self.group(execution).map_or_else(
+            |_| Vec::new(),
+            |group| group.observers.iter().map(|entry| entry.command).collect(),
+        )
+    }
+
+    pub(crate) fn planned(&self, execution: Execution) -> bool {
+        self.group(execution).is_ok_and(|group| group.planned)
+    }
+
     #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
     pub(crate) fn member(&self, command: CommandId) -> Option<(Execution, u64)> {
         self.members
@@ -407,7 +469,9 @@ impl Groups {
             .map(|entry| entry.deadline)
             .filter(|deadline| *deadline < group.deadline);
         let pending = group.pending.iter().map(|entry| entry.deadline);
-        let execution_term = (!group.terminal && group.legs == 0).then_some(group.deadline);
+        // A Plan's own timer owns its root.
+        let execution_term =
+            (!group.terminal && !group.planned && group.legs == 0).then_some(group.deadline);
         observers
             .chain(pending)
             .chain(execution_term)
@@ -425,7 +489,7 @@ impl Groups {
         let timeout = group.timeout();
         // The execution bound wins over a same-instant leg timeout, so owners
         // get the typed timeout before the leg's own failure is delivered.
-        let closes = !group.terminal && now >= group.deadline;
+        let closes = !group.terminal && !group.planned && now >= group.deadline;
         let (expired, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut group.observers)
             .into_iter()
             .partition(|entry| {
@@ -496,7 +560,19 @@ impl Groups {
             .into_iter()
             .map(|entry| {
                 let result = project(&entry.key);
-                group.seal(entry, result, true)
+                if group.planned {
+                    // The Plan journal's own projection, verbatim.
+                    Sealed {
+                        command: entry.command,
+                        generation: entry.generation,
+                        result,
+                        journal: group.operation == Operation::Mutation,
+                        projected: true,
+                        early: None,
+                    }
+                } else {
+                    group.seal(entry, result, true)
+                }
             })
             .collect();
         self.release_members(&sealed);

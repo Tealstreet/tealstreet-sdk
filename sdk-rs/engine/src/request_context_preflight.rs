@@ -115,13 +115,15 @@ impl ContextRegistry {
 
     pub(crate) fn retirement_current(&self, token: &HttpOwnerRetirement) -> bool {
         let preflight = token.preflight();
-        let Owner::Command { id, generation } = preflight.owner() else {
+        if !matches!(preflight.owner(), Owner::Command { .. })
+            && !self.physical_owner(preflight.owner())
+        {
             return false;
-        };
+        }
         preflight.issued_by(&self.issuer)
             && self.retirements.front().is_some_and(|first| first.matches_preflight(preflight))
-            && self.commands.get(&id).is_some_and(|owner| {
-                owner.generation == generation && owner.pending == 0
+            && self.owner_entry(preflight.owner()).is_some_and(|owner| {
+                owner.pending == 0
                     && matches!(&owner.phase, CommandPhase::Retiring(held) if held.matches_preflight(preflight))
             })
     }
@@ -130,10 +132,15 @@ impl ContextRegistry {
         if !self.retirement_current(token) {
             return false;
         }
-        let Owner::Command { id, .. } = token.preflight().owner() else {
-            return false;
-        };
-        self.commands.remove(&id);
+        match token.preflight().owner() {
+            Owner::Command { id, .. } => {
+                self.commands.remove(&id);
+            }
+            Owner::Execution { generation } => {
+                self.physical.remove(&generation);
+            }
+            _ => return false,
+        }
         self.contexts
             .retain(|_, context| context.owner() != token.preflight().owner());
         self.retirements.pop_front();

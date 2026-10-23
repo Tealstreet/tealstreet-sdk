@@ -126,6 +126,13 @@ impl<P> Cx<'_, P> {
     ) -> Result<(), Error> {
         if self
             .io
+            .request_contexts
+            .planned_execution_root(&execution.0)
+        {
+            return Err(Error::Invalid);
+        }
+        if self
+            .io
             .http_delivery
             .as_ref()
             .is_some_and(|delivery| delivery.context.owner() != execution.0.owner())
@@ -174,7 +181,15 @@ impl<P> Cx<'_, P> {
                 .request_contexts
                 .observer_authority(&seal)
                 .expect("retained observer root");
-            let finished = self.finish_command_as(seal.command, seal.result, Some(&root), true);
+            let finished = if seal.projected {
+                let (success, projected) =
+                    self.io
+                        .request_contexts
+                        .seal_projected(seal.command, &root, seal.result);
+                self.finish_sealed_command(seal.command, success, projected)
+            } else {
+                self.finish_command_as(seal.command, seal.result, Some(&root), true)
+            };
             assert!(finished.is_ok(), "observer seal {finished:?}");
         }
         self.io.revoke_unsent_execution_legs();
@@ -185,5 +200,91 @@ impl<P> Cx<'_, P> {
     pub(super) fn sweep_executions(&mut self) {
         let sealed = self.io.request_contexts.expire_executions(self.now);
         self.finish_sealed(sealed);
+    }
+}
+
+#[cfg(feature = "http-plans")]
+impl<P> Cx<'_, P> {
+    /// Admit the founder's retained Preflight as a Plan owned by a new
+    /// execution, in one transaction. The founder becomes that execution's
+    /// first observer; the returned root is its own (detach/completion only,
+    /// never a send right) and is bounded by the Plan root. Followers join
+    /// with `join_execution`. A refusal leaves no Plan, group, root or id.
+    pub fn begin_planned_execution(
+        &mut self,
+        preflight: &crate::request_context::Preflight,
+        steps: &[crate::request_context::plan::StepBound<'_>],
+        policy: crate::request_context::PlanPolicy,
+        window: Window,
+        key: &str,
+    ) -> Result<(crate::request_context::Plan, ExecutionHandle, Context), Error> {
+        if window != Window::UntilTerminal {
+            return Err(Error::Invalid);
+        }
+        let Owner::Command { id: founder, .. } = preflight.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.io
+            .request_contexts
+            .prepare_planned_execution(founder, key)?;
+        let shared = policy.clone();
+        let (plan, moved) = self.admit_plan_owned(preflight, steps, policy, true)?;
+        let (_, founder_root) = moved.expect("physical admission");
+        let root = self
+            .io
+            .request_contexts
+            .begin_planned_execution(&plan, &shared, &founder_root, key, self.now)
+            .expect("reserved before Plan admission");
+        self.io.rearm_execution_timer();
+        Ok((plan, ExecutionHandle(root), founder_root))
+    }
+
+    /// Retire a sealed physical Plan owner. It has no command: no notice,
+    /// order lock or entry completion; observers are sealed separately.
+    pub(super) fn finish_physical_plan(&mut self, owner: Owner) {
+        self.io.retire_http_owner(owner);
+        if !self.io.request_contexts.finish_physical(owner) {
+            self.io.http_owner_poison = true;
+            panic!("HTTP physical owner retirement bookkeeping failed");
+        }
+    }
+
+    /// Called once from the Plan seal: every surviving observer receives the
+    /// Plan's projection and rejection reports. Observers past their own
+    /// bound time out first.
+    pub(super) fn seal_planned_execution(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        projection: Result<String, VenueError>,
+        reports: &[String],
+    ) {
+        if !matches!(plan.owner(), Owner::Execution { .. }) {
+            return;
+        }
+        self.sweep_executions();
+        let sealed = self
+            .io
+            .request_contexts
+            .seal_planned_execution(plan, &projection);
+        if projection.is_err() {
+            for seal in &sealed {
+                for report in reports {
+                    self.command_error(seal.command, report.clone());
+                }
+            }
+        }
+        self.finish_sealed(sealed);
+    }
+
+    /// Fail every physical Plan left with no observer, outside any delivery:
+    /// its unsent work was already revoked and nothing may be published.
+    pub(super) fn fail_orphaned_plans(&mut self) {
+        if !self.io.request_contexts.has_planned_executions() {
+            return;
+        }
+        while let Some(plan) = self.io.request_contexts.orphaned_plan() {
+            let failed = self.fail_plan(&plan, VenueError::new("No execution observer remains"));
+            assert!(failed.is_ok(), "orphaned Plan seal {failed:?}");
+        }
     }
 }
