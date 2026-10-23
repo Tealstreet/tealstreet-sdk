@@ -952,3 +952,29 @@ boundaries, then implement only shared storage/access adaptations. Run focused
 engine/OKX/Bitunix/Binance native/strict/fmt/bans checks and two independent
 ordering/preservation reviews. A new exact-head CI run must establish CPU and
 memory objectives; storage stability is not a CPU-pass or margin claim.
+
+PhaseF measurement requirement from the owner: compare actual landing7641650,
+pre-change socketa31c3ff and the new stable-holder head on ONE machine, using
+matching CI-built WASM packages. Run several low-concurrency interleaved cycles,
+rotating the three variants and keeping the native Bitunix public tape,
+performance workload, nine TS/Rust pairs and thresholds unchanged. Record every
+raw sample and package/source digest; no local release build, imported aggregate
+or different-runner before/after comparison substitutes for this control.
+Normal full CI remains independently required. Report absolute medians, ratios
+and how much of the socket-versus-landing gap closes. If the change does not
+close most of that same-machine gap, keep it an unproved experiment and continue
+profiling instead of treating a fortunate CI pass as the fix. Prefer one
+isolated CI runner so unrelated local builds cannot contaminate the comparison;
+measurement-only workflow/tooling is separate from runtime and gate policy.
+
+PhaseF local verification: both original storage assertions fail on ccbd's
+pre-change implementation (16 compatibility checks pass), then pass unchanged
+with the holder. The final nonempty-watchdog compatibility check also passes.
+All 1,454 engine/OKX/Bitunix/Binance all-target checks and103 focused all-feature
+socket checks pass; strict four-crate all-target/all-feature Clippy, workspace
+fmt, diff and full bans pass. Both independent source/API/ordering reviews are
+CLEAR: only the holder/access plumbing changes; existing Driver algorithms and
+all19 other managed socket production functions are byte-identical. Normal
+error restoration, inactive/invalid registration, retained ownership, leased
+access refusal and fatal exhaustion while leased are covered. These are
+correctness and representation results, not CPU improvement evidence.

@@ -21,9 +21,9 @@ pub(super) struct Proposal {
 
 impl<P> Cx<'_, P> {
     fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
-        let mut driver = std::mem::take(&mut self.io.socket_driver);
+        let mut driver = self.io.socket_driver.lease();
         let result = f(&mut driver, self);
-        self.io.socket_driver = driver;
+        self.io.socket_driver.restore(driver);
         result
     }
     pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
@@ -61,10 +61,13 @@ impl<P> Cx<'_, P> {
         Ok(feed)
     }
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
-        self.io.socket_driver.state.epoch(feed)
+        self.io.socket_driver.get()?.state.epoch(feed)
     }
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
-        self.io.socket_driver.state.authenticated(feed)
+        self.io
+            .socket_driver
+            .get()
+            .is_some_and(|driver| driver.state.authenticated(feed))
     }
     /// Native one-shot frames ordered after current interests, retained with
     /// their epoch until final drain. They are never persistent interests.
@@ -92,7 +95,11 @@ impl<P> Cx<'_, P> {
         if self.io.socket_failed {
             return Err(SocketError::NotPermitted);
         }
-        self.io.socket_driver.preflight_begin(feed, self.now)?;
+        self.io
+            .socket_driver
+            .get()
+            .ok_or(SocketError::Stale)?
+            .preflight_begin(feed, self.now)?;
         let role = self.io.socket_driver.state.policy(feed)?.role.clone();
         if role == SocketChannel::Public && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return Err(SocketError::NotPermitted);
@@ -115,11 +122,17 @@ impl<P> Cx<'_, P> {
         Ok(epoch)
     }
     pub fn retire_socket(&mut self, feed: FeedId, reason: RetireReason) {
+        if self.io.socket_driver.get().is_none() {
+            return;
+        }
         let effects =
             self.with_socket_driver(|d, cx| d.retire(cx, feed, reason, true).into_iter().collect());
         self.socket_effects(effects);
     }
     pub fn stop_socket_feed(&mut self, feed: FeedId) {
+        if self.io.socket_driver.get().is_none() {
+            return;
+        }
         let effects = self.with_socket_driver(|d, cx| d.stop_feed(cx, feed).into_iter().collect());
         self.socket_effects(effects);
     }
@@ -131,7 +144,12 @@ impl<P> Cx<'_, P> {
         if self.io.socket_failed {
             return Err(SocketError::NotPermitted);
         }
-        self.io.socket_driver.state.policy(feed)?;
+        self.io
+            .socket_driver
+            .get()
+            .ok_or(SocketError::Stale)?
+            .state
+            .policy(feed)?;
         let (count, bytes) = match &update {
             InterestUpdate::Desired(values) => (
                 values.len(),
@@ -195,6 +213,9 @@ impl<P> Cx<'_, P> {
 
 impl<V: Venue> Engine<V> {
     pub(super) fn has_socket_work(&self) -> bool {
+        if !self.io.managed_sockets {
+            return false;
+        }
         !self.io.socket_effects.is_empty()
             || !self.io.socket_proposals.is_empty()
             || self
@@ -997,6 +1018,75 @@ mod tests {
                 queries + 128
             );
         }
+    }
+
+    #[test]
+    fn inactive_engine_socket_queries_keep_legacy_behavior_without_initializing() {
+        let (registered, _) = engine();
+        let foreign = registered.venue.feed.unwrap();
+        let mut e = crate::test_support::seeded_engine(Probe::default());
+        assert!(!e.has_socket_work());
+        assert!(e.io.socket_driver.get().is_none());
+        let ids = e.io.next_id;
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        assert_eq!(cx.socket_epoch(foreign), None);
+        assert!(!cx.socket_authenticated(foreign));
+        assert_eq!(
+            cx.connect_socket(foreign, "wss://unregistered.test"),
+            Err(SocketError::Stale)
+        );
+        assert_eq!(
+            cx.set_socket_interests(foreign, vec![]),
+            Err(SocketError::Stale)
+        );
+        assert_eq!(
+            cx.send_after_socket_interests(foreign, "ignored".into()),
+            Err(SocketError::Stale)
+        );
+        cx.stop_socket_feed(foreign);
+        cx.retire_socket(foreign, RetireReason::Stopped);
+        assert!(e.io.socket_driver.get().is_none());
+        assert_eq!(e.io.next_id, ids);
+        assert!(e.drain_actions().next().is_none());
+    }
+
+    #[test]
+    fn fatal_during_driver_lease_cannot_reconstruct_or_resume_the_engine() {
+        let mut e = crate::test_support::seeded_engine(Probe::default());
+        e.io.next_id = crate::resource_ids::ResourceIds::with_ceiling(1);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| e.start(0.))).is_err());
+        assert!(e.failed());
+        assert!(matches!(
+            e.io.socket_driver,
+            crate::socket_driver::DriverSlot::Leased
+        ));
+        assert!(e.venue.events.is_empty());
+        let mut yielded = 0;
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                e.drain_actions().for_each(|_| yielded += 1);
+            }))
+            .is_err()
+        );
+        assert_eq!(yielded, 0);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                e.handle(
+                    1.,
+                    Event::WsMessage {
+                        socket: SocketId(1),
+                        text: "cannot-resume",
+                    },
+                );
+            }))
+            .is_err()
+        );
+        assert_eq!(e.venue.messages, 0);
+        assert!(e.venue.events.is_empty());
     }
 
     #[test]

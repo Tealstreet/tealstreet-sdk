@@ -1442,7 +1442,7 @@ struct Io<P> {
     /// Each retried read's latest Error time and digit-normalised text, by call site.
     retried_failures: HashMap<&'static str, (f64, String)>,
     #[cfg(feature = "managed-sockets")]
-    socket_driver: crate::socket_driver::Driver,
+    socket_driver: crate::socket_driver::DriverSlot,
     #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
     #[cfg(feature = "managed-sockets")]
