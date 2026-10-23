@@ -203,21 +203,30 @@ impl Driver {
             .min(5_000.);
         Some(if timeout < initial { 3 } else { 2 })
     }
+    pub(crate) fn validate_snapshot_completion(
+        &self,
+        epoch: Epoch,
+        now: f64,
+    ) -> Result<(), SocketError> {
+        if !self.state.current(epoch) || !self.state.authenticated(epoch.feed()) {
+            return Err(SocketError::Stale);
+        }
+        let runtime = &self.runtimes[epoch.feed().index()];
+        if !runtime.snapshot_pending
+            || !runtime.time.valid(now)
+            || runtime.supervisor.expired(now).is_some()
+        {
+            return Err(SocketError::Stale);
+        }
+        Ok(())
+    }
     pub(crate) fn complete_snapshot<P>(
         &mut self,
         cx: &mut Cx<'_, P>,
         epoch: Epoch,
     ) -> Result<(), SocketError> {
-        if !self.state.current(epoch) || !self.state.authenticated(epoch.feed()) {
-            return Err(SocketError::Stale);
-        }
+        self.validate_snapshot_completion(epoch, cx.now)?;
         let runtime = self.runtime_mut(epoch.feed());
-        if !runtime.snapshot_pending
-            || !runtime.time.valid(cx.now)
-            || runtime.supervisor.expired(cx.now).is_some()
-        {
-            return Err(SocketError::Stale);
-        }
         runtime.snapshot_pending = false;
         runtime.supervisor.authenticated(cx);
         Ok(())

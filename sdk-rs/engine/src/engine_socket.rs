@@ -96,6 +96,9 @@ impl<P> Cx<'_, P> {
         if self.now != received_at {
             return Err(SocketError::InvalidTime);
         }
+        self.io
+            .socket_driver
+            .validate_snapshot_completion(epoch, self.now)?;
         if !self.io.next_id.available(1) {
             return Err(SocketError::Capacity);
         }
@@ -1962,6 +1965,48 @@ mod tests {
         );
         assert!(cx.io.actions.is_empty());
         assert_eq!(cx.register_socket_feed(policy()).unwrap().index(), 0);
+    }
+    #[test]
+    fn snapshot_completion_capacity_preserves_proof_and_duplicate_is_inert() {
+        for ceiling in [3, 4] {
+            let mut store = Store::default();
+            let mut io = Io::<()>::default();
+            io.next_id = crate::resource_ids::ResourceIds::with_ceiling(ceiling);
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let mut declared = policy();
+            declared.auth = AuthMode::Required;
+            declared.supervision.auth_timeout_ms = Some(20_000.);
+            let feed = cx.register_socket_feed_with_snapshot(declared).unwrap();
+            let epoch = cx.connect_socket(feed, "wss://snapshot.test").unwrap();
+            cx.with_socket_driver(|d, cx| d.ingress(cx, epoch.socket(), Ingress::Open));
+            cx.with_socket_driver(|d, cx| {
+                d.control(
+                    cx,
+                    epoch,
+                    crate::socket_lifecycle::Control::Auth(
+                        crate::socket_lifecycle::AuthEvidence::Accepted,
+                    ),
+                    false,
+                )
+            });
+            cx.io.socket_message = Some((epoch, 0.));
+            if ceiling == 3 {
+                let actions = cx.io.actions.len();
+                assert_eq!(cx.complete_socket_snapshot(), Err(SocketError::Capacity));
+                assert_eq!(cx.io.actions.len(), actions);
+                assert_eq!(cx.io.socket_message, Some((epoch, 0.)));
+                cx.io.next_id = crate::resource_ids::ResourceIds::starting_at(4);
+            }
+            assert_eq!(cx.complete_socket_snapshot(), Ok(()));
+            cx.io.socket_message = Some((epoch, 0.));
+            let actions = cx.io.actions.len();
+            assert_eq!(cx.complete_socket_snapshot(), Err(SocketError::Stale));
+            assert_eq!(cx.io.actions.len(), actions);
+        }
     }
 }
 
