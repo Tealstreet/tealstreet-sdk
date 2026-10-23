@@ -573,7 +573,7 @@ impl<P> Cx<'_, P> {
         };
         let owner = self.io.request_contexts.commands.get_mut(&id).unwrap();
         let narrowed = match intent {
-            Some(intent) if owner.prepare_leg_intent(&context, intent)? => Some(intent),
+            Some(intent) if owner.prepare_leg_intent(&context, intent, false)? => Some(intent),
             _ => None,
         };
         // Journal enrollment precedes headers, recipe preparation and all queue
