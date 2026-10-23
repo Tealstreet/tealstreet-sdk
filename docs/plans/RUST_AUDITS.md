@@ -2230,3 +2230,14 @@ staged or accepted and no native endpoint is fabricated. Public trades reject
 through Completion with typed pre-I/O Unsupported/NotSent, while lookup's
 nondefinitive contract remains separate. Hyperliquid perpetual history and all
 native trading/signing/account paths retain their existing behavior.
+
+## Shared ticker lookup CPU headroom
+
+A named WASM profile identifies indirect symbol comparisons in Store::ticker_index
+as a substantial public-data cost. The shared Store now uses the existing
+HashMap<Box<str>,u32> index representation for borrowed symbol lookup, rebuilding
+in input order and releasing obsolete keys/capacity on replacement. This applies
+to every venue using symbol lookup; WOO's cached-index WS reducer remains outside
+that hot path. No authority policy, codec, venue-specific shortcut or legacy-site
+exemption changes. Exact paired CI performance and family memory/size gates remain
+separate evidence from diagnostic profiles.

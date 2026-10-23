@@ -33,8 +33,7 @@ pub struct Store {
     market_by_id: HashMap<Box<str>, u32>,
     tickers: Vec<Ticker>,
     ticker_revision: u64,
-    // Sorted row indexes borrow ticker identity instead of copying every symbol.
-    ticker_by_symbol: Vec<u32>,
+    ticker_by_symbol: HashMap<Box<str>, u32>,
     orders: Vec<Order>,
     orders_revision: u64,
     order_snapshot_epoch: Epoch,
@@ -351,15 +350,14 @@ impl Store {
     pub fn set_tickers(&mut self, tickers: Vec<Ticker>) {
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         self.tickers = tickers;
-        self.ticker_by_symbol = (0..self.tickers.len() as u32).collect();
-        self.ticker_by_symbol.sort_unstable_by(|&a, &b| {
-            self.tickers[a as usize]
-                .symbol
-                .cmp(&self.tickers[b as usize].symbol)
-                .then_with(|| b.cmp(&a))
-        });
-        self.ticker_by_symbol
-            .dedup_by(|a, b| self.tickers[*a as usize].symbol == self.tickers[*b as usize].symbol);
+        // Input-order insertion keeps the last duplicate as the lookup winner.
+        // Rebuilding releases obsolete keys and capacity after replacement.
+        self.ticker_by_symbol = self
+            .tickers
+            .iter()
+            .enumerate()
+            .map(|(index, ticker)| (ticker.symbol.as_str().into(), index as u32))
+            .collect();
         self.changes.tickers_replaced = true;
         self.ticker_masks = vec![0; self.tickers.len()];
         self.dirty_tickers.clear();
@@ -371,10 +369,7 @@ impl Store {
     }
 
     fn ticker_index(&self, symbol: &str) -> Option<u32> {
-        self.ticker_by_symbol
-            .binary_search_by(|&index| self.tickers[index as usize].symbol.as_str().cmp(symbol))
-            .ok()
-            .map(|slot| self.ticker_by_symbol[slot])
+        self.ticker_by_symbol.get(symbol).copied()
     }
 
     /// Recover a catalogue ticker omitted by a malformed seed when live data arrives.
@@ -389,14 +384,10 @@ impl Store {
             symbol: market.symbol.clone(),
             ..Ticker::default()
         };
-        let slot = self
-            .ticker_by_symbol
-            .binary_search_by(|&index| self.tickers[index as usize].symbol.as_str().cmp(symbol))
-            .unwrap_err();
         let index = self.tickers.len() as u32;
         self.tickers.push(ticker);
         self.ticker_masks.push(0);
-        self.ticker_by_symbol.insert(slot, index);
+        self.ticker_by_symbol.insert(symbol.into(), index);
         self.changes.tickers_replaced = true;
         Some(index)
     }

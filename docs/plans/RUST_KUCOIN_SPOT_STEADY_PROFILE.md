@@ -172,3 +172,24 @@ dirty masks and append-only recovery. Unchanged generic native benchmark on the
 recorded steady symbol corpus: 965 distinct symbols,2,500,000 lookups, checksum
 1,236,723,300,248,721,791ns elapsed wall time (99.489ns/lookup). This is baseline
 evidence, not the paired CI objective.
+
+## Candidate evidence before full CI
+
+The single shared Store source move is11 additions /20 removals. All29 Store
+controls and1296 engine/KuCoin/Binance native tests across51 targets pass; strict
+engine all-target/all-feature Clippy, scoped fmt, bans and request-context checks
+(14 checker regressions) pass. The same native benchmark checksum is unchanged;
+lookup wall time is99.489 to23.099ns. The index-only native allocation diagnostic
+measures3860 to59603 retained bytes and7720 to119206 replacement-peak bytes for965
+keys; large/small/empty controls release capacity completely. Raw memory source
+and output are index-memory.rs/index-memory.log in the profile evidence directory.
+
+A same-flags named candidate capture shows ticker_index14.164 to1.499ms inclusive
+and WASM ingress47.294 to30.495ms. Final markets, tickers and books equal the prior
+named capture; no protocol errors or unserved request change. These are diagnostic
+sampling weights, not paired timing medians. The candidate includes actual9aef's
+host capability additions while the initial profile source was258c, so overall
+profile metrics are not an isolated Store-only CPU experiment. Both named runs
+report2883584 high-water WASM bytes; process-heap noise prevents attributing their
+retainedBytes difference to the index. Fresh CI owns the performance, memory and
+size verdict, and the >=1.20x median target remains unproven until those results.

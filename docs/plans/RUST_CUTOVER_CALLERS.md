@@ -5099,3 +5099,11 @@ Hyperliquid's existing earlier cache-hit and identity/client-ID shortcuts remain
 Live Store/cache access stays separate from history. No REST capability, result
 wrapper, managed-request migration or NX runtime adoption is added.
 [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## Shared ticker symbol lookup
+
+Ticker symbol reads and updates use the shared Store index. Ticker row order,
+last-duplicate lookup winner, replacement/delisting and append-only recovery
+indices retain their contracts. Full snapshots and dirty-field deltas keep the
+same row identities and signed-zero behavior. Venue code and cached row-index
+consumers continue using the same Store API.
