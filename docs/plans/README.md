@@ -240,3 +240,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Shared live Plan admission | Implementation plan | Before consuming Preflight, native whole-plan roots, reserved call slots or owned readiness. | [RUST_LIVE_PLAN_ADMISSION.md](RUST_LIVE_PLAN_ADMISSION.md) |
 | KuCoin Spot steady CPU | Profiling plan | Before attributing public steady-state CPU cost or proposing shared-path performance changes. | [RUST_KUCOIN_SPOT_STEADY_PROFILE.md](RUST_KUCOIN_SPOT_STEADY_PROFILE.md) |
+
+| MEXC synchronous read command custody | Planned | Before changing local history/leverage refusals, genuine command entry or the exact eight-site prune | [RUST_MEXC_LOCAL_READ_CONTEXT.md](RUST_MEXC_LOCAL_READ_CONTEXT.md) |
