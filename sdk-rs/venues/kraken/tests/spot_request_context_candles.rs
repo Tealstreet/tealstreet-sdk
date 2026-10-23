@@ -500,4 +500,3 @@ fn initial_capacity_rejection_keeps_parked_owner_and_reuses_only_freed_capacity(
         1
     );
 }
-
