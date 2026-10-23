@@ -740,3 +740,52 @@ none is ignored or treated as a supported exception. The original Prepare RED
 now passes through the real native managed path. Current full scanner failures
 are only newer KuCoin/Lighter inventory reductions against the moved landing;
 actual integration remains required before final scanner/CI evidence.
+
+## Current-landing conversion checkpoint
+
+Continue from actual `c473342d483` with canonical reviewed #1919
+`fff4d424898`. Integrate that reviewed group head before the landing so the
+#1894 prepare/commit terminal funnel is preserved without a local core conflict
+resolution. Shared docs keep incoming text first and each metadata block once;
+#1919's capacity-outcome documentation correction is retained. No landing merge
+or engine window is requested by this checkpoint.
+
+The implementation removes Admission::Joined, numeric command lists and
+Completion::finish from metadata. Store returns a publication Resolution only.
+A complete WorkKey retains the configured primary subject, selected slot and
+Identity, RoutingIntent, Read operation, symbol/native instrument, native
+endpoint sequence and immutable call/retry geometry, publication and fallback
+policy. The bounded index stores only WorkKey/Token/ExecutionHandle. It checks
+full equality and token currency independently of publication eligibility;
+return-only reads can join while writes/supersession cannot revive publication.
+The adapter prunes nonvalidating handles before lookup, and retires their token
+storage too. No key text, observer list or new completion table enters the group.
+
+Founder entry spends one ReadOnly Preflight before native missing-key/market
+refusal, then begin_planned_execution once. Followers spend one genuine 80-second
+Read root and join only an exact live key; refusal fails that same root. The
+constructor binds Store ownership only after admitted Plan/group custody exists.
+The adapter carries that token through both native slots. Validate exact DATA
+before codecs and resolve/publish through Store before the one Plan terminal;
+current-settings fallback uses the existing early Read terminal. Retain native
+STEPS/READ, selected slot, re-sign recipe, retry and positions fences verbatim.
+
+Verification starts by rerunning the five named original failures against this
+integration, then preserves their bodies while the conversion makes them pass.
+Adapt own core tests from numeric waiters to publication-only outcomes; native
+joined caller tests keep terminal/result assertions. Add full-key separation,
+index saturation/prune, return-only supersession and two-slot retry/independent
+observer controls. Typed admission-capacity equality replaces literal text.
+All native/provider failure and Store pending-write controls stay required.
+
+For #1928's separate caller boundary, plan managed-host controls using its real
+Prepare/Bind/Claim adapter and deterministic deferred responses. The caller
+wait must reject once at 120 seconds without cancelling a pending managed
+resource; late completion cannot change that failed ingestion-window result.
+A modeled serial ingestion chain releases on promise rejection and admits its
+next wait while old engine work may remain. Test late success and late failure,
+and the within-bound success control. These are SDK managed-host boundary
+controls, not an executed NX deployment or Plan-history runtime receipt. Keep
+NX abd35931b4's current TS path distinct from the future Rust binding. The real
+private paged consumer still needs its final-slot physical-timeout/root-expiry
+controls after #1928's exact runtime signatures are reviewed.
