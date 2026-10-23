@@ -47,7 +47,9 @@ fn owners(sealed: &[Sealed]) -> Vec<(CommandId, u64)> {
 fn joined_read_seals_each_live_owner_once_with_its_projection() {
     let mut groups = Groups::default();
     let (execution, _) = read(&mut groups, member(1, 10, 500., "BTC"), 1_000);
-    let (_, joined) = groups.join(execution, member(2, 20, 500., "ETH"), 1.).unwrap();
+    let (_, joined) = groups
+        .join(execution, member(2, 20, 500., "ETH"), 1.)
+        .unwrap();
     assert_eq!(joined, Joined::Live(vec![]));
     let sealed = groups
         .complete(execution, |key| Ok(format!("{key}-rails")))
@@ -56,8 +58,14 @@ fn joined_read_seals_each_live_owner_once_with_its_projection() {
     assert_eq!(sealed[0].result, Ok("BTC-rails".into()));
     assert_eq!(sealed[1].result, Ok("ETH-rails".into()));
     assert!(sealed.iter().all(|s| !s.journal));
-    assert_eq!(groups.complete(execution, |_| Ok(String::new())), Err(Error::Stale));
-    assert_eq!(groups.abort(execution, VenueError::new("late")), Err(Error::Stale));
+    assert_eq!(
+        groups.complete(execution, |_| Ok(String::new())),
+        Err(Error::Stale)
+    );
+    assert_eq!(
+        groups.abort(execution, VenueError::new("late")),
+        Err(Error::Stale)
+    );
     assert_eq!(groups.member(1), None);
     assert_eq!(groups.member(2), None);
 }
@@ -67,7 +75,9 @@ fn execution_bound_is_capped_by_founder_and_never_raised_by_a_join() {
     let mut groups = Groups::default();
     let (execution, _) = read(&mut groups, member(1, 10, 300., "a"), 1_000);
     assert_eq!(groups.deadline(execution), Some(300.));
-    groups.join(execution, member(2, 20, 5_000., "b"), 1.).unwrap();
+    groups
+        .join(execution, member(2, 20, 5_000., "b"), 1.)
+        .unwrap();
     assert_eq!(groups.deadline(execution), Some(300.));
     let (other, _) = read(&mut groups, member(3, 30, 5_000., "c"), 200);
     assert_eq!(groups.deadline(other), Some(200.));
@@ -95,13 +105,18 @@ fn expired_observer_detaches_alone_and_siblings_still_complete() {
 fn cancelled_founder_leaves_the_follower_attached() {
     let mut groups = Groups::default();
     let (execution, founder) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
-    groups.join(execution, member(2, 20, 900., "b"), 1.).unwrap();
+    groups
+        .join(execution, member(2, 20, 900., "b"), 1.)
+        .unwrap();
     let sealed = groups
         .detach(founder, VenueError::new("cancelled"))
         .unwrap();
     assert_eq!((sealed.command, sealed.generation), (1, 10));
     assert!(groups.may_publish(execution));
-    assert_eq!(groups.detach(founder, VenueError::new("again")), Err(Error::Revoked));
+    assert_eq!(
+        groups.detach(founder, VenueError::new("again")),
+        Err(Error::Revoked)
+    );
     let sealed = groups.complete(execution, |_| Ok("ok".into())).unwrap();
     assert_eq!(owners(&sealed), [(2, 20)]);
 }
@@ -113,12 +128,16 @@ fn one_timer_owns_the_execution_deadline_only_while_no_leg_is_in_flight() {
     assert_eq!(groups.timer(execution), Some(900.));
     groups.leg_issued(execution).unwrap();
     assert_eq!(groups.timer(execution), None);
-    groups.join(execution, member(2, 20, 400., "b"), 1.).unwrap();
+    groups
+        .join(execution, member(2, 20, 400., "b"), 1.)
+        .unwrap();
     assert_eq!(groups.timer(execution), Some(400.));
     groups.leg_retired(execution).unwrap();
     assert_eq!(groups.timer(execution), Some(400.));
     // An observer at the execution bound is owned by the execution term only.
-    groups.join(execution, member(3, 30, 900., "c"), 2.).unwrap();
+    groups
+        .join(execution, member(3, 30, 900., "c"), 2.)
+        .unwrap();
     groups.expire(execution, 400.);
     assert_eq!(groups.timer(execution), Some(900.));
 }
@@ -127,14 +146,21 @@ fn one_timer_owns_the_execution_deadline_only_while_no_leg_is_in_flight() {
 fn execution_deadline_without_a_leg_seals_every_remaining_owner() {
     let mut groups = Groups::default();
     let (execution, _) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
-    groups.join(execution, member(2, 20, 900., "b"), 1.).unwrap();
+    groups
+        .join(execution, member(2, 20, 900., "b"), 1.)
+        .unwrap();
     assert!(groups.expire(execution, 899.).is_empty());
     let sealed = groups.expire(execution, 900.);
     assert_eq!(owners(&sealed), [(1, 10), (2, 20)]);
-    assert!(sealed
-        .iter()
-        .all(|s| s.result.as_ref().unwrap_err().kind == Some(ErrorKind::Timeout)));
-    assert_eq!(groups.complete(execution, |_| Ok(String::new())), Err(Error::Stale));
+    assert!(
+        sealed
+            .iter()
+            .all(|s| s.result.as_ref().unwrap_err().kind == Some(ErrorKind::Timeout))
+    );
+    assert_eq!(
+        groups.complete(execution, |_| Ok(String::new())),
+        Err(Error::Stale)
+    );
 }
 
 #[test]
@@ -205,7 +231,10 @@ fn mutation_abort_after_release_cannot_claim_a_definitive_outcome() {
     let sealed = groups.abort(execution, rejected).unwrap();
     let error = sealed[0].result.as_ref().unwrap_err();
     assert!(sealed[0].journal);
-    assert_eq!((error.kind, error.outcome), (Some(ErrorKind::Rejected), None));
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::Rejected), None)
+    );
 }
 
 #[test]
@@ -271,7 +300,10 @@ fn reused_command_id_cannot_borrow_an_old_observer_generation() {
     groups.complete(first, |_| Ok("ok".into())).unwrap();
     let (second, _) = read(&mut groups, member(1, 11, 900., "a"), 1_000);
     assert_eq!(groups.member(1), Some((second, 11)));
-    assert_eq!(groups.detach(old, VenueError::new("old")), Err(Error::Revoked));
+    assert_eq!(
+        groups.detach(old, VenueError::new("old")),
+        Err(Error::Revoked)
+    );
     assert_eq!(groups.member(1), Some((second, 11)));
 }
 
@@ -323,16 +355,43 @@ fn joins_reject_terminal_mismatched_expired_or_oversized_owners_atomically() {
 fn begin_rejects_invalid_policies_without_registering_anything() {
     let mut groups = Groups::default();
     let cases = [
-        (Root::Background { deadline: 900. }, Operation::Mutation, 1_000, 0.),
-        (Root::Command(member(1, 10, 900., "a")), Operation::Read, 0, 0.),
-        (Root::Command(member(1, 10, 900., "a")), Operation::Read, 1_000, f64::NAN),
-        (Root::Command(member(1, 10, 900., "a")), Operation::Mutation, 1_000, 0.),
-        (Root::Command(member(1, 10, 0., "a")), Operation::Read, 1_000, 0.),
+        (
+            Root::Background { deadline: 900. },
+            Operation::Mutation,
+            1_000,
+            0.,
+        ),
+        (
+            Root::Command(member(1, 10, 900., "a")),
+            Operation::Read,
+            0,
+            0.,
+        ),
+        (
+            Root::Command(member(1, 10, 900., "a")),
+            Operation::Read,
+            1_000,
+            f64::NAN,
+        ),
+        (
+            Root::Command(member(1, 10, 900., "a")),
+            Operation::Mutation,
+            1_000,
+            0.,
+        ),
+        (
+            Root::Command(member(1, 10, 0., "a")),
+            Operation::Read,
+            1_000,
+            0.,
+        ),
     ];
     for (root, operation, timeout, now) in cases {
-        assert!(groups
-            .begin(root, operation, Window::UntilTerminal, timeout, now)
-            .is_err());
+        assert!(
+            groups
+                .begin(root, operation, Window::UntilTerminal, timeout, now)
+                .is_err()
+        );
     }
     assert_eq!(groups.member(1), None);
 }
@@ -360,7 +419,9 @@ fn observer_capacity_refusal_leaves_the_execution_unchanged() {
 fn last_command_observer_gone_revokes_unsent_work_and_publication() {
     let mut groups = Groups::default();
     let (execution, founder) = read(&mut groups, member(1, 10, 900., "a"), 1_000);
-    groups.detach(founder, VenueError::new("cancelled")).unwrap();
+    groups
+        .detach(founder, VenueError::new("cancelled"))
+        .unwrap();
     assert!(!groups.may_publish(execution));
     assert_eq!(groups.leg_issued(execution), Err(Error::Revoked));
 }
@@ -381,8 +442,12 @@ fn background_root_publishes_without_observers_and_never_carries_a_write() {
     assert_eq!(groups.deadline(execution), Some(900.));
     assert!(groups.may_publish(execution));
     groups.leg_issued(execution).unwrap();
-    let (observer, _) = groups.join(execution, member(1, 10, 500., "BTC"), 1.).unwrap();
-    groups.detach(observer, VenueError::new("cancelled")).unwrap();
+    let (observer, _) = groups
+        .join(execution, member(1, 10, 500., "BTC"), 1.)
+        .unwrap();
+    groups
+        .detach(observer, VenueError::new("cancelled"))
+        .unwrap();
     assert!(groups.may_publish(execution));
 }
 
@@ -398,16 +463,18 @@ fn before_release_window_queues_later_joiners_for_the_next_background_read() {
             0.,
         )
         .unwrap();
-    groups.join(first, member(1, 10, 2_000., "BTC"), 1.).unwrap();
+    groups
+        .join(first, member(1, 10, 2_000., "BTC"), 1.)
+        .unwrap();
     groups.leg_issued(first).unwrap();
     groups.leg_released(first).unwrap();
-    let (_, joined) = groups.join(first, member(2, 20, 2_000., "ETH"), 2.).unwrap();
+    let (_, joined) = groups
+        .join(first, member(2, 20, 2_000., "ETH"), 2.)
+        .unwrap();
     assert_eq!(joined, Joined::Pending);
     groups.join(first, member(3, 30, 50., "SOL"), 3.).unwrap();
     // The pending owner keeps its own deadline across the old read's terminal.
-    let sealed = groups
-        .complete(first, |key| Ok(key.to_owned()))
-        .unwrap();
+    let sealed = groups.complete(first, |key| Ok(key.to_owned())).unwrap();
     assert_eq!(owners(&sealed), [(1, 10)]);
     groups.leg_retired(first).unwrap();
     assert_eq!(groups.timer(first), Some(50.));

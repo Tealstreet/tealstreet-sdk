@@ -35,7 +35,9 @@ pub(crate) struct Member {
 pub(crate) enum Root {
     Command(Member),
     /// An existing background read Context keeps its own publication rights.
-    Background { deadline: f64 },
+    Background {
+        deadline: f64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,7 +94,102 @@ pub(crate) struct Groups {
     members: HashMap<CommandId, (u64, u64)>,
 }
 
+impl Entry {
+    fn new(member: Member, cap: f64, now: f64) -> Result<Self, Error> {
+        if !now.is_finite() || !member.deadline.is_finite() || member.key.len() > MAX_KEY {
+            return Err(Error::Invalid);
+        }
+        if member.deadline <= now {
+            return Err(Error::TimedOut);
+        }
+        Ok(Self {
+            command: member.command,
+            generation: member.generation,
+            deadline: member.deadline.min(cap),
+            key: member.key,
+        })
+    }
+}
+
+impl Group {
+    fn live(&self) -> usize {
+        self.observers.len() + self.pending.len()
+    }
+
+    /// Message and kind come from the caller. A released write's outcome
+    /// belongs to the shared journal alone.
+    fn seal(&self, entry: Entry, result: Result<String, VenueError>) -> Sealed {
+        let journal = self.operation == Operation::Mutation;
+        let result = result.map_err(|mut error| {
+            if journal && self.released {
+                error.outcome = None;
+            }
+            error
+        });
+        Sealed {
+            command: entry.command,
+            generation: entry.generation,
+            result,
+            journal,
+        }
+    }
+
+    fn timeout(&self) -> VenueError {
+        let error = VenueError::new("Execution deadline expired").kind(ErrorKind::Timeout);
+        if self.operation == Operation::Mutation && !self.released {
+            error.outcome(Outcome::NotSent)
+        } else {
+            error
+        }
+    }
+}
+
 impl Groups {
+    fn issue(&mut self) -> Result<u64, Error> {
+        let id = self.next.checked_add(1).ok_or(Error::Capacity)?;
+        self.next = id;
+        Ok(id)
+    }
+
+    fn group(&self, execution: Execution) -> Result<&Group, Error> {
+        self.groups.get(&execution.0).ok_or(Error::Revoked)
+    }
+
+    fn open(&mut self, execution: Execution) -> Result<&mut Group, Error> {
+        self.groups
+            .get_mut(&execution.0)
+            .filter(|group| !group.terminal)
+            .ok_or(Error::Revoked)
+    }
+
+    fn admit(&self, member: &Member) -> Result<(), Error> {
+        if self.members.contains_key(&member.command) {
+            return Err(Error::State);
+        }
+        if self.members.len() >= MAX_MEMBERS {
+            return Err(Error::Capacity);
+        }
+        Ok(())
+    }
+
+    fn retire(&mut self, id: u64) {
+        if self
+            .groups
+            .get(&id)
+            .is_some_and(|group| group.terminal && group.legs == 0 && group.pending.is_empty())
+        {
+            self.groups.remove(&id);
+        }
+    }
+
+    fn release_members(&mut self, sealed: &[Sealed]) {
+        for seal in sealed {
+            if self.members.get(&seal.command).map(|(_, g)| *g) == Some(seal.generation) {
+                self.members.remove(&seal.command);
+            }
+        }
+    }
+
     pub(crate) fn begin(
         &mut self,
         root: Root,
@@ -101,10 +198,61 @@ impl Groups {
         timeout_ms: u32,
         now: f64,
     ) -> Result<(Execution, Option<Observer>), Error> {
-        let _ = (root, operation, window, timeout_ms, now);
-        Err(Error::State)
+        if !now.is_finite() || timeout_ms == 0 {
+            return Err(Error::Invalid);
+        }
+        let bound = now + f64::from(timeout_ms);
+        let (deadline, founder, background) = match root {
+            Root::Command(member) => {
+                if member.operation != operation {
+                    return Err(Error::Invalid);
+                }
+                let entry = Entry::new(member.clone(), bound, now)?;
+                self.admit(&member)?;
+                (entry.deadline, Some(entry), false)
+            }
+            Root::Background { deadline } => {
+                if operation != Operation::Read || !deadline.is_finite() {
+                    return Err(Error::Invalid);
+                }
+                if deadline <= now {
+                    return Err(Error::TimedOut);
+                }
+                (deadline.min(bound), None, true)
+            }
+        };
+        if self.groups.len() >= MAX_EXECUTIONS {
+            return Err(Error::Capacity);
+        }
+        let id = self.issue()?;
+        let execution = Execution(id);
+        let observer = founder.as_ref().map(|entry| {
+            self.members.insert(entry.command, (id, entry.generation));
+            Observer {
+                execution,
+                command: entry.command,
+                generation: entry.generation,
+            }
+        });
+        self.groups.insert(
+            id,
+            Group {
+                operation,
+                window,
+                deadline,
+                background,
+                legs: 0,
+                released: false,
+                terminal: false,
+                observers: founder.into_iter().collect(),
+                pending: Vec::new(),
+                progress: Vec::new(),
+            },
+        );
+        Ok((execution, observer))
     }
 
+    /// The next read of the same background root adopts its queued joiners.
     pub(crate) fn begin_successor(
         &mut self,
         previous: Execution,
@@ -112,8 +260,40 @@ impl Groups {
         timeout_ms: u32,
         now: f64,
     ) -> Result<(Execution, Vec<Sealed>), Error> {
-        let _ = (previous, root_deadline, timeout_ms, now);
-        Err(Error::State)
+        let old = self.group(previous)?;
+        if !old.background {
+            return Err(Error::Invalid);
+        }
+        let window = old.window;
+        let (execution, _) = self.begin(
+            Root::Background {
+                deadline: root_deadline,
+            },
+            Operation::Read,
+            window,
+            timeout_ms,
+            now,
+        )?;
+        let old = self.groups.get_mut(&previous.0).expect("validated above");
+        let queued = std::mem::take(&mut old.pending);
+        let group = self.groups.get_mut(&execution.0).expect("just issued");
+        let mut sealed = Vec::new();
+        for mut entry in queued {
+            if entry.deadline <= now {
+                sealed.push(group.seal(
+                    entry,
+                    Err(VenueError::new("Execution deadline expired").kind(ErrorKind::Timeout)),
+                ));
+                continue;
+            }
+            entry.deadline = entry.deadline.min(group.deadline);
+            self.members
+                .insert(entry.command, (execution.0, entry.generation));
+            group.observers.push(entry);
+        }
+        self.release_members(&sealed);
+        self.retire(previous.0);
+        Ok((execution, sealed))
     }
 
     pub(crate) fn join(
@@ -122,49 +302,142 @@ impl Groups {
         member: Member,
         now: f64,
     ) -> Result<(Observer, Joined), Error> {
-        let _ = (execution, member, now);
-        Err(Error::State)
+        self.open(execution)?;
+        let observer = Observer {
+            execution,
+            command: member.command,
+            generation: member.generation,
+        };
+        if let Some(&(id, generation)) = self.members.get(&member.command) {
+            return if id == execution.0 && generation == member.generation {
+                Ok((observer, Joined::Already))
+            } else {
+                Err(Error::State)
+            };
+        }
+        let group = self.groups.get(&execution.0).expect("open above");
+        if member.operation != group.operation {
+            return Err(Error::Invalid);
+        }
+        let pending = group.window == Window::BeforeRelease && group.released;
+        if pending && !group.background {
+            return Err(Error::State);
+        }
+        let cap = if pending {
+            f64::INFINITY
+        } else {
+            group.deadline
+        };
+        let entry = Entry::new(member.clone(), cap, now)?;
+        self.admit(&member)?;
+        let group = self.groups.get_mut(&execution.0).expect("open above");
+        if group.live() >= MAX_OBSERVERS {
+            return Err(Error::Capacity);
+        }
+        self.members
+            .insert(entry.command, (execution.0, entry.generation));
+        if pending {
+            group.pending.push(entry);
+            return Ok((observer, Joined::Pending));
+        }
+        group.observers.push(entry);
+        Ok((observer, Joined::Live(group.progress.clone())))
     }
 
     pub(crate) fn deadline(&self, execution: Execution) -> Option<f64> {
-        let _ = execution;
-        None
+        self.group(execution).ok().map(|group| group.deadline)
     }
 
     pub(crate) fn leg_issued(&mut self, execution: Execution) -> Result<(), Error> {
-        let _ = execution;
-        Err(Error::State)
+        let group = self.open(execution)?;
+        if !group.background && group.observers.is_empty() {
+            return Err(Error::Revoked);
+        }
+        group.legs = group.legs.checked_add(1).ok_or(Error::Capacity)?;
+        Ok(())
     }
 
     pub(crate) fn leg_released(&mut self, execution: Execution) -> Result<(), Error> {
-        let _ = execution;
-        Err(Error::State)
+        let group = self.groups.get_mut(&execution.0).ok_or(Error::Revoked)?;
+        if group.legs == 0 {
+            return Err(Error::State);
+        }
+        group.released = true;
+        Ok(())
     }
 
     pub(crate) fn leg_retired(&mut self, execution: Execution) -> Result<(), Error> {
-        let _ = execution;
-        Err(Error::State)
+        let group = self.groups.get_mut(&execution.0).ok_or(Error::Revoked)?;
+        group.legs = group.legs.checked_sub(1).ok_or(Error::State)?;
+        self.retire(execution.0);
+        Ok(())
     }
 
     /// Store/native-cache publication is allowed only for a live owner set.
     pub(crate) fn may_publish(&self, execution: Execution) -> bool {
-        let _ = execution;
-        false
+        self.group(execution)
+            .is_ok_and(|group| !group.terminal && (group.background || !group.observers.is_empty()))
     }
 
     pub(crate) fn member(&self, command: CommandId) -> Option<(Execution, u64)> {
-        let _ = command;
-        None
+        self.members
+            .get(&command)
+            .map(|&(id, generation)| (Execution(id), generation))
     }
 
     pub(crate) fn timer(&self, execution: Execution) -> Option<f64> {
-        let _ = execution;
-        None
+        let group = self.group(execution).ok()?;
+        let observers = group
+            .observers
+            .iter()
+            .filter(|_| !group.terminal)
+            .map(|entry| entry.deadline)
+            .filter(|deadline| *deadline < group.deadline);
+        let pending = group.pending.iter().map(|entry| entry.deadline);
+        let execution_term = (!group.terminal && group.legs == 0).then_some(group.deadline);
+        observers
+            .chain(pending)
+            .chain(execution_term)
+            .min_by(f64::total_cmp)
     }
 
     pub(crate) fn expire(&mut self, execution: Execution, now: f64) -> Vec<Sealed> {
-        let _ = (execution, now);
-        Vec::new()
+        let Some(group) = self.groups.get_mut(&execution.0) else {
+            return Vec::new();
+        };
+        let mut sealed = Vec::new();
+        let timeout = group.timeout();
+        let closes = !group.terminal && group.legs == 0 && now >= group.deadline;
+        let (expired, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut group.observers)
+            .into_iter()
+            .partition(|entry| {
+                closes || (entry.deadline < group.deadline && entry.deadline <= now)
+            });
+        group.observers = kept;
+        let (expired_pending, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut group.pending)
+            .into_iter()
+            .partition(|entry| entry.deadline <= now);
+        group.pending = kept;
+        if closes {
+            group.terminal = true;
+        }
+        for entry in expired {
+            sealed.push(group.seal(entry, Err(timeout.clone())));
+        }
+        for entry in expired_pending {
+            sealed.push(Sealed {
+                command: entry.command,
+                generation: entry.generation,
+                result: Err(VenueError::new("Execution deadline expired").kind(ErrorKind::Timeout)),
+                journal: false,
+            });
+        }
+        if !group.background && group.observers.is_empty() && group.legs == 0 {
+            group.terminal = true;
+        }
+        self.release_members(&sealed);
+        self.retire(execution.0);
+        sealed
     }
 
     pub(crate) fn detach(
@@ -172,17 +445,59 @@ impl Groups {
         observer: Observer,
         error: VenueError,
     ) -> Result<Sealed, Error> {
-        let _ = (observer, error);
-        Err(Error::State)
+        let Some(&(id, generation)) = self.members.get(&observer.command) else {
+            return Err(Error::Revoked);
+        };
+        if generation != observer.generation {
+            return Err(Error::Revoked);
+        }
+        let group = self.groups.get_mut(&id).ok_or(Error::Revoked)?;
+        let found = |entries: &mut Vec<Entry>| {
+            entries
+                .iter()
+                .position(|entry| entry.command == observer.command)
+                .map(|at| entries.remove(at))
+        };
+        let (entry, queued) = match found(&mut group.observers) {
+            Some(entry) => (entry, false),
+            None => (found(&mut group.pending).ok_or(Error::Revoked)?, true),
+        };
+        let sealed = if queued {
+            Sealed {
+                command: entry.command,
+                generation: entry.generation,
+                result: Err(error),
+                journal: false,
+            }
+        } else {
+            group.seal(entry, Err(error))
+        };
+        if !group.background && group.observers.is_empty() {
+            group.terminal = true;
+        }
+        self.members.remove(&observer.command);
+        self.retire(id);
+        Ok(sealed)
     }
 
     pub(crate) fn complete(
         &mut self,
         execution: Execution,
-        project: impl FnMut(&str) -> Result<String, VenueError>,
+        mut project: impl FnMut(&str) -> Result<String, VenueError>,
     ) -> Result<Vec<Sealed>, Error> {
-        let _ = (execution, project);
-        Err(Error::State)
+        let group = self.open(execution).map_err(|_| Error::Stale)?;
+        group.terminal = true;
+        let entries = std::mem::take(&mut group.observers);
+        let sealed: Vec<_> = entries
+            .into_iter()
+            .map(|entry| {
+                let result = project(&entry.key);
+                group.seal(entry, result)
+            })
+            .collect();
+        self.release_members(&sealed);
+        self.retire(execution.0);
+        Ok(sealed)
     }
 
     pub(crate) fn abort(
@@ -190,8 +505,7 @@ impl Groups {
         execution: Execution,
         error: VenueError,
     ) -> Result<Vec<Sealed>, Error> {
-        let _ = (execution, error);
-        Err(Error::State)
+        self.complete(execution, |_| Err(error.clone()))
     }
 
     pub(crate) fn progress(
@@ -199,8 +513,16 @@ impl Groups {
         execution: Execution,
         receipts: Vec<OrderIdentityReceipt>,
     ) -> Result<Vec<(CommandId, u64, Vec<OrderIdentityReceipt>)>, Error> {
-        let _ = (execution, receipts);
-        Err(Error::State)
+        let group = self.open(execution)?;
+        if group.progress.len() + receipts.len() > MAX_PROGRESS {
+            return Err(Error::Capacity);
+        }
+        group.progress.extend(receipts.iter().cloned());
+        Ok(group
+            .observers
+            .iter()
+            .map(|entry| (entry.command, entry.generation, receipts.clone()))
+            .collect())
     }
 }
 
