@@ -2520,3 +2520,15 @@ Spot leverage projection. No HTTP attempt is fabricated and no owner is acquired
 on private/pager fallthrough. Existing credential precedence, successful setter
 no-ops and accountMarginType capability are preserved. The exact ratchet removes
 eight occurrences/seven rows; remaining signing/history/Session sites remain held.
+
+### Lighter ticker seed Background custody
+
+The exchangeStats physical read now carries a mandatory managed Background Read
+Context. Shared ownership gates staging/publication and retires on success,
+strict stream failure, preparation/network denial and original deadline expiry.
+Native partial-row acceptance and per-symbol WS revision dominance are retained.
+Six original legacy-dispatch assertion REDs precede the move; controls cover four
+deployments/six envelopes, early response/stream fencing, malformed prefixes,
+route/transport/expiry recovery, capacity peer isolation and300 retirements.
+Only2bbebb…:1 is pruned (Lighter42→41/lib2→1); catalog remains counted.
+Architecture No: existing shared Context/HTTP authority and startup Backoff.
