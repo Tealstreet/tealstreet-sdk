@@ -356,6 +356,17 @@ impl Groups {
         Ok((observer, Joined::Live(group.progress.clone())))
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+
+    /// Every held execution in issue order, retired or not.
+    pub(crate) fn executions(&self) -> Vec<Execution> {
+        let mut ids = self.groups.keys().copied().collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids.into_iter().map(Execution).collect()
+    }
+
     pub(crate) fn deadline(&self, execution: Execution) -> Option<f64> {
         self.group(execution).ok().map(|group| group.deadline)
     }
