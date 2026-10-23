@@ -2248,8 +2248,26 @@ mod product_semantics {
         let socket = socket(&actions(&mut e), "/private");
         e.handle(2001.0, Event::WsOpened { socket });
         actions(&mut e);
-        ws(&mut e, socket, r#"{"event":"login","code":"0"}"#);
-        let mut fresh: Vec<_> = actions(&mut e)
+        e.handle(
+            2002.0,
+            Event::WsMessage {
+                socket,
+                text: r#"{"event":"login","code":"0"}"#,
+            },
+        );
+        let mut handed_off = actions(&mut e);
+        let wakeups: Vec<_> = handed_off
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == 2002.0 => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        for timer in wakeups {
+            e.handle(2002.0, Event::TimerFired { timer });
+            handed_off.extend(actions(&mut e));
+        }
+        let mut fresh: Vec<_> = handed_off
             .into_iter()
             .filter(|a| matches!(a, Action::Http(_)))
             .collect();
