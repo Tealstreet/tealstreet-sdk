@@ -5881,3 +5881,23 @@ HTTP, timer or Store effect. A refused entry never emits a second numeric reply
 or retires an unrelated pending owner. Completed local command IDs remain reusable.
 Remote history selection, page geometry, signing, streaming and native finalizers
 are unchanged; this slice does not claim managed remote history adoption.
+
+## Backpack transitional dual custody (remove before master)
+
+The Backpack registry arm installs a provider copy of the configured API key
+and Ed25519 seed, and passes its identity to the venue for managed trading.
+Engine options still hold the raw key and seed, but only for the unadopted
+account-read and private-WS paths ([RUST_BACKPACK_SIGNER_ADMISSION.md](RUST_BACKPACK_SIGNER_ADMISSION.md),
+option B, approved by claude-ddi2il).
+
+- A malformed or non-32-byte base64 seed is now refused at construction, typed
+  invalid input ("Invalid Backpack base64 seed" or "Backpack Ed25519 seed must
+  be 32 bytes"). Such an account now gets no engine at all, public data
+  included. Previously it posted CONFIG_INVALID at account start and kept
+  streaming public data. This is deliberate (R3).
+- TS construction is unchanged: `dispatchSigning` is off for backpack.
+- External signers and injected refs are still refused for backpack.
+- This must be removed before master. It ends when account reads, private WS
+  auth and repair adopt the provider (codex-hcmq3f). The raw fields are then
+  dropped from venue options.
+
