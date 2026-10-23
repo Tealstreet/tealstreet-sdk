@@ -28,8 +28,22 @@ fn issue(
     _at: Option<safe_cex_engine::json::ArrayAt>,
     pending: Pending,
 ) {
-    let (url, headers, body) = params.into_request(method, path, credentials, cx.now);
-    cx.request(method, url, headers, body, pending);
+    // Mirrors the crate's legacy staging transport for the source-included modules.
+    let recipe = credentials.map(|c| {
+        sign::dispatch::Http::new(c.identity(method).clone(), method, path, params.clone())
+    });
+    let (url, headers, body) = params.render(
+        method,
+        path,
+        vec![(
+            sign::unsigned_headers(method)[0].0,
+            sign::unsigned_headers(method)[0].1.into(),
+        )],
+    );
+    let id = cx.request(method, url, headers, body, pending);
+    if let Some(recipe) = recipe {
+        cx.sign_http(id, Box::new(recipe));
+    }
 }
 struct TestVenue {
     trading: Trading,
@@ -72,6 +86,16 @@ impl Venue for TestVenue {
         self.trading
             .on_failed(cx, Some(&self.credentials), request, error);
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let Pending::Trade(request) = pending;
+        self.trading
+            .on_sign_failed(cx, Some(&self.credentials), request, error);
+    }
     fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         self.trading.command(cx, Some(&self.credentials), command);
@@ -94,16 +118,26 @@ impl Harness {
         Self::with_status(initial, "NEW")
     }
     fn with_status(initial: Option<(Order, &str)>, status: &str) -> Self {
+        let (local, identities) =
+            safe_cex_crypto::signer::LocalSigner::from_setup(safe_cex_crypto::signer::LocalSetup {
+                primary: Some(safe_cex_crypto::signer::LocalIdentity {
+                    key: safe_cex_crypto::signer::Secret::new("key".into()),
+                    secret: safe_cex_crypto::signer::Secret::new("secret".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .unwrap();
         let mut engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
             trading: Trading::default(),
             initial: initial.map(|(o, k)| (o, k.into(), status.into())),
             acknowledgements: Vec::new(),
             credentials: Credentials {
                 read: None,
-                key: "key".into(),
-                secret: "secret".into(),
+                primary: identities.primary.unwrap(),
             },
         });
+        engine.set_signer(Some(std::sync::Arc::new(local))).unwrap();
         engine.start(1_000.0);
         let mut h = Self {
             engine,

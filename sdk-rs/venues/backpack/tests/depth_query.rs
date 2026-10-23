@@ -16,7 +16,10 @@ fn ask(e: &mut Engine<Backpack>, command: u32, symbol: &str, limit: Option<u32>)
             limit,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_actions(e, 1000.0)
+        .into_iter()
+        .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect();
     assert_eq!(
         actions.len(),
         1,
