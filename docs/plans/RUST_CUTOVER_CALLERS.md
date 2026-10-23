@@ -4331,3 +4331,36 @@ size budget still applies. SDK construction, commands, transports, payloads and
 row shapes keep their existing contracts. CPU objectives and all strict
 correctness checks retain their existing thresholds and known-failure policies.
 Combined and native release builds keep their existing profile selection.
+
+## Engine-owned initial command admission
+
+Adapters use `admit_http_command(policy)` at the start of a genuine engine command
+callback, before HTTP, WebSocket, timer or signing work. The engine correlates
+this entry with the command being delivered; adapters do not supply a numeric
+command ID. An initial policy, clock or capacity refusal emits one structured
+command failure without issuing a Context or sending work. Read failures carry
+no write outcome; an unissued mutation is `NotSent`. Binance candle, account
+identity and trade-root admission use this path. Native input/planning failures
+keep their existing behavior.
+
+NX handles an admission rejection once using its typed category and message;
+it must not append a numeric failure, optimistic success or automatic duplicate
+submission. Resource capacity reports `Internal`; invalid initial context policy
+or time reports `InvalidInput`. These local failures prove nothing about an
+already-owned or previously sent command. A revoked entry has no completion
+rights and must not finalize another generation. The returned Context remains
+the authority for successful admission, including cached/no-I/O read completion
+and native single-owner WebSocket callbacks. Child legs and retries keep their
+existing explicit Context APIs and original deadlines.
+
+A caught native command-callback panic permanently fences the engine, including
+held transport permits, pending signer completions and venue-bearing queries.
+Hosts dispose the failed engine through their terminal-failure path; NX retains
+prior-sent uncertainty and reconciles through a new healthy engine. An engine
+panic does not prove `NotSent` for work released earlier.
+
+Shared read owners can validate that a handle is the exact original Read root
+before binding completion authority or publishing a no-I/O completion companion.
+A same-owner child, foreign issuer, mutation-bearing owner or sealed generation
+is refused. This check retains completion expiry semantics and grants no new
+send, retry, publication or joined-observer authority.
