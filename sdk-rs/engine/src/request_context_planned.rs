@@ -550,9 +550,12 @@ impl<P> Cx<'_, P> {
                 };
                 // The founder keeps its own pending/delivery accounting and
                 // becomes an observer: it holds no journal or send right.
+                // A planned founder is never a tracked caller-wait root.
                 owner.phase = CommandPhase::Context {
                     root: root.clone(),
                     entry_owned: true,
+                    tracked: false,
+                    expired: false,
                 };
                 owner.last_deadline = deadline;
                 registry.contexts.insert(root.leg(), root.clone());

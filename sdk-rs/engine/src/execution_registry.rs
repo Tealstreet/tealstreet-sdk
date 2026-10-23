@@ -108,7 +108,7 @@ impl ContextRegistry {
             return Err(Error::Invalid);
         };
         let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
-        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true } if issued == root)
+        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true, .. } if issued == root)
         {
             return Err(Error::Revoked);
         }
