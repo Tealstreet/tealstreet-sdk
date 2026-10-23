@@ -2,8 +2,8 @@ use super::*;
 use crate::request_context::{Claim, HttpAction, Prepared, RetryPolicy};
 use crate::{Action, Command, Engine, Event, Method, Notice, Response, SocketId, TimerId, Venue};
 
-// Baseline architectural probe: logical liveness alone is not delivery proof.
-// Implementation switches only this call; the publication assertions stay exact.
+// The baseline checkpoint used logical liveness alone. Only the authority call
+// changes here; the original native/Store publication assertions stay exact.
 fn authority<P>(cx: &Cx<'_, P>, context: &Context) -> Result<(), Error> {
     let ids = cx.io.next_id;
     let actions = cx.io.actions.len();
@@ -14,7 +14,7 @@ fn authority<P>(cx: &Cx<'_, P>, context: &Context) -> Result<(), Error> {
         .http_delivery
         .as_ref()
         .map(|d| (d.context.clone(), d.attempt));
-    let result = cx.validate_http_context(context);
+    let result = cx.validate_background_read_http_delivery(context);
     assert_eq!(cx.io.next_id, ids);
     assert_eq!(cx.io.actions.len(), actions);
     assert_eq!(cx.io.request_contexts.contexts.len(), contexts);

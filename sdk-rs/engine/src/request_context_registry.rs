@@ -741,6 +741,29 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Validate a Background Read in this exact managed HTTP callback. Publish
+    /// synchronously after validation, before retiring the Context. Native
+    /// response validity and publication freshness remain separate requirements.
+    /// Failure callbacks also carry delivery identity, but prove no response data.
+    /// This grants no send, retry, session or command completion authority.
+    pub fn validate_background_read_http_delivery(&self, context: &Context) -> Result<(), Error> {
+        self.validate_http_context(context)?;
+        if context.operation() != Operation::Read
+            || !matches!(context.owner(), Owner::Background { .. })
+        {
+            return Err(Error::Invalid);
+        }
+        if self
+            .io
+            .http_delivery
+            .as_ref()
+            .is_none_or(|delivery| delivery.context != *context)
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
     /// Validate read publication in this exact managed HTTP callback. Native
     /// response decoding and snapshot freshness remain separate requirements.
     /// Failure callbacks also have delivery ownership; this does not prove a
