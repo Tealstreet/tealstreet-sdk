@@ -93,3 +93,16 @@ fn existing_context_issuer_refuses_foreign_engine_with_identical_numeric_handles
     current.handle(1., Event::TimerFired { timer });
     assert!(current.venue().checked);
 }
+
+#[test]
+fn existing_unregistered_setup_allows_provider_replacement_before_startup() {
+    let original: safe_cex_engine::signing::Provider = Arc::new(Provider);
+    let replacement: safe_cex_engine::signing::Provider = Arc::new(Provider);
+    let mut engine = support::seeded_engine(Fixture::default());
+    engine.set_signer(Some(original.clone())).unwrap();
+    engine.set_signer(Some(replacement.clone())).unwrap();
+    assert!(Arc::ptr_eq(&engine.signer().unwrap(), &replacement));
+    assert!(!Arc::ptr_eq(&engine.signer().unwrap(), &original));
+    engine.set_signer(None).unwrap();
+    assert!(engine.signer().is_none());
+}

@@ -31,7 +31,7 @@ Provisional vocabulary, exact API pending review:
 
 ```rust
 // Trusted construction, before start; no venue callback can mint this snapshot.
-engine.install_identity_snapshot(identities, subjects, setup_policy)
+engine.install_identity_snapshot(identities, provider, subjects, setup_policy)
     -> Result<SetupSnapshot, SetupError>
 // Shared selection resolves an opaque binding from that installed snapshot.
 // Admission couples it to this exact owner/leg; no arbitrary external Context.
@@ -41,7 +41,9 @@ SetupSnapshot is issuer-bound, engine-issued and opaque. It contains only refs
 and non-secret declared/codec-resolved account data, never raw credentials,
 private-key-derived hashes or a caller-chosen epoch. Identity.stable_id remains
 the public nonce namespace; it is not a subject proof or configuration epoch.
-Nonce stores and consumed nonces never reset because an engine is recreated.
+Preserve existing externally/process-owned nonce stores and consumed evidence;
+retain each family's existing per-engine counter initialization/reseed contract.
+This slice adds no cross-engine persistence for per-engine venue counters.
 
 Use the existing declared AccountSubject vocabulary from C2 in
 RUST_CREDENTIAL_SELECTION.md: signer, trading_account, fee_subject, public_id,
@@ -67,7 +69,17 @@ metadata or a second conflicting install refuses with no partially registered
 identity. Existing #1899 set_identities capability registration must converge on
 the SAME exact trusted identities; it is not a second subject/configuration
 registry. Coordinate its actual constructor seam with claude-19pt8s/m26ps4.
-Preserve provider capability checks independently at release.
+Snapshot installation atomically converges with the FINAL #1899 trusted
+identities, provider and setup policy as one validated construction tuple. No
+snapshot survives a conflicting setup mutation, even before start. Installation
+freezes ALL dependent setters: set_signer, set_identities, credential/selection,
+capability and private-feed/setup policy setters, plus any derived setup caches.
+Subsequent setter calls refuse without altering the installed tuple; exact setter
+inventory is part of source review. Existing pre-start replacement remains legal
+only while no snapshot is installed. Resolve trusted setup completely before
+installation; do not capture one tuple and later finish a different one.
+Failed installation leaves no snapshot, partial identity registration or frozen
+half-state. Preserve provider capability checks independently at release.
 
 ## Binding, admission and release
 
@@ -128,7 +140,10 @@ the same installed identity/role channel rather than a second subject path.
 ## Tests and sequence
 
 1. Commit this plan and current GREEN controls; obtain core/consumer/setup fit.
-2. After exact API review, NEW-CONTRACT controls: install once atomically;
+2. After exact API review, NEW-CONTRACT controls: install once atomically with
+   final identities/provider/setup policy; every dependent setter refuses both
+   before and after start without mutating that installed tuple; failed installs
+   neither partially register nor freeze setup;
    missing/conflicting subject or refs refuse before IDs; foreign issuer/snapshot,
    slot/role/ref mismatch; immutable binding survives queueing but not teardown;
    old Prepared/Sign/Bind/DATA/timer after new engine cannot release/publish;
@@ -150,3 +165,12 @@ bans/ratchets; native first-consumer gates on adoption and exact-head CI for
 WASM/size/replay/CPU. Source/caller/full-map independent reviews. No merge
 without an overseer window. Architecture gate: one trusted identity provenance
 and lifetime choke point, not a private wrapper claiming facts it cannot prove.
+
+## Setup-freeze refinement
+
+Core review requires installation, rather than start, to freeze dependent setup.
+A third existing GREEN control documents that set_signer currently permits
+replacement/removal before startup in an unregistered engine. It is evidence
+for the NEW-CONTRACT boundary, not a fabricated snapshot RED. Reconfiguration
+remains teardown plus a new engine; existing external nonce evidence and
+per-engine reseed contracts remain unchanged.

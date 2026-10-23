@@ -5721,3 +5721,11 @@ released write unsent or clears prior Unknown/partial-ID evidence. G2c's snapsho
 installation and explicit retirement hooks remain planned; existing setter-after-
 startup refusal is preserved, and tests for new snapshot APIs are labelled
 NEW-CONTRACT rather than invented original regressions.
+
+G2c snapshot installation will freeze all dependent identities, provider and setup
+policy setters immediately, including before startup. Account construction must
+finish the final trusted setup tuple before installation; conflicting setter
+calls then refuse without changing it. Unregistered pre-start setup keeps its
+current behavior. Existing external/process-owned nonce evidence and per-engine
+counter initialization/reseed contracts are preserved; this slice adds no new
+cross-engine counter persistence.
