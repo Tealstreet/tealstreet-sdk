@@ -4468,6 +4468,32 @@ query promise. Custom transport providers must implement the shared managed
 HTTP contract when upgrading. SDK call arguments, result units and subscriptions
 remain the same; this establishes no NX deployment or private-request migration.
 
+## Bitrue FIFO public read Context
+
+Bitrue candle and public-trade commands retain the genuine engine-issued Read
+Context through their native per-channel FIFO, timer and response callbacks. Each
+owner keeps its original 5000ms deadline, including queue wait. A correlated reply
+at or after that bound cannot decode or complete the head, clear its timer, or
+advance the queue. The existing timer still closes the socket and fails every
+pending owner, including live peers on other channels.
+
+The shared entry owner retains completion generation through delayed timer delivery
+and unrelated admissions. A repeated in-flight numeric command ID cannot acquire a
+new timer or request. Admission refusal is completed once by the engine, without
+adapter numeric fallback. Native preflight order/messages, 32-owner queue cap,
+empty-cb_id compatibility, timer-derived correlation shape, candle timestamp/volume
+normalization and trade payloads retain their contracts. Wrong or duplicate explicit
+correlation IDs cannot consume the next owner. Rejected/malformed heads fail once
+and allow the next live owner to proceed. No HTTP operation or joined group is
+introduced for these single-owner native reads.
+
+
+### Kraken Spot managed command OHLC
+
+Spot FetchCandles requires managed prepare/bind/final release under one raw 20-second deadline, including all four possible transport attempts. Native GET pair aliases, interval and floor-seconds since remain; limit/to_ms and native last remain ignored. Malformed rows reject the whole response, and successful results stay sorted. Native API/row failures remain message-only.
+
+Three retries now re-enter managed preparation immediately rather than waiting in a zero-delay native timer queue, so expiry stays engine-owned while routing is parked. Exhaustion retains its native warning and the engine-supplied typed failure kind, including actual #1838 integrity errors. Preparation denial never spends a network retry. Expired/retired callbacks cannot publish results or diagnostics or complete a reused command. A shared context error's local notSent does not prove that earlier physical reads were never sent. Initial pre-context failure, unsupported interval, background discovery and signed/futures paths remain separate migration tails.
+
 
 ### Orderly managed command candles
 
