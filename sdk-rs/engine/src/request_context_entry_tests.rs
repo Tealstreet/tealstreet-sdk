@@ -850,3 +850,64 @@ mod managed_socket_activity {
         });
     }
 }
+
+#[cfg(feature = "order-locks")]
+#[test]
+fn duplicate_active_command_id_is_rejected_before_the_venue_sees_it() {
+    // The original command stays active: the venue answers nothing yet.
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        guard_writes: true,
+        callback: Some(|_| {}),
+        ..Default::default()
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        1.,
+        Event::Command(Command::PlaceOrders {
+            command: 7,
+            orders: vec![],
+        }),
+    );
+    assert_eq!(e.venue.calls, 1);
+    assert_eq!(terminal_count(&e.drain_actions().collect::<Vec<_>>()), 0);
+    assert!(e.io.active_commands.contains(&7));
+    for (now, duplicate) in [
+        (
+            2.,
+            Command::PlaceOrders {
+                command: 7,
+                orders: vec![],
+            },
+        ),
+        (
+            3.,
+            Command::SetMarginType {
+                command: 7,
+                symbol: "BTCUSD".into(),
+                isolated: true,
+            },
+        ),
+        (
+            4.,
+            Command::FetchLeverage {
+                command: 7,
+                symbol: "BTCUSD".into(),
+            },
+        ),
+    ] {
+        e.handle(now, Event::Command(duplicate));
+        assert_eq!(
+            e.venue.calls, 1,
+            "the venue never sees a duplicate active ID"
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(terminal_count(&actions), 0, "the original stays unanswered");
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::Event(event)) if event.code == log_code::COMMAND_DUPLICATE
+        )));
+        assert!(e.io.active_commands.contains(&7));
+    }
+}

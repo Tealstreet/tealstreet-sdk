@@ -96,10 +96,6 @@
     "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2,
     "cdbc56e33db26826a6081ba21a8e2bde0358586fa3f14bce7fae483b071e8b6c": 1
   },
-  "venues/hyperliquid/src/lib.rs": {
-    "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2,
-    "fd78adb5b21889b836207c7d212d4694d9e34d6bfeb0e5f19023c0f2abffd7c3": 1
-  },
   "venues/kraken/src/account.rs": {
     "297733c7eb42dfbca2cbf5172bc2d8d63e74f1cff9c223adc1a9bff1c7b526ed": 1
   },
