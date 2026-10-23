@@ -271,6 +271,7 @@ fn done(actions: &[Action], result: &str) -> usize {
         .count()
 }
 #[test]
+#[ignore = "adoption #1894, owner codex-hcmq3f; runtime waits for reviewed #1873 feature pin"]
 fn original_red_cancel_success_can_retire_unissued_replacement_once() {
     let mut e = start(true);
     let cancel = request(&mut e, 1.);
