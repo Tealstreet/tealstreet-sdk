@@ -2485,7 +2485,7 @@ mod tests {
                     (
                         "weex",
                         r#"{"key":"k","secret":"s"}"#,
-                        "WEEX requires a passphrase",
+                        "Invalid local signer setup",
                     ),
                 ] {
                     let error = server

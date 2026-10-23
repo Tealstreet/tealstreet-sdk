@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
+import { prepareRecordedHttp } from './support/managedHttp';
 
 const running: RustEngineExchange[] = [];
 afterEach(() => {
@@ -29,6 +30,8 @@ const setup = async (publicDataOnly = false) => {
       },
     ]);
   const transport: Transport = {
+    // Identity and leverage reads are managed; route preparation precedes signing.
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (_url, handlers) => {
       setTimeout(handlers.onOpen, 0);
