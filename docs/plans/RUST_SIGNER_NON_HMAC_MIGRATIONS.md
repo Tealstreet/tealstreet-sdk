@@ -44,13 +44,17 @@ payloadSigner contract in [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md).
   Pem (`crypto/src/signer/key_material.rs`).
 - **Engine policy:** `RequestContext` already owns `RetryPolicy` and `Pacing`
   (`engine/src/request_context.rs:91-130`).
-- **Remote wire:** half 2 (keyless `remoteSigner`) does not re-run HTTP
-  config signing. Per RUST_HOSTED_SIGNER_BRIDGE.md it carries exact preimages
-  in the existing ws-auth envelope. That envelope signs only the HMAC-family
-  `outputFormat`s: `hex`, `base64`, `hex-base64`, `apexomni-base64` and
-  `bitunix-double-sha256`. `kraken-challenge` and `coinbase-jwt` fail in the
-  base signer (`base.ts:2357-2372`). payloadSigner covers only `hmac-sha256`
-  and `stark`.
+- **Remote wire:** half 2 is keyless options (`remoteSigner` or
+  `payloadSigner`), as in RUST_HOSTED_SIGNER_BRIDGE.md, and is primary-only.
+  - It does not re-run HTTP config signing: `remoteSigner` carries exact
+    preimages in the existing ws-auth envelope.
+  - The base signer handles `hex`, `base64`, `hex-base64`,
+    `apexomni-base64` (HMAC) and `bitunix-double-sha256` (double SHA256)
+    (`base.ts:2337-2377`).
+  - `coinbase-jwt` works today only through the kept TS Coinbase override
+    (`rust.exchange.ts:430-441` → `coinbase.exchange.ts:142`), which mints the
+    whole JWT (nonce and claims) instead of signing an engine preimage.
+  - payloadSigner covers only `hmac-sha256` and `stark`.
 
 ## Inventory
 
@@ -177,14 +181,14 @@ No family source edit depends on an unlanded prerequisite.
   - It needs a shared provider operation that imports a response field under a
     provider-held ref, without the venue seeing the bytes.
   - Polymarket is blocked on an owner decision here.
-- **P7. Hosted halves.** Each family adds its recipe to the shared
+- **P7. Hosted halves.** Every family (implicit in every row) adds its recipe to the shared
   `hosted_signing` adapter (half 1, browser `signHttpRequest`/`signWsAuth`)
   and keyless `remoteSigner` admission (half 2). Each migrated family gets
   one positive test per half; no TS venue classes.
 - **P8. Remote wire formats.** No half-2 shape exists today for:
   - Ed25519 (Orderly, Backpack; REST and WS);
-  - ES256/EdDSA JWT (Coinbase REST; `coinbase-jwt` builds a whole WS JWT and
-    the base signer refuses it);
+  - ES256/EdDSA over an engine-built JWT preimage (Coinbase REST and WS;
+    today's `coinbase-jwt` relies on the TS class minting its own JWT);
   - secp256k1 digests (Aster V3/Code, Hyperliquid, TxFlow, GRVT,
     Polymarket);
   - zkLink (ApeX orders);
@@ -200,6 +204,10 @@ No family source edit depends on an unlanded prerequisite.
   - Crypto.com, Aster V1 (`hex`);
   - ApeX REST and WS login (`apexomni-base64`);
   - Paradex (payloadSigner `stark`).
+
+  Half 2 is primary-only. Secondary-identity reads (Aster V1 GET, Bitunix
+  GET) under keyless options keep the existing typed refusal of secondary
+  remote signing.
 
 ## Family order (ranked by what blocks RequestContext lanes)
 
@@ -227,6 +235,12 @@ V1-only Aster PR) before its migrated construction path is enabled.
   existing observable contract through the engine's re-prepare path. The
   existing counters stay frozen for that lane to delete. It does not
   re-implement them.
+- Today `RetryPolicy` has only `Never`, `ReadFailure` and
+  `DefinitiveRefusal`, which cannot express prerequisite-then-resend:
+  resync-then-resend, re-login-then-resend and refetch-nonce-then-resend.
+  That variant is a shared request-core extension (codex-uufub4, with
+  claude-m26ps4 for the nonce case). This lane reports it as a dependency and
+  never adds a per-venue substitute.
 - The affected sites, all for the RequestContext lane to retire:
   - ApeX signature-rejection resend versus 3 network retries;
   - Crypto.com 40101;
