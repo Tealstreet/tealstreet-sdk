@@ -2,7 +2,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
-use safe_cex_crypto::{Encoding, eip712, ethereum, hmac_sha256};
+#[cfg(test)]
+use safe_cex_crypto::{Encoding, hmac_sha256};
+use safe_cex_crypto::{eip712, ethereum};
 use safe_cex_engine::signing::{
     Algorithm, Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
     SignResult,
@@ -58,6 +60,9 @@ pub fn is_private_key(value: &str) -> bool {
     body.len() == 64 && body.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// Legacy eager-signing oracle for the wire vectors; production signs only
+/// through `Recipe` at dispatch.
+#[cfg(test)]
 #[derive(Clone)]
 pub struct Credentials {
     pub version: Version,
@@ -67,6 +72,7 @@ pub struct Credentials {
     pub signer: Option<String>,
 }
 
+#[cfg(test)]
 impl Credentials {
     pub fn validate(&self) -> Result<(), String> {
         if self.key.is_empty() {
@@ -142,6 +148,7 @@ impl Query {
         join(&self.0, false)
     }
 
+    #[cfg(test)]
     pub fn signed(
         self,
         credentials: &Credentials,
@@ -842,37 +849,29 @@ mod tests {
     }
 
     #[test]
-    fn v1_secondary_hmac_ignores_v3_auth_overrides_while_v3_retains_them() {
-        let case = corpus().remove(0);
-        let engine = |version| {
-            crate::AsterDex::new(crate::Options {
-                api_version: Some(version),
-                key: Some("primary-key".into()),
-                secret: Some("primary-raw-secret".into()),
-                read_key: Some("secondary-key".into()),
-                read_secret: Some("secondary-raw-secret".into()),
-                auth_user_address: Some(case.user.clone()),
-                auth_signer_address: Some(case.signer.clone()),
-                auth_private_key: Some(case.private_key.clone()),
-                ..crate::Options::default()
-            })
+    fn v1_hmac_oracle_matches_independent_vectors_for_both_slots() {
+        let v1 = |key: &str, secret: &str| Credentials {
+            version: Version::V1,
+            key: key.into(),
+            secret: secret.into(),
+            user: None,
+            signer: None,
         };
-        let v1 = engine(Version::V1);
         // Independent Python hashlib/hmac vectors, using the exact native payload.
         for (credentials, expected) in [
             (
-                v1.credentials.as_ref().unwrap(),
+                v1("primary-key", "primary-raw-secret"),
                 "29306ee689ad7468724aa8f72aed3a3bb507291d3c577faa91fda70fcf7cb3c0",
             ),
             (
-                v1.read_credentials.as_ref().unwrap(),
+                v1("secondary-key", "secondary-raw-secret"),
                 "cd0441e53172012534659d4a39a53bd924f19b2c4f35e4f01ca7be577ea7372d",
             ),
         ] {
             let query = Query::new()
                 .str("symbol", "BTCUSDT")
                 .signed(
-                    credentials,
+                    &credentials,
                     Method::Get,
                     "/fapi/v1/account",
                     1_700_000_000_000.0,
@@ -886,51 +885,24 @@ mod tests {
                 )
             );
         }
-        let v3 = engine(Version::V3);
-        for credentials in [
-            v3.credentials.as_ref().unwrap(),
-            v3.read_credentials.as_ref().unwrap(),
-        ] {
-            assert_eq!(credentials.secret, case.private_key);
-            assert_eq!(credentials.signer.as_deref(), Some(case.signer.as_str()));
-            assert_eq!(credentials.user.as_deref(), Some(case.user.as_str()));
-            assert!(
-                Query::new()
-                    .signed(
-                        credentials,
-                        Method::Get,
-                        "/fapi/v3/account",
-                        case.now_ms,
-                        false,
-                    )
-                    .is_ok()
-            );
-        }
     }
 
     #[test]
-    fn engines_with_different_owners_share_the_agent_nonce_sequence() {
+    fn owners_sharing_an_agent_share_its_nonce_sequence() {
         let secret = format!("0x{}", "92".repeat(32));
         let signer = ethereum::private_key_address(&secret).unwrap();
-        let engine = |owner: &str| {
-            crate::AsterDex::new(crate::Options {
-                key: Some(signer.clone()),
-                secret: Some(secret.clone()),
-                application_id: Some(owner.into()),
-                ..crate::Options::default()
-            })
+        let credentials = |owner: &str| Credentials {
+            version: Version::V3,
+            key: signer.clone(),
+            secret: secret.clone(),
+            user: Some(owner.into()),
+            signer: Some(signer.clone()),
         };
-        let first = engine("0x0000000000000000000000000000000000000111");
-        let second = engine("0x0000000000000000000000000000000000000222");
-        let query = |engine: &crate::AsterDex, now| {
+        let first = credentials("0x0000000000000000000000000000000000000111");
+        let second = credentials("0x0000000000000000000000000000000000000222");
+        let query = |credentials: &Credentials, now| {
             Query::new()
-                .signed(
-                    engine.credentials.as_ref().unwrap(),
-                    Method::Get,
-                    "/fapi/v3/account",
-                    now,
-                    false,
-                )
+                .signed(credentials, Method::Get, "/fapi/v3/account", now, false)
                 .unwrap()
         };
         assert!(query(&first, 1234.0).contains("nonce=1234000&signature="));
@@ -939,4 +911,5 @@ mod tests {
     }
 }
 
+#[cfg(test)]
 safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);

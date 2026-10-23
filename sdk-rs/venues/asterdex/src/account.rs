@@ -4,6 +4,7 @@ use crate::{AsterDex, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -359,6 +360,7 @@ impl AsterDex {
         };
         self.signed(
             cx,
+            CredentialRole::Read { scope: None },
             Method::Get,
             &path,
             Query::new(),
@@ -383,6 +385,7 @@ impl AsterDex {
         let path = self.path("positionSide/dual");
         self.signed(
             cx,
+            CredentialRole::Read { scope: None },
             Method::Get,
             &path,
             Query::new(),
@@ -412,6 +415,7 @@ impl AsterDex {
         let path = self.path("listenKey");
         self.signed(
             cx,
+            CredentialRole::SessionAuth,
             Method::Post,
             &path,
             Query::new(),
@@ -444,6 +448,7 @@ impl AsterDex {
         };
         self.signed(
             cx,
+            CredentialRole::Read { scope: None },
             Method::Get,
             &path,
             Query::new(),
@@ -700,7 +705,7 @@ impl AsterDex {
                                 user_id: info
                                     .account_alias
                                     .filter(|x| !x.is_empty())
-                                    .or_else(|| self.options.key.clone())
+                                    .or_else(|| self.options.signer_address.clone())
                                     .unwrap_or_default(),
                             })
                             .map_err(|e| e.to_string())
@@ -973,6 +978,7 @@ impl AsterDex {
             let path = self.path("listenKey");
             self.signed(
                 cx,
+                CredentialRole::SessionAuth,
                 Method::Put,
                 &path,
                 Query::new(),

@@ -2,8 +2,10 @@
 //! Change Initial Leverage and STP examples. Synthetic credentials only.
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_asterdex::{AsterDex, Options};
+mod support;
+use safe_cex_venue_asterdex::AsterDex;
 use serde_json::json;
+use support::Options;
 
 struct Harness {
     engine: Engine<AsterDex>,
@@ -20,7 +22,7 @@ impl Harness {
         })
     }
     fn options(options: Options) -> Self {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(AsterDex::new(options));
+        let mut engine = support::engine(options);
         engine.store_mut().set_markets(vec![Market {
             id: "BTCUSDT".into(),
             symbol: "BTCUSDT".into(),
@@ -60,7 +62,7 @@ impl Harness {
         }
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in support::drain(&mut self.engine, 1700000000000.0).into_iter() {
             match action {
                 Action::Http(request) => self.requests.push(request),
                 Action::Notice(Notice::CommandDone { command, result }) => {
@@ -235,10 +237,15 @@ fn bybit_execution_controls_reject_entire_batch_before_clock_or_order_write() {
             ("bybitSlippageToleranceTicks", json!(1)),
             ("bybitSlippageToleranceTicks", json!(0)),
         ] {
+            // V3 setup accepts only a hex wallet key.
+            let secret = match version {
+                safe_cex_venue_asterdex::sign::Version::V1 => "synthetic-secret".into(),
+                safe_cex_venue_asterdex::sign::Version::V3 => "01".repeat(32),
+            };
             let mut h = Harness::options(Options {
                 api_version: Some(version),
                 key: Some("synthetic-key".into()),
-                secret: Some("synthetic-secret".into()),
+                secret: Some(secret),
                 ..Options::default()
             });
             let mut second = limit();
