@@ -84,5 +84,5 @@ request-context checker and all13 checker regressions PASS. Source/adversarial,
 caller, documentation and full-map reviews are CLEAN; architecture answer No.
 The manifest remains unchanged at24 BloFin occurrences across20 hash rows.
 No actual1848 landing, final integration CI, merge readiness or zero-legacy claim
-is implied by this native consumer receipt. Actual1857 integration and fresh CI
-follow the overseer's stable venue-phase schedule.
+is implied by this native consumer receipt. The stable venue phase is pinned to actual1854; fresh CI uses that
+integration. Actual1857 was deferred by the overseer until after this phase.
