@@ -41,6 +41,7 @@ function verifyWorkflow(text) {
   assert.match(final, /CPU_CERT_RESULTS: \$\{\{ needs\.cpu-certify\.outputs\.results \}\}/);
   assert.doesNotMatch(final, /GITHUB_TOKEN|--command certify|upload-artifact/);
   for (const supplemental of [plan, second, certify, final]) {
+    assert.match(supplemental, /defaults:\n      run:\n        working-directory: \.\n/);
     assert.doesNotMatch(supplemental, /(?:yarn|npm|cargo|rustup) (?:install|build|add)|rust:build|--command prepare/);
     assert.doesNotMatch(supplemental, /continue-on-error|gh run rerun|retries|retry:/);
   }
@@ -54,6 +55,7 @@ test('workflow controls reject skipped final checks, unconditional second jobs a
     text => text.replace("needs: cpu-plan\n    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'", 'needs: cpu-plan\n    if: always()'),
     text => text.replace('needs: [gate, cpu-plan, cpu-second]\n    if: always()', 'needs: [gate, cpu-plan, cpu-second]\n    if: success()'),
     text => text.replace('needs: cpu-certify\n    if: always()', 'needs: cpu-certify\n    if: success()'),
+    text => text.replace('timeout-minutes: 5\n    defaults:\n      run:\n        working-directory: .', 'timeout-minutes: 5'),
     text => text.replace('suite: [breakoutprop,', 'suite: ['),
     text => text.replace('--command plan --out', '--command plan --suite bitget --out'),
     text => text.replace("--command collect --suite '${{ matrix.venue }}'", "rust:gate:verify --suite '${{ matrix.venue }}'"),

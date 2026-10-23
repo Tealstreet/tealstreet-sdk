@@ -707,6 +707,9 @@ jobs:
         suite: [breakoutprop, apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: .
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
