@@ -661,3 +661,8 @@ poll delivery, late sibling failure/login, a 100-row late page and asset timers.
 Both normal empty-list error envelopes and errors missing data are covered;
 successful missing/null lists retain retry behavior. Existing account assertions remain
 intact, and the legacy request inventory has no venue delta.
+
+Verification on the integrated startup fix passes456 MEXC+Binance tests across
+40 targets, including all44 account tests. Scoped fmt/strict all-target Clippy
+and both ratchets (14 controls) pass. Three independent reviews are clean;
+architecture No. Source/test files held by history #1793 remain untouched.

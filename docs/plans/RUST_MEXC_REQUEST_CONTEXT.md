@@ -344,3 +344,14 @@ on_stream_error; a successful envelope without its expected list remains a
 retryable malformed snapshot. Terminal state discards late snapshot pages and
 blocks both existing and newly requested asset refreshes without rearming polls. Architecture No: reuse existing native refusal facts and
 engine startup authority rather than adding another policy implementation.
+
+### Initial Plan refusal verification
+
+Plan d015560d56a precedes separate original-source RED tests d759c610dda
+(two failures, two negative controls passing). The implemented fix passes all
+44 account tests and full MEXC+Binance native suites:456 tests across40 targets.
+Scoped formatting, strict all-target Clippy and both integrated request-context
+checks pass, including14 scanner controls. Independent source/adversarial, caller
+and full-map reviews are clean, architecture No. Actual #1786 and #1854 are
+integrated, and all incoming Crypto.com #1818 work is preserved. Inventory is
+identical to incoming; only native initial-Plan refusal behavior changes.
