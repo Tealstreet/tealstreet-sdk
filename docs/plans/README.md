@@ -276,3 +276,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Read Plan receipt cap | Receipt-cap implementation under review on frozen #1945 | Before bounding Plan admission by the original command receipt across JWT/preflight waits. | [RUST_PLAN_RECEIPT_CAP.md](RUST_PLAN_RECEIPT_CAP.md) |
 | BingX FetchAccount selected Read | Plan; original REDs next | Before replacing identity entry/failure custody with the frozen shared selected-read helper or pruning its two terminals. | [RUST_BINGX_IDENTITY_CONTEXT.md](RUST_BINGX_IDENTITY_CONTEXT.md) |
 | [Bitget CPU option-B follow-up](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md) | Shared second-runner CPU remeasurement, two-run mean and fail-closed certification; enabled for every CPU-gated suite, with unchanged tapes and thresholds. |
+
+| [WEEX account-cycle Background reads](RUST_WEEX_ACCOUNT_BACKGROUND.md) | Plan first; native handoff review before production |
