@@ -84,15 +84,14 @@ fn secondary_get_keeps_primary_mutations() {
                 request.body.as_deref().unwrap()
             },
         );
-        assert_eq!(request.headers, expected_headers);
+        let headers = &request.headers;
+        assert_eq!(*headers, expected_headers);
         assert!(
-            request
-                .headers
+            headers
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case("X-BAPI-API-KEY")
                     && value == expected),
-            "{:?}",
-            request
+            "{headers:?}"
         );
     }
 }
