@@ -1235,3 +1235,63 @@ fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
         "Kraken cancellation rejected or identity mismatch: notFound"
     );
 }
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_accepted_ids_survive_later_refusal() {
+    p0_write_accepted_ids_survive(false);
+}
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_accepted_ids_survive_later_transport_loss() {
+    p0_write_accepted_ids_survive(true);
+}
+
+fn p0_write_accepted_ids_survive(transport_loss: bool) {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit(), limit()]);
+    let first = http(&mut e, "/sendorder");
+    ack(&mut e, &first, "accepted", "placed");
+    let second = http(&mut e, "/sendorder");
+    if transport_loss {
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: second.id,
+                error: "response lost",
+            },
+        );
+    } else {
+        reply(
+            &mut e,
+            &second,
+            200,
+            r#"{"result":"error","error":"insufficientFunds"}"#,
+        );
+    }
+    let actions: Vec<_> = e.drain_actions().collect();
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    if transport_loss {
+        assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    }
+    assert_eq!(
+        failures[0]
+            .partial
+            .as_ref()
+            .map(|partial| partial.order_ids.as_slice()),
+        Some(["accepted".to_owned()].as_slice()),
+        "accepted native IDs must survive as structured reconciliation evidence"
+    );
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Http(_) | Action::Notice(Notice::CommandDone { command: 7, .. })
+    )));
+}
