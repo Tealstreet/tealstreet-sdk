@@ -17,6 +17,10 @@ enum Fact {
 
 struct Probe {
     fact: Fact,
+    fact_on_failure: Fact,
+    finish_first: bool,
+    retire_in_response: Option<Session>,
+    facts: Vec<Result<(), Error>>,
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
     preparation_failures: Vec<(Error, Option<crate::Outcome>)>,
@@ -26,6 +30,10 @@ impl Default for Probe {
     fn default() -> Self {
         Self {
             fact: Fact::None,
+            fact_on_failure: Fact::None,
+            finish_first: false,
+            retire_in_response: None,
+            facts: vec![],
             responses: vec![],
             failures: vec![],
             preparation_failures: vec![],
@@ -61,26 +69,29 @@ impl Venue for Probe {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         self.responses
             .push((pending.0.owner(), response.body.to_owned()));
-        if pending.0.operation() == Operation::Mutation
-            && matches!(pending.0.owner(), Owner::Session { .. })
-        {
-            let fact = match self.fact {
-                Fact::None => None,
-                Fact::Accepted => Some(WriteResult::Accepted { order_ids: vec![] }),
-                Fact::Rejected => {
-                    Some(WriteResult::Rejected(VenueError::new("listen key refused")))
-                }
-            };
-            if let Some(fact) = fact {
-                cx.http_write_result(&pending.0, fact).unwrap();
-            }
+        if let Some(session) = self.retire_in_response.take() {
+            cx.retire_session(&session).unwrap();
+            return;
         }
-        if matches!(pending.0.owner(), Owner::Session { .. }) {
+        let session = matches!(pending.0.owner(), Owner::Session { .. });
+        if session && self.finish_first {
+            cx.finish_http_context(&pending.0).unwrap();
+        }
+        if pending.0.operation() == Operation::Mutation
+            && session
+            && let Some(fact) = fact(self.fact)
+        {
+            self.facts.push(cx.http_write_result(&pending.0, fact));
+        }
+        if session && !self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
     }
-    fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, pending: Pending, _: &str) {
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: &str) {
         self.failures.push(pending.0.owner());
+        if let Some(fact) = fact(self.fact_on_failure) {
+            self.facts.push(cx.http_write_result(&pending.0, fact));
+        }
     }
     fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {
         panic!("engine timer leaked to venue");
@@ -91,6 +102,14 @@ impl Venue for Probe {
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(std::iter::empty())
+    }
+}
+
+fn fact(fact: Fact) -> Option<WriteResult> {
+    match fact {
+        Fact::None => None,
+        Fact::Accepted => Some(WriteResult::Accepted { order_ids: vec![] }),
+        Fact::Rejected => Some(WriteResult::Rejected(VenueError::new("listen key refused"))),
     }
 }
 
@@ -576,4 +595,207 @@ fn session_handles_carry_no_credential_material() {
     .unwrap();
     let debug = format!("{session:?}");
     assert!(!debug.contains("primary"), "{debug}");
+}
+
+fn mutation(
+    engine: &mut Engine<Probe>,
+    session: &Session,
+    now: f64,
+) -> Result<crate::request_context::Context, Error> {
+    with(engine, now, |cx| {
+        cx.session_context(session, policy(Operation::Mutation))
+    })
+}
+
+fn queue_result(
+    engine: &mut Engine<Probe>,
+    context: &crate::request_context::Context,
+    now: f64,
+) -> Result<RequestId, Error> {
+    with(engine, now, |cx| {
+        cx.request_managed(
+            context.clone(),
+            Method::Post,
+            "https://venue.test/login".into(),
+            None,
+            Pending(context.clone()),
+        )
+    })
+    .map_err(|(_, error)| error)
+}
+
+#[test]
+fn a_context_issued_earlier_cannot_bypass_the_unresolved_gate() {
+    let mut engine = engine();
+    let session = open(&mut engine, false);
+    let first = mutation(&mut engine, &session, 1.).unwrap();
+    let second = mutation(&mut engine, &session, 1.).unwrap();
+    let token = queue(&mut engine, &first, 1.);
+    let request = release(&mut engine, token, 2.);
+    lose(&mut engine, request, 3.);
+    assert_eq!(queue_result(&mut engine, &second, 4.), Err(Error::State));
+}
+
+#[test]
+fn a_session_that_is_not_repeat_safe_sends_one_write_at_a_time() {
+    let mut engine = engine();
+    let session = open(&mut engine, false);
+    let first = mutation(&mut engine, &session, 1.).unwrap();
+    let second = mutation(&mut engine, &session, 1.).unwrap();
+    queue(&mut engine, &first, 1.);
+    assert_eq!(mutation(&mut engine, &session, 2.), Err(Error::State));
+    assert_eq!(
+        with(&mut engine, 2., |cx| cx
+            .http_leg_context(&first, policy(Operation::Mutation))),
+        Err(Error::State)
+    );
+    assert_eq!(queue_result(&mut engine, &second, 2.), Err(Error::State));
+}
+
+#[test]
+fn an_engine_recorded_failure_cannot_be_overwritten_by_a_later_fact() {
+    for fact in [Fact::Accepted, Fact::Rejected] {
+        let mut engine = engine();
+        engine.venue.fact_on_failure = fact;
+        let session = open(&mut engine, false);
+        let token = session_write(&mut engine, &session, 1.);
+        let request = release(&mut engine, token, 2.);
+        lose(&mut engine, request, 3.);
+        assert_eq!(engine.venue.facts, [Err(Error::State)]);
+        assert_eq!(mutation(&mut engine, &session, 4.), Err(Error::State));
+    }
+}
+
+#[test]
+fn a_released_write_that_times_out_is_unknown() {
+    let mut engine = engine();
+    let session = open(&mut engine, false);
+    let context = mutation(&mut engine, &session, 1.).unwrap();
+    queue_result(&mut engine, &context, 1.).unwrap();
+    let mut timer = None;
+    let mut token = None;
+    for action in engine.drain_actions() {
+        match action {
+            Action::SetTimer { timer: id, .. } => timer = Some(id),
+            Action::ManagedHttp(action) => {
+                if let HttpAction::Prepare { preparation, .. } = *action {
+                    token = Some(preparation);
+                }
+            }
+            _ => {}
+        }
+    }
+    release(&mut engine, token.unwrap(), 2.);
+    engine.handle(
+        context.deadline(),
+        Event::TimerFired {
+            timer: timer.unwrap(),
+        },
+    );
+    engine.drain_actions().for_each(drop);
+    assert_eq!(engine.venue.failures, [session.owner()]);
+    assert_eq!(
+        mutation(&mut engine, &session, context.deadline() + 1.),
+        Err(Error::State)
+    );
+}
+
+#[test]
+fn finishing_before_recording_the_fact_leaves_the_write_unknown() {
+    let mut engine = engine();
+    engine.venue.fact = Fact::Accepted;
+    engine.venue.finish_first = true;
+    let session = open(&mut engine, false);
+    let token = session_write(&mut engine, &session, 1.);
+    let request = release(&mut engine, token, 2.);
+    respond(&mut engine, request, 3., "{}");
+    assert_eq!(engine.venue.facts.len(), 1);
+    assert!(engine.venue.facts[0].is_err());
+    assert_eq!(mutation(&mut engine, &session, 4.), Err(Error::State));
+}
+
+#[test]
+fn a_session_can_retire_itself_from_its_own_response() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let first = session_write(&mut engine, &session, 1.);
+    let second = session_write(&mut engine, &session, 1.);
+    let first = release(&mut engine, first, 2.);
+    let second = release(&mut engine, second, 2.);
+    engine.venue.retire_in_response = Some(session.clone());
+    respond(&mut engine, first, 3., "{\"code\":-1125}");
+    respond(&mut engine, second, 4., "{}");
+    lose(&mut engine, second, 5.);
+    assert_eq!(engine.venue.responses.len(), 1);
+    assert!(engine.venue.failures.is_empty());
+    assert!(!with(&mut engine, 6., |cx| cx.session_live(&session)));
+}
+
+#[cfg(feature = "order-locks")]
+#[test]
+fn session_writes_supply_no_legacy_placement_evidence() {
+    let mut engine = engine();
+    engine
+        .io
+        .order_locks
+        .acquire(
+            &Command::PlaceOrders {
+                command: 7,
+                orders: vec![],
+            },
+            &engine.store,
+            true,
+        )
+        .unwrap();
+    let session = open(&mut engine, true);
+    let token = session_write(&mut engine, &session, 1.);
+    release(&mut engine, token, 2.);
+    engine.io.order_locks.finish(7, true);
+    assert!(
+        !engine.io.order_locks.uncertain(""),
+        "a keepalive is not a placement write"
+    );
+}
+
+#[test]
+fn context_capacity_refusal_commits_nothing() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    for _ in 0..super::super::CAPACITY {
+        with(&mut engine, 1., |cx| {
+            cx.session_context(&session, policy(Operation::Read))
+        })
+        .unwrap();
+    }
+    assert_eq!(mutation(&mut engine, &session, 1.), Err(Error::Capacity));
+    let Owner::Session { generation } = session.owner() else {
+        unreachable!()
+    };
+    assert!(
+        engine.io.request_contexts.sessions.live[&generation]
+            .writes
+            .is_empty()
+    );
+    with(&mut engine, 1., |cx| cx.retire_session(&session)).unwrap();
+    let fresh = open(&mut engine, true);
+    session_write(&mut engine, &fresh, 2.);
+}
+
+#[test]
+fn queued_session_packets_redact_the_listen_key() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let context = mutation(&mut engine, &session, 1.).unwrap();
+    with(&mut engine, 1., |cx| {
+        cx.request_managed(
+            context.clone(),
+            Method::Put,
+            "https://venue.test/listenKey?listenKey=secret-key".into(),
+            None,
+            Pending(context.clone()),
+        )
+    })
+    .unwrap();
+    let debug = format!("{:?}", engine.drain_actions().collect::<Vec<_>>());
+    assert!(!debug.contains("secret-key"), "{debug}");
 }
