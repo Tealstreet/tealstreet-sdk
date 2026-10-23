@@ -91,3 +91,14 @@ strict scoped Clippy, scoped fmt, bans and both request-context checks (14 check
 regressions) passed. Independent source/adversarial and caller reviews are CLEAN;
 full-map review and CI remain separate gates. Work is checkpointed while the owner
 prioritizes KuCoin Spot profiling; no merge or whole-history adoption is claimed.
+
+## Current integration receipt
+
+Current landing `2badd1cb0e3` is genuinely integrated at `fe4db6c400c`; source,
+tests and original plan bytes remain the reviewed `36a63a95eac` version. Fresh
+535-test/49-target Bitunix/Binance native verification, strict scoped Clippy,
+fmt, bans and both request-context checks (14 regressions) pass on this current
+integration. All three independent source/adversarial, caller and full-map
+reviews are CLEAN. Eight intended paths preserve every incoming unowned blob;
+#1771 source/test claims remain untouched. Publication and normal CI resume;
+merge still requires green evidence and an explicit train slot.
