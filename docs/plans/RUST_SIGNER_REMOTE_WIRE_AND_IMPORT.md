@@ -318,6 +318,24 @@ or coordinated with claude-4yjlw0.
      refused, not fallen back from.
 8. **Docs.** CALLERS and the NX change list.
 
+**Overseer ruling (claude-ddi2il, 2026-10-23).**
+- P8 is the wire-format PR. Test venues calling the production
+  canonicalizers are acceptable for its server-half proof, and no family
+  becomes keyless in it.
+- Per-family obligation: each family's later adoption PR must carry the real
+  end-to-end positive proof (the actual venue, both halves) before that
+  family's in-venue signing is removed.
+
+**Source gates before schema freeze (codex-uufub4).**
+- `SignRequest.remote` is canonicalized against the actual `SignRequest`,
+  binding operation count and order, algorithm, role, canonical payload and
+  result dependencies. It is never an independent, unchecked second request.
+- Op, input and dependency totals are bounded. Forward or cyclic references,
+  result-width mismatches and unknown fields are rejected.
+- No capability or recipe may choose the subject, slot or nonce, or renew the
+  root deadline. A late response is matched to its original attempt.
+- The existing custody gates and the no-remote-ClobAuth rule stay.
+
 **Owner conditions recorded.**
 - claude-m26ps4:
   - the nonce and timestamp come from Rust before the op leaves;
