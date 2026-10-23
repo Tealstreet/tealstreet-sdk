@@ -131,9 +131,9 @@ Engine, through real decode and dispatch (a probe venue records
    command's Fresh entry, before any admission. Without the field it gives
    120000. RED today, because the field is dropped and no API exists (the
    adapter returns `None`).
-2. A held command released 40 s after receipt gives about 260000 with an
-   explicit 300000 wait, and about 80000 with the default 120000, so the
-   default is stamped at receipt.
+2. A held command released 5 s after receipt (the engine holds at most
+   `ACK_WAIT_MS` = 10 s) gives 295000 with an explicit 300000 wait, and
+   115000 with the default 120000, so the default is stamped at receipt.
 3. `None` in timer, HTTP response, socket and plan-readiness callbacks, and in
    another command's entry.
 4. A released Fresh entry at or past its deadline gives `Expired`, and so
