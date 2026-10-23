@@ -20,7 +20,8 @@ provider refusal. Consumer ruling requires preserving this preparation barrier. 
 reviewed shared parallel-Mutation group prepare/release barrier is an OPEN
 prerequisite to BloFin cutover; #1939 only governs reply independence. G2's
 immutable binding REDs can proceed, but no native parity claim until that barrier
-exists. The owning lane/scope is being confirmed with the overseer.
+exists. The overseer assigned G2b to codex-hcmq3f as a separate plan/RED slice;
+G2 runtime stacks on it, reviewed by codex-uufub4 and claude-dazzy3.
 No local eager-sign fallback. Reverse, duplicate and stale deliveries must not
 change the aggregate result.
 
@@ -70,7 +71,7 @@ struct LegDeclaration {
     operation: Operation,
     selected: SelectedIdentity, // opaque shared Selection + Identity + routing
     retry: RetryPolicy, // resolved per leg, bounded by its CallBound credits
-    // Pacing remains declared; no callback override.
+    pacing: Option<Pacing>, // resolved per leg; no callback override
 }
 // Same internal admission used by uniform, conditional and physical Plans.
 cx.admit_plan_with_legs(&preflight, steps, root_policy, legs, terminals)
@@ -84,6 +85,17 @@ credential generation and RoutingIntent; Selection::credential(KeyRef) supplies
 the managed Context's Credential. The same selection builds the family recipe
 for request_signed_managed. There is no separate runtime Identity lookup that
 can reselect after admission.
+
+Subject/config-generation provenance is an OPEN shared admission prerequisite,
+not supplied by today's Selection (slot/route/evidence) or Credential
+(slot+KeyRef). The reviewed helper must bind a trusted engine-issued configured
+identity snapshot to the exact issuer/subject/config generation, prove each ref
+belongs to it, and retain that immutable snapshot through queued dispatch. The
+setup/configuration transition must revoke that snapshot and retire its owned
+Plans before replacement. A private wrapper or a venue integer is not proof.
+Coordinate this with codex-9czdjh's non-Clone admitted wrapper; external
+queue_existing is deferred there. Until its exact snapshot/retirement contract
+is reviewed, G2 has no source clearance and cannot promise that provenance.
 
 Selection resolves ONCE from configured identities plus an explicit operation
 policy, never an HTTP method. Read uses configured Secondary else Primary;
@@ -100,10 +112,12 @@ G2 cannot introduce a new credential domain from a later DATA callback. Read
 and Mutation bindings are immutable for retries, refusal fallback and reprepare.
 A configuration change retires the owner, never reselects its remaining legs.
 
-The final Rust shape must prevent a binding count/order mismatch. Either a
-recursive declaration attaches bindings directly to each CallBound, or a checked
-root-first ordinal slice exactly covers Schedule's complete enumeration,
-including every fallback occurrence. API review chooses one before source.
+Choose a recursive declaration attaching each binding directly to its call,
+including each fallback occurrence. Normalize it through the exact Schedule
+traversal once at admission; do not accept a parallel root-first binding slice.
+Current fallback sequences are processed LIFO, and equal cardinality cannot
+detect a same-count identity permutation. Structural attachment removes that
+class of mismatch rather than trusting an ordinal convention.
 Reject duplicate/missing/extra/wrong bindings before reservation; failure leaves
 Preflight, activation custody and IDs unchanged. All fallible validation and
 storage preparation precede the same admission commit as uniform declarations.
@@ -117,7 +131,10 @@ Each leg also fixes RetryPolicy. Today's root PlanPolicy.retry is insufficient:
 CallBound attempts/window/fallback do not grant retry authority, and a Mutation
 Context cannot use ReadFailure. A Read leg's bounded ReadFailure permission is
 independent of a Mutation leg's Never/DefinitiveRefusal permission. Retry/fallback
-selection cannot upgrade operation, credential or journal authority.
+selection cannot upgrade operation, credential or journal authority. Per-leg
+Pacing is also immutable; CallBound currently has neither retry permission nor
+pacing. Uniform APIs normalize their root policy into each attached binding.
+No callback infers ReadFailure/DefinitiveRefusal or a different pacing domain.
 
 Journal enrollment and replacement must be operation-aware. Today's
 replace_plan_call enrolls every fallback logical ID through CommandWrites::replace;
@@ -228,3 +245,14 @@ No merge without an explicit overseer window.
 
 Architecture gate: this is one shared immutable binding/admission choke point
 for multiple venues, not a per-venue credential switch, journal or signing path.
+
+## Original-source checkpoint
+
+On a828 engine source, plan_mixed_legs compiles and runs through genuine command
+admission and Prepare/Bind/Claim. Both original assertions fail: Verify is
+Mutation instead of Read and carries primary-ref instead of secondary-ref. The
+parallel two-Primary control passes, including reverse replies, exactly one
+terminal and replay inertness. No Accepted fact is fabricated for the GET.
+The two REDs remain ignored, owned by codex-hcmq3f's G2 runtime adoption; only
+fixture admission/selection changes when that reviewed API exists. This is
+original assertion evidence, not a passing mixed-leg implementation claim.
