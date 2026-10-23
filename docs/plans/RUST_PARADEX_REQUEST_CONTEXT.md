@@ -345,7 +345,7 @@ Mutation completion capability; no fabricated accepted write, Read relabeling
 or venue finalizer may bypass it. All four settings remain unchanged here.
 
 Select instead four synchronous Read terminal occurrences at
-`History::query` lines289,308,326,330. They need neither physical requests nor
+`History::query` lines289,306,322,326. They need neither physical requests nor
 Plan/history-walk authority. The larger candle family has two native GET
 routes with klines-to-TradingView fallback and polling owners, requiring its
 own Plan/authority audit. Paradex signing remains untouched while the remote
@@ -415,7 +415,8 @@ outbound HTTP/sign/WS operation or command-specific timer is introduced.
 3. Retire one real Read and rerun each branch to recover its exact native
    terminal; confirm parked peers remain live, no new outbound/timer effects
    appear and the freed slot remains available. Exercise300 sequential local
-   queries and post-completion ID reuse to expose leaked retained owners. An
+   queries at a fixed finite clock and post-completion ID reuse, then refill
+   the full256-owner bound to expose leaks without expiry masking them. An
    ID owned by a parked Read must not finalize that Read; permit its existing
    canonical duplicate diagnostic. Preserve the managed PublicTrades tests
    unchanged, plus valid private history/lookup tests to prove fallthrough.
