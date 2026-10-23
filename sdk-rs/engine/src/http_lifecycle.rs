@@ -3142,8 +3142,10 @@ mod tests {
             ..Probe::default()
         });
         for (command, status) in [(7, 429), (8, 503)] {
-            let (_, token, _) = mutation(&mut engine, command, 0.);
-            let permit = bind(&mut engine, token, 1.);
+            // A native auth refusal is credential evidence only on a signed write.
+            let (_, token, _) = queue_mutation(&mut engine, command, 0., true);
+            let (attempt, input) = work(&route(&mut engine, token, 1.));
+            let permit = bound(&signed(&mut engine, 1., attempt, input));
             engine.claim_http(2., permit).unwrap();
             engine.io.auth_failure_counted = true;
             #[cfg(feature = "order-locks")]
