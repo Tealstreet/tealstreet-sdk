@@ -18,7 +18,7 @@ fn context(operation: Operation, pacing: Option<Pacing>) -> Context {
     )
     .unwrap()
 }
-fn lifecycle(id: u32, pacing: Option<Pacing>) -> Lifecycle {
+fn lifecycle(id: u64, pacing: Option<Pacing>) -> Lifecycle {
     Lifecycle::new(
         context(Operation::Mutation, pacing),
         Attempt {
@@ -514,7 +514,7 @@ fn aggregate_retains_effects_and_unknowns_independent_of_callback_order() {
     ] {
         let mut writes = CommandWrites::new(3).unwrap();
         for id in [1, 2, 3] {
-            writes.register(RequestId(id), id as u64).unwrap();
+            writes.register(RequestId(id), id).unwrap();
             writes.released(RequestId(id)).unwrap();
         }
         for id in order {
@@ -878,7 +878,7 @@ fn fully_known_partial_execution_preserves_ids_and_each_native_refusal_without_u
     for order in [[1, 2, 3], [3, 2, 1]] {
         let mut writes = CommandWrites::new(3).unwrap();
         for id in [1, 2, 3] {
-            writes.register(RequestId(id), u64::from(id)).unwrap();
+            writes.register(RequestId(id), id).unwrap();
             writes.released(RequestId(id)).unwrap();
         }
         for id in order {
@@ -1016,7 +1016,7 @@ fn per_request_longer_gap_is_anchored_to_its_own_handoff_and_survives_next_reque
 #[test]
 fn host_tokens_round_trip_wide_generations_without_js_number_conversion() {
     let attempt = Attempt {
-        request: RequestId(u32::MAX),
+        request: RequestId(crate::resource_ids::MAX_RESOURCE_ID),
         generation: u64::MAX,
     };
     let preparation = Preparation {
@@ -1056,7 +1056,7 @@ fn host_tokens_reject_noncanonical_aliases_overflow_and_truncation() {
         "p1:1:1",
         "p1:1::0",
         "p2:1:1:0",
-        "p1:4294967296:1:0",
+        "p1:9007199254740992:1:0",
         "p1:1:18446744073709551616:0",
     ] {
         assert_eq!(
@@ -1170,7 +1170,7 @@ fn write_success_seals_once_including_a_recovered_native_refusal() {
 fn known_partial_writes_cannot_be_sealed_as_success_or_lose_their_partial_projection() {
     let mut writes = CommandWrites::new(2).unwrap();
     for id in [1, 2] {
-        writes.register(RequestId(id), u64::from(id)).unwrap();
+        writes.register(RequestId(id), id).unwrap();
         writes.released(RequestId(id)).unwrap();
     }
     writes
@@ -1233,7 +1233,7 @@ fn known_partial_effects_without_ids_forbid_retry_and_whole_success_or_rejection
 fn known_partial_effects_do_not_hide_an_unresolved_sent_sibling() {
     let mut writes = CommandWrites::new(2).unwrap();
     for id in [1, 2] {
-        writes.register(RequestId(id), u64::from(id)).unwrap();
+        writes.register(RequestId(id), id).unwrap();
         writes.released(RequestId(id)).unwrap();
     }
     writes

@@ -3,8 +3,8 @@ use super::*;
 fn accepted(ids: Vec<String>) -> WriteResult {
     WriteResult::Accepted { order_ids: ids }
 }
-fn released(writes: &mut CommandWrites, id: u32) {
-    writes.register(RequestId(id), u64::from(id)).unwrap();
+fn released(writes: &mut CommandWrites, id: u64) {
+    writes.register(RequestId(id), id).unwrap();
     writes.released(RequestId(id)).unwrap();
 }
 
