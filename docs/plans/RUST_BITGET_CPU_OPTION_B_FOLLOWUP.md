@@ -64,8 +64,10 @@ initial jobs use measurement names. A single planner authenticates all complete
 first suites and emits an exact dynamic matrix containing only suites with an
 eligible public miss. One second physical job per selected suite replays only
 that suite's eligible cases, once each. No second runner is scheduled if the
-first cohort has no eligible miss. A final 32-suite matrix verifies each decision
-with `always()` semantics, including missing/failed planner or second results. Retain exact first/second artifacts separately and
+first cohort has no eligible miss. One shared post-second certification job verifies every suite with `always()`
+semantics, including missing/failed planner or second results. A 32-suite matrix
+retains required check names and accepts only the successful same-run, same-
+checkout complete certification output; these wrappers make no evidence API calls. Retain exact first/second artifacts separately and
 bind physical runner IDs and original attempt1 jobs; rerun/duplicate evidence
 cannot authorize a third measurement.
 
@@ -131,3 +133,24 @@ before selecting one row. Every required replay check runs even if the planner
 or a second job fails; no eligible slot may disappear through matrix skips.
 Preserve all strict private/declared public diagnostic handling; no declared
 correctness divergence can be rescued by CPU averaging.
+
+## Evidence request transaction
+
+Planner, each selected second runner and the shared certifier take one complete
+same-run job/artifact inventory at entry and a fresh complete inventory at exit.
+Exact authenticated bundles and completed physical logs are reused within that
+transaction; current metadata is never replaced by a prior-run receipt. The exit
+snapshot rejects new duplicate names, changed artifacts/producers or a workflow
+attempt change. Final runtime authority checks the canonical current artifact
+metadata/upload and the restored manifest retained by the successful second job
+against the original premeasurement manifest, avoiding a second runtime download.
+The second job still downloads and validates every runtime byte before timing.
+
+The request-budget control exercises the production paginated reader and upload
+adapter with every registered suite, extra job/package rows and all-second worst
+case. It includes initial preparation, planner, each selected second, shared
+certification and fresh boundary checks. Expected totals are310 requests for no
+second and918 for all32 seconds, below the ordinary1000/hour repository token
+limit before concurrent activity. This is not a reservation against other CI;
+rate-limit, unavailable evidence and HTTP errors fail closed. No history scanner
+or token-limit exemption is introduced.

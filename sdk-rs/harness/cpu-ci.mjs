@@ -147,7 +147,7 @@ async function authenticateCase(context, evidence, producer, suite, role = 'firs
   return authenticateMeasurementWindow({ execution: evidence.execution, key: evidence.key, job: producer, logBytes });
 }
 
-async function currentPhysical(context, name) {
+export async function currentPhysical(context, name) {
   const { run, jobs } = context.inventory ? await evidenceInventory(context) :
     { run: await context.reader.getRun(context.runId), jobs: await context.reader.listJobs(context.runId) };
   const selected = jobs.filter((job) => job.name === name);

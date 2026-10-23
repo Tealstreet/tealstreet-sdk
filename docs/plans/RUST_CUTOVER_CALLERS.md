@@ -5088,8 +5088,9 @@ ordinary manifest verdict and request no second measurement. Original strict
 reports, diagnostic lists and raw outputs remain unchanged, including FAILs.
 
 The existing `Rust / replay gate (<suite>)` checks certify the decision after
-initial `Rust / replay measurement (<suite>)` jobs. The global planner and final
-checks run even after upstream failure. The second-run matrix is skipped when
+initial `Rust / replay measurement (<suite>)` jobs. The global planner, shared certifier and final
+checks run even after upstream failure. Each final check requires the successful
+same-run, same-checkout complete output of that shared certifier. The second-run matrix is skipped when
 there is no eligible miss; otherwise it contains exactly the selected suites.
 Consumers of check-rollup metadata must allow that conditional job to be
 skipped, while requiring every final replay check to succeed. Missing, failed,
