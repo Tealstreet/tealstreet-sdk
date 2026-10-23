@@ -93,3 +93,36 @@ unaffected map byte-for-byte.
    baseline rules. Real-integrate any newly landed shared/build dependency.
    No guard or merge until the owner grants the landing window; guard and merge
    remain separate commands with exact reviewed head and audited resulting tree.
+
+Plan audit refinements before implementation:
+
+- Successful terminal publication consumes current same-command entry custody,
+  including legacy done/fail and Context completion. New admission cannot follow
+  an earlier result in the same callback. Conversely, automatic Rejected blocks
+  a same-callback numeric done/fail from publishing a second result. Existing
+  authority-bearing Context completion after successful admission still works.
+  Nonterminal command_error diagnostics are not completion. Once-only custody
+  is scoped to this callback, not a new forever blacklist or global legacy claim.
+- Fresh admission must precede opaque I/O. Snapshot the existing safe resource
+  state at loan creation; a changed watermark revokes fresh admission without
+  resetting it. Mark fresh custody unavailable at existing no-new-Io-ID outbound
+  paths (plain/signed WS send, close and attaching deferred signing to existing
+  work). This is a read-only watermark plus one scoped enum, not another resource
+  allocator or physical evidence journal. Legacy I/O and its existing numeric
+  completion may continue, but cannot later claim new pre-authority NotSent.
+- Protect already-existing ownership independently of invalid clocks. NaN may
+  make a deadline comparison false; it must never permit rejecting or deleting
+  a prior generation. Only safely expired, unheld metadata may be retired before
+  first issuance. Every typed refusal precedes owner creation; revalidate this
+  invariant before rejection cleanup, which never retires unrelated requests.
+- Leave the private loan present if the native callback unwinds; its presence is
+  itself the sticky engine failure fence until host disposal. Clear on normal
+  return before deferred commands or placement release. Supported Venue actions
+  get the same engine loan; unsupported capability guards never receive one.
+- Request Error classification belongs to the shared error core (claude-dazzy3).
+  Coordinate the same kind/venue_error helper instead of introducing a competing
+  venue or command-entry error table. The helper is additive; existing typed
+  failure categories and transport/financial proof semantics stay unchanged.
+
+Independent plan audit accepts one private scoped Io loan/state, no new registry,
+resource counter or venue workaround. Source implementation follows these gates.
