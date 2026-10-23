@@ -148,7 +148,7 @@ fn order_specific_fills_use_documented_endpoint_and_exact_client_filters() {
 }
 
 #[test]
-fn paged_fills_deduplicate_overlaps_and_reject_failed_continuations() {
+fn paged_fills_deduplicate_overlaps_and_warn_on_failed_continuations() {
     let (mut e, _) = ready();
     actions(&mut e);
     ask(&mut e, fills(None, None, 100));
@@ -175,10 +175,11 @@ fn paged_fills_deduplicate_overlaps_and_reject_failed_continuations() {
         503,
         r#"{"success":false,"message":"busy"}"#,
     );
-    assert!(
-        result(&mut e).is_err(),
-        "never return first-page success after failure"
-    );
+    // Supersedes the old whole-read refusal: only the validated first page is
+    // recoverable, and the shared owner marks that result incomplete.
+    let rows: Vec<FillResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
 }
 
 #[test]
@@ -508,7 +509,7 @@ fn pagination_has_a_hard_fifty_page_budget_and_checks_metadata() {
 }
 
 #[test]
-fn oversized_page_and_failed_algo_history_never_return_partial_results() {
+fn oversized_page_rejects_and_failed_algo_history_recovers_validated_regular_orders() {
     let (mut e, _) = ready();
     actions(&mut e);
     ask(
@@ -547,7 +548,9 @@ fn oversized_page_and_failed_algo_history_never_return_partial_results() {
         401,
         r#"{"success":false,"message":"unauthorized"}"#,
     );
-    assert!(result(&mut e).is_err());
+    let rows: Vec<OrderResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
 }
 
 #[test]
@@ -687,4 +690,272 @@ fn funding_timers_delayed_by_host_throttling_cannot_dispatch_together() {
             .1,
         format!("{at:.0}")
     );
+}
+
+// Owned-history controls: validated output, never native census or failed-page
+// prefixes, is the authority for recovery after an actual read failure.
+fn owned_terminal(
+    e: &mut Driver,
+    command: u32,
+    partial: bool,
+) -> Result<String, safe_cex_engine::VenueError> {
+    let out = actions(e);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    let markers: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        markers.len(),
+        usize::from(partial),
+        "exactly one owned marker for partial recovery"
+    );
+    for marker in markers {
+        assert_eq!(marker.level, safe_cex_engine::Level::Warn);
+        assert!(marker.fields.iter().any(|(k, v)| *k == "command"
+            && matches!(v,safe_cex_engine::Value::Num(n) if *n == f64::from(command))));
+    }
+    let mut terminals = out.into_iter().filter_map(|a| match a {
+        Action::Notice(Notice::CommandDone {
+            command: id,
+            result,
+        }) if id == command => Some(Ok(result)),
+        Action::Notice(Notice::CommandFailed { command: id, error }) if id == command => {
+            Some(Err(error))
+        }
+        _ => None,
+    });
+    let result = terminals.next().expect("one terminal");
+    assert!(terminals.next().is_none());
+    result
+}
+
+#[test]
+fn owned_first_failures_are_typed_and_filtered_rows_cannot_authorize_partial() {
+    for filtered in [false, true] {
+        for failure in 0..3 {
+            let (mut e, _) = ready();
+            actions(&mut e);
+            ask(&mut e, fills(Some("BTCUSDC"), None, 100));
+            let mut r = request(&mut e);
+            if filtered {
+                let outside = FILL.replace("PERP_BTC_USDC", "PERP_ETH_USDC");
+                reply(&mut e, &r, 200, &page(&outside, 2, 1));
+                r = request(&mut e);
+            }
+            match failure {
+                0 => reply(&mut e, &r, 503, r#"{"success":false,"message":"busy"}"#),
+                1 => reply(&mut e, &r, 200, r#"{"success":true,"data":{"rows":{}}}"#),
+                _ => e.handle(
+                    2500.0,
+                    Event::HttpFailed {
+                        request: r.id,
+                        error: "offline",
+                    },
+                ),
+            }
+            let error = owned_terminal(&mut e, 77, false).unwrap_err();
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+        }
+    }
+}
+
+#[test]
+fn owned_later_failures_return_only_accepted_pages_with_one_warning() {
+    for failure in 0..4 {
+        let (mut e, _) = ready();
+        actions(&mut e);
+        ask(&mut e, fills(None, None, 100));
+        let r = request(&mut e);
+        reply(&mut e, &r, 200, &page(FILL, 3, 1));
+        let r = request(&mut e);
+        match failure {
+            0 => reply(&mut e, &r, 503, r#"{"success":false,"message":"busy"}"#),
+            1 => reply(&mut e, &r, 200, r#"{"success":true,"data":{"rows":{}}}"#),
+            2 => e.handle(
+                2500.0,
+                Event::HttpFailed {
+                    request: r.id,
+                    error: "offline",
+                },
+            ),
+            _ => {
+                let fresh = FILL.replace("9007199254740993", "9007199254740994");
+                let invalid = FILL.replace(
+                    "\"executed_quantity\":\"0.25\"",
+                    "\"executed_quantity\":\"NaN\"",
+                );
+                reply(&mut e, &r, 200, &page(&format!("{fresh},{invalid}"), 3, 2));
+            }
+        }
+        let rows: Vec<FillResult> =
+            serde_json::from_str(&owned_terminal(&mut e, 77, true).unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "9007199254740993");
+    }
+}
+
+#[test]
+fn owned_regular_orders_survive_algo_read_failure() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    ask(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let r = request(&mut e);
+    reply(&mut e, &r, 200, &page(HIST_ORDER, 1, 1));
+    let r = request(&mut e);
+    assert!(r.url.contains("/algo/orders"));
+    reply(&mut e, &r, 503, r#"{"success":false,"message":"busy"}"#);
+    let rows: Vec<OrderResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "9007199254740993");
+}
+
+#[test]
+fn owned_native_proof_refusals_remain_strict_after_accepted_output() {
+    for inconsistent in [false, true] {
+        let (mut e, _) = ready();
+        actions(&mut e);
+        ask(&mut e, fills(None, None, 100));
+        let r = request(&mut e);
+        reply(&mut e, &r, 200, &page(FILL, 3, 1));
+        let r = request(&mut e);
+        reply(
+            &mut e,
+            &r,
+            200,
+            &page(FILL, 3, if inconsistent { 9 } else { 2 }),
+        );
+        assert!(owned_terminal(&mut e, 77, false).is_err());
+    }
+}
+
+#[test]
+fn owned_fifty_page_budget_spans_regular_and_algo_but_terminal_fiftieth_succeeds() {
+    for needs_more in [false, true] {
+        let (mut e, _) = ready();
+        actions(&mut e);
+        ask(
+            &mut e,
+            Query::OrderHistory {
+                symbol: None,
+                from_ms: None,
+                to_ms: None,
+                limit: Some(1000),
+            },
+        );
+        for number in 1..=49 {
+            let r = request(&mut e);
+            assert!(!r.url.contains("/algo/"));
+            let row = HIST_ORDER.replace("9007199254740993", &number.to_string());
+            reply(&mut e, &r, 200, &page(&row, 49, number));
+        }
+        let r = request(&mut e);
+        assert!(r.url.contains("/algo/orders") && r.url.contains("page=1"));
+        let row = HIST_ORDER
+            .replace("order_id", "algo_order_id")
+            .replace("\"type\":\"LIMIT\"", "\"algo_type\":\"LIMIT\"")
+            .replace("9007199254740993", "999");
+        reply(
+            &mut e,
+            &r,
+            200,
+            &page(&row, if needs_more { 2 } else { 1 }, 1),
+        );
+        let terminal = owned_terminal(&mut e, 77, false);
+        if needs_more {
+            assert!(terminal.unwrap_err().message.contains("pagination"));
+        } else {
+            let rows: Vec<OrderResult> = serde_json::from_str(&terminal.unwrap()).unwrap();
+            assert_eq!(rows.len(), 50);
+        }
+    }
+}
+
+#[test]
+fn owned_stage_identity_and_limits_keep_algo_rows_in_final_sort() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    ask(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    );
+    let r = request(&mut e);
+    // A native total beyond the result limit must not add regular-page I/O.
+    reply(&mut e, &r, 200, &page(HIST_ORDER, 2, 1));
+    let r = request(&mut e);
+    assert!(r.url.contains("/algo/orders") && r.url.contains("page=1"));
+    let algo = HIST_ORDER
+        .replace("order_id", "algo_order_id")
+        .replace("\"type\":\"LIMIT\"", "\"algo_type\":\"LIMIT\"")
+        .replace("\"created_time\":2000", "\"created_time\":2100");
+    // Same native ID in another endpoint is a separate identity.
+    reply(&mut e, &r, 200, &page(&algo, 1, 1));
+    let rows: Vec<OrderResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, false).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].created_time, 2100.0);
+}
+
+#[test]
+fn owned_concurrent_reads_do_not_share_rows_or_markers() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    ask(&mut e, fills(None, None, 100));
+    let first = request(&mut e);
+    ask_with_id(&mut e, 78, fills(None, None, 100));
+    let other = request(&mut e);
+    reply(&mut e, &first, 200, &page(FILL, 2, 1));
+    let next = request(&mut e);
+    reply(&mut e, &other, 200, &page("", 0, 1));
+    assert_eq!(owned_terminal(&mut e, 78, false).unwrap(), "[]");
+    reply(&mut e, &next, 503, r#"{"success":false,"message":"busy"}"#);
+    let rows: Vec<FillResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn owned_signing_refusal_after_accepted_page_is_strict() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    ask(&mut e, fills(None, None, 100));
+    let r = request(&mut e);
+    let body = page(FILL, 2, 1);
+    // A bad host clock makes native header preparation refuse the continuation.
+    // It must never turn accepted output into a partial signing success.
+    e.handle(
+        -1.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
+        },
+    );
+    let error = owned_terminal(&mut e, 77, false).unwrap_err();
+    assert!(error.message.contains("invalid clock"));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
 }
