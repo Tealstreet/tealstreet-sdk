@@ -129,8 +129,8 @@ struct Fields {
     order_link_id: Option<String>,
     #[serde(rename = "orderId", default)]
     order_id: Option<String>,
-    #[serde(default)]
-    request: Vec<Fields>,
+    #[serde(rename = "request", default)]
+    items: Vec<Fields>,
 }
 
 /// Our own request body's identity fields.
@@ -138,7 +138,7 @@ fn fields(body: &str) -> Fields {
     serde_json::from_str(body).unwrap_or(Fields {
         order_link_id: None,
         order_id: None,
-        request: Vec::new(),
+        items: Vec::new(),
     })
 }
 
@@ -1120,7 +1120,7 @@ impl BybitLinear {
             }
             Call::PlaceBatch { .. } => {
                 let links: Vec<Option<String>> = fields(&planned.body)
-                    .request
+                    .items
                     .into_iter()
                     .map(|item| item.order_link_id)
                     .collect();

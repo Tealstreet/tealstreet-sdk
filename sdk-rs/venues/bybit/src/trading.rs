@@ -2463,7 +2463,8 @@ impl BybitLinear {
     ) {
         #[derive(serde::Deserialize)]
         struct Inputs {
-            request: Vec<LocalOrder>,
+            #[serde(rename = "request")]
+            orders: Vec<LocalOrder>,
         }
         if local.socket != self.private.socket
             || local.snapshot != self.account.orders_snapshot_version
@@ -2473,7 +2474,7 @@ impl BybitLinear {
         let Ok(inputs) = serde_json::from_str::<Inputs>(&local.body) else {
             return;
         };
-        for (input, id) in inputs.request.iter().zip(ids) {
+        for (input, id) in inputs.orders.iter().zip(ids) {
             if let Some(id) = id {
                 self.publish_local_create(cx, input, id);
             }

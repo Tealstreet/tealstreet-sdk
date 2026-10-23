@@ -2188,3 +2188,16 @@ reads indefinitely. Each request remains bounded by its declared read policy,
 but the final write-plan root starts only when the native write steps are fixed.
 No arbitrary whole-preflight or 120-second product cap is added. A finite redo
 limit would change caller-visible liveness policy and needs a separate decision.
+
+
+## Ordinary Bybit Plan adoption
+
+Ordinary Bybit writes move from the legacy job pipeline to the shared Preflight
+and Plan core; Hyro and option placements stay on the legacy pipeline until
+their own adoption (D5, remove-before-master-merge). One const code table and a
+strict object-only acknowledgement codec record write facts before any Store or
+Demo publication; refusals that carry rows or IDs are unproven, and no text or
+transport loss authorizes a resend. The partial-stop protection-cancel leg
+needs `plan_protection_cancel_leg_context`, carried on the child until its own
+engine follow-up PR merges after #1857 and #1873. Legacy inventory: one
+`trading.rs` site pruned; the rest serves the Hyro/option pipeline.

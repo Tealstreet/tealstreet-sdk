@@ -274,8 +274,9 @@ impl Harness {
         urls.sort_unstable();
         urls.dedup();
         assert_eq!(urls.len(), issued, "the reconcile read is issued once");
-        while self.has_request("/v5/order/realtime") {
-            self.respond("/v5/order/realtime", 200, empty);
+        let reads: Vec<RequestId> = self.requests.drain(..).map(|r| r.id).collect();
+        for read in reads {
+            self.reply(read, 200, empty);
         }
         assert!(
             self.requests.is_empty(),
