@@ -334,10 +334,15 @@ Contract:
       deletes it. The `lib.rs` STAGING_BOOTSTRAPS `sign_http` allowance stays
       until codex-cxxyqr's history Completion bridge removes the history
       callers.
-    - **Declared caller change:** an explicit 20 s raw bound. A hung create
-      now fails, logs and retries after the native 30 s backoff;
-      `a_hung_listen_key_create_fails_at_its_bound_and_retries` fails on the
-      legacy code.
+    - **Declared caller change:** an explicit 20 s raw bound. It matters for
+      keepalive: a hung create is already dropped by the native 10 s connect
+      watchdog, but a hung keepalive runs with no watchdog and previously
+      relied on the host default. It now fails at 20 s and the native 30 s
+      `RETRY_MS` PUT follows.
+      `a_hung_listen_key_keepalive_fails_at_its_bound_and_retries` fires
+      timers in real order and fails on the legacy code. Request bytes are
+      unchanged: same method, URL, `?listenKey=` query, the per-method
+      unsigned headers plus `X-BX-APIKEY`, and no signature.
   - **MEXC:** no session HTTP consumer. Rust MEXC authenticates its private
     socket with a signed WS `login` (confirmed by codex-ih35js), which is
     #1771/signer work.
