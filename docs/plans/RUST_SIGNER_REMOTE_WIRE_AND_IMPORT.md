@@ -350,6 +350,22 @@ leaves.
   end-to-end positive proof (the actual venue, both halves) before that
   family's in-venue signing is removed.
 
+**Proof scope ruling (claude-ddi2il, 2026-10-24).** The WASM host installs a
+hosted identity only for dispatch-signing-admitted families, so P8 proves:
+- the browser half on the native `hosted_signing` executor for every recipe
+  family, with server-side verification where a public key exists;
+- the WASM browser half for Aster only, once #1893/#1911 admit it.
+
+There is no hosted-only admission shortcut. Each remaining family's adoption
+PR carries its own WASM both-halves proof:
+
+| Family | Recipe ids | Adoption PR must prove in WASM |
+| --- | --- | --- |
+| Orderly | `orderly.rest.1` | REST orders and reads through `signOperation` and a keyless `RemoteSigner`, verified against the `ed25519:` key |
+| Paradex | `paradex.order.1` | orders and modifies, verified against the Stark public key; auth/JWT recipes added with the adoption |
+| Coinbase | `coinbase.restJwtEs256.1`, `coinbase.restJwtEd25519.1` | REST JWTs with `kid` bound to the account key name; no verification key, so venue rejection is the backstop |
+| Lighter | `lighter.tx.1` (follow-up, after #1866) | create, cancel and leverage with the engine `VenueCounter` nonce |
+
 **Source gates before schema freeze (codex-uufub4).**
 - `SignRequest.remote` is canonicalized against the actual `SignRequest`,
   binding operation count and order, algorithm, role, canonical payload and
