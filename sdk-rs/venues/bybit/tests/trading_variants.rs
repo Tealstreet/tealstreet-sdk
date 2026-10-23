@@ -3140,3 +3140,58 @@ fn managed_recv_window_resends_carry_the_venue_clock() {
         "mode-read retry uses the corrected clock"
     );
 }
+
+// Hyro H1 original REDs: non-placement Hyro commands run on the ordinary Plan path.
+
+/// H1a: a Hyro cancel is one admitted Plan call with its native window.
+#[test]
+fn hyro_cancel_runs_on_the_ordinary_plan_with_a_native_window() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 95, vec![order("BTCUSDT", 1.0)]);
+    created(&mut h, "plan-cancel");
+    h.command(Command::CancelOrders {
+        command: 96,
+        ids: vec!["plan-cancel".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    assert_eq!(cancel.timeout_ms, Some(20_000), "a managed Plan call");
+}
+
+/// H1b: a lost Hyro cancel reconciles with one fresh Hyro snapshot.
+#[test]
+fn a_lost_hyro_cancel_reconciles_with_a_fresh_snapshot() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 97, vec![order("BTCUSDT", 1.0)]);
+    created(&mut h, "lost-cancel");
+    h.command(Command::CancelOrders {
+        command: 98,
+        ids: vec!["lost-cancel".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    h.event(Event::HttpFailed {
+        request: cancel.id,
+        error: "connection reset",
+    });
+    assert!(
+        h.has_request("/v5/order/realtime"),
+        "the uncertain write is reconciled by a fresh order read"
+    );
+}
+
+/// H1c: host text that resembles a signature refusal never resends a write.
+#[test]
+fn hyro_cancel_is_never_resent_on_text_alone() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 99, vec![order("BTCUSDT", 1.0)]);
+    created(&mut h, "text-cancel");
+    h.command(Command::CancelOrders {
+        command: 100,
+        ids: vec!["text-cancel".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    h.event(Event::HttpFailed {
+        request: cancel.id,
+        error: "network lost; error sign",
+    });
+    assert!(!h.has_request("/v5/order/cancel"), "no write resend");
+}
