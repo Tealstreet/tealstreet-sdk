@@ -48,6 +48,12 @@ impl<P> Io<P> {
                 || !matches!(entry.state, State::Rejected | State::Spent)
         })
     }
+    /// Read-only: this exact command's genuine callback holds its issued root.
+    pub(super) fn entry_bound(&self, command: CommandId) -> bool {
+        self.command_entry
+            .as_ref()
+            .is_some_and(|entry| entry.command == command && entry.state == State::Bound)
+    }
     pub(super) fn entry_completed(&mut self, command: CommandId) {
         if let Some(entry) = &mut self.command_entry
             && entry.command == command
