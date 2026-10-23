@@ -341,3 +341,27 @@ Final composition must use the cleared, frozen #1945 successor's `stamp()`
 accessor. #1949 owns the one raw matching helper; fe7's separate Context expiry
 follow-up reuses it. Both reviewers still require that bounded composition
 review and fresh integrated CI before readiness.
+
+### Frozen successor and landing integration
+
+`04ce84ca72d` genuinely merges frozen #1945 `27a5c4541a9` into `db28bac1ee4`.
+The sole conflict keeps the one shared matching helper, now reading the incoming
+`Waits::stamp(entry.command)` accessor. uufub4 and fe7 cleared that composition:
+all unowned paths are exact incoming, and other own blobs are unchanged.
+
+The old landing's WEEX inventory made the first bans run fail against the moved
+base. `bf238746eb4` therefore genuinely merges landing `fade3aa0a41`; the only
+manual resolutions keep full incoming README/CALLERS plus the exact stack's
+own additions once. Every non-doc path equals the automatic merge. The lookup,
+Plan cap, preflight-call state and cap tests remain exact `04ce`; the captured
+preflight function is unchanged inside the automatic incoming initialization
+merge. uufub4 independently reproduced this tree and cleared preservation.
+Its exact tree is `4a7ba25385b0a0525e35bdbda5947bc255bf020a`.
+
+On that committed source, jobs 2: integration 10, custody 5, command-wait 18,
+preflight 38, Plan-filter 71 and feature-off command-wait 17 all pass. Strict
+engine all-target/all-feature Clippy passes. Bans and its scanner unit gates
+pass; neither a checker exemption nor an inventory re-key was introduced.
+These focused checks and source reviews do not replace fresh CI on the pushed
+head. The PR remains held for CI, freeze and the combo-5 owner window after
+#1945; Context expiry and execution-owned capped Plans are still excluded.

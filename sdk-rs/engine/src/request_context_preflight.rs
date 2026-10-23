@@ -55,6 +55,7 @@ impl ContextRegistry {
                 mutation_declared,
                 pending: 0,
                 deliveries: 0,
+                waits: 0,
                 intent: self
                     .dispatch
                     .filter(|(id, _)| *id == command)
