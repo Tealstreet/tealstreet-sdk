@@ -219,3 +219,7 @@ impl ContextRegistry {
         self.executions.observers.remove(&command);
     }
 }
+
+#[cfg(test)]
+#[path = "execution_plan_capacity_tests.rs"]
+mod plan_capacity_tests;
