@@ -433,13 +433,7 @@ impl<V: Venue> Engine<V> {
         let delivery = managed.delivery();
         error.outcome = Some(crate::Outcome::NotSent);
         if error.kind.is_none() {
-            error.kind = Some(match reason {
-                Error::TimedOut => ErrorKind::Timeout,
-                Error::Invalid | Error::Revoked | Error::Duplicate | Error::RetryForbidden => {
-                    ErrorKind::InvalidInput
-                }
-                _ => ErrorKind::Internal,
-            });
+            error.kind = Some(reason.kind());
         }
         if delivery.context.operation() == Operation::Mutation {
             let _ = self.io.request_contexts.result(
