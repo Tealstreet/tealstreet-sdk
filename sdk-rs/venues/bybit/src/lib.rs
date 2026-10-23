@@ -126,7 +126,7 @@ impl Rest {
 /// What to do with a response. Startup lists and klines stream in element by
 /// element (see `Cx::request_streamed`); their continuations collect the rows.
 pub enum Then {
-    Identity(CommandId),
+    Identity(safe_cex_engine::request_context::Context),
     Markets {
         prelaunch: bool,
         markets: Vec<Market>,
@@ -1894,7 +1894,11 @@ impl BybitLinear {
                 Err(error) => self.refresh_failed(cx, page, error),
             },
             Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
-            Then::Identity(command) => self.identity_response(cx, command, response),
+            Then::Identity(context) => {
+                let response =
+                    response.map_err(|error| VenueError::new(error).kind(ErrorKind::Internal));
+                self.identity_response(cx, context, response)
+            }
             Then::Markets {
                 prelaunch,
                 markets,
@@ -2296,6 +2300,7 @@ impl Venue for BybitLinear {
         match pending.then {
             Then::Ordinary(request) => self.on_ordinary_leg_failed(cx, request, error),
             Then::Candles(read) => Self::candles_failed(cx, read, error),
+            Then::Identity(context) => self.identity_response(cx, context, Err(error)),
             then => self.on_request_failed(
                 cx,
                 Pending {
@@ -2617,10 +2622,7 @@ impl Venue for BybitLinear {
         self.select_category(pending.category);
         match pending.then {
             Then::Trade(request) => self.on_trade_sign_failed(cx, request, error),
-            Then::Identity(command) => {
-                cx.command_error(command, error.message.clone());
-                cx.fail(command, error);
-            }
+            Then::Identity(context) => self.identity_response(cx, context, Err(error)),
             Then::History(request) => self.on_history_sign_failed(cx, request, error),
             Then::Closed(request) => self.on_closed_sign_failed(cx, request, error),
             Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
@@ -2711,8 +2713,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Command::FetchAccount { command } = command {
-            self.fetch_identity(cx, command);
+        // The engine binds the command when the read is admitted.
+        if let Command::FetchAccount { command: _ } = command {
+            self.fetch_identity(cx);
             return;
         }
         let symbol = match &command {

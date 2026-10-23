@@ -368,15 +368,11 @@
     "ae3209100adb7617d3a60abc05d13961f6b17901cc02551743ff77b75e18b37f": 1,
     "f1edadfdd7da1ed138abfcb6a0a6da4fb2235a4cd588d30793b998914d8cc716": 1
   },
-  "venues/bybit/src/identity.rs": {
-    "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-  },
   "venues/bybit/src/lib.rs": {
     "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1,
     "6d6c3e7f4e63a2f043d5e8d216388f39ade0f48db923dec3dbac2d1f89556920": 1,
     "6de483fa835aa8c705e0cd492cc37d91cb6e031be4d73cf99b79700e59901eaf": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 2
+    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
   "venues/bybit/src/options.rs": {
     "03c7a5a6e5689cdbfef80ea5263426426fe06e75a674bc8d6e792d93873046a9": 1,
@@ -390,10 +386,6 @@
   "venues/bybit/src/refresh.rs": {
     "a097b2dcc40a7542befa0a5ceaf29569dbc01948149d25f72752764e20815d30": 1,
     "b7e0fc57635f067f2cb8fb52afb9945f984181d9ff16de74d2a6875baa237b8b": 3
-  },
-  "venues/bybit/src/secondary_tests.rs": {
-    "a7617729d0072e07db5e1edc2bf4b86e1d54554bc3aec103d0fe92dc960281e4": 1,
-    "f758cbc2754c2b39d2f81d56901f6920f66dcc953a7fe7faa9b5c8f2a5b46c90": 1
   },
   "venues/bybit/src/trading.rs": {
     "1d4f5e56d9b1a40a5628d8df7c7fc07f610f0348cee56f6ae2aaee864a6fc9b1": 2,

@@ -5880,3 +5880,11 @@ No other venue inventory, shared checker, allowance or signer source changes.
 | The reconcile read after an uncertain or absent-order write | Always a fresh read; an older snapshot still in flight is abandoned (its late pages are ignored) instead of joined, so the fence clears only on rows read after the write | An order row may stay until that fresh read lands. |
 | Signed snapshot reads after a signature/timestamp refusal | Re-read once, only on a native `10002`/`10004` (no text match) | None. |
 
+### Bybit account identity on managed authority (slice 3)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `fetchAccount` is a signed command read with a 20 s window, signed with the read key when configured | `timeout` when it expires; a late answer is ignored | None. |
+| Refusals before any request (invalid options, invalid read key, no primary key) | Typed `NotSent`: `invalidInput`, `invalidInput`, `authInvalid`; texts unchanged (was untyped) | Branch on `kind`. |
+| A signature/timestamp refusal | Re-read once only on a native `10002`/`10004`; text never re-reads | None. |
+

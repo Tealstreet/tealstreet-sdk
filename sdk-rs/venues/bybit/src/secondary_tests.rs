@@ -61,13 +61,13 @@ fn secondary_get_keeps_primary_mutations() {
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
     assert_eq!(requests.len(), 4);
-    for request in requests {
-        let expected = if request.method == Method::Get {
+    for sent in requests {
+        let expected = if sent.method == Method::Get {
             "read-key"
         } else {
             "primary-key"
         };
-        let secret = if request.method == Method::Get {
+        let secret = if sent.method == Method::Get {
             READ_SECRET
         } else {
             PRIMARY_SECRET
@@ -78,21 +78,20 @@ fn secondary_get_keeps_primary_mutations() {
         }
         .headers(
             1700000001234.0,
-            if request.method == Method::Get {
-                request.url.split_once('?').unwrap().1
+            if sent.method == Method::Get {
+                sent.url.split_once('?').unwrap().1
             } else {
-                request.body.as_deref().unwrap()
+                sent.body.as_deref().unwrap()
             },
         );
-        assert_eq!(request.headers, expected_headers);
+        assert_eq!(sent.headers, expected_headers);
         assert!(
-            request
-                .headers
+            sent.headers
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case("X-BAPI-API-KEY")
                     && value == expected),
             "{:?}",
-            request
+            sent
         );
     }
 }

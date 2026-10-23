@@ -161,6 +161,28 @@ fn prepare_parked(engine: &mut Engine<BybitLinear>, now: f64) -> Vec<Action> {
     rest.extend(engine.drain_actions());
     rest
 }
+/// Claim every bound request after a parked preparation (prepared outside
+/// the immediate fixture driver), as the host would.
+fn release_bound(engine: &mut Engine<BybitLinear>, now: f64) -> Vec<Action> {
+    use safe_cex_engine::request_context::{Claim, HttpAction};
+    let mut out = Vec::new();
+    for action in engine.drain_actions().collect::<Vec<_>>() {
+        match action {
+            Action::ManagedHttp(managed) => {
+                if let HttpAction::Bind {
+                    permit, request, ..
+                } = *managed
+                    && let Ok(Claim::Released(_)) = engine.claim_http(now, permit)
+                {
+                    out.push(Action::Http(request));
+                }
+            }
+            action => out.push(action),
+        }
+    }
+    out.extend(engine.drain_actions());
+    out
+}
 /// Ordinary writes and mode reads are managed: drive Prepare/Bind/Claim.
 fn managed(engine: &mut Engine<BybitLinear>, now: f64) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(engine, now)
@@ -250,11 +272,9 @@ fn expired_provider_result_is_reprepared_and_late_attempt_cannot_publish() {
     let (mut engine, gate) = engine(options(Variant::Linear, true, Some(500)));
     // A rare read before startup is valid and avoids unrelated account traffic.
     gate.mode.store(1, Ordering::SeqCst);
-    let (old, old_work) = work(command(
-        &mut engine,
-        1000.,
-        Command::FetchAccount { command: 42 },
-    ));
+    // Identity is a managed read whose signing the provider parks.
+    engine.handle(1000., Event::Command(Command::FetchAccount { command: 42 }));
+    let (old, old_work) = work(prepare_parked(&mut engine, 1000.));
     assert_eq!(old_work.receipt.stamp_ms, Some(1000.));
     assert!(!format!("{old_work:?}").contains("read-secret"));
     let old_result = gate.local.sign_ready(&old_work).unwrap().unwrap();
@@ -265,7 +285,7 @@ fn expired_provider_result_is_reprepared_and_late_attempt_cannot_publish() {
             result: Ok(old_result.clone()),
         },
     );
-    let (fresh, fresh_work) = work(engine.drain_actions().collect());
+    let (fresh, fresh_work) = work(prepare_parked(&mut engine, 1600.));
     assert_ne!(old, fresh);
     assert_eq!(fresh_work.receipt.stamp_ms, Some(1600.));
     engine.handle(
@@ -284,8 +304,8 @@ fn expired_provider_result_is_reprepared_and_late_attempt_cannot_publish() {
             result: Ok(result),
         },
     );
-    let requests: Vec<_> = engine
-        .drain_actions()
+    let requests: Vec<_> = release_bound(&mut engine, 1602.)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -318,7 +338,13 @@ fn provider_refusal_invalid_presentation_and_timeout_are_owned_not_sent_reads() 
             } else {
                 Command::FetchAccount { command: 42 }
             };
-            let mut actions = command(&mut engine, 1000., cmd);
+            let mut actions = if mode == 1 && !query {
+                // Identity is managed: its parked signing stays with the provider.
+                engine.handle(1000., Event::Command(cmd));
+                prepare_parked(&mut engine, 1000.)
+            } else {
+                command(&mut engine, 1000., cmd)
+            };
             if mode == 1 {
                 let timer = actions
                     .iter()
