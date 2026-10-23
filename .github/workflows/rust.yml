@@ -65,7 +65,7 @@ jobs:
   native:
     name: Rust / native ${{ matrix.check }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +77,11 @@ jobs:
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
             command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark --lib signer::'
+          # Workspace resolution unifies family features. Exercise each
+          # standalone engine closure, including both Plan configurations.
+          - check: engine-feature-modes
+            timeout: 90
+            command: python3 scripts/test-http-plan-feature-modes.py
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -89,6 +94,10 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-${{ matrix.check }}-
       - name: Install pinned toolchain
         run: rustup show
+      - uses: actions/setup-node@v4
+        if: matrix.check == 'engine-feature-modes'
+        with:
+          node-version: 22
       - name: Run ${{ matrix.check }}
         run: ${{ matrix.command }}
 
