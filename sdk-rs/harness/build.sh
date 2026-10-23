@@ -33,9 +33,10 @@ family_args() {
   esac
   build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family")
   # Use size defaults unless measured CPU margin requires speed defaults.
-  # Aster, KuCoin Spot and WOO retain speed defaults after measured margin misses.
+  # KuCoin Spot and WOO retain speed defaults after measured margin misses. Aster
+  # takes size defaults since dispatch signing, with its venue crate at speed below.
   # CI-only Bitget throughput measurement; adoption requires separate evidence review.
-  if [[ $family != asterdex && $family != kucoinspot && $family != woo && $family != bitget ]]; then
+  if [[ $family != kucoinspot && $family != woo && $family != bitget ]]; then
     build_args+=("${wasm_profile_args[@]}")
   fi
   if [[ $family == asterdex ]]; then
