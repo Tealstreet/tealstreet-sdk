@@ -95,6 +95,12 @@ the query fails through the root. Then the native body checks run unchanged:
 - Envelope/HTTP status failure goes to `query_failed`.
 - The cursor is followed, with `seen` dedup and `MAX_PAGES` 1000.
 
+Each delivered, failed or discarded page retires its own leg with
+`finish_http_context(&leg)` before the next dequeue. This also covers a
+40085-discarded page and a page about to be retried. A child never gets
+`done_context`/`fail_context`, because those settle the command. Only the
+root carries the logical terminal, which revokes any remaining child.
+
 **Native geometry is kept exactly:**
 
 - 30-day oldest-first windows, at most 1000;
