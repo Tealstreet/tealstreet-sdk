@@ -379,13 +379,16 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
 - **Weight.** A streamed page reserves 120 weight at dequeue against the shared
   1000/minute account read budget, then settles to `20 + ceil(rows/20)` on
   response: `history_weight` releases 100 of the 120-weight reservation and
-  then adds `ceil(rows/20)`. An uncontended walk is therefore about 7-8 pages a minute.
-- **Duration.** A 200-page fills walk is about 25+ minutes, and combined
-  income (up to 400 pages, because `restart_stage` resets the page budget) is
-  about 50+ minutes. Any default or configured caller wait shorter than that
-  ends the walk at root expiry, as a strict Timeout failure with no rows.
-  CALLERS documents this. The overseer ruled not to refuse multi-page and not
-  to shrink geometry.
+  then adds `ceil(rows/20)`. A full2000-row fills page settles120; a full
+  500-row funding page settles45. Reservation headroom, response latency and
+  other Account FIFO work determine actual throughput; one universal pages/minute
+  or whole-walk duration estimate would be incorrect.
+- **Duration.** Combined income retains up to400 pages because `restart_stage`
+  resets the200-page budget. Any caller deadline reached before the native walk
+  completes ends strictly with no rows. The default120s is not a promise that
+  every retained page fits. The overseer ruled not to shrink native geometry.
+  CALLERS must also name derived historical positions (`PositionHistory::FillsSymbol`),
+  which rejects on root expiry rather than folding an accepted prefix.
 
 ### Bridge and terminals
 
@@ -406,15 +409,17 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
   - **Root expiry** (parked, in flight, or on the last page) belongs to the
     engine funnel: one strict Timeout with outcome None, and no rows, marker or
     native finalizer. Hyperliquid owns no root timer and no root map.
-    - The venue's failure callbacks still receive their `Pending`, but every
-      terminal attempt through the expired root is inert.
-    - Hyperliquid implements `read_root_retired(owner)` with no Cx. It drops
-      that owner's queued `ReadContinuation::History` entries from
-      `account.reads`, and only those.
+    - The engine discards managed requests and returns their pendings directly
+      to `read_root_retired(owner, Vec<Pending>)`, without normal failure callbacks.
+      Hyperliquid drops them and only that exact owner's queued
+      `ReadContinuation::History` entries from `account.reads`. The hook has no Cx
+      and grants no terminal, send, weight settlement or Store authority.
   - **A leg-only timeout with the root live** stays an ordinary page failure,
     with accepted-only recovery.
 - **Lookup.** The REST client-ID lookup completes through `done_context` or
-  `fail_context` on its root, not numeric `done`/`fail`.
+  `fail_context` on its root, not numeric `done`/`fail`. This preserves native
+  untyped lookup-codec errors instead of adding ReadCompletion's Internal default;
+  typed core causes and metadata remain typed without message inference.
 - **No-I/O branches.** Missing identity, an invalid range and an unknown
   public-trades market fail through `fail_context` on the admitted root. The
   standalone-spot branches already use the legacy `Completion` and are out of
@@ -429,7 +434,7 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
      callback can mint a leg because outside an entry
      `entry_context_allowed` is true and minting needs no delivery. Every
      refusal ends the query strictly through its own owner's `reject`, never
-     `finish_with`, so a preparation or policy refusal can never publish an
+     `finish_with`, so a synchronous child/queue-issuance refusal cannot publish an
      accepted prefix. No weight is charged and no Prepare is emitted.
      - An expired root never reaches this point: the engine sweep retires it
        first and the hook removes its queue entry.
@@ -440,12 +445,18 @@ on frozen #1945 `15df705c0b5`, which supplies `Cx::command_wait`.
 
      A `request_managed_with_headers` refusal returns its `Pending` and takes
      the same strict route with `error.venue_error()`.
-  2. It then charges weight and sends with
-     `request_managed_with_headers(leg, POST /info, Content-Type: application/json)`,
-     plus `stream_response(ArrayAt::Root)` for streamed kinds.
+  2. Submit with `request_managed_with_headers(leg, POST /info,
+     Content-Type: application/json)`, charging native reservation weight only
+     after Ok; a synchronous Err retains no reservation. Streamed kinds retain
+     `stream_response(ArrayAt::Root)`.
+- **Typed callbacks.** History gets its own `on_sign_error`/`on_http_failed`
+  branches. Asynchronous route/preparation/transport failures with a live root
+  retain native accepted-only recovery and their typed cause/metadata; a leg-only
+  Timeout is not string-demoted to Internal. Public Auth* failures add no private
+  auth evidence. These are distinct from strict synchronous issuance refusal.
 - **Wake-ups.** The read timer path issues children through the same public
-  APIs. Expired queued history is pruned through its own owner's `reject`,
-  never a codec or numeric completion.
+  APIs. Engine expiry removes queued work through exact-owner cleanup, never a
+  codec, numeric completion or venue root timer.
 - **Unchanged.** The Account branch, its weights, the FIFO order and the
   shared budget are unchanged.
 
@@ -558,8 +569,8 @@ occurrences, six numeric terminals plus five conservative macro matches:
 | `3df680cd1e2f4c54c571665d0801de18a9503305bd36f985f4e874ddca464ab3` | 1 | Missing identity refusal; original root typed failure. |
 | `ad251e5c58e1d420c73ffe2316dc86c18d35f699fb86b25eba7ff188a9594df4` | 1 | Invalid range refusal; original root typed failure. |
 | `a8154036fb27748faf81b7747c40e8362162b5271d8c5979eba20d6b8d766ef0` | 1 | Unknown public market; original root typed failure. |
-| `e6b5e06ea1d1144f3419909a5caa2040fb5042168a325cc09e7997675f738e62` | 1 | Lookup success; original ReadCompletion. |
-| `180d8a106dd44bf339fbb2be6079affef61e703e71477572a5b804ffa76b1c0b` | 2 | Lookup parse/transport failures; original ReadCompletion. |
+| `e6b5e06ea1d1144f3419909a5caa2040fb5042168a325cc09e7997675f738e62` | 1 | Lookup success; original root done_context. |
+| `180d8a106dd44bf339fbb2be6079affef61e703e71477572a5b804ffa76b1c0b` | 2 | Lookup parse/transport failures; original root fail_context. |
 | `b1854c6f5b64c99469571ff9e2f7e1da0c69bf23768ad9537e12567cf7473aa9` | 2 | Ranged-kind macro in builder/response; same native predicate on managed continuation. |
 | `4a595f0e8169456b0ddf61d405d836b0cd131fe7329ad6aadc94049f9a2e37d9` | 1 | Fill aggregateByTime macro; preserve false and native body. |
 | `7658b4ae003384019ae0454fa74a2ca07a7379da26a0c633e0e088ef98db9a4e` | 1 | Inclusive-progress cursor formatting; preserve timestamp/seen identity. |
@@ -595,3 +606,11 @@ completion algorithm is introduced. All three independent reviews precede any
 production readiness claim. The older-base ratchet currently reports incoming
 foreign prunes; dependency/current-landing integration must resolve provenance
 without editing those maps. Scope here is committed plan plus original REDs.
+
+Plan review corrections: stage-specific weight facts replace universal duration
+estimates; exact cleanup-only hook and synchronous reservation handling are
+explicit. Lookup uses direct Context terminals to preserve native untyped codec
+errors. Typed History route/transport failures and derived positions are named.
+Frozen #1945 448567a690c is genuinely integrated at57f9e380dd9, with README and
+CALLERS incoming-first keep-both resolutions only; ce54 source remains the locally
+authorized reviewed API, pending its eventual frozen/actual integration.
