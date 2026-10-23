@@ -296,3 +296,12 @@ last-safe whole-child-range refusal/one-child success controls. Both independent
 reviews and focused engine/native/reference gates must pass before refreezing.
 The former076 head/evidence remain historical; only socket1771 is authorized to
 consume the new reviewed freeze, and actual1784 is still ahead in merge order.
+
+The actual1783 adaptation passes561 all-feature engine controls and1,040 focused
+engine/native/Binance all-target tests. Strict touched-crate all-target Clippy,
+fmt, diff and full bans pass. Both independent final source/adversarial and
+complete-tree preservation reviews are CLEAR. The only incoming doc conflict
+retains the complete incoming CALLERS first and prior own section once; new
+replacement behavior is described solely in the own SafeIDs section. Two
+redundant test-fixture u64 conversions were removed without changing assertions.
+No journal, body-proof, release, timer or venue signing policy changed.

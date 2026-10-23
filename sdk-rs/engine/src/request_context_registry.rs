@@ -166,7 +166,7 @@ impl ContextRegistry {
         &mut self,
         parent: &Context,
         delivery: &Delivery,
-        first: u32,
+        first: u64,
         policies: &[Policy],
         now: f64,
     ) -> Result<Vec<Context>, Error> {
@@ -183,7 +183,9 @@ impl ContextRegistry {
         }
         if policies.len() > CAPACITY
             || first == 0
-            || first.checked_add(policies.len() as u32).is_none()
+            || first
+                .checked_add(policies.len() as u64)
+                .is_none_or(|end| end > crate::resource_ids::MAX_RESOURCE_ID + 1)
             || self
                 .contexts
                 .values()
@@ -216,7 +218,7 @@ impl ContextRegistry {
             {
                 return Err(Error::Invalid);
             }
-            let leg = u64::from(first + index as u32);
+            let leg = first + index as u64;
             if self.contexts.contains_key(&leg) {
                 return Err(Error::Duplicate);
             }
@@ -554,15 +556,13 @@ impl<P> Cx<'_, P> {
             return Err(Error::Capacity);
         }
         let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?.clone();
-        let first = self.io.next_id;
-        let next = first
-            .checked_add(policies.len() as u32)
-            .ok_or(Error::Capacity)?;
-        if first == 0 {
-            return Err(Error::Capacity);
-        }
+        // Reserve the complete child range before registry/journal mutation.
         // Failed admission may leave monotonic gaps, never reused identities.
-        self.io.next_id = next;
+        let first = self
+            .io
+            .reserve_ids(policies.len() as u64)
+            .ok_or(Error::Capacity)?
+            .start;
         self.io
             .request_contexts
             .replace(parent, &delivery, first, policies, self.now)
