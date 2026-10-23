@@ -6,7 +6,9 @@ native settings revision; shared observations apply to its background settings
 proposals and Store write fences, not query coalescing. The earlier design and
 checkpoint sections below describe the original two-adapter scope; this current
 boundary and the Plan/execution continuation supersede its WEEX query-cutover
-claims. BingX joined Plan adoption waits for the reviewed composition source.
+claims. BingX joined Plan adoption consumes the reviewed composition source
+under the production contract below; the legacy query path still remains at
+this checkpoint.
 
 Owner assignment: architecture audit §G, rank 13. Start from actual
 `ecc84a798163c9f61ea9439e90001a98bb07b907`; retain the later decision-only merge
@@ -572,3 +574,101 @@ Independent rerun of the refined test tree reports 75 account tests passing and
 three intended assertion failures: these two command-owner capacity controls
 plus the original managed-Prepare RED. Source/adversarial review is CLEAR; the
 only follow-up is a fixture comment explaining why native startup I/O is omitted.
+
+
+## Managed metadata production contract
+
+The frozen composition is #1919 `c5d73d6c5a5` (reviewed source
+`3f02db74335`), now integrated alongside actual #1873 and actual #1888
+`c55a6a76044`. The constructor and observer contract above are available on
+this reviewed stack, not yet claimed as landed. Consume native BingX #1884
+`60f51b0c228` through its owner's agreed conflict disposition before source
+conversion. Preserve the actual Store ticker-index implementation verbatim.
+
+### One subject definition and a complete work key
+
+Name the configured namespace `CredentialSubject::ConfiguredPrimary`, not
+`AccountSubject`: credential decision C2 reserves the latter for a future
+venue-resolved identity. The configured subject contains the immutable primary
+presentation/signing references, optional passphrase reference, and stable_id
+when present. No fetched UID or key hash is inferred. Absence of stable_id does
+not disable joining on equal configured references. Credential rotation creates
+a new engine; there is no mutable identity generation in this adapter.
+
+The complete typed key separately retains normalized symbol, configured primary
+subject, selected `CredentialSlot` and selected signing Identity references,
+`RoutingIntent`, `Operation::Read`, metadata read kind, native instrument and
+native-work/profile/bound identity, publication policy, and fallback policy.
+Secondary reads therefore share the primary account namespace without joining
+primary-slot work. Reuse the engine's slot and intent types. Credential C2's
+future resolved-account selection gate remains outside this configured type.
+
+Use full equality in one bounded Store metadata work index. A linear collection
+bounded by the existing 256-attempt limit avoids adding Hash implementations or
+encoding credential references into an execution tag. The index retains only a
+full key, freshness token and shared ExecutionHandle, never numeric waiters,
+observer lists, its own timers or terminal authority. The engine group key is
+limited to 128 bytes; the proposal is a closed metadata projection tag while
+full typed-key equality selects the handle. Confirm that tag contract with the
+group owner before implementation; do not widen the limit or hash credentials.
+
+### Entry, admission and supersession
+
+Pure key/market inspection grants no refusal or publication right. A live
+same-key handle may be checked with `validate_http_context` as an advisory
+read-only check. In the same callback, admit the follower's genuine Read root
+with the native 80-second bound and join through `join_execution`. That join
+is authoritative. A join refusal fails that same root through `fail_context`;
+never remint Preflight or start another execution after spending the entry loan.
+
+A founder calls genuine ReadOnly `begin_preflight` before missing-key or
+unknown-market refusal, then calls `begin_planned_execution` once. Do not call
+separate `admit_plan`. Capacity/refusal must preserve the original command-owner
+REDs' exact typed error, including no write outcome for Read admission failure.
+
+Check Store space without mutation before admission. Only after Plan admission
+succeeds create/bind its freshness token and work-index entry, before any native
+request. A failure to bind retires that exact admitted Plan without I/O or a
+stray index entry. Failed Plan admission cannot supersede an older read. A new
+admitted different-key read for the same symbol, including return-only, does
+supersede older publication. Retiring it cannot revive an older token. A read
+issued during a pending write remains permanently nonpublishing even after the
+write finishes. Distinguish current-token lookup from publication eligibility
+so valid return-only work can still coalesce.
+
+### Direct completion cutover and native handoff
+
+Remove the metadata core's numeric waiter vector, Joined admission variant and
+Completion::finish numeric fan-out in the same conversion. Store resolves a
+validated proposal into publication status and a native value/error only.
+Shared Plan sealing projects the uniform result once to its actual observers;
+there is no second completion owner. Adapt core publication-only tests, keeping
+actual native joined-caller result/failure assertions and all original entry
+RED test bodies unchanged.
+
+At the #1884 handoff retain native STEPS/READ bounds, selected read slot,
+request_signed_managed recipe, one signature re-sign, exact Plan Slot/Context,
+finish_plan_call, early done_read_plan_after_data, and positions_revision fences.
+Only the constructor/handoff and metadata eligibility/publication seams change.
+Replace legacy Request::Metadata/token response and typed failure arms with the
+incoming Pending::Metadata owner. Preserve supplied provider errors unchanged,
+no authentication inference, and pending-write retirement on every native exit.
+Move the existing typed-provider/auth controls onto the real managed owner when
+their old manual Request fixture disappears; do not drop the coverage.
+
+Validate exact Plan delivery before decode or Store effects. On validated final
+publication, resolve the complete proposal and apply the infallible native
+positions fence before Plan seal in the same callback. On stale DATA retain the
+native current-settings fallback and discard the superseded margin before
+parsing. On seal remove the exact token/key entry. Since expiry/orphan retirement
+need not enter a venue callback, prune invalid handles before a subsequent entry;
+never reuse a dead handle or leave bounded attempt storage permanently occupied.
+
+Before readiness, execute full-key separation controls and a two-step real
+Read Plan/retry with founder/follower detach and expiry. Founder detach between
+first DATA and second issue must preserve work for a live peer; all-detach must
+prevent that issue and reject a current-token reply before codec. Pin newer
+return-only supersession, token change during re-sign, exact slot/Attempt
+custody, stale-index retirement, native 20/40/80-second bounds and all three
+original REDs turning GREEN. Retire the BingX inventory rehash through this
+managed conversion only; no new exemption or STAGING edit is permitted.
