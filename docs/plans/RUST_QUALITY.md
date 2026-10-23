@@ -520,3 +520,14 @@ bounded duplicate replacement after eviction, two/four candidate requests,
 signature reset, concurrent owners and persistent live cache. Native endpoint
 selection/upsert facts remain local; no new owner/pager/marker policy or shared
 signing-provenance implementation is copied into the venue.
+
+## KuCoin Spot discovery lifecycle regressions
+
+Managed discovery regressions cover keyed/keyless unsigned header preparation,
+unreleased identity rejection, original deadline expiry, ticker-only recovery,
+unchanged native envelopes and duplicate suppression. A fixed-clock capacity probe
+drives 270 terminal attempts separately through each of six response/failure routes,
+so 20-second expiry cannot conceal missing retirement. Native startup/valuation,
+broker, secondary identity and socket-policy assertions retain their original
+payloads, using the shared prepared transport fixture. The real WASM boundary
+fixture explicitly supplies that same existing test transport preparation contract.

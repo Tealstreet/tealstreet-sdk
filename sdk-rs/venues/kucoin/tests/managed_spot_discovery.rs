@@ -216,90 +216,94 @@ fn parked_ticker_expiry_retries_only_tickers_and_keeps_catalogue() {
 #[test]
 fn discovery_terminal_paths_release_capacity_before_native_retry() {
     use safe_cex_engine::request_context::{Claim, Prepared};
-    let mut e = engine(false);
-    let mut now = 100.;
-    e.start(now);
-    for attempt in 0..300 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
-        let token = prepare(&actions);
-        if attempt % 6 == 0 {
-            e.http_preparation_failed(
-                now,
-                token,
-                Error::Invalid,
-                VenueError::new("fixture refusal"),
-            );
-        } else {
-            e.http_prepared(
-                now,
-                token,
-                Prepared {
-                    id: token.attempt().request.0,
-                    expires_at: None,
-                },
-            );
-            let permit = e
+    // Fire each recorded retry at one fixed clock only in this capacity probe:
+    // expiry must not hide a missing terminal retirement. Timing has separate tests.
+    for mode in 0..6 {
+        let mut e = engine(false);
+        let now = 100.;
+        e.start(now);
+        for _ in 0..270 {
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            let token = prepare(&actions);
+            if mode == 0 {
+                e.http_preparation_failed(
+                    now,
+                    token,
+                    Error::Invalid,
+                    VenueError::new("fixture refusal"),
+                );
+            } else {
+                e.http_prepared(
+                    now,
+                    token,
+                    Prepared {
+                        id: token.attempt().request.0,
+                        expires_at: None,
+                    },
+                );
+                let permit = e
+                    .drain_actions()
+                    .find_map(|a| match a {
+                        Action::ManagedHttp(a) => match *a {
+                            HttpAction::Bind { permit, .. } => Some(permit),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .unwrap();
+                assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
+                e.drain_actions().for_each(drop);
+                match mode {
+                    1 => reply(
+                        &mut e,
+                        now,
+                        token.attempt().request,
+                        r#"{"code":"200000","data":[]}"#,
+                    ),
+                    2 => reply(
+                        &mut e,
+                        now,
+                        token.attempt().request,
+                        r#"{"code":"200000","data":{}}"#,
+                    ),
+                    3 => reply(
+                        &mut e,
+                        now,
+                        token.attempt().request,
+                        r#"{"code":"200000","data":["#,
+                    ),
+                    4 => reply(
+                        &mut e,
+                        now,
+                        token.attempt().request,
+                        r#"{"code":"400100","msg":"fixture rejection"}"#,
+                    ),
+                    _ => e.handle(
+                        now,
+                        Event::HttpFailed {
+                            request: token.attempt().request,
+                            error: "fixture transport failure",
+                        },
+                    ),
+                }
+            }
+            assert!(!e.store().loaded().markets);
+            let (timer, at) = e
                 .drain_actions()
                 .find_map(|a| match a {
-                    Action::ManagedHttp(a) => match *a {
-                        HttpAction::Bind { permit, .. } => Some(permit),
-                        _ => None,
-                    },
+                    Action::SetTimer { timer, at_ms } if at_ms > now && at_ms < now + 40_000. => {
+                        Some((timer, at_ms))
+                    }
                     _ => None,
                 })
-                .unwrap();
-            assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
-            e.drain_actions().for_each(drop);
-            match attempt % 6 {
-                1 => reply(
-                    &mut e,
-                    now,
-                    token.attempt().request,
-                    r#"{"code":"200000","data":[]}"#,
-                ),
-                2 => reply(
-                    &mut e,
-                    now,
-                    token.attempt().request,
-                    r#"{"code":"200000","data":{}}"#,
-                ),
-                3 => reply(
-                    &mut e,
-                    now,
-                    token.attempt().request,
-                    r#"{"code":"200000","data":["#,
-                ),
-                4 => reply(
-                    &mut e,
-                    now,
-                    token.attempt().request,
-                    r#"{"code":"400100","msg":"fixture rejection"}"#,
-                ),
-                _ => e.handle(
-                    now,
-                    Event::HttpFailed {
-                        request: token.attempt().request,
-                        error: "fixture transport failure",
-                    },
-                ),
-            }
+                .expect("every terminal callback preserves native discovery recovery");
+            assert!(at > now);
+            e.handle(now, Event::TimerFired { timer });
         }
-        assert!(!e.store().loaded().markets);
-        let (timer, at) = e
-            .drain_actions()
-            .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if at_ms > now && at_ms < now + 40_000. => {
-                    Some((timer, at_ms))
-                }
-                _ => None,
-            })
-            .expect("every terminal callback preserves native discovery recovery");
-        now = at;
-        e.handle(now, Event::TimerFired { timer });
+        let markets = released(&mut e, now, "/api/v2/symbols");
+        reply(&mut e, now, markets.id, MARKETS);
+        let tickers = released(&mut e, now, "/api/v1/market/allTickers");
+        reply(&mut e, now, tickers.id, TICKERS);
+        assert!(e.store().loaded().markets && e.store().loaded().tickers);
     }
-    let markets = released(&mut e, now, "/api/v2/symbols");
-    reply(&mut e, now, markets.id, MARKETS);
-    let tickers = released(&mut e, now, "/api/v1/market/allTickers");
-    reply(&mut e, now, tickers.id, TICKERS);
-    assert!(e.store().loaded().markets && e.store().loaded().tickers);
 }
