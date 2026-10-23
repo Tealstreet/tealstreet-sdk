@@ -6080,3 +6080,31 @@ Native and SDK controls are passing; actual-WASM hosted/native-login tests and
 full CI/replay proof are pending. This section describes the proposed contract,
 not a landed or live-capture claim. [Family plan](RUST_OKX_DISPATCH_SIGNER.md),
 [landed shared presentation](RUST_HOSTED_SIGNER_PRESENTATION.md).
+
+### OKX caller adoption: leverage, config read and trade entry (slice 1)
+
+This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_ADOPTION.md).
+
+- **`fetchLeverage`** is admitted as one command Read before any refusal. It
+  then sends one managed signed GET using the read key when configured, else
+  the primary key. An unanswered read fails once with kind `timeout` at the
+  shared 20 s deadline. A late reply publishes no leverage and adds no second
+  terminal. More than 256 outstanding managed reads give one typed capacity
+  failure before any HTTP; an answered read frees capacity. Provider refusal
+  stays one `notSent` failure.
+- **The startup config read** is a Background managed Read with no retry. An
+  unanswered read ends at the shared 20 s deadline and enters OKX's existing
+  startup backoff, so it is re-sent one jittered backoff step later. It no
+  longer stays in flight forever. 50113 counting, documented key rejections
+  and the 30 s configured poll are unchanged.
+- **Refusals are unchanged.** `unknown market`, `OKX leverage requires
+  credentials`, `Only cross mode is supported`, `OKX account is not ready` and
+  planning `invalidInput` refusals keep their text, kind and outcome. The
+  trade refusals stay `notSent` through a terminal-only Mutation owner and
+  leave no order lock behind. A duplicate active command ID is refused by the
+  engine before OKX sees it, so OKX's own "command is already running" text is
+  gone.
+- Both reads now emit `ManagedHttp` preparation, as Binance, BingX and WEEX
+  already do. The demo `x-simulated-trading: 1` header comes from the
+  recipe's unsigned-header declaration. Writes, history, candles and socket
+  login are unchanged.
