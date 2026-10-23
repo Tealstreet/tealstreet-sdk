@@ -339,3 +339,17 @@ Current actual+authorized-stack request inventory is32F/35O (account3/3,
 history5/8, identity3/3, income2/2, lib15/15, trading4/4); signing is14F/14O in
 lib.rs. Independent refreshed-plan source/caller/full-map reviews CLEAR before
 additional existing-API REDs. Production source is still unchanged.
+
+Resumed test-only checkpoint `17b9ee461cb` executes22native tests:6GREEN and
+16 intended assertion REDs (10 original provider-bypass REDs plus6 new release/
+aggregation REDs),0ignored, on unchanged stacked production. Strict target
+Clippy passes. New MAX/calibrated suffixes forbid early active-list reads,
+exercise a genuine early host timer/rearm and require actual repair at the
+maximum raw bound plus5000. They remain honestly unexecuted behind initial
+provider bypass/missing release assertions until implementation. The one
+set_signer-after-startup fixture error was corrected and excluded from proof.
+Probe delegates every relevant native guard/socket/release hook. Source and
+caller rechecks CLEAR after adding native guard delegation and early-repair
+negative controls. Actual `6c7f4fcf292` was then genuinely plain-merged in
+`12f16c0e85c`, preserving tests/Phemex source and automatic core composition;
+the same22test run again produces6GREEN/16 intendedRED/0ignored.
