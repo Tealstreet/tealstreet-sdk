@@ -209,3 +209,11 @@ working control. Existing signing (82), HTTP lifecycle (122) and request-context
 All ten controls and strict engine all-target Clippy also pass with the optional
 Plan/socket/order-lock features off. Runtime source and consumer review and
 fresh exact-head CI remain separate gates.
+
+Classifier/lifecycle source review of `6d4efa7d46b` is CLEAR. The accepted
+hardening delta is explicit: positive protocol remaining time whose raw addition
+rounds back to the release time now refuses with Invalid, instead of releasing
+with a non-advancing expiry. The shared projector control pins this extreme
+floating-point case. Managed lifecycle cap and stale/timeout precedence remain
+unchanged. Venue inventory drift is integrated through actual `f3248164ec8`;
+no manifest allowance is added or manually refreshed.
