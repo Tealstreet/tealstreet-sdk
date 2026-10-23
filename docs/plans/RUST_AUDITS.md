@@ -2439,3 +2439,12 @@ No venue owner registry, finalizer wrapper or credential/routing substitute is
 introduced. Three defensive guards are migrated without an unreachable native
 original-RED claim; thirteen dispatcher-reachable exits supply the production
 acceptance coverage.
+## Bitunix local history authority adoption
+
+Five synchronous history terminal expressions now consume genuine command-entry
+Read authority and complete through the shared Context APIs. The exact four
+history.rs scanner rows retire: Bitunix23 to18 occurrences,20 to16 hash rows,
+four tothree files. Account3, lib7 and trading8 occurrences remain, including
+four conservative trading macro matches. This does not close private history's
+legacy Completion/pager or the blocked physical dispatchers; #1771 source claims,
+signer and shared multi-request prerequisites remain separate.

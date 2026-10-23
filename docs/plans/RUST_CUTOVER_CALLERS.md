@@ -5508,3 +5508,17 @@ adapter fallback or result. Capacity refusal uses the shared Internal error;
 invalid raw clock admission uses InvalidInput, both without a Read financial
 outcome. Repeated commands can recover when unrelated roots retire. Callers need
 no new endpoint, retry or history marker handling for this local-only slice.
+## Bitunix synchronous history Read completion
+
+Local history exits retain their original command Read authority through shared
+entry admission and Context completion. Unsupported client lookup/public trades
+retain their native text and now carry Unsupported/NotSent; nonfinite time keeps
+its text and carries InvalidInput/NotSent. These local refusals still have no
+error companion. Genuine admission refusal uses the engine's typed reason once,
+including invalid clocks and capacity, without issuing opaque work.
+
+Keyless private queries still return `[]` before time validation. Missing or
+unknown fill symbols still return `[]` before finite-time validation. Unsupported
+query checks still precede keyless handling. No range-order guard, timer or
+transport is added. Valid private history dispatch, signatures, paging and
+incompleteness behavior retain their existing contracts and remain legacy-owned.
