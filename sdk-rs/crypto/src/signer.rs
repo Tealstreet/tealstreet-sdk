@@ -1771,4 +1771,91 @@ mod tests {
             }
         }
     }
+
+    // P6b REDs: the l1Wallet role reaches the provider through the existing
+    // policy and setup decode; its one algorithm is Secp256k1Digest.
+    fn l1_wallet_setup(wallet: &str) -> (LocalSigner, serde_json::Value) {
+        let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
+            "primary": {"extra": {"key": "l1Wallet", "field": "requiredForPrivate", "encoding": "hex"}}
+        }))
+        .unwrap();
+        let setup = serde_json::json!({"primary": {
+            "key": "account", "secret": "l2", "extra": {"l1Wallet": {"value": wallet, "encoding": "hex"}}
+        }});
+        let (signer, ids) = LocalSigner::from_json_with_policy(setup.to_string(), policy).unwrap();
+        let role = serde_json::to_value(ids.primary.unwrap()).unwrap()["extra"]["l1Wallet"].clone();
+        assert!(role.is_string());
+        (signer, role)
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn l1_wallet_role_answers_its_ethers_address() {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/ethereum/primitives.json"))
+                .unwrap();
+        for case in corpus["cases"].as_array().unwrap() {
+            let wallet = case["privateKey"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x");
+            let (signer, role) = l1_wallet_setup(wallet);
+            let request =
+                public_request(serde_json::json!([{"kind": "publicAddress", "key": role}]));
+            let result = signer.sign_now(&request).unwrap();
+            let expected = case["recovered"].as_str().unwrap().to_ascii_lowercase();
+            assert_eq!(format!("0x{}", crate::hex(&result.values[0])), expected);
+        }
+    }
+
+    #[test]
+    fn l1_wallet_role_is_refused_outside_its_algorithm() {
+        let (signer, role) = l1_wallet_setup(SCALAR);
+        for operation in [
+            serde_json::json!({"kind": "present", "key": role}),
+            serde_json::json!({"kind": "sign", "algorithm": "hmacSha256", "key": "primary.signing",
+                "payload": [{"kind": "credential", "key": role}]}),
+            serde_json::json!({"kind": "sign", "algorithm": "hmacSha256", "key": role, "payload": []}),
+            serde_json::json!({"kind": "sign", "algorithm": "zkLinkContract", "key": role,
+                "payload": [{"kind": "bytes", "bytes": vec![0u8; 36]}]}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "ed25519", "key": role}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "starkDigest", "key": role}),
+        ] {
+            let request = public_request(serde_json::json!([operation]));
+            assert_eq!(
+                signer.sign_now(&request),
+                Err(SignError::InvalidRequest),
+                "{operation}"
+            );
+        }
+        // The zkLink role answers no public operation and signs nothing else.
+        let (seed, _, _) = zklink_case();
+        let (zklink, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let seed_ref = ids.primary.unwrap().extra[&ExtraKey::ZklinkSeed].clone();
+        for operation in [
+            serde_json::json!({"kind": "publicAddress", "key": seed_ref}),
+            serde_json::json!({"kind": "sign", "algorithm": "secp256k1Digest", "key": seed_ref,
+                "payload": [{"kind": "bytes", "bytes": vec![7u8; 32]}]}),
+        ] {
+            let request = public_request(serde_json::json!([operation]));
+            assert_eq!(
+                zklink.sign_now(&request),
+                Err(SignError::InvalidRequest),
+                "{operation}"
+            );
+        }
+        // The L1 wallet belongs to the primary identity only.
+        let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
+            "secondary": {"extra": {"key": "l1Wallet", "encoding": "hex"}}
+        }))
+        .unwrap();
+        let setup = serde_json::json!({"secondary": {
+            "key": "read", "secret": "l2", "extra": {"l1Wallet": {"value": SCALAR, "encoding": "hex"}}
+        }});
+        assert!(matches!(
+            LocalSigner::from_json_with_policy(setup.to_string(), policy),
+            Err(SignError::InvalidRequest)
+        ));
+    }
 }
