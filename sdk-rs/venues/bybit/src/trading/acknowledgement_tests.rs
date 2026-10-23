@@ -2,12 +2,12 @@ use super::*;
 
 fn refused(body: &str) -> Option<(i64, String)> {
     match answer(body) {
-        Ok(Answer::Refused { code, message }) => Some((code, message)),
+        Ok(Answer::Refused { code, message, .. }) => Some((code, message)),
         _ => None,
     }
 }
 
-fn success(body: &str) -> (&RawValue, Option<&RawValue>) {
+fn success(body: &str) -> (Option<&RawValue>, Option<&RawValue>) {
     match answer(body).unwrap() {
         Answer::Success { result, ext } => (result, ext),
         refused => panic!("expected success, got {refused:?}"),
@@ -15,7 +15,7 @@ fn success(body: &str) -> (&RawValue, Option<&RawValue>) {
 }
 
 #[test]
-fn the_envelope_needs_an_exact_integer_code_and_an_object_result() {
+fn the_envelope_needs_an_exact_integer_code_and_an_object_or_absent_result() {
     assert_eq!(
         refused(r#"{"retCode":10001,"retMsg":"params error"}"#),
         Some((10001, "params error".into()))
@@ -24,9 +24,9 @@ fn the_envelope_needs_an_exact_integer_code_and_an_object_result() {
         refused(r#"{"retCode":"10004","retMsg":"error sign"}"#),
         Some((10004, "error sign".into()))
     );
+    assert!(success(r#"{"retCode":0,"retMsg":"OK"}"#).0.is_none());
     for body in [
         r#"[0,"OK",{}]"#,
-        r#"{"retCode":0,"retMsg":"OK"}"#,
         r#"{"retCode":0,"result":[]}"#,
         r#"{"retCode":0,"result":null}"#,
         r#"{"retCode":0.0,"result":{}}"#,
@@ -41,20 +41,28 @@ fn the_envelope_needs_an_exact_integer_code_and_an_object_result() {
 }
 
 #[test]
-fn a_single_identity_needs_its_id_and_exact_echoes() {
+fn a_single_identity_needs_its_bounded_id_and_consistent_echoes() {
     let (result, _) = success(r#"{"retCode":0,"result":{"orderId":"n1","orderLinkId":"c1"}}"#);
-    assert_eq!(identity(result, None, Some("c1")), Ok("n1".into()));
-    assert_eq!(identity(result, Some("n1"), None), Ok("n1".into()));
-    assert_eq!(identity(result, None, Some("other")), Err(Malformed));
-    assert_eq!(identity(result, Some("n2"), None), Err(Malformed));
+    assert_eq!(created(result, Some("c1")), Ok("n1".into()));
+    assert_eq!(created(result, Some("other")), Err(Malformed));
+    // An echo the request never sent is not this order's identity.
+    assert_eq!(created(result, None), Err(Malformed));
+    let (bare, _) = success(r#"{"retCode":0,"result":{"orderId":"n1"}}"#);
+    assert_eq!(created(bare, Some("c1")), Ok("n1".into()));
+    assert_eq!(targeted(result, "n1"), Ok(()));
+    assert_eq!(targeted(result, "n2"), Err(Malformed));
     let (empty, _) = success(r#"{"retCode":0,"result":{"orderId":"","orderLinkId":"c1"}}"#);
-    assert_eq!(identity(empty, None, Some("c1")), Err(Malformed));
-    let (bare, _) = success(r#"{"retCode":0,"result":{}}"#);
-    assert_eq!(identity(bare, None, None), Err(Malformed));
+    assert_eq!(created(empty, Some("c1")), Err(Malformed));
+    let (none, _) = success(r#"{"retCode":0,"result":{}}"#);
+    assert_eq!(created(none, None), Err(Malformed));
+    assert_eq!(created(None, None), Err(Malformed));
+    let long = format!(r#"{{"retCode":0,"result":{{"orderId":"{}"}}}}"#, "n".repeat(1025));
+    let (long, _) = success(&long);
+    assert_eq!(created(long, None), Err(Malformed));
 }
 
 #[test]
-fn created_rows_match_by_count_and_client_echo_not_position() {
+fn created_rows_match_by_count_echo_and_unique_ids() {
     let body = r#"{"retCode":0,"result":{"list":[
         {"orderId":"n1","orderLinkId":"c1"},{"orderId":"","orderLinkId":""}]},
         "retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110007,"msg":"no balance"}]}}"#;
@@ -80,6 +88,10 @@ fn created_rows_match_by_count_and_client_echo_not_position() {
         created_rows(result, None, &[Some("c1"), Some("c2")]),
         Err(Malformed)
     );
+    let (twice, twice_ext) = success(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"n1"},{"orderId":"n1"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
+    );
+    assert_eq!(created_rows(twice, twice_ext, &[None, None]), Err(Malformed));
     for body in [
         r#"{"retCode":0,"result":{"list":[["n1","c1"]]},"retExtInfo":{"list":[{"code":0}]}}"#,
         r#"{"retCode":0,"result":{"list":[{"orderId":"n1","orderLinkId":"c1"}]},"retExtInfo":{"list":[[0,"OK"]]}}"#,
@@ -125,20 +137,92 @@ fn cancelled_rows_need_one_status_per_order_and_the_requested_target() {
 }
 
 #[test]
-fn margin_reasons_refuse_even_when_their_text_is_blank() {
-    let (ok, _) = success(r#"{"retCode":0,"result":{}}"#);
-    assert_eq!(margin_refusal(ok), Ok(None));
-    let (empty, _) = success(r#"{"retCode":0,"result":{"reasons":[]}}"#);
-    assert_eq!(margin_refusal(empty), Ok(None));
-    let (blank, _) =
-        success(r#"{"retCode":0,"result":{"reasons":[{"reasonCode":"3400000","reasonMsg":""}]}}"#);
-    assert_eq!(margin_refusal(blank), Ok(Some("3400000".into())));
+fn one_partial_stop_cancel_needs_exactly_one_status_and_no_other_target() {
+    for (body, expected) in [
+        (
+            r#"{"retCode":0,"result":{"orderId":"p"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+            Ok(Row::Accepted("p".into())),
+        ),
+        (
+            r#"{"retCode":0,"retExtInfo":{"list":[{"code":110001,"msg":"gone"}]}}"#,
+            Ok(Row::Refused {
+                code: 110001,
+                message: "gone".into(),
+            }),
+        ),
+        (
+            r#"{"retCode":0,"result":{"orderId":"other"},"retExtInfo":{"list":[{"code":0}]}}"#,
+            Err(Malformed),
+        ),
+        (r#"{"retCode":0}"#, Err(Malformed)),
+        (r#"{"retCode":0,"retExtInfo":{"list":[]}}"#, Err(Malformed)),
+        (r#"{"retCode":0,"retExtInfo":{"list":[{}]}}"#, Err(Malformed)),
+        (
+            r#"{"retCode":0,"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
+            Err(Malformed),
+        ),
+    ] {
+        let (result, ext) = success(body);
+        assert_eq!(cancelled_one(result, ext, "p"), expected, "{body}");
+    }
+}
+
+#[test]
+fn cancel_all_needs_object_rows_and_a_successful_flag() {
+    let (result, _) = success(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"b"},{"orderId":"a"},{"orderId":"a"}],"success":"1"}}"#,
+    );
+    assert_eq!(cancelled_all(result), Ok(vec!["a".into(), "b".into()]));
     for body in [
-        r#"{"retCode":0,"result":{"reasons":[[]]}}"#,
-        r#"{"retCode":0,"result":{"reasons":{"reasonMsg":"x"}}}"#,
+        r#"{"retCode":0,"result":{"list":null,"success":"1"}}"#,
+        r#"{"retCode":0,"result":{"list":[],"success":"0"}}"#,
+        r#"{"retCode":0,"result":{"list":[["a"]]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":""}]}}"#,
+        r#"{"retCode":0}"#,
     ] {
         let (result, _) = success(body);
-        assert_eq!(margin_refusal(result), Err(Malformed), "{body}");
+        assert_eq!(cancelled_all(result), Err(Malformed), "{body}");
+    }
+}
+
+#[test]
+fn evidence_keeps_only_wholly_well_formed_bounded_rows() {
+    let (rows, _) = success(r#"{"retCode":0,"result":{"list":[{"orderId":"a"},{"orderId":"b"}]}}"#);
+    assert_eq!(evidence_ids(rows), ["a", "b"]);
+    let (single, _) = success(r#"{"retCode":0,"result":{"orderId":"a"}}"#);
+    assert_eq!(evidence_ids(single), ["a"]);
+    for body in [
+        r#"{"retCode":0,"result":{"list":[{"orderId":"a"},123]}}"#,
+        r#"{"retCode":0,"result":{"list":[["a"]]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"a"},{}]}}"#,
+    ] {
+        let (result, _) = success(body);
+        assert!(evidence_ids(result).is_empty(), "{body}");
+    }
+}
+
+#[test]
+fn margin_success_needs_no_reason_rows_of_any_shape() {
+    for body in [
+        r#"{"retCode":0}"#,
+        r#"{"retCode":0,"result":{}}"#,
+        r#"{"retCode":0,"result":{"reasons":[]}}"#,
+    ] {
+        assert_eq!(margin_applied(success(body).0), Ok(true), "{body}");
+    }
+    for body in [
+        r#"{"retCode":0,"result":{"reasons":[{"reasonCode":"3400000","reasonMsg":""}]}}"#,
+        r#"{"retCode":0,"result":{"reasons":[{}]}}"#,
+    ] {
+        assert_eq!(margin_applied(success(body).0), Ok(false), "{body}");
+    }
+    for body in [
+        r#"{"retCode":0,"result":{"reasons":[[]]}}"#,
+        r#"{"retCode":0,"result":{"reasons":null}}"#,
+        r#"{"retCode":0,"result":{"reasons":{"reasonMsg":"x"}}}"#,
+        r#"{"retCode":0,"result":{"reasons":[{"reasonCode":1}]}}"#,
+    ] {
+        assert_eq!(margin_applied(success(body).0), Err(Malformed), "{body}");
     }
 }
 
@@ -159,6 +243,7 @@ fn position_modes_need_object_rows_with_integer_indexes() {
         r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":"0"}]}}"#,
         r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":3}]}}"#,
         r#"{"retCode":0,"result":{}}"#,
+        r#"{"retCode":0}"#,
     ] {
         let (result, _) = success(body);
         assert!(position_mode(result, "BTCUSDT").is_err(), "{body}");

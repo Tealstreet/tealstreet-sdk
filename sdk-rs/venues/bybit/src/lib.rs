@@ -147,6 +147,8 @@ pub enum Then {
     },
     Account(account::Request),
     Trade(trading::Request),
+    /// An ordinary write or mode read on the engine's Preflight/Plan core.
+    Ordinary(trading::ordinary::Request),
     History(history::Request),
     Closed(closed::Request),
 }
@@ -1838,6 +1840,8 @@ impl BybitLinear {
             },
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Trade(request) => self.on_trade_response(cx, request, response),
+            // Ordinary responses and failures never reach the public path.
+            Then::Ordinary(_) => {}
             Then::History(request) => self.on_history_response(cx, request, response),
             Then::Closed(request) => self.on_closed_response(cx, request, response),
         }
@@ -2133,6 +2137,32 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.on_ordinary_plan_ready(cx, plan);
+    }
+
+    fn on_http_owner_retired(&mut self, owner: &safe_cex_engine::request_context::HttpOwnerRetirement) {
+        self.on_ordinary_retired(owner);
+    }
+
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        self.ordinary_reconciliation(pending)
+    }
+
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_ordinary(cx);
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -2294,6 +2324,11 @@ impl Venue for BybitLinear {
             return;
         }
         self.select_category(pending.category);
+        // Ordinary writes resend only on a classified grant, never on text.
+        if let Then::Ordinary(request) = pending.then {
+            self.on_ordinary_response(cx, request, response);
+            return;
+        }
         let mut pending = Some(pending);
         if self.resend(cx, &mut pending, response.body) {
             return;
@@ -2356,6 +2391,10 @@ impl Venue for BybitLinear {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        // The engine seals an ordinary preflight or plan on its own refusals.
+        if matches!(pending.then, Then::Ordinary(_)) {
+            return;
+        }
         if pending.rest.resent {
             // This refusal concerns only the retry. The earlier dispatched
             // attempt keeps the existing conservative failure/recovery path.
@@ -2380,6 +2419,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if matches!(pending.then, Then::Ordinary(_)) {
+            return;
+        }
         if matches!(&pending.then, Then::RefreshMarkets(_)) {
             let Then::RefreshMarkets(page) = pending.then else {
                 unreachable!()
@@ -2466,6 +2508,11 @@ impl Venue for BybitLinear {
             _ => None,
         };
         let category = symbol.map_or(self.primary_category, |symbol| self.category_for(symbol));
+        // An ordinary trade command fails through its own preflight.
+        if !self.category_enabled(category) && self.ordinary_command(&command) {
+            self.on_trade_command(cx, command);
+            return;
+        }
         if !self.category_enabled(category) {
             let id = match &command {
                 Command::FetchCandles { command, .. }

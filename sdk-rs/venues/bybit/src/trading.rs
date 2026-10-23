@@ -2,12 +2,10 @@
 //! requests go out together and the next step starts when they all answer.
 //! Attached stop-loss and take-profit ride on the order itself; stops against
 //! an open position and trailing stops go through `/v5/position/trading-stop`.
-// Shared with Hyro's adoption (hyro.rs). Wired into dispatch with the Plan
-// adoption; until then only their tests use them.
-#[allow(dead_code)]
+// Shared with Hyro's adoption (hyro.rs).
 pub(crate) mod acknowledgement;
-#[allow(dead_code)]
 pub(crate) mod codes;
+pub(crate) mod ordinary;
 
 use crate::sign::Body;
 use crate::wire::*;
@@ -122,6 +120,7 @@ struct Job {
 #[derive(Default)]
 pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
+    ordinary: HashMap<CommandId, ordinary::Ordinary>,
     mode_version: u64,
     pub(crate) hyro: crate::hyro::State,
 }
@@ -428,6 +427,10 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if self.ordinary_command(&command) {
+            self.start_ordinary(cx, command);
+            return;
+        }
         // `send` drops requests while the options are invalid; fail instead of hanging.
         if let Some(error) = self.config_error.clone()
             && let Some(id) = trade_command_id(&command)
@@ -559,38 +562,55 @@ impl BybitLinear {
             );
             return;
         }
-        let (id, plan) = match command {
-            Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
-            Command::CancelOrders { command, ids } => {
-                let orders = ids
-                    .iter()
-                    .map(|id| {
-                        cx.store.order(id).cloned().ok_or_else(|| {
-                            format!("Order {id} not found; cancellation requires its symbol")
-                        })
-                    })
-                    .collect::<Result<Vec<Order>, String>>();
-                (command, orders.map(|orders| self.plan_cancel(&orders)))
+        let Some(id) = trade_command_id(&command) else {
+            return;
+        };
+        let Some(plan) = self.plan_job(cx, &command) else {
+            return;
+        };
+        if self.credentials.is_none() {
+            cx.fail(id, not_sent("Bybit trading needs an API key"));
+            return;
+        }
+        match plan {
+            Ok(job) => {
+                self.trading.jobs.insert(id, job);
+                self.advance(cx, id);
             }
+            Err(message) => {
+                cx.command_error(id, message.clone());
+                cx.fail(id, not_sent(message));
+            }
+        }
+    }
+
+    /// The native job for one trade command once its preconditions hold;
+    /// `None` for commands Bybit trading does not plan.
+    fn plan_job(&self, cx: &Cx<'_, Pending>, command: &Command) -> Option<Result<Job, String>> {
+        Some(match command {
+            Command::PlaceOrders { orders, .. } => self.plan_place(cx, orders),
+            Command::CancelOrders { ids, .. } => ids
+                .iter()
+                .map(|id| {
+                    cx.store.order(id).cloned().ok_or_else(|| {
+                        format!("Order {id} not found; cancellation requires its symbol")
+                    })
+                })
+                .collect::<Result<Vec<Order>, String>>()
+                .map(|orders| self.plan_cancel(&orders)),
             Command::AmendOrder {
-                command,
-                id,
-                price,
-                amount,
-            } => (command, self.plan_amend(cx, &id, price, amount)),
-            Command::CancelSymbolOrders { command, symbol } => {
+                id, price, amount, ..
+            } => self.plan_amend(cx, id, *price, *amount),
+            Command::CancelSymbolOrders { symbol, .. } => {
                 if self.variant.is_hyro() {
                     let orders: Vec<Order> = cx
                         .store
                         .orders()
                         .iter()
-                        .filter(|o| o.symbol == symbol)
+                        .filter(|o| o.symbol == *symbol)
                         .cloned()
                         .collect();
-                    let job = self.plan_cancel(&orders);
-                    self.trading.jobs.insert(command, job);
-                    self.advance(cx, command);
-                    return;
+                    return Some(Ok(self.plan_cancel(&orders)));
                 }
                 if self.variant.is_spot() {
                     let mut job = Job {
@@ -605,7 +625,7 @@ impl BybitLinear {
                             .orders()
                             .iter()
                             .filter(|o| {
-                                o.symbol == symbol
+                                o.symbol == *symbol
                                     && !is_virtual(&o.id)
                                     && spot_order_filter(o.kind) == filter
                             })
@@ -618,59 +638,46 @@ impl BybitLinear {
                                 path: "/v5/order/cancel-all",
                                 body: Body::new()
                                     .str("category", self.paths.category)
-                                    .str("symbol", &symbol)
+                                    .str("symbol", symbol)
                                     .str("orderFilter", filter)
                                     .finish(),
                                 call: Call::CancelAll { ids },
                             }],
                         });
                     }
-                    (command, Ok(job))
+                    Ok(job)
                 } else {
                     let ids = cx
                         .store
                         .orders()
                         .iter()
-                        .filter(|o| o.symbol == symbol && !is_virtual(&o.id))
+                        .filter(|o| o.symbol == *symbol && !is_virtual(&o.id))
                         .map(|o| o.id.clone())
                         .collect();
                     let body = Body::new()
                         .str("category", self.paths.category)
-                        .str("symbol", &symbol)
+                        .str("symbol", symbol)
                         .finish();
-                    let call = Call::CancelAll { ids };
-                    (command, Ok(single("/v5/order/cancel-all", body, call)))
+                    Ok(single("/v5/order/cancel-all", body, Call::CancelAll { ids }))
                 }
             }
             Command::SetLeverage {
-                command,
-                symbol,
-                leverage,
-                side: _,
-            } => (
-                command,
-                plan_leverage(cx, self.paths.category, symbol, leverage),
-            ),
-            Command::SetMarginType {
-                command, isolated, ..
-            } => {
-                let mode = if isolated {
+                symbol, leverage, ..
+            } => plan_leverage(cx, self.paths.category, symbol.clone(), *leverage),
+            Command::SetMarginType { isolated, .. } => {
+                let mode = if *isolated {
                     "ISOLATED_MARGIN"
                 } else {
                     "REGULAR_MARGIN"
                 };
                 let body = Body::new().str("setMarginMode", mode).finish();
-                let call = Call::MarginMode { isolated };
-                (
-                    command,
-                    Ok(single("/v5/account/set-margin-mode", body, call)),
-                )
+                let call = Call::MarginMode {
+                    isolated: *isolated,
+                };
+                Ok(single("/v5/account/set-margin-mode", body, call))
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
+            Command::SetPositionMode { hedged, .. } => {
+                let hedged = *hedged;
                 if self.category == Category::Inverse {
                     let mut coins = std::collections::BTreeSet::new();
                     for market in cx.store.markets() {
@@ -694,15 +701,11 @@ impl BybitLinear {
                         });
                     }
                     if job.steps.is_empty() {
-                        cx.fail(
-                            command,
-                            not_sent("No inverse markets loaded for position-mode switch"),
-                        );
-                    } else {
-                        self.trading.jobs.insert(command, job);
-                        self.advance(cx, command);
+                        return Some(Err(
+                            "No inverse markets loaded for position-mode switch".into()
+                        ));
                     }
-                    return;
+                    return Some(Ok(job));
                 }
                 // Linear modes switch per settle coin; USDT carries every perp but USDC's.
                 let body = Body::new()
@@ -710,25 +713,14 @@ impl BybitLinear {
                     .str("coin", "USDT")
                     .int("mode", if hedged { 3 } else { 0 })
                     .finish();
-                let call = Call::PositionMode { hedged };
-                (command, Ok(single("/v5/position/switch-mode", body, call)))
+                Ok(single(
+                    "/v5/position/switch-mode",
+                    body,
+                    Call::PositionMode { hedged },
+                ))
             }
-            _ => return,
-        };
-        if self.credentials.is_none() {
-            cx.fail(id, not_sent("Bybit trading needs an API key"));
-            return;
-        }
-        match plan {
-            Ok(job) => {
-                self.trading.jobs.insert(id, job);
-                self.advance(cx, id);
-            }
-            Err(message) => {
-                cx.command_error(id, message.clone());
-                cx.fail(id, not_sent(message));
-            }
-        }
+            _ => return None,
+        })
     }
 
     /// Send the job's next step, or finish it.
@@ -2455,6 +2447,32 @@ impl BybitLinear {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Demo rows for a validated create-batch, one per accepted request.
+    fn publish_local_rows(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        local: &LocalWrite,
+        ids: &[Option<String>],
+    ) {
+        #[derive(serde::Deserialize)]
+        struct Inputs {
+            request: Vec<LocalOrder>,
+        }
+        if local.socket != self.private.socket
+            || local.snapshot != self.account.orders_snapshot_version
+        {
+            return;
+        }
+        let Ok(inputs) = serde_json::from_str::<Inputs>(&local.body) else {
+            return;
+        };
+        for (input, id) in inputs.request.iter().zip(ids) {
+            if let Some(id) = id {
+                self.publish_local_create(cx, input, id);
+            }
         }
     }
 

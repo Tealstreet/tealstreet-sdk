@@ -1451,6 +1451,15 @@ impl BybitLinear {
         );
     }
 
+    /// A fresh order read: a follow-up when one is already out.
+    pub(crate) fn refetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders.is_some() {
+            self.account.orders_follow_up = true;
+        } else {
+            self.fetch_orders(cx);
+        }
+    }
+
     pub(crate) fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.orders.is_some() {
             return;
@@ -2708,6 +2717,16 @@ impl BybitLinear {
             .all(|c| self.orders_loaded.contains(c))
         {
             cx.store.set_orders(cx.store.orders().to_vec());
+        }
+        // A committed fresh read clears the engine's uncertain-write fence once
+        // no product's order read is still out.
+        if self.account.orders.is_none()
+            && self
+                .products
+                .iter()
+                .all(|state| state.account.orders.is_none())
+        {
+            cx.orders_reconciled(None);
         }
     }
 
