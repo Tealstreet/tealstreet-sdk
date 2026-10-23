@@ -207,7 +207,7 @@ impl ContextRegistry {
         let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
             parent.deadline().min(now + f64::from(policy.timeout_ms))
         });
-        if let Scope::Command(id) = scope
+        if let Owner::Command { id, .. } = owner
             && let Some(owner) = self.commands.get(&id).filter(|owner| owner.entry_owned)
         {
             if now >= owner.completion_root.deadline() {
