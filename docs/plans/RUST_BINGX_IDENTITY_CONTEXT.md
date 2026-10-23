@@ -2,8 +2,9 @@
 
 Plan-first, 2026-10-24. Owner codex-zs5e83; explicit handoff from codex-uufub4.
 Branch `feat/rust-bingx-identity-context` starts at actual `64f4faa202d804d6fc9cf84f314e5f581df10105`.
-The overseer was notified before coding. This checkpoint contains only this
-plan/index; original assertion REDs follow separately, with production unchanged.
+The overseer was notified before coding. Initial plan/index commit
+`2119b0ec9df` preceded original assertion RED commit `fa95669213c`; production
+and inventory remain unchanged in both checkpoints.
 
 ## Scope and collision boundary
 
@@ -195,3 +196,57 @@ owners; no source or inventory movement is implied by listing them here.
 | `venues/bingx/src/trading.rs` | `b9fe9d4e02015da4b49bb3e467c65f8fbec06c81605999dc39c08de9f077b18a` | 1 | Held: existing owner; unchanged |
 | `venues/bingx/src/trading.rs` | `df1e843744fe35d63b22778691cfbe4de4aece149d94ad0c5343e03739d6c3df` | 1 | Held: existing owner; unchanged |
 | `venues/bingx/src/trading.rs` | `fbafcc48aaedbe70a22d054c16acc0858b261af3d5f711681c39d0e866da7e30` | 1 | Held: existing owner; unchanged |
+
+## Executed original assertion checkpoint
+
+Test-only commit `fa95669213c` adds only
+`sdk-rs/venues/bingx/tests/request_context_identity.rs`. Against unchanged actual
+`64f4faa202d804d6fc9cf84f314e5f581df10105` production, the existing-API target
+compiles and executes **6 PASS / 8 intended assertion REDs / 0 ignored**:
+
+```sh
+CARGO_BUILD_JOBS=2 cargo test --manifest-path sdk-rs/Cargo.toml \
+  -p safe-cex-venue-bingx --test request_context_identity --locked
+CARGO_BUILD_JOBS=2 cargo clippy --manifest-path sdk-rs/Cargo.toml \
+  -p safe-cex-venue-bingx --test request_context_identity --locked -- -D warnings
+```
+
+The test exits 101 because of the eight intended assertions. Strict scoped
+Clippy, touched-file rustfmt check and git diff check pass. The compiling receipt
+is `/tmp/codex-zs5e83-bingx-identity-original-reds.log`; Clippy receipt is
+`/tmp/codex-zs5e83-bingx-identity-clippy.log`. These logs are not committed.
+
+- Four local capacity REDs: missing primary, public-only, secondary-only and
+  invalid secondary bypass shared admission and emit native diagnostic/failure.
+- Remote capacity RED: generic lifecycle-unavailable diagnostic plus
+  Internal/NotSent replaces the engine's exact Capacity denial with no outcome.
+- Invalid clock RED: first keyless/NaN case emits native diagnostic/failure,
+  instead of the engine's typed InvalidInput denial before local work.
+- Released network and root-timer REDs: both reach the intended kind assertion,
+  observing `(None, None)` instead of `(Some(Network/Timeout), None)`. Exact
+  preparation cancellation, one diagnostic-before-terminal, stale late-response
+  suppression and unchanged Store checks execute before that assertion.
+
+The six GREEN tests pin all local eligibility/config precedence combinations,
+fixed-clock local retirement and genuine peer reuse, exact real-provider primary
+and secondary golden wire plus u64/text/USDT codec, opaque selected refs and
+pending duplicate ownership, malformed/status/100001 refusal without retry, and
+typed preparation/provider refusal with no HTTP release. Cancellation checks
+permit only the tested exact preparation; provider refusal additionally pins its
+known signing attempt. Pre-prepare signing IDs are engine-private.
+
+Capacity recovery/refill suffixes and later clock cases are present but blocked
+behind the first failing assertion; they are not claimed executed. Fixture
+compile, cancellation-cleanup and snapshot-serialization-clock mistakes were
+corrected and excluded from the RED evidence. Actual timer/late HTTP event
+clocks remain unchanged; Store frames use the same serialization clock.
+
+Independent source/adversarial and caller reviews are CLEAR after those fixes;
+full-map review confirms only the two original docs plus this new test differ
+from the base, with all production/held files and manifest unchanged. Architecture
+gate: No. Full native/replay/size CI is deferred to the adoption PR; this is an
+intentionally failing plan/test checkpoint, without a PR or CI watcher.
+
+Production remains held on actual #1962 and a fresh scoped lib-hunk release.
+Do not consume its frozen API as a local implementation or weaken these original
+assertions at adoption. Recompute the actual base/map before source work.
