@@ -2596,3 +2596,19 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+### Binance identity terminal provenance
+
+The local identity error helper reuses existing Read entry and typed identity
+error completion. Its unused numeric success arm and numeric command argument
+are removed. Successful credential selection, HTTP preparation and response
+handling remain exact to actual `15bd7821b52`; no shared API, session, signing,
+history, account reducer or Store changes are involved. The listen-key owner
+confirmed the identity helper and distant FetchAccount dispatch arm are clear;
+the existing command-entry capacity assertion is preserved.
+
+Pure inventory prune removes only `venues/binance/src/identity.rs`:
+`c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548: 1`
+and `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa: 1`.
+All other manifest bytes/maps remain exact; Binance shrinks from 26 fingerprints
+/ 30 occurrences to 24 / 28. No rehash, site growth or checker exemption.

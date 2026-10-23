@@ -1204,3 +1204,15 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+### Binance identity preflight Read admission
+
+Plan `3a0598f1892` precedes original-control commit `84e327e2c8f`.
+With unchanged production, four real full-registry controls are assertion RED:
+missing/disabled/incomplete-primary/incomplete-secondary identity preflights
+publish local messages rather than the engine's capacity refusal. The existing
+valid-command capacity control and all six identity compatibility controls are
+GREEN, including 300 same-clock/same-command local refusals and exact selected
+signer request bytes. The same eleven tests pass after conversion, with no
+transport, extra diagnostic or Store mutation on initial admission refusal.
+No manufactured Context or fixture bypass is used.

@@ -61,3 +61,23 @@ retaining an unreachable fallback API.
 
 No push, merge window or readiness is implied by a local plan or RED result.
 #1902 remains frozen on its own branch; #1944 stays behind its actual landing.
+
+## Local implementation evidence
+
+Original control commit `84e327e2c8f` has four independent assertion REDs and
+seven working GREEN controls, with no production edits. After conversion all
+eleven tests pass unchanged. Scoped all-target Binance Clippy with warnings
+denied, package formatting, the unchanged inventory checker and all fifteen
+ratchet controls pass. The listen-key owner's original command-entry test is
+preserved byte-for-byte as a prefix; only new tests are appended.
+
+The identity inventory map becomes empty: remove exactly
+`c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548: 1`
+and `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa: 1`.
+Global occurrences shrink 1,032 to 1,030; every other manifest byte is exact.
+Manifest SHA256 changes from
+`86e948782fc26b7565e252bda20638f698894b3f9c1298f3fedb0b22c9e7f0ef` to
+`3a665d5adaa07307a33a931349a12bc90debcda34e1d50f3c9eeac4c15d887b7`.
+Shared engine/harness and the selected HTTP/response tail remain untouched.
+Independent implementation review, current integration and full CI are separate
+readiness gates; this local result does not claim a merge window.

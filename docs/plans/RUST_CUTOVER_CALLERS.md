@@ -5756,3 +5756,19 @@ Caller-visible changes:
   empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
   Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
   caller migration.
+
+## Binance identity local refusal custody
+
+Binance USD-M and portfolio-margin `fetchAccount` preflight refusals use genuine
+engine Read command admission before publishing a result. Missing, disabled or
+incomplete credentials retain their existing message and one correlated
+diagnostic followed by one terminal when admission succeeds. If the engine
+context registry is full, the engine instead emits one Internal failure,
+`Engine request capacity reached`, with no extra diagnostic or transport.
+These Read failures carry no mutation outcome.
+
+Local identity refusals release their Read ownership immediately, including
+repeated calls with the same command number. They do not issue HTTP/signatures
+or mutate account snapshots. Valid identity reads retain the selected signer,
+request bytes, routes and `userId` shape. Spot and COIN-M identity remain
+capability-refused before venue dispatch.
