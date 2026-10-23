@@ -429,10 +429,34 @@ authorization; landing merged at `a7f3494a430`.
   with legacy inventory pruned. Two review rounds on the wiring and one on the
   consumer, with RED regressions for each fix.
 
-Still open: Mutation executions and the shared journal (Hyro), background
-roots and the pending successor (Bitrue), metadata adoption (after #1747 and
+Still open: Mutation executions and the shared journal (Hyro), metadata adoption (after #1747 and
 the BingX/WEEX signers), and a second production consumer. Consumers call
 `admit_http_command` before any I/O or opaque work; `Revoked` then means
 existing or spent custody (no fresh first entry), so returning without a new
 terminal is correct (confirmed with uufub4).
+
+## Background-root checkpoint (claude-fe7lgm, 2026-10-23)
+
+Branch `feat/rust-execution-background-roots` on landing after #1854/#1864.
+
+- `Cx::begin_background_execution(background, policy, window)` roots a read
+  execution in a live `Owner::Background` read Context (Read only). Its legs
+  are ordinary `Owner::Execution` legs. It publishes while its background
+  Context is still issued; once that Context is finished or expired, only
+  surviving command observers keep it live, and with none it cannot publish.
+- One background Context roots at most one live execution.
+- `BeforeRelease` queues joiners that arrive after the first release, each
+  with its own deadline and expiry timer. A failed read seals only owners
+  joined before its release.
+- `Cx::begin_successor_execution(previous, background, policy)` adopts the
+  queue into the next read. The background must carry the same credential
+  (account) as the previous root. Each execution has at most one successor;
+  a succeeded execution refuses further joins. A retired previous (nothing
+  queued) returns `Revoked`, and the venue begins a fresh background
+  execution itself.
+- The event sweep returns immediately when the engine holds no execution, so
+  engines that never use groups (Hyro steady state) pay no per-event scan.
+
+Bitrue FetchLeverage adoption (codex-9czdjh, #1819) waits on Bitrue's signer
+migration. Mutation executions (Hyro) remain open.
 

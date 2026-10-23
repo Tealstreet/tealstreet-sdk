@@ -570,6 +570,11 @@ impl ContextRegistry {
         now: f64,
     ) -> Result<(), Error> {
         self.validate(context, now)?;
+        // A member's only physical work is its execution's, including on the
+        // entry root it already holds.
+        if matches!(context.owner(), Owner::Command { id, .. } if self.is_observer(id)) {
+            return Err(Error::Revoked);
+        }
         if matches!(context.owner(), Owner::Background { .. })
             && context.operation() == Operation::Read
         {

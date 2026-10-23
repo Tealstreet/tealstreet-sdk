@@ -250,4 +250,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | MEXC synchronous read command custody | Draft adoption; local checks pass | Before changing local history/leverage refusals, genuine command entry or the exact eight-site prune | [RUST_MEXC_LOCAL_READ_CONTEXT.md](RUST_MEXC_LOCAL_READ_CONTEXT.md) |
 
 | Paradex public-trades Read history | Consumer plan | Before migrating the native unsigned single-page public trade command through the reviewed history bridge. | [RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md](RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md) |
+| KuCoin local Read terminals | Frozen-base adoption plan | Before converting Spot cached/empty/refusal reads and futures unsupported leverage to genuine initial Read authority. | [RUST_KUCOIN_LOCAL_READ_CONTEXT.md](RUST_KUCOIN_LOCAL_READ_CONTEXT.md) |
+| BloFin PublicTrades Context | Committed native consumer plan | Before moving the single unsigned trade-history response onto the shared Read completion bridge. | [RUST_BLOFIN_PUBLIC_TRADES_CONTEXT.md](RUST_BLOFIN_PUBLIC_TRADES_CONTEXT.md) |
 | Bitunix public REST Read authority | Managed adoption; native proof | Before moving public markets/tickers/candles, extracting native codes or pruning their eight legacy occurrences. | [RUST_BITUNIX_PUBLIC_READ_CONTEXT.md](RUST_BITUNIX_PUBLIC_READ_CONTEXT.md) |

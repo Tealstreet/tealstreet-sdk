@@ -1,6 +1,6 @@
 //! Rare reads stream into typed results; they never change the account store.
 use super::*;
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{Completion, CursorHistory, ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{ErrorKind, Outcome, VenueError};
@@ -20,6 +20,12 @@ pub struct Request {
     last_cursor: String,
     received: usize,
     reached_start: bool,
+    failed: bool,
+}
+pub struct PublicTradesRequest {
+    query: Query,
+    history: ReadCursorHistory<Mapped>,
+    received: usize,
     failed: bool,
 }
 enum Mapped {
@@ -94,6 +100,12 @@ impl Request {
     }
     fn reject(self, cx: &mut Cx<'_, Pending>, error: VenueError) {
         self.history.reject(cx, error);
+    }
+}
+impl PublicTradesRequest {
+    fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        let Self { query, history, .. } = self;
+        let _ = history.finish_with(cx, result, |rows| encode_result(&query, rows));
     }
 }
 
@@ -252,6 +264,18 @@ fn position_side(value: &str) -> &'static str {
 fn nonzero(value: f64) -> Option<f64> {
     (value != 0.0).then_some(value)
 }
+fn public_trade(row: &Row<'_>, market: &Market, id: String, time: f64) -> Trade {
+    let qty = account::clean(row.size.0 * market.contract_size.unwrap_or(1.0));
+    Trade {
+        id,
+        symbol: market.symbol.clone(),
+        price: row.price.0,
+        qty,
+        quote_qty: qty * row.price.0,
+        timestamp: time,
+        side: side(&row.side),
+    }
+}
 impl Blofin {
     pub(crate) fn start_query(
         &mut self,
@@ -259,6 +283,13 @@ impl Blofin {
         command: CommandId,
         query: Query,
     ) {
+        let query = match query {
+            Query::PublicTrades { symbol, limit } => {
+                self.start_public_trades(cx, command, symbol, limit);
+                return;
+            }
+            query => query,
+        };
         let completion = Completion::new(command);
         if !matches!(
             query,
@@ -692,16 +723,9 @@ impl Blofin {
                 let Some(market) = market else {
                     return;
                 };
-                let qty = account::clean(row.size.0 * market.contract_size.unwrap_or(1.0));
-                request.history.stage(Mapped::Trade(Trade {
-                    id,
-                    symbol: symbol.clone(),
-                    price: row.price.0,
-                    qty,
-                    quote_qty: qty * row.price.0,
-                    timestamp: time,
-                    side: side(&row.side),
-                }));
+                request
+                    .history
+                    .stage(Mapped::Trade(public_trade(&row, market, id, time)));
             }
             Query::OrderByClientId { .. } => request.failed = true,
         }
@@ -764,5 +788,140 @@ impl Blofin {
         error: &str,
     ) {
         request.finish(cx, Err(VenueError::new(error)));
+    }
+
+    fn start_public_trades(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: String,
+        limit: Option<u32>,
+    ) {
+        let context = match cx.admit_http_command(Self::read_policy()) {
+            Ok(context) => context,
+            Err(_) => return,
+        };
+        let completion = match ReadCompletion::from_context(cx, command, context) {
+            Ok(completion) => completion,
+            Err(_) => return,
+        };
+        let Some(market) = cx.store.market(&symbol) else {
+            let _ = completion.finish(
+                cx,
+                Err(VenueError::new(format!("Unknown market {symbol}"))
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent)),
+            );
+            return;
+        };
+        let path = format!(
+            "/api/v1/market/trades?instId={}&limit={}",
+            encode(&market.id),
+            limit.unwrap_or(100).clamp(1, 100),
+        );
+        let request = PublicTradesRequest {
+            query: Query::PublicTrades { symbol, limit },
+            history: ReadCursorHistory::new(
+                completion,
+                CursorWalk::new(MAX_PAGES),
+                |_| "BloFin income pagination did not finish".into(),
+                missing_finalizer,
+            ),
+            received: 0,
+            failed: false,
+        };
+        match cx.request_managed(
+            request.history.root().clone(),
+            Method::Get,
+            format!("{}{path}", self.host()),
+            None,
+            Pending::PublicTrades(request),
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::EnvelopeField("data")),
+            Err((pending, error)) => self.on_sign_error(cx, pending, error.venue_error()),
+        }
+    }
+
+    pub(crate) fn public_trades_item(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut PublicTradesRequest,
+        item: &str,
+    ) {
+        let leg = request.history.root().clone();
+        let Ok(mut page) = request.history.admit(cx, &leg) else {
+            return;
+        };
+        let row = match serde_json::from_str::<Row<'_>>(item) {
+            Ok(row) => row,
+            Err(_) => {
+                request.failed = true;
+                return;
+            }
+        };
+        request.received += 1;
+        let time = if row.ts.0 > 0.0 {
+            row.ts.0
+        } else {
+            row.create_time.0
+        };
+        if time <= 0.0 || row.inst_id.is_empty() || row.trade_id.is_empty() {
+            return;
+        }
+        let id = row.trade_id.to_string();
+        if !page.fresh(id.clone()) {
+            return;
+        }
+        let Some(market) = cx.store.market_by_id(&row.inst_id) else {
+            return;
+        };
+        page.stage(Mapped::Trade(public_trade(&row, market, id, time)));
+    }
+
+    pub(crate) fn public_trades_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: PublicTradesRequest,
+        response: Response<'_>,
+    ) {
+        let leg = request.history.root().clone();
+        if request.history.validate_delivery(cx, &leg).is_err() {
+            return;
+        }
+        if let Err(error) = check(&response) {
+            request.finish(cx, Err(VenueError::new(error)));
+            return;
+        }
+        if request.failed {
+            request.finish(cx, Err(VenueError::new("Malformed BloFin history row")));
+            return;
+        }
+        let step = {
+            let Ok(mut page) = request.history.admit(cx, &leg) else {
+                return;
+            };
+            page.advance(CursorPage {
+                next: None,
+                rows: request.received,
+                fresh: request.received,
+                want_more: false,
+            })
+        };
+        match step {
+            CursorStep::Done => request.finish(cx, Ok(())),
+            CursorStep::More(_) | CursorStep::Stalled(_) => request.finish(
+                cx,
+                Err(VenueError::new("BloFin income pagination did not finish")),
+            ),
+        }
+    }
+
+    pub(crate) fn public_trades_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: PublicTradesRequest,
+        error: VenueError,
+    ) {
+        request.finish(cx, Err(error));
     }
 }

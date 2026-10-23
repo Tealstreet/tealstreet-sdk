@@ -2512,6 +2512,52 @@ Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
 history13->11). Private history/signing and spot REST capabilities stay native.
 Architecture gate: No; existing engine admission and completion choke points.
 
+## KuCoin local Read ownership
+
+Eight local terminal expressions use genuine initial Read command admission.
+The original root is validated immediately before cached-result publication or
+Spot leverage projection. No HTTP attempt is fabricated and no owner is acquired
+on private/pager fallthrough. Existing credential precedence, successful setter
+no-ops and accountMarginType capability are preserved. The exact ratchet removes
+eight occurrences/seven rows; remaining signing/history/Session sites remain held.
+
+### Lighter ticker seed Background custody
+
+The exchangeStats physical read now carries a mandatory managed Background Read
+Context. Shared ownership gates staging/publication and retires on success,
+strict stream failure, preparation/network denial and original deadline expiry.
+Native partial-row acceptance and per-symbol WS revision dominance are retained.
+Six original legacy-dispatch assertion REDs precede the move; controls cover four
+deployments/six envelopes, early response/stream fencing, malformed prefixes,
+route/transport/expiry recovery, capacity peer isolation and300 retirements.
+Only2bbebb…:1 is pruned (Lighter42→41/lib2→1); catalog remains counted.
+Architecture No: existing shared Context/HTTP authority and startup Backoff.
+
+
+
+## BloFin PublicTrades history authority
+
+The PublicTrades owner now adopts shared ReadCompletion/ReadCursorHistory,
+managed HTTP delivery and borrowed page admission. Exact physical delivery is
+checked before row mutation or page acceptance; typed shared terminals own both
+preflight and asynchronous cleanup. The adapter supplies only its native wire
+codec and result shaping. Independent source/adversarial, caller and full-map
+reviews answer the architecture gate No.
+
+The legacy inventory remains 24 BloFin occurrences: the shared private-history
+dispatcher and conservative query macro matches remain inventoried. This slice
+adds no exemption and makes no zero-legacy claim. Signed/private history, trading
+and the existing candle entry refusal remain separately tracked.
+
+## BloFin PublicTrades current inventory scope
+
+The actual-#1848 PublicTrades integration preserves all incoming engine and
+venue code outside its declared slice. The earlier 24-occurrence snapshot above
+predates #1867; current BloFin is 23 occurrences /19 rows /four files, unchanged
+by PublicTrades adoption. Its private dispatcher and conservative history macro
+sites remain explicit debt; neither the actual bridge nor the capacity assertion
+update claims a ratchet removal or private signer/Plan readiness.
+
 
 ### Bitunix public REST Read authority
 
