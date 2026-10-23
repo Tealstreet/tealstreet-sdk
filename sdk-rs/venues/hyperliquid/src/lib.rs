@@ -493,7 +493,14 @@ impl Hyperliquid {
         }
         cx.store.set_tickers(all);
     }
-    fn propose_socket_interests(&self, cx: &mut Cx<'_, Pending>) {
+    fn propose_socket_interests(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.connection.open
+            && self.account.mode_refresh_due
+            && !self.private_socket_interests(cx.store).is_empty()
+        {
+            self.schedule_socket_refresh(cx, true);
+            return;
+        }
         if let Some(feed) = self.connection.feed {
             let desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
             if let Err(error) = cx.set_socket_interests(feed, desired) {

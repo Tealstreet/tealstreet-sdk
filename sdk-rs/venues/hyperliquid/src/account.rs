@@ -71,6 +71,7 @@ pub struct Account {
     pub started: bool,
     mode: Mode,
     mode_resolved: bool,
+    pub(crate) mode_refresh_due: bool,
     mode_timer: Option<TimerId>,
     role_timer: Option<TimerId>,
     sync_timer: Option<TimerId>,
@@ -565,7 +566,19 @@ impl Hyperliquid {
         if let Some(t) = self.account.mode_timer.take() {
             cx.clear_timer(t);
         }
+        self.account.mode_refresh_due = true;
         self.schedule_socket_refresh(cx, true);
+    }
+    pub(crate) fn finish_mode_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.mode_refresh_due {
+            return;
+        }
+        self.refresh_spot_holdings(cx);
+        if self.tracks_spot_holdings() && !self.account.spot_inflight {
+            return;
+        }
+        self.live_balance(cx);
+        self.account.mode_refresh_due = false;
     }
     pub(crate) fn private_socket_interests(
         &self,

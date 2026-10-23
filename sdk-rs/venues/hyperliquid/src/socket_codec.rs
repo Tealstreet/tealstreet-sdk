@@ -2,7 +2,7 @@
 use super::*;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, FeedPolicy, Interest, Invalidation,
-    LifecycleEvent, TrafficPolicy,
+    LifecycleEvent, RetireReason, TrafficPolicy,
 };
 
 #[derive(Serialize)]
@@ -164,10 +164,10 @@ impl Hyperliquid {
             Vec::new()
         };
         if private.is_empty() {
+            self.finish_socket_refresh(cx, mode_ready);
             if self.connection.open {
                 self.propose_socket_interests(cx);
             }
-            self.finish_socket_refresh(cx, mode_ready);
             return;
         }
         let Some(feed) = self.connection.feed else {
@@ -178,6 +178,7 @@ impl Hyperliquid {
             .iter()
             .map(|interest| interest.key.as_ref())
             .collect();
+        let epoch = cx.socket_epoch(feed);
         if let Err(error) = cx.set_socket_interests_then(
             feed,
             desired,
@@ -185,16 +186,21 @@ impl Hyperliquid {
             Pending::SocketRefresh { mode_ready },
         ) {
             Self::socket_refused(cx, error);
+            if error == SocketError::Capacity && epoch.is_some() && cx.socket_epoch(feed) == epoch {
+                cx.retire_socket(feed, RetireReason::Closed);
+            }
         }
     }
 
     pub(super) fn finish_socket_refresh(&mut self, cx: &mut Cx<'_, Pending>, mode_ready: bool) {
-        if mode_ready {
-            self.refresh_spot_holdings(cx);
-            self.live_balance(cx);
-        } else if self.account.started && self.user().is_some() && !self.options.public_data_only {
+        if !mode_ready
+            && self.account.started
+            && self.user().is_some()
+            && !self.options.public_data_only
+        {
             self.refresh_account(cx);
         }
+        self.finish_mode_refresh(cx);
     }
 
     pub(super) fn managed_socket_event(
@@ -231,7 +237,13 @@ impl Hyperliquid {
             }
             LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "{\"method\":\"ping\"}"),
             LifecycleEvent::Reconnect(_) => self.managed_connect(cx)?,
-            LifecycleEvent::InterestsRefused { error, .. } => return Err(error),
+            LifecycleEvent::InterestsRefused { feed, error, .. } => {
+                if error != SocketError::Capacity || self.connection.feed != Some(feed) {
+                    return Err(error);
+                }
+                Self::socket_refused(cx, error);
+                cx.retire_socket(feed, RetireReason::Closed);
+            }
             _ => {}
         }
         Ok(())

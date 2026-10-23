@@ -684,6 +684,11 @@ fn retired_mode_handoff_never_starts_its_spot_read() {
         })
         .unwrap();
     assert_ne!(fresh, wake);
+    engine.handle(at, Event::TimerFired { timer: wake });
+    assert!(
+        !engine.drain_actions().any(|a| matches!(a, Action::Http(_))),
+        "old-epoch wake cannot consume the due work before its fresh handoff"
+    );
     engine.handle(at, Event::TimerFired { timer: fresh });
     released.extend(engine.drain_actions());
     let reads: Vec<_> = released
