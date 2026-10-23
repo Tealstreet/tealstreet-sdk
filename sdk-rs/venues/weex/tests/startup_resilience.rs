@@ -1,6 +1,8 @@
 //! Scripted discovery regressions; no network or account credentials.
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response};
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
+use support::setup::Options;
 
 /// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
 fn jittered(actual: f64, nominal: f64) -> bool {
@@ -8,10 +10,10 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"symbols":[{"broken":true},{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":1e-06,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"###;
 fn public_engine() -> Engine<WeexFutures> {
-    safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    support::setup::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }))
+    })
 }
 #[test]
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
@@ -76,12 +78,12 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_when_a_pending_ticker_read_fails() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    let mut engine = support::setup::engine(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         passphrase: Some("scripted-passphrase".into()),
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     let catalogue = engine
         .drain_actions()

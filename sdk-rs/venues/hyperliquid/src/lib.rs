@@ -10,9 +10,11 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    VenueError,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -112,6 +114,14 @@ pub enum Pending {
         candles: Vec<Candle>,
         valid: bool,
     },
+    ManagedCandles(Box<ManagedCandleRead>),
+}
+
+/// A single public perps read owns its exact root and physical HTTP delivery.
+pub struct ManagedCandleRead {
+    context: Context,
+    candles: Vec<Candle>,
+    valid: bool,
 }
 struct Connection {
     socket: Option<SocketId>,
@@ -1179,6 +1189,13 @@ impl Venue for Hyperliquid {
         self.connection.supervisor.retry(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::ManagedCandles(read) = &pending
+            && cx
+                .validate_read_http_delivery(&read.context, &read.context)
+                .is_err()
+        {
+            return;
+        }
         // Trade answers keep their status so a refusal can be told from a lost write.
         if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
             self.on_request_failed(
@@ -1353,6 +1370,14 @@ impl Venue for Hyperliquid {
                 self.dex_queue = dexs.into();
                 self.next_dex(cx);
             }
+            Pending::ManagedCandles(read) => {
+                if read.valid {
+                    let _ = cx
+                        .done_context(&read.context, serde_json::to_string(&read.candles).unwrap());
+                } else {
+                    let _ = cx.fail_context(&read.context, "Malformed Hyperliquid candles");
+                }
+            }
             Pending::Candles {
                 command,
                 candles,
@@ -1451,6 +1476,18 @@ impl Venue for Hyperliquid {
                     dexs.push((dex.name, 110_000 + (position - 1) * 10_000));
                 }
             }
+            Pending::ManagedCandles(read) => {
+                if _cx
+                    .validate_read_http_delivery(&read.context, &read.context)
+                    .is_err()
+                {
+                    return;
+                }
+                match serde_json::from_str::<CandleRow>(item) {
+                    Ok(row) => read.candles.push(row.candle()),
+                    Err(_) => read.valid = false,
+                }
+            }
             Pending::Candles { candles, valid, .. } => {
                 match serde_json::from_str::<CandleRow>(item) {
                     Ok(row) => candles.push(row.candle()),
@@ -1461,6 +1498,9 @@ impl Venue for Hyperliquid {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::ManagedCandles(read) => {
+                let _ = cx.fail_context(&read.context, error);
+            }
             Pending::SpotMeta { .. } if !self.spot => {
                 self.spot_markets_failed(cx, error);
             }
@@ -1483,6 +1523,22 @@ impl Venue for Hyperliquid {
                     self.advance_scope(cx, &dex);
                 }
             }
+        }
+    }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::ManagedCandles(read) => {
+                let _ = cx.fail_context(&read.context, error);
+            }
+            pending => self.on_sign_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::ManagedCandles(read) => {
+                let _ = cx.fail_context(&read.context, error);
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1580,6 +1636,54 @@ impl Venue for Hyperliquid {
                 from_ms,
                 to_ms,
             } => {
+                if !self.spot
+                    && !cx
+                        .store
+                        .market(&symbol)
+                        .is_some_and(|market| market.is_spot == Some(true))
+                {
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return;
+                    };
+                    if !supported(interval) {
+                        let _ = cx.fail_context(&context, interval.unsupported("Hyperliquid"));
+                        return;
+                    }
+                    let Some(coin) = self.coin(cx, &symbol) else {
+                        let _ = cx.fail_context(&context, "Market not found");
+                        return;
+                    };
+                    let Some(body) = candle_body(cx.now, coin, interval, limit, from_ms, to_ms)
+                    else {
+                        let _ = cx.fail_context(&context, "Invalid candle time range");
+                        return;
+                    };
+                    let pending = Pending::ManagedCandles(Box::new(ManagedCandleRead {
+                        context: context.clone(),
+                        candles: Vec::new(),
+                        valid: true,
+                    }));
+                    match cx.request_managed_with_headers(
+                        context.clone(),
+                        Method::Post,
+                        format!("{}/info", self.rest()),
+                        &[("Content-Type", "application/json")],
+                        Some(body),
+                        pending,
+                    ) {
+                        Ok(id) => cx.stream_response(id, ArrayAt::Root),
+                        Err((_pending, error)) => {
+                            let _ = cx.fail_context(&context, error.venue_error());
+                        }
+                    }
+                    return;
+                }
                 if !supported(interval) {
                     cx.fail(command, interval.unsupported("Hyperliquid"));
                     return;
@@ -1588,44 +1692,10 @@ impl Venue for Hyperliquid {
                     cx.fail(command, "Market not found");
                     return;
                 };
-                #[derive(Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Req<'a> {
-                    coin: &'a str,
-                    interval: &'a str,
-                    start_time: u64,
-                    end_time: u64,
-                }
-                #[derive(Serialize)]
-                struct Read<'a> {
-                    r#type: &'static str,
-                    req: Req<'a>,
-                }
-                let end = to_ms.unwrap_or(cx.now).floor();
-                let start = match (limit, from_ms) {
-                    (None, Some(from)) => from,
-                    _ => end - interval.ms() * f64::from(limit.unwrap_or(500).min(1500)),
-                };
-                if !start.is_finite()
-                    || !end.is_finite()
-                    || start > end
-                    || end > 9_007_199_254_740_991.0
-                    || end < 0.0
-                    || from_ms.is_some_and(|t| t < 0.0)
-                {
+                let Some(body) = candle_body(cx.now, coin, interval, limit, from_ms, to_ms) else {
                     cx.fail(command, "Invalid candle time range");
                     return;
-                }
-                let body = serde_json::to_string(&Read {
-                    r#type: "candleSnapshot",
-                    req: Req {
-                        coin,
-                        interval: interval.as_str(),
-                        start_time: start.max(0.0).floor() as u64,
-                        end_time: end as u64,
-                    },
-                })
-                .unwrap();
+                };
                 self.info(
                     cx,
                     body,
@@ -1652,6 +1722,55 @@ impl Venue for Hyperliquid {
     }
 }
 // Hyperliquid's candle codes are the TS spellings.
+fn candle_body(
+    now: f64,
+    coin: &str,
+    interval: Interval,
+    limit: Option<u32>,
+    from_ms: Option<f64>,
+    to_ms: Option<f64>,
+) -> Option<String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Req<'a> {
+        coin: &'a str,
+        interval: &'a str,
+        start_time: u64,
+        end_time: u64,
+    }
+    #[derive(Serialize)]
+    struct Read<'a> {
+        r#type: &'static str,
+        req: Req<'a>,
+    }
+    let end = to_ms.unwrap_or(now).floor();
+    let start = match (limit, from_ms) {
+        (None, Some(from)) => from,
+        _ => end - interval.ms() * f64::from(limit.unwrap_or(500).min(1500)),
+    };
+    if !start.is_finite()
+        || !end.is_finite()
+        || start > end
+        || end > 9_007_199_254_740_991.0
+        || end < 0.0
+        || from_ms.is_some_and(|t| t < 0.0)
+    {
+        return None;
+    }
+    Some(
+        serde_json::to_string(&Read {
+            r#type: "candleSnapshot",
+            req: Req {
+                coin,
+                interval: interval.as_str(),
+                start_time: start.max(0.0).floor() as u64,
+                end_time: end as u64,
+            },
+        })
+        .unwrap(),
+    )
+}
+
 fn supported(interval: Interval) -> bool {
     use Interval::*;
     matches!(

@@ -3,7 +3,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, PublicFeedPolicy, RequestId, Response, SocketChannel, SocketId,
     TimerId,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
+use support::setup::Options;
 
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
 const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"90000"}]"#;
@@ -39,14 +41,14 @@ impl Harness {
     }
     fn with_policy(feed: Feed, policy: PublicFeedPolicy) -> Self {
         let private = feed == Feed::Private;
-        let mut engine = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+        let mut engine = support::setup::engine(Options {
             public_data_only: !private,
             key: private.then(|| "key".into()),
             secret: private.then(|| "secret".into()),
             passphrase: private.then(|| "passphrase".into()),
             private_ws_headers: private,
             ..Options::default()
-        }));
+        });
         engine.set_public_feed_policy(policy).unwrap();
         let mut h = Self {
             engine,
