@@ -342,7 +342,7 @@ fn initial_halves() -> (
     let mut halves = Vec::new();
     let mut repairs = Vec::new();
     loop {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
         if actions.is_empty() {
             break;
         }
