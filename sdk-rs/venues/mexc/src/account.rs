@@ -184,15 +184,15 @@ impl MexcFutures {
     }
     pub fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: u32, symbol: String) {
         if cx.now < self.account.paused_until {
-            cx.fail(command, "MEXC account reads are rate limited");
+            Self::fail_local_read(cx, "MEXC account reads are rate limited");
             return;
         }
         let Some(m) = cx.store.market(&symbol) else {
-            cx.fail(command, "Market not found");
+            Self::fail_local_read(cx, "Market not found");
             return;
         };
         if self.credentials.is_none() {
-            cx.fail(command, "MEXC leverage requires credentials");
+            Self::fail_local_read(cx, "MEXC leverage requires credentials");
             return;
         }
         let query = sign::query([("symbol", m.id.clone())]);
