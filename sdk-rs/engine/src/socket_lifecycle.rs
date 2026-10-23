@@ -954,6 +954,46 @@ mod tests {
         }
         Ok(())
     }
+    fn retained_text_allocations() -> [usize; 6] {
+        let (mut l, f, e) = started(AuthMode::None);
+        let key = "shared-canonical-nonempty-native-argument";
+        let mut encoded_key = 0;
+        l.replace_interests(f, vec![interest(key)], |op, rows, emit| {
+            encoded_key = rows[0].key.as_ptr() as usize;
+            encode(op, rows, emit)
+        }).unwrap();
+        let (map_key, row) = l.feeds[f.0].interests.desired.iter().next().unwrap();
+        let desired_key = row.key.as_ptr() as usize;
+        let desired_arg = row.wire_args.as_ptr() as usize;
+        let desired_map = map_key.as_ptr() as usize;
+        let coverage = l.feeds[f.0].interests.queue.front().unwrap().batch.covered_keys[0].as_ptr() as usize;
+        assert!(l.release_batch(e, false).is_some());
+        let released_map = l.feeds[f.0].interests.released.keys().next().unwrap().as_ptr() as usize;
+        [desired_key, desired_arg, desired_map, coverage, released_map, encoded_key]
+    }
+
+    #[test]
+    fn equal_native_key_and_argument_share_canonical_text_storage() {
+        let addresses = retained_text_allocations();
+        assert_eq!(addresses[0], addresses[1], "equal immutable native text must not be retained twice");
+    }
+    #[test]
+    fn desired_and_released_map_keys_share_the_canonical_row_key() {
+        let addresses = retained_text_allocations();
+        assert_eq!(addresses[0], addresses[2], "desired map key must not duplicate row text");
+        assert_eq!(addresses[0], addresses[4], "released map key must share the same canonical text");
+    }
+    #[test]
+    fn queued_coverage_uses_the_canonical_row_key_storage() {
+        let addresses = retained_text_allocations();
+        assert_eq!(addresses[0], addresses[3], "queued coverage must retain a handle, not duplicate native text");
+    }
+    #[test]
+    fn encoder_scratch_reuses_canonical_interest_text() {
+        let addresses = retained_text_allocations();
+        assert_eq!(addresses[0], addresses[5], "transaction scratch must retain a handle, not deep-clone text");
+    }
+
     #[test]
     fn final_release_transfers_queued_coverage_key_storage() {
         let (mut l, f, e) = started(AuthMode::None);
