@@ -2403,6 +2403,52 @@ that hot path. No authority policy, codec, venue-specific shortcut or legacy-sit
 exemption changes. Exact paired CI performance and family memory/size gates remain
 separate evidence from diagnostic profiles.
 
+## Draft socket lifecycle architecture adoption
+
+The shared Supervisor alone did not own current epochs, auth acceptance,
+subscription coverage or invalidation. The draft Engine socket lifecycle now
+owns those boundaries for OKX and rejects late ingress before health
+or native mutation. Review found and corrected inactive retry-stop ownership,
+unexpected-close accounting, per-event health reset, silent callback errors and
+cleanup loss on queue exhaustion. Safe-integer physical IDs use the landed shared allocator; full family adoption and deployed cutover
+proof remain open. No allocator change is included in this socket draft.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.
+
+### Lighter depth snapshot Context ownership
+
+The independent public REST depth sender consumes an engine Background Read
+Context and retires it on every success/failure, including stale subscription or
+WS-revision returns. Original deadline/release authority fences publication;
+matching-generation native cleanup cannot release a replacement's latch.
+Exactly one sender is removed (Lighter43→42, lib3→2). Ticker adoption is deferred
+because #1877 holds its interfering candle timer fixture; no timing/order or
+source-ownership workaround is introduced. No held signing/trading/test edits.
+
+## KuCoin futures local terminal provenance
+
+Sixteen synchronous numeric history/funding terminals adopt shared initial Read
+admission and Context finalization. The exact ratchet shrinks KuCoin80->64
+occurrences and70->58 rows, nine files retained; history13->5 and funding9->1.
+Six conservative embedded macro fingerprints remain counted unchanged. Legacy
+signed-streaming, numeric Completion and multipage scheduling remain held for
+their shared signer/history/Plan prerequisites; no zero-legacy claim is made.
+No venue owner registry, finalizer wrapper or credential/routing substitute is
+introduced. Three defensive guards are migrated without an unreachable native
+original-RED claim; thirteen dispatcher-reachable exits supply the production
+acceptance coverage.
+## Bitunix local history authority adoption
+
+Five synchronous history terminal expressions now consume genuine command-entry
+Read authority and complete through the shared Context APIs. The exact four
+history.rs scanner rows retire: Bitunix23 to18 occurrences,20 to16 hash rows,
+four tothree files. Account3, lib7 and trading8 occurrences remain, including
+four conservative trading macro matches. This does not close private history's
+legacy Completion/pager or the blocked physical dispatchers; #1771 source claims,
+signer and shared multi-request prerequisites remain separate.
+
 ## Bitrue local history terminal provenance
 
 Five synchronous numeric refusals consume shared initial Read admission and
