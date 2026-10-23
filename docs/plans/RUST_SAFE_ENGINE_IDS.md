@@ -122,3 +122,42 @@ This is an engine checkpoint only. WASM numeric ingress/outbound validation,
 native and WASM typed terminal disposal, all remaining host/type adapters,
 actual-WASM round trips, final caller contract verification, ratchet checks and
 full CI/replay proof remain required before opening a ready PR or merging it.
+
+## Host phase: numeric codecs and terminal custody
+
+Implement the next phase as thin adapters over the engine checkpoint, without
+changing command IDs, durations, hosted capture IDs or managed string tokens:
+
+- WASM's fifteen physical-resource ingress exports plus signingPending accept
+  f64, call one shared finite/integral/nonnegative/MAX-safe decoder before any
+  clock/event/drain mutation, then construct the u64 wrappers. Return typed
+  invalid-input errors on malformed numbers. Keep the JS ABI numeric; do not
+  expose wasm-bindgen u64/BigInt parameters. Optional text/bytes APIs retain their
+  empty/invalid-UTF8 behavior after resource validation.
+- Widen ActionOut resource fields, managed HttpPacket.request and Cancel.signing
+  to u64 serialization. Audit nested SignedOutbound and managed packet/permit
+  IDs before any host receives an action, rejecting forged unsafe tuple values
+  rather than trusting Rust tuple construction as a wire-boundary exception.
+- Expose the engine's sticky failed state through AnyEngine/WasmEngine. The JS
+  host's existing EngineDeadError path owns disposal, task/route/socket/timer
+  cancellation and conservative pending-write settlement. Check sticky state
+  around host invocation and final claims, so catching an earlier trap cannot
+  permit later output. Workers must use the same terminal notification and stop
+  their flush timers instead of retaining a disposed host.
+- Native host callbacks use one common guarded turn. Only a panic accompanied by
+  the engine's sticky fatal allocator state becomes the typed terminal failure;
+  unrelated panics retain their existing behavior. Stop/cancel all host resources
+  before returning or reporting terminal failure, and never drain partial
+  callback actions or frames. FrameServer maps the same terminal failure through
+  its existing bounded startup-failed channel and settles pending commands
+  conservatively, without restarting the failed engine or reusing identities.
+- Update only mechanical downstream resource-helper types. Keep registry duration
+  casts, command IDs and independent hosted capture token bounds unchanged.
+
+Verification includes native serialization above u32/MAX-safe and managed string
+round trips; actual-WASM wide/invalid ingress must not alias a low pending request
+or drain work; JS host wide Map keys and sticky-fatal same-turn no-I/O controls;
+Workers/native terminal once-only cleanup and late-callback suppression. Forced
+low-ceiling engine tests supply reachable exhaustion without load or timing
+experiments. No local WASM release build is needed: actual-WASM acceptance uses
+CI-built matching artifacts, retaining artifact provenance and explicit limits.
