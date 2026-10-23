@@ -272,3 +272,15 @@ by the intended behavior assertions; normal venue suites pass
 Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
 pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
 controls expose defects; they are not GREEN adoption or P0 closure evidence.
+
+The Info companion row #29 also has an original-source control in the same
+unreserved trading target: a native non-auth -1004 on HTTP400 during client/info
+startup must not deactivate or emit AUTH_REJECTED, and read recovery stays
+armed. It uses the existing authenticated options and actual startup request;
+no session mutation or production callback is replaced. The same p0_write_
+command now runs three controls; its earlier two-control receipt is historical.
+
+Updated local evidence: all three controls compile and fail their intended
+original-source assertions; normal Orderly passes181 tests/three ignored.
+Scoped strict all-target Clippy, fmt, bans and both ratchets pass. These are
+regression controls for future shared adoption, not P0 closure evidence.

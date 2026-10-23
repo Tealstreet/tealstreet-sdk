@@ -1871,3 +1871,50 @@ fn p0_write_5xx_preserves_native_code_without_proving_refusal() {
         if request.method == safe_cex_engine::Method::Post))
     );
 }
+
+#[test]
+#[ignore = "original RED: Info auth classification waits for managed account adoption"]
+fn p0_write_info_non_auth_4xx_does_not_deactivate() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_orderly::Orderly::new(
+        options(),
+    ));
+    e.start(1000.0);
+    let mut delivered_info = false;
+    for _ in 0..4 {
+        let request = requests(&mut e).pop().expect("native startup request");
+        if request.url.ends_with("/v1/public/info") {
+            reply(&mut e, &request, 200, MARKETS);
+        } else if request.url.ends_with("/v1/public/futures") {
+            reply(&mut e, &request, 200, TICKERS);
+        } else {
+            assert!(request.url.ends_with("/v1/client/info"));
+            delivered_info = true;
+            reply(
+                &mut e,
+                &request,
+                400,
+                r#"{"success":false,"code":-1004,"message":"invalid request parameter"}"#,
+            );
+            let out = actions(&mut e);
+            assert!(
+                !out.iter()
+                    .any(|action| matches!(action, Action::Notice(Notice::Deactivate))),
+                "an unrelated request error does not prove invalid credentials"
+            );
+            assert!(!out.iter().any(
+                |action| matches!(action, Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::AUTH_REJECTED)
+            ));
+            assert!(
+                out.iter()
+                    .any(|action| matches!(action, Action::SetTimer { .. })),
+                "native account read recovery must remain armed"
+            );
+            break;
+        }
+    }
+    assert!(
+        delivered_info,
+        "Info failure exercised, not just public discovery"
+    );
+}
