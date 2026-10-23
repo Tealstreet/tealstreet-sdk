@@ -308,7 +308,7 @@ fn partial_initial_positions_do_not_claim_readiness_and_clean_retry_can_complete
     e.start(0.0);
     let mut position = None;
     loop {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
         if actions.is_empty() {
             break;
         }

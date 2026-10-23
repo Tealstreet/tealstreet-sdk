@@ -381,6 +381,36 @@ API (A2), revised after an independent audit:
       hold the command owner until it finishes. It also found the resend
       check was looser than `retry`; it now shares `retry`'s journal
       admission and requires the context's refusal policy.
+  - **BingX checkpoint** (stacked on #1832 and landing; claude-4yjlw0
+    confirmed no overlap with #1884):
+    - **Code:** listenKey POST create and PUT keepalive run as repeat-safe
+      session Mutations through a thin `managed::session_write` over the
+      existing managed `queue()`. BingX listen keys expire 60 minutes after
+      their last keepalive, so an extra create or keepalive is harmless. The
+      writes are created with `resent: true`, because a listen key presents
+      only the API key and legacy never resent it on a signature refusal.
+    - **Session lifecycle:** each create and every `invalidate_private` retire
+      the previous session. Native `epoch`/`key_in_flight` recovery stays as
+      it was.
+    - **Ratchet:** `bingx/src/account.rs` goes 17 → 15 (its two listen-key
+      callers).
+    - **Not removed yet:** `Self::request` stays on landing because
+      `fetch_metadata` still uses it; whichever of this and #1884 lands second
+      deletes it. The `lib.rs` STAGING_BOOTSTRAPS `sign_http` allowance stays
+      until codex-cxxyqr's history Completion bridge removes the history
+      callers.
+    - **Declared caller change:** an explicit 20 s raw bound. It matters for
+      keepalive: a hung create is already dropped by the native 10 s connect
+      watchdog, but a hung keepalive runs with no watchdog and previously
+      relied on the host default. It now fails at 20 s and the native 30 s
+      `RETRY_MS` PUT follows.
+      `a_hung_listen_key_keepalive_fails_at_its_bound_and_retries` fires
+      timers in real order and fails on the legacy code. Request bytes are
+      unchanged: same method, URL, `?listenKey=` query, the per-method
+      unsigned headers plus `X-BX-APIKEY`, and no signature.
+  - **MEXC:** no session HTTP consumer. Rust MEXC authenticates its private
+    socket with a signed WS `login` (confirmed by codex-ih35js), which is
+    #1771/signer work.
   - **Binance checkpoint** (owner ruling (a): stacked on #1817's reviewed
     head, listen-key region only; regions confirmed with claude-m26ps4):
     - **Code:** create and keepalive go through `venues/binance/src/session.rs`

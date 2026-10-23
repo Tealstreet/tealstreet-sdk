@@ -1717,8 +1717,8 @@ impl Venue for BinanceFutures {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Command::FetchAccount { command } = command {
-            self.fetch_identity(cx, command);
+        if let Command::FetchAccount { .. } = command {
+            self.fetch_identity(cx);
             return;
         }
         match command {
