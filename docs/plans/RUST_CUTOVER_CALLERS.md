@@ -4399,3 +4399,10 @@ issued Context can complete that generation. An expired root still grants no
 send or publication rights, and unparented siblings cannot extend its bound.
 Outstanding owners count toward the existing 256-owner capacity until cleanup;
 adapters must finalize them through their existing native terminal callbacks.
+
+
+### Coinbase deferred candles on catalogue failure
+
+A `FetchCandles` command waiting for Coinbase public catalogue startup now fails once if its current catalogue fails. Its error has kind `internal`, message `Coinbase public catalogue unavailable`, the original discovery failure in `venueMessage`, and no financial outcome. Initial empty catalogues follow the existing discovery failure/backoff path; empty individual Products pages/families remain allowed until the complete aggregate is known. A stale Products generation cannot settle a current waiting command.
+
+Subscriptions remain queued in their original order and resume on catalogue recovery. Discovery retries and the shared native 334-ms REST pacing remain in place. Recovery does not replay rejected candle commands; callers may submit a fresh query. This containment uses the existing failure/completion path; managed request adoption remains a separate change.
