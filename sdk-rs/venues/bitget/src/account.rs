@@ -99,8 +99,8 @@ pub struct Account {
     pub(crate) reject_route: bool,
     /// That refusal's native code and message, reported once routes are spent.
     pub(crate) egress_refusal: Option<(f64, String)>,
-    /// Every route refused this key's egress; private connects stay stopped.
-    pub(crate) egress_exhausted: bool,
+    /// Exhaustion was reported this streak; later walks retry silently.
+    egress_reported: bool,
     poll: Option<TimerId>,
     /// Backs off the settings probe that gates private startup; transient failures never end it.
     probe: safe_cex_engine::startup::Backoff<()>,
@@ -980,28 +980,28 @@ impl BitgetFutures {
     }
 
     /// The host refused every route for this private socket's egress: report
-    /// the native refusal once and stop reconnecting (TS #8093).
+    /// the native refusal once per streak, then keep retrying the last route
+    /// as TS does, so a later whitelist change recovers (TS #8093).
     pub(crate) fn private_route_exhausted(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         (code, msg): (f64, String),
     ) {
-        let connection = &mut self.sockets[3];
-        connection.open = false;
-        connection.socket = None;
-        self.account.authenticated = false;
-        self.account.egress_exhausted = true;
-        self.account.supervisor.cancel(cx);
+        if std::mem::replace(&mut self.account.egress_reported, true) {
+            return self.disconnected(cx, 3);
+        }
         let error = rejection(
             "private WebSocket login from every available egress IP",
             code,
             &msg,
             ErrorKind::AuthPermission,
         );
-        cx.notice(Level::Error, code::AUTH_REJECTED, error.message.clone());
+        // An IP whitelist refusal is not a refused key: never deactivate.
         if !self.startup_ready(cx) {
-            self.reject_startup(cx, error, true);
+            return self.reject_startup(cx, error, false);
         }
+        cx.notice(Level::Error, code::AUTH_REJECTED, error.message.clone());
+        self.disconnected(cx, 3);
     }
 
     fn startup_ready(&self, cx: &Cx<'_, Pending>) -> bool {
@@ -1520,14 +1520,27 @@ impl BitgetFutures {
                 }
                 self.account.authenticated = true;
                 self.account.egress_refusal = None;
+                self.account.egress_reported = false;
                 self.account.supervisor.authenticated(cx);
                 self.private_subscribe(cx);
             } else if refused && let Some(code) = egress_refusal_code(text) {
                 // 40018 (key bound to other IPs) or 40024 (restricted location)
                 // refuses this egress: try the host's next route before reporting.
+                // The supervisor's backoff paces the walk: a host without
+                // routing ignores the request and never reports exhaustion.
                 self.account.egress_refusal = Some((code, header.msg.to_string()));
                 self.account.reject_route = true;
-                self.connect(cx, 3);
+                cx.notice(
+                    Level::Warn,
+                    code::AUTH_REJECTED,
+                    format!(
+                        "Bitget private WS login refused this egress IP ({code}); trying the next route"
+                    ),
+                );
+                if let Some(socket) = self.sockets[3].socket {
+                    cx.close(socket);
+                    self.disconnected(cx, 3);
+                }
             } else {
                 if !self.account.authenticated
                     && !self.startup_ready(cx)

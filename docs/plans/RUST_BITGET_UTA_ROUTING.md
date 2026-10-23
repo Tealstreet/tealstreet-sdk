@@ -52,11 +52,15 @@ which rejected a fixed refusal count.
    - The serialized native plan gains `private_ws_routes`, and its fixture is
      refreshed.
 5. **Bitget venue, exact TS #8093 behaviour.**
-   - **Refusal:** pre-login 40018/40024 leads at once to reconnect with
-     `reject_route`, and nothing is reported.
+   - **Refusal:** pre-login 40018/40024 reconnects with `reject_route` after
+     the supervisor's first backoff step, with TS's "trying the next route"
+     warning and no error report. Backoff (not an immediate dial) bounds a host
+     that ignores `reject_route` and never reports exhaustion.
    - **Exhaustion:** `on_route_exhausted` for the current private socket reports
-     the existing typed egress refusal ONCE. The message says whether Tealstreet
-     egress routes were tried. Private reconnects then stop.
+     the typed `AuthPermission` egress refusal once per streak: as a startup
+     failure before startup (no deactivation, as for REST 40018), else as an
+     error notice. As in TS, the socket then keeps retrying the last route, so a
+     later whitelist fix recovers; an authenticated login ends the streak.
    - **Non-terminal until exhaustion:** 40018/40024 are not a permanent auth
      failure until then.
    - **Separate counters:** carried over from TS. These are

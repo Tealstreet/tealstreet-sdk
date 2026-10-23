@@ -1,5 +1,6 @@
 //! TS #8093 egress-refusal walk: a pre-login 40018/40024 asks the host for the
-//! next route; only the host's typed exhaustion reports, once, and stops.
+//! next route; only the host's typed exhaustion reports, once per streak, and
+//! the socket keeps retrying the last route as TS does.
 mod support;
 
 use safe_cex_engine::{ErrorKind, Event, SocketId};
@@ -79,8 +80,36 @@ fn auth_rejections(h: &Harness) -> usize {
         .count()
 }
 
+/// Fire timers until the next private connect; returns that socket.
+fn next_private(h: &mut Harness) -> SocketId {
+    let connects = private_connects(h);
+    while private_connects(h) == connects {
+        let next = h.timers.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1));
+        let (timer, at) = next.expect("a paced reconnect");
+        h.timers.retain(|(t, _)| *t != timer);
+        h.now = at;
+        h.event(Event::TimerFired { timer });
+    }
+    private(h)
+}
+
+/// Deliver a refusal and pace to the next private connect; returns its delay.
+fn refuse(h: &mut Harness, refusal: &str) -> f64 {
+    let from = h.now;
+    h.private_message(refusal);
+    next_private(h);
+    h.now - from
+}
+
+fn route_warnings(h: &Harness) -> usize {
+    h.logs
+        .iter()
+        .filter(|m| m.contains("trying the next route"))
+        .count()
+}
+
 #[test]
-fn egress_refusal_before_login_asks_for_the_next_route_silently() {
+fn egress_refusal_before_login_asks_for_the_next_route_without_reporting() {
     for refusal in [
         IP_BOUND,
         r#"{"event":"error","code":"40018","msg":"Invalid IP"}"#,
@@ -92,18 +121,22 @@ fn egress_refusal_before_login_asks_for_the_next_route_silently() {
             !rejects_route(&h, first),
             "first connect carries no refusal"
         );
-        h.private_message(refusal);
+        let delay = refuse(&mut h, refusal);
         assert!(
             h.closed.contains(&first),
             "{refusal}: refused socket closed"
         );
-        assert_eq!(private_connects(&h), 2, "{refusal}: reconnects at once");
+        assert!(
+            delay <= 1_000.,
+            "{refusal}: first walk step is prompt: {delay}"
+        );
         assert!(
             rejects_route(&h, private(&h)),
             "{refusal}: next route asked"
         );
         assert!(h.startup_failures.is_empty(), "{refusal}: nothing reported");
         assert_eq!(auth_rejections(&h), 0);
+        assert_eq!(route_warnings(&h), 1, "{refusal}: TS-style walk warning");
         // The edge is one connect: an ordinary reconnect after it is plain.
         let second = private(&h);
         h.event(Event::WsClosed {
@@ -120,9 +153,24 @@ fn egress_refusal_before_login_asks_for_the_next_route_silently() {
 }
 
 #[test]
-fn route_exhaustion_reports_once_and_stops_private_reconnects() {
+fn a_host_without_routing_paces_repeated_refusals_with_backoff() {
+    // Such a host ignores reject_route and never reports exhaustion.
     let mut h = to_login();
-    h.private_message(IP_BOUND);
+    let mut delays = vec![];
+    for _ in 0..6 {
+        let socket = private(&h);
+        h.event(Event::WsOpened { socket });
+        delays.push(refuse(&mut h, IP_BOUND));
+    }
+    assert!(delays.windows(2).all(|d| d[1] >= d[0] * 0.75), "{delays:?}");
+    assert!(delays[5] >= 8_000., "backoff grows: {delays:?}");
+    assert!(h.startup_failures.is_empty());
+}
+
+#[test]
+fn startup_exhaustion_reports_once_without_deactivating() {
+    let mut h = to_login();
+    refuse(&mut h, IP_BOUND);
     let refused = private(&h);
     h.event(Event::WsRouteExhausted { socket: refused });
     assert_eq!(h.startup_failures.len(), 1);
@@ -130,22 +178,21 @@ fn route_exhaustion_reports_once_and_stops_private_reconnects() {
     assert_eq!(failure.kind, Some(ErrorKind::AuthPermission));
     assert_eq!(failure.venue_code.as_deref(), Some("40018"));
     assert!(failure.message.contains("Current IP does not match"));
+    assert_eq!(
+        h.deactivations, 0,
+        "a whitelist refusal is not a refused key"
+    );
     // Duplicate exhaustion for the spent socket is inert.
     h.event(Event::WsRouteExhausted { socket: refused });
     run_for(&mut h, 600_000.);
     assert_eq!(h.startup_failures.len(), 1);
-    assert_eq!(
-        private_connects(&h),
-        2,
-        "no private reconnect after exhaustion"
-    );
 }
 
 #[test]
 fn walk_across_three_routes_reports_only_at_the_end() {
     let mut h = to_login();
     for route in 1..=2 {
-        h.private_message(IP_BOUND);
+        refuse(&mut h, IP_BOUND);
         assert_eq!(private_connects(&h), route + 1);
         let socket = private(&h);
         assert!(rejects_route(&h, socket));
@@ -156,15 +203,42 @@ fn walk_across_three_routes_reports_only_at_the_end() {
         socket: private(&h),
     });
     assert_eq!(h.startup_failures.len(), 1);
-    run_for(&mut h, 600_000.);
-    assert_eq!(private_connects(&h), 3);
+}
+
+#[test]
+fn established_session_exhaustion_reports_once_per_streak_and_keeps_retrying() {
+    let mut h = Harness::classic();
+    let exhaust = |h: &mut Harness| {
+        let socket = private(h);
+        h.event(Event::WsClosed { socket, code: 1006 });
+        let socket = next_private(h);
+        h.event(Event::WsOpened { socket });
+        refuse(h, IP_BOUND);
+        h.event(Event::WsRouteExhausted { socket: private(h) });
+        let socket = next_private(h);
+        h.event(Event::WsOpened { socket });
+    };
+    exhaust(&mut h);
+    assert_eq!(auth_rejections(&h), 1);
+    let socket = private(&h);
+    assert!(!rejects_route(&h, socket), "redials the last route like TS");
+    // A second spent walk in the same streak stays silent.
+    exhaust(&mut h);
+    assert_eq!(auth_rejections(&h), 1);
+    // A whitelist fix recovers: login ends the streak, so a later one reports.
+    let socket = private(&h);
+    h.event(Event::WsOpened { socket });
+    h.private_message(r#"{"event":"login","code":0,"msg":""}"#);
+    exhaust(&mut h);
+    assert_eq!(auth_rejections(&h), 2);
+    assert_eq!(h.deactivations, 0);
 }
 
 #[test]
 fn stale_exhaustion_from_an_old_socket_is_inert() {
     let mut h = to_login();
     let old = private(&h);
-    h.private_message(IP_BOUND);
+    refuse(&mut h, IP_BOUND);
     h.event(Event::WsRouteExhausted { socket: old });
     assert!(h.startup_failures.is_empty());
     assert_eq!(private_connects(&h), 2);

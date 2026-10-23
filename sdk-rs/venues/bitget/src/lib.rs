@@ -244,11 +244,7 @@ impl BitgetFutures {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
-        if index == 3
-            && (self.account.startup_rejected
-                || self.account.egress_exhausted
-                || self.account.supervisor.is_waiting())
-        {
+        if index == 3 && (self.account.startup_rejected || self.account.supervisor.is_waiting()) {
             return;
         }
         let url = if index == 3 {
