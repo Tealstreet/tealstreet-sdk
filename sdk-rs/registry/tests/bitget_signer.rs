@@ -1,4 +1,5 @@
 #![cfg(feature = "bitget")]
+use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Engine, Event, Response, Venue};
 use safe_cex_venues::{Visit, build};
 const NOW: f64 = 1_709_209_849_123.9;
@@ -8,11 +9,14 @@ impl Visit for Start {
     fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Vec<Action> {
         engine.start(NOW);
         let mut all = vec![];
+        // Managed reads release at the time of the event that issued them.
+        let mut now = NOW;
         for step in 0..8 {
-            let output: Vec<_> = engine.drain_actions().collect();
+            let output = prepared_actions(&mut engine, now);
             if output.is_empty() {
                 break;
             }
+            now = NOW + f64::from(step);
             for action in output {
                 if let Action::Http(http) = &action {
                     let body = if http.url.contains("/contracts") {

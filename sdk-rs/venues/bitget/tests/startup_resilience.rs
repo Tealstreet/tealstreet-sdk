@@ -105,8 +105,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let reads = engine
-        .drain_actions()
+    let reads = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,

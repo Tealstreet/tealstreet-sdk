@@ -246,6 +246,17 @@ fn unanswered_identity_read_fails_at_the_shared_deadline() {
 #[test]
 fn identity_reads_beyond_shared_capacity_are_refused_before_io() {
     let mut h = Harness::classic();
+    // Background account reads share the registry: settle the login
+    // reconciliation so none still holds a slot.
+    while let Some(i) = h
+        .requests
+        .iter()
+        .position(|r| account_answer(&r.url).is_some())
+    {
+        let request = h.requests.remove(i);
+        h.reply(request.id, 200, account_answer(&request.url).unwrap());
+    }
+    assert!(h.requests.is_empty(), "{:?}", h.requests);
     for command in 1_000..1_256 {
         h.command(Command::FetchAccount { command });
     }
