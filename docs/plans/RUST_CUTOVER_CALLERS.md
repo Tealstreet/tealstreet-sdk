@@ -4079,6 +4079,73 @@ new option, credential transfer or persisted identity mapping for this additive
 header seam. [Contract and scope](RUST_UNSIGNED_HTTP_HEADERS.md).
 
 
+### Kraken futures histories: admitted pages with strict native proof refusals
+
+Fills, closed orders, ledger and public trades now use the existing engine
+CursorHistory/Completion owner. Actual HTTP/native-envelope/stream/decode/row
+failure before eligible output was admitted rejects typed; later actual loss
+returns only earlier admitted rows with one command-owned history.incomplete
+Warn before Done, visible at Error-only logging. Failed-page prefixes, including
+a newer terminal update to an admitted native order, never enter the result.
+Terminal orders fold across admitted rows only, preserving strict latest-time
+selection and first encounter on equal timestamps.
+
+Native continuation-proof refusal remains strict even after earlier pages:
+missing token on a saturated order page, conflicting decoded body/header tokens,
+repeated/empty/no-fresh continuations and fifty-page exhaustion return no partial
+result or success marker. A terminal fiftieth page completes without a fifty-first
+request. The ledger's validated since-only coverage gap now goes through the
+engine marker owner with its existing message, native predicate precedence and
+eligible-output-limit suppression. Valid filtered-empty coverage may still be
+explicitly incomplete; filtered rows cannot authorize actual-failure recovery.
+
+Shared owner finalization supplies kind internal for formerly unclassified
+actual-page errors and strict cursor/proof/budget refusals, affecting typed
+caller handling and telemetry categories. Existing range admission, explicit
+unsupported client-ID lookup and consuming signed-setup refusal retain their
+separate paths/classification; no notSent/unknown outcome is invented. Exact
+ISO/opaque/since cursor request bytes, native IDs, output fields/units, final
+sort/limits, cash/position ledger filtering, public unsigned dispatch and live
+Store isolation are preserved. Kraken Spot is separate and unchanged.
+
+SDK arguments and row shapes are unchanged. Numeric Completion uses legacy
+authority rather than managed Context completion. Callers must ingest command-scoped
+incomplete-query warnings, gate coverage accordingly and handle typed rejection
+as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+### KuCoin futures and spot owned history
+
+This slice moves the implemented KuCoin query reads to the existing engine
+history owner. Futures fills, orders, transaction ledger and symbol-scoped
+funding retain one owner across native pages and time windows. A terminal
+HTTP/envelope/metadata-decode/row failure before any eligible page rows were accepted rejects
+with kind `internal`; after accepted rows, it resolves those rows plus one
+command-owned Warn `history.incomplete`. A failed page's streamed prefix is
+excluded. Filters do not authorize partial success, and retries do not poison
+accepted identities. Transport and decode failures share callbacks, so they
+retain the shared Internal fallback rather than a blanket Network label.
+
+Well-formed but inconsistent page census, ledger offset and funding same-timestamp continuation
+proofs, clipped ranges and the retry-inclusive request safety bound remain
+strict rejections, even after accepted rows. These refusals now carry the
+shared `internal` kind where legacy string errors had no kind; telemetry tags
+can change. Time/identity sorting, native units, filters and the output-limit
+exception for explicitly ranged income/funding remain unchanged. One owner
+spans every window; no venue emits its own completeness marker.
+
+Futures public trades also gains typed Internal failures through the owner; it
+remains a single-response public read with unchanged header selection.
+
+Spot fills remains a single HF response with the existing schema/defaults and
+no invented continuation. Its whole response is validated before admission;
+malformed/HTTP/transport errors reject `internal` rather than an unclassified
+string failure. The existing command-error diagnostic on request failure stays.
+Spot lookup and disabled order-history/income stubs remain unchanged, and public
+trades remains unsupported. No signing helper, credential selection, constructor
+argument, capability or NX bootstrap changes are included. Callers must ingest
+command-scoped incomplete-query warnings, gate coverage accordingly and handle
+typed query rejection as unavailable history.
+
 ### Bitrue single-page fills: shared admission and completion owner
 
 Bitrue's bounded native `/fapi/v2/myTrades` result now uses the existing engine

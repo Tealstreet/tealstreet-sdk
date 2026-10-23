@@ -1590,6 +1590,224 @@ shared-owner adoption. No local release-WASM, full replay or timing run. Final
 publication integrates actual #1762; fresh CI and post-sort-baseline proof remain
 required, alongside the existing queued history merge order.
 
+## Next cursor fan-out: Kraken futures histories
+
+Plan first on fresh `feat/rust-owned-history-kraken-futures` from actual
+landing `fe44969d033529c244fc4f33fce5395c0273df04` (2026-10-23), during the
+owner-assigned Orderly #1767 exclusive landing window. This checkpoint is a
+plan only. Existing Hyperliquid #1765 and Backpack #1766 CI watches remain
+active. No landing merge occurs before actual #1767; real-integrate its
+shared-engine input before final CI/proof. Signer, clock and financial lanes
+confirm Kraken futures history and request-builder regions are clear; later
+account reducers remain separate.
+
+Scope: adopt existing boxed `CursorHistory<Row>`/`Completion` in
+`sdk-rs/venues/kraken/src/history.rs`, with original-source controls in the
+existing `tests/history.rs` and nearby CALLERS/AUDITS/QUALITY/this-plan
+updates. Existing `lib.rs` already routes streamed HTTP/transport failure to
+`history_failed`; no routing edit is planned. No engine API, paging primitive,
+account reducer, signing, credentials, Store, Context, capabilities, harness,
+workflow, fixtures, reference output, budget or NX edits. Numeric Completion
+remains the explicit legacy authority, not managed Context completion or a
+journal-policy bypass; coordinate any future exact legacy-inventory refresh
+after actual landing.
+
+One existing engine owner must own accepted/staged rows, command finalization,
+identity/cursor history and the fifty-page budget. Remove the venue accepted
+rows vector, global seen/cursor sets and page counter. Native raw counts,
+fresh/native identity facts, ascending/descending observations, oldest/newest
+native millisecond bounds and endpoint cursor derivation remain adapter facts.
+Use raw native identities for `fresh`, including filtered records; only
+eligible mapped rows are staged. The raw account-ledger identity remains
+booking ID plus asset/contract; derived PnL/funding/fee/liquidation rows keep
+their existing IDs, cash-leg filtering and units. Filtered rows must not
+authorize failure recovery. No new output cap or early stop: fills and orders
+still walk their current native coverage despite a small requested limit;
+trades retain their current limit stop.
+
+Admit a page only after HTTP/native envelope, required-array, all streamed
+rows, order length and cursor-envelope consistency checks succeed. Actual first
+or zero-eligible-output failure rejects typed (Internal fallback); actual
+later-page HTTP/transport/decode/malformed failure returns only earlier
+accepted rows plus one command-owned incomplete Warn before Done, including
+Error-only logging. Discard the failed page's prefix, including order updates
+to already accepted native IDs. Move order terminal-state folding into the
+contextual final encoder across admitted rows only: keep the latest
+strictly-greater updated timestamp, first encounter on equal timestamps,
+existing filters-before-fold, ignored NotFound/EditRejected/nonterminal events,
+and final descending sort/truncation. Do not retain a separate mutable
+accepted-order cache outside the history owner. No historical row may enter the
+live account Store.
+
+Preserve strict endpoint-policy refusals separately from recoverable actual
+page failure: repeated/no-fresh cursor, fifty-page exhaustion, and a saturated
+order page with no continuation proof, or contradictory decoded body/header
+tokens, still reject via owner.reject even after prior rows. Do not change
+their existing INCOMPLETE messages or manufacture a complete order total. Drive
+repeat/empty/no-new-row/budget detection through CursorWalk settings and native
+CursorPage facts; explicitly enable both stall_on_empty_page() and
+stall_on_no_new_rows() so an empty page carrying a token preserves the current
+strict refusal. Reject its Stalled verdict instead of adding another loop.
+Validate missing/conflicting continuation proof before page admission and
+reject it strictly; no request or complete result is authorized by unusable
+proof. Generic whole-envelope/row decode failure and a declared order length
+mismatch remain actual failed-page errors with accepted-only recovery. Preserve
+the existing native parser rather than inventing token authority from a
+malformed envelope. Keep body/header opaque token agreement and exact
+`lastFillTime`/`lastTime` ISO millisecond overlap, ledger `since`/count and
+orders since/before/count/sort/ closed/opened/tradeable request bytes. A
+terminal page at request fifty is still complete; a full continuing page fifty
+rejects without a request fifty-one. Synchronous consuming signed setup refusal
+stays strict through its current error path, never a partial HTTP-page failure
+or a reason to resend.
+
+Replace the ledger's direct HISTORY_INCOMPLETE emitter with
+advance_with_coverage on the validated terminal since-only coverage gap.
+Preserve its message and current suppression when eligible accepted+staged
+output already satisfies the requested limit. Preserve native ledger predicate
+precedence: crossing from can prove descending coverage; crossing to proves
+coverage only in the ascending, distinct-time continuation branch. A descending
+page with newest above to alone still has the existing since-only gap unless
+from or the eligible output limit proves sufficient coverage. A valid
+all-filtered saturated page may explicitly return incomplete empty output; a
+failed page with no eligible accepted output must reject instead. Completion
+owns command fields, severity, exactly-once marker ordering and serialization
+failure suppression. Preserve first coverage cause without a venue marker
+latch.
+
+Before production edits, commit original-source assertion-RED controls for
+typed first/native/streamed failure, accepted-only later-page recovery,
+failed-prefix isolation, zero-eligible recovery refusal, concurrent owners and
+Error-only marker-before-Done delivery. Cover fills, ledger, closed orders and
+unsigned public trades with full-page continuations where applicable. Pin an
+accepted terminal order followed by a newer failed-page update to the same ID,
+proving that the failed update cannot replace the prior accepted state.
+Preserve and extend existing strict repeated-cursor, full same-time fill
+boundary and real fifty-page/no-fifty-first tests; add terminal fiftieth page,
+missing/conflicting order token, an accepted order page followed by an empty
+page with a token (strict rejection, no partial marker/result), declared length
+mismatch, fully filtered
+native progress, requested small-limit behavior, descending-above-to ledger gap
+precedence, native compound ledger identities and existing exact
+large-ID/signing/public-unsigned/request-sequence controls. Retain the explicit
+unsupported client-ID lookup refusal and range admission behavior unchanged.
+
+Independent plan/correctness/adversarial reviews must explicitly answer the
+architecture gate: this is adoption of the existing shared engine history
+owner, not another venue completeness/paging implementation. Focused
+engine/Kraken futures/Binance native tests plus touched all-target strict
+Clippy/fmt/bans/diff checks use four Cargo jobs. Corepack Yarn only; never
+bare/Volta yarn, npx or the account-policy check. No local release WASM/full
+replay/size/timing run. After actual shared predecessors, require exact-head
+green CI and fresh authenticated post-sort raw/package/ordered-gate evidence,
+then announce, run a fresh separate porcelain guard and a separate exact-head
+merge. Caller docs record accepted-only partial recovery and typed telemetry
+without claiming B11 ingestion/coverage, managed completion, remote-signing or
+deployed cutover proof closed.
+
+Independent correctness and adversarial plan reviews are CLEAN after the
+explicit strict token-proof, empty-with-token and native ledger-precedence
+refinements. Existing CursorHistory/Completion APIs suffice; no production
+source or tests are edited in this plan checkpoint. Both reviews confirm the
+shared-engine architecture gate. Original-RED controls precede implementation.
+
+Kraken futures regression-only checkpoint `f2389ff658b` leaves production
+unchanged: nineteen controls pass (including the new strict-proof compatibility
+control), and four new assertion groups fail on untyped first/filtered failures,
+accepted-page loss and failed newer-order-prefix isolation. Existing engine
+owner adoption makes all four groups green. Added compatibility controls pin
+terminal page fifty versus continuing cap fifty/no page fifty-one, strict empty
+or missing/conflicting order continuation after accepted rows, declared length
+mismatch, first native/transport/decode typing, ledger descending-above-to gap
+precedence and filtered-empty coverage, concurrent owners, first order state on
+equal timestamp, and no-I/O strict consuming setup. Terminal helpers inspect
+physical HTTP actions before filtering notices, preventing vacuous no-resend
+assertions. Independent source correctness/adversarial reviews are CLEAN and
+confirm existing-engine choke-point adoption; no engine API or managed completion
+policy is added. Final focused/strict checks and tests/caller review precede
+draft publication; actual shared dependencies and full CI/evidence remain.
+
+## KuCoin futures and spot owner adoption (planned 2026-10-23)
+
+Base: actual landing `90dc6637d6e12eafecc283d0dfb9a78e7fc967d6`.
+Scope: `venues/kucoin/src/history.rs`, `funding.rs`, spot query-only regions in
+`spot/mod.rs`, focused existing/new history tests, and appended caller/audit/
+quality notes. No signing helper, credential selection, account reducer,
+capability, HTTP recipe or request-context authority changes. Keep all watches;
+no landing merge during the #1741 exclusive window. Actual shared predecessors
+must be integrated before final CI/proof.
+
+1. Pin numbered-page/ledger and funding request sequences, admission errors,
+   retry delays/counts, 350ms pacing, exact integer offsets/nanosecond fill
+   bounds, newest-first tiled windows, census/cursor proofs and final shaping.
+   Spot fills remains one request, limit/defaults/output schema unchanged;
+   disabled order-history/income stubs and lookup remain unchanged.
+2. Regression-only first: reject Internal with no Done/marker on initial failed
+   HTTP/envelope/row reads; after an accepted futures/funding page resolve only
+   admitted rows with one command-owned Warn on terminal page failure. Prove
+   failed-page prefixes and retries cannot leak rows/poison dedupe, concurrent
+   owners remain isolated, successful empty is complete, and spot malformed/
+   transport failures become typed failures without partial success.
+3. Adopt existing engine `CursorHistory`/`Completion` for futures history and
+   funding, retaining one owner across every native window. Native page/offset/
+   timestamp tokens describe wire continuation; the shared walk owns accepted
+   row identity, continuation lifecycle and missing-coverage reporting. Keep
+   native census, strictly decreasing ledger/funding cursor and bounded-attempt
+   refusals strict via owner.reject; those native completeness proofs are not
+   recoverable page failures. Keep the existing total HTTP-attempt safety guard
+   (counts retries), independent of accepted-page tracking. Stage normalized
+   page rows locally until the whole response validates, then admit atomically.
+   Spot fills uses `HistoryRows` for its single validated response, without
+   inventing pagination or enabling unsupported endpoints.
+4. Preserve final descending time/identity ordering and limit exceptions for
+   explicitly ranged income/funding. Preserve newest-window allocation bounds,
+   cursor inclusivity and padding, output units, filters and successful paths.
+   HTTP/decode callbacks are multiplexed, so the shared Internal default is
+   honest; do not classify all failures as Network. No numeric/managed fallback.
+5. Independent correctness/adversarial reviews must answer the architecture
+   gate: these are two family adapters to the existing engine history choke
+   point, not a second marker emitter/pager. Focused engine/KuCoin (spot feature)/
+   Binance tests, strict touched all-target Clippy/fmt/bans/diff locally with
+   four Cargo jobs; no local release WASM/full replay/size/timing. Update caller
+   impact and open a draft with CI watch, no cutover/B11/runtime closure claim.
+
+KuCoin plan-audit clarification: malformed metadata decoding follows failed-page
+owner policy; well-formed census values and missing/nondecreasing native cursors
+remain strict proof refusals. Funding cursor proof still precedes the output cap,
+while ledger cursor proof is checked only when continuation is actually needed.
+Raw census/cursor facts include filtered/duplicate rows; output admission does not.
+
+KuCoin local adoption checkpoint: exact final 17 controls on original source
+`90dc6637d6e` produce 14 assertion RED / 3 compatibility GREEN; the implementation
+makes all 17 GREEN. Original comparison saves/restores only this slice's three
+source files byte-for-byte, with test/source hashes recorded locally. The full
+focused engine/KuCoin (spot)/Binance native suite passes 957 tests; strict touched
+all-target Clippy/fmt/bans/diff checks pass. Independent plan, correctness,
+adversarial source/delta and final tests/docs reviews are CLEAN. Actual #1741
+must be genuinely integrated before draft/final CI; none of these local receipts
+claims new shared-core compatibility or deployed runtime coverage.
+
+Actual #1741 integration was conflict-free and preserved all four reviewed
+source/test blobs and the entire incoming unowned tree; integrated native suite
+passes 1,100 tests. Its exact lexical inventory needs the owner-authorized
+follow-on: prune KuCoin history 20->13 and funding 15->9 legacy sites, and spot
+22->20 with the same GET call re-expressed only to carry HistoryRows. Record the
+full exact spot old/new maps in existing HISTORY_BOOTSTRAPS and hash-pin the
+transition in checker controls; preserve every other map and all checker logic.
+The funding cursor formatting is factored through a tuple to avoid two false
+macro matches on the local identifier `request`, without changing cursor bytes.
+No new HTTP site, recipe, headers, signing or broad exemption is authorized.
+
+The precise ratchet update passes all 12 checker controls and the full bans
+script. Exact spot map hashes (sorted JSON) are
+`cff9fea5f76ae51654a83c7953df010ef41e3941614a6fdd67b9f1001bd212ff`
+(old) and `fca911a5d114175c7374dfef35111bf3498f871eead93ef398d926ccf6929da8`
+(new); existing negative controls also exercise this transition against modified
+baselines, foreign paths, inflated counts/new digests and newer pruning.
+Final tuple-cursor source passes all 257 KuCoin/spot tests (including the same
+17 owned-history controls), strict all-target Clippy/fmt and diff checks. No
+production request-context adoption or signing changes are implied by pruning.
+
 ## Next single-page fan-out: Bitrue execution histories
 
 Plan first on fresh `feat/rust-owned-history-bitrue` from actual landing
