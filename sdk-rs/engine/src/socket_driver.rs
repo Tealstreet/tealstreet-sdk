@@ -295,20 +295,16 @@ impl Driver {
         socket: SocketId,
         ingress: Ingress,
     ) -> IngressResult {
-        let expired = if let Some(epoch) = self.state.socket_epoch(socket) {
-            if !self.valid_time(epoch.feed(), cx.now) {
-                return IngressResult {
-                    admission: Admission::Denied,
-                    effects: Vec::new(),
-                };
+        let runtimes = &self.runtimes;
+        let admission = self.state.admit_checked(socket, ingress, |epoch| {
+            let runtime = runtimes
+                .get(epoch.feed().index())
+                .ok_or(SocketError::InvalidTime)?;
+            if !runtime.time.valid(cx.now) {
+                return Err(SocketError::InvalidTime);
             }
-            self.runtimes[epoch.feed().index()]
-                .supervisor
-                .expired(cx.now)
-        } else {
-            None
-        };
-        let admission = self.state.admit(socket, ingress, expired);
+            Ok(runtime.supervisor.expired(cx.now))
+        });
         let mut effects = Vec::new();
         match admission {
             Admission::Expired(retirement, timeout) => {
@@ -810,8 +806,14 @@ mod tests {
         h.text(0, "stop");
         let before = h.engine.venue().driver.state.socket_lookup_count();
         let effects = h.engine.venue().effects.len();
-        h.event(Event::WsMessage { socket, text: "pong" });
-        assert_eq!(h.engine.venue().driver.state.socket_lookup_count() - before, 1);
+        h.event(Event::WsMessage {
+            socket,
+            text: "pong",
+        });
+        assert_eq!(
+            h.engine.venue().driver.state.socket_lookup_count() - before,
+            1
+        );
         assert_eq!(h.engine.venue().effects.len(), effects);
     }
 

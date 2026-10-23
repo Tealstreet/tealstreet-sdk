@@ -887,3 +887,12 @@ budget or timing-threshold edit. Review the concrete API/order before source,
 run focused four-crate native/strict checks and independent source reviews,
 then measure the resulting exact head in CI. A reduced lookup count is not a
 CPU-pass claim.
+
+PhaseE source verification passes 1,446 engine/OKX/Bitunix/Binance all-target
+cases and67 targeted all-feature socket controls, strict touched-crate Clippy,
+fmt and diff checks. The three original lookup assertions fail on the prior
+implementation (12 driver compatibility controls GREEN), then pass unchanged
+with single-resolution admission. Both independent correctness/adversarial
+source/API/preservation reviews are CLEAR. Exact wrong-phase expiry denial,
+invalid-query queue retention and no callback for unknown/retired/legacy socket
+controls pass. No CPU improvement is claimed until the next exact CI measure.

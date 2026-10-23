@@ -504,16 +504,30 @@ impl Lifecycle {
             .get(feed.0)
             .is_some_and(|f| !f.stopped && f.phase == Phase::Waiting)
     }
+    #[cfg(test)]
     pub(crate) fn admit(
         &mut self,
         socket: SocketId,
         ingress: Ingress,
         expired: Option<Timeout>,
     ) -> Admission {
+        self.admit_checked(socket, ingress, |_| Ok(expired))
+    }
+    /// Resolve one current physical epoch and query its fresh supervision state
+    /// synchronously. The caller cannot supply an epoch or cache admission.
+    pub(crate) fn admit_checked(
+        &mut self,
+        socket: SocketId,
+        ingress: Ingress,
+        check: impl FnOnce(Epoch) -> Result<Option<Timeout>, SocketError>,
+    ) -> Admission {
         if !self.enabled() {
             return Admission::Legacy;
         }
         let Some(epoch) = self.socket_epoch(socket) else {
+            return Admission::Denied;
+        };
+        let Ok(expired) = check(epoch) else {
             return Admission::Denied;
         };
         let f = &self.feeds[epoch.feed.0];
@@ -1010,6 +1024,97 @@ mod tests {
             key: key.into(),
             wire_args: key.into(),
         }
+    }
+    #[test]
+    fn checked_admission_queries_only_one_current_epoch() {
+        let mut l = Lifecycle::default();
+        let mut calls = 0;
+        assert_eq!(
+            l.admit_checked(SocketId(7), Ingress::Message, |_| {
+                calls += 1;
+                Ok(None)
+            }),
+            Admission::Legacy
+        );
+        let f = l.register(policy(AuthMode::None)).unwrap();
+        let e = l.begin(f, SocketId(7)).unwrap();
+        assert_eq!(
+            l.admit_checked(SocketId(8), Ingress::Message, |_| {
+                calls += 1;
+                Ok(None)
+            }),
+            Admission::Denied
+        );
+        l.opened(e).unwrap();
+        assert_eq!(
+            l.admit_checked(e.socket(), Ingress::Message, |exact| {
+                calls += 1;
+                assert_eq!(exact, e);
+                Ok(None)
+            }),
+            Admission::Current(e)
+        );
+        assert_eq!(calls, 1);
+        l.retire(f).unwrap();
+        assert_eq!(
+            l.admit_checked(e.socket(), Ingress::Message, |_| {
+                calls += 1;
+                Ok(None)
+            }),
+            Admission::Denied
+        );
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn checked_expiry_does_not_retire_wrong_phase_events() {
+        let mut l = Lifecycle::default();
+        let f = l.register(policy(AuthMode::None)).unwrap();
+        let e = l.begin(f, SocketId(7)).unwrap();
+        assert_eq!(
+            l.admit_checked(e.socket(), Ingress::Message, |_| Ok(Some(Timeout::Connect))),
+            Admission::Denied
+        );
+        assert!(l.current(e));
+        l.opened(e).unwrap();
+        assert_eq!(
+            l.admit_checked(e.socket(), Ingress::Open, |_| Ok(Some(Timeout::Idle))),
+            Admission::Denied
+        );
+        assert!(l.current(e));
+        assert!(matches!(
+            l.admit_checked(e.socket(), Ingress::Message, |_| Ok(Some(Timeout::Idle))),
+            Admission::Expired(retired, Timeout::Idle) if retired.epoch == e
+        ));
+        assert!(!l.current(e));
+        let mut called = false;
+        assert_eq!(
+            l.admit_checked(e.socket(), Ingress::Message, |_| {
+                called = true;
+                Ok(None)
+            }),
+            Admission::Denied
+        );
+        assert!(!called);
+    }
+
+    #[test]
+    fn failed_fresh_query_preserves_epoch_and_queued_interests() {
+        let (mut l, f, e) = started(AuthMode::None);
+        l.replace_interests(f, vec![interest("unchanged")], encode)
+            .unwrap();
+        let bytes = l.feeds[f.0].interests.bytes();
+        let frames = l.pending_frames;
+        assert_eq!(
+            l.admit_checked(e.socket(), Ingress::Message, |_| Err(
+                SocketError::InvalidTime
+            )),
+            Admission::Denied
+        );
+        assert!(l.current(e));
+        assert_eq!(l.pending_frames, frames);
+        assert_eq!(l.feeds[f.0].interests.bytes(), bytes);
+        assert!(l.release_batch(e, false).is_some());
     }
     fn encode(
         subscribe: bool,
