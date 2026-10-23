@@ -288,32 +288,39 @@ fn second_page_in_flight(release: bool) -> (Engine<Probe>, Option<HttpRequest>) 
     (e, second)
 }
 
+/// The in-flight page's own leg timer, bound to its exact managed request.
 fn leg_timer(e: &Engine<Probe>) -> TimerId {
-    *e.io
-        .timers
-        .keys()
-        .next()
-        .expect("the in-flight leg's engine timer")
+    assert_eq!(e.io.managed_http.len(), 1, "exactly one page in flight");
+    e.io.managed_http.values().next().unwrap().timer
+}
+
+fn released_page_expiry(leg_first: bool) -> Engine<Probe> {
+    let (mut e, second) = second_page_in_flight(true);
+    let second = second.expect("second page released");
+    let timer = leg_timer(&e);
+    if leg_first {
+        e.handle(30_000., Event::TimerFired { timer });
+        tick(&mut e, 30_000.);
+    } else {
+        tick(&mut e, 30_000.);
+        e.handle(30_000., Event::TimerFired { timer });
+    }
+    respond(&mut e, 30_001., &second, "late-row");
+    e
 }
 
 #[test]
-fn root_expiry_with_a_released_page_in_flight_is_strict_in_both_orders() {
-    for leg_first in [true, false] {
-        let (mut e, second) = second_page_in_flight(true);
-        let second = second.expect("second page released");
-        let timer = leg_timer(&e);
-        if leg_first {
-            e.handle(30_000., Event::TimerFired { timer });
-            tick(&mut e, 30_000.);
-        } else {
-            tick(&mut e, 30_000.);
-            e.handle(30_000., Event::TimerFired { timer });
-        }
-        respond(&mut e, 30_001., &second, "late-row");
-        let actions: Vec<_> = e.drain_actions().collect();
-        let label = if leg_first { "leg first" } else { "root first" };
-        assert_strict_timeout(&actions, 7, e.venue.finalized.get(), label);
-    }
+fn root_expiry_with_a_released_page_in_flight_is_strict_leg_timer_first() {
+    let mut e = released_page_expiry(true);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_strict_timeout(&actions, 7, e.venue.finalized.get(), "leg first");
+}
+
+#[test]
+fn root_expiry_with_a_released_page_in_flight_is_strict_root_deadline_first() {
+    let mut e = released_page_expiry(false);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_strict_timeout(&actions, 7, e.venue.finalized.get(), "root first");
 }
 
 #[test]
@@ -340,29 +347,36 @@ fn a_leg_only_timeout_under_a_live_root_keeps_accepted_rows() {
     assert_eq!(e.venue.finalized.get(), 1);
 }
 
+fn same_id_arrival(arrival: f64) {
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    let old = e.venue.roots[&7].clone();
+    e.drain_actions().for_each(drop);
+    e.venue.park = false;
+    receive(&mut e, arrival, 7, 5_000);
+    let new = e.venue.roots[&7].clone();
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (terminals, _) = outcome(&actions, 7);
+    let old_ended_once =
+        matches!(terminals.as_slice(), [Err(error)] if error.kind == Some(ErrorKind::Timeout));
+    assert_eq!(
+        (new.deadline(), new.owner() != old.owner(), old_ended_once),
+        (arrival + 5_000., true, true),
+        "arrival {arrival}: (new root deadline, new generation, old root ended once)"
+    );
+}
+
 #[test]
-fn a_same_id_arrival_at_or_past_the_deadline_gets_its_own_receipt() {
-    for arrival in [1_000., 1_500.] {
-        let mut e = engine(Probe {
-            park: true,
-            ..Default::default()
-        });
-        receive(&mut e, 0., 7, 1_000);
-        e.drain_actions().for_each(drop);
-        e.venue.park = false;
-        receive(&mut e, arrival, 7, 5_000);
-        assert_eq!(
-            e.venue.roots[&7].deadline(),
-            arrival + 5_000.,
-            "arrival {arrival}: the new command owns a new root"
-        );
-        let actions: Vec<_> = e.drain_actions().collect();
-        let (terminals, _) = outcome(&actions, 7);
-        assert!(
-            matches!(terminals.as_slice(), [Err(error)] if error.kind == Some(ErrorKind::Timeout)),
-            "arrival {arrival}: the old root ends once"
-        );
-    }
+fn a_same_id_arrival_at_the_deadline_gets_its_own_receipt() {
+    same_id_arrival(1_000.);
+}
+
+#[test]
+fn a_same_id_arrival_past_the_deadline_gets_its_own_receipt() {
+    same_id_arrival(1_500.);
 }
 
 #[test]
@@ -377,63 +391,87 @@ fn two_roots_due_together_each_end_once_and_a_live_root_is_untouched() {
     e.drain_actions().for_each(drop);
     tick(&mut e, 1_000.);
     let actions: Vec<_> = e.drain_actions().collect();
-    assert_strict_timeout(&actions, 7, 0, "first due root");
-    assert_strict_timeout(&actions, 8, 0, "second due root");
-    assert!(outcome(&actions, 9).0.is_empty());
+    let strict = |command| {
+        matches!(outcome(&actions, command), (terminals, 0) if matches!(terminals.as_slice(),
+            [Err(error)] if error.kind == Some(ErrorKind::Timeout) && error.outcome.is_none()))
+    };
     let root = e.venue.roots[&9].clone();
     let cx = Cx {
         now: 2_000.,
         store: &mut e.store,
         io: &mut e.io,
     };
-    assert_eq!(cx.validate_read_root_context(&root), Ok(()));
+    let live = outcome(&actions, 9).0.is_empty() && cx.validate_read_root_context(&root).is_ok();
+    assert_eq!(
+        (strict(7), strict(8), live),
+        (true, true, true),
+        "(first due root, second due root, live third root)"
+    );
 }
 
-#[test]
-fn public_entries_without_an_event_expire_a_due_root_first() {
-    for entry in ["prepare_dispatch", "take_frame"] {
-        let mut e = engine(Probe {
-            park: true,
-            ..Default::default()
-        });
-        receive(&mut e, 0., 7, 1_000);
-        e.drain_actions().for_each(drop);
-        match entry {
-            "prepare_dispatch" => e.prepare_dispatch(1_000.),
-            _ => {
-                let _ = e.take_frame(1_000.);
-            }
+fn public_entry(entry: &str) {
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    e.drain_actions().for_each(drop);
+    match entry {
+        "prepare_dispatch" => e.prepare_dispatch(1_000.),
+        _ => {
+            let _ = e.take_frame(1_000.);
         }
-        let actions: Vec<_> = e.drain_actions().collect();
-        assert_strict_timeout(&actions, 7, 0, entry);
     }
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_strict_timeout(&actions, 7, 0, entry);
 }
 
 #[test]
-fn a_missing_receipt_is_refused_without_a_fresh_default_root() {
-    for case in ["duplicate legacy id", "exhausted sequence"] {
-        let mut e = engine(Probe {
-            legacy_from: Some(50),
-            ..Default::default()
-        });
-        let command = if case == "duplicate legacy id" {
-            receive(&mut e, 0., 50, 300_000);
-            e.venue.legacy_from = None;
-            50
-        } else {
-            e.io.command_waits.exhaust_receipts();
-            7
-        };
-        e.drain_actions().for_each(drop);
-        receive(&mut e, 1., command, 5_000);
-        assert!(
-            !e.venue.roots.contains_key(&command),
-            "{case}: no root is minted for an unknown cap"
-        );
-        let (terminals, _) = outcome(&e.drain_actions().collect::<Vec<_>>(), command);
-        assert!(
-            matches!(terminals.as_slice(), [Err(error)] if error.outcome.is_none()),
-            "{case}: one typed Read refusal, got {terminals:?}"
-        );
-    }
+fn prepare_dispatch_expires_a_due_root_first() {
+    public_entry("prepare_dispatch");
+}
+
+#[test]
+fn take_frame_expires_a_due_root_first() {
+    public_entry("take_frame");
+}
+
+fn missing_receipt(duplicate: bool) {
+    let label = if duplicate {
+        "duplicate legacy id"
+    } else {
+        "exhausted sequence"
+    };
+    let mut e = engine(Probe {
+        legacy_from: Some(50),
+        ..Default::default()
+    });
+    let command = if duplicate {
+        receive(&mut e, 0., 50, 300_000);
+        e.venue.legacy_from = None;
+        50
+    } else {
+        e.io.command_waits.exhaust_receipts();
+        7
+    };
+    e.drain_actions().for_each(drop);
+    receive(&mut e, 1., command, 5_000);
+    let minted = e.venue.roots.contains_key(&command);
+    let (terminals, _) = outcome(&e.drain_actions().collect::<Vec<_>>(), command);
+    let refused = matches!(terminals.as_slice(), [Err(error)] if error.outcome.is_none());
+    assert_eq!(
+        (minted, refused),
+        (false, true),
+        "{label}: (default root minted, one typed Read refusal), got {terminals:?}"
+    );
+}
+
+#[test]
+fn a_duplicate_legacy_receipt_is_refused_without_a_default_root() {
+    missing_receipt(true);
+}
+
+#[test]
+fn an_exhausted_receipt_sequence_is_refused_without_a_default_root() {
+    missing_receipt(false);
 }
