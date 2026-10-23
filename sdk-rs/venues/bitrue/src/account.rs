@@ -15,10 +15,12 @@ use safe_cex_engine::model::{
     Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, ErrorKind, Fill, Method, Outcome, Response, SocketChannel, SocketId,
+    TimerId, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -147,6 +149,16 @@ impl Request {
         }
     }
 }
+fn local_leverage_read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
 #[derive(Default)]
 pub struct Snapshot {
     balances: HashMap<String, Balance>,
@@ -1451,11 +1463,27 @@ impl Bitrue {
     pub(crate) fn account_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
         if let Command::FetchMaxLeverage { command, symbol } = command {
             let Some(symbol) = self.resolve_symbol(cx, symbol) else {
-                cx.fail(*command, "Unknown Bitrue market");
+                let Ok(context) = cx.admit_http_command(local_leverage_read_policy()) else {
+                    return true;
+                };
+                let _ = cx.fail_context(
+                    &context,
+                    VenueError::new("Unknown Bitrue market")
+                        .kind(ErrorKind::InvalidInput)
+                        .outcome(Outcome::NotSent),
+                );
                 return true;
             };
             if !self.authenticated() {
-                cx.fail(*command, "Bitrue private credentials required");
+                let Ok(context) = cx.admit_http_command(local_leverage_read_policy()) else {
+                    return true;
+                };
+                let _ = cx.fail_context(
+                    &context,
+                    VenueError::new("Bitrue private credentials required")
+                        .kind(ErrorKind::InvalidInput)
+                        .outcome(Outcome::NotSent),
+                );
                 return true;
             }
             let contract = &cx.store.market(&symbol).expect("resolved market").id;
@@ -1479,11 +1507,27 @@ impl Bitrue {
             return false;
         };
         let Some(symbol) = self.resolve_symbol(cx, symbol) else {
-            cx.fail(*command, "Unknown Bitrue market");
+            let Ok(context) = cx.admit_http_command(local_leverage_read_policy()) else {
+                return true;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Unknown Bitrue market")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return true;
         };
         if !self.authenticated() {
-            cx.fail(*command, "Bitrue private credentials required");
+            let Ok(context) = cx.admit_http_command(local_leverage_read_policy()) else {
+                return true;
+            };
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new("Bitrue private credentials required")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(Outcome::NotSent),
+            );
             return true;
         }
         self.account.leverage_queries.push((*command, symbol));
