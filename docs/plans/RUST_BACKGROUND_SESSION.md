@@ -411,6 +411,29 @@ API (A2), revised after an independent audit:
   - **MEXC:** no session HTTP consumer. Rust MEXC authenticates its private
     socket with a signed WS `login` (confirmed by codex-ih35js), which is
     #1771/signer work.
+  - **Binance checkpoint** (owner ruling (a): stacked on #1817's reviewed
+    head, listen-key region only; regions confirmed with claude-m26ps4):
+    - **Code:** create and keepalive go through `venues/binance/src/session.rs`
+      as session Mutations. One `SessionAuth` selection is made per request,
+      and its `selection.credential` goes into the Policy (no `route_request`).
+      Livenet uses the key-only recipe; testnet uses the signed recipe, selected
+      inside the adapter.
+    - **Session lifecycle:** each create retires the previous session, so a
+      stale create or keepalive outcome cannot reach the account reducers. The
+      session is repeat-safe: Binance returns the active key and keepalive
+      extends it.
+    - **Native policy kept:** the backoff, the 30 min keepalive and the
+      reconnect behaviour are unchanged.
+    - **Ratchet:** `binance/src/account.rs` goes from 1 legacy site to 0; no
+      other map changes.
+    - **Declared caller change:** listenKey requests now carry an explicit
+      20 s raw bound. Legacy sent `timeout_ms: None`, which fell back to the
+      host default. A hung create now fails at 20 s and backs off, where an
+      unbounded host could hang forever. That regression fails on the legacy
+      code.
+    - **Tests adapted:** two waits answer the reconnect listenKey like their
+      account siblings. The slow-POST test uses 15 s, which is still above the
+      10 s connect timeout it checks.
 - **C. Cadence/feed linkage** as above, after #1771.
 - **D. Hand-off.** The API and adoption notes go to codex-9czdjh, codex-zs5e83,
   codex-ih35js and codex-hcmq3f. BingX adoption and deletion of the #1779
