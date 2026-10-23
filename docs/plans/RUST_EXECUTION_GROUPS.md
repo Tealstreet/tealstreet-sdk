@@ -295,17 +295,17 @@ Revised after independent adversarial review (3 blockers, 4 major resolved).
    seals one shared `CommandWrites` journal; every observer gets the same
    outcome projection, keeping earlier release evidence, partial IDs and
    Unknown for writes released before it joined.
-6. **Expiry: one terminal path.** The engine arms one execution timer at the
-   earliest observer deadline strictly earlier than the execution deadline,
-   and detaches only those observers. While no leg is in flight (between
-   legs, paused, a pending successor not yet issued, or after an early leg
-   failure), the same timer is also armed at the execution deadline. It is
-   disarmed when a leg is issued and re-armed when the last leg retires, so
-   exactly one path owns the execution deadline at any time. If an observer
+6. **Expiry: one terminal path.** The engine arms one execution timer at
+   `min(earliest observer deadline strictly earlier than the execution
+   deadline, execution deadline while no leg is in flight)`. Observer
+   deadlines detach only those observers. "No leg in flight" covers between
+   legs, paused, a pending successor not yet issued and after an early leg
+   failure; issuing a leg drops the execution-deadline term and retiring the
+   last leg restores it, so exactly one path owns the execution deadline. If an observer
    detach and a leg timeout fall on the same instant, the detach runs first and
    the leg callback sees only the remaining observers. Read → `ErrorKind::Timeout`;
    Mutation → journal projection (`NotSent` only if nothing was released).
-   Siblings continue. At the execution deadline there is no second timer: the
+   Siblings continue. While a leg is in flight there is no second timer at the execution deadline: the
    existing physical timer path (`expire_http_timer`, typed by #1816) delivers
    the leg timeout to the venue callback with execution delivery authority.
    Any observer the venue leaves unsealed is then sealed by the engine's
