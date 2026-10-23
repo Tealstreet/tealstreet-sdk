@@ -213,3 +213,80 @@ unchanged Bybit landing remains mandatory before the fresh separate guard.
 If those new covered source inputs move KCS bytes away from the pre-#1746
 baseline, report that explicitly and block for evidence/disposition; never
 substitute a different baseline or claim byte identity from arguments alone.
+
+## WOO landing-margin trigger: restore speed defaults (2026-10-23)
+
+Start from actual #1782 `6a7193e86688275e8888e9acec2d4bed3be2eff7`.
+Owner directs restoring WOO's speed-default exclusion after repeated public CPU
+misses on unrelated heads, including #1745 and #1780, and landing ratios near
+0.91–1.06x since #1746. This applies the existing measured-margin rule rather
+than spending another rerun. No objective, budget or threshold changes.
+
+Change only the central family condition in `sdk-rs/harness/build.sh`: WOO joins
+AsterDEX and KuCoin Spot in bypassing `wasm_profile_args`. Keep global serde_json
+level 3, explicit package overrides, other 38 alias argument arrays, combined
+arguments, optimization/bindings and native Cargo profiles unchanged. WOO's
+complete argument array must equal pre-#1746 actual hosted-bridge landing
+`5743c485d44e348e3d29039c4ebe83f6a78f0186`. Any WOO artifact difference from
+that older build must be attributed to intervening build-covered source inputs,
+including WOO and shared inputs, not claimed byte-identical merely because
+arguments match. Compare old/current
+source with the restored policy and inspect authenticated CI package receipts;
+no local release build or replay. Use the #1753 same-source/profile evidence
+standard if shared inputs prevent historical byte identity.
+
+Architecture gate: YES, shared build-profile policy implementing its existing
+measured speed exception, no venue parser or per-venue algorithm. Independent
+plan and implementation/argument reviews; shell syntax and captured 39 aliases
+plus combined without invoking builds, root checks, full current-head green CI,
+WOO public CPU and fixed size budgets, authenticated WOO raw output/ordered-gate
+comparison and package provenance. Other families retain identical arguments;
+compare CI module hashes and report differences explicitly. CALLERS describes
+only the landed timing/profile behavior; proof/status goes in the PR body.
+
+Commit this plan before implementation. Merge only in the owner's queue after
+announcing the guard window; integrate any changed shared build/engine inputs,
+then fresh CI/proof, separate guard and separate exact-head merge. Verify actual
+parents/tree and notify dependent lanes. Reporter AsterDEX/GRVT/TxFlow work is
+saved separately at plan12d54/testaea90 with unchanged production and original
+124/124 native account controls; resume after this priority restore.
+
+Plan audit clarification: the pre-#1746-to-current source inventory includes
+WOO's subsequently landed account reporter/financial code as well as shared
+signing/engine inputs. Attribute historical byte deltas to the authenticated
+complete source projection; do not describe that interval as shared-only. The
+restored historical WOO arguments execute on the current candidate source.
+This PR also removes only the owner-flagged stale test/proof-status tail of its
+existing #1782 CALLERS section; behavior text is preserved. #1776 wording stays
+with its owner. This housekeeping adds no runtime scope.
+
+## Option A: Bitget speed-profile decision draft
+
+Owner instruction, 2026-10-23: prepare a DRAFT PR from actual landing
+`7641650e7b1fc54c55593880ac16299171f60a90`, pending Sam's decision, do not
+merge. Reuse the preserved measurement patch from
+`c2f62b6fc3531ff414f8ea239235f44a0c399efa` for `harness/build.sh` only:
+exclude family `bitget` from the shared size argument array alongside AsterDEX,
+KuCoin Spot and WOO. Bitget USDC resolves to the same family. Keep the global
+serde_json throughput selection, combined/native settings, explicit overrides,
+Binaryen flags, budgets, thresholds, fixtures and all venue source unchanged.
+
+Commit this plan before implementation; independent correctness and adversarial
+reviews check the exact patch and architecture gate. Capture Cargo arguments
+without invoking Cargo/bindgen for all 39 aliases plus combined/families routing;
+only Bitget and Bitget USDC may differ. Run shell syntax, focused harness tests,
+root typecheck/lint/test checks. No local release build or performance replay.
+Push the reviewed source once, open a draft titled/body marked
+"pending Sam's decision, do not merge", and run ordinary PR CI once with no
+rerun. Authenticate exact job/head/attempt/artifacts and package digests. Retain
+nine paired samples per public workload. Private CPU/process figures are single
+correctness-run diagnostics, not a performance objective or margin claim; keep
+strict known-failure status explicit. Report Bitget and USDC CPU ratios, process CPU,
+WASM bytes and fixed-budget headroom, including known private correctness
+failures rather than interpreting CPU as parity. Preserve failures and report
+any missing evidence. No guard/merge and no edits to #1785-#1788. If Sam chooses
+B or C, close the draft; preparation does not approve adopting option A.
+
+Architecture gate: YES, this is a family-specific selection in the existing
+shared build-policy choke point, explicitly prepared for an owner policy
+decision. It introduces no per-venue implementation, gate or threshold rule.

@@ -1,5 +1,6 @@
 use super::*;
 use crate::request_context::{Credential, Pacing, RetryPolicy};
+use crate::resource_ids::{MAX_RESOURCE_ID, ResourceIds};
 use crate::{CredentialSlot, Outcome, Store};
 
 fn policy() -> Policy {
@@ -18,7 +19,7 @@ fn policy() -> Policy {
     }
 }
 
-fn refusal(registry: &mut ContextRegistry, context: &Context, request: u32) -> Delivery {
+fn refusal(registry: &mut ContextRegistry, context: &Context, request: u64) -> Delivery {
     registry
         .register_attempt(context, RequestId(request), 0.)
         .unwrap();
@@ -30,7 +31,7 @@ fn refusal(registry: &mut ContextRegistry, context: &Context, request: u32) -> D
         context: context.clone(),
         attempt: Attempt {
             request: RequestId(request),
-            generation: u64::from(request),
+            generation: request,
         },
     };
     registry
@@ -42,7 +43,7 @@ fn refusal(registry: &mut ContextRegistry, context: &Context, request: u32) -> D
     delivery
 }
 
-fn unchanged(registry: &ContextRegistry, parent: &Context, request: u32, count: usize) {
+fn unchanged(registry: &ContextRegistry, parent: &Context, request: u64, count: usize) {
     assert_eq!(registry.contexts.len(), count);
     assert_eq!(registry.validate(parent, 1.), Ok(()));
     assert_eq!(
@@ -82,7 +83,7 @@ fn replacement_policies_are_atomic_and_keep_exact_parent_bounds() {
         Err(Error::Invalid)
     );
     assert_eq!(
-        registry.replace(&parent, &delivery, u32::MAX, &[policy()], 1.),
+        registry.replace(&parent, &delivery, MAX_RESOURCE_ID + 1, &[policy()], 1.),
         Err(Error::Capacity)
     );
     unchanged(&registry, &parent, 11, 1);
@@ -184,7 +185,7 @@ fn context_and_journal_capacity_fail_without_partial_supersession() {
         let mut registry = ContextRegistry::default();
         let parent = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
         let delivery = refusal(&mut registry, &parent, 11);
-        for id in 2..CAPACITY as u32 {
+        for id in 2..CAPACITY as u64 {
             if fill_contexts {
                 registry
                     .issue(
@@ -207,7 +208,7 @@ fn context_and_journal_capacity_fail_without_partial_supersession() {
                     .writes
                     .as_mut()
                     .unwrap()
-                    .register(RequestId(1000 + id), u64::from(1000 + id))
+                    .register(RequestId(1000 + id), 1000 + id)
                     .unwrap();
             }
         }
@@ -277,7 +278,7 @@ fn superseded_nonroot_cannot_seal_and_expired_root_timer_grants_no_send() {
 }
 
 #[test]
-fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
+fn public_replacement_children_cross_u32_without_narrowing_or_identity_reuse() {
     let mut io = super::super::Io::<()>::default();
     let mut store = Store::default();
     let parent = io
@@ -285,7 +286,44 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
         .issue(1, Scope::Command(7), policy(), 0.)
         .unwrap();
     io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
-    io.next_id = u32::MAX - 1;
+    let first = u64::from(u32::MAX);
+    io.next_id = ResourceIds::starting_at(first);
+    let mut cx = Cx {
+        now: 1.,
+        store: &mut store,
+        io: &mut io,
+    };
+    let children = cx
+        .http_replacement_contexts(&parent, &[policy(), policy()])
+        .unwrap();
+    assert_eq!(
+        children.iter().map(Context::leg).collect::<Vec<_>>(),
+        [first, first + 1]
+    );
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(first + 2));
+    assert!(children.iter().all(|child| child.owner() == parent.owner()
+        && child.deadline() == parent.deadline()
+        && cx.io.request_contexts.validate(child, 1.).is_ok()));
+    assert_eq!(
+        cx.io.request_contexts.validate(&parent, 1.),
+        Err(Error::Revoked)
+    );
+    assert!(!cx.io.next_id.failed());
+    assert!(cx.io.pending.is_empty());
+    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.timers.is_empty());
+}
+
+#[test]
+fn last_safe_replacement_range_refuses_atomically_then_admits_its_final_child() {
+    let mut io = super::super::Io::<()>::default();
+    let mut store = Store::default();
+    let parent = io
+        .request_contexts
+        .issue(1, Scope::Command(7), policy(), 0.)
+        .unwrap();
+    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
+    io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
     let mut cx = Cx {
         now: 1.,
         store: &mut store,
@@ -295,7 +333,45 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
         cx.http_replacement_contexts(&parent, &[policy(), policy()]),
         Err(Error::Capacity)
     );
-    assert_eq!(cx.io.next_id, u32::MAX - 1);
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID));
+    unchanged(&cx.io.request_contexts, &parent, 11, 1);
+    assert!(!cx.io.next_id.failed());
+    assert!(cx.io.pending.is_empty());
+    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.timers.is_empty());
+    let children = cx.http_replacement_contexts(&parent, &[policy()]).unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].leg(), MAX_RESOURCE_ID);
+    assert_eq!(children[0].owner(), parent.owner());
+    assert_eq!(children[0].deadline(), parent.deadline());
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID + 1));
+    assert_eq!(cx.io.reserve_ids(1), None); // Exclusive-end sentinel is not issued.
+    assert!(!cx.io.next_id.failed());
+    assert!(cx.io.pending.is_empty());
+    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.timers.is_empty());
+}
+
+#[test]
+fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
+    let mut io = super::super::Io::<()>::default();
+    let mut store = Store::default();
+    let parent = io
+        .request_contexts
+        .issue(1, Scope::Command(7), policy(), 0.)
+        .unwrap();
+    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
+    io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
+    let mut cx = Cx {
+        now: 1.,
+        store: &mut store,
+        io: &mut io,
+    };
+    assert_eq!(
+        cx.http_replacement_contexts(&parent, &[policy(), policy()]),
+        Err(Error::Capacity)
+    );
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID));
     unchanged(&cx.io.request_contexts, &parent, 11, 1);
     let mut invalid = policy();
     invalid.timeout_ms = 0;
@@ -305,7 +381,7 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
     );
     assert_eq!(
         cx.io.next_id,
-        u32::MAX,
+        ResourceIds::starting_at(MAX_RESOURCE_ID + 1),
         "failed policy burns checked identities"
     );
     assert_eq!(
@@ -346,7 +422,7 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
             }),
             _ => Some(correct.clone()),
         };
-        io.next_id = 20;
+        io.next_id = ResourceIds::starting_at(20);
         let mut cx = Cx {
             now: 1.,
             store: &mut store,
@@ -366,7 +442,10 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
             cx.io.request_contexts.contexts.get(&parent.leg()),
             Some(&parent)
         );
-        assert_eq!(cx.io.next_id, if case == 0 { 20 } else { 21 });
+        assert_eq!(
+            cx.io.next_id,
+            ResourceIds::starting_at(if case == 0 { 20 } else { 21 })
+        );
         assert!(cx.io.pending.is_empty());
         assert!(cx.io.actions.is_empty());
         if case != 2 {
@@ -442,7 +521,7 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
             .unwrap();
     }
     io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
-    io.next_id = 20;
+    io.next_id = ResourceIds::starting_at(20);
     let before = registry_state(&io.request_contexts, &parent);
     let mut cx = Cx {
         now: 2.,
@@ -455,7 +534,8 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
     );
     assert_eq!(registry_state(&cx.io.request_contexts, &parent), before);
     assert_eq!(
-        cx.io.next_id, 22,
+        cx.io.next_id,
+        ResourceIds::starting_at(22),
         "the denied checked range is never reused"
     );
     assert!(!cx.io.request_contexts.contexts.contains_key(&20));
@@ -477,7 +557,7 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
             .iter()
             .all(|child| child.deadline() == 100. && child.owner() == parent.owner())
     );
-    assert_eq!(cx.io.next_id, 24);
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(24));
     assert!(!cx.io.request_contexts.contexts.contains_key(&99));
     assert!(cx.io.request_contexts.contexts.contains_key(&21));
     assert_eq!(
@@ -930,7 +1010,7 @@ mod signed_replacement_handoff {
             now,
             preparation,
             Prepared {
-                id: u64::from(preparation.attempt().request.0),
+                id: preparation.attempt().request.0,
                 expires_at: None,
             },
         );
