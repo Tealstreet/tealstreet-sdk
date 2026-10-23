@@ -262,7 +262,13 @@ fn candle_ranges_are_not_truncated_without_an_explicit_limit() {
             to_ms: Some(1700060000000.0),
         }),
     );
-    let r = requests(&mut e).remove(0);
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.0)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
     let times = (0..1000)
         .map(|i| (1700000000u64 + i * 60).to_string())
         .collect::<Vec<_>>()
