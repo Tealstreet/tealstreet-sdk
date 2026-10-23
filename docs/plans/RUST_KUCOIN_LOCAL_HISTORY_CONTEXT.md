@@ -70,9 +70,11 @@ mutation is introduced. The zero-limit history owner is constructed then dropped
 as before; do not convert CursorHistory/Completion or acquire a root on a valid
 signed/public paging fallthrough. No private data is read by these local paths.
 
-Two funding type/kind guards are defensive: the sole public dispatcher routes
-only Income/FUNDING_FEE into funding_command, so they have no direct production
-entry witness. Migrate them through the same checked local terminal API, but do
+Three guards are defensive: the two funding type/kind guards and history
+windows(None). The sole public dispatcher routes
+only Income/FUNDING_FEE into funding_command; validated integer bounds plus
+clipping mathematically cap history windows at MAX_REQUESTS. These three guards
+have no direct production entry witness. Migrate them through the same checked local terminal API, but do
 not claim native original-RED coverage for unreachable branches. Reachable
 branches and genuine shared-entry denial are the required production witnesses.
 
@@ -92,8 +94,9 @@ results bypassing capacity; invalid-clock bypass. Compatibility GREENs: original
 message/precedence, zero-limit shape, no error companion/history marker/Store
 mutation and unchanged valid signed paging path/request bytes. Cover client ID,
 invalid order before credentials, missing credentials before symbol/range,
-unknown symbol, non-integral/negative/nonfinite/reversed/over-budget range,
-funding delegation and missing symbol, both zero-limit endpoints. Valid private
+unknown symbol, non-integral/negative/nonfinite/reversed/greater-than-MAX_SAFE_INTEGER range,
+funding delegation and missing symbol, both zero-limit endpoints. A long valid
+range is a clipped paging compatibility fallthrough, not a local refusal. Valid private
 paging retains legacy scheduling/headers/routes and no managed Prepare or owner.
 
 After source, require all new assertions GREEN plus existing KuCoin and Binance
