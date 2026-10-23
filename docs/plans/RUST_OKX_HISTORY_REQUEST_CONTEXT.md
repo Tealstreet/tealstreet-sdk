@@ -388,3 +388,12 @@ Full provenance currently rejects only stale incoming Aster/BingX entries on
 origin; genuine replacement1976 integration must bring those foreign prunes.
 No foreign map, scanner or engine source is edited. Independent implementation
 reviews and fresh exact-composition CI remain outstanding.
+
+Independent caller review corrected one documentation grouping: asynchronous
+pre-release provider/preparation failure is NotSent, while synchronous child/
+submission failure keeps the shared Read projection (outcome None). Source was
+unchanged. Source/adversarial review requested stronger peer preservation proof:
+the capacity test now retains every genuine peer Preparation and verifies each
+remains pending before and after the owner refusal, while forbidding new Prepare/
+Bind. All20 controls and focused strict Clippy still pass. These are review
+follow-ups, not additional original REDs or a runtime change.

@@ -549,6 +549,7 @@ fn dequeued_child_capacity_refusal_discards_rows_without_completing_peers() {
     let waiting = actions(&mut engine, NOW + 10.);
     let timer = paced(&waiting, NOW + 110.);
     let mut peers = 0;
+    let mut preparations = Vec::new();
     let mut full = false;
     for command in 1000..1600 {
         engine.handle(
@@ -572,9 +573,22 @@ fn dequeued_child_capacity_refusal_discards_rows_without_completing_peers() {
             break;
         }
         assert!(output.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))));
+        preparations.extend(output.iter().filter_map(|a| match a {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        }));
         peers += 1;
     }
     assert!(full && peers > 0, "genuine peer roots fill shared registry");
+    assert_eq!(preparations.len(), peers);
+    assert!(
+        preparations
+            .iter()
+            .all(|preparation| engine.http_preparation_pending(*preparation))
+    );
     engine.handle(NOW + 110., Event::TimerFired { timer });
     let output: Vec<_> = engine.drain_actions().collect();
     let failures: Vec<_> = output
@@ -594,6 +608,12 @@ fn dequeued_child_capacity_refusal_discards_rows_without_completing_peers() {
         a,
         Action::Notice(Notice::CommandError { .. }) | Action::Http(_)
     )));
+    assert!(
+        preparations
+            .iter()
+            .all(|preparation| engine.http_preparation_pending(*preparation))
+    );
+    assert!(!output.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
 }
 
 #[test]
