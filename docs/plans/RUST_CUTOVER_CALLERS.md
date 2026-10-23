@@ -4571,7 +4571,7 @@ Adapters publishing a one-leg Background Read use
 `validate_background_read_http_delivery` synchronously in its matching managed
 HTTP callback, before retiring the Context or changing native/cache/Store state.
 Logical liveness alone does not prove that a different live Context belongs to
-that response. Command and Session owners cannot use this Background-only gate.
+that response. Command, Execution and Session owners cannot use this Background-only gate.
 
 Native response validity and publication freshness remain separate checks. A
 failure callback can have valid delivery identity without response data to

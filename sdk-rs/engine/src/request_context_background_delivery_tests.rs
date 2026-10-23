@@ -41,6 +41,8 @@ fn policy() -> Policy {
 
 #[derive(Default)]
 struct Probe {
+    execution_read: bool,
+    execution: Option<crate::engine::ExecutionHandle>,
     wrong_peer: bool,
     argument: Option<Context>,
     socket: Option<SocketId>,
@@ -60,6 +62,9 @@ impl Probe {
 impl Venue for Probe {
     type Pending = Context;
     fn start(&mut self, cx: &mut Cx<'_, Context>) {
+        if self.execution_read {
+            return;
+        }
         let actual = cx.http_context(Scope::Background, policy()).unwrap();
         let peer = cx.http_context(Scope::Background, policy()).unwrap();
         self.argument = Some(if self.wrong_peer {
@@ -77,8 +82,14 @@ impl Venue for Probe {
         )
         .unwrap();
     }
-    fn on_response(&mut self, cx: &mut Cx<'_, Context>, _: Context, response: Response<'_>) {
+    fn on_response(&mut self, cx: &mut Cx<'_, Context>, context: Context, response: Response<'_>) {
         self.callbacks += 1;
+        if let Some(execution) = &self.execution {
+            assert_eq!(
+                cx.validate_execution_read_delivery(execution, &context),
+                Ok(())
+            );
+        }
         // Native validity is deliberately independent of delivery ownership.
         if self.check(cx) && response.status == 200 && response.body == "{\"valid\":true}" {
             self.native_publications += 1;
@@ -94,7 +105,31 @@ impl Venue for Probe {
             cx.store.set_hedged(true);
         }
     }
-    fn on_command(&mut self, _: &mut Cx<'_, Context>, _: Command) {}
+    fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
+        if !self.execution_read {
+            return;
+        }
+        let root = cx.admit_http_command(policy()).unwrap();
+        let execution = cx
+            .begin_execution(
+                &root,
+                policy(),
+                crate::engine::Window::UntilTerminal,
+                "background-denial",
+            )
+            .unwrap();
+        let leg = cx.http_leg_context(execution.context(), policy()).unwrap();
+        self.execution = Some(execution);
+        self.argument = Some(leg.clone());
+        cx.request_managed(
+            leg.clone(),
+            Method::Get,
+            "https://background-read.test/execution".into(),
+            None,
+            leg,
+        )
+        .unwrap();
+    }
     fn on_open(&mut self, _: &mut Cx<'_, Context>, _: SocketId) {}
     fn on_close(&mut self, _: &mut Cx<'_, Context>, _: SocketId, _: u16) {}
     fn on_timer(&mut self, _: &mut Cx<'_, Context>, _: TimerId) {}
@@ -107,11 +142,29 @@ impl Venue for Probe {
 }
 
 fn released(wrong_peer: bool) -> (Engine<Probe>, RequestId) {
-    let mut engine = crate::test_support::seeded_engine(Probe {
+    released_probe(Probe {
         wrong_peer,
         ..Default::default()
-    });
+    })
+}
+
+fn released_probe(probe: Probe) -> (Engine<Probe>, RequestId) {
+    let execution_read = probe.execution_read;
+    let mut engine = crate::test_support::seeded_engine(probe);
     engine.start(0.);
+    if execution_read {
+        engine.handle(
+            0.,
+            Event::Command(Command::FetchCandles {
+                command: 7,
+                symbol: "BTCUSD".into(),
+                interval: crate::model::Interval::M1,
+                limit: Some(2),
+                from_ms: None,
+                to_ms: None,
+            }),
+        );
+    }
     let preparation = engine
         .drain_actions()
         .find_map(|a| match a {
@@ -306,4 +359,25 @@ fn background_delivery_refusals_preserve_existing_issuer_deadline_and_owner_rule
         };
         assert_eq!(authority(&cx, &argument), expected, "case {case}");
     }
+}
+
+#[test]
+fn background_delivery_rejects_matching_execution_read_before_publication() {
+    let (mut engine, request) = released_probe(Probe {
+        execution_read: true,
+        ..Default::default()
+    });
+    assert!(matches!(
+        engine.venue().argument.as_ref().unwrap().owner(),
+        Owner::Execution { .. }
+    ));
+    response(&mut engine, request, 3., "{\"valid\":true}");
+    assert_eq!(engine.venue().callbacks, 1);
+    assert_eq!(engine.venue().checks, [Err(Error::Invalid)]);
+    assert_eq!(engine.venue().native_publications, 0);
+    assert!(!engine.store().hedged());
+    assert!(!engine.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+    )));
 }

@@ -222,7 +222,7 @@ own request, so there is no shared result. Failure fans out because the
 prerequisite failed. None is an execution group. Owner ruling (2026-10-23):
 Paradex, GRVT and BreakoutProp go to claude-55ao7t's background-session gate
 (#1815; gate API in #1842, stacked on #1832); the credential core (#1805) supplies only key/subject. AsterDex is
-clock-lane (codex-5c57jl) and Coinbase is with codex-hcmq3f (fix #1843). Reported hang risks: Coinbase drains deferred
+clock-lane (codex-5c57jl) and Coinbase is with codex-hcmq3f (fixed by #1843, landed `43c5d6152c3`). Reported hang risks: Coinbase drains deferred
 `FetchCandles` only on catalogue success (`public_pending`), never from
 `public_failed`; GRVT owners wait on a 5 s retry timer with no own deadline;
 Paradex owners are bounded only by the auth transport timeout. AsterDex is not
@@ -328,12 +328,13 @@ Revised after independent adversarial review (3 blockers, 4 major resolved).
    detach and a leg timeout fall on the same instant, the detach runs first and
    the leg callback sees only the remaining observers. Read → `ErrorKind::Timeout`;
    Mutation → journal projection (`NotSent` only if nothing was released).
-   Siblings continue. While a leg is in flight there is no second timer at the execution deadline: the
-   existing physical timer path (`expire_http_timer`, typed by #1816) delivers
-   the leg timeout to the venue callback with execution delivery authority.
-   Any observer the venue leaves unsealed is then sealed by the engine's
-   post-callback sweep: Read observers with that typed Timeout, Mutation
-   observers with the journal projection above. A leg that ends earlier (a
+   Siblings continue. While a leg is in flight there is no second timer at the
+   execution deadline; the leg's physical timer fires there. The engine sweeps
+   executions at event entry, so at that instant the execution bound seals
+   every remaining observer first (Read → typed Timeout, Mutation → journal
+   projection) and the leg failure then reaches the venue with nothing left to
+   seal (amended after the RefreshMarkets review: a venue leg handler must not
+   relabel the owners' timeout as a transport failure). A leg that ends earlier (a
    shortened `request_timeout`) is an ordinary leg failure; the venue may
    issue another leg within the execution bound. Explicit `detach_observer`
    uses the observer path.
@@ -407,3 +408,31 @@ validator, `CommandEntryError`) plus reviewed #1808. It preserves #1792/#1789
 authority and the exact join/orphan-precodec matrix, and leaves uufub4's parked
 whole-plan work (`feat/rust-bybit-context-groups`) alone. The precise hook list
 goes to uufub4 before any production change; source conflicts go to the owner.
+
+## Implementation checkpoint (claude-fe7lgm, 2026-10-23)
+
+Branch `feat/rust-execution-group-state`, stacked exactly on reviewed #1830
+(`66cb32e8958`) and #1820 (`cb4b508b569`) under the standing seam
+authorization; landing merged at `a7f3494a430`.
+
+- Pure state: `engine/src/execution_group.rs` (32 controls, RED first).
+- Wiring: `Owner::Execution` legs through the registry's attempt accounting
+  (`execution_registry.rs`), venue API in `engine/src/execution_cx.rs`
+  (`begin_execution`, `join_execution`, `detach_execution_observer`,
+  `complete_execution`, `abort_execution`, `validate_execution_read_delivery`).
+  Begin/join run only in the observer command's genuine entry callback
+  (`Io::entry_bound`, cleared with uufub4). Observers are sealed only through
+  their execution; numeric and direct-root completion are refused. One engine
+  timer and an event-entry/post-callback sweep own expiry. Read executions
+  with command roots only.
+- Reference consumer: Bybit RefreshMarkets (`venues/bybit/src/refresh.rs`),
+  with legacy inventory pruned. Two review rounds on the wiring and one on the
+  consumer, with RED regressions for each fix.
+
+Still open: Mutation executions and the shared journal (Hyro), background
+roots and the pending successor (Bitrue), metadata adoption (after #1747 and
+the BingX/WEEX signers), and a second production consumer. Consumers call
+`admit_http_command` before any I/O or opaque work; `Revoked` then means
+existing or spent custody (no fresh first entry), so returning without a new
+terminal is correct (confirmed with uufub4).
+
