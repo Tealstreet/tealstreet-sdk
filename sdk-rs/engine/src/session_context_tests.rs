@@ -1339,7 +1339,11 @@ fn session_egress_never_crosses_sessions_or_engines() {
         cx.session_scoped_context(&first, Scope::Command(7), policy(Operation::Read))
     })
     .unwrap();
-    let other = engine.io.request_contexts.sessions.egress(generation(&second));
+    let other = engine
+        .io
+        .request_contexts
+        .sessions
+        .egress(generation(&second));
     assert!(other.is_some() && other != scoped.egress());
     assert_eq!(
         with(&mut engine, 1., |cx| cx.make_http_context(
@@ -1372,10 +1376,12 @@ fn session_egress_never_crosses_sessions_or_engines() {
             .http_leg_context(&scoped, policy(Operation::Read))),
         Err(Error::Revoked)
     );
-    assert!(with(&mut engine, 2., |cx| cx.session_scoped_context(
-        &second,
-        Scope::Command(8),
-        policy(Operation::Read)
-    ))
-    .is_ok());
+    assert!(
+        with(&mut engine, 2., |cx| cx.session_scoped_context(
+            &second,
+            Scope::Command(8),
+            policy(Operation::Read)
+        ))
+        .is_ok()
+    );
 }
