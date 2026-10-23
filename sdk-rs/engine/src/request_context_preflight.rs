@@ -65,6 +65,11 @@ impl ContextRegistry {
                 mutation_declared,
                 pending: 0,
                 deliveries: 0,
+                intent: self
+                    .dispatch
+                    .filter(|(id, _)| *id == command)
+                    .map(|(_, intent)| intent),
+                leg_intents: Vec::new(),
             },
         );
         Preflight::new(&self.issuer, command, generation)

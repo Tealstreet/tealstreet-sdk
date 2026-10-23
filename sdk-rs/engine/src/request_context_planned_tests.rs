@@ -195,6 +195,12 @@ mod planned_calls {
                     )
                     .unwrap();
                 }
+                if self.write {
+                    // This internal state-machine fixture models a classified
+                    // grant; production consumers must use WriteFact APIs.
+                    let delivery = cx.io.http_delivery.clone().unwrap();
+                    cx.io.request_contexts.grant_resend(&delivery).unwrap();
+                }
                 let context = cx
                     .plan_retry_context(
                         &plan,

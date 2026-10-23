@@ -77,6 +77,7 @@ fn overflow_cannot_be_hidden_by_an_ordinary_rejection_or_retry() {
             ),
         )
         .unwrap();
+    let _ = writes.grant_resend(RequestId(2));
     assert_eq!(
         writes.retry(RequestId(2), RequestId(3)),
         Err(Error::RetryForbidden)
@@ -300,6 +301,7 @@ fn historical_refusal_retries_share_text_budget_with_terminal_attempt() {
     writes.register(RequestId(1), 1).unwrap();
     for id in 1..=32 {
         if id > 1 {
+            let _ = writes.grant_resend(RequestId(id - 1));
             writes.retry(RequestId(id - 1), RequestId(id)).unwrap();
         }
         writes.released(RequestId(id)).unwrap();
@@ -340,6 +342,7 @@ fn known_partial_effects_share_text_and_exact_identity_overflow_bounds() {
             ])),
         )
         .unwrap();
+    let _ = writes.grant_resend(RequestId(2));
     assert_eq!(
         writes.retry(RequestId(2), RequestId(3)),
         Err(Error::RetryForbidden)
@@ -600,6 +603,7 @@ fn observer_projection_does_not_consume_definitive_refusal_retry() {
                 WriteResult::Rejected(VenueError::new("native refusal")),
             )
             .unwrap();
+        writes.grant_resend(RequestId(1)).unwrap();
         let budget = writes.evidence;
         let error = observer_projection(&writes, VenueError::new("observer detached"));
         assert_eq!(error.outcome, Some(Outcome::Rejected));
@@ -828,6 +832,7 @@ fn native_unproven_capture_cannot_borrow_a_prior_attempt_after_retry() {
             WriteResult::Rejected(VenueError::new("definitively refused")),
         )
         .unwrap();
+    writes.grant_resend(RequestId(1)).unwrap();
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     let mut captures = 0;
     assert_eq!(
@@ -984,6 +989,7 @@ fn effect_authority_rejects_an_old_retry_and_superseded_parent() {
             WriteResult::Rejected(VenueError::new("refused")),
         )
         .unwrap();
+    writes.grant_resend(RequestId(1)).unwrap();
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     assert_eq!(writes.validate_effects(RequestId(1)), Err(Error::Revoked));
     assert_eq!(

@@ -1631,6 +1631,7 @@ fn replacement_failure_cannot_borrow_an_older_parent_retry_delivery() {
     let mut registry = ContextRegistry::default();
     let root = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
     let old = refusal(&mut registry, &root, 11);
+    registry.grant_resend(&old).unwrap();
     registry.register_attempt(&root, RequestId(12), 1.).unwrap();
     *registry
         .release_flag(&root, RequestId(12))
@@ -1700,6 +1701,7 @@ fn replacement_failure_rejects_a_sent_child_hidden_by_its_unsent_retry() {
             WriteResult::Rejected(VenueError::new("child refusal")),
         )
         .unwrap();
+    registry.grant_resend(&child_delivery).unwrap();
     registry.register_attempt(child, RequestId(32), 3.).unwrap();
     assert_eq!(
         registry.commands[&7]

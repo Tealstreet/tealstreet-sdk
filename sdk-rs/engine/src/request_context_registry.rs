@@ -5,7 +5,7 @@ use crate::VenueError;
 use crate::request_context::{
     Attempt, CommandWrites, Context, Error, HttpOwnerRetirement, Operation, Owner, Plan,
     PlanPolicy, Policy, Preflight, PreflightPolicy, PreflightPurpose, RejectionReports,
-    RetryEvidence, Scope, WriteResult,
+    ResendGrant, RetryEvidence, Scope, WriteResult,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -33,6 +33,11 @@ struct CommandOwner {
     mutation_declared: bool,
     pending: usize,
     deliveries: usize,
+    /// The logical command's intent, captured when its first context is
+    /// issued during command dispatch. `None`: issued outside dispatch.
+    intent: Option<crate::classify::Intent>,
+    /// Engine-validated narrowing for individual legs (see `http_write_leg_intent`).
+    leg_intents: Vec<(u64, crate::classify::Intent)>,
 }
 
 enum CommandPhase {
@@ -95,6 +100,8 @@ pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
     contexts: HashMap<u64, Context>,
     commands: HashMap<CommandId, CommandOwner>,
+    /// The command being dispatched to the venue and its intent.
+    pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     retirements: VecDeque<HttpOwnerRetirement>,
     /// Scoped delivery loans outlive temporary marker removal and even owner
     /// cleanup. Readiness may run only after the true outermost scope exits.
@@ -281,6 +288,11 @@ impl ContextRegistry {
                     mutation_declared: context.operation() == Operation::Mutation,
                     pending: 0,
                     deliveries: 0,
+                    intent: self
+                        .dispatch
+                        .filter(|(command, _)| *command == id)
+                        .map(|(_, intent)| intent),
+                    leg_intents: Vec::new(),
                 });
         }
         self.contexts.insert(identity, context.clone());
@@ -539,6 +551,37 @@ impl ContextRegistry {
             .as_mut()
             .ok_or(Error::State)?
             .result(delivery.attempt.request, result)
+    }
+
+    pub(super) fn latest_write(&self, context: &Context) -> Result<Option<RequestId>, Error> {
+        let Owner::Command { id, generation } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        let owner = self
+            .commands
+            .get(&id)
+            .filter(|owner| context.issued_by(&self.issuer) && owner.generation == generation)
+            .ok_or(Error::Revoked)?;
+        Ok(owner
+            .writes
+            .as_ref()
+            .and_then(|writes| writes.latest(context.leg())))
+    }
+
+    /// One classified resend per logical leg: a refused resend is final.
+    pub(super) fn grant_resend(&mut self, delivery: &Delivery) -> Result<(), Error> {
+        if delivery.context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        let writes = self
+            .command_mut(&delivery.context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?;
+        if writes.leg_attempts(delivery.context.leg()) > 1 {
+            return Err(Error::RetryForbidden);
+        }
+        writes.grant_resend(delivery.attempt.request)
     }
 
     pub(super) fn unproven_result(
@@ -871,6 +914,9 @@ impl<P> Cx<'_, P> {
         evidence: RetryEvidence,
     ) -> Result<Context, Error> {
         self.io.request_contexts.validate_legacy(context)?;
+        if evidence == RetryEvidence::DefinitiveRefusal {
+            return Err(Error::RetryForbidden);
+        }
         self.io.request_contexts.validate(context, self.now)?;
         context.retry(evidence, self.now)
     }
@@ -1034,7 +1080,8 @@ impl<P> Cx<'_, P> {
     /// Record only native codec facts for the exact currently delivered attempt.
     /// Transport and signing failures are recorded by the engine, never inferred
     /// from venue exception text or a caller-provided numeric request id.
-    pub fn http_write_result(
+    #[cfg(test)]
+    pub(crate) fn http_write_result(
         &mut self,
         context: &Context,
         result: WriteResult,
@@ -1118,7 +1165,8 @@ impl<P> Cx<'_, P> {
     /// Native reports are published centrally with the terminal logical legs.
     /// Capacity refusal leaves facts untouched: retry with empty reports to keep
     /// native facts/partial IDs. Never bypass a provenance or state refusal.
-    pub fn http_write_result_with_reports(
+    #[cfg(test)]
+    pub(crate) fn http_write_result_with_reports(
         &mut self,
         context: &Context,
         result: WriteResult,
@@ -1131,6 +1179,245 @@ impl<P> Cx<'_, P> {
         self.io
             .request_contexts
             .result_with_reports(delivery, result, reports)
+    }
+
+    /// Classify the delivered write reply. The engine supplies the status,
+    /// headers and the command's intent; the codec supplies native evidence.
+    pub fn classify_write(
+        &self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        native: Option<&crate::classify::Native<'_>>,
+        message: impl Into<String>,
+    ) -> Result<crate::classify::Fact, Error> {
+        let (status, headers) = self.io.http_write_reply.as_ref().ok_or(Error::State)?;
+        let response = crate::Response {
+            status: *status,
+            headers,
+            body: "",
+        };
+        let delivery = self.current_write_delivery(context)?;
+        Ok(crate::classify::fact(
+            table,
+            self.write_intent(context)?,
+            crate::classify::Released::Response(&response),
+            native,
+            message,
+        )
+        .for_attempt(delivery.attempt.request))
+    }
+
+    /// Record the delivered write attempt's native answer. Refusals exist only
+    /// as classifier facts; a whole `RefusedResend` refusal returns the only
+    /// grant a resend accepts (one per logical leg).
+    pub fn http_write_fact(
+        &mut self,
+        context: &Context,
+        fact: crate::classify::WriteFact,
+        reports: Option<RejectionReports>,
+    ) -> Result<Option<ResendGrant>, Error> {
+        let delivery = self.current_write_delivery(context)?;
+        if !fact.belongs_to(delivery.attempt.request) {
+            return Err(Error::Revoked);
+        }
+        let resendable = fact.resendable();
+        let result = match fact.into_result() {
+            // A placement acknowledgement must name what it placed.
+            WriteResult::Accepted { order_ids }
+                if order_ids.is_empty()
+                    && self.write_intent(context)? == crate::classify::Intent::Place =>
+            {
+                WriteResult::Failed(
+                    VenueError::new("Placement acknowledgement has no native order ID")
+                        .kind(crate::ErrorKind::Internal)
+                        .outcome(crate::Outcome::Unknown),
+                )
+            }
+            result => result,
+        };
+        // Accepted facts carry no rejection reports.
+        let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
+        self.record_write(&delivery, result, reports)?;
+        if !resendable {
+            return Ok(None);
+        }
+        match self.io.request_contexts.grant_resend(&delivery) {
+            Ok(()) => Ok(Some(ResendGrant {
+                attempt: delivery.attempt.request,
+            })),
+            Err(Error::RetryForbidden) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Classify and record one whole native failure for the delivered attempt.
+    /// `reports: None` keeps the default one-message rejection reporting.
+    pub fn http_write_failure(
+        &mut self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        native: Option<&crate::classify::Native<'_>>,
+        message: impl Into<String>,
+        reports: Option<RejectionReports>,
+    ) -> Result<(crate::classify::Verdict, Option<ResendGrant>), Error> {
+        let fact = self.classify_write(context, table, native, message)?;
+        let verdict = fact.verdict();
+        let failed = crate::classify::WriteFact::Failed {
+            fact,
+            known_effects: false,
+        };
+        Ok((verdict, self.http_write_fact(context, failed, reports)?))
+    }
+
+    /// A 2xx whose success envelope or acknowledgement does not prove the write.
+    pub fn http_write_unproven(
+        &mut self,
+        context: &Context,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        let failed = crate::classify::WriteFact::Failed {
+            fact: crate::classify::unproven_reply(message),
+            known_effects: false,
+        };
+        self.http_write_fact(context, failed, None).map(|_| ())
+    }
+
+    /// One batch acknowledgement, items in caller order. The engine checks the
+    /// item count, joins accepted IDs and chooses Accepted, Rejected, KnownPartial
+    /// or Failed. `message` is the venue's existing text for a failed batch.
+    pub fn http_write_batch(
+        &mut self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        expected: usize,
+        items: &[crate::classify::BatchItem<'_>],
+        message: impl Into<String>,
+        reports: Option<RejectionReports>,
+    ) -> Result<WriteResult, Error> {
+        let delivery = self.current_write_delivery(context)?;
+        let (status, headers) = self.io.http_write_reply.as_ref().ok_or(Error::State)?;
+        let response = crate::Response {
+            status: *status,
+            headers,
+            body: "",
+        };
+        let intent = self.write_intent(context)?;
+        let result = crate::classify::batch(table, intent, &response, expected, items, message)?;
+        let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
+        self.record_write(&delivery, result.clone(), reports)?;
+        Ok(result)
+    }
+
+    /// The intent the engine recorded for this leg's logical command.
+    /// Background (session) writes classify as placements; a command owner
+    /// created outside dispatch has no trusted intent.
+    fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
+        let Owner::Command { id, generation } = context.owner() else {
+            return Ok(crate::classify::Intent::Place);
+        };
+        let owner = self
+            .io
+            .request_contexts
+            .commands
+            .get(&id)
+            .filter(|owner| owner.generation == generation)
+            .ok_or(Error::Revoked)?;
+        let leg = owner
+            .leg_intents
+            .iter()
+            .find(|(leg, _)| *leg == context.leg())
+            .map(|(_, intent)| *intent);
+        leg.or(owner.intent).ok_or(Error::State)
+    }
+
+    /// Narrow one leg's intent, before its first attempt, where the command
+    /// implies it: an amend's replacement is a Place; a placement may first
+    /// cancel conflicting orders or set a protection setting. An amend's own
+    /// cancel leg can never become a Cancel. The command's own intent is a no-op.
+    pub fn http_write_leg_intent(
+        &mut self,
+        context: &Context,
+        intent: crate::classify::Intent,
+    ) -> Result<(), Error> {
+        use crate::classify::Intent;
+        self.io.request_contexts.validate(context, self.now)?;
+        let Owner::Command { id, generation } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        let owner = self
+            .io
+            .request_contexts
+            .commands
+            .get_mut(&id)
+            .filter(|owner| owner.generation == generation)
+            .ok_or(Error::Revoked)?;
+        if owner
+            .leg_intents
+            .iter()
+            .any(|(leg, _)| *leg == context.leg())
+        {
+            return Err(Error::Duplicate);
+        }
+        if owner
+            .writes
+            .as_ref()
+            .is_some_and(|writes| writes.latest(context.leg()).is_some())
+        {
+            return Err(Error::State);
+        }
+        if owner.intent == Some(intent) && context.operation() == Operation::Mutation {
+            return Ok(());
+        }
+        let allowed = matches!(
+            (owner.intent, intent),
+            (Some(Intent::Amend), Intent::Place)
+                | (Some(Intent::Place), Intent::Cancel | Intent::Setting)
+        );
+        if !allowed || context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        if owner.leg_intents.len() >= CAPACITY {
+            return Err(Error::Capacity);
+        }
+        owner.leg_intents.push((context.leg(), intent));
+        Ok(())
+    }
+
+    /// A resend of a write refused with a `RefusedResend` verdict. The journal
+    /// still refuses a second resend of the same logical leg.
+    pub fn http_resend_context(
+        &self,
+        context: &Context,
+        grant: ResendGrant,
+    ) -> Result<Context, Error> {
+        self.io.request_contexts.validate(context, self.now)?;
+        if self.io.request_contexts.latest_write(context)? != Some(grant.attempt) {
+            return Err(Error::Revoked);
+        }
+        context.retry(RetryEvidence::DefinitiveRefusal, self.now)
+    }
+
+    fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.request_contexts.issuer) {
+            return Err(Error::Revoked);
+        }
+        Ok(delivery.clone())
+    }
+
+    fn record_write(
+        &mut self,
+        delivery: &Delivery,
+        result: WriteResult,
+        reports: Option<RejectionReports>,
+    ) -> Result<(), Error> {
+        match reports {
+            Some(reports) => self
+                .io
+                .request_contexts
+                .result_with_reports(delivery, result, reports),
+            None => self.io.request_contexts.result(delivery, result),
+        }
     }
 
     /// Retire a fully completed logical read/page join or write leg. Do not call
@@ -1913,6 +2200,246 @@ mod write_tests {
     }
 
     #[test]
+    fn write_facts_are_bound_to_their_attempt_intent_and_placement_ids() {
+        use crate::classify::{self, CodeTable, Intent, Native, NativeCode, Verdict, WriteFact};
+        const REFUSE: CodeTable = CodeTable {
+            rows: &[],
+            success: &[],
+            unlisted: Verdict::Refused(crate::ErrorKind::Rejected),
+            status: &[],
+        };
+        let native = Native {
+            code: NativeCode::Int(-1),
+            message: "refused",
+        };
+        let released = |intent: Option<Intent>| {
+            let mut io = super::super::Io::<()>::default();
+            io.request_contexts.dispatch = intent.map(|intent| (7, intent));
+            let context = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts.dispatch = None;
+            for id in [11, 12] {
+                let _ = io
+                    .request_contexts
+                    .register_attempt(&context, RequestId(id), 0.);
+            }
+            *io.request_contexts
+                .release_flag(&context, RequestId(11))
+                .unwrap()
+                .unwrap() = true;
+            io.http_delivery = Some(delivery(&context, 11));
+            io.http_write_reply = Some((400, String::new()));
+            (io, context)
+        };
+
+        // A fact classified for one attempt cannot be recorded on another.
+        let (mut io, context) = released(Some(Intent::Place));
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let fact = cx
+            .classify_write(&context, &REFUSE, Some(&native), "x")
+            .unwrap();
+        cx.io.http_delivery = Some(delivery(&context, 12));
+        let failed = WriteFact::Failed {
+            fact: fact.clone(),
+            known_effects: false,
+        };
+        assert_eq!(
+            cx.http_write_fact(&context, failed, None).unwrap_err(),
+            Error::Revoked
+        );
+        // An attempt-free fact may only be an unproven answer.
+        cx.io.http_delivery = Some(delivery(&context, 11));
+        let (_, error) = classify::write(
+            &REFUSE,
+            Intent::Place,
+            classify::Released::Transport,
+            None,
+            "x",
+        );
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        let forged = classify::fact(
+            &REFUSE,
+            Intent::Place,
+            classify::Released::Response(&crate::Response {
+                status: 400,
+                headers: "",
+                body: "",
+            }),
+            Some(&native),
+            "x",
+        );
+        let forged = WriteFact::Failed {
+            fact: forged,
+            known_effects: false,
+        };
+        assert_eq!(
+            cx.http_write_fact(&context, forged, None).unwrap_err(),
+            Error::Revoked
+        );
+        // A placement acknowledgement without native IDs proves nothing.
+        let empty = WriteFact::Accepted {
+            order_ids: Vec::new(),
+        };
+        cx.http_write_fact(&context, empty, None).unwrap();
+        let Seal::Failure(error, _) = cx.io.request_contexts.seal(
+            7,
+            Some(&delivery(&context, 11)),
+            Some(&context),
+            Some(VenueError::new("fallback")),
+        ) else {
+            panic!("an empty placement ACK cannot seal success");
+        };
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+
+        // Owners issued outside command dispatch have no trusted intent.
+        let (mut io, context) = released(None);
+        let mut store = Store::default();
+        let cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.classify_write(&context, &REFUSE, Some(&native), "x")
+                .unwrap_err(),
+            Error::State
+        );
+    }
+
+    #[test]
+    fn leg_intents_only_narrow_what_the_command_implies() {
+        use crate::classify::Intent;
+        for (commanded, leg, allowed) in [
+            (Intent::Amend, Intent::Place, true),
+            (Intent::Place, Intent::Setting, true),
+            // A placement's conflicting-order cancel is a real cancel.
+            (Intent::Place, Intent::Cancel, true),
+            (Intent::Amend, Intent::Cancel, false),
+            (Intent::Cancel, Intent::Place, false),
+            (Intent::Setting, Intent::Cancel, false),
+        ] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            io.request_contexts.dispatch = Some((7, commanded));
+            let context = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts.dispatch = None;
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let narrowed = cx.http_write_leg_intent(&context, leg);
+            assert_eq!(narrowed.is_ok(), allowed, "{commanded:?} -> {leg:?}");
+            if allowed {
+                assert_eq!(cx.write_intent(&context), Ok(leg));
+                assert_eq!(
+                    cx.http_write_leg_intent(&context, leg),
+                    Err(Error::Duplicate)
+                );
+            } else {
+                assert_eq!(cx.write_intent(&context), Ok(commanded));
+            }
+        }
+        // The command's own intent is a no-op; nothing narrows after a send.
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        io.request_contexts.dispatch = Some((7, Intent::Place));
+        let context = io
+            .request_contexts
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        io.request_contexts.dispatch = None;
+        io.request_contexts
+            .register_attempt(&context, RequestId(11), 0.)
+            .unwrap();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.http_write_leg_intent(&context, Intent::Place),
+            Err(Error::State)
+        );
+        assert_eq!(
+            cx.http_write_leg_intent(&context, Intent::Cancel),
+            Err(Error::State)
+        );
+        assert_eq!(cx.write_intent(&context), Ok(Intent::Place));
+    }
+
+    #[test]
+    fn classification_takes_intent_from_the_command_and_status_from_the_engine() {
+        use crate::classify::{
+            CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
+        };
+        const GONE: CodeTable = CodeTable {
+            rows: &[Row {
+                key: Key::Int(-2011),
+                verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+                only: Some(Intent::Cancel),
+            }],
+            success: &[],
+            unlisted: Verdict::Unknown(None),
+            status: &[],
+        };
+        let native = Native {
+            code: NativeCode::Int(-2011),
+            message: "Unknown order sent.",
+        };
+        for (intent, expected) in [
+            (
+                Some(Intent::Cancel),
+                Verdict::Satisfied(SatisfiedIntent::Cancel),
+            ),
+            // An amend's cancel leg can never inherit cancel success.
+            (Some(Intent::Amend), Verdict::Unknown(None)),
+            // A venue action classifies conservatively as a placement.
+            (Some(Intent::Place), Verdict::Unknown(None)),
+        ] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            io.request_contexts.dispatch = intent.map(|intent| (7, intent));
+            let context = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts.dispatch = None;
+            io.http_delivery = Some(delivery(&context, 11));
+            let cx = Cx {
+                now: 1.,
+                store: &mut store,
+                io: &mut io,
+            };
+            assert_eq!(
+                cx.classify_write(&context, &GONE, Some(&native), "x"),
+                Err(Error::State),
+                "no delivered reply"
+            );
+            cx.io.http_write_reply = Some((400, String::new()));
+            let fact = cx
+                .classify_write(&context, &GONE, Some(&native), "x")
+                .unwrap();
+            assert_eq!(fact.verdict(), expected, "{intent:?}");
+            cx.io.http_write_reply = Some((503, String::new()));
+            let fact = cx
+                .classify_write(&context, &GONE, Some(&native), "x")
+                .unwrap();
+            assert!(matches!(fact.verdict(), Verdict::Unknown(Some(_))));
+        }
+    }
+
+    #[test]
     fn native_report_api_preserves_delivery_authority_and_publishes_each_batch_message_once() {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
@@ -2100,6 +2627,7 @@ mod write_tests {
         registry
             .result(&delivery(&context, 11), rejected())
             .unwrap();
+        registry.grant_resend(&delivery(&context, 11)).unwrap();
         registry
             .register_attempt(&context, RequestId(12), 1.)
             .unwrap();
@@ -2291,6 +2819,9 @@ mod write_tests {
             .unwrap() = true;
         io.request_contexts
             .result(&delivery(&context, 11), rejected())
+            .unwrap();
+        io.request_contexts
+            .grant_resend(&delivery(&context, 11))
             .unwrap();
         io.request_contexts
             .register_attempt(&context, RequestId(12), 1.)

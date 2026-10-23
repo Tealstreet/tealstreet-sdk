@@ -694,6 +694,7 @@ fn earlier_released_retryable_refusal_then_failed_retry_is_unknown_for_every_fai
                         WriteResult::Rejected(failure("clock refusal").venue_code(code)),
                     )
                     .unwrap();
+                let _ = writes.grant_resend(RequestId(1));
                 writes.retry(RequestId(1), RequestId(2)).unwrap();
                 if released_retry {
                     writes.released(RequestId(2)).unwrap();
@@ -781,6 +782,7 @@ fn unknown_write_cannot_enter_a_generic_retry_and_native_facts_require_release()
     writes
         .result(RequestId(1), failed("network failure"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     assert_eq!(
         writes.retry(RequestId(1), RequestId(2)),
         Err(Error::RetryForbidden)
@@ -1069,6 +1071,7 @@ fn partial_native_rejection_forbids_replaying_the_effective_logical_write() {
             WriteResult::Rejected(failure("partial refusal").partial_ids(&["accepted".into()])),
         )
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     assert_eq!(
         writes.retry(RequestId(1), RequestId(2)),
         Err(Error::RetryForbidden)
@@ -1121,6 +1124,7 @@ fn staged_retry_timeout_does_not_erase_prior_attempt_evidence() {
     writes
         .result(RequestId(1), rejected("retryable refusal"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     assert_eq!(seal(&mut writes).outcome, Some(Outcome::Unknown));
 }
@@ -1133,6 +1137,7 @@ fn recovered_retry_is_not_reported_as_a_rejected_logical_leg() {
     writes
         .result(RequestId(1), rejected("recoverable clock refusal"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     writes.released(RequestId(2)).unwrap();
     writes
@@ -1353,6 +1358,7 @@ fn write_success_seals_once_including_a_recovered_native_refusal() {
     writes
         .result(RequestId(1), rejected("native clock refusal"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     assert_eq!(writes.succeed(), Err(Error::State));
     writes.released(RequestId(2)).unwrap();
@@ -1411,6 +1417,7 @@ fn known_partial_effects_without_ids_forbid_retry_and_whole_success_or_rejection
     assert_eq!(writes.result(RequestId(1), fact.clone()), Err(Error::State));
     writes.released(RequestId(1)).unwrap();
     writes.result(RequestId(1), fact).unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     assert_eq!(
         writes.retry(RequestId(1), RequestId(2)),
         Err(Error::RetryForbidden)
@@ -1452,6 +1459,33 @@ fn known_partial_effects_do_not_hide_an_unresolved_sent_sibling() {
         Some(Outcome::Unknown)
     );
 }
+
+#[test]
+fn a_write_resend_needs_an_engine_grant_and_each_grant_is_used_once() {
+    let mut writes = CommandWrites::new(8).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    writes.released(RequestId(1)).unwrap();
+    writes.result(RequestId(1), rejected("clock")).unwrap();
+    assert_eq!(
+        writes.retry(RequestId(1), RequestId(2)),
+        Err(Error::RetryForbidden)
+    );
+    writes.grant_resend(RequestId(1)).unwrap();
+    writes.retry(RequestId(1), RequestId(2)).unwrap();
+    writes.released(RequestId(2)).unwrap();
+    writes
+        .result(RequestId(2), rejected("clock again"))
+        .unwrap();
+    assert_eq!(
+        writes.retry(RequestId(2), RequestId(3)),
+        Err(Error::RetryForbidden)
+    );
+    let mut failed = CommandWrites::new(8).unwrap();
+    failed.register(RequestId(1), 1).unwrap();
+    failed.released(RequestId(1)).unwrap();
+    failed.result(RequestId(1), self::failed("lost")).unwrap();
+    assert_eq!(failed.grant_resend(RequestId(1)), Err(Error::State));
+}
 #[test]
 fn full_plan_journal_backing_is_reserved_before_any_native_fact() {
     for (attempts, legs) in [(0, 1), (257, 1), (1, 0), (1, 2)] {
@@ -1472,6 +1506,7 @@ fn full_plan_journal_backing_is_reserved_before_any_native_fact() {
         writes
             .result(first, WriteResult::Rejected(VenueError::new("refused")))
             .unwrap();
+        writes.grant_resend(first).unwrap();
         writes.retry(first, second).unwrap();
         *writes.release_flag(second).unwrap() = true;
         writes
