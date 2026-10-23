@@ -611,6 +611,22 @@ choke point. No signing, transport, history, snapshot authority or financial
 arithmetic change. Current-head CI/raw proof and queue ordering still apply;
 this entry does not close the remaining reporter inventory.
 
+
+## Lighter managed candle area
+
+Lighter and Robinhood candle requests share the engine preparation/claim,
+original-deadline and generation-bearing completion paths. Typed preparation
+failures are passed intact; failed streamed rows never become a successful
+result. Background retirement precedes stale subscription/revision returns and
+preserves later fallback polling. Existing candle source-order assertions stay
+intact while their fixture uses the shared prepared-action helper. An additional
+within-deadline resubscription control distinguishes the venue generation fence
+from expiry. No signer, nonce, paging, row-admission or retry policy is copied.
+
+The exact request ratchet removes four Lighter lib occurrences only. The
+pre-authority issuance refusal remains explicitly counted until its shared
+engine prerequisite; this does not claim all Lighter or cross-venue closure.
+
 ## Shared CRC32 compatibility boundaries
 
 The engine owns CRC32 initialization, byte updates and final complement. Native
