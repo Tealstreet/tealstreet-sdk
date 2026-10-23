@@ -290,6 +290,9 @@ enum ActionOut<'a> {
     Sign {
         attempt: u64,
         work: &'a safe_cex_engine::signing::SignRequest,
+        /// Omitted for every existing step, so their JSON is unchanged.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        remote: Option<&'a safe_cex_engine::signing_remote::RemoteWire>,
         #[serde(rename = "timeoutMs")]
         timeout_ms: u32,
     },
@@ -406,10 +409,12 @@ fn encode(actions: &[Action]) -> String {
             Action::Sign {
                 attempt,
                 work,
+                remote,
                 timeout_ms,
             } => ActionOut::Sign {
                 attempt: attempt.0,
                 work,
+                remote: remote.as_deref(),
                 timeout_ms: *timeout_ms,
             },
             Action::SignPayload {

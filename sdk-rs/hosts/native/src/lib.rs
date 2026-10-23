@@ -392,9 +392,11 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 Action::SignedOutbound { .. } => {
                     unreachable!("engine drain unwraps signed outbound")
                 }
+                // Native providers are Rust signers; the recipe wire is for JS hosts.
                 Action::Sign {
                     attempt,
                     work,
+                    remote: _,
                     timeout_ms,
                 } => {
                     if !self.engine.signing_pending(attempt) {
