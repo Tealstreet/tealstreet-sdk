@@ -3,7 +3,7 @@ import type { Store } from '../../store/store.interface';
 import type { ExchangeName } from '../../types';
 import type { LighterAccountTier } from './lighter.account-tier';
 import type { LighterBuilderFeeConfig } from './lighter.builder-fee';
-import type { LighterCreateOrderRequest, LighterSignerAdapter } from './lighter.signer';
+import type { LighterCreateGroupedOrdersRequest, LighterCreateOrderRequest, LighterSignerAdapter } from './lighter.signer';
 
 import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
@@ -2506,6 +2506,122 @@ export class LighterExchange extends BaseExchange {
       }
     }
 
+    const shouldAttachTpSlSiblings =
+      (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
+      !opts.reduceOnly &&
+      (opts.stopLoss !== undefined || opts.takeProfit !== undefined);
+    const shouldUseGroupedAttachedTpSl = shouldAttachTpSlSiblings && opts.type === OrderType.Limit;
+    if (shouldUseGroupedAttachedTpSl) {
+      if (lotAmounts.length !== 1) {
+        throw new Error('Lighter attached TP/SL limit orders cannot be split into multiple native lots.');
+      }
+
+      const inverseSide = opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
+      const childRequests: LighterCreateOrderRequest[] = [];
+      const childHints: Array<{ orderId: bigint; hint: Omit<LighterPlacedOrderHint, 'createdAt'> }> = [];
+      const buildChildRequest = (childType: OrderType.StopLoss | OrderType.TakeProfit, triggerValue: number) => {
+        const triggerPrice = adjust(triggerValue, pPrice);
+        if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) {
+          throw new Error(`Trigger price is required for attached Lighter TP/SL orders (${opts.symbol})`);
+        }
+        const childOrderId = this.reserveClientOrderIndex();
+        const childOrderType = childType === OrderType.StopLoss ? 'stop_loss' : 'take_profit';
+        const executionGuardPrice = this.resolveConditionalExecutionPrice(triggerPrice, inverseSide, {
+          ...opts,
+          type: childType,
+          side: inverseSide,
+          price: triggerPrice,
+          triggerPrice,
+          amount: 0,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.ImmediateOrCancel,
+        });
+
+        childHints.push({
+          orderId: childOrderId,
+          hint: {
+            type: childType,
+            side: inverseSide,
+            reduceOnly: true,
+            timeInForce: OrderTimeInForce.ImmediateOrCancel,
+            price: triggerPrice,
+            symbol: opts.symbol,
+          },
+        });
+
+        childRequests.push({
+          ...orderParams,
+          orderId: childOrderId,
+          isBuy: inverseSide === OrderSide.Buy,
+          price: toLighterScaledInt(executionGuardPrice, priceDecimals),
+          amount: 0n,
+          postOnly: false,
+          reduceOnly: true,
+          orderType: childOrderType,
+          triggerPrice: toLighterScaledInt(triggerPrice, priceDecimals),
+          timeInForce: OrderTimeInForce.ImmediateOrCancel,
+        });
+      };
+
+      if (opts.stopLoss !== undefined) {
+        buildChildRequest(OrderType.StopLoss, opts.stopLoss);
+      }
+      if (opts.takeProfit !== undefined) {
+        buildChildRequest(OrderType.TakeProfit, opts.takeProfit);
+      }
+
+      const groupedOrderIds = [orderId, ...childHints.map(({ orderId }) => orderId)].map((id) => id.toString());
+      const groupedOrderRequest: LighterCreateGroupedOrdersRequest = {
+        groupingType: childRequests.length === 2 ? 3 : 1,
+        orders: [orderParams, ...childRequests],
+        ...(builderFeeConfig
+          ? {
+              integratorAccountIndex: builderFeeConfig.integratorAccountIndex,
+              integratorMakerFee: builderFeeConfig.integratorMakerFee,
+              integratorTakerFee: builderFeeConfig.integratorTakerFee,
+            }
+          : {}),
+      };
+
+      this.log(
+        `Grouped order request: ${JSON.stringify(groupedOrderRequest, (_k, val) =>
+          typeof val === 'bigint' ? val.toString() : val,
+        )}`,
+        LogSeverity.Info,
+      );
+
+      this.rememberPlacedOrderHint(orderId, {
+        type: opts.type,
+        side: opts.side,
+        reduceOnly: Boolean(opts.reduceOnly),
+        timeInForce: normalizedTimeInForce,
+        price: executionPrice,
+        symbol: opts.symbol,
+      });
+      for (const childHint of childHints) {
+        this.rememberPlacedOrderHint(childHint.orderId, childHint.hint);
+      }
+
+      try {
+        await signerAdapter.createGroupedOrders(groupedOrderRequest);
+        this.privateWebsocket.throttleFetchOrders();
+        return groupedOrderIds;
+      } catch (error: any) {
+        for (const orderIdToForget of groupedOrderIds) {
+          this.placedOrderHints.delete(orderIdToForget);
+        }
+        const rawOrderErrorMessage = this.extractOrderErrorMessage(error);
+        if (this.isInvalidMarginModeOrderError(error, rawOrderErrorMessage)) {
+          await this.refreshMarginModeStateAfterInvalidOrder(opts.symbol);
+        }
+        const normalizedPrimaryErrorMessage = this.normalizePlaceOrderErrorMessage(opts, error);
+        const groupedErrorMessage = `Lighter attached TP/SL order placement failed: ${normalizedPrimaryErrorMessage}`;
+        this.privateWebsocket.throttleFetchOrders();
+        this.emitAndLogError(groupedErrorMessage);
+        throw new Error(groupedErrorMessage);
+      }
+    }
+
     const orderIds: string[] = [];
 
     // Create orders in lots if needed.
@@ -2544,10 +2660,6 @@ export class LighterExchange extends BaseExchange {
       }
     }
 
-    const shouldAttachTpSlSiblings =
-      (opts.type === OrderType.Limit || opts.type === OrderType.Market) &&
-      !opts.reduceOnly &&
-      (opts.stopLoss !== undefined || opts.takeProfit !== undefined);
     if (shouldAttachTpSlSiblings) {
       const siblingOrders = this.deriveAlgoOrdersFromNormalOrdersOpts([opts]).map((siblingOrder) => ({
         ...siblingOrder,
