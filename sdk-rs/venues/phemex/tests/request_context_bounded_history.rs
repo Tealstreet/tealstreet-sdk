@@ -15,7 +15,11 @@ const TRADE: &str = r#"{"error":null,"result":{"symbol":"BTCUSDT","trades_p":[[1
 const FILL: &str = r#"{"transactTimeNs":1669407633999999999,"symbol":"BTCUSDT","currency":"USDT","side":"Sell","tradeType":"Trade","execQtyRq":"0.001","execPriceRp":"16600","execFeeRv":"0.00166","execID":"execution-a","orderID":"order-a"}"#;
 
 fn engine(primary: bool, secondary: bool) -> TestEngine {
+    engine_with_mode(primary, secondary, false)
+}
+fn engine_with_mode(primary: bool, secondary: bool, public_data_only: bool) -> TestEngine {
     let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+        public_data_only,
         key: primary.then(|| "fixture-primary".into()),
         secret: primary.then(|| "fixture-material".into()),
         read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
@@ -199,12 +203,16 @@ fn client_lookup_requires_managed_primary_preparation() {
 fn unclaimed_response_cannot_publish_history_before_route_binding() {
     let mut e = engine(false, false);
     ask(&mut e, NOW, OWNER, public());
-    let request = e
+    let (request, preparation) = e
         .drain_actions()
         .find_map(|action| match action {
-            Action::Http(request) => Some(request),
+            Action::Http(request) => Some((request, None)),
             Action::ManagedHttp(action) => match *action {
-                HttpAction::Prepare { request, .. } => Some(request),
+                HttpAction::Prepare {
+                    request,
+                    preparation,
+                    ..
+                } => Some((request, Some(preparation))),
                 _ => None,
             },
             _ => None,
@@ -212,9 +220,21 @@ fn unclaimed_response_cannot_publish_history_before_route_binding() {
         .expect("native or managed original request");
     let output = reply(&mut e, NOW + 1., &request, 200, TRADE);
     assert!(
-        done(&output, OWNER).is_none(),
-        "unclaimed response has no DATA authority"
+        !output.iter().any(|action| matches!(
+            action,
+            Action::Notice(
+                Notice::CommandDone { command: OWNER, .. }
+                    | Notice::CommandFailed { command: OWNER, .. }
+            )
+        )),
+        "unclaimed response has no DATA or terminal authority"
     );
+    if let Some(preparation) = preparation {
+        assert!(
+            e.http_preparation_pending(preparation),
+            "early input cannot retire the live owner"
+        );
+    }
 }
 
 #[test]
@@ -322,6 +342,7 @@ fn shared_context_capacity_refuses_history_before_native_active_slot_or_io() {
                 .expect("a real existing candle owns a shared Context"),
         );
     }
+    assert!(peers.iter().all(|peer| e.http_preparation_pending(*peer)));
     ask(&mut e, NOW, OWNER, public());
     let output: Vec<_> = e.drain_actions().collect();
     assert!(
@@ -334,18 +355,35 @@ fn shared_context_capacity_refuses_history_before_native_active_slot_or_io() {
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.message, "Engine request capacity reached");
     assert!(error.outcome.is_none());
+    assert!(
+        peers.iter().all(|peer| e.http_preparation_pending(*peer)),
+        "refusal must preserve every unrelated owner"
+    );
     e.http_preparation_failed(
         NOW + 1.,
         peers[0],
         Error::State,
         VenueError::new("release fixture peer"),
     );
-    e.drain_actions().for_each(drop);
+    let output: Vec<_> = e.drain_actions().collect();
+    assert_eq!(failure(&output, 1).message, "release fixture peer");
+    assert!(!e.http_preparation_pending(peers[0]));
+    assert!(
+        peers[1..]
+            .iter()
+            .all(|peer| e.http_preparation_pending(*peer))
+    );
     let request = released(&mut e, NOW + 2., OWNER, public());
     let output = reply(&mut e, NOW + 3., &request, 200, TRADE);
     assert!(
         done(&output, OWNER).is_some(),
         "refusal did not consume native active slot"
+    );
+    assert!(
+        peers[1..]
+            .iter()
+            .all(|peer| e.http_preparation_pending(*peer)),
+        "successful recovery must preserve all 255 unrelated peers"
     );
 }
 
@@ -446,6 +484,33 @@ fn native_signed_read_selection_and_lookup_primary_are_preserved() {
                 Some(r#"{"found":false,"definitive":true}"#),
             );
         }
+    }
+}
+
+#[test]
+fn native_optional_auth_survives_public_mode_and_single_credential_containers() {
+    for (primary, secondary, public_data_only, expected_key) in [
+        (true, false, false, "fixture-primary"),
+        (false, true, false, "fixture-secondary"),
+        (true, true, true, "fixture-secondary"),
+        (false, true, true, "fixture-secondary"),
+    ] {
+        let mut e = engine_with_mode(primary, secondary, public_data_only);
+        let request = released(&mut e, NOW, OWNER, public());
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, value)| *name == "X-PHEMEX-ACCESS-TOKEN" && value == expected_key)
+        );
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, _)| *name == "X-PHEMEX-REQUEST-SIGNATURE")
+        );
+        let output = reply(&mut e, NOW + 1., &request, 200, TRADE);
+        assert!(done(&output, OWNER).is_some());
     }
 }
 

@@ -63,8 +63,8 @@ starting work. Private credential availability precedes normal symbol/bounds
 validation. Lookup first checks client ID, then unknown market returns the
 non-definitive sentinel, before ordinary private checks. Input bounds are
 nonnegative safe integer milliseconds, ordered when both supplied. The native
-symbol accepts ASCII alphanumeric/underscore only. Every query's output limit
-defaults to 100 and clamps 1..200, including public trades. The public endpoint
+symbol accepts ASCII alphanumeric/underscore only. Fills, orders and public
+trades default to 100 output rows and clamp 1..200; lookup fixes its limit to 1. The public endpoint
 has no size parameter and separately refuses over 1000 response tuples.
 
 Keep exact nanosecond division before conversion, millisecond filtering, current
