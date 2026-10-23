@@ -1486,15 +1486,14 @@ fn decode(call: &Call, data: &Data<'_>, absent: bool) -> Result<Vec<String>, Ven
         Call::Place => Ok(vec![placement_id(data)?]),
         Call::Cancel { ids, .. } => {
             data.canceled()?;
-            if !absent {
-                if let Some(id) = data.id().map_err(unknown)?
-                    && ids.len() == 1
-                    && id != ids[0]
-                {
-                    return Err(unknown(
-                        "BingX cancellation acknowledgement identifies another order",
-                    ));
-                }
+            if !absent
+                && let Some(id) = data.id().map_err(unknown)?
+                && ids.len() == 1
+                && id != ids[0]
+            {
+                return Err(unknown(
+                    "BingX cancellation acknowledgement identifies another order",
+                ));
             }
             if !data.failed.is_empty() {
                 return Err(unknown(
