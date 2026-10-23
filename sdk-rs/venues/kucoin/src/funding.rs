@@ -1,11 +1,13 @@
 //! Funding has its own ledger. Inclusive time cursors preserve boundary rows.
 use crate::wire::Envelope;
 use crate::{Kucoin, Pending};
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 const DAY: u64 = 86_400_000;
 const WINDOW: u64 = 60 * DAY;
@@ -17,7 +19,7 @@ pub struct Funding {
     waiting: HashMap<TimerId, Request>,
 }
 pub struct Request {
-    command: CommandId,
+    owner: Box<CursorHistory<Income>>,
     symbol: String,
     api_symbol: String,
     from: u64,
@@ -26,9 +28,7 @@ pub struct Request {
     window_end: u64,
     limit: usize,
     explicit_range: bool,
-    rows: Vec<Income>,
     page: Vec<Income>,
-    seen: HashSet<String>,
     page_minimum: Option<u64>,
     page_count: usize,
     invalid: bool,
@@ -146,7 +146,12 @@ impl Kucoin {
         self.funding_schedule(
             cx,
             Request {
-                command,
+                owner: Box::new(CursorHistory::new(
+                    Completion::new(command),
+                    CursorWalk::new(MAX_REQUESTS),
+                    |_| "KuCoin funding exceeded page safety bound".into(),
+                    |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
+                )),
                 symbol,
                 api_symbol: market.id.clone(),
                 from,
@@ -155,9 +160,7 @@ impl Kucoin {
                 window_end: end,
                 limit,
                 explicit_range: from_ms.is_some() && to_ms.is_some(),
-                rows: vec![],
                 page: vec![],
-                seen: HashSet::new(),
                 page_minimum: None,
                 page_count: 0,
                 invalid: false,
@@ -180,7 +183,10 @@ impl Kucoin {
     fn funding_send(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         request.requests += 1;
         if request.requests > MAX_REQUESTS {
-            cx.fail(request.command, "KuCoin funding exceeded page safety bound");
+            request.owner.reject(
+                cx,
+                VenueError::new("KuCoin funding exceeded page safety bound"),
+            );
             return;
         }
         request.page.clear();
@@ -270,13 +276,11 @@ impl Kucoin {
                 let delay = 1000.0 * request.retries as f64;
                 self.funding_schedule(cx, request, delay);
             } else {
-                cx.fail(
-                    request.command,
-                    envelope.map_or_else(
-                        |_| "Malformed KuCoin funding response".into(),
-                        |e| format!("KuCoin funding {}: {}", e.code, e.msg),
-                    ),
+                let error = envelope.map_or_else(
+                    |_| "Malformed KuCoin funding response".into(),
+                    |e| format!("KuCoin funding {}: {}", e.code, e.msg),
                 );
+                self.funding_finish(cx, request, Err(VenueError::new(error)));
             }
             return;
         }
@@ -284,60 +288,87 @@ impl Kucoin {
         let page = match serde_json::from_str::<Page>(envelope.data.unwrap().get()) {
             Ok(page) => page,
             Err(_) => {
-                cx.fail(request.command, "Malformed KuCoin funding page");
+                self.funding_finish(
+                    cx,
+                    request,
+                    Err(VenueError::new("Malformed KuCoin funding page")),
+                );
                 return;
             }
         };
         // Never subtract one from an incomplete timestamp boundary: it may hide
         // additional settlements at exactly the same millisecond.
         if page.has_more && request.page_minimum.is_none_or(|time| time >= request.end) {
-            cx.fail(
-                request.command,
-                "KuCoin funding cursor cannot prove complete same-timestamp coverage",
+            request.owner.reject(
+                cx,
+                VenueError::new(
+                    "KuCoin funding cursor cannot prove complete same-timestamp coverage",
+                ),
             );
             return;
         }
+        let mut fresh = 0;
         for row in request.page.drain(..) {
-            if request.seen.insert(row.tran_id.clone()) {
-                request.rows.push(row);
+            if request.owner.fresh(row.tran_id.clone()) {
+                request.owner.stage(row);
+                fresh += 1;
             }
         }
-        let capped = !request.explicit_range && request.rows.len() >= request.limit;
-        if !capped
+        let capped = !request.explicit_range
+            && request.owner.accepted_len() + request.owner.staged_len() >= request.limit;
+        let next_bounds = if !capped
             && page.has_more
             && request
                 .page_minimum
                 .is_some_and(|time| time >= request.start)
         {
             request.end = request.page_minimum.unwrap();
-            request.retries = 0;
-            self.funding_schedule(cx, request, 0.0);
-            return;
-        }
-        if !capped && request.start > request.from {
+            Some((request.start, request.end))
+        } else if !capped && request.start > request.from {
             request.window_end = request.start - 1;
             request.end = request.window_end;
             request.start = request.from.max(request.end.saturating_sub(WINDOW - 1));
-            request.retries = 0;
-            self.funding_schedule(cx, request, 0.0);
-            return;
-        }
-        request.rows.sort_by(|a, b| {
-            b.timestamp
-                .cmp(&a.timestamp)
-                .then_with(|| a.tran_id.cmp(&b.tran_id))
-        });
-        if !request.explicit_range {
-            request.rows.truncate(request.limit);
-        }
-        {
-            let result: Result<String, String> =
-                serde_json::to_string(&request.rows).map_err(|e| e.to_string());
-            match result {
-                Ok(data) => cx.done(request.command, data),
-                Err(error) => cx.fail(request.command, error),
-            }
+            Some((request.start, request.end))
+        } else {
+            None
         };
+        let next = next_bounds.map(|(start, end)| format!("{start}:{end}"));
+        match request.owner.advance(CursorPage {
+            next,
+            rows: request.page_count,
+            fresh,
+            want_more: true,
+        }) {
+            CursorStep::More(_) => {
+                request.retries = 0;
+                self.funding_schedule(cx, request, 0.0);
+            }
+            CursorStep::Done => self.funding_finish(cx, request, Ok(())),
+            CursorStep::Stalled(_) => request.owner.reject(
+                cx,
+                VenueError::new("KuCoin funding exceeded page safety bound"),
+            ),
+        }
+    }
+    fn funding_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        result: Result<(), VenueError>,
+    ) {
+        let limit = request.limit;
+        let uncapped = request.explicit_range;
+        request.owner.finish_with(cx, result, |mut rows| {
+            rows.sort_by(|a, b| {
+                b.timestamp
+                    .cmp(&a.timestamp)
+                    .then_with(|| a.tran_id.cmp(&b.tran_id))
+            });
+            if !uncapped {
+                rows.truncate(limit);
+            }
+            serde_json::to_string(&rows).map_err(|e| VenueError::new(e.to_string()))
+        });
     }
     pub(crate) fn funding_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if let Some(request) = self.funding.waiting.remove(&timer) {
