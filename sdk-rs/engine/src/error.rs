@@ -198,9 +198,9 @@ impl VenueError {
     }
 }
 
-/// Pre-dispatch request-lifecycle refusals: the new attempt was never released.
-/// A mutation command join still recomputes the outcome from earlier releases;
-/// read and legacy commands pass this through, which is harmless for reads.
+/// Local operation failure: this call dispatched nothing new. `NotSent` never proves
+/// the whole command unsent; the mutation journal overrides it from earlier
+/// releases, and an earlier released read may still have reached the venue.
 impl crate::request_context::Error {
     pub fn kind(self) -> ErrorKind {
         match self {
@@ -227,9 +227,9 @@ impl fmt::Display for crate::request_context::Error {
             Error::Capacity => "Too many requests in flight",
             Error::Duplicate => "Request is already in flight",
             Error::State => "Request is not in a sendable state",
-            Error::TimedOut => "Request timed out before dispatch",
-            Error::Stale => "Request was superseded before dispatch",
-            Error::Revoked => "Request was revoked before dispatch",
+            Error::TimedOut => "Request context timed out",
+            Error::Stale => "Request context is stale",
+            Error::Revoked => "Request context was revoked",
             Error::RetryForbidden => "Request may not be retried",
         })
     }
@@ -341,7 +341,7 @@ mod tests {
     fn request_context_refusals_are_typed_not_sent_failures() {
         use crate::request_context::Error;
         let error = Error::TimedOut.venue_error();
-        assert_eq!(error.message, "Request timed out before dispatch");
+        assert_eq!(error.message, "Request context timed out");
         assert_eq!(error.kind, Some(ErrorKind::Timeout));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
         for (reason, kind) in [
