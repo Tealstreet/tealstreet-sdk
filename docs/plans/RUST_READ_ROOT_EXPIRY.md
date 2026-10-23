@@ -93,6 +93,10 @@ timeout and re-derived. Legs are minted under it with the existing
 `http_leg_context` and are capped at the root deadline
 (`request_context_registry.rs:342-360`).
 
+**Egress.** A tracked root declares no egress, so its routing is derived from
+its credential: Primary only when it carries the primary credential, and
+Public when it is keyless. Its legs inherit it, as with #1833.
+
 **Plain Read only.** A tracked owner stays a plain Read owner. A later
 Mutation sibling, a replacement Context or ownership conversion (to a
 Preflight, Plan or Execution) is refused with `Invalid`. The refusal comes

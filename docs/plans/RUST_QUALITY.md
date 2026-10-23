@@ -1338,6 +1338,14 @@ recipe headers remain unchanged. Genuine engine controls cover capacity,
 duplicate entry, phase custody, expiry, retry, streaming and account evidence;
 native compatibility controls do not substitute for later venue adoption.
 
+## BingX identity original Read owner
+
+One AdmittedRead couples selection, credential and terminal authority without a
+venue admission or numeric fallback. Exact managed delivery is checked before
+native response decoding/publication. Local config precedence and 20s/Never
+remain native; typed transport/refusal errors keep checked diagnostic ordering.
+Only identity.rs loses two legacy terminal occurrences; other inventory is intact.
+
 ## Selected multi-page Read contract controls
 
 New-contract Engine controls cover exact receipt bounds, distinct page legs,
