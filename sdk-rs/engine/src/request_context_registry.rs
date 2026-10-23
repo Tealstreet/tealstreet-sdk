@@ -188,11 +188,40 @@ pub(super) struct ContextRegistry {
     plan_index: Vec<CommandId>,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
+    /// Order-read epoch at each live owner's first released Read: one logical
+    /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
+    #[cfg(feature = "order-locks")]
+    pub(super) read_marks: HashMap<Owner, u64>,
 }
 
 impl ContextRegistry {
+    /// The order-read token for a Read released now under `owner`: its earliest
+    /// release's epoch. Execution reads keep their attempt token; their contexts
+    /// live in the execution registry, outside this owner's lifetime.
+    #[cfg(feature = "order-locks")]
+    pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
+        if matches!(owner, Owner::Execution { .. }) {
+            return epoch;
+        }
+        *self.read_marks.entry(owner).or_insert(epoch)
+    }
+    #[cfg(feature = "order-locks")]
+    fn forget_dead_read_marks(&mut self) {
+        if self.read_marks.is_empty() {
+            return;
+        }
+        let live: std::collections::HashSet<Owner> =
+            self.contexts.values().map(Context::owner).collect();
+        self.read_marks.retain(|owner, _| live.contains(owner));
+    }
+    fn forget_read_mark(&mut self, _owner: Owner) {
+        #[cfg(feature = "order-locks")]
+        self.read_marks.remove(&_owner);
+    }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
+        #[cfg(feature = "order-locks")]
+        self.forget_dead_read_marks();
         self.commands.retain(|_, old| {
             old.retained()
                 || old.last_deadline > now
@@ -224,6 +253,7 @@ impl ContextRegistry {
         };
         self.commands.remove(&command);
         self.contexts.retain(|_, context| context.owner() != old);
+        self.forget_read_mark(old);
         true
     }
 
@@ -489,6 +519,8 @@ impl ContextRegistry {
             .expect("validated journal")
             .replace(delivery.attempt.request, &legs)?;
         self.contexts.retain(|_, context| context.deadline() > now);
+        #[cfg(feature = "order-locks")]
+        self.forget_dead_read_marks();
         self.contexts.extend(
             children
                 .iter()
@@ -939,6 +971,7 @@ impl ContextRegistry {
                     owner.phase = CommandPhase::Retiring(token.clone());
                     self.contexts
                         .retain(|_, context| context.owner() != token.preflight().owner());
+                    self.forget_read_mark(token.preflight().owner());
                     self.retirements.push_back(token);
                     return true;
                 }
@@ -949,13 +982,12 @@ impl ContextRegistry {
         }
         self.forget_observer(command);
         if let Some(owner) = self.commands.remove(&command) {
-            self.contexts.retain(|_, context| {
-                context.owner()
-                    != Owner::Command {
-                        id: command,
-                        generation: owner.generation,
-                    }
-            });
+            let retired = Owner::Command {
+                id: command,
+                generation: owner.generation,
+            };
+            self.contexts.retain(|_, context| context.owner() != retired);
+            self.forget_read_mark(retired);
         }
         true
     }

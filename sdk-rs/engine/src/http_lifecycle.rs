@@ -766,9 +766,12 @@ impl<V: Venue> Engine<V> {
                     self.io.order_locks.note_command_write(id);
                 }
                 if managed.lifecycle.context().operation() == Operation::Read {
-                    self.io
-                        .order_read_tokens
-                        .insert(request, self.io.order_locks.token());
+                    let owner = managed.lifecycle.context().owner();
+                    let token = self
+                        .io
+                        .request_contexts
+                        .read_mark(owner, self.io.order_locks.token());
+                    self.io.order_read_tokens.insert(request, token);
                 }
             }
             self.venue.on_signing_receipt(
@@ -4866,5 +4869,36 @@ mod tests {
         release(&mut engine, tokens[0], 500.);
         response(&mut engine, tokens[0], 501.);
         assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    /// Marks live only as long as their owner's contexts; the registry's own
+    /// pruning bounds them.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_read_mark_is_dropped_with_its_owners_last_context() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        response(&mut engine, tokens[0], 2.);
+        assert_eq!(engine.io.request_contexts.read_marks.len(), 1);
+        Cx {
+            now: 5_000.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 1_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        )
+        .unwrap();
+        assert!(engine.io.request_contexts.read_marks.is_empty());
     }
 }

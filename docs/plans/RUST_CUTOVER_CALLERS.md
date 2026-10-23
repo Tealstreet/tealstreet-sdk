@@ -5468,3 +5468,16 @@ its returned rows as partial coverage. An absent or refused managed result does
 not establish complete history. Existing native row shapes and result shaping
 remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
 and [owned history](RUST_OWNED_HISTORY.md).
+
+
+## Managed order reads reconcile from their earliest leg
+
+A managed order read clears an uncertain-write fence only if its earliest
+released leg (page, settle coin or product) was released after the fence.
+A read that straddles a fence leaves it set until the next full read, which the
+engine already requests. Caller outcomes and frames are unchanged; an order row
+may stay one extra read cycle after an unknown write.
+
+Legacy `cx.request` order reads still carry the per-attempt overclaim: a paged
+legacy read can clear a fence on rows read before it. This stays true for each
+venue until that venue moves its order reads onto managed contexts.
