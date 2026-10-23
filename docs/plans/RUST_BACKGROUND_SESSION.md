@@ -197,6 +197,45 @@ owns *when* to acquire and retire, and the import primitive owns
   and #1842. The retire-all-on-dispose and `drop_imported` calls are owned
   here.
 
+### AsterDEX listenKey (stacked on #1832 and #1893 `981f8d7156c`)
+
+claude-m26ps4 pinned #1893 for this stack and owns its signer and dispatch.
+This PR changes only the listen-key region.
+
+**Original REDs** (`asterdex/tests/listen_key_session.rs`; both fail on the
+legacy source):
+- The create carries the engine-owned 20 s raw bound.
+- A hung keepalive (PUT) is retried at its bound when the host reports
+  nothing. Every due timer fires in real order and pings are answered, so no
+  watchdog closes the stream first.
+
+**Shape.**
+- **Dispatch.** `dispatch_signed` sends listen-key work as a session Mutation
+  through `request_signed_managed`. It uses the same `SessionAuth` selection
+  and dispatch-time `sign::Recipe`, plus the selection's credential.
+- **Session.** Each create (POST) retires the old session and opens a new
+  repeat-safe generation; keepalives reuse the live one.
+  - Repeat-safe on the cited fact above: Aster returns the active key on
+    create and extends it on keepalive.
+  - `close_private` retires the session, so a stale create or keepalive
+    answer never reaches the account reducers.
+- **Retries.** The existing V1 signature resend, timestamp resync and
+  network/status retries (1/2/3 s) each become a new session operation.
+  - `is_read`'s `/listenKey` path test is replaced by an explicit rule:
+    listen-key session writes. The path alone grants nothing.
+- **Facts.** A 2xx answer without a negative code records `Accepted`. Any
+  other outcome is left unproven, which is harmless for a repeat-safe session.
+
+**Inventory.** No call site is removed: the shared `dispatch_signed` sender
+stays. The rewritten read-policy unit test drops three `assert!(request(…))`
+fingerprints that the checker counted inside `request.rs`'s test module.
+Aster `request.rs` goes **32→29** against #1893.
+
+**Fixture.** `late_listen_key_response_after_connect_deadline_*` picked "the
+last timer" as the connect watchdog. It now skips the create's 20 s engine
+bound explicitly; its assertions are unchanged. The suite is unchanged on the
+legacy source apart from the two REDs.
+
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
 The keepalive interval, failure backoff and expiry-driven recreation are
