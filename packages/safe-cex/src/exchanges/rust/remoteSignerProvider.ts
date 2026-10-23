@@ -1,9 +1,12 @@
-import type { Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
+import type { SignAlgorithm, Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 
 import { nanoid } from 'nanoid';
 
 import { deriveRemoteSigningPolicy } from './construction';
+
+/** Everything this provider signs; the engine's capability admission reads it. */
+export const REMOTE_SIGNER_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
 
 export interface RemoteSignerIdentity {
   credential: string;
@@ -259,7 +262,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
           if (total > MAX_PAYLOAD) throw refused();
           return { kind: 'present' as const, key: operation.key, passphrase: item === undefined, bytes: material.slice() };
         }
-        if (operation.kind !== 'sign' || operation.algorithm !== 'hmacSha256') throw refused();
+        if (operation.kind !== 'sign' || !REMOTE_SIGNER_ALGORITHMS.includes(operation.algorithm)) throw refused();
         const entry = owned.get(operation.key);
         if (!entry || entry.identity.signing !== operation.key || (remoteSigner && !entry.primary)
           || !Array.isArray(operation.payload) || operation.payload.length > MAX_PARTS) throw refused();

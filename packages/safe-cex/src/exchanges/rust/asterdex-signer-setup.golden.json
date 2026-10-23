@@ -1,0 +1,124 @@
+{
+  "description": "AsterDEX trusted setup mapping shared by TS LocalSignerSetup and native setup. <hex32:NN> expands to NN repeated 32 times.",
+  "cases": [
+    {
+      "name": "v1 HMAC with its own read agent",
+      "input": {"key": "api-key", "secret": "api-secret", "secondary_key": "read-key", "secondary_secret": "read-secret"},
+      "expected": {
+        "apiVersion": "v1",
+        "setup": {
+          "primary": {"key": "api-key", "secret": "api-secret", "secretEncoding": "utf8"},
+          "secondary": {"key": "read-key", "secret": "read-secret", "secretEncoding": "utf8"}
+        }
+      }
+    },
+    {
+      "name": "v3 wallet key from the secret",
+      "input": {"key": "0x1111111111111111111111111111111111111111", "secret": "<hex32:12>", "applicationId": "0x2222222222222222222222222222222222222222"},
+      "expected": {
+        "apiVersion": "v3",
+        "signerAddress": "0x1111111111111111111111111111111111111111",
+        "setup": {
+          "primary": {"key": "0x1111111111111111111111111111111111111111", "secret": "<hex32:12>", "secretEncoding": "hex"}
+        }
+      }
+    },
+    {
+      "name": "v3 auth wallet key aliased by the read agent",
+      "input": {
+        "key": "0x1111111111111111111111111111111111111111", "secret": "unused-secret",
+        "applicationId": "0x2222222222222222222222222222222222222222",
+        "auth": {"privateKey": "0x<hex32:13>"},
+        "secondary_key": "0x3333333333333333333333333333333333333333", "secondary_secret": "<hex32:14>"
+      },
+      "expected": {
+        "apiVersion": "v3",
+        "signerAddress": "0x1111111111111111111111111111111111111111",
+        "readSignerAddress": "0x3333333333333333333333333333333333333333",
+        "setup": {
+          "primary": {"key": "0x1111111111111111111111111111111111111111", "secret": "0x<hex32:13>", "secretEncoding": "hex"},
+          "secondary": {"key": "0x3333333333333333333333333333333333333333", "secretEncoding": "hex", "signingFromPrimary": true}
+        }
+      }
+    },
+    {
+      "name": "v3 auth addresses with the read agent's own wallet key",
+      "input": {
+        "key": "api-wallet-key", "secret": "<hex32:12>",
+        "auth": {"userAddress": "0x2222222222222222222222222222222222222222", "signerAddress": "0x4444444444444444444444444444444444444444"},
+        "secondary_key": "read-agent-key", "secondary_secret": "<hex32:14>"
+      },
+      "expected": {
+        "apiVersion": "v3",
+        "signerAddress": "0x4444444444444444444444444444444444444444",
+        "readSignerAddress": "0x4444444444444444444444444444444444444444",
+        "setup": {
+          "primary": {"key": "api-wallet-key", "secret": "<hex32:12>", "secretEncoding": "hex"},
+          "secondary": {"key": "read-agent-key", "secret": "<hex32:14>", "secretEncoding": "hex"}
+        }
+      }
+    },
+    {
+      "name": "v3 wallet key is trimmed while addresses resolve from padded auth",
+      "input": {
+        "key": "0x1111111111111111111111111111111111111111", "secret": "unused-secret",
+        "applicationId": "0x2222222222222222222222222222222222222222",
+        "auth": {"privateKey": "  0x<hex32:15>  "}
+      },
+      "expected": {
+        "apiVersion": "v3",
+        "signerAddress": "0x1111111111111111111111111111111111111111",
+        "setup": {
+          "primary": {"key": "0x1111111111111111111111111111111111111111", "secret": "0x<hex32:15>", "secretEncoding": "hex"}
+        }
+      }
+    },
+    {
+      "name": "explicit v1 keeps v3-shaped material as an HMAC secret",
+      "input": {
+        "key": "0x1111111111111111111111111111111111111111", "secret": "<hex32:12>",
+        "applicationId": "0x2222222222222222222222222222222222222222",
+        "apiVersion": "v1"
+      },
+      "expected": {
+        "apiVersion": "v1",
+        "setup": {
+          "primary": {"key": "0x1111111111111111111111111111111111111111", "secret": "<hex32:12>", "secretEncoding": "utf8"}
+        }
+      }
+    },
+    {
+      "name": "keyless public account installs nothing",
+      "input": {},
+      "expected": {"apiVersion": "v1", "setup": {}}
+    },
+    {
+      "name": "blank v1 secret is absent and passphrases are ignored",
+      "input": {"key": "api-key", "secret": "  ", "passphrase": "unused", "secondary_passphrase": "unused"},
+      "expected": {
+        "apiVersion": "v1",
+        "setup": {"primary": {"key": "api-key", "secretEncoding": "utf8"}}
+      }
+    },
+    {
+      "name": "v3 prefix-only wallet key is blank",
+      "input": {
+        "key": "0x1111111111111111111111111111111111111111", "secret": "0x",
+        "applicationId": "0x2222222222222222222222222222222222222222", "apiVersion": "v3"
+      },
+      "expected": {
+        "apiVersion": "v3",
+        "signerAddress": "0x1111111111111111111111111111111111111111",
+        "setup": {"primary": {"key": "0x1111111111111111111111111111111111111111", "secretEncoding": "hex"}}
+      }
+    },
+    {
+      "name": "half-supplied read agent installs nothing",
+      "input": {"key": "api-key", "secret": "api-secret", "secondary_key": "read-key"},
+      "expected": {
+        "apiVersion": "v1",
+        "setup": {"primary": {"key": "api-key", "secret": "api-secret", "secretEncoding": "utf8"}}
+      }
+    }
+  ]
+}
