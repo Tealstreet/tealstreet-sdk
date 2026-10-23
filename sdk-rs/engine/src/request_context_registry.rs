@@ -17,7 +17,7 @@ use std::collections::VecDeque;
 const CAPACITY: usize = 256;
 
 #[path = "session_context.rs"]
-mod session;
+pub(super) mod session;
 
 #[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_tests.rs"]
@@ -52,6 +52,9 @@ struct CommandOwner {
     mutation_declared: bool,
     pending: usize,
     deliveries: usize,
+    /// Session waiters keep completion authority until the command finishes:
+    /// a drained Failed waiter must still be able to fail its command.
+    waits: usize,
     /// The logical command's intent, captured when its first context is
     /// issued during command dispatch. `None`: issued outside dispatch.
     intent: Option<crate::classify::Intent>,
@@ -243,6 +246,7 @@ impl ContextRegistry {
                 || old.writes.is_some()
                 || old.pending > 0
                 || old.deliveries > 0
+                || old.waits > 0
         });
         #[cfg(feature = "order-locks")]
         self.forget_dead_read_marks();
@@ -261,6 +265,7 @@ impl ContextRegistry {
             || owner.writes.is_some()
             || owner.pending != 0
             || owner.deliveries != 0
+            || owner.waits != 0
         {
             return false;
         }
@@ -282,6 +287,7 @@ impl ContextRegistry {
                 || owner.writes.is_some()
                 || owner.pending > 0
                 || owner.deliveries > 0
+                || owner.waits > 0
         })
     }
 
@@ -359,7 +365,7 @@ impl ContextRegistry {
         // childless generations when unrelated work is issued.
         self.prune(now);
         if matches!(scope, Scope::Command(id) if self.commands.get(&id)
-            .is_some_and(|owner| !matches!(owner.phase, CommandPhase::Context { .. }) || ((owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0) && now >= owner.last_deadline)))
+            .is_some_and(|owner| !matches!(owner.phase, CommandPhase::Context { .. }) || ((owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0 || owner.waits > 0) && now >= owner.last_deadline)))
         {
             return Err(Error::State);
         }
@@ -481,6 +487,7 @@ impl ContextRegistry {
                     mutation_declared: context.operation() == Operation::Mutation,
                     pending: 0,
                     deliveries: 0,
+                    waits: 0,
                     intent: self
                         .dispatch
                         .filter(|(command, _)| *command == id)
@@ -766,6 +773,49 @@ impl ContextRegistry {
             .ok_or(Error::State)?
             .release_flag(request)
             .map(Some)
+    }
+
+    /// A parked owner must be able to re-send on Ready: an earlier attempt
+    /// needs both the context's refusal policy and the journal's admission.
+    pub(super) fn resend_blocked(&self, context: &Context, now: f64) -> bool {
+        let Owner::Command { id, .. } = context.owner() else {
+            return false;
+        };
+        let Some(writes) = self
+            .commands
+            .get(&id)
+            .and_then(|owner| owner.writes.as_ref())
+        else {
+            return false;
+        };
+        context.operation() == Operation::Mutation
+            && writes.latest(context.leg()).is_some()
+            && (writes.resend_blocked(context.leg())
+                || context
+                    .retry(RetryEvidence::DefinitiveRefusal, now)
+                    .is_err())
+    }
+
+    /// A command owner outside a Plan or Preflight; non-command owners pass.
+    pub(super) fn context_phase(&self, context: &Context) -> bool {
+        let Owner::Command { id, .. } = context.owner() else {
+            return true;
+        };
+        self.commands
+            .get(&id)
+            .is_none_or(|owner| matches!(owner.phase, CommandPhase::Context { .. }))
+    }
+
+    pub(super) fn hold_wait(&mut self, context: &Context) {
+        if let Ok(owner) = self.command_mut(context) {
+            owner.waits += 1;
+        }
+    }
+
+    pub(super) fn release_wait(&mut self, context: &Context) {
+        if let Ok(owner) = self.command_mut(context) {
+            owner.waits = owner.waits.saturating_sub(1);
+        }
     }
 
     /// Session writes record release separately: they have no command journal.
