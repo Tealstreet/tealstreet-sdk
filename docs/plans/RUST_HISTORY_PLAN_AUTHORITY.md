@@ -412,3 +412,18 @@ owner-supplied NX inventory. They do not establish exact native Plan geometry,
 root-expiry disposition or private BloFin adoption; those remain the native
 managed consumer gates after runtime signatures freeze. No NX source, host wait
 policy, release behavior or production caller flow is changed by these tests.
+
+
+The managed-host boundary target hosthistory-wait.test.mjs now executes three
+passing controls on this integrated source: timeout followed by late success,
+timeout followed by late transport failure, and normal completion within the
+wait bound. Six physical pages complete19seconds apart; the seventh remains
+pending at the120second caller timeout. All eight preparations/binds/claims/
+dispatches (seven old pages plus the next window) are asserted through the real
+host runner. The failed window has no accepted-prefix result and never completes
+later; the next serial wait starts at120seconds while the old signal remains
+un-aborted and two resources briefly coexist. Late settlement releases the old
+resource and cannot complete or fail the caller again. No legacy request path
+is permitted by the fixture. These are executed SDK managed-host/model controls,
+not an executed NX integration or Rust native Plan-history receipt. Exact native
+accepted-prefix authority and root-expiry precedence remain separate gates.
