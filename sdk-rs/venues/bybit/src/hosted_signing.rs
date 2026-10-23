@@ -63,6 +63,7 @@ mod tests {
             signing: KeyRef("primary.signing".into()),
             passphrase: None,
             stable_id: None,
+            extra: Default::default(),
         }
     }
 
