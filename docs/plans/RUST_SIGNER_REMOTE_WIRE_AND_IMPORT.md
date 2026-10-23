@@ -209,6 +209,85 @@ Cross-half tests replay recorded requests. Compatibility tests cover an old
 browser with a new server (never sent), and a new browser with an old server
 (no change). No live keys are used.
 
+## P8 implementation plan (Sam decision 8, 2026-10-23)
+
+Owner claude-19pt8s. One PR, stacked on #1845 → #1844 → #1839; it is
+retargeted to landing as they merge.
+
+**Scope.**
+- The additive versioned wire, the browser executor, capability gating, and
+  one production recipe per non-HMAC format: EIP-712, Starknet, ed25519, JWT
+  and Schnorr.
+- A positive end-to-end test per format through both halves: the server-side
+  keyless Rust account and the browser executor.
+- The HMAC `ws-auth` and `http` formats stay byte-identical, with their
+  existing tests unchanged.
+
+**Phases.** Each phase is a commit with focused tests.
+
+1. **Engine schema** (codex-uufub4 review).
+   - `SignRequest.remote: Option<RemoteOp { recipe, inputs }>`. It is set
+     only by recipes that support remote signing, ignored by the local
+     provider, size-bounded, and omitted from JSON when absent, so existing
+     requests are byte-identical.
+2. **Shared recipe registry** (`registry/src/remote_recipes.rs`).
+   - `RemoteRecipe { id, family, algorithm, key role, canonicalize(inputs) -> (bytes, class), allow(class) }`.
+   - A venue's `SignStep` builds its signed bytes by calling the same
+     `canonicalize`, so the server and the browser cannot drift.
+   - The recipe, not the request, fixes the algorithm and the key role.
+3. **Browser executor.**
+   - `hosted_signing::Input::Op { recipe, inputs }`: look up the recipe,
+     canonicalize, check `allow`, sign with the role-bound key through
+     `LocalSigner`, and return the raw values.
+   - WASM `hostedSigning({kind: 'op'})` and
+     `RustEngineExchange.signOperation(op)`.
+   - The hosted signing deadline cap rises from 5 s within the ordering in
+     §4 above.
+4. **Wire and server bridge (TS).**
+   - `RemoteSignerRequest` gains `type: 'op', v: 2, op | ops`, and
+     `RemoteSignerResponse` gains `v: 2, values`.
+   - `remoteSignerProvider` maps a `SignRequest.remote` onto `op` when the
+     account advertised that recipe. Otherwise it keeps the HMAC path or
+     refuses before sending.
+   - The capability (`signOps.recipes`) is passed to keyless construction,
+     which refuses when a family's required recipes are missing. WASM exports
+     the compiled recipe list.
+5. **Formats and recipes.** Each recipe and its allowlist is defined once in
+   the venue's `sign.rs`; content checks follow §Security.
+   - EIP-712: `asterdex.code` (Aster Code order, #1845).
+   - Starknet: `paradex.order` (Stark typed-data hash).
+   - ed25519: `orderly.rest`.
+   - JWT: `coinbase.restJwt` (ES256 and EdDSA; claim bounds and `uri` deny
+     rules).
+   - Schnorr: `lighter.tx` (create, cancel and leverage only). This needs the
+     P3 Lighter Schnorr provider arm: `SchnorrDigest` gets an 80-byte result,
+     a Poseidon2 words payload and engine-drawn hedge bytes, implemented in
+     this PR's last phase behind a crypto `schnorr` feature.
+   - Families adopt these recipes in their managed conversions. Until then
+     the e2e tests drive them through test venues.
+6. **End-to-end tests per format.**
+   - **Native:** a recipe produces a `SignRequest` with `remote`; the
+     registry executor signs with a separate local setup; the engine releases
+     bytes equal to direct local signing and to the existing independent
+     vectors.
+   - **SDK and WASM (CI):** a fake exchange-server wire carries the server
+     account's `op` to a browser `signOperation`, and the reply is applied.
+     Released bytes equal the local-provider and vector output.
+   - **Refusals:** each allowlist refusal, an unadvertised recipe, ClobAuth
+     and Hyperliquid main-wallet are refused before sending.
+   - **Compatibility:** an old browser never receives v2, and HMAC requests
+     carry no `v`.
+7. **Docs.** CALLERS lines and an NX change-list update.
+
+**Coordination.**
+- codex-uufub4: engine schema and hosted executor.
+- claude-m26ps4: key roles; no nonce or subject from inputs.
+- Venue lanes: the recipe files in `sign.rs` only, plus `pub mod sign` where
+  each lane allows it.
+- The NX lane receives the final wire pin.
+
+No merge without a window.
+
 ## P6b: provider credential import (Polymarket L2)
 
 Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
