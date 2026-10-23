@@ -2,11 +2,12 @@
 
 Owner: codex-cxxyqr. Reviewers: codex-uufub4 (Plan core) and
 claude-fe7lgm (#1945 receipt custody). Assigned as a separate engine PR after
-#1945. Base: actual `a828ede7ebb`. Status: plan only; no runtime changes or
-executed REDs. #1945 is not frozen: owner checkpoint `8082a59d197` still needs
-independent source/host reviews. It is
-reference material, not an authorized source dependency. Stack on its announced
-frozen head before writing tests or implementation.
+#1945. Initial plan base: actual `a828ede7ebb`. Current stack genuinely includes
+#1945's frozen `15df705c0b5`, announced by fe7/overseer, after the authorized
+source-cleared `f7550a0c6d0` checkpoint. Status: plan and original assertion
+controls; no receipt-cap runtime implementation yet. The only merge conflicts
+were shared CALLERS appends/order: frozen incoming text retains all prior lines
+once. Engine/host/receipt runtime is byte-identical to frozen #1945.
 
 ## Problem and invariant
 
@@ -173,8 +174,9 @@ New-mode controls after implementation:
 - Feature off builds and ordinary uncapped Read preflights retain their declared
   behavior; missing receipt never becomes an uncapped success on the new route.
 
-No tests or runtime adoption are claimed in this plan checkpoint. Exact missing
-receipt/expiry error projection and refusal accounting are API-review gates.
+Original assertion evidence is recorded below; no runtime adoption is claimed.
+Exact missing receipt/expiry error projection and refusal accounting remain
+source/API-review gates.
 
 ## API-fit receipt
 
@@ -189,8 +191,8 @@ fe7 cleared the #1945 custody fit at `a2795215932`, with binding notes folded in
 above: one shared exact-receipt lookup, refusal of every unstamped case,
 effect-free capture expiry leaving Fresh custody, raw sub-millisecond expiry,
 retained sequence/deadline without later stamp lookup, and original receipt on
-deferred re-entry. Both clearances are API-fit only. Source still waits for
-frozen #1945; runtime/source review remains separate.
+deferred re-entry. Both clearances are API-fit only. Frozen #1945 is now genuinely integrated;
+runtime/source review remains separate.
 
 ## Files, reviews and gates
 
@@ -210,3 +212,41 @@ review, scoped feature-on/off tests, strict Clippy/fmt/bans and exact-head CI.
 Consumer adoption needs its own native history and expiry controls. No merge
 without the overseer's explicit GO. Architecture gate: No; existing receipt,
 preflight and Plan ownership paths, with one additional checked lifetime cap.
+
+## Original assertion receipt on frozen #1945
+
+`engine/tests/plan_receipt_cap.rs` drives real `handle_command`, genuine Read
+preflight entry, managed prerequisite Prepare/Bind/Claim and exact HTTP DATA
+handoff before `admit_plan`. Its explicitly labelled negative adapter still
+uses the existing native-only `begin_preflight`; only that adapter changes to
+the opt-in API during implementation. Native-only mode has its own positive
+control, so fixing the new route must not globally cap existing Plans.
+
+Executed command (jobs 2, test threads 2):
+
+```
+cargo test -p safe-cex-engine --all-features --test plan_receipt_cap --jobs 2
+```
+
+The original compile-only fixture mistakes (private venue field and missing
+timer callback/import) were corrected before any RED claim. The compiled run reports 2 GREEN controls and 7 assertion REDs, no ignored
+tests. It shows deadline-renewal assertion failures: explicit wait100/prerequisite60
+produces160 instead of100; default wait120000/prerequisite40000 produces240000
+instead of120000; overridden wait300000/prerequisite5000 produces405000 instead
+of300000; two serial100ms/two FreshAttempt declarations retain all4 attempt
+credits but produce440 instead of the150ms receipt cap. Equality, already-expired
+and sub-ms handoffs are separate controls expecting TimedOut rather than a new
+Plan. A shorter native20ms Plan admitted at60 keeps deadline80 and completes a
+real managed page exactly once; native-only mode keeps deadline160 unchanged.
+No receipt-cap source or missing-API compile failure is counted as RED evidence.
+
+### Frozen dependency source shape
+
+On the exact frozen #1945 source, command-owned admission is implemented in
+`admit_declared_plan`; the `admit_plan_owned` factoring and planned-execution
+route exist on the separate unlanded #1919 stack. This PR must put the cap in
+the actual single command Plan admission path, not import another Plan core.
+Execution-owned admission is unavailable on this dependency and is not claimed
+as tested. Before composition with #1919, its owner must carry the capped-mode
+refusal ahead of every execution/group/credit/phase change. The first-slice
+command-only restriction remains binding.
