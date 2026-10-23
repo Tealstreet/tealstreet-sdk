@@ -5100,6 +5100,108 @@ Live Store/cache access stays separate from history. No REST capability, result
 wrapper, managed-request migration or NX runtime adoption is added.
 [Scope and controls](RUST_OWNED_HISTORY.md).
 
+
+### Paradex managed independent book snapshots
+
+Rust `fetchOrderBook` uses the engine managed preparation/binding/final claim
+path for the existing public Paradex GET snapshot. Custom worker/hosted transports
+must implement preparation; legacy `request()` alone cannot service this query.
+Typed preparation refusals retain their engine-provided kind/outcome and reject
+the existing snapshot promise. One original20,000ms raw upper bound covers route
+preparation and response handling; a shorter host timeout may shorten it. Late,
+duplicate or retired replies cannot finish a reused command ID.
+
+Production/testnet URL selection, encoded raw symbol, default20 and explicit
+unclamped depth, side order/duplicates/zero sizes, quote-product totals and the
+current native non-auth/rate error metadata remain unchanged. No query retry is
+added. Snapshot completion never publishes live SBE/JSON depth or changes JWT,
+private account state or trading's separate optional capped-order quote path.
+The previously audited caller scope remains: no default direct NX/CLI/MCP
+snapshot producer was established. This transport migration does not claim
+listener/chart migration, NX deployment or live private connectivity.
+
+## Lighter candle command-entry refusal
+
+Lighter and Robinhood command candle reads borrow their genuine engine callback's
+initial Read owner through shared `admit_http_command`, before validation or
+outbound work. When capacity is exhausted, callers receive exactly one correlated
+`CommandFailed` with `Too many requests in flight`, Internal kind and no financial
+outcome. Invalid clock/deadline admission instead returns `Invalid request
+context`, InvalidInput kind and no outcome. These replace the adapter's generic
+lifecycle-unavailable/Internal refusal. No caller retry or special transport path
+is required. Existing successful candle results and native parameter errors keep
+their shape; custom transports still perform managed Prepare/Bind/final claim.
+Repeated live command IDs retain the engine duplicate diagnostic without a
+second result or replacement request. The original candle owner can still finish.
+Subscription fallback polling retains its background owner and generation cleanup.
+
+## KuCoin Spot candle Read authority
+
+FetchCandles admits its original Public Read owner before interval preflight and
+uses prepared unsigned HTTP with the declared ordered public headers. Its
+20-second budget includes preparation. Exact physical delivery is checked before
+row staging and result publication; stale, unclaimed and expired responses cannot
+complete it. Unsupported interval preflight gains Unsupported/NotSent metadata.
+Initial admission refusal has the shared typed reason and no Read outcome;
+immediate HTTP-queue refusal retains NotSent.
+
+Preparation, transport and expiry failures retain their typed errors and the
+existing correlated error companion before rejection. Decoded malformed candle
+rows and unsupported preflight keep their companion-free failure timeline. The
+native query order, flooring/u64 casts, default500/cap1500, unknown-symbol HTTP,
+candle codec, duplicate timestamps, oversized results and ascending sorting are
+preserved. Private credentials, successful setting no-ops and capability policy
+retain their existing behavior.
+
+## MEXC initial plan-list credential refusal
+
+An initial Plan snapshot with an existing parsed native credential refusal now
+rejects startup with AuthInvalid, AuthExpired or AuthPermission, matching the
+initial position-mode read. Native venueCode and venueMessage are preserved,
+including complete error envelopes without a data list. A primary-key AuthInvalid rejection
+still deactivates; secondary-key refusal retains the existing non-deactivation
+policy. Startup publishes one terminal failure and cannot initialize orders or
+resume account polling, snapshot pages or asset refreshes through late callbacks.
+
+Transient failures, bare HTTP401/403 without a parsed native refusal, successful
+envelopes missing their list and refusals after initial orders loaded retain
+their existing retry behavior. No caller option or credential migration is
+required; callers awaiting startup receive the existing typed rejection.
+
+## Phemex unsigned candle command transport
+
+Phemex FetchCandles uses prepared managed HTTP when neither its constructed
+primary nor secondary credential container exists. Custom transports prepare,
+bind and synchronously claim that public request; no legacy send fallback is
+used in this branch. The original issued20-second Read deadline covers route
+waiting and released HTTP. Initial admission rejection is typed, exactly once
+and has no write outcome; released Network/Timeout failures declare the public
+read NotSent. Late or duplicate callbacks cannot finish a reused command ID,
+change account credentials or pause a later read.
+
+Credentialed public candles retain their existing native signed request path,
+including primary/secondary GET selection even with public_data_only. This
+partial change does not migrate signing or require credential transfer. Native
+host selection, symbol mapping/encoding, interval and limit/from/to rules,
+data.rows mapping, sorted results, errors and current rate-limit pause remain.
+
+## MEXC standalone book command authority
+
+MEXC FetchOrderBook uses one public Read Context through prepared route binding,
+final synchronous release and completion. Custom transports must prepare, bind
+and claim; legacy request dispatch is not a fallback. The issued20-second bound
+includes route waiting and released HTTP. Initial engine rejection publishes
+one typed terminal without a write outcome; issued public failures retain their
+NotSent declaration and typed setup/Network/Timeout causes. Late/duplicate
+replies cannot complete a reused owner or extend the depth/account cooldown.
+
+The unsigned native depth URL, captured contract size and limit1..1000/default100,
+sorted base amounts and totals, zero quantities and exact u64 version string
+remain. Numeric overflow in rows beyond the requested output limit still rejects the
+whole snapshot. Native status/code510 classification, code/message and bounded retry
+hint remain; live rate limits pause depth and account reads without resending.
+Results never change subscribed books, account state or credential health.
+
 ### Session-scoped private egress (#1897)
 
 Unsigned requests that carry a login or session token now take the primary
