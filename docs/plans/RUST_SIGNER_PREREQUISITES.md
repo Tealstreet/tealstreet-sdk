@@ -230,6 +230,8 @@ given identity:
     Otherwise `Unsupported`.
   - JS host provider (host.mjs): a declared `algorithms` list, validated at
     admission like the rest of the host contract. Undeclared means `Unknown`.
+    The SDK's own WASM and native local setups declare their compiled list,
+    so local Amend keeps working on every host.
   - `remoteSignerProvider`: `hmacSha256` only, until P8 adds recipe ids.
     Every other algorithm is `Unsupported`.
   - Browser hosted signing: per family, from `hosted_signing.rs`.
