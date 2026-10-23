@@ -763,3 +763,23 @@ mutation, distinct command IDs and explicit pre-I/O Unsupported/NotSent. Native
 unsupported capabilities remain unsupported and no numeric managed fallback is
 introduced. Caller polling guidance retains coverage while deduplicating UI
 alerts.
+
+
+## Paradex managed REST book area
+
+The independent Paradex public snapshot query adopts the existing engine
+preparation/claim, original read bound, exact delivery check and Context
+completion. Public wire/codec behavior and the existing eight snapshot contract
+tests remain; fixture adaptation uses shared prepared-actions and explicitly
+checks the one new original-deadline timer before preserving outbound-only
+assertions. Original-RED controls cover premature delivery, typed denial,
+expiry, reused/concurrent owners, duplicates and capacity refusal/recovery.
+No private credential, Starknet, candle fallback or live-book mechanism moves.
+The venue-only inventory loses five occurrences; pre-authority refusal remains
+counted for the shared engine entry seam rather than hidden in another API.
+
+The existing public-SBE and private-JWT snapshot isolation fixtures also use the
+shared prepared-action helper for this query only. Both keep their original
+clocks, request bodies, native-state and protocol assertions; the public fixture
+checks the new original-deadline timer explicitly before its no-extra-actions
+control. Held account/trading source and tests/account are untouched.
