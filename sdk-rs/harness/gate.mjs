@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { validateCiWasm } from './ci-wasm.mjs';
+import { createRecordedReplay } from './recorded-replay.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
@@ -30,6 +31,7 @@ const { values } = parseArgs({
     runs: { type: 'string' },
     report: { type: 'string' },
     'ci-wasm': { type: 'string' },
+    'recorded-evidence': { type: 'string' },
     'no-egress': { type: 'boolean', default: false },
   },
 });
@@ -48,6 +50,11 @@ if (smokeResult) values.books = smokeResult.symbol;
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 console.log(`Replay output: ${outDir}`);
+const recorded = values['recorded-evidence'] === undefined ? null : createRecordedReplay({
+  evidence: JSON.parse(readFileSync(values['recorded-evidence'], 'utf8')),
+  venue: values.venue, tape: values.tape, books: values.books,
+});
+if (recorded && values.runs !== '9') throw new Error('recorded public verification requires exactly nine original pairs');
 const artifacts = [];
 const fixerReports = [];
 class CommandReplayTimeout extends Error {
@@ -60,6 +67,7 @@ class CommandReplayTimeout extends Error {
 const replay = (impl, run, performanceRun = false) => {
   const out = `${outDir}/${impl}-${performanceRun ? "perf" : "audit"}-${run}.json`;
   artifacts.push({ impl, mode: performanceRun ? 'performance' : 'correctness', run, path: out });
+  if (recorded) return recorded.read(impl, run, performanceRun);
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push(
     'sdk-rs/harness/replay.mjs',
@@ -362,6 +370,7 @@ if (venue.family === 'coinbase')
     `(documented Coinbase corrections: ${COINBASE_TS_FIXES.length}; native JWT and independent oracles checked)`,
   );
 
+recorded?.finish();
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate) failures.push(...performanceFailures(

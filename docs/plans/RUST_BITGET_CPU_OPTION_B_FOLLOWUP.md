@@ -100,3 +100,12 @@ CI status in the PR body. Run focused policy/provenance/workflow controls and ro
 typecheck/lint/tests. Obtain independent correctness/adversarial reviews before
 publishing the draft. No fixture/tape edits, gate threshold changes or merge
 without a window.
+
+## Policy checkpoint
+
+Plan review confirms architecture YES and the Bitget-only same-run design. The
+first implementation reuses only reviewed pure policy/offline strict-verifier
+primitives; the parked history scanner, workflow and coordinator are absent.
+Focused controls cover all-three-objective means, missing/failed second runners,
+unchanged strict failures, 5% boundaries and disabled suites. Runtime transport
+and workflow authority remain the next separately reviewed phase.

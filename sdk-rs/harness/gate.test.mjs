@@ -113,7 +113,8 @@ const gate = (venue, isPrivate = false, defect) => {
   const script = `
     import assert from 'node:assert/strict';
     import childProcess from 'node:child_process';
-    import { writeFileSync } from 'node:fs';
+    import { readFileSync, writeFileSync } from 'node:fs';
+    import { createHash } from 'node:crypto';
     import { syncBuiltinESMExports } from 'node:module';
     import { expectedCheckpointPlan } from ${JSON.stringify(new URL('./tape.mjs', import.meta.url).href)};
     import { venueOf } from ${JSON.stringify(new URL('./venues.mjs', import.meta.url).href)};
@@ -150,7 +151,7 @@ const gate = (venue, isPrivate = false, defect) => {
         orders: [], positions: [], settings: [], fills: [], flatPositionPnl: [],
       });
       const output = {
-        frames: 1, unserved: 0, missingWrites: 0, unusedWrites: 0,
+        impl, frames: 1, unserved: 0, missingWrites: 0, unusedWrites: 0,
         invalidSignatures: 0, protocolErrors: [], wsRequests: [], subscriptions: [], requests: [], writes: [], writeCount: 0,
         metrics: {
           baselineKind: 'idle-loaded', measuredMode: args.includes('--performance') ? 'performance' : 'correctness',
@@ -320,6 +321,28 @@ const gate = (venue, isPrivate = false, defect) => {
     };
     syncBuiltinESMExports();
     await import(${JSON.stringify(new URL('./gate.mjs', import.meta.url).href)});
+    if (defect?.startsWith('recorded-')) {
+      const original = JSON.parse(readFileSync(${JSON.stringify(reportPath)}, 'utf8'));
+      const raw = original.artifacts.map(({ impl, mode, run, path }) => {
+        let bytes = readFileSync(path, 'utf8');
+        if (defect === 'recorded-corrupt' && impl === 'rust' && mode === 'performance' && run === 8) {
+          const changed = JSON.parse(bytes); changed.tickers[0].last = 7;
+          bytes = JSON.stringify(changed); writeFileSync(path, bytes);
+        }
+        return { impl, mode, run, bytes, sha256: createHash('sha256').update(bytes).digest('hex') };
+      });
+      if (defect === 'recorded-missing') raw.pop();
+      const recordedPath = ${JSON.stringify(join(cwd, 'recorded.json'))};
+      const offlinePath = ${JSON.stringify(join(cwd, 'offline.json'))};
+      writeFileSync(recordedPath, JSON.stringify({ report: original, raw }));
+      childProcess.spawnSync = () => { throw new Error('FORBIDDEN REPLAY FALLBACK'); };
+      syncBuiltinESMExports();
+      process.argv = ['node', 'gate.mjs', '--venue', venue, '--tape', ${JSON.stringify(tape)},
+        '--books', 'BTCUSDT', '--runs', '9', '--report', offlinePath, '--recorded-evidence', recordedPath];
+      await import(${JSON.stringify(new URL('./gate.mjs', import.meta.url).href + '?recorded-control')});
+      const { compareRecordedReport } = await import(${JSON.stringify(new URL('./recorded-replay.mjs', import.meta.url).href)});
+      assert.deepEqual(compareRecordedReport(original, JSON.parse(readFileSync(offlinePath, 'utf8'))), []);
+    }
     assert.deepEqual([...spawned].sort(), ['rust', 'ts']);
     if (!isPrivate) {
       assert.deepEqual(calls.slice(0, 2), [['correctness', 'ts'], ['correctness', 'rust']]);
@@ -581,4 +604,18 @@ test('Coinbase midpoint changes in the last measured run fail own-audit validati
   const result = gate('coinbase', false, 'midpoint:later');
   assert.equal(result.status, 1, result.stderr + result.stdout);
   assert.match(result.stdout, /rust performance run 7.*quoteVolume/);
+});
+
+
+test('offline gate reuses every strict validator and never spawns another replay', () => {
+  const original = gate('bybitinverse', false, 'recorded-control');
+  assert.equal(original.status, 0, original.stderr);
+  assert.equal(original.stdout.split('\nPASS\n').length, 3, 'both original and offline validation pass');
+  const corrupt = gate('bybitinverse', false, 'recorded-corrupt');
+  assert.equal(corrupt.status, 1, corrupt.stderr);
+  assert.match(corrupt.stdout, /performance run 9.*ticker|performance run 9.*tickers/);
+  const missing = gate('bybitinverse', false, 'recorded-missing');
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /recorded public case\/inventory/);
+  for (const result of [original, corrupt, missing]) assert.doesNotMatch(result.stderr, /FORBIDDEN REPLAY FALLBACK/);
 });

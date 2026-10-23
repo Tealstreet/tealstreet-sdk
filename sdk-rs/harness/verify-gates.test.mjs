@@ -5,6 +5,54 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { verifyGateSuite, loadGateLedger } from './verify-gates.mjs';
+import { expectedGateCases } from './ci-gate-suites.mjs';
+import { performanceFailures } from './performance-policy.mjs';
+const manifest = { schema: 1, failures: [] };
+const metric = (amount, mode) => ({
+  baselineKind: 'idle-loaded', measuredMode: mode, cpuMs: amount, steadyCpuMs: amount, processCpuMs: amount,
+  idleLoadCpuMs: 1, idleLoadProcessCpuMs: 1, idleLoadWallMs: 1,
+  runtimeCpuMs: amount - 1, runtimeProcessCpuMs: amount - 1, runtimeWallMs: amount - 1, wallMs: amount,
+  heapBeforeBytes: 100, heapUsedBytes: 150, heapRetainedBytes: 50,
+  buffersBefore: 0, buffersAfter: 0, bufferRetainedBytes: 0,
+  wasmBeforeBytes: 0, wasmBytes: 0, wasmRetainedBytes: 0, retainedBytes: 50,
+});
+const entries = () => expectedGateCases('mexc').map((item, index) => {
+  const privateCase = !item.books;
+  const samples = Object.fromEntries(['ts', 'rust'].map((impl) => [impl, Array.from({ length: privateCase ? 1 : 9 }, () => ({
+    ...metric(impl === 'ts' ? 200 : 180, privateCase ? 'correctness' : 'performance'),
+    ...(impl === 'ts' ? { heapUsedBytes: 200, heapRetainedBytes: 100, retainedBytes: 100 } : {}),
+  }))]));
+  const report = { ...item, schema: 1, tapeSha256: String(index + 1).repeat(64), private: privateCase,
+    runs: privateCase ? 0 : 9, correctnessRuns: 1, requiredImprovement: 0.1, samples, status: 'PASS', failures: [] };
+  return { report, exitCode: 0 };
+});
+
+test('default verifier preserves strict complete suite coverage', () => {
+  const result = verifyGateSuite({ suite: 'mexc', entries: entries(), manifest });
+  assert.deepEqual(result.errors, []); assert.equal(result.passes, 2); assert.equal(result.pending.length, 0);
+  assert.ok(verifyGateSuite({ suite: 'mexc', entries: entries().slice(1), manifest }).errors.length);
+  assert.ok(verifyGateSuite({ suite: 'mexc', entries: [...entries(), entries()[0]], manifest }).errors.length);
+});
+
+test('default strict mode refuses CPU failure and collection needs full raw evidence', () => {
+  const values = entries(); const entry = values[0];
+  for (const sample of entry.report.samples.rust) {
+    sample.steadyCpuMs = 183.6;
+  }
+  entry.report.failures = performanceFailures(entry.report.samples.ts, entry.report.samples.rust).sort();
+  entry.report.status = 'FAIL'; entry.exitCode = 1;
+  assert.ok(verifyGateSuite({ suite: 'mexc', entries: values, manifest }).errors.length);
+  assert.ok(verifyGateSuite({ suite: 'mexc', entries: values, manifest, mode: 'collect' }).errors.length);
+});
+
+test('ledger status mismatch, unknown mode and malformed inputs cannot bypass verification', () => {
+  const values = entries(); values[0].exitCode = 1;
+  assert.ok(verifyGateSuite({ suite: 'mexc', entries: values, manifest }).errors.length);
+  assert.throws(() => verifyGateSuite({ suite: 'mexc', entries: entries(), manifest, mode: 'anything' }), /mode/);
+  for (const value of [undefined, null, [], [{}], [{ report: null }]])
+    assert.ok(verifyGateSuite({ suite: 'mexc', entries: value, manifest }).errors.length);
+});
 
 test('invalid or undeclared reports are never labelled as known failures or certified passes', (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'gate-verifier-'));
@@ -30,4 +78,23 @@ test('invalid or undeclared reports are never labelled as known failures or cert
     assert.match(result.stdout, /0 declared known-failure gates/);
     assert.doesNotMatch(result.stdout, /KNOWN FAILURE \(not parity\)/);
   }
+});
+
+
+test('collecting a declared private incomplete replay does not demand nonexistent raw results', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'gate-private-incomplete-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const ledger = join(directory, 'sdk-rs/harness/out/ci'); mkdirSync(ledger, { recursive: true });
+  const reportPath = join(ledger, 'private.json');
+  const report = { schema: 1, venue: 'fixture', tapeSha256: 'a'.repeat(64), private: true, status: 'FAIL',
+    failures: ['ts replay: command Orders did not complete'], runs: 0,
+    replayFailure: { kind: 'command-timeout', impl: 'ts', command: 'Orders' },
+    coverage: { correctness: 'incomplete', performance: 'not-run' },
+    artifacts: [{ impl: 'ts', mode: 'correctness', run: 0, path: join(ledger, 'missing.json') }] };
+  writeFileSync(reportPath, JSON.stringify(report));
+  writeFileSync(join(ledger, 'ledger.jsonl'), JSON.stringify({ reportPath, exitCode: 1 }) + '\n');
+  const loaded = loadGateLedger({ root: directory, includeRaw: true });
+  assert.equal(loaded[0].report.status, 'FAIL'); assert.equal(loaded[0].raw, undefined);
+  report.private = false; writeFileSync(reportPath, JSON.stringify(report));
+  assert.throws(() => loadGateLedger({ root: directory, includeRaw: true }), /ENOENT/);
 });
