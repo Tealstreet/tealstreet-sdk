@@ -234,7 +234,7 @@ fn capacity(read: Local) {
             &local(&mut engine, NOW, 600, read),
             600,
             ErrorKind::Internal,
-            "Too many requests in flight",
+            "Engine request capacity reached",
         );
         engine.http_preparation_failed(
             NOW + 1.,
