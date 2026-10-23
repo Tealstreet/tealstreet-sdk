@@ -355,3 +355,59 @@ checks pass, including14 scanner controls. Independent source/adversarial, calle
 and full-map reviews are clean, architecture No. Actual #1786 and #1854 are
 integrated, and all incoming Crypto.com #1818 work is preserved. Inventory is
 identical to incoming; only native initial-Plan refusal behavior changes.
+
+## Standalone public book command slice
+
+Base landing367601fdf7a30bed7aa5442546466fd1337fb781, newer than the requested
+cd3dc6a13fe. The overseer authorizes this branch to stack the reviewed green
+#1872 headaa40d4ce87ea70b0cc8ec64e4d7e2127bfc21968 despite its own lib.rs claim;
+porcelain merge6bc38aa2345 includes it. Actual #1872 landing must be integrated
+before final proof. Shared docs retain incoming first and each appendix once.
+HMAC owner claude-4yjlw0 confirms no MEXC/Phemex/WOO source reservation or reviewed
+private recipe; private adoption waits for the shared engine read helper after
+#1817. This unsigned public read needs no signer or credential plumbing.
+
+Current MEXC inventory is37 occurrences /36 entries after actual #1793 history
+landing. This slice removes8 occurrences /7 entries, leaving29 occurrences /
+29 entries. Every other venue/path map stays incoming-exact. Exact removals:
+
+| Path | Fingerprint | Count | Shared destination |
+| --- | --- | --- | --- |
+| venues/mexc/src/depth_query.rs | 0707067c9785c0028c07d0ad94a471aeb9a9315be7d6ed5ceee3f353f822fcf3 | 1 | Issued Context preflight refusal |
+| venues/mexc/src/depth_query.rs | 1c48419d2e8ec54a5b30b712ac91268756fd235c538bcacfdc3227f6383b0de8 | 1 | Issued Context preflight refusal |
+| venues/mexc/src/depth_query.rs | 234fcf69606cefc3d5816bdb500ae93f956e92c1fb5deaeace8f9fd0f4185dce | 1 | Issued Context preflight refusal |
+| venues/mexc/src/depth_query.rs | 7277348e8c2d96d515028483928e715a3e9c014072f494e18fd2e527dc2f360b | 1 | Context success terminal |
+| venues/mexc/src/depth_query.rs | 73bc67e960a617f9b43feeede1fd54e4edf11045a028006651973a5982f241bf | 1 | Issued Context preflight refusal |
+| venues/mexc/src/depth_query.rs | 87fd4d841397b006cb8e07e6de819cc3176d93fcdcc16d2247db02b24db8fa12 | 2 | Context native/decode failure terminal |
+| venues/mexc/src/lib.rs | dd40ba0518f46ed21ce7a11fae5c0e8e1d5877f4466529272ed959bc0aeb843c | 1 | Typed Context HTTP failure terminal |
+
+Genuine admit_http_command issues Read/Public20s/Never before preflight; the
+public adapter accepts no numeric owner argument. Rejected is already terminal,
+Revoked grants nothing, and neither falls back to numeric completion. Store the
+Context with the captured contract size and limit in Pending::BookQuery. Use one
+unsigned request_managed GET to the native encoded contract depth URL. Preserve
+limit1..1000/default100, market/scale validation, sorting, base amounts/totals,
+exact u64 version string, zero quantities and native snapshot error metadata.
+The original status/code510/Retry-After codec is reused, not expanded or replaced
+by another status ladder. Preserve depth+account pause only for live responses;
+no retry, live-book/account commit or credential evidence is introduced.
+
+Typed setup/network/released-deadline errors complete the Context with the native
+public-read NotSent declaration. Initial engine refusal has no write outcome.
+Parked/released expiry, old preparation, duplicate reply and ID reuse must not
+publish stale success or apply a stale429 pause. Native error/decode controls
+remain independent of Context liveness. No signer, shared executor, new timer,
+classification policy, numeric lookup or exemption is added.
+
+Commit original-source REDs before production changes: preparation/release,
+parked and released expiry, typed timeout, stale callbacks/ID reuse, genuine
+initial rejection and late429 non-interference. Preserve native book regression
+payloads/assertions in port_lows/auth_results/candle cross-controls, adapting
+only prepared transport and forward response clocks. The old no-timer assertion
+becomes an explicit single engine20s deadline with no retry timer or socket send.
+Then change depth_query.rs/lib.rs, prune exactly the table above, append CALLERS/
+AUDITS/QUALITY and obtain source/adversarial, caller and full-map reviews.
+Run full MEXC+Binance suites, scoped fmt/strict Clippy and both ratchets; CI and
+an overseer window are required. Architecture No: native codec adopts existing
+shared command custody, managed lifecycle and typed completion. History #1793
+is actual and its remaining paths stay untouched; account #1872 is stack-only.
