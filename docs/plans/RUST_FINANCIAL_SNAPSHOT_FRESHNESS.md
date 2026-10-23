@@ -238,3 +238,126 @@ independently authenticated. Anything else blocks. A separate small harness PR
 will sort failure lists deterministically AFTER this core lands. Fresh integrated
 head CI/proof, actual #1757 verification and the separate final guard/merge remain
 pending.
+
+## First follow-on adoption: Backpack and Paradex (2026-10-23)
+
+Base actual Kraken history #1768
+`848924471635eee7a0c61c64407a861c3aea37f3`; shared #1759 is actual
+`9bf754a01149d373c522728edbebb46abc5ae5b2`. Only Binance and Bitunix currently
+call the Store snapshot-token entry points. The inventory below distinguishes
+local whole-read freshness from native semantic ordering and from bootstrap or
+WS readiness publication; absence of a token alone is not a proven live defect.
+Architecture gate: YES, cross-cutting freshness consumers adopt the existing
+engine boundary, without another epoch/counter implementation or engine API.
+
+The next two families are Backpack and Paradex. Ownership coordination covers
+account/trading modules and their native tests; signing helpers and wire payloads
+remain unchanged. Avoid BingX, WEEX, OKX, Bitget and the active Bybit follow-on.
+Scope is those two account/trading modules, existing native account/trading
+tests, this plan plus AUDITS/QUALITY/CALLERS, and only exact existing legacy-site
+inventory rehashes if a changed pending field changes a site hash. No new site,
+site kind, request recipe/header or map growth is allowed; independent full-map
+comparison records any old-to-new hashes. Existing queue order is unchanged.
+
+1. Backpack replaces only Account.orders_revision and Request::Orders.revision
+   with an owned OrderSnapshotToken. Its native read-start increment also
+   supersedes earlier reads: explicitly invalidate then capture, not stamp alone.
+   Preserve WS invalidation at its existing point (including native old-event
+   conservatism), optimistic cancel/cancel-all and accepted single-placement,
+   cancel and cancel-all boundaries, including absent stored rows. Keep native
+   per-order timestamps, positions/balance/leverage revisions and repair rules.
+   Capture exhaustion emits an Error snapshot-discard notice, issues no order
+   GET, and advances the existing next-account continuation without an immediate
+   retry loop. Final token admission precedes skip-memory clean clear, native
+   trigger bookkeeping and Store publication; repairs run only after admission
+   and outside the infallible commit closure.
+2. Backpack's streamed mapping currently mutates unpriced-trigger bookkeeping
+   before final read admission. Stage each mapped row's native insert/remove
+   decision at mapping time, then apply only inside admitted publication; do not
+   recompute the decision from a later ticker. Verify stale/failed reads cannot
+   affect later trigger relabeling, with a native original-RED control before
+   claiming a financial fix. Accepted batch Pair ACKs currently omit the local
+   order fence: add a bounded native read/ACK/old-response control first. If it
+   proves an omission, route the accepted result through the same Store
+   invalidator and document it as a distinct original-RED correctness repair;
+   malformed or unaccepted pair results must not gain acceptance semantics.
+3. Paradex replaces its whole-order revision capture/comparison and bump_orders
+   arithmetic with Store token capture/commit/invalidation, threading Cx through
+   the existing invalidator. Keep orders_busy single-read ownership; capture
+   before setting busy so exhaustion cannot strand the cycle. Exhaustion emits
+   an Error discard, issues no order GET and advances the native cycle to
+   margins when appropriate. Preserve the existing pre-dispatch and completion
+   invalidation (including failures), accepted WS triggers, native order-version
+   timestamps/quanta, terminal IDs and amend-evidence fences. Prepare fallible
+   order mappings/version decoding before commit, then apply native evidence,
+   version/terminal maps and Store rows in the same infallible admitted closure.
+   Retain current rows via its read-only argument; no transport, callback, Cx or
+   Store reborrow belongs inside the closure. A sibling snapshot commit never
+   invalidates itself or another token by publishing rows.
+
+Verification phases: commit and independently review this concrete plan before
+source changes. Run original focused native suites and add compatibility controls
+for read -> ordinary ACK -> old response, missing stored rows, WS terminal and
+post-write lagging reads, valid empty publication and native-cache preservation.
+Seal any proven native defect's RED before correcting it. Add token-only controls
+for explicit Store invalidation, cross-Store or exhausted authority where usable,
+permanent capture exhaustion with live continuation/timers and no stranded busy
+state; these test the new API and are not old-production defect claims. Both
+families must keep existing normal snapshot/financial/caller tests unchanged.
+
+Run focused engine/Backpack/Paradex/Binance native tests with CARGO_BUILD_JOBS=4,
+strict all-target Clippy, scoped fmt, bans and root typecheck/lint. Independent
+correctness/adversarial plan/source/test/caller and exact-map reviews. Draft when
+clean; queue unchanged. Future actual shared predecessors, full current-head CI,
+authenticated complete raw/ordered-gate proof, a fresh separate guard then a
+separate merge remain required. No local release WASM or full replay/timing/size
+matrix, comparator/budget/manifest relaxation, live actions or capture data.
+
+### Landing inventory at848924 (before this slice)
+
+All27 venue crates were searched, including nested Kraken/KuCoin Spot adapters.
+Only the two reference crates call begin/commit/invalidate. Paths below are
+relative to `sdk-rs/venues/<family>/src/`; A=account.rs, T=trading.rs, L=lib.rs.
+These are adoption boundaries, not25 proven unsafe implementations. Existing
+native guards frequently already prevent an ordinary ACK/read race. Bootstrap
+empty/readiness publication is not an unfenced financial REST replacement.
+
+| Family | Existing order authority/publication requiring preservation |
+| --- | --- |
+| Binance | DONE: A480 captures; A1438 commits token; native write invalidators remain explicit. |
+| Bitunix | DONE: A373 captures; A1075 validates both initial halves; A1201 commits. |
+| ApeX | A984/1102/1169-1200 standalone/joined merge; per-ID versions/retirement floor, terminal/cancel-grace state; T918/929/982 cancellation evidence. |
+| AsterDEX | A490/865/909 capture/guard/replace; A496/1210 and T499/533/593 invalidators; preserve bootstrap seeds and terminal/native clocks. |
+| Backpack | SELECTED: A430/720/725 latest-read revision/guard/replace; A824 and T611/641/730/856/871 invalidate; staged trigger metadata/repairs need admission. |
+| BingX | EXCLUDED: A505/1080/1121 capture/guard/replace; wrapping bump_orders A294, native observations/bootstrap before replacement. |
+| Bitget | EXCLUDED: A471 whole-read+stream captures; A753 guard and A1243-1333 publication; keep per-ID WS/tombstone/source/virtual-order state. |
+| Bitrue | A604/695 per-symbol capture; A1887 guard and A1954-1962 removal/upserts; local revision also controls T964-1015 trading census. |
+| BloFin | A583 capture; A1427 join guard; A1553 replacement; native source/child/terminal maps and pre-guard startup execution seeding A1422. |
+| BreakoutProp | L327 dispatch-rebound portfolio revision, L861 local guard/L864 server version; A101-121 atomic multi-domain portfolio publication. |
+| Bybit | EXCLUDED/uuf follow-on: A163-174 joined revision and A2575-2710 commit; Hyro atomic account/StaleGuard A1245-1342. |
+| Coinbase (+Spot) | A1989-2043 per-ID merge/proof/foreign identity publication; trading census T972-1020 depends on native read/version clocks. |
+| Crypto.com | A713-767 normal/advanced join with per-ID versions, advanced membership/terminals/timestamps; ACK fence coverage needs native investigation, no defect claimed. |
+| GRVT | A1062/1596/1627 capture/guard/replace; A1031/2013 and T1297/1389/1694 invalidate; T614/1326 trading read-scope authority must remain. |
+| Hyperliquid (+Spot) | A493/769/801 per-DEX capture/guard/replace; A1031/T1042/1067 ACKs and A1849 WS; preserve DEX isolation/cloid/suppressed IDs. |
+| Kraken futures/Spot | A1382 guard, A1175-1194 native cache/publication plus recovery sequences; Spot account361/627-643 capture/guard/replace with provenance/native-time/terminal maps. |
+| KuCoin futures/Spot | A950-1051 normal/stop paged merge and native per-ID versions/absence/fill/readiness; Spot mod420/1279-1286 capture/guard/seeding+replace. |
+| Lighter (+Robinhood) | A776 capture, A1828-1861 per-ID merge/native-record pruning; A1997-2005 per-market fallback join and native suppressed/record clocks. |
+| MEXC | Shared revision A72/read210/259 and A522-564 per-ID merge; order_updates/terminal clocks also serve other domains and must not be removed wholesale. |
+| OKX | EXCLUDED: paged/product order generation+version carried to A940 replacement; native row rejection/leverage/native-fill state remains protocol-owned. |
+| Orderly brokers | A218 two order clocks, A494 capture, A1257-1357 joined normal/algo publication; preserve endpoint scopes, initial join, proofs/terminal/stamps. |
+| Paradex | SELECTED: A1045 capture/A1343-1396 guarded native+Store commit; A318/T775/999/A1561 invalidate; retain amended target/version/terminal evidence. |
+| Phemex | A132 order revision also gates command preflight and WS snapshot authority A994-1085; not a simple REST-only scalar replacement. |
+| Polymarket | A488 capture and A875-932 per-ID merge/native fill/terminal publication; terminal helper A1027 also serves snapshot omissions, so invalidation cannot be blanket-added there. |
+| TxFlow | A25/read418/page874-895/final907-917 local fence; native order memo/terminal merge and post-commit reconciliation need one paged token; write ACK helper A462 differs from WS progression. |
+| WEEX | EXCLUDED: A161/208 local orders revision, A370 capture/A587 guard/A622 replace; command preflight authority and native normal/algo domains remain. |
+| WOO | A162 revision plus per-ID clocks and A1370-1473 normal/algo paged join; native classification/execution seeding and healthy-peer progress remain distinct. |
+
+After this two-family adoption,23 other non-reference crates remain outside the
+shared API, including five explicitly excluded active families. This count is
+not an allegation that23 live races exist, nor a cutover-completion claim.
+
+Both independent plan/API reviews are CLEAN: mapping-time trigger decisions are
+staged, while Paradex's stateful evidence decisions remain sequential inside the
+admitted callback. Original focused engine/Backpack/Paradex/Binance baseline
+passes1157 tests across59 groups before production edits. Native RED hypotheses
+remain hypotheses until their bounded controls reproduce the asserted effect.
