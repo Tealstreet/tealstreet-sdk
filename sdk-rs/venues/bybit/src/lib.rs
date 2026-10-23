@@ -782,9 +782,16 @@ impl BybitLinear {
         match queued {
             Ok(request) if stream => cx.stream_response(request, ArrayAt::Path(MARKETS_PATH)),
             Ok(_) => {}
-            Err((pending, error)) => {
-                self.on_public_response(cx, pending.then, Err(&error.venue_error().message));
-            }
+            Err((pending, error)) => match pending.then {
+                // Nothing was sent: the typed refusal is the command's.
+                Then::Identity(context) => {
+                    let error = error
+                        .venue_error()
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.identity_response(cx, context, Err(error));
+                }
+                then => self.on_public_response(cx, then, Err(&error.venue_error().message)),
+            },
         }
     }
 
@@ -2611,6 +2618,11 @@ impl Venue for BybitLinear {
         }
         if let Then::Candles(read) = pending.then {
             Self::candles_failed(cx, read, error);
+            return;
+        }
+        // A managed identity read (first or retried leg) keeps the engine's type.
+        if let Then::Identity(context) = pending.then {
+            self.identity_response(cx, context, Err(error));
             return;
         }
         if pending.rest.resent {

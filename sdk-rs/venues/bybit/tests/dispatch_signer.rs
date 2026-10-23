@@ -359,7 +359,11 @@ fn provider_refusal_invalid_presentation_and_timeout_are_owned_not_sent_reads() 
                 engine.handle(21_001., Event::TimerFired { timer });
                 actions = engine.drain_actions().collect();
             }
-            assert_eq!(failed(&actions, 42).outcome, Some(Outcome::NotSent));
+            let error = failed(&actions, 42);
+            assert_eq!(error.outcome, Some(Outcome::NotSent));
+            if mode == 1 && !query {
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+            }
         }
     }
 }

@@ -1,7 +1,7 @@
 //! V5 API-key identity: a signed command Read on the engine's managed
 //! authority, with the read key when configured.
 use crate::{BybitLinear, Pending, Rest, Then, sign::Query};
-use safe_cex_engine::request_context::{Context, Owner};
+use safe_cex_engine::request_context::Context;
 use safe_cex_engine::{Cx, ErrorKind, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
@@ -85,10 +85,13 @@ fn finish(cx: &mut Cx<'_, Pending>, context: &Context, result: Result<Identity, 
 
 /// Every failure is reported to its command before the typed terminal.
 fn fail(cx: &mut Cx<'_, Pending>, context: &Context, error: VenueError) {
-    if let Owner::Command { id, .. } = context.owner() {
-        cx.command_error(id, &error.message);
+    // Only a live owner gets the diagnostic, so it never outlives its terminal.
+    if cx
+        .command_error_context(context, error.message.clone())
+        .is_ok()
+    {
+        let _ = cx.fail_context(context, error);
     }
-    let _ = cx.fail_context(context, error);
 }
 
 fn refuse(cx: &mut Cx<'_, Pending>, context: &Context, message: String, kind: ErrorKind) {
