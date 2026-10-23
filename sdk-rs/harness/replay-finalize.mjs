@@ -1,5 +1,5 @@
-export function captureReplayState(snapshot, audit) {
-  return { ...snapshot, protocolErrors: audit?.errors() ?? [] };
+export function captureReplayState(snapshot, audit, { final = false } = {}) {
+  return { ...snapshot, protocolErrors: final ? audit?.errors() ?? [] : [] };
 }
 
 /**

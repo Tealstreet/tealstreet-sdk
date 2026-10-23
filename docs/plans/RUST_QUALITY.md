@@ -1113,3 +1113,16 @@ finite ID reuse and 900 synchronous retirements followed by 256 real parked
 managed candle owners. No marker or Store mutation is introduced. Exact inventory
 removes only two local done sites; native/strict checks and independent reviews
 are required on the committed source before merge readiness.
+
+
+### Replay audit finalization controls
+
+The behavior-preserving extraction has four working controls and two assertion
+REDs matching the historical WOO false protocol diagnostics. After final-only
+aggregation, all 31 focused audit/finalization/checkpoint/WOO protocol controls
+pass. Genuine late private violations remain visible; audit exceptions propagate.
+Both real replay callers and forgotten-final-flag mutations are checked.
+
+Native accepted-write snapshot races are separately reproduced by four REDs
+and two working controls; the identical six controls pass against queued #1788.
+Those venue changes and their tests are outside this standalone harness scope.
