@@ -2421,7 +2421,9 @@ pub trait Venue {
     );
     /// A request that may have reached the venue failed without a usable
     /// response. `error.kind` is `Timeout` for engine deadline expiry,
-    /// `Internal` for a body that is not UTF-8, else `Network`.
+    /// `Internal` for a whole delivered body (or managed write reply) the engine
+    /// cannot decode, else `Network`. Streams that break mid-array still use
+    /// `on_stream_malformed`.
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
