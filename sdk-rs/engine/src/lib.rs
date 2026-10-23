@@ -5,6 +5,7 @@ pub mod capabilities;
 pub mod classify;
 pub mod command;
 pub mod coverage;
+pub mod credential_selection;
 pub mod credentials;
 pub mod de;
 pub mod engine;

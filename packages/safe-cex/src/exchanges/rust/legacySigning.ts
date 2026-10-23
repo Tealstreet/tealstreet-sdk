@@ -11,6 +11,7 @@ import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site'
 import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';
 
 const BINANCE = new Set<ExchangeName>(['binance', 'binancepm', 'binanceinverse', 'binancespot']);
+const BYBIT = new Set<ExchangeName>(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader']);
 
 /** The surviving hosted wire adapter uses standalone codecs, never a TS venue.
  * It cannot fall back to options.secret: the callback always uses owned refs.
@@ -23,6 +24,9 @@ export const signHostedHttp = async (
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
+  // Other dispatch families (AsterDEX until its hosted half) have no request codec here.
+  if (!BINANCE.has(name) && !BYBIT.has(name))
+    return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   const unsigned = binance ? isBinancePublicSigningRequest(name, request.config.url)
     : isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
