@@ -298,6 +298,10 @@ impl<P> Cx<'_, P> {
             if self.io.request_contexts.resend_blocked(owner, self.now) {
                 return Err(Error::State);
             }
+            // Planned and preflight commands sequence their own legs.
+            if !self.io.request_contexts.context_phase(owner) {
+                return Err(Error::State);
+            }
             if self
                 .io
                 .session_waits
