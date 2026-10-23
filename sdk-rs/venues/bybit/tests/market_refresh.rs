@@ -265,6 +265,38 @@ fn timeout_and_late_old_generation_cannot_finish_or_pollute_a_new_walk() {
 }
 
 #[test]
+fn joined_owners_time_out_once_each_and_pages_keep_the_broker_header() {
+    let mut h = Harness::new();
+    let before = h.requests.len();
+    refresh(&mut h, 21);
+    let pages = h.requests.len() - before;
+    assert!(pages > 0);
+    for request in &h.requests[before..] {
+        assert_eq!(
+            Harness::header(request, "X-Referer").as_deref(),
+            Some("Tealstreet")
+        );
+    }
+    h.advance(10_000.);
+    refresh(&mut h, 22);
+    assert_eq!(
+        h.requests.len(),
+        before + pages,
+        "late owner joins the walk"
+    );
+    h.advance(20_001.);
+    for command in [21, 22] {
+        let terminals = h.done.iter().filter(|(c, _)| *c == command).count();
+        assert_eq!(terminals, 1, "command {command} terminal count");
+        assert!(h.result(command).unwrap().is_err());
+    }
+    // The ended walk does not absorb a new caller.
+    refresh(&mut h, 23);
+    assert!(h.requests.len() > before + pages);
+    assert!(h.result(23).is_none());
+}
+
+#[test]
 fn malformed_rows_and_transport_failures_fail_atomic_and_cooldown_blocks_rediscovery() {
     for failure in ["row", "transport", "rate"] {
         let mut h = Harness::new();
