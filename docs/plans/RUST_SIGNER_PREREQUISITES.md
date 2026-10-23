@@ -203,3 +203,71 @@ Focused checks pass locally:
 Independent adversarial review: CLEAN. Its minor findings are addressed:
 policy-owned seed encoding, the narrowed field vocabulary, the CI feature-off
 step, the seed wipe and role binding. CI owns the WASM size and timing gates.
+
+## Signer capability (command admission, ahead of P8)
+
+Owner claude-19pt8s; consumer codex-hcmq3f (ApeX Amend and batch). Approved
+by claude-ddi2il on 2026-10-23 for the engine-window queue, ready-first.
+
+**Problem.** A command can need several signing algorithms across several
+releases. Native ApeX Amend releases an HMAC cancel, then a zkLink
+replacement. With a remote provider that accepts HMAC but refuses
+`ZkLinkContract`, refusal at the replacement's `prepare` comes after the
+cancel has left. The result is an effect, not a whole-command `NotSent`.
+Nothing trusted tells the venue in advance what the provider can sign for a
+given identity:
+- ref text, extra presence, raw options and `Signer::immediate()` are not
+  capability, and venue flags are banned;
+- `capabilities.rs` is venue-level.
+
+**API.**
+- `Signer::can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability`
+  where `Capability` is `Supported | Unsupported | Unknown`. The default is
+  `Unknown`. Providers answer from what trusted construction installed and
+  never sign to probe.
+  - Local provider: `Supported` only when the ref is installed, role-bound
+    to that algorithm (#1839), and the crypto feature is compiled in.
+    Otherwise `Unsupported`.
+  - JS host provider (host.mjs): a declared `algorithms` list, validated at
+    admission like the rest of the host contract. Undeclared means `Unknown`.
+  - `remoteSignerProvider`: `hmacSha256` only, until P8 adds recipe ids.
+    Every other algorithm is `Unsupported`.
+  - Browser hosted signing: per family, from `hosted_signing.rs`.
+- `Cx::can_sign(slot: CredentialSlot, identity: &Identity, needs: &[Need])`
+  `-> Result<(), SignError>`, where `Need` is `(KeyUse, Algorithm)` and
+  `KeyUse` is `Signing` or `Extra(ExtraKey)`. It is callable from
+  `on_command` and any command or preflight admission point, before the first
+  release. `DispatchContext::can_sign` gives the same answer at prepare.
+  - The slot must match the identity the venue selected for it (C1
+    `Slots::select` once landed). A mismatch, or a missing ref for a `Need`,
+    is `SignError::Invalid`.
+  - Every `Need` must be `Supported`. `Unsupported` or `Unknown` gives
+    `SignError::Unsupported`, which the venue maps to a whole-command typed
+    `NotSent` before any I/O.
+  - No provider: `Unavailable`.
+- The answer is advisory for admission only. Signing at release stays the
+  choke point, so a provider that answered `Supported` and later refuses
+  still fails that release as today.
+
+**Use.** A multi-release command (ApeX Amend/batch with contracts) calls
+`cx.can_sign` once with every algorithm it will need, before releasing
+anything. Single-release commands need no call; `prepare` refusal already
+fails before I/O. There is no eager signing and no venue flag.
+
+**Architecture gate.** This is the cross-cutting fix. Any family with a
+multi-algorithm command uses the same query: ApeX now, later Paradex (Stark
+plus JWT) and Polymarket (EIP-712 plus L2 HMAC).
+
+**Tests.**
+- Engine: local `Supported`/`Unsupported` per role and feature; slot and
+  identity mismatch is `Invalid`; `Unknown` default fails closed; no provider
+  is `Unavailable`.
+- Host: a host.mjs provider with and without a declared list; a
+  `remoteSignerProvider` refusing `zkLinkContract` and accepting
+  `hmacSha256`.
+- Consumer proof (hcmq3f's PR): a keyless remote ApeX Amend is a typed
+  `NotSent` with zero HTTP actions; local Amend still sends the cancel and
+  the replacement.
+
+**P8 interaction.** When P8 admits recipe ids, `remoteSignerProvider` answers
+`Supported` for an algorithm only through a matching admitted recipe id.
