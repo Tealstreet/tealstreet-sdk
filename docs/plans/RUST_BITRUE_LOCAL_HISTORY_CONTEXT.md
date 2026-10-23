@@ -63,3 +63,12 @@ shared engine admission/completion only; no venue-specific cross-cutting mechani
 | `3222c9dc7146bd368025519801a954c755cb187050b8dcca08eea2163dfb87f8` | `cx . fail ( command , "Bitrue fills require authenticated futures credentials" , )` |
 | `b0723bf50b38aec58f93f9e0c3c86eb7adb6b09590d7255838d094a9bd119c37` | `cx . fail ( command , "Invalid Bitrue fill time window" )` |
 | `1d929e91360e3f2b465b4f60d8024a7aa9f9167e8573e49457119fe4d06f634d` | `cx . fail ( command , "Bitrue fills require a known symbol" )` |
+
+## Executed phase receipt
+
+Tests-first `23c35ea2059` runs unchanged production with five assertion REDs and
+three compatibility GREENs. The same frozen eight controls pass after adoption.
+All461 Bitrue/Binance native tests across38 targets, scoped strict Clippy and fmt
+pass. Three independent source/adversarial, caller and full-map reviews are
+CLEAN. A newer landing ratchet prune must be genuinely integrated before final
+bans/request-context verification and publication; no old inventory is restored.

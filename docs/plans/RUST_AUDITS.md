@@ -2312,3 +2312,12 @@ live cooldown remain unchanged. Exact pruning removes8 occurrences/7 entries;
 there is no signer migration, local timer/classifier, retry executor or numeric
 Context lookup. Architecture No: existing shared custody and lifecycle are
 consumed. The separate reviewed startup fix is retained as a stack dependency.
+
+## Bitrue local history terminal provenance
+
+Five synchronous numeric refusals consume shared initial Read admission and
+Context completion directly. Bitrue inventory shrinks42->37 occurrences,
+27->22 rows and five->four files; every other incoming hash/count stays exact.
+The still-legacy signed fill/HistoryRows/Completion path and account lookup stay
+held for their shared prerequisites, even where the scanner no longer lists the
+history source. No private read, group or whole-venue zero claim is introduced.

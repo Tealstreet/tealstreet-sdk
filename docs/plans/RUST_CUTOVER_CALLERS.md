@@ -5201,3 +5201,14 @@ remain. Numeric overflow in rows beyond the requested output limit still rejects
 whole snapshot. Native status/code510 classification, code/message and bounded retry
 hint remain; live rate limits pause depth and account reads without resending.
 Results never change subscribed books, account state or credential health.
+
+## Bitrue synchronous history refusal authority
+
+Unsupported complete order/income history and local fill preflight refusals now
+consume genuine initial Read authority and finish in the same callback. Their
+exact native messages, authentication-before-range-before-symbol precedence,
+companion-free timeline and absence of I/O/Store mutation remain. Unsupported
+kinds gain Unsupported/NotSent; local input or missing credential errors gain
+InvalidInput/NotSent. Shared admission refusal emits its one engine-owned typed
+failure, with no adapter fallback or Read financial outcome. Valid private fills,
+lookup and WS FIFO delegates keep their existing separate transport contracts.

@@ -859,3 +859,15 @@ input/cooldown refusals still forbid timers and managed dispatch. Native decoder
 large IDs, scaling, overflow beyond limit, code510 and live cooldown controls
 remain independently exercised. Inventory shrinks by exactly8 occurrences and
 7 entries, with no unowned map or scanner change.
+
+## Bitrue local history command admission controls
+
+Tests-first genuine Engine callbacks delegate both native mutation guards and
+cover all five local refusals, including missing/unknown symbols. Original source
+produces five assertion REDs and three compatibility GREENs. Capacity setup uses
+a prior no-ID callback with256 asserted Background roots; repeated denials retain
+peers, explicit retirement recovers at one clock and fixed-clock reuse exercises
+terminal cleanup. Invalid raw clocks and typed local metadata are distinguished
+from native text/precedence, Store stability and signed-fill preservation.
+Aliases, fractional-time flooring, default/clamped limits, native headers and
+empty results remain covered; no fake HTTP or command origin supplies authority.
