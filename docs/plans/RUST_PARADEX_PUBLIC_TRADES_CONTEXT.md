@@ -186,3 +186,13 @@ a876e5300951dc42d8c9828d78f0d32d52e42b439cbaf763cc6cdd6b63174865 once:
 Paradex56→55, history14→13. Full native/strict checks, independent implementation
 reviews and CI remain required; this is native consumer evidence, not actual
 bridge landing or a whole-venue readiness claim.
+
+Frozen source38836aad176 passes501 Paradex+Binance native tests across41 result
+groups, including the seven unchanged original controls, strict Paradex all-target/
+all-feature Clippy and scoped fmt. Source/adversarial, caller and full-map reviews
+are CLEAN (architecture gate No). Genuine actual2badd1cb0e3 integration changes
+only incoming other-venue source/docs/inventory; all Paradex/Binance/engine/crypto
+blobs remain exact to the tested source. Scanner, its14 controls and bans pass on
+the integrated tree. Full bridge source/tests still match authorized f471 exactly.
+This supplies the second real unsigned native Read-history consumer receipt;
+CI/actual bridge integration/merge window remain separate gates.

@@ -871,3 +871,11 @@ original deadline and stale token/ID reuse without marker or Store leakage.
 Only one public sender fingerprint is pruned; private authority and shared bridge
 blobs remain unchanged. Full native/strict/CI and independent review are separate
 readiness gates; this native receipt alone does not claim bridge landing.
+
+The public-trades frozen source38836aad176 passes501 Paradex+Binance native tests
+(41 result groups), strict all-target/all-feature Paradex Clippy and scoped fmt;
+all three frozen implementation reviews are CLEAN/architectureNo. Incoming
+actual2badd1cb0e3 preserves tested dependency blobs and all foreign prunes. Both
+request checks/14 controls and bans pass on the integrated head; bridge blobs
+remain exact to authorized f471. This is executed native consumer evidence, not
+an actual bridge landing or complete WASM/replay/size proof.
