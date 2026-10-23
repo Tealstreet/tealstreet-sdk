@@ -233,15 +233,18 @@ given identity:
     - an extra ref is `Supported` only for its role's algorithm, when that
       crypto feature is compiled in (`ZkLinkContract` needs `zklink`);
     - every other combination, and any ref not installed, is `Unsupported`.
-  - JS host provider: the WASM `ExternalSigner` and the host.mjs `Signer`
-    function gain a declared algorithm list at installation
-    (`useExternalSigner(signer, { algorithms })`), validated with the rest of
-    the host contract. Undeclared means `Unknown`. The list is per
+  - JS host provider: installing it clears the Rust provider, and the host
+    fulfils `Action::Sign`. host.mjs takes `signerAlgorithms` beside `signer`
+    and passes it as JSON to WASM `useExternalSigner(algorithmsJson?)`, which
+    parses exact `SignAlgorithm` names into `Engine::set_host_algorithms`
+    before startup. Undeclared means `Unknown`. The list is per
     algorithm, not per ref. WASM and native local setups install the Rust
     `LocalSigner` directly, so they need no list and local Amend keeps
     working on every host.
-  - `remoteSignerProvider` declares `hmacSha256` only, until P8 adds recipe
-    ids. It also refuses secondary-slot HMAC at sign time, which a
+  - `remoteSignerProvider` declares `hmacSha256` only
+    (`REMOTE_SIGNER_ALGORITHMS`, the same constant its refusal check uses),
+    until P8 adds recipe ids. `DelegatedSignerSetup` passes it as
+    `signerAlgorithms`. It also refuses secondary-slot HMAC at sign time, which a
     per-algorithm list cannot express. That is acceptable because the answer
     is advisory and release still refuses before I/O.
   - Browser `hosted_signing.rs` is a request facade for the TS exchanges, not
@@ -250,6 +253,7 @@ given identity:
   `Identity` map with the engine, next to `set_signer`
   (`set_identities(signing::Identities)`, before startup, refs only). The venue
   keeps its own copy for signing; the registry passes the same values.
+  `Engine::identities()` exposes them (refs only) for host tests.
 - `Cx::can_sign(slot: CredentialSlot, needs: &[Need]) -> Result<(), SignError>`,
   where `Need` is `(KeyUse, Algorithm)` and `KeyUse` is `Signing` or
   `Extra(ExtraKey)`. It is callable from `on_command` and any command or
@@ -261,10 +265,12 @@ given identity:
     `SignError::Unsupported`. Both errors map to `NotSent`
     (`signing.rs:539-549`), so the venue reports a whole-command typed
     `NotSent` before any I/O.
-  - No provider: `Unavailable`.
-- `DispatchContext` gains the provider handle where it is built
-  (`engine.rs:3790`) and exposes `can_sign(key, algorithm)` at prepare. The
-  slot check does not apply there, because the step already holds its refs.
+  - Refs are resolved for every need before any capability is asked, so a
+    malformed command is `InvalidRequest` regardless of need order.
+  - No Rust provider means the host fulfils `Action::Sign`: the declared list
+    answers, and an undeclared host is `Unknown`.
+- There is no `DispatchContext::can_sign`: at prepare the step's own
+  `SignRequest` already refuses before I/O, so a second query adds nothing.
 - The answer is advisory for admission only. Signing at release stays the
   choke point, so a provider that answered `Supported` and later refuses
   still fails that release as today.
