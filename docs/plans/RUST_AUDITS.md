@@ -2448,3 +2448,12 @@ four tothree files. Account3, lib7 and trading8 occurrences remain, including
 four conservative trading macro matches. This does not close private history's
 legacy Completion/pager or the blocked physical dispatchers; #1771 source claims,
 signer and shared multi-request prerequisites remain separate.
+
+## Bitrue local history terminal provenance
+
+Five synchronous numeric refusals consume shared initial Read admission and
+Context completion directly. Bitrue inventory shrinks42->37 occurrences,
+27->22 rows and five->four files; every other incoming hash/count stays exact.
+The still-legacy signed fill/HistoryRows/Completion path and account lookup stay
+held for their shared prerequisites, even where the scanner no longer lists the
+history source. No private read, group or whole-venue zero claim is introduced.

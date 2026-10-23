@@ -5522,3 +5522,14 @@ unknown fill symbols still return `[]` before finite-time validation. Unsupporte
 query checks still precede keyless handling. No range-order guard, timer or
 transport is added. Valid private history dispatch, signatures, paging and
 incompleteness behavior retain their existing contracts and remain legacy-owned.
+
+## Bitrue synchronous history refusal authority
+
+Unsupported complete order/income history and local fill preflight refusals now
+consume genuine initial Read authority and finish in the same callback. Their
+exact native messages, authentication-before-range-before-symbol precedence,
+companion-free timeline and absence of I/O/Store mutation remain. Unsupported
+kinds gain Unsupported/NotSent; local input or missing credential errors gain
+InvalidInput/NotSent. Shared admission refusal emits its one engine-owned typed
+failure, with no adapter fallback or Read financial outcome. Valid private fills,
+lookup and WS FIFO delegates keep their existing separate transport contracts.

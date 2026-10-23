@@ -1021,3 +1021,15 @@ background roots before270 rounds of command refusals, explicitly retire them,
 and recover at one clock. Invalid-clock denial and more than256 fixed-clock local
 completions cover both empty-result paths as well as refusals. An unchanged valid
 signed private history request and empty response remain a compatibility control.
+
+## Bitrue local history command admission controls
+
+Tests-first genuine Engine callbacks delegate both native mutation guards and
+cover all five local refusals, including missing/unknown symbols. Original source
+produces five assertion REDs and three compatibility GREENs. Capacity setup uses
+a prior no-ID callback with256 asserted Background roots; repeated denials retain
+peers, explicit retirement recovers at one clock and fixed-clock reuse exercises
+terminal cleanup. Invalid raw clocks and typed local metadata are distinguished
+from native text/precedence, Store stability and signed-fill preservation.
+Aliases, fractional-time flooring, default/clamped limits, native headers and
+empty results remain covered; no fake HTTP or command origin supplies authority.
