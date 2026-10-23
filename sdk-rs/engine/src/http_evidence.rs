@@ -1,6 +1,6 @@
 //! One retained-evidence budget, independent of native execution classification.
-use super::WriteResult;
-use crate::VenueError;
+use super::{Error, WriteResult};
+use crate::{ErrorKind, Outcome, Partial, VenueError};
 use std::collections::HashSet;
 
 pub(super) const MAX_ATTEMPTS: usize = 256;
@@ -11,6 +11,101 @@ const TEXT_BYTES: usize = 64 * 1024;
 const TEXT_FIELD: usize = 4_096;
 const TRUNCATED: &str = "[truncated]";
 const ID_OVERFLOW: &str = " [truncated IDs: reconcile remaining identities through reads]";
+
+/// Envelope eligibility for a native codec, never proof of native acceptance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResponseProof {
+    NativeCodec,
+    Unproven(ErrorKind),
+}
+
+impl ResponseProof {
+    pub(crate) fn from_status(status: u16) -> Self {
+        match status {
+            408 => Self::Unproven(ErrorKind::Timeout),
+            500.. => Self::Unproven(ErrorKind::VenueUnavailable),
+            _ => Self::NativeCodec,
+        }
+    }
+
+    pub(crate) fn error(self) -> Option<VenueError> {
+        match self {
+            Self::NativeCodec => None,
+            Self::Unproven(kind) => Some(
+                VenueError::new("HTTP response does not prove the write outcome")
+                    .kind(kind)
+                    .outcome(Outcome::Unknown),
+            ),
+        }
+    }
+}
+
+/// Native diagnostics and exact identities only. This grants no execution,
+/// classification, caller-leg attribution, authentication or retry authority.
+pub struct UnprovenEvidence {
+    budget: EvidenceBudget,
+    error: VenueError,
+    id_overflow: bool,
+}
+
+impl UnprovenEvidence {
+    pub(super) fn new(mut budget: EvidenceBudget, status: u16) -> Result<Self, Error> {
+        let mut error = ResponseProof::from_status(status)
+            .error()
+            .ok_or(Error::Invalid)?;
+        error.message = budget.text(&error.message);
+        Ok(Self {
+            budget,
+            error,
+            id_overflow: false,
+        })
+    }
+
+    /// Stop retaining identities after any invalid/over-budget identity. Never
+    /// truncate an ID or substitute a planned caller identity for native proof.
+    pub fn order_id(&mut self, id: &str) -> bool {
+        if self.id_overflow {
+            return false;
+        }
+        if id.is_empty() || !self.budget.admit_identity(id) {
+            self.id_overflow = true;
+            return false;
+        }
+        self.error
+            .partial
+            .get_or_insert_with(|| {
+                Box::new(Partial {
+                    order_ids: Vec::new(),
+                    total: None,
+                    failed_index: None,
+                })
+            })
+            .order_ids
+            .push(id.to_owned().into_boxed_str().into_string());
+        true
+    }
+
+    pub fn venue_code(&mut self, code: &str) {
+        if self.error.venue_code.is_none() {
+            self.error.venue_code = Some(self.budget.text(code));
+        }
+    }
+
+    pub fn venue_message(&mut self, message: &str) {
+        if self.error.venue_message.is_none() {
+            self.error.venue_message = Some(self.budget.text(message));
+        }
+    }
+
+    pub(super) fn finish(mut self) -> (EvidenceBudget, VenueError, bool) {
+        if let Some(partial) = self.error.partial.as_mut() {
+            partial.order_ids = std::mem::take(&mut partial.order_ids)
+                .into_boxed_slice()
+                .into_vec();
+        }
+        (self.budget, self.error, self.id_overflow)
+    }
+}
 
 /// Entry budgets include duplicates and historical attempts. At overload,
 /// retained prefixes follow admission order, not logical error selection order.
