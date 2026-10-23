@@ -250,3 +250,37 @@ intentionally failing plan/test checkpoint, without a PR or CI watcher.
 Production remains held on actual #1962 and a fresh scoped lib-hunk release.
 Do not consume its frozen API as a local implementation or weaken these original
 assertions at adoption. Recompute the actual base/map before source work.
+
+## Production adoption on actual #1962
+
+Actual `9f405e55403733d489da560f466faea12f3ff8f1` was genuinely plain-merged
+in `5112c67969f`. The only conflict was the README index, resolved incoming rows
+first plus the exact own row once. uufub4 renewed the narrow Identity lib-hunk
+release after reviewing `96ba71b7876`; no further permission is required absent
+a new overlapping source conflict. The fresh open-PR scan still shows the held
+#1884/#1747 lib regions and inherited #1891 fixtures; none are edited beyond the
+explicitly released identity hunks. Existing tests and helper bodies remain exact.
+
+FetchAccount now consumes SelectedRead/AdmittedRead directly, keeps the native
+eligibility presentation and codec, and checks exact original managed delivery
+before parsing/publication. Pending carries the same non-Clone wrapper through
+DATA, preparation/provider and typed HTTP failure. The old numeric identity-only
+finalizers and Signed exceptions are removed. No selection by method, new shared
+policy, fake credential, copied helper, status retry or numeric fallback is added.
+
+All 14 original dedicated tests now PASS, including the previously unexecuted
+capacity recovery/refill suffixes and all branch/invalid-clock cases. The new
+test file is byte-identical to original `fa95669213c`. Native compatibility and
+broader scoped gates are recorded with the reviewed PR head below. Manifest
+prune is exactly identity's two singleton entries; family34F/37O ->32F/35O at
+this actual base. Generic managed.rs retains its held owner's existing identity
+special-case text; that body is outside the released scope, with cleanup handed
+to its owner. Production does not call it for identity anymore.
+
+Scoped pre-integration validation: all 14 original identity tests PASS; full BingX
+native suite 235 PASS, 0 failures, with the two existing paired-metadata original
+REDs still ignored under their separate shared-Plan hold. Strict BingX all-target,
+all-feature Clippy and Binance all-target check PASS. Both request-context checks
+PASS (15 checker tests), touched rustfmt and diff checks PASS. Source/adversarial
+and full-map reviews CLEAR; caller review and final incoming integration receipts
+are tracked in the PR body. CI, rather than local builds, owns WASM/replay/size.

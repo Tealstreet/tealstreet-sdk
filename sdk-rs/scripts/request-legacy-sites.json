@@ -178,10 +178,6 @@
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
     "f43453f19ab26af8ad6edee4529387f502a76b04b80658aac68a19e1034c4904": 1
   },
-  "venues/bingx/src/identity.rs": {
-    "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-  },
   "venues/bingx/src/lib.rs": {
     "1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43": 1,
     "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1,
