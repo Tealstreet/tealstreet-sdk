@@ -1027,6 +1027,8 @@ mod tests {
         auth_observations: std::cell::Cell<usize>,
         hold_write_fact: Option<bool>,
         reconciles: Vec<Option<Vec<String>>>,
+        // The command intent a test mutation is issued under (default Place).
+        mutation_intent: Option<crate::classify::Intent>,
         // Whether a reconcile hook ever saw borrowed delivery/read authority.
         #[cfg(feature = "order-locks")]
         reconcile_custody: bool,
@@ -1850,8 +1852,12 @@ mod tests {
         } else {
             RetryPolicy::Never
         };
-        // Issued as if dispatched from a placement command.
-        engine.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
+        // Issued as if dispatched from a placement command (or the chosen intent).
+        let intent = engine
+            .venue
+            .mutation_intent
+            .unwrap_or(crate::classify::Intent::Place);
+        engine.io.request_contexts.dispatch = Some((command, intent));
         let mut cx = Cx {
             now: at,
             store: &mut engine.store,
@@ -2871,6 +2877,80 @@ mod tests {
         engine.io.queue_reconcile(None, f64::NAN);
         engine.finish_event_scope(7.);
         assert_eq!(engine.venue.reconciles, vec![None]);
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn an_absent_order_cancel_fences_and_reconciles_exactly_once() {
+        use crate::classify::{
+            CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
+        };
+        const GONE: CodeTable = CodeTable {
+            rows: &[Row {
+                key: Key::Int(110001),
+                verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+                only: Some(Intent::Cancel),
+            }],
+            success: &[],
+            unlisted: Verdict::Refused(crate::ErrorKind::Rejected),
+            status: &[],
+        };
+        let native = Native {
+            code: NativeCode::Int(110001),
+            message: "order not exists",
+        };
+        for intent in [Intent::Cancel, Intent::Place] {
+            let (mut engine, _) = start(Probe {
+                mutation_intent: Some(intent),
+                ..Probe::default()
+            });
+            let (context, token, _) = mutation(&mut engine, 7, 0.);
+            let permit = bind(&mut engine, token, 1.);
+            engine.claim_http(1., permit).unwrap();
+            let delivery = engine
+                .io
+                .managed_http
+                .get(&token.attempt().request)
+                .unwrap()
+                .delivery();
+            engine.io.http_delivery = Some(delivery);
+            engine.io.http_write_reply = Some((200, String::new()));
+            let (verdict, _) = Cx {
+                now: 2.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            }
+            .http_write_failure(&context, &GONE, Some(&native), "order not exists", None)
+            .unwrap();
+            engine.io.http_write_reply = None;
+            engine.io.http_delivery = None;
+            engine.finish_event_scope(2.);
+            if intent != Intent::Cancel {
+                // Outside a cancel the absent-order row never applies.
+                assert_eq!(verdict, Verdict::Refused(crate::ErrorKind::Rejected));
+                assert!(engine.venue.reconciles.is_empty());
+                assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+                continue;
+            }
+            assert_eq!(verdict, Verdict::Satisfied(SatisfiedIntent::Cancel));
+            assert_eq!(engine.venue.reconciles, vec![None], "exactly one read");
+            assert!(
+                engine.io.order_locks.uncertain("BTCUSDT"),
+                "fenced, not cancelled"
+            );
+            engine.finish_event_scope(3.);
+            assert_eq!(engine.venue.reconciles.len(), 1, "never asked twice");
+            // Only a fresh order read clears the fence.
+            engine.io.order_response_token = Some(engine.io.order_locks.token());
+            Cx {
+                now: 4.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            }
+            .orders_reconciled(None);
+            engine.io.order_response_token = None;
+            assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+        }
     }
 
     #[cfg(feature = "order-locks")]

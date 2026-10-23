@@ -1016,6 +1016,8 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         let resendable = fact.resendable();
+        let absent = matches!(&fact, crate::classify::WriteFact::Failed { fact, .. }
+            if fact.verdict() == crate::classify::Verdict::Satisfied(crate::classify::SatisfiedIntent::Cancel));
         let result = match fact.into_result() {
             // A placement acknowledgement must name what it placed.
             WriteResult::Accepted { order_ids }
@@ -1033,6 +1035,9 @@ impl<P> Cx<'_, P> {
         // Accepted facts carry no rejection reports.
         let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
         self.record_write(&delivery, result, reports)?;
+        if absent {
+            self.fence_absent_orders(context);
+        }
         if !resendable {
             return Ok(None);
         }
@@ -1098,9 +1103,34 @@ impl<P> Cx<'_, P> {
         };
         let intent = self.write_intent(context)?;
         let result = crate::classify::batch(table, intent, &response, expected, items, message)?;
+        let absent = !matches!(result, WriteResult::Failed(_))
+            && items.iter().any(|item| {
+                matches!(item, crate::classify::BatchItem::Native(native)
+                    if table.verdict(native, intent)
+                        == crate::classify::Verdict::Satisfied(crate::classify::SatisfiedIntent::Cancel))
+            });
         let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
         self.record_write(&delivery, result.clone(), reports)?;
+        if absent {
+            self.fence_absent_orders(context);
+        }
         Ok(result)
+    }
+
+    /// A Satisfied(Cancel) answer is success without a store transition: fence
+    /// the command's symbols and ask the venue for exactly one fresh order read.
+    fn fence_absent_orders(&mut self, context: &Context) {
+        #[cfg(feature = "order-locks")]
+        {
+            let scope = match context.owner() {
+                Owner::Command { id, .. } => self.io.order_locks.reconcile_scope(id).flatten(),
+                _ => None,
+            };
+            self.io.order_locks.fence(scope.as_deref());
+            self.io.queue_reconcile(scope, self.now);
+        }
+        #[cfg(not(feature = "order-locks"))]
+        let _ = context;
     }
 
     /// The intent the engine recorded for this leg's logical command.
@@ -1126,13 +1156,32 @@ impl<P> Cx<'_, P> {
     }
 
     /// Narrow one leg's intent, before its first attempt, where the command
-    /// implies it: an amend's replacement is a Place; a placement may first
-    /// cancel conflicting orders or set a protection setting. An amend's own
-    /// cancel leg can never become a Cancel. The command's own intent is a no-op.
+    /// implies it: an amend's replacement is a Place and its attached TP/SL
+    /// update a Setting; a placement may first cancel conflicting orders or set
+    /// a protection setting. An amend's own cancel leg never becomes a Cancel
+    /// here (see `http_write_protection_cancel_leg`). The command's own intent is
+    /// a no-op.
     pub fn http_write_leg_intent(
         &mut self,
         context: &Context,
         intent: crate::classify::Intent,
+    ) -> Result<(), Error> {
+        self.narrow_leg(context, intent, false)
+    }
+
+    /// The one declared exception for an amend's cancel leg: the old order of a
+    /// cancel-then-recreate whose replacement is position-bound protection
+    /// (reduce-only / close-on-trigger), so an absent old order is safe to
+    /// replace. Never declare it for any other replacement.
+    pub fn http_write_protection_cancel_leg(&mut self, context: &Context) -> Result<(), Error> {
+        self.narrow_leg(context, crate::classify::Intent::Cancel, true)
+    }
+
+    fn narrow_leg(
+        &mut self,
+        context: &Context,
+        intent: crate::classify::Intent,
+        protection_cancel: bool,
     ) -> Result<(), Error> {
         use crate::classify::Intent;
         self.io.request_contexts.validate(context, self.now)?;
@@ -1163,11 +1212,12 @@ impl<P> Cx<'_, P> {
         if owner.intent == Some(intent) && context.operation() == Operation::Mutation {
             return Ok(());
         }
-        let allowed = matches!(
-            (owner.intent, intent),
-            (Some(Intent::Amend), Intent::Place)
-                | (Some(Intent::Place), Intent::Cancel | Intent::Setting)
-        );
+        let allowed = match (owner.intent, intent) {
+            (Some(Intent::Amend), Intent::Cancel) => protection_cancel,
+            (Some(Intent::Amend), Intent::Place | Intent::Setting)
+            | (Some(Intent::Place), Intent::Cancel | Intent::Setting) => !protection_cancel,
+            _ => false,
+        };
         if !allowed || context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
         }
@@ -1912,9 +1962,12 @@ mod write_tests {
         use crate::classify::Intent;
         for (commanded, leg, allowed) in [
             (Intent::Amend, Intent::Place, true),
+            // An amend's attached TP/SL update is a setting.
+            (Intent::Amend, Intent::Setting, true),
             (Intent::Place, Intent::Setting, true),
             // A placement's conflicting-order cancel is a real cancel.
             (Intent::Place, Intent::Cancel, true),
+            // An amend's own cancel leg never borrows cancel success generically.
             (Intent::Amend, Intent::Cancel, false),
             (Intent::Cancel, Intent::Place, false),
             (Intent::Setting, Intent::Cancel, false),
@@ -1970,6 +2023,41 @@ mod write_tests {
             Err(Error::State)
         );
         assert_eq!(cx.write_intent(&context), Ok(Intent::Place));
+
+        // The one declared amend-cancel exception: only an amend's leg, once,
+        // before any attempt; any other command refuses it.
+        for (commanded, allowed) in [
+            (Intent::Amend, true),
+            (Intent::Place, false),
+            (Intent::Cancel, false),
+            (Intent::Setting, false),
+        ] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            io.request_contexts.dispatch = Some((7, commanded));
+            let context = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts.dispatch = None;
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut store,
+                io: &mut io,
+            };
+            if commanded == Intent::Cancel {
+                // A Cancel command's own intent needs no exception.
+                assert_eq!(cx.http_write_protection_cancel_leg(&context), Ok(()));
+                continue;
+            }
+            assert_eq!(
+                cx.http_write_protection_cancel_leg(&context).is_ok(),
+                allowed,
+                "{commanded:?}"
+            );
+            let expected = if allowed { Intent::Cancel } else { commanded };
+            assert_eq!(cx.write_intent(&context), Ok(expected));
+        }
     }
 
     #[test]

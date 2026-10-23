@@ -215,6 +215,23 @@ impl OrderLocks {
         self.active.retain(|(id, _)| *id != command);
         marked
     }
+    /// Fence symbols (`None`: every symbol) until a fresh order read clears
+    /// them through `reconciled`: an absent-order answer proved the order is not
+    /// open, not that it was cancelled.
+    pub fn fence(&mut self, symbols: Option<&[String]>) {
+        self.epoch = self.epoch.saturating_add(1);
+        match symbols {
+            Some(symbols) => {
+                for symbol in symbols {
+                    self.uncertain.insert(symbol.clone(), self.epoch);
+                }
+            }
+            None => {
+                self.uncertain.insert(String::new(), self.epoch);
+            }
+        }
+    }
+
     /// What a reconcile read must cover for this held command: `None` is a
     /// full read (unrouted IDs or an all-symbol cancel), else its symbols.
     pub fn reconcile_scope(&self, command: CommandId) -> Option<Option<Vec<String>>> {
