@@ -188,15 +188,17 @@ slot/ref never implies equal account.
   Generalizes Coinbase's runtime drop; other families adopt it only
   explicitly, listed per PR.
 
-### C2. Account subject (deferred; decision with Sam, not in Phase 2)
+### C2. Account subject (decided by Sam 2026-10-23)
 
 `AccountSubject { signer, trading_account, fee_subject, public_id }` per slot,
 kept as separate fields, resolved once by the venue identity codec and read by
-every request from the engine instead of recomputed. Candidate rule: secondary
-account reads are admitted only once the secondary's resolved trading account
-equals the primary's, where the venue can report it (Coinbase does this today);
-otherwise current behaviour. This changes behaviour for misconfigured read keys
-and needs a claude-ddi2il/owner decision. Not part of Phase 1.
+every request from the engine instead of recomputed. Decision: secondary
+account reads require the secondary key's resolved account subject to equal
+the primary's. A mismatch is refused with a typed, not-sent error, never
+silently served from another account (Coinbase checks this today, by
+portfolio). This changes behaviour for misconfigured read keys and gets a
+RUST_CUTOVER_CALLERS entry. It ships in its own PR after the Coinbase
+adoption.
 
 ### C3. Nonce authority (single store, moved into the engine)
 
@@ -253,6 +255,22 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 - Random/derived/timestamp families keep their protocol data; they are listed
   so a future duplicate-timestamp defect (e.g. cryptocom nonce = request id)
   has one owner.
+
+### C3 as built (part 1: store, keys, Hyperliquid/TxFlow)
+
+- `engine/src/nonce.rs` holds the single process-global store.
+  `crypto::nonce::next` is now a thin caller, kept only for Kraken's legacy
+  secret-digest domain (`reserve_legacy_digest`, frozen by the C4 checker).
+- `NonceKey::{stable_id, ethereum_address}` are the only constructors. The
+  `hyperliquid-agent` key stays byte-identical (`sha256` of the lowercase `0x`
+  address), so no sequence resets across the upgrade.
+- `Cx::reserve_nonce(domain, &key, NonceFloor, limit)` takes the floor from the
+  raw or protocol clock. Hyperliquid and TxFlow reserve through one
+  `agent_nonce` helper. `crypto::nonce::ethereum_agent` is removed.
+- Still to come:
+  - Lighter `VenueCounter`;
+  - Aster V3 (`asterdex-v3`, ProtocolMs x1000), after its open PRs;
+  - `DispatchContext::reserve_nonce`, after #1771.
 
 ### C4. Enforcement
 
@@ -320,7 +338,7 @@ Re-check before each PR.
    - registry AsterDEX/Binance construction.
 
    Each PR prunes its checker rows.
-6. **C2 subject**, only after a decision.
+6. **C2 subject**: refuse secondary reads whose account subject differs from the primary's (typed notSent); RUST_CUTOVER_CALLERS entry.
 
 Each PR:
 - CARGO_BUILD_JOBS=2; `cargo test -p` for touched crates, plus clippy/fmt;
