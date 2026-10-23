@@ -63,6 +63,57 @@ impl<P> Cx<'_, P> {
         Ok(ExecutionHandle(root))
     }
 
+    /// Begin a read execution rooted in a live background read, which keeps
+    /// its own publication rights. Commands may join; none founds it.
+    pub fn begin_background_execution(
+        &mut self,
+        background: &Context,
+        policy: Policy,
+        window: Window,
+    ) -> Result<ExecutionHandle, Error> {
+        if self.io.http_delivery.is_some() || !self.io.next_id.available(1) {
+            return Err(if self.io.http_delivery.is_some() {
+                Error::Revoked
+            } else {
+                Error::Capacity
+            });
+        }
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        let root = self
+            .io
+            .request_contexts
+            .begin_background_execution(identity, background, policy, window, self.now)?;
+        self.io.rearm_execution_timer();
+        Ok(ExecutionHandle(root))
+    }
+
+    /// The next read of the same account adopts owners that joined after
+    /// `previous` was released; owners already past their deadline time out
+    /// once. A retired `previous` (nothing queued) is `Revoked`: begin afresh.
+    pub fn begin_successor_execution(
+        &mut self,
+        previous: &ExecutionHandle,
+        background: &Context,
+        policy: Policy,
+    ) -> Result<ExecutionHandle, Error> {
+        if self.io.http_delivery.is_some() {
+            return Err(Error::Revoked);
+        }
+        if !self.io.next_id.available(1) {
+            return Err(Error::Capacity);
+        }
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        let (root, sealed) = self.io.request_contexts.begin_successor_execution(
+            identity,
+            &previous.0,
+            background,
+            policy,
+            self.now,
+        )?;
+        self.finish_sealed(sealed);
+        Ok(ExecutionHandle(root))
+    }
+
     /// Join with this command's genuine entry root. No new attempt is made and
     /// the execution bound is unchanged.
     pub fn join_execution(

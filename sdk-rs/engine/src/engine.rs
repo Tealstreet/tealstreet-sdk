@@ -78,6 +78,8 @@ impl Method {
 pub enum RequestRoute {
     /// A primary-account read must not use the secondary read identity/egress.
     Primary,
+    /// A read signed by the secondary key uses the read identity's egress.
+    Secondary,
     Direct,
     PublicCors,
 }
@@ -85,6 +87,7 @@ impl RequestRoute {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Primary => "primary",
+            Self::Secondary => "secondary",
             Self::Direct => "direct",
             Self::PublicCors => "publicCors",
         }
@@ -1443,9 +1446,15 @@ struct Io<P> {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    // Reconcile reads the engine owes the venue, one per uncertain seal: the
+    // symbols (`None` = all) and the earliest time to ask.
+    #[cfg(feature = "order-locks")]
+    reconcile_due: Vec<(Option<Vec<String>>, f64)>,
     command_entry: Option<command_entry::Entry>,
     #[cfg(feature = "http-plans")]
     http_plan_ready: Option<crate::request_context::Plan>,
+    #[cfg(feature = "http-plans")]
+    http_plan_expiring: Option<crate::request_context::Plan>,
     http_owner_poison: bool,
     #[cfg(feature = "http-plans")]
     http_plan_poison: bool,
@@ -1519,9 +1528,13 @@ impl<P> Default for Io<P> {
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_due: Vec::new(),
             command_entry: None,
             #[cfg(feature = "http-plans")]
             http_plan_ready: None,
+            #[cfg(feature = "http-plans")]
+            http_plan_expiring: None,
             http_owner_poison: false,
             #[cfg(feature = "http-plans")]
             http_plan_poison: false,
@@ -1587,6 +1600,26 @@ impl<P> Default for Io<P> {
 }
 
 impl<P> Io<P> {
+    /// Bounded: past the cap, coalesce into one full read that waits for the
+    /// latest merged deadline, so no rate or credential wait is cut short.
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
+        const RECONCILE_QUEUE: usize = 64;
+        // A seal at a non-finite clock is due at the next drain.
+        let at = if at.is_finite() { at } else { 0. };
+        if self.reconcile_due.len() < RECONCILE_QUEUE {
+            self.reconcile_due.push((symbols, at));
+            return;
+        }
+        let latest = self
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .fold(at, f64::max);
+        self.reconcile_due = vec![(None, latest)];
+    }
+
     fn managed_socket_active(&self) -> bool {
         #[cfg(feature = "managed-sockets")]
         {
@@ -2310,6 +2343,8 @@ impl<P> Cx<'_, P> {
                 Err(error)
             }
         };
+        // A credential-free route's auth-kind refusal is no credential evidence.
+        let credential_evidence = self.io.request_contexts.owner_credentialed(command);
         self.io.retire_http_command(command);
         if !self.io.request_contexts.finish(command) {
             self.io.http_owner_poison = true;
@@ -2325,7 +2360,33 @@ impl<P> Cx<'_, P> {
             {
                 self.io.order_locks.managed_resolved(command);
             }
-            self.io.order_locks.finish(command, result.is_err());
+            let scope = self.io.order_locks.reconcile_scope(command);
+            let absent = self.io.order_locks.absent_pending(command);
+            let marked = self.io.order_locks.finish(command, result.is_err());
+            let unknown = result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.outcome == Some(crate::Outcome::Unknown));
+            // Every uncertain seal asks again, even for an already-uncertain
+            // symbol: an earlier in-flight read may predate this write.
+            // A managed write the lock never held still reconciles: a full read.
+            let scope = scope.or_else(|| (write_sealed && unknown).then_some(None));
+            if let Some(scope) = scope.filter(|_| unknown || absent || !marked.is_empty()) {
+                // A rate limit or credential refusal must not fan out reads now.
+                let delay = match result.as_ref().err().and_then(|error| error.kind) {
+                    Some(ErrorKind::RateLimited) => result
+                        .as_ref()
+                        .err()
+                        .and_then(|error| error.retry_after_ms)
+                        .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS),
+                    Some(
+                        ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission,
+                    ) => crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS,
+                    _ => 0.,
+                };
+                let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+                self.io.queue_reconcile(scope, self.now + delay);
+            }
             self.io.active_commands.remove(&command);
         }
         #[cfg(not(feature = "order-locks"))]
@@ -2333,7 +2394,9 @@ impl<P> Cx<'_, P> {
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
-                count_auth_failure(self.io, Some(&error));
+                if credential_evidence {
+                    count_auth_failure(self.io, Some(&error));
+                }
                 Notice::CommandFailed { command, error }
             }
         };
@@ -2482,6 +2545,16 @@ pub trait Venue {
         self.on_sign_error(cx, pending, error);
     }
 
+    /// Reconcile writes whose outcome is unknown: issue a fresh order read for
+    /// these symbols (`None`: all) and report it through `orders_reconciled`.
+    /// The engine asks once per uncertain seal, after any rate-limit wait.
+    fn reconcile_uncertain(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _symbols: Option<&[String]>,
+    ) {
+    }
+
     /// Defer symbol cancellation until placement native identities are known.
     fn guard_pending_placements(&self) -> bool {
         false
@@ -2628,7 +2701,9 @@ pub trait Venue {
         _headers: &str,
         error: &str,
     ) {
-        self.on_request_failed(cx, pending, error);
+        // The venue answered but the stream broke (or is not UTF-8): a
+        // malformed reply, never transport loss. Defaults reach on_request_failed.
+        self.on_http_failed(cx, pending, malformed_body(error));
     }
     fn on_request_failed(
         &mut self,
@@ -2638,9 +2713,9 @@ pub trait Venue {
     );
     /// A request that may have reached the venue failed without a usable
     /// response. `error.kind` is `Timeout` for engine deadline expiry,
-    /// `Internal` for a whole delivered body (or managed write reply) the engine
-    /// cannot decode, else `Network`. Streams that break mid-array still use
-    /// `on_stream_malformed`.
+    /// `Internal` for a delivered body (or managed write reply) the engine cannot
+    /// decode, including a stream that breaks mid-array (the default
+    /// `on_stream_malformed` forwards here), else `Network`.
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -2717,6 +2792,8 @@ pub struct Engine<V: Venue> {
     startup_watch_at: Option<f64>,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
+    #[cfg(feature = "order-locks")]
+    reconcile_timer: Option<(TimerId, f64)>,
     /// Set while dispatching released commands, which must not be held again.
     releasing: bool,
     /// Hosts opt in when the account can sign; public-only engines have no account sections.
@@ -2763,6 +2840,8 @@ impl<V: Venue> Engine<V> {
             started: false,
             startup_watch_at: None,
             ack_timer: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_timer: None,
             releasing: false,
             account_startup: false,
             shared_books: HashMap::new(),
@@ -3134,12 +3213,29 @@ impl<V: Venue> Engine<V> {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
             return;
         }
         if let Event::TimerFired { timer } = &event
             && let Some((_, pending)) = self.io.signing.expire(*timer)
         {
             self.sign_failed(now, pending.outbound, crate::signing::SignError::TimedOut);
+            if self.venue.cancel_needs_stored_order() {
+                self.release_held(now);
+            }
+            #[cfg(feature = "order-locks")]
+            self.reconcile_uncertain(now);
+            return;
+        }
+        #[cfg(feature = "order-locks")]
+        if let Event::TimerFired { timer } = &event
+            && self.reconcile_timer.is_some_and(|(own, _)| own == *timer)
+        {
+            self.reconcile_timer = None;
+            // The full end-of-event path: deferred commands, the reconcile
+            // drain itself and shared tickers.
+            self.finish_event_scope(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
@@ -3642,6 +3738,71 @@ impl<V: Venue> Engine<V> {
         {
             self.io.order_response_token = order_response;
         }
+        #[cfg(feature = "order-locks")]
+        self.reconcile_uncertain(now);
+        self.restore_shared_tickers(false, now);
+    }
+
+    /// Ask the venue once for each due uncertain-write reconcile read, then
+    /// re-arm one wake-up for deferred ones. A fresh read the venue reports
+    /// through `orders_reconciled` clears the order-lock fence as before.
+    // Out of line: its callers share one copy (wasm size budget).
+    #[cfg(feature = "order-locks")]
+    #[inline(never)]
+    fn reconcile_uncertain(&mut self, now: f64) {
+        // Never inside a command entry; the hook runs with no HTTP delivery
+        // or order-read authority of its own.
+        if self.io.command_entry.is_some() {
+            return;
+        }
+        let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
+        self.io.reconcile_due.retain_mut(|(scope, at)| {
+            if *at > now && now.is_finite() {
+                return true;
+            }
+            any = true;
+            match scope.take() {
+                None => all = true,
+                Some(scope) => {
+                    for symbol in scope {
+                        if !symbols.contains(&symbol) {
+                            symbols.push(symbol);
+                        }
+                    }
+                }
+            }
+            false
+        });
+        if any {
+            let delivery = self.io.http_delivery.take();
+            let token = self.io.order_response_token.take();
+            let mut cx = Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            };
+            self.venue
+                .reconcile_uncertain(&mut cx, (!all).then_some(symbols.as_slice()));
+            self.io.http_delivery = delivery;
+            self.io.order_response_token = token;
+        }
+        let next = self
+            .io
+            .reconcile_due
+            .iter()
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp);
+        if self.reconcile_timer.map(|(_, at)| at) == next {
+            return;
+        }
+        if let Some((timer, _)) = self.reconcile_timer.take() {
+            self.io.actions.push(Action::ClearTimer { timer });
+        }
+        if let Some(at_ms) = next {
+            let timer = TimerId(self.io.next());
+            self.io.actions.push(Action::SetTimer { timer, at_ms });
+            self.reconcile_timer = Some((timer, at_ms));
+        }
     }
 
     fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {
@@ -3994,6 +4155,7 @@ impl<V: Venue> Engine<V> {
         if !now.is_finite()
             || self.io.http_delivery.is_some()
             || self.io.http_plan_ready.is_some()
+            || self.io.http_plan_expiring.is_some()
             || !self.io.request_contexts.plan_scope_clear()
         {
             return;
@@ -4002,6 +4164,7 @@ impl<V: Venue> Engine<V> {
         while let Some(plan) = self.io.request_contexts.next_plan_ready(now) {
             advanced = true;
             if now >= plan.deadline() {
+                self.expire_plan_calls(now, &plan);
                 Cx {
                     now,
                     store: &mut self.store,
@@ -8179,3 +8342,7 @@ mod dispatch_signing_tests;
 #[cfg(all(test, feature = "order-locks", feature = "http-plans"))]
 #[path = "http_plan_boundary_tests.rs"]
 mod http_plan_boundary_tests;
+
+#[cfg(feature = "http-plans")]
+#[path = "http_plan_expiry.rs"]
+mod http_plan_expiry;

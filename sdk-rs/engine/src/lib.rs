@@ -5,6 +5,7 @@ pub mod capabilities;
 pub mod classify;
 pub mod command;
 pub mod coverage;
+pub mod credential_selection;
 pub mod credentials;
 pub mod de;
 pub mod engine;
@@ -18,6 +19,7 @@ pub mod json;
 pub mod log;
 pub mod metadata;
 pub mod model;
+pub mod nonce;
 pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
