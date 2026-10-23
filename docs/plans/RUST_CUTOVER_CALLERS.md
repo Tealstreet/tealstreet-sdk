@@ -4270,3 +4270,26 @@ venue profile continue to apply. This is a build-profile selection: callers use
 the same loader, API, request/signing contracts and public/private row shapes.
 Other family selections, the combined engine and native build profiles retain
 their existing policy.
+
+## Phemex bounded fills, closed orders and public trades
+
+Fills, closed-order history and public recent trades use the shared HistoryRows
+owner. Eligible rows remain staged until the entire single response validates.
+HTTP, transport, malformed/oversized body and request-preparation failures reject
+with kind `Internal` where these errors were previously unclassified. Existing
+messages are retained, including the shared wrapper's HTTP diagnostic; these
+read failures gain no write outcome. The failure callback combines transport and
+decode paths, so `Internal` is a fallback rather than a network-only claim.
+Callers must handle typed rejection as unavailable history instead of assuming
+an empty result.
+
+These remain bounded one-response endpoints, with no continuation, earlier
+accepted page or incomplete marker. Private fills/orders keep offset zero and
+the requested limit clamped to 1..200; public trades keep the native recent
+snapshot and 1000-row defensive cap. Valid empty responses succeed as `[]`.
+Stable descending native-time sorting, final limit, output shape, filters,
+dedupe and public equal-tuple occurrence IDs are retained. Client-ID lookup,
+income, pre-request admission, signing/credential selection and rate-pause
+behavior retain their existing contracts. This owner uses legacy numeric
+completion; it does not establish managed request or NX runtime adoption.
+[Scope and controls](RUST_OWNED_HISTORY.md).

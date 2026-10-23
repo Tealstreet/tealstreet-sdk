@@ -2179,3 +2179,30 @@ Cargo jobs), source and adversarial/caller reviews, then a draft. Corepack Yarn
 only, never bare/Volta yarn, npx or account-policy. No local release WASM/full
 replay/timing sweep. Respect #1792 then #1789 priority and real-integrate actual
 shared/build inputs before final CI/proof/announced separate guard and merge.
+
+Phemex checkpoint: original 28 controls PASS. Regression-only commit
+`c3c98778f79` adds four assertion-RED groups (missing Internal classification)
+and three compatibility GREEN controls. The wrapper intercepts non-2xx before
+the history response handler; the HTTP-message fixture was corrected to its
+existing `HTTP 503: unavailable` text, without changing production behavior.
+A fresh original-source rerun with that corrected fixture still reports exactly
+31 PASS/4 expected assertion failures. Implementation uses existing boxed
+HistoryRows variants, native seen/count/filter facts and a shared native shaping
+helper; lookup keeps its original numeric finalizers. Whole response validation
+precedes the only accept_page. Failed prefixes have no admitted earlier page.
+
+The request-context inventory change is a single exact prune: Phemex history
+17->16, removing only the direct malformed/oversized cx.fail site now delegated
+to history_failed. Lookup still uses the other finalizer sites, so they remain
+in inventory. No added fingerprints, bootstrap, checker change or other map
+edit. No account/lib/signing/income/shared-engine production change.
+
+Corrected local validation: 770 engine/Phemex native tests PASS, including
+all 35 history controls. Strict all-target/all-feature Clippy, formatting, bans,
+request-context checker plus all 13 checker controls and diff checks PASS.
+Source self-audit confirms the native builder, income, lookup codec, filtering,
+units and row mapping are unchanged; only the three normal row sinks stage into
+the shared owner and final stable shaping moves behind page admission. No local
+release WASM or full replay run. Independent source/caller/full-map review and
+fresh CI remain draft/final-proof gates; actual #1792/#1789 inputs are required
+before landing.

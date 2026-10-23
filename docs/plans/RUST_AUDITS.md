@@ -1998,3 +1998,14 @@ nonempty paths retain native/cache selection; bounded native upsert remains an
 endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## Phemex bounded non-income owner
+
+~~Phemex fills/orders/public trades store output and finalize through venue-local
+Vec and numeric completion branches.~~ Existing HistoryRows/Completion now owns
+staging, one-response admission and terminal delivery. No result is accepted
+until complete response validation, so failure rejects Internal rather than
+publishing a staged prefix, partial result or incomplete marker. Native limits,
+filters, dedupe, sort/shape, shared rate pause and lookup/income policy remain.
+This is bounded owner adoption, not a new pager or managed completion seam.
+[Scope and original controls](RUST_OWNED_HISTORY.md).
