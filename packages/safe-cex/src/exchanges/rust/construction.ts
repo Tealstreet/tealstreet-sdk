@@ -8,7 +8,7 @@ export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'require
 export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
 export type ExtraKeyPolicy = { key: 'zklinkSeed'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
 export type IdentitySetupPolicy = {
-  trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
+  trimCredential?: boolean; trimSigning?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
 };
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
 export type CredentialPresence = Readonly<{ key: boolean; secret: boolean }>;

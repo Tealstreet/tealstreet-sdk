@@ -20,6 +20,8 @@ pub struct CredentialSetupPolicy {
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct IdentitySetupPolicy {
     pub trim_credential: Option<bool>,
+    /// Trim the signing key text (Unicode White_Space) once, before decoding.
+    pub trim_signing: Option<bool>,
     pub passphrase: Option<SetupFieldPolicy>,
     /// Declared secret decoding is authoritative over caller metadata.
     pub secret_encoding: Option<KeyEncoding>,

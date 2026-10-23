@@ -206,6 +206,40 @@ describe('shared credential setup policy', () => {
     },
   );
 
+  it('declares Bitunix signing-key trimming for both slots and forwards it to the provider', () => {
+    const policy = deriveSignerSetupPolicy('bitunix');
+    expect(policy).toEqual({
+      primary: { trimCredential: true, trimSigning: true },
+      secondary: { trimCredential: true, trimSigning: true },
+    });
+    const input = { ...options(), key: ' key ', secret: ' secret\n' };
+    const setup = new LocalSignerSetup(input, policy);
+    let received: unknown;
+    class Engine { constructor(_venue: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    setup.construct(Engine as never, 'bitunix', '{}');
+    expect(received).toMatchObject({
+      primary: { key: ' key ', secret: ' secret\n', trimCredential: true, trimSigning: true },
+      secondary: { trimCredential: true, trimSigning: true },
+    });
+    expect(input.secret).toBe(' secret\n');
+  });
+
+  it.each([['\u0085', false], ['\ufeff', true], [' \t', false], [' s ', true]] as const)(
+    'treats a Bitunix signing key %j by native whitespace semantics', (secret, present) => {
+      const setup = new LocalSignerSetup({ ...options(), secret }, deriveSignerSetupPolicy('bitunix'));
+      expect(setup.credentialPresence.secret).toBe(present);
+      setup.dispose();
+      const secondary = () => new LocalSignerSetup({ ...options(), secondary_secret: secret }, deriveSignerSetupPolicy('bitunix'));
+      if (present) expect(secondary).not.toThrow();
+      else expect(secondary).toThrow(/nonempty key and secret/);
+    },
+  );
+
+  it('never lets caller metadata request signing-key trimming', () => {
+    expect(() => new LocalSignerSetup({ ...options(), localSigner: { primary: { trimSigning: true } } } as unknown as ExchangeOptions)
+      .construct(class {} as never, 'binance', '{}')).toThrow();
+  });
+
   it('does not invent slots solely because a family has a setup policy', () => {
     const setup = new LocalSignerSetup({ publicDataOnly: true } as ExchangeOptions, deriveSignerSetupPolicy('mexc'));
     let received: unknown;
