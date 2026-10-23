@@ -237,7 +237,7 @@ fn identity_disabled_trading_missing_or_malformed_config_and_business_errors_rej
 }
 #[test]
 fn identity_public_only_missing_primary_or_invalid_selected_auth_fails_before_io() {
-    for opts in [
+    for (case, opts) in [
         Options {
             public_data_only: true,
             read_credentials: Some(read()),
@@ -275,10 +275,19 @@ fn identity_public_only_missing_primary_or_invalid_selected_auth_fails_before_io
             }),
             ..options()
         },
-    ] {
-        // Trusted setup refuses required material it can see; otherwise the venue
-        // refuses its unusable identity before any I/O.
-        if opts.clone().try_build().is_err() {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // Trusted setup refuses missing required passphrases outright; every other
+        // case reaches the venue, which refuses its unusable identity before I/O.
+        let refused_by_setup = case == 5;
+        assert_eq!(
+            opts.clone().try_build().is_err(),
+            refused_by_setup,
+            "case {case}"
+        );
+        if refused_by_setup {
             continue;
         }
         let mut e = engine(opts);

@@ -1636,6 +1636,6 @@ describe('RustEngineExchange', () => {
 it('WEEX private engines require the passphrase before starting I/O', async () => {
   const { WasmEngine } = await loadNodeEngine();
   expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow(
-    'WEEX requires a passphrase',
+    'Invalid local signer setup',
   );
 });

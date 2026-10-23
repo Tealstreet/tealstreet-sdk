@@ -16,7 +16,7 @@ impl Venue for Revoke {
         self.0.on_command(cx, command);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        self.0.credentials = None;
+        self.0.credentials = Default::default();
         self.0.on_response(cx, pending, response);
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {

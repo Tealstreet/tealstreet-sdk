@@ -87,17 +87,20 @@ pub fn engine_with_provider(
     engine
 }
 
-/// Signs the first `allow` requests through the trusted provider, then refuses.
+/// Signs or refuses each request in `plan` order, then signs everything after.
 pub struct Gated {
     pub inner: Provider,
-    pub allow: std::sync::atomic::AtomicUsize,
+    pub plan: std::sync::Mutex<std::collections::VecDeque<bool>>,
 }
 impl Gated {
+    pub fn new(inner: Provider, plan: &[bool]) -> Self {
+        Self {
+            inner,
+            plan: std::sync::Mutex::new(plan.iter().copied().collect()),
+        }
+    }
     fn admit(&self) -> bool {
-        use std::sync::atomic::Ordering::SeqCst;
-        self.allow
-            .try_update(SeqCst, SeqCst, |n| n.checked_sub(1))
-            .is_ok()
+        self.plan.lock().unwrap().pop_front().unwrap_or(true)
     }
 }
 impl safe_cex_engine::signing::Signer for Gated {

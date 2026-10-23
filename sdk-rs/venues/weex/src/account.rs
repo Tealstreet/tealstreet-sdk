@@ -300,7 +300,7 @@ impl WeexFutures {
             cx.deactivate();
             return;
         }
-        if self.credentials.is_none() {
+        if self.credentials.primary.is_none() {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
             cx.store.set_orders(vec![]);
@@ -318,7 +318,7 @@ impl WeexFutures {
             self.start_account(cx);
             return;
         }
-        if self.credentials.is_none() || self.account.pending > 0 {
+        if self.credentials.primary.is_none() || self.account.pending > 0 {
             return;
         }
         if let Some(timer) = self.account.refresh.take() {
@@ -327,9 +327,9 @@ impl WeexFutures {
         self.account_cycle(cx);
     }
     fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(credentials) = &self.credentials {
+        if let Some(primary) = &self.credentials.primary {
             // The upgrade is signed with the primary identity at dispatch time.
-            let step = crate::dispatch_signing::Upgrade::new(credentials.primary.clone());
+            let step = crate::dispatch_signing::Upgrade::new(primary.clone());
             self.account.socket = Some(cx.connect_signed(step.unsigned(), Box::new(step)));
             self.account.supervisor.connecting(cx);
         }

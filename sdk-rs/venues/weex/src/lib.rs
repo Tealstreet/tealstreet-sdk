@@ -158,7 +158,7 @@ pub struct WeexFutures {
     settings_auth: safe_cex_engine::MergedScopeAuth,
     trading: trading::State,
     history: history::State,
-    credentials: Option<sign::Credentials>,
+    credentials: sign::Credentials,
     /// Trusted caller-assigned primary stableId; never derived from key material.
     identity: Option<String>,
     /// A supplied primary identity lacks a valid key/signing/passphrase ref.
@@ -186,10 +186,10 @@ impl WeexFutures {
             .as_ref()
             .is_some_and(|read| !complete(read));
         let identity = primary.as_ref().and_then(|p| p.stable_id.clone());
-        let credentials = primary.filter(complete).map(|primary| sign::Credentials {
-            primary,
+        let credentials = sign::Credentials {
+            primary: primary.filter(complete),
             read: options.read_credentials.filter(complete),
-        });
+        };
         Self {
             public: Connection::default(),
             active_symbols: HashSet::new(),
@@ -264,14 +264,14 @@ impl WeexFutures {
             cx.fail(command, String::from("WEEX account reads are rate limited"));
             return;
         }
-        let Some(credentials) = &self.credentials else {
+        let Some(signer) = self.credentials.select(Method::Get) else {
             cx.fail(command, String::from("WEEX leverage requires credentials"));
             return;
         };
         let revision = self.account.settings_revision();
         if let Err(error) = managed::read(
             cx,
-            credentials,
+            signer,
             command,
             format!("/capi/v3/account/symbolConfig?symbol={market_id}"),
             self.seed_generation,
@@ -374,7 +374,7 @@ impl WeexFutures {
         task: Task,
         stream: Option<ArrayAt>,
     ) -> bool {
-        let Some(credentials) = &self.credentials else {
+        let Some((identity, slot)) = self.credentials.select(method) else {
             return false;
         };
         let mut pairs: Vec<_> = query.split('&').filter(|p| !p.is_empty()).collect();
@@ -384,12 +384,7 @@ impl WeexFutures {
         } else {
             format!("{path}?{}", pairs.join("&"))
         };
-        let recipe = dispatch_signing::Http::new(
-            credentials.identity(method).clone(),
-            method,
-            path_query,
-            body,
-        );
+        let recipe = dispatch_signing::Http::new(identity.clone(), method, path_query, body);
         let (url, headers, body) = recipe.unsigned();
         let scope = account::auth_scope(&task);
         let pending = Pending {
@@ -405,7 +400,7 @@ impl WeexFutures {
         };
         cx.sign_http(id, Box::new(recipe));
         if let Some(scope) = scope {
-            cx.tag_account_read(id, credentials.slot(method), scope);
+            cx.tag_account_read(id, slot, scope);
         }
         true
     }
@@ -1076,7 +1071,7 @@ impl Venue for WeexFutures {
             Task::Identity { context, .. } => Self::identity_failed(cx, &context, error),
             Task::Leverage { context, .. } => managed::reject(cx, &context, error),
             Task::Trade(r) => self.trade_failed(cx, r, error),
-            Task::History(r) => self.history_failed(cx, r, error),
+            Task::History(r) => self.history_refused(cx, r, error),
             task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
         }
     }

@@ -1506,3 +1506,34 @@ fn empty_fill_identity_semantic_marker_survives_error_only_logging_before_succes
     );
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:1,result})if result.contains("good"))));
 }
+
+#[test]
+fn provider_refusal_after_an_accepted_page_rejects_strictly_without_partial_rows() {
+    let mut e = support::setup::engine_with_provider(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            ..Options::default()
+        },
+        |inner| std::sync::Arc::new(support::setup::Gated::new(inner, &[true, false])),
+    );
+    let actions = command(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let actions = response(&mut e, NOW, request(&actions, "/order/history").id, NORMAL);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/allAlgoOrders"))),
+        "the refused page is never released"
+    );
+    let error = result(&actions).unwrap_err();
+    assert!(!error.is_empty());
+}

@@ -1,7 +1,7 @@
 //! A rare configuration validation must not change account settings or reconciliation state.
 use crate::{Pending, Task, WeexFutures, account_wire::AccountConfig};
 use safe_cex_engine::request_context::Context;
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Outcome, Response, VenueError};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,7 +54,10 @@ impl WeexFutures {
             finish(cx, command, Err(crate::READ_CREDENTIALS_INVALID.into()));
             return;
         }
-        let Some(credentials) = &self.credentials else {
+        let (Some(_), Some(signer)) = (
+            &self.credentials.primary,
+            self.credentials.select(Method::Get),
+        ) else {
             finish(
                 cx,
                 command,
@@ -76,7 +79,7 @@ impl WeexFutures {
         }
         if let Err(error) = crate::managed::read(
             cx,
-            credentials,
+            signer,
             command,
             "/capi/v3/account/accountConfig".into(),
             self.seed_generation,

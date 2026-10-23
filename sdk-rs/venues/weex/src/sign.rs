@@ -4,24 +4,20 @@ pub use safe_cex_engine::url::encode;
 use safe_cex_engine::{CredentialSlot, Method};
 
 /// Opaque refs only; trusted setup and the injected provider own the material.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Credentials {
-    pub primary: Identity,
+    /// A complete private primary identity; absent for public accounts.
+    pub primary: Option<Identity>,
     pub read: Option<Identity>,
 }
 impl Credentials {
-    /// GET reads use the secondary identity when provisioned; POST stays primary.
-    pub fn slot(&self, method: Method) -> CredentialSlot {
-        if method == Method::Get && self.read.is_some() {
-            CredentialSlot::Secondary
-        } else {
-            CredentialSlot::Primary
-        }
-    }
-    pub fn identity(&self, method: Method) -> &Identity {
-        match (self.slot(method), &self.read) {
-            (CredentialSlot::Secondary, Some(read)) => read,
-            _ => &self.primary,
+    /// GET reads use the secondary identity when provisioned, even without a
+    /// usable primary; every other method requires the primary.
+    pub fn select(&self, method: Method) -> Option<(&Identity, CredentialSlot)> {
+        match (&self.read, &self.primary) {
+            (Some(read), _) if method == Method::Get => Some((read, CredentialSlot::Secondary)),
+            (_, Some(primary)) => Some((primary, CredentialSlot::Primary)),
+            _ => None,
         }
     }
 }

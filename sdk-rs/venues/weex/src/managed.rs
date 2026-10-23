@@ -1,12 +1,12 @@
 //! Single-owner command reads under engine-issued Read authority. Route,
 //! release, deadline and outcome policy stay with the shared lifecycle.
 use crate::dispatch_signing::Http;
-use crate::sign::Credentials;
 use crate::{Pending, Task};
 use safe_cex_engine::request_context::{
     Context, Credential, Operation, Policy, RetryPolicy, Scope,
 };
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, VenueError};
+use safe_cex_engine::signing::Identity;
+use safe_cex_engine::{CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, VenueError};
 
 fn refused() -> VenueError {
     VenueError::new("WEEX managed read lifecycle is unavailable")
@@ -19,20 +19,19 @@ fn refused() -> VenueError {
 /// Without engine authority nothing is issued and the caller fails the command.
 pub(crate) fn read(
     cx: &mut Cx<'_, Pending>,
-    credentials: &Credentials,
+    (identity, slot): (&Identity, CredentialSlot),
     command: CommandId,
     path_query: String,
     seed_generation: u32,
     task: impl FnOnce(Context) -> Task,
 ) -> Result<(), VenueError> {
     let method = Method::Get;
-    let identity = credentials.identity(method);
     let Ok(context) = cx.http_context(
         Scope::Command(command),
         Policy {
             operation: Operation::Read,
             credential: Some(Credential {
-                slot: credentials.slot(method),
+                slot,
                 reference: identity.credential.clone(),
             }),
             timeout_ms: 20_000,
