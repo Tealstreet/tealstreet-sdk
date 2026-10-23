@@ -60,7 +60,7 @@ fn cases() -> Vec<Case> {
         Case {
             private: true,
             paused: false,
-            read: Read::History(orders(Some(NOW + 1.), None, None)),
+            read: Read::History(orders(Some(NOW + 100.), None, None)),
             error: "Invalid MEXC query time range",
         },
         Case {
@@ -381,7 +381,11 @@ fn duplicate_numeric_id_does_not_steal_an_existing_managed_owner() {
         let (mut e, pending_pause) = fixture(&case);
         let peer = book(&mut e, 605);
         pause(&mut e, pending_pause);
-        assert!(dispatch(&mut e, NOW, 605, case.read).is_empty());
+        let actions = dispatch(&mut e, NOW, 605, case.read);
+        assert!(
+            matches!(actions.as_slice(), [Action::Notice(Notice::Event(event))]
+            if event.code == safe_cex_engine::log::code::COMMAND_DUPLICATE)
+        );
         assert!(e.http_preparation_pending(peer));
         e.http_preparation_failed(
             NOW + 1.,
