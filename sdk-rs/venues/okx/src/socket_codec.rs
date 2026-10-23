@@ -200,12 +200,28 @@ impl Okx {
             }
             LifecycleEvent::Ready { epoch, reopened } => {
                 let channel = self.feed_channel(epoch.feed()).ok_or(SocketError::Stale)?;
-                self.propose_interests(cx, channel)?;
+                if channel != PUBLIC && self.credentials.is_some() {
+                    let desired = self.desired_socket_interests(cx.store, channel);
+                    let required: Vec<_> = desired
+                        .iter()
+                        .filter(|interest| {
+                            serde_json::from_str::<TopicArgs<'_>>(&interest.wire_args)
+                                .is_ok_and(|args| !args.channel.starts_with("candle"))
+                        })
+                        .map(|interest| interest.key.to_string())
+                        .collect();
+                    let keys: Vec<_> = required.iter().map(String::as_str).collect();
+                    cx.set_socket_interests_then(
+                        epoch.feed(),
+                        desired,
+                        &keys,
+                        Pending::SocketRefresh { reopened },
+                    )?;
+                } else {
+                    self.propose_interests(cx, channel)?;
+                }
                 if channel == PUBLIC || self.credentials.is_none() {
                     cx.send_after_socket_interests(epoch.feed(), "ping".into())?;
-                }
-                if channel != PUBLIC && self.credentials.is_some() {
-                    self.socket_account_ready(cx, reopened);
                 }
             }
             LifecycleEvent::AuthFailure {

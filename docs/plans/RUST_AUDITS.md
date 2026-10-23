@@ -2466,3 +2466,20 @@ Bitrue42->38 occurrences,27->25 rows, five files retained. The separate history
 slice's prune composes independently. Native successful leverage joins, refresh,
 projection, account replies and signed bracket requests remain unchanged; no
 managed private-read, execution-group or whole-venue zero claim is introduced.
+
+
+## Subscription handoff custody boundary
+
+The shared correction adds bounded native Pending custody and a read-only
+arming tail after the existing final drain dispatch/fence/retirement checks.
+Native callbacks run only at later timer ingress; they cannot retroactively
+remove prerequisite frames from an already returned batch. Required canonical
+interests bind work to committed revisions, and only committed changes cancel
+or rebase existing work. Refused replacements do not revoke old committed work.
+
+The uufub4 API/drain review of 4583d233556 plus 8739ef44fcf cleared this timer-boundary
+design with explicit committed-change, subsequent-ingress and timer-bookkeeping
+controls. The runtime source review is separate. HTTP lifecycle, signing
+release/gates, Plan flushing, financial reducers and request recipes retain
+their existing ownership. No legacy-inventory or performance-budget changes
+are part of this shared correction; WOO consumes the seam in its own PR.

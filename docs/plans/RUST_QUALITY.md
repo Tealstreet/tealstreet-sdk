@@ -1044,3 +1044,32 @@ explicitly retires roots and recovers at one clock. Fixed-clock reuse and invali
 raw clocks distinguish shared admission from native messages and Store stability.
 Valid bracket/account requests retain their signed dispatch; existing account
 suite assertions continue to own successful caller completion/group behavior.
+
+
+## Subscription handoff ordering controls
+
+The assertion-only real OKX private reconnect test fails on the original
+managed adapter (HTTP index 2 before subscription index 5); the identical native
+pre-#1771 control passes in an isolated source/target. The corrected control
+compares the complete concatenated action batches and fires the actual queued
+wakeup, preserving the subscription-before-refresh assertion.
+
+Seventeen engine controls cover actual managed Prepare/Bind/Claim, final-batch
+fencing, callback retirement/replacement, required-interest removal and wire
+changes, refusal, additive supersession, pacing, repair/no-op, auth and delayed
+signing, bounded atomic admission, last-safe ID/rearm, duplicate/early/expired
+wakeups, HTTP-delivery isolation, command-entry refusal and caught fatal state.
+Existing OKX account, product and reconciliation fixtures drive genuine wakeups
+at their native reconnect times; their financial assertions stay unchanged.
+The focused engine/OKX all-target/all-feature run passes 1,241 tests.
+
+Three actual EngineHost bookkeeping controls fail against the original host
+and pass with inline/cleared/superseded timer ownership repaired. The full scoped
+host-unit command passes 194 tests. These local correctness results do not make
+a CPU, memory, size or replay-parity claim; those measurements belong to CI.
+
+Engine feature modes pass: feature-off 718, managed-sockets 820, http-plans 806,
+and combined 908 tests. Strict focused Clippy is clean. The initial bans run
+fails because the newer remote landing has already pruned unrelated Paradex
+and Phemex history inventory; this branch must integrate those actual changes
+before a current-landing ratchet pass is claimed.

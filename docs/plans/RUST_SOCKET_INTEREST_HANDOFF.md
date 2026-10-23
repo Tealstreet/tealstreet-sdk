@@ -52,8 +52,8 @@ of the barrier; the first frame never releases a whole continuation. Keep exact
 revision ownership through replacement, including replacement before drain;
 superseded native work must not lose a still-needed book seed or seed a removed
 and re-created book. Required wire interests and native generation binding need
-explicit representation in the reviewed API. Refusal/retirement cancels custody
-and frees each reservation once. Do not infer send authority from numeric IDs.
+explicit representation in the reviewed API. Refusal cancels only the new proposal's custody; retirement cancels epoch custody.
+Each reservation is freed once. Do not infer send authority from numeric IDs.
 
 Remove work before invocation; drain a bounded snapshot, preventing recursive
 self-registration. Fresh clock/auth/signing/epoch checks precede invocation.
@@ -81,7 +81,7 @@ The no-work steady ingress path must remain allocation-free.
    strict Clippy/fmt, ratchets and preservation reviews precede fresh full CI.
 6. Include caller/quality/audit sections. Report source-equivalent limits and
    CPU/memory/size gates honestly. Send the green frozen PR/head to the auditor
-   for combo-3b first if ready, otherwise combo-4. No merge without train GO;
+   first in combo-4. No merge without train GO;
    separate fresh scope/unowned/revert guard then head-matched merge.
 
 ## Concrete API candidate
@@ -95,8 +95,9 @@ with no new numeric terminal or HTTP authority. The combined proposal/pending
 count and retained interest bytes share bounded credits; a wakeup TimerId comes
 from the landed checked allocator only after every preflight succeeds.
 
-The proposal carries the pending record until commit; failure cancels it. A
-later replacement/repair rebinds the continuation to the latest revision only
+The proposal carries the pending record until commit; failure cancels only that
+new record. A refused replacement/repair preserves existing still-needed work
+on the unchanged committed revision. A committed replacement/repair rebinds the continuation to the latest revision only
 while every required Interest is unchanged. A removed required key cancels the
 work immediately, even if a later proposal re-adds it. This prevents a removed
 and re-created book from inheriting an old seed. Unrelated additive interests
@@ -114,15 +115,16 @@ WsSend actions. The wakeup validates the sealed epoch/revision receipt, consumes
 and frees custody before invocation, and uses the same event/fatal/retirement
 rails as ordinary socket ingress. Early, duplicate and cancelled timers are inert.
 
-If another proposal arrives between handoff and wakeup, the engine cancels that
+If another proposal commits between handoff and wakeup, the engine cancels that
 wakeup, applies the required-interest rule, and waits for a new final handoff.
+A refused proposal preserves/rearms work on the unchanged committed revision.
 No callback can retroactively fence the prerequisite frames from an earlier
 returned batch. Callback-created work is ordinary HTTP under normal contexts;
 it does not inherit a command/response/Plan/Preflight activation loan.
 
 No new host wire action or peer ACK is introduced. Tests compare concatenated
 ordered host batches, firing only the actual engine wakeup, and retain the exact
-native baseline comparison. The new internal scheduling turn is a caller-visible
+native baseline comparison. The subsequent engine ingress is a caller-visible
 timing change and must be documented; no timeout or account policy is enlarged.
 
 The existing JS host passes two focused handoff controls using the actual
@@ -131,3 +133,20 @@ socket sender before arming and executing the continuation that issues HTTP.
 The new host test uses the host-unit filename glob, so the ordinary CI command
 picks it up. This proves host action ordering only; it does not establish the
 new engine receipt, cancellation or managed HTTP authority checks.
+
+
+## Reviewed timer-boundary implementation
+
+The API/drain review of 4583d233556 plus 8739ef44fcf cleared implementation before
+the separate runtime review. Arming retains the original drain body verbatim
+and adds only a read-only continuation check after its final safety assertion.
+No native callback executes at final drain. A fresh wakeup ID is reserved after
+rebasing an already armed revision, so a late old event cannot consume new work.
+The empty continuation path performs no allocation or additional batch scan.
+
+The actual EngineHost controls also expose and repair inline timer handle
+bookkeeping: an inline-fired arm must never be inserted after its callback,
+and cleared/superseded callbacks cannot delete or invoke the current arm.
+The ordering promise is a subsequent engine ingress after host handoff, even
+when a host's timer implementation calls back inline; it is not an event-loop
+or peer-ACK guarantee. Three controls are assertion RED against the old host.

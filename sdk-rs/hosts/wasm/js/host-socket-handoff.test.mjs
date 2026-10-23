@@ -47,6 +47,39 @@ for (const inline of [false, true]) {
     }
     assert.deepEqual(effects, ['subscription handoff', 'arm continuation',
       'engine continuation', 'HTTP handoff']);
+    assert.equal(host.timers.size, 0);
+    wake();
+    assert.equal(effects.filter((value) => value === 'engine continuation').length, 1);
+    assert.equal(host.timers.size, 0);
     host.dispose();
   });
 }
+
+test('cleared and superseded timer callbacks cannot consume a new arm', () => {
+  const callbacks = [];
+  const cleared = [];
+  let calls = 0;
+  const host = new EngineHost({ timer() { calls++; return '[]'; } }, {
+    now: () => 100,
+    setTimeout(callback) { callbacks.push(callback); return callbacks.length; },
+    clearTimeout(handle) { cleared.push(handle); },
+  });
+  const arm = () => host.execute({ op: 'setTimer', timer: 19, at: 100 });
+  arm();
+  arm();
+  assert.deepEqual(cleared, [1]);
+  callbacks[0]();
+  assert.equal(calls, 0);
+  assert.equal(host.timers.get(19), 2);
+  callbacks[1]();
+  callbacks[1]();
+  assert.equal(calls, 1);
+  assert.equal(host.timers.size, 0);
+  arm();
+  host.execute({ op: 'clearTimer', timer: 19 });
+  callbacks[2]();
+  assert.equal(calls, 1);
+  assert.equal(host.timers.size, 0);
+  assert.deepEqual(cleared, [1, 3]);
+  host.dispose();
+});

@@ -561,7 +561,18 @@ fn reconnect_subscription_precedes_its_account_refresh() {
             text: LOGIN_OK,
         },
     );
-    let out: Vec<_> = h.engine.drain_actions().collect();
+    let mut out: Vec<_> = h.engine.drain_actions().collect();
+    let wakeups: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in wakeups {
+        h.engine.handle(at, Event::TimerFired { timer });
+        out.extend(h.engine.drain_actions());
+    }
     let subscribe = out.iter().position(|action| matches!(action,
         Action::WsSend { socket, text } if *socket == replacement && text.contains("subscribe")
     )).expect("private subscription");
