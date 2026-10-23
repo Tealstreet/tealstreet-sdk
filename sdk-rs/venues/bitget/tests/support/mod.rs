@@ -87,6 +87,9 @@ impl Harness {
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions() {
             match action {
+                Action::ManagedHttp(_) => {
+                    panic!("managed HTTP requires the prepared test-driver handshake")
+                }
                 Action::Sign { .. }
                 | Action::SignedOutbound { .. }
                 | Action::SignPayload { .. } => {

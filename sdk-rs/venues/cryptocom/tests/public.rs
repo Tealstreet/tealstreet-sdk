@@ -391,7 +391,10 @@ fn rest_book_success_and_failure_leave_live_book_ticker_and_account_untouched() 
                 limit: Some(1),
             }),
         );
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut engine, 3.0)
+            .into_iter()
+            .filter(|action| !matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+            .collect();
         assert_eq!(actions.len(), 1);
         let Action::Http(request) = &actions[0] else {
             panic!("unsigned public query")
@@ -437,4 +440,46 @@ fn rest_book_success_and_failure_leave_live_book_ticker_and_account_untouched() 
     }
     engine.handle(5.0,Event::WsMessage {socket,text:r#"{"id":-1,"code":0,"result":{"channel":"book","instrument_name":"BTCUSD-PERP","data":[{"bids":[["98","5","1"]],"asks":[]}]}}"#});
     assert_eq!(engine.book("BTCUSD-PERP").unwrap().bids(), [(98.0, 5.0)]);
+}
+
+#[test]
+fn instrument_summary_counts_duplicates_and_keeps_the_first_label() {
+    for (first, label) in [
+        (r#"{"inst_type":"PERPETUAL_SWAP"}"#, "without an id"),
+        (r#"{"inst_type":"PERPETUAL_SWAP","symbol":""}"#, ""),
+        (r#"{"inst_type":"PERPETUAL_SWAP","symbol":"bad"}"#, "bad"),
+    ] {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+            public_data_only: true,
+            ..Default::default()
+        }));
+        engine.start(0.0);
+        let good = r#"{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.0001","quote_decimals":1,"quantity_decimals":4,"max_leverage":"50"}"#;
+        let duplicate = r#"{"inst_type":"PERPETUAL_SWAP","symbol":"duplicate"}"#;
+        answer(
+            &mut engine,
+            &format!(
+                r#"{{"code":0,"result":{{"data":[{first},{duplicate},{duplicate},{good}]}}}}"#
+            ),
+        );
+        assert!(engine.store().market("BTCUSD-PERP").is_some());
+        let reports: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Event(e))
+                    if e.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+                {
+                    Some(e)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].level, safe_cex_engine::Level::Warn);
+        assert_eq!(
+            reports[0].message,
+            format!("Crypto.com skipped 3 unmappable instrument rows (first: {label})")
+        );
+        assert_eq!(engine.health().rows_skipped, 1);
+    }
 }

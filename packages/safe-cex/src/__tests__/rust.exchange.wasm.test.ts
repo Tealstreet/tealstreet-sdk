@@ -9,6 +9,7 @@ import { HYROTRADER_PROD_URL, HYROTRADER_SIMULATOR_URL } from '../exchanges/bybi
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
+import { prepareRecordedHttp } from './support/managedHttp';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { PRIVATE_PROXY_JP } from '../transport/tealstreet/transportResolution';
 import { OrderSide, OrderStatus, OrderType } from '../types';
@@ -56,6 +57,7 @@ const recordedTransport = (overrides: Record<string, { status: number; body: str
   const sockets = new Map<string, (text: string) => void>();
   const requests: string[] = [];
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       sockets.set(new URL(url).pathname, onMessage);
@@ -299,6 +301,8 @@ const bingxTransport = () => {
   const writes: Array<{ path: string; body?: string }> = [];
   let nextOrderId = 4242;
   const transport: Transport = {
+    // BingX credentialed reads are managed; route preparation precedes signing.
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       sockets.set(new URL(url).pathname, onMessage);
@@ -663,27 +667,32 @@ describe('RustEngineExchange', () => {
     expect([...tape.sockets.keys()].some((path) => path.includes('/private'))).toBe(false);
   });
 
-  it('rejects remote-only private signing before transport starts', async () => {
+  it('starts a remote-only private account through owned signing and retains streaming sessions', async () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    exchange = new RustEngineExchange(
-      'binance',
-      {
-        key: 'k',
-        secret: '',
-        remoteSigner: {
-          accountName: 'test',
-          sign: async () => ({ id: 'unused', error: 'must not be called' }),
-          isAvailable: () => true,
-          onAvailabilityChange: () => () => undefined,
-        },
-      },
-      new DefaultStore(),
-    );
-
-    await expect(exchange.start()).rejects.toThrow('keyless remote-signed accounts run on the TS venue');
-    expect(tape.requests).toEqual([]);
+    const store = new DefaultStore();
+    const sign = vi.fn(async (work: Parameters<NonNullable<ExchangeOptions['remoteSigner']>['sign']>[0]) => ({
+      id: work.id, wsAuthSignature: createHmac('sha256', 'delegated-provider-fixture').update(work.wsAuth!.toSign).digest('hex'),
+    }));
+    exchange = new RustEngineExchange('binance', { key: 'k', secret: '', remoteSigner: {
+      accountName: 'test', sign, isAvailable: () => true, onAvailabilityChange: () => () => undefined,
+    } }, store);
+    await exchange.start();
+    expect(store.balance).toMatchObject({ total: 1000, free: 900, used: 100 });
+    expect(store.loaded.orders && store.loaded.positions).toBe(true);
+    expect(sign).toHaveBeenCalled();
+    const signedReads = tape.requests.filter((line) => line.includes('signature='));
+    expect(signedReads.length).toBeGreaterThan(0);
+    for (const [, url] of signedReads.map((line) => line.split(' '))) {
+      const query = url.split('?')[1];
+      const [payload, signature] = query.split('&signature=');
+      expect(signature).toBe(createHmac('sha256', 'delegated-provider-fixture').update(payload).digest('hex'));
+    }
+    expect(tape.requests.some((request) => request.includes('listenKey'))).toBe(true);
+    await until(() => [...tape.sockets.keys()].some((path) => path.includes('/private')));
+    expect(exchange.options).not.toHaveProperty('secret');
+    expect(exchange.options).not.toHaveProperty('remoteSigner');
   });
 
   it('keeps all three real Bitget public feeds direct on their first connection', async () => {
@@ -743,22 +752,36 @@ describe('RustEngineExchange', () => {
     },
   );
 
-  it('rejects payload-only private signing before transport starts', async () => {
+  it('starts a PayloadSigner account through actual signed REST with callback headers and no private session', async () => {
     const tape = recordedTransport();
+    const baseRequest = tape.transport.request;
+    const signed: Array<Parameters<Transport['request']>[0]> = [];
+    tape.transport.request = async (request) => {
+      if (request.url.includes('signature=')) signed.push(request);
+      return baseRequest(request);
+    };
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    exchange = new RustEngineExchange(
-      'binance',
-      {
-        key: 'k',
-        secret: '',
-        payloadSigner: async () => ({ signature: 'unused' }),
-      } satisfies ExchangeOptions,
-      new DefaultStore(),
-    );
-
-    await expect(exchange.start()).rejects.toThrow('remote signing is unsupported');
-    expect(tape.requests).toEqual([]);
+    const store = new DefaultStore();
+    const callback = vi.fn(async ({ payload }: { payload: string }) => ({
+      signature: createHmac('sha256', 'delegated-provider-fixture').update(payload).digest('hex'),
+      headers: { 'X-Proof': 'same-attempt' },
+    }));
+    exchange = new RustEngineExchange('binance', { key: 'k', secret: '', payloadSigner: callback }, store);
+    await exchange.start();
+    expect(store.balance).toMatchObject({ total: 1000, free: 900, used: 100 });
+    expect(store.loaded.orders && store.loaded.positions).toBe(true);
+    expect(callback).toHaveBeenCalled();
+    expect(signed.length).toBeGreaterThan(0);
+    for (const request of signed) {
+      expect(request.headers['X-Proof']).toBe('same-attempt');
+      const [payload, signature] = request.url.split('?')[1].split('&signature=');
+      expect(signature).toBe(createHmac('sha256', 'delegated-provider-fixture').update(payload).digest('hex'));
+    }
+    expect(tape.requests.some((request) => request.includes('listenKey'))).toBe(false);
+    expect([...tape.sockets.keys()].some((path) => path.includes('/private'))).toBe(false);
+    expect(exchange.options).not.toHaveProperty('payloadSigner');
+    expect(exchange.options).not.toHaveProperty('secret');
   });
 
   it('turns trading methods into engine commands and loads the account', async () => {
@@ -1615,6 +1638,6 @@ describe('RustEngineExchange', () => {
 it('WEEX private engines require the passphrase before starting I/O', async () => {
   const { WasmEngine } = await loadNodeEngine();
   expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow(
-    'WEEX requires a passphrase',
+    'Invalid local signer setup',
   );
 });

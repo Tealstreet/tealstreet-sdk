@@ -486,7 +486,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
     h.seed();
     h.actions.clear();
     h.e.handle(1000., Event::TimerFired { timer: retry });
-    h.collect();
+    h.collect_at(1000.);
     h.reply(
         "instruments",
         &PARTIAL_INSTRUMENTS.replace("\"maxLeverage\":\"0\"", "\"maxLeverage\":\"20\""),
@@ -504,7 +504,8 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
     assert!(
         !h.actions
             .iter()
-            .any(|a| matches!(a, Action::WsConnect { .. } | Action::SetTimer { .. })),
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+            && new_timer(&h.actions).is_none(),
         "{:?}",
         h.actions
     );
@@ -1798,8 +1799,9 @@ fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
             if event.message.contains("Malformed BloFin order row"))));
 }
 fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
-    actions.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+    actions.iter().enumerate().find_map(|(index, action)| match action {
+        Action::SetTimer { timer, at_ms }
+            if !actions[index + 1..].iter().any(|action| matches!(action, Action::ClearTimer { timer: cleared } if cleared == timer)) => Some((*timer, *at_ms)),
         _ => None,
     })
 }
@@ -1816,7 +1818,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     assert!(h.e.store().order("working").is_some());
     let listed = h.e.store().market_by_id("BTC-USDT").cloned().unwrap();
     h.e.handle(at, Event::TimerFired { timer: retry });
-    h.collect();
+    h.collect_at(at);
     // BTC-USDT drops out of the list while BAD-USDT stays malformed.
     h.reply(
         "instruments",
@@ -1853,7 +1855,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let mut rereads = 0;
     while let Some((timer, at)) = retry.take() {
         h.e.handle(at, Event::TimerFired { timer });
-        h.collect();
+        h.collect_at(at);
         h.actions.clear();
         h.reply("instruments", PARTIAL_INSTRUMENTS);
         rereads += 1;
@@ -2057,6 +2059,118 @@ fn kept_attached_tpsl_leg_is_not_duplicated_by_its_parent() {
     assert_eq!(legs(&h), ["T1__take_profit"]);
     poll_lists(&mut h, 30_000.0, POSITION, parent, "");
     assert_eq!(legs(&h), ["X__take_profit"]);
+}
+
+#[test]
+fn row_report_order_aliases_rearm_on_decode_even_when_the_read_cannot_commit() {
+    let mut h = Harness::new();
+    h.seed();
+    let bad = ["order-alias", "tpsl-alias", "algo-alias"]
+        .map(|id| format!(r#"{{"instId":"BTC-USDT","orderId":"{id}","size":null}}"#))
+        .join(",");
+    let skips = |logs: Vec<String>| {
+        logs.into_iter()
+            .filter(|message| message.starts_with("BloFin skipped malformed order row"))
+            .collect::<Vec<_>>()
+    };
+    let expected = ["order-alias", "tpsl-alias", "algo-alias"]
+        .map(|id| format!("BloFin skipped malformed order row {id}"));
+    assert_eq!(skips(poll(&mut h, 10_000.0, POSITION, &bad)), expected);
+    assert!(skips(poll(&mut h, 20_000.0, POSITION, &bad)).is_empty());
+
+    // Decoding rearms all aliases before market mapping. The unidentified next
+    // row fails this read, preventing the clean accepted-read clear as a shortcut.
+    let decoded = r#"{"instId":"FILTERED-USD","orderId":"order-alias","tpslId":"tpsl-alias","algoId":"algo-alias","side":"buy","size":"1","price":"100","state":"live"}"#;
+    poll(
+        &mut h,
+        30_000.0,
+        POSITION,
+        &format!("{decoded},{{\"size\":null}}"),
+    );
+    assert_eq!(skips(poll(&mut h, 40_000.0, POSITION, &bad)), expected);
+    assert!(h.e.store().orders().is_empty());
+}
+
+#[test]
+fn row_report_position_decode_rearms_before_a_held_snapshot_and_keeps_empty_identity() {
+    let mut h = Harness::new();
+    h.seed();
+    let bad = POSITION.replace("\"positions\":\"4\"", "\"positions\":null");
+    let messages = |logs: Vec<String>| {
+        logs.into_iter()
+            .filter(|message| message.starts_with("BloFin skipped malformed position row"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        messages(poll(&mut h, 10_000.0, &bad, "")),
+        ["BloFin skipped malformed position row BTC-USDT"]
+    );
+    assert!(messages(poll(&mut h, 20_000.0, &bad, "")).is_empty());
+    let held = format!("{POSITION},{{\"positions\":null}}");
+    assert_eq!(
+        messages(poll(&mut h, 30_000.0, &held, "")),
+        ["BloFin skipped malformed position row without an instrument"]
+    );
+    assert_eq!(
+        messages(poll(&mut h, 40_000.0, &bad, "")),
+        ["BloFin skipped malformed position row BTC-USDT"]
+    );
+    assert_eq!(h.e.store().position("BTCUSDT").unwrap().contracts, 0.004);
+}
+
+#[test]
+fn row_report_position_decode_rearms_only_its_key_before_a_later_failed_row() {
+    let mut h = Harness::with_instruments(PARTIAL_INSTRUMENTS);
+    h.seed();
+    let bad = POSITION.replace("\"positions\":\"4\"", "\"positions\":null");
+    let anonymous = r#"{"positions":null}"#;
+    let messages = |logs: Vec<String>| {
+        logs.into_iter()
+            .filter(|message| message.starts_with("BloFin skipped malformed position row"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        messages(poll(&mut h, 10_000.0, &format!("{bad},{anonymous}"), "")).len(),
+        2
+    );
+    // This malformed-catalogue row fails the whole read after decoding BTC.
+    // No balance/commit clear can explain rearming BTC or erase anonymous memory.
+    let failed = format!(r#"{POSITION},{{"instId":"BAD-USDT","positions":null}},{anonymous}"#);
+    assert!(messages(poll(&mut h, 20_000.0, &failed, "")).is_empty());
+    assert_eq!(
+        messages(poll(&mut h, 30_000.0, &format!("{bad},{anonymous}"), "")),
+        ["BloFin skipped malformed position row BTC-USDT"]
+    );
+}
+
+#[test]
+fn row_report_once_does_not_upgrade_after_the_retained_position_is_removed() {
+    let mut h = Harness::new();
+    h.seed();
+    let bad = POSITION.replace("\"positions\":\"4\"", "\"positions\":null");
+    poll(&mut h, 10_000.0, &bad, "");
+    let reports: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.message == "BloFin skipped malformed position row BTC-USDT" =>
+            {
+                Some(event.level)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reports, [safe_cex_engine::Level::Warn]);
+    h.ws(r#"{"arg":{"channel":"positions"},"data":[]}"#);
+    assert!(h.e.store().positions().is_empty());
+    let logs = poll(&mut h, 20_000.0, &bad, "");
+    assert!(
+        !logs
+            .iter()
+            .any(|message| message == "BloFin skipped malformed position row BTC-USDT"),
+        "native Once remains quiet even when the next skip would be Error"
+    );
 }
 
 fn prefix_overflow_event(quantity: &str, average: &str) -> String {

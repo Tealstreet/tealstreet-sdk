@@ -55,6 +55,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The shrink-only request provenance ratchet verifies immutable base
+          # and parent manifests, never a caller-supplied enlarged inventory.
+          fetch-depth: 0
       - name: Reject JavaScript emulation and deleted-port dependencies
         run: ./scripts/check-bans.sh
 
@@ -363,6 +367,9 @@ jobs:
       - name: Build the combined wasm engine
         if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
         run: corepack yarn rust:build-wasm
+      - name: Combined capability command conformance
+        if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
+        run: corepack yarn -s node --test sdk-rs/harness/capabilities-combined.integration.mjs
       - name: Check the shipped combined wasm size budget
         if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
         run: corepack yarn -s rust:wasm-budget --combined
@@ -456,6 +463,9 @@ jobs:
             corepack yarn "rust:private-tape-$venue"
             corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
           done
+      - name: MEXC missing command-feature negative control
+        if: matrix.venue == 'mexc'
+        run: corepack yarn -s node sdk-rs/harness/capability-feature-control.mjs
       - name: Hyperliquid Spot compiled native account and trading contracts
         if: matrix.venue == 'hyperliquidspot'
         run: corepack yarn rust:test-hyperliquidspot-parity

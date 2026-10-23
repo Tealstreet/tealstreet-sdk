@@ -220,7 +220,7 @@ describe('shared credential setup policy', () => {
 });
 
 
-const passphraseFamilies = ['okx', 'okxeu', 'okxdemo', 'okxeudemo', 'bitget', 'bitgetinverse', 'bitgetusdc'] as const;
+const passphraseFamilies = ['okx', 'okxeu', 'okxdemo', 'okxeudemo', 'bitget', 'bitgetinverse', 'bitgetusdc', 'weex'] as const;
 const requiredSetup = (input: Partial<ExchangeOptions>, venue: typeof passphraseFamilies[number] = 'okx') =>
   new LocalSignerSetup(input as ExchangeOptions, deriveSignerSetupPolicy(venue));
 const setupFailure = (run: () => unknown): unknown => {
@@ -235,19 +235,22 @@ const setupPayload = (setup: LocalSignerSetup, venue = 'okx'): unknown => {
 };
 
 describe('shared required passphrase field policy', () => {
-  it.each(passphraseFamilies)('%s declares both slot rules independently of family adoption', (venue) => {
+  it.each(passphraseFamilies)('%s declares both slot rules; only migrated Bitget and WEEX adopt dispatch signing', (venue) => {
     expect(deriveSignerSetupPolicy(venue)).toEqual({
       primary: { passphrase: 'requiredForPrivate' },
       secondary: { passphrase: 'requiredWithPrimaryFallback' },
     });
-    const migrated = venue.startsWith('bitget');
+    const bitget = venue.startsWith('bitget');
+    const migrated = bitget || venue === 'weex';
     expect(deriveBridgeConstruction(venue, {} as ExchangeOptions).dispatchSigning).toBe(migrated);
     const construct = () => new RustEngineExchange(venue, { key: 'key', secret: 'secret', passphrase: 'pass', localSigner: {} } as ExchangeOptions, new DefaultStore());
-    if (migrated) {
+    if (bitget) {
       const exchange = construct();
       expect(exchange.options.key).toBeUndefined();
       expect(exchange.options.secret).toBeUndefined();
       expect(exchange.options.passphrase).toBeUndefined();
+    } else if (migrated) {
+      expect(construct).not.toThrow();
     } else {
       expect(construct).toThrow(/not supported/);
     }

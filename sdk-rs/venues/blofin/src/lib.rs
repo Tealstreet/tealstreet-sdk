@@ -10,6 +10,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
@@ -44,6 +45,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    Managed(Context, Box<Pending>),
     History(history::Request),
     Closed(closed::Request),
     Trade(trading::Request),
@@ -57,7 +59,6 @@ pub enum Pending {
         failed: bool,
     },
     Candles {
-        command: CommandId,
         rows: Vec<Candle>,
         failed: bool,
     },
@@ -215,17 +216,154 @@ impl Blofin {
         }
         self.public_supervisor.retry(cx);
     }
+    fn read_policy() -> Policy {
+        Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }
+    }
     fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+        let context = match cx.http_context(Scope::Background, Self::read_policy()) {
+            Ok(context) => context,
+            Err(_) => {
+                self.public_failed(
+                    cx,
+                    matches!(pending, Pending::Markets { .. }),
+                    VenueError::new("BloFin read lifecycle is unavailable")
+                        .kind(ErrorKind::Internal),
+                );
+                return;
+            }
+        };
+        self.managed_read(cx, path, context, pending);
+    }
+    fn managed_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        context: Context,
+        pending: Pending,
+    ) {
         if matches!(&pending, Pending::Tickers { .. }) {
             self.live_tickers.begin();
         }
-        cx.request_streamed(
+        match cx.request_managed(
+            context.clone(),
             Method::Get,
             format!("{}{path}", self.host()),
-            vec![],
-            ArrayAt::EnvelopeField("data"),
-            pending,
-        );
+            None,
+            Pending::Managed(context, Box::new(pending)),
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::EnvelopeField("data")),
+            Err((pending, _)) => self.on_sign_error(
+                cx,
+                pending,
+                VenueError::new("BloFin read preparation is unavailable").kind(ErrorKind::Internal),
+            ),
+        }
+    }
+    fn public_failure(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        context: Context,
+        pending: Pending,
+        error: VenueError,
+    ) {
+        if matches!(&pending, Pending::Candles { .. }) {
+            let _ = cx.fail_context(&context, error);
+        } else {
+            let _ = cx.finish_http_context(&context);
+            self.public_failed(cx, matches!(pending, Pending::Markets { .. }), error);
+        }
+    }
+    fn public_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        context: Context,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if !matches!(&pending, Pending::Candles { .. }) {
+            let _ = cx.finish_http_context(&context);
+        }
+        if let Err(error) = check(&response) {
+            if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+                self.public_failed(
+                    cx,
+                    matches!(pending, Pending::Markets { .. }),
+                    discovery_error(&response),
+                );
+                return;
+            }
+            self.public_failure(cx, context, pending, VenueError::new(error));
+            return;
+        }
+        match pending {
+            Pending::Markets { rows, malformed } if !rows.is_empty() => {
+                let refresh = cx.store.loaded().markets;
+                let rows = if refresh {
+                    keep_listed(cx.store.markets(), rows)
+                } else {
+                    rows
+                };
+                cx.store.set_markets(rows);
+                let before = self.malformed_markets.len();
+                self.malformed_markets.extend(malformed);
+                self.malformed_markets
+                    .retain(|id| cx.store.market_by_id(id).is_none());
+                let after = self.malformed_markets.len();
+                // A partial catalogue commits so private reads start, then re-reads.
+                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
+                    self.public_failed(
+                        cx,
+                        true,
+                        VenueError::new("Incomplete BloFin catalogue")
+                            .kind(ErrorKind::VenueUnavailable),
+                    );
+                } else {
+                    self.startup.succeeded(cx, DiscoveryRead::Markets);
+                }
+                if refresh {
+                    return;
+                }
+                self.connect(cx);
+                self.read(
+                    cx,
+                    "/api/v1/market/tickers",
+                    Pending::Tickers {
+                        rows: vec![],
+                        failed: false,
+                    },
+                );
+                self.private_start(cx);
+            }
+            Pending::Tickers { mut rows, failed } if !failed || !rows.is_empty() => {
+                self.live_tickers.finish(cx.store, &mut rows);
+                cx.store.set_tickers(rows);
+                self.startup.succeeded(cx, DiscoveryRead::Tickers);
+            }
+            Pending::Candles {
+                mut rows,
+                failed: false,
+            } => {
+                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
+            }
+            other @ (Pending::Markets { .. } | Pending::Tickers { .. }) => self.public_failed(
+                cx,
+                matches!(other, Pending::Markets { .. }),
+                discovery_error(&response),
+            ),
+            other => self.public_failure(
+                cx,
+                context,
+                other,
+                VenueError::new("Malformed BloFin response"),
+            ),
+        }
     }
     fn topics(&self, cx: &mut Cx<'_, Pending>, op: &str, topics: &[Topic<'_>]) {
         let Some(socket) = self.public.socket.filter(|_| self.public.open) else {
@@ -603,6 +741,7 @@ impl Venue for Blofin {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Managed(_, pending) => self.on_item(cx, pending, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Closed(request) => Self::closed_item(request, item),
@@ -735,95 +874,23 @@ impl Venue for Blofin {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        let pending = match pending {
+        match pending {
             Pending::History(request) => {
                 self.history_response(cx, request, response);
-                return;
             }
             Pending::Closed(request) => {
                 self.closed_response(cx, request, response);
-                return;
             }
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
-                return;
             }
             Pending::Trade(request) => {
                 self.trade_response(cx, request, response);
-                return;
             }
-            other => other,
-        };
-        if let Err(error) = check(&response) {
-            if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
-                self.public_failed(
-                    cx,
-                    matches!(pending, Pending::Markets { .. }),
-                    discovery_error(&response),
-                );
-                return;
+            Pending::Managed(context, pending) => {
+                self.public_response(cx, context, *pending, response)
             }
-            self.on_request_failed(cx, pending, &error);
-            return;
-        }
-        match pending {
-            Pending::Markets { rows, malformed } if !rows.is_empty() => {
-                let refresh = cx.store.loaded().markets;
-                let rows = if refresh {
-                    keep_listed(cx.store.markets(), rows)
-                } else {
-                    rows
-                };
-                cx.store.set_markets(rows);
-                let before = self.malformed_markets.len();
-                self.malformed_markets.extend(malformed);
-                self.malformed_markets
-                    .retain(|id| cx.store.market_by_id(id).is_none());
-                let after = self.malformed_markets.len();
-                // A partial catalogue commits so private reads start, then re-reads.
-                if reread_partial(cx, &mut self.reread_stalls, refresh, before, after) {
-                    self.public_failed(
-                        cx,
-                        true,
-                        VenueError::new("Incomplete BloFin catalogue")
-                            .kind(ErrorKind::VenueUnavailable),
-                    );
-                } else {
-                    self.startup.succeeded(cx, DiscoveryRead::Markets);
-                }
-                if refresh {
-                    return;
-                }
-                self.connect(cx);
-                self.read(
-                    cx,
-                    "/api/v1/market/tickers",
-                    Pending::Tickers {
-                        rows: vec![],
-                        failed: false,
-                    },
-                );
-                self.private_start(cx);
-            }
-            Pending::Tickers { mut rows, failed } if !failed || !rows.is_empty() => {
-                self.live_tickers.finish(cx.store, &mut rows);
-                cx.store.set_tickers(rows);
-                self.startup.succeeded(cx, DiscoveryRead::Tickers);
-            }
-            Pending::Candles {
-                command,
-                mut rows,
-                failed: false,
-            } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, serde_json::to_string(&rows).unwrap());
-            }
-            other @ (Pending::Markets { .. } | Pending::Tickers { .. }) => self.public_failed(
-                cx,
-                matches!(other, Pending::Markets { .. }),
-                discovery_error(&response),
-            ),
-            other => self.on_request_failed(cx, other, "Malformed BloFin response"),
+            other => self.on_request_failed(cx, other, "Unmanaged BloFin public response"),
         }
     }
     fn on_stream_malformed(
@@ -834,14 +901,17 @@ impl Venue for Blofin {
         _headers: &str,
         error: &str,
     ) {
-        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
-            self.public_failed(
-                cx,
-                matches!(pending, Pending::Markets { .. }),
-                safe_cex_engine::startup::public_response_error(status, None, None),
-            );
-        } else {
-            self.on_request_failed(cx, pending, error);
+        match pending {
+            Pending::Managed(context, pending) => {
+                let error =
+                    if matches!(&*pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+                        safe_cex_engine::startup::public_response_error(status, None, None)
+                    } else {
+                        VenueError::new(error)
+                    };
+                self.public_failure(cx, context, *pending, error);
+            }
+            other => self.on_request_failed(cx, other, error),
         }
     }
     fn on_stream_error(
@@ -850,25 +920,46 @@ impl Venue for Blofin {
         pending: Pending,
         response: Response<'_>,
     ) {
-        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
-            self.public_failed(
+        match pending {
+            Pending::Managed(context, pending) => {
+                let error =
+                    if matches!(&*pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+                        discovery_error(&response)
+                    } else {
+                        VenueError::new(format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        ))
+                    };
+                self.public_failure(cx, context, *pending, error);
+            }
+            other => self.on_request_failed(
                 cx,
-                matches!(pending, Pending::Markets { .. }),
-                discovery_error(&response),
-            );
-        } else {
-            self.on_request_failed(
-                cx,
-                pending,
+                other,
                 &format!(
                     "response did not contain the expected list: {}",
                     response.body
                 ),
-            );
+            ),
+        }
+    }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Managed(context, pending) => self.public_failure(cx, context, *pending, error),
+            other => self.on_request_failed(cx, other, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let pending = match pending {
+            Pending::Managed(context, pending) => {
+                self.public_failure(
+                    cx,
+                    context,
+                    *pending,
+                    VenueError::new(error).kind(ErrorKind::Network),
+                );
+                return;
+            }
             Pending::History(request) => {
                 self.history_failed(cx, request, error);
                 return;
@@ -888,9 +979,8 @@ impl Venue for Blofin {
             self.account_failed(cx, request, error);
             return;
         }
-        if let Pending::Candles { command, .. } = pending {
-            cx.fail(command, error.to_string());
-        } else {
+        // Candle failures carry their Managed Context and return above.
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
             self.public_failed(
                 cx,
                 matches!(pending, Pending::Markets { .. }),
@@ -1016,16 +1106,25 @@ impl Venue for Blofin {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval: i,
                 limit,
                 from_ms,
                 to_ms,
             } => {
+                let context = match cx.admit_http_command(Self::read_policy()) {
+                    Ok(context) => context,
+                    Err(_) => return,
+                };
                 if let Some(m) = cx.store.market(&symbol) {
                     let Some(bar) = interval(i) else {
-                        cx.fail(command, i.unsupported("BloFin"));
+                        let _ = cx.fail_context(
+                            &context,
+                            VenueError::new(i.unsupported("BloFin"))
+                                .kind(ErrorKind::Unsupported)
+                                .outcome(safe_cex_engine::Outcome::NotSent),
+                        );
                         return;
                     };
                     let step = i.ms();
@@ -1043,17 +1142,22 @@ impl Venue for Blofin {
                         num::format(start),
                         num::format(end)
                     );
-                    self.read(
+                    self.managed_read(
                         cx,
                         &path,
+                        context,
                         Pending::Candles {
-                            command,
                             rows: vec![],
                             failed: false,
                         },
                     );
                 } else {
-                    cx.fail(command, format!("Unknown market {symbol}"));
+                    let _ = cx.fail_context(
+                        &context,
+                        VenueError::new(format!("Unknown market {symbol}"))
+                            .kind(ErrorKind::InvalidInput)
+                            .outcome(safe_cex_engine::Outcome::NotSent),
+                    );
                 }
             }
             Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),

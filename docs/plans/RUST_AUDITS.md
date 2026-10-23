@@ -39,6 +39,29 @@ hosted-signing delegates; they are not a generic ordinary-account rollback path.
 TxFlow has no production TS fallback. The branch cannot reach master until 1–3
 are settled for them; rollback availability remains explicit in decision 4.
 
+## Shared financial snapshot admission (Binance and Bitunix)
+
+The engine now owns an issuer-bound, checked order-snapshot write fence and one
+admission boundary before BOTH native cache application and Store publication.
+Binance and Bitunix replace their local order-write revision copies with linear
+Store tokens; all existing invalidation boundaries and native lagging-server,
+terminal, incarnation and client-ownership protections remain. Bitunix keeps
+row-selective WS healthy-peer progress and validates both initial endpoint
+tokens before regular then TP-SL native application. Snapshot publication does
+not invalidate sibling reads or metadata domains. The existing StaleGuard
+progress escape never overrides this write fence.
+
+This is standardization of native behavior, not a new original-RED fill fix.
+Permanent exhaustion refuses reads before HTTP and settles owned preflight;
+accepted native writes remain possible. Native compatibility and new exhaustion
+controls are recorded in [the contract](RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md).
+Only these two financial references are migrated. Metadata reuses the primitive
+in its own follow-up; RequestContext's initial late-response codec remains
+read-only. Safe late ACK patches to both Store and native terminal/filled tables
+must explicitly invalidate this fence before future snapshot application; they
+are not claimed implemented here. Broader Store mutation revisions protect a
+different boundary and must not replace selective snapshot-write admission.
+
 ## Error handling (scoping)
 
 Owner flags error handling as one of safe-cex's weakest points. Scope a
@@ -512,9 +535,11 @@ dispositions are in [the architecture and gate ledger](RUST_ARCHITECTURE_GATE_AU
   private/write boundaries, passphrase inheritance and Bitget's degraded-balance
   primary-key exception when sharing it. ~~Copied per-venue test probes~~ were
   replaced by `engine::test_support::ProbeVenue` in #1427 (`1435005aea3`);
-  13 secondary-test files retain venue-specific assertions. **Owner decision:**
-  park selection deduplication until after cutover; this re-audit established no
-  wrong-key or missing-read-key production defect.
+  13 secondary-test files retain venue-specific assertions. This re-audit
+  established no wrong-key or missing-read-key production defect. ~~Owner
+  decision: park selection deduplication until after cutover.~~ Superseded by
+  the 2026-10-22 owner choke-point decision: selection moves to the engine per
+  [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md).
 - ~~`docs/plans` has 47 files; collapse the evidence documents; roster stale.~~
   **Owner decision:** retain the documents and use the single
   [topic/status/read-trigger/file index](README.md). The old in-progress port
@@ -815,6 +840,14 @@ Remaining resilience and completeness findings are independent of request parity
 - ~~Hyperliquid's rolling order-retention ownership omission~~ now carries the
   actual query command before completion. A native 2,000-row regression checks
   retained financial rows, Warn ownership/order and Error-only delivery.
+
+- Owned-history follow-up: ~~later actual page/stage failure discards accepted
+  history, and inclusive stalls/caps reject the entire accumulated read~~.
+  Existing CursorHistory now owns staged admission, completion, page budget,
+  stage restart and rolling-retention gaps. Actual first/zero-eligible failure
+  rejects typed; later loss retains only admitted output with one owned gap.
+  Native inclusive progress, output mapping/limits and lookup/spot behavior
+  remain. Cross-family fan-out, managed completion and B11 runtime proof stay open.
 
 Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
@@ -1765,3 +1798,462 @@ failures stay strict. Native request/codec/ledger behavior is pinned; no account
 or signing implementation changes. This closes Paradex's local completion/
 paging ownership copy, not all-family fan-out or B11 downstream coverage.
 [Implementation and limits](RUST_OWNED_HISTORY.md).
+
+Phemex income owned-history follow-up: ~~later page/currency errors discard all
+accepted ledger rows and saturation rejects before the next currency~~. The
+shared range owner now retains eligible admitted rows and one command-owned gap;
+first actual page failures reject typed and failed-page prefixes stay excluded.
+Shared filtered admission and checked range-stage/native-bound transitions retain
+coverage before output filtering. The strict output cap and single-page Phemex
+history/lookup policies remain; other venue adoption is still open.
+
+## KuCoin Spot cumulative fallback — shared execution adoption
+
+~~Without `matchSize`, the Spot match reducer emitted all of `filledSize` as a
+new Fill, replaying the already trusted cumulative prefix.~~ Native regressions
+prove the defect against actual `2cf8c4c91dd`: startup filled0.5 followed by
+filledSize0.75 emitted0.75 instead of0.25. Existing engine `Cursor` now prepares
+the binary suffix before native identity admission; positive unique delivery
+commits its anchor. Authoritative `matchSize` remains exact and independent of
+stale/terminal display fences. Raw native identity keys and optional bounds stay.
+
+Valid raw REST prefixes seed previously unseen IDs only after current nonlookup
+snapshot admission, including healthy peers of rejected rows. Seeds never come
+from retained rejected/cached replacement rows, failed/stale reads or lookups.
+The independent20,000-order FIFO retains anchors through terminal removal,
+REST absence and reconnect; later reads do not overwrite live execution progress.
+Eviction ends that bounded guarantee, even for active orders. A last fill with
+no cumulative endpoint does not invent a prefix; subsequent fallback cannot
+prove how that unanchored last overlaps, an explicit remaining evidence limit.
+This fixes one financial defect with multiple native RED controls, not a claim
+of new live captures or complete all-family fill-helper adoption. Orderly and
+the shared row-reporting extension remain next.
+
+
+## GRVT owned-history fan-out
+
+~~GRVT general histories own accepted/staged output and numeric finalization
+alongside a separate shared cursor walk.~~ They now adopt CursorHistory for page
+admission/completion and the existing first/later actual-failure contract. A
+reusable engine staged-page discard preserves admitted rows/cursor/budget across
+existing retries and session refresh. Order-filtered fill totals, setup/session
+refusals and lookup proofs remain strict; native identity ledgers/units/request
+sequences are unchanged. Other adapters, managed completion and NX B11 coverage
+remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+
+## Crypto.com owned-history fan-out
+
+~~Crypto.com history output retention and numeric completion are venue-local
+alongside nanosecond continuation state.~~ Existing CursorHistory now owns page
+admission and command-owned finalization, reusing the shared staged-page reset.
+First/zero-accepted actual failure rejects typed; later actual loss retains prior
+accepted rows only. Exact cursor proof refusals stay strict. Native time bounds,
+identity rollback, mixed retry counter, pacing, public duplicates and ranged
+income limits remain. Other adapters and B11 runtime coverage stay open.
+[Scope](RUST_OWNED_HISTORY.md).
+
+## Orderly observed-average quote retention
+
+~~High: a uniquely delivered whole-growth direct Fill with no cumulative average
+(or average zero) stores a fabricated zero quote. A later average-priced suffix
+can be mispriced: cumulative1/last1/direct100 then cumulative2/average100 emits
+the second1@200 rather than1@100.~~ Original native assertions prove missing-
+average, zero-average and corrected-root-child instances of this one financial
+defect. Shared engine `prepare_observed_average` keeps unknown quote explicit and
+lets an admitted direct Fill establish only its exact whole new interval, from
+an already known prefix or the empty prefix. Inferred overflow is best-effort;
+supplied average-product overflow still rejects before effects.
+
+The Orderly adapter retains one native totals map with terminal-FIFO eviction,
+native identity precedence,
+observation-before-dedup, quiet forward observations, binary quantities, REST
+non-seeding, sparse freshness gates and late unique delivery. Missing cumulative
+still resolves to zero and never invents a prefix. Equal/regressed endpoints do
+not replace quote. A blind gap cannot infer a whole historical quote; the native
+arbitrary-last quote-delta quotient and its zero fallback remain deliberately
+unchanged. `Report::Last` remains strict. Native/root/helper controls are evidence
+for this repair, not live capture, new caller deployment or reporting closure.
+
+
+## Persistent row-reporting core: first consumers
+
+Repeat suppression and re-arm are cross-cutting engine policy. The first
+reporting slice moves Coinbase, Crypto.com and WOO diagnostic memory into
+`coverage::RowReports`: Coinbase preserves one non-Error-to-Error upgrade and
+namespace re-arm; Crypto.com preserves separate bounded Once memories for orders
+and positions, including decoded-key forget before market lookup; WOO preserves
+unbounded last-message comparison for fixed report kinds. Bounded memory still
+clears at4096 before even a duplicate lookup. The limit is independent of
+`RowAdmission` protection. Suppression does not increment health; an admitted
+report passes the existing coded boundary exactly once even if host delivery is
+filtered.
+
+This is a compatibility/architecture change, not a newly proven financial or
+production bug. Original native account controls pass before migration, covering
+Coinbase upgrade/re-arm, Crypto.com Warn-to-missing-copy suppression and decoded
+row re-arm within a partial response, and WOO A→B→A/clean-reset summaries. New
+engine controls pin repeat policies, namespace isolation/empty identities,
+borrowed forget, bounded duplicate-key reset, unbounded retention and filtered
+health. Existing financial reducers, admission coverage and snapshot fences are
+unchanged. Grouped collectors (Crypto.com every rejection, WOO unique known IDs
+plus anonymous rows), Bybit deferred reporting, and remaining persistent copies
+remain open in [the reporting plan](RUST_ROW_ADMISSION.md). No all-venue closure
+or new live capture/parity claim is made by this first slice.
+
+
+## Grouped and deferred row-reporting engine path
+
+Phase2 moves duplicate-inclusive counts/first labels and ordered unique-ID plus
+anonymous counts into explicit engine `RowCount`/`RowKeys` collectors. Crypto.com
+keeps its exact summary formatting, including anonymous versus empty first labels;
+WOO keeps unique known IDs, each anonymous row, original retention/page progress
+and ChangedMessage/empty-group re-arm. Bybit keeps deferred unbounded Once memory
+at the accepted joined-order boundary, including admitted partial joins. Failed,
+noncurrent or incomplete whole joins do not consume it; clean/mapped rows do not
+re-arm it, and cached-row restoration remains outside report suppression. Both
+real Bybit constructors select that explicit policy and product swaps preserve it.
+
+Architecture gate YES: these are cross-cutting grouping/repeat policies behind
+engine coverage, with native identity/formatting/admission timing retained. The
+233 selected original native tests pass before migration; these are compatibility
+controls, not defect RED evidence. New core controls cover exact first labels,
+summary health/filtering, empty text versus absent summary and key-only re-arm
+at capacity. Financial reducers, signing, clocks and snapshot fences stay native.
+Seventeen bounded persistent source files remain for subsequent fan-out; no
+all-venue closure, live capture or stronger replay parity claim is made here.
+
+
+### Row reporting: BloFin and Kraken consumer migration (2026-10-23)
+
+Moved BloFin position/order, Kraken futures row/unlisted-symbol and Kraken Spot
+row diagnostic memories onto existing engine RowReports. Architecture gate YES:
+this is consumer fan-out of cross-cutting policy, not another venue policy copy
+or new engine API. The futures real constructor explicitly chooses bounded
+ErrorUpgrade plus separate unbounded Once; BloFin and Spot use bounded Once.
+Native messages, severities, keys, empty identities, 4096 clear-before-lookup,
+re-arm sites and pre-admission reporting remain unchanged. The final 126 original
+native account controls (55 BloFin,39 futures,32 Spot), including eleven new
+compatibility controls, pass against unchanged actual #1775 production. Exact
+source/test/log hashes are bound in
+`/tmp/codex-row-blofin-kraken-original-final-receipt.json` (SHA256
+`aa9137471325c9cb881aaa2cf4bf16f060e482db5ad4943038a5a37521489bc6`).
+An initial Spot test expected REST text for WS execution diagnostics; only that
+fixture expectation was corrected before the final original-GREEN run. No
+production defect/RED, financial repair or all-venue closure claim. Other bounded
+and unbounded reporter consumers remain open; see RUST_ROW_ADMISSION.md.
+
+Migrated engine/BloFin/Kraken/Binance focused suites pass1253 native tests across
+68 groups; strict all-target Clippy, scoped fmt, bans, root44 typecheck/28 lint
+(root tasks cached) pass. Both independent source/caller reviews are CLEAN.
+Actual #1781 `ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated
+without conflicts, preserving both incoming files. Full green CI and current-head
+artifact proof remain pending.
+
+## Kraken futures owned-history fan-out
+
+~~Kraken futures histories retain rows, cursor sets, page counters and terminal
+ledger completeness emission in the venue.~~ Fills, closed orders, ledger and
+public trades now adopt the existing engine CursorHistory/Completion owner.
+Actual first/zero-eligible failure rejects typed; later actual failure retains
+only admitted pages with command-owned incompleteness. Native strict cursor/
+continuation-proof/budget refusals remain strict; terminal order folding sees
+only admitted rows. Native request/identity/units/filter/signing and ledger
+coverage facts remain unchanged. Other adapters, managed completion and B11
+coverage/runtime proof stay open. [Scope](RUST_OWNED_HISTORY.md).
+
+KuCoin owned-history follow-on: futures history/funding and spot fills
+adopt the existing engine query owner. Initial page failures become typed
+Internal rejects; later futures/funding failures return only validated eligible
+rows with command-owned incompleteness. Native continuation/census/safety proofs
+remain strict. Signing, disabled spot endpoints and B11/NX coverage are outside
+this slice; see RUST_OWNED_HISTORY.md and RUST_CUTOVER_CALLERS.md.
+
+## Bitrue single-page owned fills
+
+~~Bitrue fills keep native output storage and terminal completion beside streamed
+response validation.~~ Existing engine HistoryRows/Completion now owns staging,
+page admission, retry-page reset and typed terminal delivery. All native proof
+checks precede admission; a saturated filtered/duplicate page remains a strict
+refusal. No fictitious pagination, partial-success case or new venue marker is
+introduced. Public trades, unsupported histories and client-ID lookup stay
+separate; B11 caller/runtime coverage remains open. [Scope](RUST_OWNED_HISTORY.md).
+
+## Backpack owned-history fan-out
+
+~~Backpack retains accepted history rows and terminal paging decisions in its
+venue continuation, discarding earlier pages on later failure/repeat/cap.~~
+CursorHistory now owns page admission, repeat/cap coverage and completion, with
+the existing offset helper subordinate to owner-authorized continuation. Failed
+page prefixes remain staged; admitted malformed-fill skips supply owned coverage
+without changing native row isolation. Raw request displacement, native mapping,
+eager non-fill diagnostics and strict setup/admission behavior remain. This is
+shared-owner adoption, not universal history or NX B11 coverage closure.
+
+## ApeX bounded execution completion
+
+~~ApeX fills exhaust all native/display REST alternatives into apparent complete
+WS-cache or empty success, even when every REST attempt actually failed.~~
+Existing engine HistoryRows/Completion now owns terminal admission and delivery;
+all-actual-failure exhaustion rejects typed Internal. Validated successful empty/
+nonempty paths retain native/cache selection; bounded native upsert remains an
+endpoint normalization fact. No invented pager, partial recovery or cache-backed
+coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
+separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+
+### Row reporting: AsterDEX, GRVT and TxFlow consumers (2026-10-23)
+
+Replaced three account-owned bounded suppression sets with existing engine
+RowReports Once, including GRVT's shared coin/order/position namespaces.
+Architecture gate YES: consumer fan-out through the existing cross-cutting
+reporting path; no new venue policy or engine API. Exact native notice text,
+severity, empty/composite identities, clear-before-lookup capacity and re-arm
+ordering are preserved. Aster/TxFlow mapping still forgets a mapped ID before
+full-read admission, zero quantity does not gain forgetting, and TxFlow WS has
+no REST-only per-key effect. GRVT duplicate coins rearm from unfiltered totals;
+position/order identities keep native rejection filters, including unknown
+identity preventing absence proof. Per-row timestamp rejection still follows
+current-response rearming.
+
+Final original125 account tests, including nine new compatibility controls,
+pass on unchanged actual1782 production. The source/test/log receipt is
+`/tmp/codex-row-aster-grvt-txflow-original-final125-receipt.json`, SHA256
+`0fa028da226ab076553c0d607657ba113482547141490dd1550817ac38fb8602`.
+This is standardization without a product defect RED or financial repair.
+Other persistent reporter consumers remain open; no all-venue closure or new
+private parity/provenance claim. See RUST_ROW_ADMISSION.md.
+
+Migrated focused engine/AsterDEX/GRVT/TxFlow/Binance suites pass1294 native tests
+across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
+and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
+are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
+required; no all-venue reporter-completion claim.
+
+## BloFin public request-context adoption
+
+BloFin instruments, ticker seeds and candle queries now declare unsigned Read
+semantics through the existing managed transport lifecycle. Context-bearing
+pending reads replace opaque public HTTP and numeric candle terminal callbacks;
+discovery retires its logical handle on terminal success/failure before native
+startup callbacks can enqueue another read. Native catalogue, ticker and candle
+mapping remain intact. No private signing, financial admission, history owner or
+trading-outcome policy is copied into the venue.
+
+One original numeric candle failure site remains for refusal before Context
+issuance; it is a shared command-entry blocker, assigned to `codex-uufub4`, not
+an exemption. The exact BloFin inventory shrinks 28 to 24; every other path map
+remains unchanged. Context-bearing history completion and multi-request admission
+remain separate shared dependencies. [Inventory and scope](RUST_BLOFIN_REQUEST_CONTEXT.md).
+
+## Bitrue FIFO read authority adoption
+
+Public candle/trade completion uses the canonical shared command-entry/retention
+seam and generation-bearing Context terminals. The native adapter checks current
+Context authority before send and response decoding, while timeout/disconnect
+cleanup retains its typed completion authority after expiry. It creates no venue
+registry, synthetic HTTP attempt, retry policy or group authority.
+
+The exact Bitrue inventory shrinks 53 to 42 occurrences, with lib.rs 22 to 11:
+ten numeric WS terminal calls and one conservative timer-correlation macro retire
+with the owned-read representation. The HTTP dispatcher and ten pending.request
+fields remain; account, private history, signing and coalesced FetchLeverage are
+outside this area. No other venue inventory entries change.
+
+## MEXC public candle lifecycle adoption
+
+The single `FetchCandles` path now consumes shared Context admission, managed
+public HTTP release and Context completion. Original-source RED controls cover
+unprepared dispatch, parked/released expiry, stale owner delivery and HTTP429
+side-effect authority. Native mapping/decoding/status/pause policy is retained.
+This closes only this command's lifecycle sites; startup, history, account,
+signing and background subscription repair remain separately inventoried.
+
+## KuCoin Spot discovery authority proof
+
+The unsigned catalogue/ticker seeds retain their original read Context through
+stream staging and publication, retire it on every terminal callback, and use the
+shared static-header preparation seam. No private credential, retry, row codec or
+error-classification policy is duplicated. Exact source inventory remains 84
+occurrences: the original shared streamed helper still serves unmigrated candles,
+so this area justifies no ratchet prune or zero-legacy claim. The complete venue
+inventory and remaining prerequisites are committed in PR #1819.
+
+## MEXC candle initial rejection ownership
+
+Closed: the candle adapter's pre-Context numeric refusal no longer assigns
+NotSent to an unissued read. Genuine engine command-entry admission publishes
+initial rejection once and denies numeric fallback. Original-source RED controls
+cover nonfinite time, capacity, valid ID reuse and preservation of an existing
+parked owner. Other MEXC command families remain separately inventoried.
+
+### MEXC/Phemex/Polymarket bounded reporter ownership (2026-10-23)
+
+These three account consumers use existing engine `RowReports<String>` bounded
+Once instead of local 4096-entry sets. This is a compatibility migration, not a
+new financial defect finding: native messages, severity, labels and rearm sites
+remain authoritative. MEXC keeps its rejection-filtered mapped IDs and shared
+coin/position/order memory. Phemex keeps currency-specific clean rearm and
+leg-ID filtering before symbol-key rearm inside admitted reads. Polymarket keeps
+validated zero/priced holding forgetting before complete-response admission;
+its separate permanent unlisted-asset memory remains unchanged.
+
+Nine new original-GREEN native controls pass with all116 account tests on
+unchanged actual #1780 production (40 MEXC,40 Phemex,36 Polymarket). The sealed
+source/test/log receipt is
+`60396c532d8eb3d220bd3ba74d73578a67d92ba7fd2ef0ae6ee67a2864abba1c`.
+The controls pin namespace/currency isolation, rejected duplicate versus named
+partial recovery, stale-slice no-rearm, and early valid holding recovery despite
+later duplicate invalidation. No product-RED, all-venue closure or private parity
+claim. Remaining queued integrations, current-head CI and authenticated complete
+raw/ordered-gate proof remain required before merge.
+
+
+## Lighter candle request ownership
+
+Command candle reads and subscription REST fallbacks use the existing managed
+HTTP lifecycle. Commands use Context finalizers and the exact read-delivery
+validator; background reads use engine delivery admission plus native
+subscription generation/revision fences against stale candle publication.
+Typed preparation failures retain engine-provided metadata; terminal background
+paths retire their handle before freshness exits and release only their own
+in-flight generation. No venue admission, retry or outcome algorithm is added.
+
+The four removed lexical occurrences shrink Lighter51->47 and its lib10->6.
+One existing numeric failure remains solely when Context issuance itself refuses
+before returning authority; its removal belongs to the shared pre-authority
+failure seam. All other venue maps remain exact. This closes this candle area
+only, not the remaining public/private/history/signing inventory or master gate.
+
+## Paradex independent startup authority
+
+~~Paradex public catalog and ticker seeds bypass managed HTTP authority and can
+remain pending without an engine-owned original deadline.~~ Independent background
+Read Contexts now own preparation, release and each 20-second attempt. Native
+staging commits only on successful validated delivery; refusal, expiry and
+transport failure retire authority before the existing startup Backoff runs.
+Candle fallback, authenticated/account/history and joined startup work remain in
+their previously committed inventory; this closes only public_seed's send site.
+
+## Hyperliquid perps candle Context authority
+
+Perps candles use actual shared command admission, unsigned static-header ingress,
+exact read delivery validation and Context terminals. Native row parsing, body
+geometry and the existing single HTTP status codec remain. Spot candles preserve
+their legacy protocol branch; no signer, retry, deadline or classification core
+is implemented in the adapter. All 52 inventory occurrences (41 fingerprints)
+remain because spot and other paths still use every shared lexical site. This
+runtime area makes no inventory deletion or all-family closure claim.
+
+## BloFin candle entry fallback retirement
+
+The final numeric candle refusal recorded in the earlier BloFin public-read
+audit is removed. Initial admission uses the landed engine command-entry seam;
+shared rejection owns the pre-Context terminal. Candle payloads no longer carry
+a numeric command ID, and physical callbacks complete through their Managed
+Context. The remaining discovery error fallback accepts only Markets/Tickers.
+No venue admission policy or finalizer is introduced. The exact own inventory
+shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
+closed/private history and trading remain tracked with their original owners.
+
+
+## TxFlow indexed history ownership
+
+TxFlow now adopts existing CursorHistory for native identity observations, staged
+page admission, accepted rows and completion. The native 2000-step/200000-cap
+indexed sequence maps to shared cursor tokens with 101 pages per income stage.
+Empty/no-new continuation and cap proof refusals remain strict; actual later
+failures recover only prior accepted eligible output with one owner warning.
+Income stage restart retains the same output owner and identities. Native
+info payload, archived instrument mapping, financial codecs, full pagination
+before sorting/truncation and Store isolation remain unchanged. Exact history
+legacy inventory prunes eleven to six sites, zero additions or checker changes.
+
+
+## Orderly accepted-page history ownership
+
+Orderly history adopts the existing engine CursorHistory owner without a new
+engine API or venue-local completion implementation. The single cursor walk
+retains the total fifty-page regular/algo budget; native metadata census and
+per-stage limit remain venue facts. Actual later read failures recover only
+accepted eligible output with the owned warning, while native proof and signing
+refusals remain strict. Failed streamed prefixes and filtered rows never authorize
+recovery. Request builders, signing, timers, account reducers and Store are
+unchanged. Exact request inventory shrinks from thirteen to nine entries by
+removing four numeric finalizers, with no additions or checker changes.
+
+
+## MEXC accepted-page history ownership
+
+MEXC history adopts existing CursorHistory rather than owning a result vector,
+identity set and numeric finalization. Window transitions retain the same output
+owner and identity ledger while resetting the existing native per-window page
+budget. Only validated pages authorize partial recovery; failed prefixes and
+filtered rows do not. The cap stays strict. Request builder, native row mapping,
+account state and Store publication policy are unchanged. Exact request legacy
+inventory prunes nine entries to six, no additions or checker/bootstrap changes.
+Kraken Spot, BreakoutProp and Hyperliquid Spot remain explicitly classified as
+non-pageable inherited stubs, with no new native history capability.
+
+## Phemex bounded non-income owner
+
+~~Phemex fills/orders/public trades store output and finalize through venue-local
+Vec and numeric completion branches.~~ Existing HistoryRows/Completion now owns
+staging, one-response admission and terminal delivery. No result is accepted
+until complete response validation, so failure rejects Internal rather than
+publishing a staged prefix, partial result or incomplete marker. Native limits,
+filters, dedupe, sort/shape, shared rate pause and lookup/income policy remain.
+This is bounded owner adoption, not a new pager or managed completion seam.
+[Scope and original controls](RUST_OWNED_HISTORY.md).
+
+## WOO shared history completion and global paging owner
+
+~~WOO retains accepted history rows, seen identities, physical-page budget and
+completion in the venue continuation.~~ Existing CursorHistory/Completion now
+owns those duties across all four implemented history axes, including native
+fallback transitions and delayed ledger continuations. Existing RangeWalk stays
+the subordinate engine v3 geometry selector, preserving its span/direction,
+identity-selection and strict truncation facts. No second completion authority,
+shared API extension, venue marker emitter or synthetic REST capability is added.
+Native current-page facts remain local until complete validation; failed prefixes
+do not enter shared dedupe or output. Existing mixed-row diagnostics keep their
+timing and also supply the owner's missing-coverage fact. All-native strict
+refusals and consuming legacy signing setup remain separate.
+
+## Non-pageable history coverage ownership
+
+~~Kraken Spot, BreakoutProp and Hyperliquid Spot locally return [] for unsupported
+historical lists without declaring missing coverage.~~ Existing
+HistoryRows/Completion now owns these terminal results and emits an explicit
+command-scoped incomplete warning before the unchanged array payload. No row is
+staged or accepted and no native endpoint is fabricated. Public trades reject
+through Completion with typed pre-I/O Unsupported/NotSent, while lookup's
+nondefinitive contract remains separate. Hyperliquid perpetual history and all
+native trading/signing/account paths retain their existing behavior.
+
+
+## Paradex independent book request authority
+
+Public REST book queries use existing engine managed release and Context
+completion with exact current read-delivery validation. Native snapshot parsing,
+public errors and bounded rate hints remain the existing request-owned codec;
+no status ladder, auth/retry policy or outcome aggregator is added. Typed
+preparation errors pass intact, and original deadlines/retirement fence stale
+results and reused command IDs. Live SBE/JSON books and held account/trading
+source are unchanged.
+
+The exact inventory prune is Paradex62->57: lib3->0 and depth_query3->1, with
+every other map unchanged. The remaining numeric refusal in depth_query exists
+only if initial authority issuance fails before returning a Context; its shared
+command-entry prerequisite remains explicit. This closes one independent read
+area, not the remaining private/history/candle/JWT or whole-venue inventory.
+
+## Lighter candle pre-authority refusal closed
+
+~~The candle issuance-refusal site requires a shared pre-authority failure seam.~~
+Actual shared command-entry authority now owns the genuine initial FetchCandles
+callback and its unissued Read denial. Lighter consumes it directly and returns
+on rejected/revoked admission without a numeric terminal. The one removed legacy
+fingerprint shrinks Lighter47→46 and lib6→5; all other inventory entries remain.
+This closes only the candle refusal and introduces no venue capacity, retry or
+outcome rule. Native background polling continues using its independent Context.

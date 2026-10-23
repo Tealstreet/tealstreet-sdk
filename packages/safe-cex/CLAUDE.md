@@ -44,12 +44,13 @@ package setting; measured performance evidence covers WASM.
 
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
-Binance's four aliases and Bybit's five aliases. High-level credential input is consumed by a trusted
+Binance's four aliases, Bybit's five aliases and WEEX (hosted admission disabled). High-level credential input is consumed by a trusted
 `LocalSignerSetup` before `BaseExchange` retains options; generic options contain
 no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached
 construction metadata preserves `canSign`/public mode; transport receives only
-read-identity presence and uses materialised outbound headers for routing.
+read-identity presence; managed routing uses explicit credential intent before
+credentials are materialised, while legacy requests retain header-based routing.
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
 `stableId` per primary/secondary identity. It is consumed with passphrases through
@@ -61,7 +62,8 @@ Trusted signer setup uses shared declarative per-family/per-slot normalization
 from construction-rules.json. Unspecified fields preserve caller trimCredential
 metadata; MEXC forces primary credential trimming and secondary preservation.
 The same field policy declares primary required-for-private passphrases and
-required secondary passphrases with primary fallback for OKX and Bitget aliases.
+required secondary passphrases with primary fallback for OKX and Bitget aliases
+and WEEX.
 Missing/JSON-null secondary passphrases inherit an opaque primary reference;
 explicit empty never inherits. Public mode bypasses only the primary requirement,
 while secondary validation stays active. Shared publicMode intent takes precedence
@@ -74,14 +76,30 @@ not JavaScript String.trim. Secret/passphrase bytes and stable IDs are unchanged
 This policy does not enable an unmigrated family; opaque external providers
 remain responsible for compliant provisioning.
 
+The same construction declaration carries hosted signature encoding and an
+optional passphrase presentation header. Registry HTTP captures snapshot that
+policy and request a distinct Present operation for the setup-owned passphrase
+ref; they never interpolate it into the HMAC payload. Formatting validates the
+entire result and combined header bounds before publication. Callback precedence
+uses the existing declared, case-insensitive header policy. These codec metadata
+fields do not enable runtime family admission or replace actual hosted tests.
+Callback setup reuses the same required-field/absent-only fallback resolver,
+consuming passphrase material into a separate provider Present map and exposing
+only opaque refs to the engine. Presenting one requires admitted signing work
+for its owning identity; it cannot be used in a Credential payload part. Missing
+required material rejects synchronously. The unchanged remote wire supplies only
+the MAC, in the declared hex or canonical padded base64 encoding of 32 raw bytes;
+it cannot supply a missing passphrase. Generic options and callback receiver
+snapshots retain no passphrase, and disposal revokes the setup wrapper.
+
 Callers must provision worker/hosted providers separately rather than copy
 `exchange.options` as credentials, and use readiness/public-mode metadata instead
 of checking `options.key`. Raw legacy native/WASM input is a trusted compatibility
 adapter until those cutover callers migrate; it converges on the same provider
 path and must be removed before TS venue/reference deletion.
 
-For dispatch-signing families, browser-facing `signHttpRequest` and `signWsAuth`
-use the same owned provider through bounded signing-only captures, without
+For families with enabled hosted-signing admission, browser-facing `signHttpRequest`
+and `signWsAuth` use the same owned provider through bounded signing-only captures, without
 starting account discovery or venue transport work. The default synchronized
 clock can still initialize its existing time-source calibration. The original HTTP config/WS response
 wire stays intact. Shared standalone Binance/Bybit request-shape interceptors,
@@ -90,9 +108,27 @@ signing after TS venue classes are deleted; no TS venue/API factory is created.
 They retain real qs/Axios serialization and caller-owned WS preimages. Capture
 tokens are single use and fenced by raw deadlines, protocol expiry and clock
 revision; provider text and partial results are not returned on failure.
-This signing-side bridge does not itself enable keyless `remoteSigner` or
-`PayloadSigner` routing to Rust. That separate companion must preserve REST-only
-PayloadSigner feeds, result headers and explicit account/secondary selection.
+A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
+its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
+The BingX native checkpoint keeps hosted admission disabled until those gates.
+The shared delegated-provider companion admits keyless `remoteSigner` and
+`PayloadSigner` accounts only for aliases enabled in construction-rules.json.
+RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary
+remote signing is refused. PayloadSigner retains REST-only private feeds and
+declared native result-header precedence. Its ordinary-function receiver is a
+private frozen public-metadata snapshot with the selected public key, excluding
+all secret/passphrase fields and arbitrary nested caller objects. Callbacks must
+hold their own secret instead of reading `this.secret`; generic exchange options
+retain neither credentials nor callbacks. Provision callbacks in the executing
+host/worker because ordinary worker initialization cannot serialize functions.
+The central policy also declares legacy WS labels and extraData codecs. Metadata
+comes from prepared receipt/payload structure, never a new wall clock or advisory
+context; HTTP remains distinct even when its query matches WS preimage grammar.
+Signing-only HTTP captures accept only their trusted declared header policy;
+WS and credential captures retain default deny.
+The delegated provider initializes UTF-8 codecs only when provider work begins.
+Importing the native registry before its host installs TextEncoder/TextDecoder
+must remain supported; signing and frame I/O require those runtime codecs.
 
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and
@@ -293,6 +329,17 @@ the mirror, and the tier methods forward to the worker
 capability fallbacks are never wrapped, so `capabilities` keeps reporting them.
 
 ## Rust engine failure
+
+Physical socket/request/signing/timer IDs are exact JS-safe integers through
+`2^53 - 1`; command IDs and durations retain their existing bounds. Host adapters
+must not coerce resource IDs to 32 bits. WASM rejects malformed numeric IDs before
+parsing payloads or advancing clocks. Checked allocator exhaustion is sticky and
+uses the same terminal path as a trap, withholding the complete queued output
+batch. Workers retire their host and flush intervals before reporting terminal
+StartupFailed; captured pending write failures still reach their original owner
+across replacement, while stale successes and diagnostics remain suppressed.
+Native account streams settle pending owners Internal/Unknown and replay only the
+terminal notice, without constructing a frame from the failed engine.
 
 A native WASM trap makes that exchange instance terminal (`isEngineDead`),
 settles its pending commands and emits `engine-dead` after one visible error.
@@ -517,6 +564,14 @@ upstream specifications, verified audit evidence, or an explicit runtime
 contract documented in this CLAUDE.md tree. Tests committed to the package must
 be deterministic and must not require network access, API keys, or local secret
 files. Live probes belong outside the test runner and outside `src/exchanges/`.
+
+The shared Vitest setup denies and records unstubbed fetch, XHR send and socket
+connections. Cleanup rejects recorded attempts even when exchange code catches
+the immediate error. Supply explicit local fixture facts instead of relying on
+an endpoint response. An intentional in-process socket fixture must bind loopback
+and use the test guard's exact-port allowance, revoked in `finally`; there is no
+blanket localhost or exchange-host exception. See
+`docs/plans/TS_UNIT_TRANSPORT_ISOLATION.md` for the test-only boundary.
 
 Vitest discovers deterministic `*.test.*` files throughout `src/` and excludes
 only explicitly named `*.integration.test.*` and `*.network.test.*` suites.
@@ -933,6 +988,18 @@ route. Optional HTTP `direct` / `publicCors` route hints support venue clock fal
 hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
+
+Managed engine HTTP uses `Transport.prepareHttp` to finish route/proxy-token
+and tunnel readiness before signing. `credentialIntent` (`public`, `primary`,
+`secondary`) selects the route independently of HTTP method or credential headers;
+custom routing providers must honor it. A custom HTTP/tunnel adapter without the
+prepared interface fails explicitly instead of invoking its legacy sender.
+Preparation and binding never send HTTP. Binding preserves signed URL/query/body
+bytes and rejects conflicting host headers; `ready()` rechecks the original
+request deadline and resource, and `dispatch()` invokes fetch/WebSocket.send
+synchronously after the engine release claim. Cancellation releases only that
+request's prepared/bound resources. Opaque legacy requests share the executor but
+retain their older routing and carry no managed release/outcome guarantee.
 
 Engine venue requests use native authorization headers. On Coinbase and its
 spot alias, an ordinary REST proxy owns `Authorization`, so the host moves the

@@ -1202,3 +1202,1481 @@ preintegration of reviewed Bybit #1728 head31035f3f09a71e5fb29d1083c217512972e5f
 which includes actual #1746 build policy3f0e3e450b2, for parallel CI. Actual
 Bybit ancestry, all actual shared predecessors, final exact-head CI/replay and
 separate guard/merge remain required; no landing/deployment claim.
+
+## Phemex income range ownership (planned)
+
+Start from actual #1756 `5f6488c7664`. This slice adopts the existing shared
+`RangeHistory` owner for `venues/phemex/src/income.rs`; it adds no pager policy or
+venue-local marker emitter. Single-page fills/orders/trades and client-ID lookup
+remain outside this bounded slice. No signing format, request path, credential
+selection, rate-pause behavior or financial Store mutation changes.
+
+The current income adapter keeps separate `RangeWalk`, page, accepted rows and
+numeric command fields. Failure of a later page/currency discards accepted
+ledger rows, and a saturated range rejects its entire result. Replace these
+parallel states with one `RangeHistory<Income>` and `Completion`, retained across
+USDT/USDC stages through an additive checked shared range-stage restart. Stage decoded rows
+until the full page validates; feed native timestamp/identity coverage into the
+shared pager before applying the existing time/type filter. Failed page prefixes
+must never enter accepted results. Preserve occurrence identities, running-balance
+components, ordering, optional result truncation, limits, probes and both
+settlement currencies. No new offset paging or endpoint behavior is invented.
+
+Before implementation, add behavior assertions that fail on current source:
+first-page transport/HTTP/malformed failure rejects with a typed error and no
+success/marker; later-page or second-currency failure retains only accepted
+rows, emits exactly one command-owned incomplete Warn, then completes. Cover
+streamed failed-page prefixes, two simultaneous command owners and Error-only
+logging. Saturated-timestamp coverage must become a shared-owned incomplete
+success with accepted rows rather than an empty complete result or total loss.
+Existing successful short/full-page, duplicate identities, type filtering,
+window boundaries, both currencies, rate deferral and strict admission controls
+remain. Explicit construction/signing/serialization refusals stay terminal and
+must not become recoverable pages; classify only facts the failure callback
+actually provides, preserving native details where available.
+
+Plan audit must check the current `RangeHistory` stage API, Phemex request/sign
+failure call graph and test helpers before production changes. Add or adapt
+focused assertion tests first and retain original-red logs. Then implement the
+shared-owner adapter, run focused engine/Phemex/Binance native tests and strict
+checks with Cargo concurrency four, and obtain correctness/adversarial reviews.
+Use Corepack Yarn only; never run the account-policy check. No local release
+WASM, full replay or timing matrix. CI and source-bound artifact proof own those
+gates. Document the caller-visible retained-partial/typed-first-failure contract
+and supersede the historical all-or-nothing test expectation explicitly.
+
+Architecture gate: adoption of one engine-owned range/completion policy by a
+new family, not a per-venue fix of a cross-cutting concern. Coordinate request
+builder ownership with the signer lane before editing; this slice does not
+change engine dispatch, RequestContext, execution, row admission or metadata.
+Merge only after #1737 and any then-current owner queue dependencies, with fresh
+integration/proof and a separate announced guard and match-head merge.
+
+
+Phemex plan audit refinement: `RangeHistory` currently lacks the cursor owner's
+stage restart and filtered-admission operations. Add these to the engine core
+before venue adoption. A checked `restart_stage(RangeWalk)` must require finished
+state with no active fetch, staged rows/facts or lifecycle error, fold the old
+walk's coverage gap into the same Completion, retain accepted rows and first gap,
+and preserve the cumulative request budget across stages. Never construct a new
+command owner for the second currency. Add shared lifecycle/coverage/budget tests.
+
+Add shared `accept_page_where` filtering after the pager has observed every
+validated native timestamp/identity. Only selected rows satisfying the output
+predicate enter accepted rows; `accepted_len` must exclude filtered rows. A
+query whose earlier pages produced no eligible output still rejects on failure,
+not an empty partial success. The venue must not keep a parallel accepted vector
+or use placeholder Option rows to inflate acceptance. Engine tests must pin
+filter-before-retention/after-coverage semantics and rejected-page prefix
+isolation. The adapter remains responsible only for native decoding and its
+existing time/type predicate, final sort/truncate and currency selection.
+
+Both methods are additive shared owner operations, not a Phemex pager fork.
+Coordinate `engine/history.rs` with the managed Completion bridge; RequestContext
+authority stays outside this slice. Signer API inspection found current Phemex
+header construction infallible; do not invent a new sign-failure callback or
+change request builders. The signing lane confirmed these regions are clear.
+
+
+Final plan review: stage replacement must account for retired-stage request
+selections as well as the current walk count, and `with_request_budget` cannot
+be reapplied after restart to reset authority. Test the exact boundary across
+two stages, inability to reopen an exhausted budget, and invalid early restart
+without mutating pending rows or an existing gap. Keep the existing more-than-
+100,000 retained-output guard a strict policy rejection, never a partial success.
+
+
+Saturated-stage sequencing is an intentional change: the old USDT truncated
+walk rejected before USDC. The shared owner will retain that coverage gap and
+continue the requested USDC stage, then return eligible accepted rows with one
+owned marker. Test that additional stage explicitly. Healthy request sequences
+stay unchanged. Preserve equal-bound padding only inside the walker
+(`end.max(start + 1)`), native-request clipping to actual end, and output filtering
+against the actual caller end rather than the padded synthetic bound.
+
+Phemex implementation checkpoint: the four original-source behavior assertions
+are RED before adoption and GREEN through the shared range owner. New core
+controls cover composite ownership/first gaps, early restart, filtered coverage
+and cumulative budgets. Independent review found a boundary regression in the
+initial adapter: a padded equal-bound walk admitted against the synthetic end
+while native HTTP used the actual end. A new assertion reproduced an inverted
+continuation. Additive shared `restrict_active_range` now binds narrower native
+bounds before dispatch and rejects expansion/inversion or changes after staging;
+coverage still sees all decoded row facts. Both direct and streamed edge cases
+are corrected, with additional core restriction controls. The range owner is
+boxed inside the native request to keep Pending's enum variants bounded, rather
+than suppressing the strict Clippy size check. This does not change completion
+authority, request wire or the planned physical-release integration boundary.
+
+## Next cursor fan-out: GRVT history ownership
+
+Plan first on fresh `feat/rust-owned-history-grvt` from actual capability landing
+`4c4df7c99dc` (2026-10-22). Avoid active OKX/Bitget/BingX signer regions, Bybit
+and Kraken Spot. GRVT already uses engine CursorWalk but retains accepted and
+staged rows plus numeric completion in its venue continuation. Adopt one boxed
+CursorHistory/Completion owner for fills, closed orders, funding/fill-derived
+income and public trades. Preserve single-order lookup's separate identity proof
+and result shape. No RequestContext/dispatch/signer/host/metadata/financial-store
+edits; no managed Completion bridge or unmerged Phemex range dependency.
+
+Keep native row codecs, raw/output identity ledgers, lifecycle ownership maps,
+subaccount/symbol/time filters and count facts in the adapter. Move output-row
+staging/acceptance, cursor advancement, page-cap/stall coverage and finalization
+to the existing shared owner. Stage a full page before admission. Before any
+accepted output, terminal HTTP/transport/decode/envelope failure rejects typed;
+after accepted output, return only previous accepted pages with one command-owned
+incomplete Warn before Done, visible at Error-only logging. Do not publish a
+failed page prefix. Keep native no-row lookup proof separate from history rows.
+
+Retain the existing five read retries and once-only session refresh unchanged.
+They reset only the current unaccepted page, including staged rows and native
+page identity/lifecycle facts; accepted rows and cursor/budget stay unchanged.
+If needed add a small shared CursorHistory discard-staged-page API, fail closed
+when called after completion/poisoning. Do not copy retry/paging policy into the
+adapter or mutate the shared cursor/identity state before page validation.
+Funding-to-fill income remains one owner across restart_stage, preserving the
+first gap, accepted rows, native stage counts and existing per-stage page caps.
+Keep stage-specific shaping/limits and final descending sort/truncation exact.
+
+Order-filtered fills remain a strict proof when lifecycle ownership is missing
+or ambiguous, the requested total limit is exceeded, or bounded cursor walking
+cannot prove the complete order fill set. Route those explicit policy refusals
+through shared reject, preserving no partial totals. General history stalls/caps
+use shared command-owned coverage. Signing/session preparation remains strict;
+do not turn a pre-send setup refusal into a recoverable failed HTTP page.
+Inspect failure origins before assigning kinds; the common callback multiplexes
+transport, malformed-stream and session failures, so do not label all Network.
+
+Commit original-source assertion controls before production edits: first and
+later terminal failures, failed streamed prefixes, retry/session-refresh page
+reset, cross-stage income failure, filtered/no eligible output, concurrent owners
+and Error-only delivery. Preserve strict order-fill proof controls and exact
+request sequence, large IDs/nanosecond bounds, maker/fee/PnL units, row.skipped
+behavior and live Store isolation. Extend engine tests for safe current-page
+discard without erasing accepted rows, coverage or page budget. Independent
+plan/correctness/adversarial reviews must answer the architecture gate: existing
+shared ownership adoption plus reusable admission reset, not a venue-local
+completeness/pagination implementation. Focused engine/GRVT/Binance tests and
+strict touched Clippy/fmt/bans locally with four Cargo jobs; no local WASM release,
+full replay, size or timing sweep. Update caller/AUDITS/QUALITY with exact scope,
+then current-head CI/source-bound proof, queue announcement, separate guard and
+separate merge. Keep #1758's watch active; no cutover/NX/deployment closure.
+
+Independent GRVT plan review is CLEAN with preservation refinements: every
+terminal failure of an order-filtered fill proof stays strict, including actual
+later HTTP/decode/transport loss after accepted fills. Keep fail_pending strict
+for deferred/bootstrap/session-refresh failure; only explicit final history
+HTTP/stream/transport call sites use recoverable owner finish. Retain native
+stage_count independently of total accepted rows, especially after funding to
+fills. Discard preserves admitted rows, first gap, cursor/pages/dedupe/stage state;
+calling it after completion/poisoning poisons strict completion. Add exhaustion,
+refresh-failure, filtered later-failure and lifecycle-misuse controls. RequestContext
+owner explicitly confirmed these additive lower HistoryRows/CursorHistory regions
+clear; Completion authority and its pending follow-on API are untouched.
+
+
+GRVT local implementation receipt: regression-only `5a3d2f20fbb` has 24 existing
+controls GREEN and five new behavior groups assertion RED on original production
+source. Shared owner adoption makes them GREEN. Additional controls pin exhausted
+streamed retries (all six attempts, byte-identical native body), strict later
+order-filtered failure, strict failed session refresh, and a general repeated
+cursor's owned partial result. Existing successful retry/refresh, full four-leg
+income request sequence, large IDs/nanosecond bounds, lifecycle proof, lookup and
+row-skipped controls remain. Two engine controls pin safe discard retaining
+accepted output/first gap/cursor/pages/identity and strict lifecycle poisoning
+after completion. Lower-core regions were explicitly cleared with RequestContext
+owner before editing; managed Completion authority is untouched. Independent
+implementation reviews and final focused checks precede publication.
+
+
+GRVT independent implementation and final tests/docs reviews are CLEAN. All 834
+focused engine/GRVT/Binance tests and strict Clippy passed before three additional
+adversarial controls; final focused history tests pass with those controls,
+including 34 GRVT history tests. The additions pin discard after existing
+poisoning, limit-one mixed income with native stage counts and stable newest-row
+selection, and the real 50-page general cap with no 51st request. API docs state
+that staged-page discard does not roll back direct shared fresh observations;
+GRVT keeps retryable identity facts local until admission. First-kind telemetry,
+strict filtered/session proofs and B11 limits are recorded in the caller doc.
+Full artifact CI/proof and actual queued predecessors remain required.
+
+## Next cursor fan-out: Crypto.com exact-nanosecond histories
+
+Plan first on fresh `feat/rust-owned-history-cryptocom` from actual capability
+landing `4c4df7c99dc` (2026-10-22), outside OKX/Bitget/BingX signer work. Replace
+Crypto.com's local accepted rows/completion with one boxed CursorHistory owner
+for fills, closed orders, income and public trades. Preserve unsupported lookup,
+initial credential/range admission and effective-zero-limit/equal-bound no-I/O. No account,
+signing, dispatch, RequestContext, metadata, Store or host edits.
+
+Keep native exact u64 nanosecond bounds and oldest+1 exclusive-end translation,
+method/key pacing and deferred timer order. Do not convert native cursors through
+f64. Feed cursor strings/facts to the shared walker only after a whole valid page.
+Use the existing native stopping rules: requested output limit, empty page,
+short repeated-identity page and exhausted time range. Missing exact cursor proof
+when continuation is required, and a non-decreasing inclusive boundary, remain
+strict policy refusals even after accepted rows; they cannot claim complete
+pagination. Do not invent a 50-page policy absent from this venue: use the shared
+walker's representable page ceiling as a fail-closed limit, with native monotonic
+bounds providing ordinary progress. Public trades remain one unsigned GET with
+native order/duplicates and count cap; ranged income keeps its existing no-output
+cap when both bounds are supplied.
+
+Stage output in the shared owner; retain native page identity facts separately
+until admission/retry. On terminal actual HTTP/native/decode/transport loss before
+eligible accepted rows, reject typed. After accepted rows, recover only those rows
+with one command-owned incomplete Warn before success, including Error-only
+logging. A malformed or failed response prefix is never admitted. Keep exact
+current-page retries: one 40101 retry, otherwise three transport retries, unchanged
+1000ms delay and shared method pacing. They discard staged output and roll back
+only native page identities; accepted rows, cursor/budget and first coverage cause
+survive. Reuse #1760's small shared discard API after explicit stack/region
+coordination rather than adding a second reset implementation. Actual #1760 and
+other shared predecessors must be integrated before final proof/merge.
+
+Commit failing-first controls on original source before production edits: typed
+first/zero-eligible failure, later HTTP/native/malformed-page failure, exhausted
+stream retries excluding all prefixes, retry success preserving exact bounds and
+IDs, concurrent owners at Error-only logging, income partial recovery and public
+single-page failure. Preserve fee sign, timestamp units, large IDs, fractional
+millisecond bounds, overlap dedupe, requested limit/output order, transfer/session
+settlement mapping, missing-cursor policy and independent method budgets. Inspect
+callback origins before assigning a kind: multiplexed transport/decode errors
+must not all become Network. No new signing capability/argument or NX handler.
+
+Independent plan/correctness/adversarial reviews must answer the architecture
+gate: existing shared CursorHistory/Completion and reusable discard adoption,
+not another venue pager, marker emitter or row-retention policy. Focused
+engine/Crypto.com/Binance tests plus strict touched Clippy/fmt/bans locally with
+four Cargo jobs; no release WASM/replay/size/timing sweep. Update caller/AUDITS/
+QUALITY scope, publish draft CI and watches, integrate actual dependencies under
+the owner queue, then exact-head CI/proof, announcement, separate guard and
+separate merge. Keep #1758/#1760 watches; no B11/runtime/cutover closure.
+
+Crypto.com plan review is CLEAN with exact preservation constraints: do not
+enable generic no-new-row/empty stalls, because a full duplicate page may still
+advance its older bound and only a short repeated page proves exhaustion. Run
+strict nanosecond/nonadvance checks only when continuation is needed, after that
+short-page stop rule. Keep the single mixed retry counter (40101 below one,
+other transport below three), and 1000ms continuation/retry timers distinct from
+per-method pacing. Public successful queries remain one page with duplicates,
+while their existing retries stay intact. The representable page ceiling is a
+strict policy refusal, not a new normal 50-page bound. account::signed is a
+synchronous validated-credential helper with no fallible signing callback, so
+no account/signing edits are required. Owner explicitly authorized exact stack
+on reviewed #1760 `ba960f9b7e8`; genuine integration `73b500095be` preserves all
+unowned blobs and the original regression blob. The sole independent-section
+plan-doc conflict preserves incoming GRVT then Crypto.com verbatim, with block
+hashes/base subsequence and no conflict markers. Actual #1760 remains required.
+
+
+Crypto.com local implementation receipt: original regression-only
+`a45c3c6ce5d` has 12 existing controls GREEN and five new assertion-RED groups.
+Shared CursorHistory adoption makes those groups GREEN. Native short-duplicate
+stop precedence, full-duplicate older-bound progress, strict later cursor proof,
+public duplicate/unsigned retry, both mixed retry orders, accepted/new-ID rollback
+and explicitly bounded income with more than the requested output limit are
+pinned. The effective-limit qualifier matters: explicitly ranged income already
+ignores caller output limits, including zero, while other zero-limit queries
+return without I/O. The source uses no new core API and preserves the approved
+#1760 exact stack; no account/signing/Completion edits. Independent correctness
+and adversarial source reviews are CLEAN; final controls/docs review, CI and
+actual queued dependency integration remain before final guard/merge.
+
+
+Crypto.com final local checks: 756 full focused engine/Crypto.com/Binance tests
+passed before the final three controls; all 26 final Crypto.com history tests
+pass, including accepted/new-ID retry rollback, both mixed retry orders and
+unsigned public retry. Final strict all-target Clippy, fmt, banned patterns and
+diff checks pass. Independent source and final tests/docs correctness/adversarial
+reviews are CLEAN. No new core source is added beyond the approved #1760 stack;
+actual predecessor ancestry, final CI/proof and separate guard/merge remain.
+
+## Next cursor fan-out: Hyperliquid inclusive account histories
+
+Plan first on fresh `feat/rust-owned-history-hyperliquid` from actual
+`9bf754a01149d373c522728edbebb46abc5ae5b2` (2026-10-23). Adopt the existing
+boxed CursorHistory/Completion owner for perp fills, closed orders, income and
+public trades. Preserve spot behavior and client-ID lookup as their separate
+paths. No signer, account reducer, dispatch, Context, Store, clock, metadata,
+remote wire or capability changes; keep OKX/Bitget/BingX work untouched.
+
+Replace accepted-output vectors/maps with staged typed native output in the
+shared owner. Fully validate a page before admission; terminal actual
+HTTP/stream/decode/transport failure before eligible accepted output rejects typed,
+while a later failure returns only accepted pages with one command-owned
+history.incomplete Warn before success, including Error-only logging. The shared
+Internal fallback is honest for multiplexed callbacks. Filtered native rows and
+failed-page prefixes must not authorize partial recovery. No history row may
+mutate live Store. Admission and lookup errors retain their separate behavior.
+
+Preserve inclusive userFillsByTime/userFunding request bounds and the additional
+empty/duplicate terminal probe even after a short successful page. Native progress
+counts include validated deduped rows before output filters; retain native ID
+facts separately from accepted output. CursorWalk owns page-budget/repeat policy;
+its internal cursor may bind native timestamp plus identity progress, since a
+same-timestamp page with new native IDs must not be rejected as a repeated physical
+time bound. Keep physical request bytes and existing 200-page per-stage bound,
+with caps 2000 fills and 500 funding used only for full-page missing-coverage
+facts. Short all-duplicate pages end the stage; full pages with no new identity
+carry an owned gap. General cap/stall termination retains admitted output and
+owned incompleteness rather than discarding it. Stage reset and first-gap retention
+must use the existing shared restart_stage API, never a second local Completion.
+For mixed income retain fill-derived PnL/fee rows through the funding stage and
+retain the same owner even if a prior stage ends incomplete.
+
+Orders remain one historicalOrders response: fold native transitions by ID in the
+final admitted-row encoder, preserving latest status timestamp and closed/canceled
+rank tie precedence before creation-time/symbol filtering. Feed rolling-retention
+coverage (raw count at least 2000) through shared admission/completion instead of
+emitting a venue-local marker. Public trades remain one response with native
+dedupe and descending sort. Keep exact timestamp units, large native IDs, gross
+historical PnL, rebate/commission signs, builder revenue metadata, vault/master
+identity, fee assets, native sort/tie order, output limits (fills default/clamp),
+weight accounting, no-I/O admission and endpoint/body shapes. Do not infer a
+new retry or signing policy.
+
+Commit original-source failing-first controls before implementation: typed first
+and zero-eligible failure, later HTTP/malformed/stream failure with prefix exclusion,
+concurrent owners at Error-only logging, mixed-income funding failure retaining
+only accepted fill rows, same-time distinct-ID continuation, full inclusive stall
+and real 200-page/no-next-request cap. Keep all existing native history controls,
+including rolling retention ownership, order transition ties, lookup and spot
+behavior. Add no engine API unless a real native fact cannot use current shared
+CursorHistory; coordinate any lower-core change with other history/RequestContext
+owners first. Independent plan/correctness/adversarial reviews must answer the
+architecture gate: shared owner/pager/marker adoption, with native endpoint facts
+only. Focused engine/Hyperliquid/Binance tests, strict Clippy/fmt/bans with four Cargo
+jobs; no local release-WASM, replay sweep or timing matrix. Update caller/audit/
+quality evidence, publish draft CI and keep all existing watches. Final current
+landing integration, authenticated full raw/package proof, independent reviews,
+announcement, separate guard and separate merge remain required. B11/runtime/
+cutover claims stay open.
+
+Hyperliquid plan review is CLEAN on the existing APIs. Bind progress to newest
+physical timestamp plus cumulative validated native identities, never page ordinal
+or filtered output count; physical inclusive startTime must not gain one ms.
+Admit positive page 200 with an owned gap and no request 201, but allow a terminal
+probe after 199 positive pages. Full zero-new-ID pages pass an explicit coverage
+gap through shared admission; short zero-new-ID pages end normally. Fold order
+transitions in encounter order before filtering, keeping the first equal-time,
+equal-rank update. Preserve successful-page-only history_weight accounting and
+existing queue reservations. Clock/row owners confirm no concrete Hyperliquid
+source overlap. Existing full-overlap test's strict rejection is an explicitly
+superseded general-query contract: retain its assertion of missing coverage and
+add accepted-row/owned-marker assertions rather than silently dropping the test.
+
+Hyperliquid original regression-only `e2255a5140a` records 11 existing tests
+GREEN and six new assertion-RED groups before production edits. Existing shared
+CursorHistory adoption makes all 17 pass. Accepted output is held only by the
+shared owner; native inclusive timestamp/identity facts feed its pager, and order
+transitions fold only in the admitted-output encoder. The prior full-overlap
+strict-failure assertion is explicitly superseded with retained-row/owned-gap
+assertions. No engine API, lib/account reducer, signing or Context edits. Both
+independent source reviews are CLEAN and confirm the architecture gate. Additional
+controls pin zero-income native progress/typed rejection, order-fold-before-filter,
+first cap gap through funding failure, and full-inclusive first-gap retention
+through successful or failed funding. A valid coverage-only cap may return owned
+incomplete empty output; actual failure still requires eligible accepted output
+for recovery. All 873 focused engine/Hyperliquid/Binance tests passed before the
+last two review-requested controls; final history/strict gates and tests/docs
+review precede publication. Actual #1762 integration and fresh post-sort-baseline
+CI/proof remain required before final guard; all prior history CI watches continue.
+
+Hyperliquid final local receipt: all 22 history tests pass, including both final
+review suggestions. Strict all-target Clippy, fmt, bans and diff checks pass.
+Both independent final tests/docs reviews are CLEAN; source remains the reviewed
+shared-owner adoption. No local release-WASM, full replay or timing run. Final
+publication integrates actual #1762; fresh CI and post-sort-baseline proof remain
+required, alongside the existing queued history merge order.
+
+## Next cursor fan-out: Kraken futures histories
+
+Plan first on fresh `feat/rust-owned-history-kraken-futures` from actual
+landing `fe44969d033529c244fc4f33fce5395c0273df04` (2026-10-23), during the
+owner-assigned Orderly #1767 exclusive landing window. This checkpoint is a
+plan only. Existing Hyperliquid #1765 and Backpack #1766 CI watches remain
+active. No landing merge occurs before actual #1767; real-integrate its
+shared-engine input before final CI/proof. Signer, clock and financial lanes
+confirm Kraken futures history and request-builder regions are clear; later
+account reducers remain separate.
+
+Scope: adopt existing boxed `CursorHistory<Row>`/`Completion` in
+`sdk-rs/venues/kraken/src/history.rs`, with original-source controls in the
+existing `tests/history.rs` and nearby CALLERS/AUDITS/QUALITY/this-plan
+updates. Existing `lib.rs` already routes streamed HTTP/transport failure to
+`history_failed`; no routing edit is planned. No engine API, paging primitive,
+account reducer, signing, credentials, Store, Context, capabilities, harness,
+workflow, fixtures, reference output, budget or NX edits. Numeric Completion
+remains the explicit legacy authority, not managed Context completion or a
+journal-policy bypass; coordinate any future exact legacy-inventory refresh
+after actual landing.
+
+One existing engine owner must own accepted/staged rows, command finalization,
+identity/cursor history and the fifty-page budget. Remove the venue accepted
+rows vector, global seen/cursor sets and page counter. Native raw counts,
+fresh/native identity facts, ascending/descending observations, oldest/newest
+native millisecond bounds and endpoint cursor derivation remain adapter facts.
+Use raw native identities for `fresh`, including filtered records; only
+eligible mapped rows are staged. The raw account-ledger identity remains
+booking ID plus asset/contract; derived PnL/funding/fee/liquidation rows keep
+their existing IDs, cash-leg filtering and units. Filtered rows must not
+authorize failure recovery. No new output cap or early stop: fills and orders
+still walk their current native coverage despite a small requested limit;
+trades retain their current limit stop.
+
+Admit a page only after HTTP/native envelope, required-array, all streamed
+rows, order length and cursor-envelope consistency checks succeed. Actual first
+or zero-eligible-output failure rejects typed (Internal fallback); actual
+later-page HTTP/transport/decode/malformed failure returns only earlier
+accepted rows plus one command-owned incomplete Warn before Done, including
+Error-only logging. Discard the failed page's prefix, including order updates
+to already accepted native IDs. Move order terminal-state folding into the
+contextual final encoder across admitted rows only: keep the latest
+strictly-greater updated timestamp, first encounter on equal timestamps,
+existing filters-before-fold, ignored NotFound/EditRejected/nonterminal events,
+and final descending sort/truncation. Do not retain a separate mutable
+accepted-order cache outside the history owner. No historical row may enter the
+live account Store.
+
+Preserve strict endpoint-policy refusals separately from recoverable actual
+page failure: repeated/no-fresh cursor, fifty-page exhaustion, and a saturated
+order page with no continuation proof, or contradictory decoded body/header
+tokens, still reject via owner.reject even after prior rows. Do not change
+their existing INCOMPLETE messages or manufacture a complete order total. Drive
+repeat/empty/no-new-row/budget detection through CursorWalk settings and native
+CursorPage facts; explicitly enable both stall_on_empty_page() and
+stall_on_no_new_rows() so an empty page carrying a token preserves the current
+strict refusal. Reject its Stalled verdict instead of adding another loop.
+Validate missing/conflicting continuation proof before page admission and
+reject it strictly; no request or complete result is authorized by unusable
+proof. Generic whole-envelope/row decode failure and a declared order length
+mismatch remain actual failed-page errors with accepted-only recovery. Preserve
+the existing native parser rather than inventing token authority from a
+malformed envelope. Keep body/header opaque token agreement and exact
+`lastFillTime`/`lastTime` ISO millisecond overlap, ledger `since`/count and
+orders since/before/count/sort/ closed/opened/tradeable request bytes. A
+terminal page at request fifty is still complete; a full continuing page fifty
+rejects without a request fifty-one. Synchronous consuming signed setup refusal
+stays strict through its current error path, never a partial HTTP-page failure
+or a reason to resend.
+
+Replace the ledger's direct HISTORY_INCOMPLETE emitter with
+advance_with_coverage on the validated terminal since-only coverage gap.
+Preserve its message and current suppression when eligible accepted+staged
+output already satisfies the requested limit. Preserve native ledger predicate
+precedence: crossing from can prove descending coverage; crossing to proves
+coverage only in the ascending, distinct-time continuation branch. A descending
+page with newest above to alone still has the existing since-only gap unless
+from or the eligible output limit proves sufficient coverage. A valid
+all-filtered saturated page may explicitly return incomplete empty output; a
+failed page with no eligible accepted output must reject instead. Completion
+owns command fields, severity, exactly-once marker ordering and serialization
+failure suppression. Preserve first coverage cause without a venue marker
+latch.
+
+Before production edits, commit original-source assertion-RED controls for
+typed first/native/streamed failure, accepted-only later-page recovery,
+failed-prefix isolation, zero-eligible recovery refusal, concurrent owners and
+Error-only marker-before-Done delivery. Cover fills, ledger, closed orders and
+unsigned public trades with full-page continuations where applicable. Pin an
+accepted terminal order followed by a newer failed-page update to the same ID,
+proving that the failed update cannot replace the prior accepted state.
+Preserve and extend existing strict repeated-cursor, full same-time fill
+boundary and real fifty-page/no-fifty-first tests; add terminal fiftieth page,
+missing/conflicting order token, an accepted order page followed by an empty
+page with a token (strict rejection, no partial marker/result), declared length
+mismatch, fully filtered
+native progress, requested small-limit behavior, descending-above-to ledger gap
+precedence, native compound ledger identities and existing exact
+large-ID/signing/public-unsigned/request-sequence controls. Retain the explicit
+unsupported client-ID lookup refusal and range admission behavior unchanged.
+
+Independent plan/correctness/adversarial reviews must explicitly answer the
+architecture gate: this is adoption of the existing shared engine history
+owner, not another venue completeness/paging implementation. Focused
+engine/Kraken futures/Binance native tests plus touched all-target strict
+Clippy/fmt/bans/diff checks use four Cargo jobs. Corepack Yarn only; never
+bare/Volta yarn, npx or the account-policy check. No local release WASM/full
+replay/size/timing run. After actual shared predecessors, require exact-head
+green CI and fresh authenticated post-sort raw/package/ordered-gate evidence,
+then announce, run a fresh separate porcelain guard and a separate exact-head
+merge. Caller docs record accepted-only partial recovery and typed telemetry
+without claiming B11 ingestion/coverage, managed completion, remote-signing or
+deployed cutover proof closed.
+
+Independent correctness and adversarial plan reviews are CLEAN after the
+explicit strict token-proof, empty-with-token and native ledger-precedence
+refinements. Existing CursorHistory/Completion APIs suffice; no production
+source or tests are edited in this plan checkpoint. Both reviews confirm the
+shared-engine architecture gate. Original-RED controls precede implementation.
+
+Kraken futures regression-only checkpoint `f2389ff658b` leaves production
+unchanged: nineteen controls pass (including the new strict-proof compatibility
+control), and four new assertion groups fail on untyped first/filtered failures,
+accepted-page loss and failed newer-order-prefix isolation. Existing engine
+owner adoption makes all four groups green. Added compatibility controls pin
+terminal page fifty versus continuing cap fifty/no page fifty-one, strict empty
+or missing/conflicting order continuation after accepted rows, declared length
+mismatch, first native/transport/decode typing, ledger descending-above-to gap
+precedence and filtered-empty coverage, concurrent owners, first order state on
+equal timestamp, and no-I/O strict consuming setup. Terminal helpers inspect
+physical HTTP actions before filtering notices, preventing vacuous no-resend
+assertions. Independent source correctness/adversarial reviews are CLEAN and
+confirm existing-engine choke-point adoption; no engine API or managed completion
+policy is added. Final focused/strict checks and tests/caller review precede
+draft publication; actual shared dependencies and full CI/evidence remain.
+
+## KuCoin futures and spot owner adoption (planned 2026-10-23)
+
+Base: actual landing `90dc6637d6e12eafecc283d0dfb9a78e7fc967d6`.
+Scope: `venues/kucoin/src/history.rs`, `funding.rs`, spot query-only regions in
+`spot/mod.rs`, focused existing/new history tests, and appended caller/audit/
+quality notes. No signing helper, credential selection, account reducer,
+capability, HTTP recipe or request-context authority changes. Keep all watches;
+no landing merge during the #1741 exclusive window. Actual shared predecessors
+must be integrated before final CI/proof.
+
+1. Pin numbered-page/ledger and funding request sequences, admission errors,
+   retry delays/counts, 350ms pacing, exact integer offsets/nanosecond fill
+   bounds, newest-first tiled windows, census/cursor proofs and final shaping.
+   Spot fills remains one request, limit/defaults/output schema unchanged;
+   disabled order-history/income stubs and lookup remain unchanged.
+2. Regression-only first: reject Internal with no Done/marker on initial failed
+   HTTP/envelope/row reads; after an accepted futures/funding page resolve only
+   admitted rows with one command-owned Warn on terminal page failure. Prove
+   failed-page prefixes and retries cannot leak rows/poison dedupe, concurrent
+   owners remain isolated, successful empty is complete, and spot malformed/
+   transport failures become typed failures without partial success.
+3. Adopt existing engine `CursorHistory`/`Completion` for futures history and
+   funding, retaining one owner across every native window. Native page/offset/
+   timestamp tokens describe wire continuation; the shared walk owns accepted
+   row identity, continuation lifecycle and missing-coverage reporting. Keep
+   native census, strictly decreasing ledger/funding cursor and bounded-attempt
+   refusals strict via owner.reject; those native completeness proofs are not
+   recoverable page failures. Keep the existing total HTTP-attempt safety guard
+   (counts retries), independent of accepted-page tracking. Stage normalized
+   page rows locally until the whole response validates, then admit atomically.
+   Spot fills uses `HistoryRows` for its single validated response, without
+   inventing pagination or enabling unsupported endpoints.
+4. Preserve final descending time/identity ordering and limit exceptions for
+   explicitly ranged income/funding. Preserve newest-window allocation bounds,
+   cursor inclusivity and padding, output units, filters and successful paths.
+   HTTP/decode callbacks are multiplexed, so the shared Internal default is
+   honest; do not classify all failures as Network. No numeric/managed fallback.
+5. Independent correctness/adversarial reviews must answer the architecture
+   gate: these are two family adapters to the existing engine history choke
+   point, not a second marker emitter/pager. Focused engine/KuCoin (spot feature)/
+   Binance tests, strict touched all-target Clippy/fmt/bans/diff locally with
+   four Cargo jobs; no local release WASM/full replay/size/timing. Update caller
+   impact and open a draft with CI watch, no cutover/B11/runtime closure claim.
+
+KuCoin plan-audit clarification: malformed metadata decoding follows failed-page
+owner policy; well-formed census values and missing/nondecreasing native cursors
+remain strict proof refusals. Funding cursor proof still precedes the output cap,
+while ledger cursor proof is checked only when continuation is actually needed.
+Raw census/cursor facts include filtered/duplicate rows; output admission does not.
+
+KuCoin local adoption checkpoint: exact final 17 controls on original source
+`90dc6637d6e` produce 14 assertion RED / 3 compatibility GREEN; the implementation
+makes all 17 GREEN. Original comparison saves/restores only this slice's three
+source files byte-for-byte, with test/source hashes recorded locally. The full
+focused engine/KuCoin (spot)/Binance native suite passes 957 tests; strict touched
+all-target Clippy/fmt/bans/diff checks pass. Independent plan, correctness,
+adversarial source/delta and final tests/docs reviews are CLEAN. Actual #1741
+must be genuinely integrated before draft/final CI; none of these local receipts
+claims new shared-core compatibility or deployed runtime coverage.
+
+Actual #1741 integration was conflict-free and preserved all four reviewed
+source/test blobs and the entire incoming unowned tree; integrated native suite
+passes 1,100 tests. Its exact lexical inventory needs the owner-authorized
+follow-on: prune KuCoin history 20->13 and funding 15->9 legacy sites, and spot
+22->20 with the same GET call re-expressed only to carry HistoryRows. Record the
+full exact spot old/new maps in existing HISTORY_BOOTSTRAPS and hash-pin the
+transition in checker controls; preserve every other map and all checker logic.
+The funding cursor formatting is factored through a tuple to avoid two false
+macro matches on the local identifier `request`, without changing cursor bytes.
+No new HTTP site, recipe, headers, signing or broad exemption is authorized.
+
+The precise ratchet update passes all 12 checker controls and the full bans
+script. Exact spot map hashes (sorted JSON) are
+`cff9fea5f76ae51654a83c7953df010ef41e3941614a6fdd67b9f1001bd212ff`
+(old) and `fca911a5d114175c7374dfef35111bf3498f871eead93ef398d926ccf6929da8`
+(new); existing negative controls also exercise this transition against modified
+baselines, foreign paths, inflated counts/new digests and newer pruning.
+Final tuple-cursor source passes all 257 KuCoin/spot tests (including the same
+17 owned-history controls), strict all-target Clippy/fmt and diff checks. No
+production request-context adoption or signing changes are implied by pruning.
+
+## Next single-page fan-out: Bitrue execution histories
+
+Plan first on fresh `feat/rust-owned-history-bitrue` from actual landing
+`bf362312d3edfb4dfa00b726c172f944053b9198` (2026-10-23). Plan only: keep queued
+Hyperliquid #1765, Backpack #1766 and Kraken futures #1768 CI/proof watches active
+and honor the owner queue, announcing before any separate guard/merge. Check
+native history/request-builder overlap with signer/clock/financial lanes before
+production edits. Future shared-engine/harness/build inputs require genuine
+integration and fresh source-bound evidence before landing.
+
+Bitrue fills read one bounded `/fapi/v2/myTrades` page; the venue's forward fromId
+is not a documented backward recent-history cursor. Do not invent continuation
+or claim general complete order history/PnL ledger. Scope existing
+`venues/bitrue/src/history.rs`, its `tests/history.rs` and nearby caller/audit/
+quality/this-plan docs. Reuse engine `HistoryRows<Execution>`/`Completion` rather
+than constructing a fake cursor walk for a one-page endpoint. One owner binds
+the real command and owns staging, admission, error finalization and encoding.
+Remove the venue row-output vector and duplicate numeric completion field. No
+new engine API, per-venue completeness emitter, paging/retry policy, Store,
+account reducer, signing/key selection, Context, capabilities, harness/fixture/
+budget/workflow or NX changes. Public WS trades, native client-ID lookup and
+explicit unsupported order-history/income admission stay separate and unchanged.
+
+Rows stream into owner staging only. Native HTTP/envelope check, required-list
+streaming decoder, all row validation, hard 1000-row guard and endpoint coverage
+proof must succeed before accept_page and final serialization. Keep the native
+received count before filters and the exact strict refusal when a full requested
+native page leaves fewer eligible unique rows than the requested limit. That
+coverage refusal remains owner.reject even if a valid prefix was staged; it
+never manufactures a successful empty/partial answer or a completeness marker.
+Actual native/HTTP/malformed/transport failure before page admission rejects
+typed with the existing shared Internal fallback, never empty complete. Since
+this endpoint admits exactly one terminal page, there is no artificial
+accepted-page/later-failure recovery case to add. Preserve valid empty success,
+exact existing messages and any supplied typed error information.
+
+Request::reset remains compatible with the existing library reset_job call.
+Discard only unvalidated owner staging and native per-attempt received/failed/
+seen-ID facts, retaining the original Completion and command across retries.
+The existing per-attempt identity set is native page deduplication, not an
+accepted/global row owner; clear it with the failed attempt so the same native
+ID can reappear in a valid retried page. No command Done/failure/marker may
+escape from a failed attempt that will retry. Preserve the one explicit -1022
+signature resend (both envelope and expected-list error paths), three eligible
+GET retries, existing rejection/UTF-8/no-list exclusions, retry counters and
+strict timestamp increment/reset behavior. Do not copy or repair the generic
+issue/retry/signing implementation in this slice; all those callsites stay as-is.
+
+Preserve byte-exact URL/contractName/limit/startTime/endTime and flooring/clamps,
+primary versus read credentials, native huge IDs and same-side bid/ask order ID,
+first eligible duplicate identity, side/type filtering, exact millisecond range
+checks before second timestamps, base/contract/quote quantity disambiguation,
+absolute commission/quote asset, maker optionality, final descending sort/limit
+and no live Store writes. The contextual finalizer sorts/truncates only the
+admitted page; serialization error rejects through the same command owner.
+Numeric Completion remains explicit legacy authority, not managed Context
+completion; notify the request-core lane of any eventual exact legacy-inventory
+net shrink after actual landing.
+
+Before production edits, commit original-source assertion-RED controls for typed
+terminal native/malformed/exhausted-transport failures and the strict full-page
+coverage refusal. Preserve existing success, lookup/public/unsupported, time/
+identity/quantity, signature-resend and interrupted-stream compatibility tests.
+Add valid-prefix plus malformed-row/envelope/UTF-8/no-list refusal, failed-prefix
+reset followed by successful same-ID changed-economics retry, mixed signature
+and transport retry accounting, filtered-full/all-duplicate pages, received-row
+1000/1001 boundary, concurrent query owners and exactly one terminal delivery.
+Inspect raw actions for no early Done/failure/marker or unexpected extra HTTP;
+no history output may mutate live orders/fills. Pin the distinction between
+legitimate terminal empty data and missing/invalid arrays. Avoid an invented
+partial-success regression for a query with no accepted earlier page.
+
+Independent plan, correctness and adversarial reviews must explicitly answer
+the architecture gate: adoption of the existing engine row-admission/completion
+owner, not another venue completion/paging/coverage implementation. Focused
+engine/Bitrue/Binance tests and touched all-target strict Clippy/fmt/bans/diff
+checks use four Cargo jobs; Corepack Yarn only, never bare/Volta yarn, npx or
+the account-policy check. No local release-WASM/full replay/size/timing sweep.
+Caller docs explain Internal fallback on formerly unclassified owner-completed
+failures and strict coverage refusals while preserving admission/lookup/setup
+paths; B11 ingestion/coverage, other adapters and deployed runtime proof stay
+open. Final exact-head green CI and fresh post-sort raw/package/ordered-gate
+evidence precede an announced fresh separate guard and separate exact-head merge.
+
+Bitrue implementation checkpoint: regression-only `51b6193c21e` leaves production
+unchanged, with 19 controls PASS and four typed-terminal assertion groups RED.
+Existing HistoryRows/Completion adoption makes those groups GREEN. All 28 final
+history controls pass, including mixed resend/GET orders with strict timestamp
+increments, no-list signature refusal after exhausted GET retries, signature
+resend not replenishing GET budget, staged same-ID economic replacement,
+1000/1001 raw-row admission, valid empty success versus malformed list,
+UTF-8/no-list nonretry, independent concurrent owners and first eligible native
+identity. No new core, library request/retry, public WS or lookup edits.
+Independent correctness source review is CLEAN; final adversarial/tests/docs
+review and focused native/strict checks remain before the draft PR. Current
+shared registry/SDK predecessor #1763 must be genuinely integrated before final
+CI/proof. No historical evidence is a certificate for that new head.
+
+Bitrue final local checks: all 842 focused engine/Bitrue/Binance tests pass;
+all 28 final history controls pass again after tightening the mixed-retry raw
+terminal drain. Touched all-target strict Clippy, fmt, bans and diff checks pass.
+Independent correctness, adversarial source and final tests/docs reviews are
+CLEAN; architecture gate is existing shared owner adoption. No local release
+WASM/full replay/size/timing run. Actual #1763 integration and fresh CI/proof
+remain required before landing.
+
+## Next offset-history fan-out: Backpack
+
+Plan first on fresh `feat/rust-owned-history-backpack` from actual landing
+`4a17998a4d9825dc7de303a23be793b5a7d9cabe` (2026-10-23). Scope is Backpack
+fills, closed orders, funding income and single-page public trades. Avoid active
+OKX/Bitget/BingX signing work, KuCoin's signer hold and Orderly financial reducers.
+Keep the #1760/#1761/#1765 CI watches and respect #1764's exclusive landing window.
+This plan adds no new plan file or index row.
+
+The adapter currently owns accepted output in `Request.rows`, emits numeric
+completion, and rejects all accepted pages on a later HTTP/stream failure or
+repeated/capped offset walk. Adopt a boxed engine `CursorHistory<Row>` with one
+`Completion` for output staging/admission, fifty-page budget, progress checks and
+terminal coverage. No new history-owner type, engine API, managed Context bridge,
+retry loop or venue-local completeness emitter is planned. Touch only Backpack
+`src/history.rs`, the narrow `Pending::History` failure arm in `src/lib.rs`,
+`tests/history.rs`, and the existing caller/AUDITS/QUALITY/OWNED_HISTORY sections.
+Do not change `account.rs`, `sign.rs`, request signing, credentials or Store.
+
+Use the existing raw-page fingerprint as the opaque progress token while the
+native page requires continuation; do not use a monotonically increasing offset
+as evidence that a repeated page progressed. Remove the venue's separate page
+fingerprint set: `CursorWalk` owns repeat detection and the page cap. Preserve
+the existing engine `OffsetWalk` solely for native next-offset arithmetic, invoked
+only after `CursorHistory` admits a valid page and returns More. It cannot
+authorize another request or a terminal outcome; the shared owner makes those
+decisions first. Keep exact raw-row displacement rather than selected output
+count or requested page size. Review this narrow protocol-helper composition
+before implementation; do not introduce a second active pagination authority or
+copy offset arithmetic/stall policy into the venue.
+
+Keep native row decoding, compound fill/order/funding identities, local symbol/
+order/time filters, oldest-time facts, page sizes, native order and output limits.
+The More predicate uses admitted plus staged retained output, preserving current
+limit behavior without admitting a page prefix. Decode into staged rows; accept
+only after HTTP/envelope/stream validation. Actual failure before eligible output
+was accepted rejects typed; after accepted output, finish with only earlier
+accepted pages and one command-owned incomplete Warn before Done, visible at
+Error-only logging. A later failure after only filtered pages still rejects.
+Repeated/capped valid coverage becomes owned incompleteness, including an empty
+result when valid pages contained no eligible output. No result row enters Store.
+
+Preserve malformed-fill isolation and the existing row.skipped diagnostic;
+malformed non-fill rows still invalidate their whole page. A validated page with
+skipped fills supplies a coverage gap to `advance_with_coverage`, rather than
+claiming complete coverage. Stage that gap and skipped-row diagnostic facts with
+the page: failed-page prefixes must not contribute output or an earlier coverage
+cause. Retain only the first admitted gap across subsequent pages. Public trades
+remain unsigned and single-page. Client-ID lookup, unsupported ledger/time/market
+admission, and synchronous signed-setup refusal remain strict and separate;
+preserve the existing consuming signed helper rather than adding a generic
+credential fallback or misclassifying setup refusal as recoverable HTTP loss.
+
+Before production edits, commit original-source assertion controls for typed
+first failure, retained later failure, streamed failed-prefix isolation, empty
+filtered-prefix failure, owned repeat/cap coverage and skipped-fill coverage.
+Pin two concurrent owners, exactly one marker before Done, Error-only delivery,
+49 full pages plus terminal probe versus a full fiftieth page with no fifty-first
+request, and non-adjacent repeated raw pages. Preserve the existing exact offset
+request-sequence control, fractional fill bounds, spot-row filtering, native
+units/IDs/quantity fallback, row-skipped diagnostic and unsigned public trades.
+Document the intentional replacement of the old repeat-page strict rejection.
+
+Independent plan/correctness/adversarial reviews must explicitly answer the
+architecture gate: shared owner adoption with an existing engine offset codec,
+not a per-venue cross-cutting pagination/completion fix. Run focused Backpack,
+engine and Binance native tests, touched all-target Clippy/fmt/bans/diff checks
+with four Cargo jobs. Corepack Yarn only; never bare/Volta yarn, npx or the
+account-policy check. No local release WASM/full replay/size/timing sweep. Before
+landing, integrate actual shared predecessors, obtain exact-head green CI and
+authenticated post-#1762 full raw/package/gate proof, announce the guard window,
+then run a fresh separate porcelain guard and a separate match-head merge. B11
+NX ingestion/coverage and deployed cutover proof remain open.
+
+Backpack plan review refinement: owner More can occur at most forty-nine times
+before the fifty-page cap, so the existing offset helper cannot reach its own
+budget. Treat any unexpected non-More helper result as a strict invariant
+failure; never let it independently finish or authorize a request. Insert page
+fingerprints only when continuation is required, matching the old repeat set,
+and do not stall on zero eligible identities. Preserve the current validation/
+filter order and eager non-fill command_error diagnostic. Keep separate staged
+skipped-fill facts and the admitted cumulative row.skipped message, emitted once
+on successful completion, including retained partial success. Add controls for
+a failed skipped prefix, an admitted skip followed by actual failure, all-skipped
+valid coverage, malformed non-fill after an accepted page, public dedupe/limit,
+and raw offset displacement across spot and malformed-fill neighbors. Strict
+synchronous setup failure must suppress both partial output and owned markers.
+
+Backpack regression-only checkpoint `b33295f3591` leaves production unchanged:
+all twelve existing history controls pass and seven new assertion groups fail on
+the original implementation. Shared owner adoption makes those groups pass. The
+old repeated-full-page strict assertion is explicitly superseded with an owned
+marker/empty-result assertion, preserving its no-silent-truncation purpose.
+Additional controls pin failed-page skip isolation, admitted first-gap retention,
+eager non-fill CommandError with prior accepted rows, raw displacement across
+spot/skipped neighbors, unchanged unsigned public dedupe/limit and strict missing-
+credential setup. Static credentials cannot become invalid midway through a
+healthy native fixture without introducing a test mutation seam; the unchanged
+consuming helper's error arm remains strict after any earlier accepted pages.
+Independent source correctness/adversarial reviews are CLEAN: no engine API,
+account/signing, Context, Store or parallel pagination-policy edits. Final focused
+checks and final tests/caller review precede draft publication.
+
+Backpack final local checks: all 814 focused engine/Backpack/Binance tests pass,
+including 24 Backpack history controls. Touched all-target strict Clippy, fmt,
+banned-pattern checks and diff checks pass. Both final source and tests/docs
+reviews are CLEAN and confirm the shared-owner architecture gate. CI/full
+artifact proof and actual queued dependency integration remain mandatory; no
+local release-WASM, full replay, timing, deployed NX or cutover proof is claimed.
+
+## Next bounded-read fan-out: ApeX Omni executions
+
+Plan first from actual landing `d05c5ede4b86409e1a8d9798e64b79b1c1c888f4`
+on `feat/rust-owned-history-apexomni`. Hyperliquid Spot and Breakout have only
+empty/unsupported history stubs, not a request pager to migrate. Keep all queued
+history CI/archive/proof watches active and honor the bounded #1769 merge hold.
+Scope ApeX `src/history.rs`, `tests/history.rs` and existing caller/audit/quality/
+this-plan docs. No signing/request-library/account/Store/engine source change.
+
+ApeX executions try native/display symbols on `/v3/fills`, then the same bounded
+alternatives on `/v3/history-orders`. They do not implement a cursor walk. Use
+existing engine HistoryRows/Completion, bound once to the original command, for
+terminal admission/encoding/error delivery, without inventing a pager. Remove
+the duplicate command field. Preserve the native per-attempt bounded Entry
+buffer: its replacement-by-key, stable raw-time sort and top-limit eviction are
+endpoint normalization facts (including last-duplicate economics and later
+reappearance after eviction), not accepted query output or a second finalizer.
+Only the selected validated terminal result enters the engine owner; no failed
+attempt prefix or background cache can independently authorize error recovery.
+
+Owner decision (2026-10-23): when every REST alias/route actually fails, reject
+typed Internal even if the background WS cache contains matching executions.
+That cache was not fetched by this command and must not be presented as complete
+history. Keep the same alias/fallback attempts and bounded upsert. On validated
+successful empty/nonempty paths, preserve the existing cache/authoritative
+selection, including nonempty primary data stopping further REST attempts even if every
+row filters out. Existing finish_history still selects matching WS cache when
+that validated nonempty response has no eligible normalized rows; preserve that
+distinction. Only eligible nonempty REST output excludes cache merging. Callers may still read the live cache separately after rejection.
+Track whether any actual REST response validated, across candidate resets, so
+mixed valid-empty/failure alternatives retain the expressly preserved successful
+path while all-actual-failure exhaustion rejects. Initial consuming signed() refusal remains the existing separate strict
+String-to-cx.fail path, without claiming unavailable typed details. The wrapper
+already flattens retry/resend preparation failures to error.message before
+history_failed; preserve that alias-exploration behavior and leave typed
+preparation provenance to the shared request/signing lane. Preserve admission's
+empty/unsupported behavior. Numeric Completion remains explicit legacy authority,
+never managed Context fallback. No first-page actual failure may become complete
+empty/cache output when all alternatives failed; no invented later-page partial
+or history.incomplete marker is needed for this bounded selection.
+
+The wrapper already validates HTTP/status/native error metadata and supports
+both signature formats and eligible transport retries. Preserve its code and
+policy exactly. Request::reset clears only native attempt count/current rows
+(and any engine pending rows defensively), retaining owner, candidate/fallback
+and the successful-response fact. Moving between aliases/routes likewise keeps
+one owner. At final success retain existing cache filter/identity/sort/limit
+selection, stage its normalized executions, accept exactly once and finish with
+the existing JSON shape. At all-failure exhaustion finalize Err through the
+engine owner, preserving the last terminal message and adding shared Internal
+classification where the history adapter previously returned success.
+
+Preserve exact signed query bytes, symbol alternative ordering, no synthetic
+page/token, clamped limit1..100, floored inclusive/exclusive time bounds, symbol/
+order/millisecond filters, native and anonymous compound identity, original raw
+milliseconds and timestamp seconds, quantity/price/fee optionality, authoritative
+REST never merging WS rows, equal-time ordering and native cumulative history-
+order fallback. No new capability, native history implementation for unsupported
+axes, remote signing policy, live state mutation or NX edit.
+
+Before production edits commit original-RED controls superseding the old
+all-failed-REST cache-success assertion: all-native failures with and without
+cache reject typed, exhausted transport/decode/missing-list alternatives reject,
+and failed streamed prefixes never enter successful or error output. Pin exact
+four candidate requests when native/display symbols differ (two when identical) and no early terminal/marker/extra HTTP. Compatibility
+controls cover valid empty aliases and cache selection, mixed valid/failed
+alternatives, first nonempty all-filtered response with cache and no further REST attempts,
+bounded duplicate
+replacement/eviction, signature reset and transport prefix rollback, concurrent
+query owners, large identities/raw-millisecond sorting and Store isolation.
+The cache remains independently available in the live account path after an
+all-failure history rejection.
+
+Independent plan/source/final tests-docs reviews answer the architecture gate:
+existing shared owner adoption, with native bounded alternative/upsert facts
+retained and no copied pager/completion policy. Run focused engine/ApeX/Binance
+native tests, touched strict all-target Clippy/fmt/bans/diff with four Cargo jobs;
+Corepack Yarn only, never bare/Volta yarn, npx or account-policy. No local release
+WASM/full replay/size/timing sweep. Open a draft after reviews, update the caller
+contract for all-failure rejection/cache access, and require actual queued shared
+inputs plus exact-head green CI and fresh raw/package/ordered-gate proof before
+an announced separate guard and separate merge. B11 and runtime coverage stay open.
+
+ApeX local implementation receipt: refined plan `bc700e3ccf6` was independently
+reviewed CLEAN twice. Regression-only `3a023040ec3` leaves production unchanged:
+18 controls PASS and four assertion groups RED. Existing HistoryRows adoption
+turns those groups GREEN. All 25 final history controls pass, including mixed
+valid/failed alternatives, filtered nonempty primary cache selection, two-route
+same-symbol alternatives, native bounded eviction-before-duplicate replacement,
+signature-prefix reset, sixteen failed transport prefixes, concurrent owners and
+cache availability after rejection. Independent source review is CLEAN; broader
+focused/strict checks and final adversarial/tests-docs review follow before the
+draft PR. The #1769 bounded hold and required actual dependency integration remain.
+
+ApeX final local checks: all 849 focused engine/ApeX/Binance tests PASS. All 25
+history controls PASS again after adding an evicted native identity's later
+reappearance case. Strict all-target Clippy/fmt, banned-pattern and diff checks
+PASS. Both independent source reviews and final adversarial/tests/caller-doc
+reviews are CLEAN, including the unchanged native bounded upsert and legacy
+signing-provenance seam. No local release WASM/full replay/size/timing run. Draft
+CI and actual queued shared dependencies still require fresh source-bound proof.
+
+## TxFlow indexed shared history owner (2026-10-23)
+
+Plan-first from actual #1784 `ab1ab29ec3d9babb684b4e9b8c35d7abcd538577`.
+The row-reporting owner confirmed history.rs/history tests clear; its #1785
+changes account.rs/account tests only. Scope is those two history files, exact
+legacy-site pruning, and OWNED_HISTORY/AUDITS/QUALITY/CALLERS additions. No lib,
+account, signing, native recipe, engine, host, SDK, workflow or dependency edits.
+
+Adopt one existing CursorHistory<Row> for native identity observations, staged
+rows, admission, accepted output and completion. Replace OffsetWalk with the
+same fixed native offset fact (0,2000,...,200000) expressed as opaque CursorWalk
+tokens and a 101-page cap per native stage. Keep stall-on-empty and no-new-row
+checks; a terminal empty page and terminal offset200000 complete, while a required
+next offset or repeated/no-progress page stays a strict rejection. Do not stop
+native pagination when the caller's output limit is reached: the existing query
+selects the newest sorted result after all native pages. No new pager policy/API.
+
+Keep one owner across fill-derived income, funding and ledger stages; restart
+only a completed stage, retaining native identities and accepted output while
+resetting offset/page history. Stage only normalized eligible output; native
+freshness still counts every new validated native identity before output filters.
+Validate HTTP/native envelope, required page and every row before page admission.
+An actual HTTP/transport/decode/row failure before accepted output rejects with
+Internal; after accepted output it returns only accepted prior pages/stages plus
+one command-scoped Warn incomplete marker. Failed-page prefixes and filtered-only
+pages never authorize recovery. Keep native stalled/offset safety and lost
+account-identity refusals strict. Pre-request unsupported-query/testnet/identity,
+range/limit/ambiguous-symbol and empty selected-ledger admission stay unchanged.
+Numeric Completion is explicit legacy authority, not managed Context fallback.
+
+Preserve exact info request kind/accountType/coin/time/deltaTypes/offset/limit
+encoding, testnet scope, archived/delisted/relisted symbol resolution, raw native
+identity namespaces, financial signs/units and millisecond-to-seconds rules,
+complete income stage selection, time and numeric-fill-ID tie sorts, global final
+truncation, and zero history Store writes. No REST public trades or lookup support
+is invented. Polymarket also has unsupported historical query axes rather than a
+native history implementation; leave its book/account methods outside this slice.
+
+Commit original-RED controls first for typed zero/filtered-only failure, later
+page-prefix rollback and mixed-income stage failure. Compatibility cases pin the
+2000-step offset sequence, no-new/empty strictness, terminal offset200000 versus
+required202000 refusal, stage reset with identities retained, full pagination
+before final top-limit sorting, native mappings and independent owner markers.
+Preserve all existing native contracts. Self-audit native builder/mapping and all map hashes, then run focused
+engine/TxFlow tests, strict Clippy/fmt/bans/checker (four Cargo jobs), independent
+review and a draft with same-PR caller behavior. Corepack Yarn only, never bare/
+Volta yarn, npx or account-policy; no local release WASM/full replay timing sweep.
+Respect #1792 then #1789 priority and integrate actual shared/build inputs before
+final CI/proof and an announced separate guard followed by separate merge.
+
+
+TxFlow local receipt: plan `f05f7057b8c` precedes regression-only `5c4ed45188a`.
+Original ten native controls pass; the four new original-source controls produce
+three assertion RED groups and one cap compatibility pass. Corrected seventeen
+history controls and 710 focused engine/TxFlow native tests pass. Strict
+Clippy/fmt/bans and thirteen request-context checker controls pass. Separate
+source/full-map and adversarial/test/caller self-audits are CLEAN. Native
+admission and mapping are unchanged apart from owner dedupe, and the info recipe
+is unchanged apart from the native offset accessor. Exact pure legacy prune is
+eleven to six, every other map/checker unchanged. Independent exact-head review,
+current CI and final shared-input artifact proof are tracked in the draft PR.
+
+
+## Orderly shared history owner (2026-10-23)
+
+Plan-first from actual `fa13c9030ed51e6e0ee0ce0bfaf898cfea55f0a5`.
+Scope: Orderly history.rs and existing history integration tests, the exact
+legacy-site inventory if sites disappear, and OWNED_HISTORY/AUDITS/QUALITY/CALLERS
+appendices. No signing, account, lib, request recipe, shared engine, host or SDK
+source changes. The Orderly account/fill owner confirmed these regions are clear.
+
+Replace Request's output rows, output deduplication, global page counter and
+numeric finalization with one boxed engine CursorHistory<Row>. One continuous
+CursorWalk(MAX_PAGES=50), initially regular:1, uses native-stage-qualified page
+tokens, including algo:1 for the second orders endpoint. Do not restart its walk:
+regular and algo share the existing total fifty-page budget. Retain native
+algo/page encoding, per-stage result limit, metadata census and page counts as
+venue facts. Every fully validated page is admitted once; only eligible rows
+stage. Final normalization sorts descending native time then ID and truncates
+once, preserving millisecond order times and second execution/income/trade times.
+
+An actual HTTP, transport, decode, missing-list or row-validation failure before
+accepted output rejects with the shared Internal default. After accepted output
+it returns only accepted pages and one command-scoped Warn incomplete marker;
+failed-page prefixes stay staged and never leak. Regular orders survive an algo
+read failure. Filtered native rows cannot authorize partial recovery. Native
+metadata inconsistencies, impossible/no-progress continuation and the shared
+page-budget stall stay strict rejects even with accepted rows, retaining their
+messages. Signing/setup refusal also stays strict, now through owner rejection
+with Internal classification; no managed Context or secret-signing bridge.
+Admission checks before constructing the owner retain existing behavior.
+
+Preserve exact paths/query/signature bytes, canonical uint64 IDs, nested algo
+classification and depth/node bounds, regular/algo identity spaces, settled-only
+funding identities, funding account-wide 3001ms start spacing and delayed timers,
+public trade occurrence keys, per-stage limit and final sorting. No cache/Store
+publication or new capability. Numeric Completion is explicitly legacy authority.
+
+Commit failing-first controls on original production: typed first failure,
+accepted-page HTTP loss, malformed continuation prefix rollback, regular-to-algo
+failure and filtered-page refusal. Add compatibility controls for total budget
+across stages, terminal fiftieth page, native metadata/no-progress strictness,
+concurrent command marker attribution, empty success and funding timing. Existing
+whole-read continuation/algo-failure assertions are superseded explicitly.
+
+Plan audit: all imports and shared methods exist on this base; continuous cursor
+stages avoid a budget reset, native census is independent of filtered output,
+and owner reject suppresses an incomplete marker on strict refusals. No shared
+API extension or source conflict is needed. Run original 17 controls first, then
+regression REDs, implementation GREENs, full Orderly/engine focused native tests,
+strict Clippy/fmt/bans and request-context inventory checks with four Cargo jobs.
+Corepack Yarn only; never bare/Volta yarn, npx or account-policy. No local release
+WASM/full replay/size/timing sweep. Self-audit source and adversarial cases before
+draft publication. Caller-visible changes carry their CALLERS section in this
+PR, with behavior wording only. #1783 and #1784 are final-proof dependencies;
+current queue and separate announced guard/merge rules remain in force.
+
+
+Orderly local implementation receipt: plan `0615cec06d9` precedes regression-only
+`b0f7a0fe62d`. Original production passes all seventeen existing controls; the
+new five controls give three assertion failures and two compatibility passes.
+The existing shared owner turns those three groups green. Eight owned-history
+controls now cover first/later HTTP, transport, malformed and row failures, strict
+proof refusals, stage failure/identity/limits, aggregate budget, concurrent owner
+attribution and signing refusal. Together with the existing cases all twenty-five
+history controls pass. Two former whole-read-failure assertions now explicitly
+require the accepted-only partial and warning contract.
+
+The source audit compares admission, funding scheduling, native request/signing
+builder and row mapping blocks byte-for-byte with the original base: all equal.
+The separate adversarial audit checks failed-page exclusion, filtered-only
+refusal, native proof strictness, no page-budget reset, terminal page fifty,
+independent concurrent commands, native stage identity and signing refusal.
+The exact inventory is a pure thirteen-to-nine prune, every other map and the
+checker remain identical. Strict Clippy/fmt, bans and inventory controls pass.
+Final draft evidence and later dependency integrations belong in the PR body;
+no local release WASM or replay performance run is used.
+
+
+## Known non-pageable inherited history boundaries
+
+At actual `9a48b645d49c9fa7b940a5cf361a38242cae6b41`, Kraken Spot,
+BreakoutProp and Hyperliquid Spot have no native pageable history implementation.
+Their fills/orders/income paths inherit empty arrays; lookup returns an existing
+non-definitive miss (Hyperliquid can first find a stored live order), and public
+trades reject as unsupported/unimplemented. These empty legacy results do not
+prove complete native history. There is no native pager to adopt and this
+fan-out adds no REST history capability or invented completeness marker.
+Kraken Spot's current inherited-history control passes unchanged. The owner
+explicitly directed documenting and skipping these stubs.
+
+## MEXC shared history owner (2026-10-23)
+
+Plan-first from actual `9a48b645d49c9fa7b940a5cf361a38242cae6b41`.
+Scope: MEXC history.rs and its existing history integration tests, pure legacy
+inventory pruning, and OWNED_HISTORY/AUDITS/QUALITY/CALLERS additions. No account,
+lib, signing, native recipe, shared engine, host, SDK, workflow or dependency
+source changes. The account reporter owner confirmed these history regions clear.
+
+Replace Request's numeric completion, result vector and output identity set with
+one boxed CursorHistory<Row>. Native page numbers become opaque continuation
+tokens for CursorWalk(MAX_PAGES=1000). Keep the shared paging::windows-generated
+newest-first 90-day windows and optional native time parameters; a fully admitted
+window end advances Done, then restart_stage keeps the same owner/accepted rows/
+identities and resets the page budget exactly as the current native per-window
+cap does. No second pager/completion implementation, global cap change, sorting,
+range overlap/gap change or new engine API.
+
+Stage eligible rows only and admit them after HTTP/native envelope, row validity
+and funding metadata validation. Limits count accepted plus staged output.
+Actual HTTP/transport/decode/malformed-row/funding-page failures reject Internal
+before eligible accepted output; later failures return accepted prior pages with
+one owned command warning and discard the failed prefix. Filtered native rows
+cannot authorize recovery. Pagination budget and impossible owner lifecycle
+remain strict even after output. Existing unsupported-ledger, identity, market,
+range, window-count and limit admission errors stay unchanged. Numeric
+Completion stays explicitly legacy, never managed Context authority.
+
+Preserve exact request/signing builder, page-size selection, funding resultList/
+currentPage/totalPage rules, order-ID single-request fills, public-trade single
+request and ordinal identities, units/contract-size conversions, timestamps,
+order mapping, stable dedupe, encounter order, global output limit and Store
+isolation. Native repeat/no-progress behavior is unchanged (no added stall-on-
+empty/no-new flags). A terminal page 1000 succeeds; one requiring 1001 rejects.
+
+Original controls run first; commit regression-only controls before production:
+typed first-failure and filtered-only refusal, accepted-page HTTP/transport loss,
+malformed continuation-prefix exclusion, funding continuation failure, older
+window failure, identity retention across windows and exact terminal/budget
+behavior. Explicitly supersede the existing whole-read continuation rejection.
+Compatibility controls retain exact window requests, native formats, limit/
+single-page behavior, empty success and concurrent command attribution.
+
+Plan self-audit: all CursorHistory methods exist on this actual base; restart
+after a completed window retains output identities but resets native per-window
+budget; accepted+staged limits preserve prefix selection; error finish drops
+pending rows. Native builder/mapping blocks can be byte-compared independently.
+Run focused engine/MEXC native tests, strict all-target Clippy/fmt/bans and full
+request-context map/checker controls (four Cargo jobs). Corepack Yarn only; never
+bare/Volta yarn, npx or account-policy. No local release WASM/full replay/timing
+sweeps. Source and adversarial/caller review precede a draft, caller changes stay
+in the same PR, actual #1784 build input is a final-proof prerequisite, and the
+existing landing queue/announced separate guard and merge rules remain.
+
+
+MEXC local implementation receipt: plan `3a6257c19df` precedes regression-only
+`94bceed7a93`. Original ten controls pass; the five added original-source tests
+produce four assertion RED groups and one page-cap compatibility pass. Corrected
+source passes all eighteen history controls, including the additional window
+identity/order, concurrent marker and single-request/global-limit cases. The
+focused engine/MEXC run passes 746 native tests. Strict all-target Clippy/fmt,
+bans and the request-context checker plus thirteen checker controls pass.
+
+Source/native-preservation and separate adversarial/test/caller self-audits are
+CLEAN: admission/window tiling, entire request/header builder and native mapping
+blocks are byte-identical to the requested actual base. Full-map comparison
+proves a pure nine-to-six MEXC history prune, every other map/checker unchanged.
+This is local evidence, with independent exact-head review and source-bound
+current CI/final artifact proof tracked in the draft PR. No new native capability
+is implied for the documented Spot/Breakout stubs.
+
+## Phemex bounded non-income history owner (2026-10-23)
+
+Plan-first from actual #1784 `ab1ab29ec3d9babb684b4e9b8c35d7abcd538577`.
+Scope: phemex/src/history.rs and existing history integration tests, exact legacy
+inventory pruning if sites disappear, and OWNED_HISTORY/AUDITS/QUALITY/CALLERS
+appendices. Reporter #1786 owns account.rs/account controls and confirmed these
+history files clear. No account, lib, signing, income, request recipe, shared
+engine, SDK, host, workflow or dependency source changes. Polymarket's historical
+query axes are unsupported; its book/account code is not an implemented history
+pager to migrate and remains outside this slice.
+
+Non-income Phemex histories are bounded one-response reads: private fills/orders
+request offset0 and clamp limit1..200; public trades retain the native snapshot
+and 1000-row defensive cap. Adopt existing HistoryRows<T>/Completion for the
+three typed result variants. Keep lookup's distinct native Vec/legacy finalizer
+and its is_lookup routing/primary credential selection unchanged. Income
+continues delegating to the already-shared RangeHistory owner unchanged.
+
+Eligible decoded rows stage until the entire HTTP/body/required-list/native row
+validation succeeds. Only then accept one page and finish through the owner,
+with the original stable time sort/truncate and exact JSON shape. HTTP, transport,
+decode, malformed/oversized response and native request preparation failure
+reject Internal rather than the previous unclassified error, with the same
+message and no added write outcome. No partial result or incomplete marker is
+possible: this bounded adapter has no accepted earlier page. A failed streamed
+prefix cannot escape. No new pager, REST capability, request or synthetic gap.
+
+Preserve all pre-owner admission errors, unknown-market nondefinitive lookup,
+lookup exact client ID/version/one-row validation and definitive-absence rules,
+16-active-command admission/duplicate refusal, shared rate-pause deferral/timers,
+request/header/signature bytes and identity slots, textual enum/stop/trailing
+mapping, exact nanosecond conversion, time/order-ID/symbol filtering, native
+identity dedupe, equal public-tuple occurrence IDs, fee and quantity units, zero
+Store publication, private/public-only gating and cleanup/re-admission after
+success/error. Keep numeric Completion explicitly legacy, never managed fallback.
+
+Commit original-RED controls before source edits: typed first HTTP/transport/
+malformed and oversized failures on fills/orders/public trades, valid streamed
+prefix followed by malformed/non-2xx failure with no output/marker, and slot
+cleanup/re-admission. Compatibility controls pin valid empty one-shot completion,
+stable equal-time ordering, exact limits/no continuation, concurrent command
+isolation and unchanged lookup/income behavior. Existing controls run first.
+
+Plan self-audit: the shared row owner has stage/accept/finish_with methods and
+supports native generic encoding. Request retains numeric command solely for
+active-set bookkeeping and lookup's existing legacy completion, while each
+history variant owns its single finalizer. Native builder and codecs should be
+byte-identical except stage instead of Vec push; no shared API extension needed.
+Run focused engine/Phemex tests, strict all-target Clippy/fmt/bans/checker (four
+Cargo jobs), source and adversarial/caller reviews, then a draft. Corepack Yarn
+only, never bare/Volta yarn, npx or account-policy. No local release WASM/full
+replay/timing sweep. Respect #1792 then #1789 priority and real-integrate actual
+shared/build inputs before final CI/proof/announced separate guard and merge.
+
+Phemex checkpoint: original 28 controls PASS. Regression-only commit
+`c3c98778f79` adds four assertion-RED groups (missing Internal classification)
+and three compatibility GREEN controls. The wrapper intercepts non-2xx before
+the history response handler; the HTTP-message fixture was corrected to its
+existing `HTTP 503: unavailable` text, without changing production behavior.
+A fresh original-source rerun with that corrected fixture still reports exactly
+31 PASS/4 expected assertion failures. Implementation uses existing boxed
+HistoryRows variants, native seen/count/filter facts and a shared native shaping
+helper; lookup keeps its original numeric finalizers. Whole response validation
+precedes the only accept_page. Failed prefixes have no admitted earlier page.
+
+The request-context inventory change is a single exact prune: Phemex history
+17->16, removing only the direct malformed/oversized cx.fail site now delegated
+to history_failed. Lookup still uses the other finalizer sites, so they remain
+in inventory. No added fingerprints, bootstrap, checker change or other map
+edit. No account/lib/signing/income/shared-engine production change.
+
+Corrected local validation: 770 engine/Phemex native tests PASS, including
+all 35 history controls. Strict all-target/all-feature Clippy, formatting, bans,
+request-context checker plus all 13 checker controls and diff checks PASS.
+Source self-audit confirms the native builder, income, lookup codec, filtering,
+units and row mapping are unchanged; only the three normal row sinks stage into
+the shared owner and final stable shaping moves behind page admission. No local
+release WASM or full replay run. Independent source/caller/full-map review and
+fresh CI remain draft/final-proof gates; actual #1792/#1789 inputs are required
+before landing.
+
+## WOO unified owned-history fan-out (2026-10-23)
+
+Plan-first from current actual landing #1792
+`8e53b1bd39e0fd03534ffa4453349390251e4585` (including actual WOO build
+restore #1784). Scope: woo/src/history.rs, existing tests/history.rs, exact
+legacy inventory pruning and OWNED_HISTORY/AUDITS/QUALITY/CALLERS appendices.
+#1788's author confirmed its WOO files are account.rs, trading.rs and
+ tests/account.rs only (plus shared append-only docs); there is no source/test
+or lib/request-builder overlap. Account snapshot tokens and trading invalidation
+stay untouched. No signing/helper, lib, engine, SDK/host, dependency, workflow,
+public socket or financial account changes. AsterDEX/Polymarket histories wait
+for #1785/#1786; no guard/merge before actual #1789 SafeIDs.
+
+Cover all implemented query axes: fills (v3 range and unbounded reads, symbol
+alternatives and paged v1 fallback), closed orders, income, public trades.
+Unsupported client-ID lookup and admission refusals remain unchanged. One
+existing CursorHistory<Entry>/Completion owns output, validated-page admission,
+physical-attempt paging budget and terminal delivery for the whole command.
+It replaces the venue's accepted rows/seen/terminal/page-cap policy; keep only
+native current-page rows/facts until full validation. Existing RangeWalk remains
+the subordinate engine geometry selector for v3 fills, with its exact span,
+direction/duplicate/skipped-row facts and range-incomplete refusal. It does not
+own accepted output or completion. There is no new engine API or second owner.
+
+Use CursorWalk's existing global 1000-page budget for the command, counting
+completed native alternatives/failed attempts as well as successful pages.
+Advance an empty validated transition for each alternative that actually yields
+to another attempt; do not stage a failed page. Delayed income timers resume an
+already-selected continuation without another advance. Tokens identify native
+range selection (RangeWalk.requests), endpoint, symbol candidate and page, so
+legitimate repeated inclusive ranges remain possible under the native range
+walk. Terminal response 1000 succeeds without attempting 1001; More/Stalled at
+that boundary is a strict owner.reject with the existing pagination message.
+The native numeric page remains request vocabulary, subordinate to the owner.
+
+Keep one owner across symbol alternatives, v3->v1 fallback, v1 pages and later
+v3 windows. Preserve the exact five candidate spellings/account-wide omission,
+per-range reset, last-fill-error tracking and all-empty versus failed-alternative
+semantics. Whole-page HTTP/envelope/list validation precedes admission. The
+native current-page vector supplies range facts and lets invalid/failed bodies
+be discarded without poisoning global dedupe or returning a prefix. Native
+selected/filtered eligible rows enter shared staging, then advance/accept once.
+Filtering never authorizes recovery; a validated page with no retained rows
+cannot turn a later failure into an empty successful partial.
+
+Terminal HTTP/decode/transport/malformed-page failure rejects Internal when no
+eligible rows were accepted; otherwise it returns only accepted rows plus the
+one command-scoped incomplete warning emitted by the shared owner. Keep fallback
+attempts and error messages, including sticky errors after successful-empty
+alternatives. Never use live Store/cache rows as history. Entirely malformed
+pages remain failures (without introducing extra fallback attempts). Invalid
+native page metadata, complete-income row budget, no-progress native refusal,
+1000-attempt cap and native range truncation remain strict owner.reject even
+with earlier rows. Consuming signed() setup errors keep their existing strict
+legacy cx.fail path and unclassified provenance; do not reconstruct a finalizer
+after the helper consumed Pending. No raw-secret managed bridge or Context claim.
+
+Preserve native mixed-page row isolation: retain immediate per-page ROW_SKIPPED
+Warn text/timing, but a validated mixed page also records an owned coverage gap
+via advance_with_coverage. It therefore cannot look like complete history merely
+because later pages succeeded. Keep the first gap and emit one owner marker at
+terminal delivery; failure before any accepted rows still rejects without a
+marker. Entirely malformed pages never admit rows. CALLERS will explicitly state
+these typed-first-failure, accepted-only-later-failure and skipped-row coverage
+changes, the strict native refusals, and the bounded public trade behavior; write
+only behavior, no merge/proof status. Caller handling of unavailable history and
+command-scoped coverage is required; no NX adoption/closure is implied.
+
+Keep all native routes/query order/header/signature bytes and credential slot
+selection, ten ledger requests/minute shared 6000-ms gate across commands,
+size/limit defaults, 100000 complete-income guard, time and symbol normalization,
+ID fallback/preference and high integer/string precision, side/position/maker and
+optional-field mapping, JSON shape, final descending time/id sort/truncate,
+public identical-print identity behavior, dedupe/filter order and zero Store
+publication. Keep native RANGE NaN placeholders for skipped rows so a full mixed
+v3 page cannot be mistaken for a terminal short page. The public endpoint stays
+one response; no manufactured continuation or additional REST capability.
+
+Original-RED controls before source edits: typed first failures after all fill
+alternatives; later order/income/ranged/legacy fill failure retaining only accepted
+rows; failed streamed prefix not leaking; mixed skipped-row owned coverage at
+success; and filtered-only pages never authorizing an empty partial. Pin native
+strict metadata/no-progress/budget and all-malformed rejection, zero Store writes,
+concurrent command ownership, global 1000-attempt terminal/cap boundary, public
+single-page empty/nonempty results and stable shapes, shared ledger timer pacing,
+exact candidate/fallback sequence and later-window reset. Run the existing WOO
+history suite first; seal RED logs/production hash before implementation. Add only
+contained native fixture facts, not source-mirroring tests or new timeouts.
+
+Plan self-audit: existing CursorHistory exposes fresh/stage/advance_with_coverage,
+discard_staged_page/accepted_len/reject/finish_with and supports a continuous
+walk without restart. Its global budget can count every attempted native leg;
+RangeWalk remains the already-shared geometry/direction component, not a copied
+pager. Selection of native next action must happen before owner.advance; final
+finish is permitted only after owner Done, while terminal Err/reject may stop an
+active walk. Retain existing consuming signed() failure boundary explicitly.
+Independent plan review must check this composition, fallback counting, ledger
+resume and native error/gap policy before production edits.
+
+Then commit regression-only REDs, implement, run focused engine/WOO native tests
+with CARGO_BUILD_JOBS=4/test-threads=4, strict all-target/all-feature Clippy,
+fmt/bans/request-context checker plus negatives and scope/diff checks; source,
+adversarial, CALLERS and full-map reviews before the draft. Pure removed legacy
+sites only; any same-site hash re-expression requires the standing exact bounded
+transition/full-map review, no broad exemption. Corepack Yarn only: never
+bare/Volta yarn, npx or the account-policy check. No local release WASM/full replay
+or timing matrix. Keep #1795/#1747 watches and owner queue; actual SafeIDs and
+later shared inputs require real integration/fresh final source-bound proof.
+
+WOO plan review: claude-8x5tm1 independently reviewed `68286b13cab` against the
+native adapter and marked it CLEAN before source edits. Conditions adopted:
+CursorWalk has neither empty nor no-new-row stall flag; shared fresh/stage run
+only after complete HTTP/envelope/row/census validation; CALLERS names both the
+immediate ROW_SKIPPED warning and terminal owned gap. Original history 29/29 PASS;
+regression-only `813b48e98e5` yields 32 PASS/8 expected assertion-RED groups on
+unchanged production (three new compatibility GREEN). Logs and original source
+SHA are sealed in /tmp/codex-woo-owned-history-original-red-proof.json locally.
+
+The previous ledger-pacing test's `result.is_err()` expectation is explicitly
+superseded: its accepted first ledger row now survives page-two HTTP 429 with
+one owned coverage marker. The exact 6000-ms timer assertions remain; the test
+now checks retained nonempty output and owned warning instead of discarded rows.
+Additional source-audit controls cover simultaneous owners with log level Error,
+first-gap retention across mixed pages, valid empty public single-response
+completion, and unchanged consuming signed() setup classification. No timeout,
+production request recipe or account fixture changes.
+
+WOO corrected local checks: all 44 history controls PASS, including the expanded
+first-failure HTTP/transport/all-malformed/truncated-prefix matrix in direct and
+streamed modes. The broader engine/WOO native suite passed 796 tests before that
+last test-only matrix expansion; final history rerun and strict all-target/
+all-feature Clippy/fmt/bans plus checker/13 negative controls PASS. The exact
+legacy map is pure prune 16->5 (11 removed occurrences, zero additions); every
+other map and checker script remains identical. A final-controls rerun against
+the original production source independently records 33 PASS/11 expected REDs
+(the original eight plus the explicit ledger-policy supersession and two added
+coverage/peer assertions). No production source was changed during that run.
+
+Source self-audit confirms matches_entry/history_entry and streamed history_item
+are byte-identical. Native parameter construction and signing/send calls are
+byte-identical except reading command from owner.command() before consuming
+Pending. No engine, lib, account/trading, signing or dependency edits. One owner
+continues across every stage and reports only validated eligible rows; no empty
+transition can set shared dedupe or manufacture recovery authority. No local
+release WASM/full replay/timing run. Independent source/caller/full-map review,
+CI and actual SafeIDs source-bound final proof remain distinct gates.
+
+## Explicit owned coverage for non-pageable history stubs (2026-10-23)
+
+Plan-first from requested actual landing #1792
+`8e53b1bd39e0fd03534ffa4453349390251e4585`. One small PR for Kraken Spot,
+BreakoutProp and Hyperliquid Spot. #1774 TS-freeze plan remains untouched. No
+new REST capability, endpoint, fallback, cache-backed history, native pager,
+account/signing change or managed Context claim; no guard/merge before #1789.
+
+Read-only overlap inventory checked all 24 open PRs via GitHub and their complete
+file lists (including pagination where needed). No target source/test overlap.
+#1788 owns only WOO/Crypto account/trading/account-test regions; #1785/#1786
+reporters and #1787 tokens likewise have no target files. Its author explicitly
+confirmed all three stub scopes clear; old Kraken reporter #1782 is landed.
+Shared AUDITS/QUALITY/CALLERS appendices overlap only under the standing
+incoming-first/verbatim-once rule. Retain later actual shared dependencies for
+final CI/proof; initial green artifacts are not final-proof relabeling inputs.
+
+Source scope: Kraken src/spot/trading.rs's existing Command::Query arm only;
+BreakoutProp src/history.rs's query function; Hyperliquid src/history.rs's
+self.spot branch only. Keep all surrounding trading/account/native request logic
+and Hyperliquid perpetual history byte-identical. Tests stay in existing
+kraken/tests/spot_trading.rs, breakoutprop/tests/history.rs and
+hyperliquid/tests/spot.rs. Plus pure legacy inventory prune and the four shared
+OWNED_HISTORY/AUDITS/QUALITY/CALLERS appendices. No engine API, catalog,
+capability schema, SDK/host, dependency or workflow change.
+
+Existing native facts: these three adapters perform no history read for fills,
+order history or income and immediately return []. Therefore they cannot prove
+complete absence, even if live Store rows exist. Use existing engine
+Completion/HistoryRows explicitly: create one Completion for the query, record a
+venue-specific reason with Completion.incomplete(), and finish an empty
+HistoryRows<()> through its owner. No row is staged or admitted; serialization is
+the existing array shape. The emitted Warn history.incomplete event has exactly
+fields.command and precedes CommandDone([]), including at log level Error.
+One local construction of existing primitives per adapter; no copied marker
+emitter, local completeness boolean, custom result envelope or new engine helper.
+
+This is an explicit incomplete empty result, not a validated empty native read.
+Keep [] for payload compatibility while making absence of coverage observable.
+Do not manufacture a complete state from missing credentials, public-only mode,
+unknown symbols, live WS/account caches or an empty Store. No HTTP/socket/timer,
+signing work, Store publication or native lookup is introduced by the query.
+Existing argument/admission behavior and all unrelated commands are unchanged.
+
+PublicTrades retains its exact existing refusal message but completes through
+Completion with ErrorKind::Unsupported and Outcome::NotSent, matching the
+existing pre-I/O refusal convention (no request was issued). It emits no
+result or incomplete marker. OrderByClientId retains the exact nondefinitive
+miss JSON (found:false, definitive:false), delivered through Completion in the
+stub branches with no unrelated history marker. Hyperliquid's existing earlier
+local cache hit and invalid-client/missing-user shortcuts remain unchanged;
+spot misses must never become definitive and perpetual lookup/history remains
+separate. No new numeric completion fallback or legacy HTTP site.
+
+CALLERS in the same PR must state: historical list payload remains [], but each
+unsupported fills/orders/income read now has one owned incomplete warning before
+completion; callers must correlate fields.command, gate coverage and avoid
+treating [] as authoritative absence. Public-trade errors now have Unsupported
+kind plus NotSent with unchanged text, denoting a pre-I/O refusal rather than
+a native rejection. Lookup shape and live Store/cache
+access stay separate. State behavior only (no draft/proof/merge status), and do
+not claim NX integration or closure. Native unsupported capabilities remain
+unsupported; no production-request success is inferred from a stub response.
+
+Verification plan: run existing three test binaries before source edits. Commit
+original-source assertion-RED tests for one command-owned Warn per history list,
+marker-before-Done and log-level Error retention for each adapter, typed public
+trade refusal and no marker on failure. Add compatibility controls for [] shape,
+no HTTP/socket/timer/sign work, Store/cache unchanged, nondefinitive lookup and
+consecutive command IDs never sharing warnings. Preserve existing broader
+history/lookup/settings tests; no timeout/dependency changes or new network use.
+
+Then implement only the three narrow branches, run focused engine/three-family
+native tests (four Cargo jobs/test threads), strict all-target/all-feature Clippy,
+fmt/bans/request-context checker and all negative controls, source-preservation
+and map checks. Legacy inventory may only prune the exact removed done/fail
+sites in the three files; every other full map/checker remains identical. Any
+fingerprint growth stops rather than adding a bootstrap. Independent plan review
+must be CLEAN before implementation; independent source/caller/map review before
+the draft. Corepack Yarn only, never bare/Volta yarn, npx or account-policy. No
+local release WASM/full replay/timing matrix. Keep #1796 CI watch active.
+
+Independent plan review of `7fa7280571c` is CLEAN before implementation. Adopt
+its two notes: match the existing Unsupported/NotSent convention for public
+read refusal; CALLERS must advise capability-gating unsupported polling and
+deduplicating user-facing alerts while preserving every command's coverage
+fact. Do not rate-limit or suppress coverage inside the engine owner.
+
+Non-pageable checkpoint: regression-only `96451b00201` records 113 selected PASS
+and six expected assertion-RED groups on original source (110 prior controls and
+three new lookup compatibility controls GREEN). The implementation changes only
+the three specified query branches/imports. Narrow byte-preservation checks
+restore each old branch and recover the entire original Kraken trading and
+Hyperliquid history file, proving native trading/perpetual history and earlier
+cache/identity shortcuts unchanged. Breakout's query-only file adds no I/O.
+
+Corrected full engine/three-family native suite PASS: 1156 tests before a final
+additional positive Hyperliquid cache-hit control. The final selected five test
+binaries PASS 120/120, including that control. Strict all-target/all-feature
+Clippy/fmt/bans, request-context checker/all 13 controls and diff checks PASS.
+The legacy map is pure prune in exactly three files: Kraken Spot trading12->9,
+Breakout history3->0 (entry removed), Hyperliquid history15->13. No additions,
+other-map/checker edits, bootstrap or exemption. No local release WASM/full
+replay/timing run; independent source/caller/full-map review and source-bound CI
+remain distinct gates before landing after actual SafeIDs dependencies.

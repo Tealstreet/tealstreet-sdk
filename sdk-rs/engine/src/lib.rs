@@ -2,6 +2,7 @@
 pub mod backoff;
 pub mod book;
 pub mod capabilities;
+pub mod classify;
 pub mod command;
 pub mod coverage;
 pub mod credentials;
@@ -10,6 +11,7 @@ pub mod engine;
 pub mod entropy;
 pub mod error;
 pub mod execution;
+pub mod execution_group;
 pub mod fence;
 pub mod history;
 pub mod json;
@@ -23,9 +25,13 @@ mod placement_acks;
 mod protocol_clock;
 pub mod public_feed;
 pub mod read_scheduler;
+pub mod request_context;
+pub mod resource_ids;
 pub mod signing;
 pub mod signing_capture;
 mod signing_dispatch;
+pub mod signing_headers;
+pub mod signing_policy;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub mod socket;
 pub mod startup;
@@ -53,6 +59,6 @@ pub use error::{
 };
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
-pub use store::Store;
+pub use store::{OrderSnapshotToken, Store};
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};

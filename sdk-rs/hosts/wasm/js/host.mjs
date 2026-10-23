@@ -1,3 +1,6 @@
+import { ManagedHttp, prepareFetch } from './managed-http.mjs';
+export { HttpPreparationError } from './managed-http.mjs';
+
 // Return only the closed numeric record; never serialize arbitrary provider data.
 function signingReceipt(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -10,11 +13,49 @@ function signingReceipt(value) {
 
 function checkedSigningResult(expected, count, result) {
   const receipt = signingReceipt(result?.receipt);
+  const rawValues = result?.values;
   if (!receipt || !expected || receipt.stampMs !== expected.stampMs || receipt.expiryMs !== expected.expiryMs
-    || !Array.isArray(result?.values) || result.values.length !== count
-    || result.values.some((bytes) => !Array.isArray(bytes) || bytes.length > 1048576
-      || bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255))) return undefined;
-  return { values: result.values.map((bytes) => Array.from(bytes)), receipt };
+    || !Array.isArray(rawValues) || rawValues.length !== count) return undefined;
+  const values = [];
+  for (let i = 0; i < count; i++) {
+    const rawBytes = rawValues[i];
+    if (!Array.isArray(rawBytes)) return undefined;
+    const size = rawBytes.length;
+    if (!Number.isSafeInteger(size) || size > 1048576 || size < 0) return undefined;
+    const bytes = [];
+    for (let j = 0; j < size; j++) {
+      const byte = rawBytes[j];
+      if (!Number.isInteger(byte) || byte < 0 || byte > 255) return undefined;
+      bytes.push(byte);
+    }
+    values.push(bytes);
+  }
+  let headers;
+  const rawHeaders = result.headers;
+  if (rawHeaders !== undefined) {
+    if (!Array.isArray(rawHeaders)) return undefined;
+    const count = rawHeaders.length;
+    if (!Number.isSafeInteger(count) || count < 0 || count > 32) return undefined;
+    let total = 0;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+    headers = [];
+    for (let i = 0; i < count; i++) {
+      const pair = rawHeaders[i];
+      if (!Array.isArray(pair) || pair.length !== 2) return undefined;
+      const name = pair[0];
+      const value = pair[1];
+      if (typeof name !== 'string' || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || name.length > 256
+        || typeof value !== 'string' || value.length > 8192 || /[\x00-\x08\x0a-\x1f\x7f]/.test(value)) return undefined;
+      const bytes = encoder.encode(value);
+      if (bytes.length > 8192 || decoder.decode(bytes) !== value) return undefined;
+      total += name.length + bytes.length;
+      if (total > 32768) return undefined;
+      headers.push([name, value]);
+    }
+  }
+  return { values, receipt,
+    ...(headers?.length ? { headers } : {}) };
 }
 
 // Runs a WasmEngine against a transport: executes its actions (sockets, HTTP,
@@ -270,6 +311,7 @@ export class EngineHost {
     this.timers = new Map();
     this.commands = new Map();
     this.requests = new Map();
+    this.managedHttp = new ManagedHttp(this);
     this.signings = new Map();
     this.socketFailures = new Map();
     this.nextCommand = 1;
@@ -290,27 +332,41 @@ export class EngineHost {
 
   get dead() { return this.deadError !== undefined; }
 
+  failEngine(error) {
+    if (this.disposed) return;
+    this.deadError = new EngineDeadError(error);
+    this.disposed = true;
+    try { this.cleanup(); }
+    finally { this.handlers.onDead?.(this.deadError); }
+  }
+
   // Preserve native argument counts without per-message closures or rest arrays.
   invoke(fn, a, b, c, d) {
     if (this.disposed) return;
     try {
-      switch (arguments.length) {
-        case 1: return fn.call(this.engine);
-        case 2: return fn.call(this.engine, a);
-        case 3: return fn.call(this.engine, a, b);
-        case 4: return fn.call(this.engine, a, b, c);
-        default: return fn.call(this.engine, a, b, c, d);
+      if (this.engine.failed?.()) {
+        this.failEngine(new Error('Engine resource identities exhausted'));
+        return;
       }
+      let result;
+      switch (arguments.length) {
+        case 1: result = fn.call(this.engine); break;
+        case 2: result = fn.call(this.engine, a); break;
+        case 3: result = fn.call(this.engine, a, b); break;
+        case 4: result = fn.call(this.engine, a, b, c); break;
+        default: result = fn.call(this.engine, a, b, c, d); break;
+      }
+      if (this.engine.failed?.()) {
+        this.failEngine(new Error('Engine resource identities exhausted'));
+        return;
+      }
+      return result;
     } catch (error) {
-      // A trap is a RuntimeError. A RangeError here unwound wasm mid-mutation (stack
-      // overflow, allocation failure in an import, result decode) with its borrow held.
+      // Do not inspect Rust state after a trap: its mutable borrow may be held.
       const fatal = (typeof WebAssembly !== 'undefined' && error instanceof WebAssembly.RuntimeError)
         || error instanceof RangeError;
       if (!fatal) throw error;
-      this.deadError = new EngineDeadError(error);
-      this.disposed = true;
-      try { this.cleanup(); }
-      finally { this.handlers.onDead?.(this.deadError); }
+      this.failEngine(error);
     }
   }
 
@@ -517,6 +573,7 @@ export class EngineHost {
     for (const id of this.socketFailures.keys()) attempt(() => this.clearSocketFailure(id));
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
+    attempt(() => this.managedHttp.dispose());
     for (const pending of this.signings.values()) {
       attempt(() => pending.controller.abort());
       attempt(() => this.transport.clearTimeout(pending.timer));
@@ -542,32 +599,34 @@ export class EngineHost {
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
-  async receive(id, { status, headers = '', body }) {
-    if (this.disposed) return;
+  async receive(id, { status, headers = '', body }, active = () => true) {
+    if (this.disposed || !active()) return;
     const { engine, transport } = this;
     this.run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
-    if (this.disposed) return;
+    if (this.disposed || !active()) return;
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
-          if (this.disposed) return;
+          if (this.disposed || !active()) return;
           this.run(this.invoke(engine.httpChunk, id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
+          if (this.disposed || !active()) return;
         }
       } else {
         for await (const chunk of body) {
-          if (this.disposed) return;
+          if (this.disposed || !active()) return;
           for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
-            if (this.disposed) return;
+            if (this.disposed || !active()) return;
             this.run(this.invoke(engine.httpChunk, id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+            if (this.disposed || !active()) return;
           }
         }
       }
     } catch {
-      if (this.disposed) return;
+      if (this.disposed || !active()) return;
       this.run(this.invoke(engine.httpFailed, id, 'HTTP response body failed', transport.now()));
       return;
     }
-    if (this.disposed) return;
+    if (this.disposed || !active()) return;
     this.run(this.invoke(engine.httpEnd, id, transport.now()));
   }
 
@@ -640,6 +699,7 @@ export class EngineHost {
   }
 
   sign(action) {
+    if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
     const id = action.attempt;
     const pending = this.primitiveSigning(action.work, action.timeoutMs,
       this.signer && ((context) => this.signer(action.work, context)), (result, code) => {
@@ -785,6 +845,7 @@ export class EngineHost {
     let unknown;
     let callbackFailure;
     for (const action of JSON.parse(actionsJson)) {
+      if (this.disposed) return;
       // Unknown protocol actions remain errors, but cannot discard the batch's
       // subsequent command completions. Ordinary callbacks still propagate.
       try { this.execute(action); }
@@ -794,6 +855,7 @@ export class EngineHost {
         unknown ??= error;
       }
     }
+    if (this.disposed) return;
     if (callbackFailure) {
       // Broken diagnostic consumers must not turn a dispatched write into an
       // ordinary rejection that a caller could mistake for a safe retry.
@@ -939,6 +1001,9 @@ export class EngineHost {
         this.sockets.delete(action.socket);
         this.socketClosed(action.socket, 1000);
         break;
+      case 'managedHttp':
+        this.managedHttp.execute(action);
+        break;
       case 'http': {
         void this.request(action);
         break;
@@ -1078,23 +1143,6 @@ export class EngineHost {
   }
 }
 
-/** A fetch body's chunks; an empty body yields nothing. */
-async function* chunks(stream) {
-  if (!stream) return;
-  const reader = stream.getReader();
-  let complete = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) { complete = true; return; }
-      yield value;
-    }
-  } finally {
-    if (!complete) await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-}
-
 /** Decode binary feeds in arrival order while leaving text feeds synchronous. */
 export const socketMessages = (onMessage, onError, binary = false) => {
   let pending;
@@ -1166,14 +1214,8 @@ export const nativeTransport = () => {
     ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
-  async request({ method, url, headers, body, signal, route, timeoutMs }) {
-    if (route === 'publicCors') throw new Error('Public CORS request routing is not configured');
-    const deadline = AbortSignal.timeout(Math.max(1,timeoutMs ?? 20_000));
-    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline, redirect: 'error' });
-    const lines = [];
-    response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
-    return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
-  },
+  prepareHttp(request) { return prepareFetch(request); },
+  async request(request) { return prepareFetch(request).bind(request).dispatch(); },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),
 };

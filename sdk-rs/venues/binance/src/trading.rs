@@ -6,14 +6,24 @@ use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::classify::{
+    CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
+};
+use safe_cex_engine::json::{ArrayAt, ArraySplitter, ItemCheck};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+use safe_cex_engine::request_context::{
+    Context, Credential, Operation, Owner, Policy, RejectionReports, RetryPolicy, UnprovenEvidence,
 };
+use safe_cex_engine::{
+    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+};
+use serde::Deserialize;
+use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 
 const BROKER_PREFIX: &str = "x-s3vFFRQp";
@@ -25,6 +35,7 @@ const POST_ONLY_REJECTED: i64 = -5022;
 
 pub struct Request {
     command: CommandId,
+    context: Context,
     call: Call,
 }
 
@@ -60,6 +71,46 @@ enum Call {
     },
 }
 
+/// Borrow native facts only. Wrong or duplicate known fields invalidate a row;
+/// the caller's intended identity is never a substitute for a native echo.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnprovenOrder<'a> {
+    code: Option<i64>,
+    #[serde(borrow)]
+    msg: Option<Cow<'a, str>>,
+    order_id: Option<u64>,
+    algo_id: Option<u64>,
+    #[serde(borrow)]
+    client_order_id: Option<Cow<'a, str>>,
+    strategy_id: Option<u64>,
+    #[serde(borrow)]
+    new_client_strategy_id: Option<Cow<'a, str>>,
+}
+
+impl<'a> UnprovenOrder<'a> {
+    fn parse(body: &'a str) -> Option<Self> {
+        // Derive also accepts positional sequences. Native placement facts
+        // require an object, never an array interpreted as struct fields.
+        if !body
+            .trim_start_matches([' ', '\t', '\r', '\n'])
+            .starts_with('{')
+        {
+            return None;
+        }
+        serde_json::from_str(body).ok()
+    }
+
+    fn capture_diagnostics(&self, evidence: &mut UnprovenEvidence) {
+        if let Some(code) = self.code {
+            evidence.venue_code(&code.to_string());
+        }
+        if let Some(message) = self.msg.as_deref() {
+            evidence.venue_message(message);
+        }
+    }
+}
+
 struct Planned {
     receipts: Vec<OrderIdentityReceipt>,
     method: Method,
@@ -70,17 +121,16 @@ struct Planned {
 
 #[derive(Default)]
 struct Job {
-    /// Any response/failure of a dispatched leg prevents aggregate notSent.
-    reached_venue: bool,
+    context: Option<Context>,
     steps: VecDeque<Vec<Planned>>,
     outstanding: usize,
     /// Run every step even after a failure (cancel-all's two families).
     continue_on_error: bool,
     ids: Vec<String>,
-    error: Option<VenueError>,
+    /// Native failure controls planning only; execution facts live in the engine.
+    stop: bool,
+    planning_error: Option<VenueError>,
     amendment: Option<Amendment>,
-    /// A step took effect, so a later rejection cannot mean nothing happened.
-    effective: bool,
 }
 
 struct Amendment {
@@ -411,8 +461,44 @@ impl BinanceFutures {
             cx.fail(id, error);
             return;
         }
+        let plan = plan.and_then(|job| {
+            // Reserve no partial prefix for a predictably oversized plan. The
+            // root also occupies one of the engine's bounded context slots.
+            let count: usize = job.steps.iter().map(Vec::len).sum();
+            if count >= 256 {
+                return Err("Binance command exceeds the HTTP lifecycle capacity".into());
+            }
+            Ok(job)
+        });
         match plan {
-            Ok(job) => {
+            Ok(mut job) => {
+                let count: usize = job.steps.iter().map(Vec::len).sum();
+                let operation = if count == 0 && job.amendment.is_none() {
+                    Operation::Read
+                } else {
+                    Operation::Mutation
+                };
+                let credential = (operation == Operation::Mutation).then(|| Credential {
+                    slot: CredentialSlot::Primary,
+                    reference: self
+                        .credentials
+                        .as_ref()
+                        .expect("checked above")
+                        .credential
+                        .clone(),
+                });
+                job.context = Some(
+                    match cx.admit_http_command(Policy {
+                        operation,
+                        credential,
+                        timeout_ms: 120_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) {
+                        Ok(context) => context,
+                        Err(_) => return, // Engine owns initial admission rejection.
+                    },
+                );
                 self.trading.jobs.insert(id, job);
                 self.advance(cx, id);
             }
@@ -428,7 +514,7 @@ impl BinanceFutures {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
-        let stop = job.error.is_some() && !job.continue_on_error;
+        let stop = (job.stop || job.planning_error.is_some()) && !job.continue_on_error;
         let step = if stop { None } else { job.steps.pop_front() };
         if step.is_none()
             && !stop
@@ -436,7 +522,7 @@ impl BinanceFutures {
         {
             let Some(order) = cx.store.order(&amendment.id) else {
                 if let Some(job) = self.trading.jobs.get_mut(&command) {
-                    job.error =
+                    job.planning_error =
                         Some("Order disappeared during cancellation; replacement fenced".into());
                 }
                 self.advance(cx, command);
@@ -460,7 +546,7 @@ impl BinanceFutures {
             if let Some(job) = self.trading.jobs.get_mut(&command) {
                 match plan {
                     Ok(plan) => job.steps.extend(plan.steps),
-                    Err(error) => job.error = Some(error.into()),
+                    Err(error) => job.planning_error = Some(error.into()),
                 }
             }
             self.advance(cx, command);
@@ -468,39 +554,175 @@ impl BinanceFutures {
         }
         let Some(step) = step.filter(|step| !step.is_empty()) else {
             let job = self.trading.jobs.remove(&command).expect("present");
-            let error = job.error.map(|mut error| {
-                if job.reached_venue && error.outcome == Some(Outcome::NotSent) {
-                    error.outcome = Some(Outcome::Unknown);
+            let context = job.context.expect("managed job has an authority");
+            match job.planning_error {
+                Some(error) => {
+                    let _ = cx.fail_context(&context, error);
                 }
-                if (job.effective || !job.ids.is_empty())
-                    && error.outcome == Some(Outcome::Rejected)
-                {
-                    error.outcome = None;
+                None => {
+                    let _ = cx.done_context(
+                        &context,
+                        serde_json::to_string(&job.ids).unwrap_or_default(),
+                    );
                 }
-                error
-            });
-            match error {
-                // An inverse batch stops at its first failure; earlier legs stand.
-                // Its requests (splits, brackets) do not map back to the caller's orders.
-                Some(error) if self.is_inverse() => cx.fail(command, error.partial_ids(&job.ids)),
-                Some(error) => cx.fail(command, error),
-                None => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
             }
             return;
         };
         job.outstanding = step.len();
+        let root = job.context.clone().expect("managed job has an authority");
+        // A placement's conflicting-order cancel is a cancel leg; an
+        // amendment's cancel stays part of the amend.
+        let amending = job.amendment.is_some();
         for planned in step {
-            cx.command_progress(command, planned.receipts);
-            self.signed(
-                cx,
-                planned.method,
-                planned.path,
-                planned.query,
-                Pending::Trade(Request {
-                    command,
-                    call: planned.call,
-                }),
+            let credentials = self
+                .credentials
+                .as_ref()
+                .expect("checked before planning")
+                .clone();
+            let context = cx.http_leg_context(
+                &root,
+                Policy {
+                    operation: Operation::Mutation,
+                    credential: Some(Credential {
+                        slot: CredentialSlot::Primary,
+                        reference: credentials.credential.clone(),
+                    }),
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
             );
+            let context = context.and_then(|context| {
+                if matches!(planned.call, Call::Cancel { .. }) && !amending {
+                    cx.http_write_leg_intent(&context, Intent::Cancel)?;
+                }
+                Ok(context)
+            });
+            let Ok(context) = context else {
+                self.trading.jobs.remove(&command);
+                let _ = cx.fail_context(
+                    &root,
+                    VenueError::new("Binance HTTP lifecycle refused the next leg"),
+                );
+                return;
+            };
+            cx.command_progress(command, planned.receipts);
+            if cx
+                .request_signed_managed(
+                    context.clone(),
+                    planned.method,
+                    format!("{}{}", self.urls.account_rest, planned.path),
+                    None,
+                    Box::new(self.signed_recipe(credentials, planned.query)),
+                    Pending::Trade(Request {
+                        command,
+                        context,
+                        call: planned.call,
+                    }),
+                )
+                .is_err()
+            {
+                self.trading.jobs.remove(&command);
+                let _ = cx.fail_context(
+                    &root,
+                    VenueError::new("Binance HTTP lifecycle refused the next leg"),
+                );
+                return;
+            }
+        }
+    }
+
+    pub(crate) fn capture_unproven_trade(
+        &self,
+        request: &Request,
+        response: Response<'_>,
+        evidence: &mut UnprovenEvidence,
+    ) {
+        if let Call::PlaceBatch { .. } = &request.call {
+            // A batch-wide native refusal has an object envelope. Preserve its
+            // bounded diagnostics, but a non-array can never supply batch IDs.
+            if let Some(row) = UnprovenOrder::parse(response.body) {
+                row.capture_diagnostics(evidence);
+                return;
+            }
+            // Validate every row and the complete envelope before emitting a
+            // prefix. Keep at most one row, never an intermediate result Vec.
+            let mut validator = ArraySplitter::new(ArrayAt::Root);
+            validator.feed(response.body.as_bytes(), |_| {});
+            if !validator.finished() {
+                return;
+            }
+            drop(validator);
+            let mut rows = ArraySplitter::with_item_check(ArrayAt::Root, ItemCheck::Venue);
+            rows.feed(response.body.as_bytes(), |row| {
+                self.capture_unproven_trade_row(request, row, evidence);
+            });
+        } else {
+            self.capture_unproven_trade_row(request, response.body, evidence);
+        }
+    }
+
+    fn capture_unproven_trade_row(
+        &self,
+        request: &Request,
+        body: &str,
+        evidence: &mut UnprovenEvidence,
+    ) {
+        let Some(row) = UnprovenOrder::parse(body) else {
+            return;
+        };
+        row.capture_diagnostics(evidence);
+        // A refusal carrying an ID is contradictory native placement proof.
+        if row.code.is_some() {
+            return;
+        }
+        let positive = |id: Option<u64>| id.filter(|id| *id > 0);
+        let futures = !self.is_spot() && !self.options.portfolio_margin;
+        match &request.call {
+            Call::PlaceOne { client_id: None } | Call::PlaceBatch { .. } if futures => {
+                if let Some(id) = positive(row.order_id) {
+                    evidence.order_id(&id.to_string());
+                }
+            }
+            Call::PlaceAlgo { client_id: None } if futures && !self.is_inverse() => {
+                if let Some(id) = positive(row.algo_id) {
+                    evidence.order_id(&id.to_string());
+                }
+            }
+            Call::PlaceOne {
+                client_id: Some(expected),
+            } if (self.is_spot() || self.options.portfolio_margin)
+                && positive(row.order_id).is_some()
+                && row.client_order_id.as_deref() == Some(expected.as_str()) =>
+            {
+                evidence.order_id(row.client_order_id.as_deref().expect("matched native echo"));
+            }
+            Call::PlaceAlgo {
+                client_id: Some(expected),
+            } if self.options.portfolio_margin
+                && positive(row.strategy_id).is_some()
+                && row.new_client_strategy_id.as_deref() == Some(expected.as_str()) =>
+            {
+                evidence.order_id(
+                    row.new_client_strategy_id
+                        .as_deref()
+                        .expect("matched native echo"),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn discard_unproven_trade(&mut self, owner: Owner) {
+        let Owner::Command { id, .. } = owner else {
+            return;
+        };
+        if self.trading.jobs.get(&id).is_some_and(|job| {
+            job.context
+                .as_ref()
+                .is_some_and(|context| context.owner() == owner)
+        }) {
+            self.trading.jobs.remove(&id);
         }
     }
 
@@ -510,10 +732,7 @@ impl BinanceFutures {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        if let Some(job) = self.trading.jobs.get_mut(&request.command) {
-            job.reached_venue = true;
-        }
-        self.on_trade_result(cx, request, response, None);
+        self.on_trade_result(cx, request, response);
     }
     pub(crate) fn on_trade_sign_failed(
         &mut self,
@@ -521,29 +740,39 @@ impl BinanceFutures {
         request: Request,
         error: VenueError,
     ) {
-        let message = error.message.clone();
-        self.on_trade_result(cx, request, Err(&message), Some(error));
+        self.on_trade_result(cx, request, Err(&error.message));
     }
     fn on_trade_result(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         response: Result<Response<'_>, &str>,
-        signing_error: Option<VenueError>,
     ) {
-        let Request { command, call } = request;
-        // A gateway failure is unproven whatever body it carries.
-        let mut unproven = response
-            .as_ref()
-            .is_ok_and(|r| r.status == 408 || r.status >= 500);
+        let Request {
+            command,
+            context,
+            call,
+        } = request;
+        let native_response = response.is_ok();
+
+        let mut reports = Vec::new();
+        let mut batch_reports = false;
+        let mut continue_after_item_refusal = false;
+        // The shared engine filters unproven envelopes before this reducer.
+        // Native malformed/mixed replies still supply their native facts here.
+        let mut unproven = false;
         let outcome = match response {
             Ok(response) => match venue_error(&response) {
-                None => Ok(response.body),
                 Some(error) => Err(error),
+                None => Ok(response.body),
             },
             Err(error) => Err((0, error.to_owned())),
         };
         let mut ids = Vec::new();
+        // Native IDs on an ambiguous batch are reconciliation evidence only;
+        // never feed them into accepted placement planning or caller bindings.
+        let mut evidence_ids = Vec::new();
+        let mut known_cancel_effects = false;
         let error = match (call, outcome) {
             (
                 Call::PlaceOne {
@@ -592,21 +821,29 @@ impl BinanceFutures {
             }
             (Call::PlaceBatch { expected, strict }, Ok(body)) => {
                 let mut rejection = None;
-                if let Ok(items) = serde_json::from_str::<Vec<BatchItem>>(body) {
-                    if strict && items.len() != expected {
+                batch_reports = true;
+                if let Ok(rows) = serde_json::from_str::<Vec<&RawValue>>(body) {
+                    if rows.len() != expected {
+                        unproven = true;
+                        for row in rows {
+                            if let Ok(item) = serde_json::from_str::<BatchItem>(row.get())
+                                && let (Some(id), None) = (item.order_id, item.code)
+                                && id > 0
+                            {
+                                evidence_ids.push(id.to_string());
+                            }
+                        }
                         rejection = Some((
                             0,
                             "Binance batch response count does not match the request".into(),
                         ));
-                    }
-                    for item in items {
-                        match (item.order_id, item.code) {
-                            (Some(id), None) => ids.push(id.to_string()),
-                            (_, code) => {
-                                let code = code.unwrap_or(0);
-                                unproven |=
-                                    failure(code, String::new()).outcome == Some(Outcome::Unknown);
-                                if strict {
+                    } else if let Ok(items) = serde_json::from_str::<Vec<BatchItem>>(body) {
+                        for item in items {
+                            match (item.order_id, item.code) {
+                                (Some(id), None) => ids.push(id.to_string()),
+                                (_, code) => {
+                                    let code = code.unwrap_or(0);
+                                    unproven |= item_unknown(code);
                                     rejection.get_or_insert((
                                         code,
                                         item.msg
@@ -614,15 +851,21 @@ impl BinanceFutures {
                                             .unwrap_or("Binance batch order rejected")
                                             .to_owned(),
                                     ));
-                                }
-                                if code != POST_ONLY_REJECTED {
-                                    let msg = item.msg.as_deref().unwrap_or("batch order rejected");
-                                    cx.command_error(command, msg.to_owned());
+                                    if code != POST_ONLY_REJECTED {
+                                        let msg =
+                                            item.msg.as_deref().unwrap_or("batch order rejected");
+                                        reports.push(msg.to_owned());
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        unproven = true;
+                        rejection = Some((0, "Binance batch response malformed".into()));
                     }
-                } else if strict {
+                    continue_after_item_refusal = !strict && !unproven;
+                } else {
+                    unproven = true;
                     rejection = Some((0, "Binance batch response malformed".into()));
                 }
                 rejection
@@ -634,7 +877,9 @@ impl BinanceFutures {
                 },
                 Ok(body),
             ) => match proof {
-                Some(proof) => self.confirm_cancel(cx, proof, body),
+                Some(proof) => {
+                    self.confirm_cancel(cx, proof, body, &mut known_cancel_effects, &mut unproven)
+                }
                 None => {
                     self.mark_canceled(cx, &canceled);
                     None
@@ -646,7 +891,7 @@ impl BinanceFutures {
                     proof,
                 },
                 Err((UNKNOWN_ORDER, message)),
-            ) => {
+            ) if !unproven => {
                 if self
                     .trading
                     .jobs
@@ -696,34 +941,74 @@ impl BinanceFutures {
                     .update_setting(&symbol, |s| s.margin_type = Some(margin));
                 None
             }
-            (Call::PositionMode { hedged }, Ok(_))
-            | (Call::PositionMode { hedged }, Err((POSITION_MODE_ALREADY_SET, _))) => {
+            (Call::PositionMode { hedged }, Ok(_)) => {
+                cx.store.set_hedged(hedged);
+                None
+            }
+            (Call::PositionMode { hedged }, Err((POSITION_MODE_ALREADY_SET, _))) if !unproven => {
                 cx.store.set_hedged(hedged);
                 None
             }
             (_, Err(error)) => Some(error),
         };
-        let succeeded = error.is_none();
+        let mut native_fact = None;
         if let Some((code, message)) = error {
-            if !SILENT_CODES.contains(&code) {
-                cx.command_error(command, message.clone());
+            if !batch_reports && !SILENT_CODES.contains(&code) {
+                reports.push(message.clone());
             }
-            if let Some(job) = self.trading.jobs.get_mut(&command) {
-                let mut failed = signing_error.unwrap_or_else(|| failure(code, message));
-                if unproven {
-                    failed.outcome = Some(Outcome::Unknown);
+            if native_response {
+                // Code 0 is no native code: a non-JSON HTTP error or an
+                // unproven acknowledgement. The engine classifies both.
+                let native = (code != 0).then_some(Native {
+                    code: NativeCode::Int(code),
+                    message: &message,
+                });
+                let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &message)
+                else {
+                    return;
+                };
+                native_fact = Some(if unproven { fact.unproven() } else { fact });
+            }
+            if let Some(job) = self.trading.jobs.get_mut(&command)
+                && !continue_after_item_refusal
+            {
+                job.stop = true;
+            }
+        }
+        if native_response {
+            let fact = match native_fact {
+                Some(fact) => {
+                    let evidence: Vec<_> = ids.iter().chain(&evidence_ids).cloned().collect();
+                    WriteFact::Failed {
+                        fact: if evidence.is_empty() {
+                            fact
+                        } else {
+                            fact.with_order_ids(&evidence)
+                        },
+                        known_effects: known_cancel_effects,
+                    }
                 }
-                // The first failure names the error; any unproven one makes it unknown.
-                let error = job.error.get_or_insert_with(|| failed.clone());
-                if failed.outcome == Some(Outcome::Unknown) {
-                    error.outcome = Some(Outcome::Unknown);
-                }
+                None => WriteFact::Accepted {
+                    order_ids: ids.clone(),
+                },
+            };
+            let metadata = RejectionReports::new(reports).unwrap_or_default();
+            let recorded = cx.http_write_fact(&context, fact.clone(), Some(metadata));
+            let recorded = if matches!(
+                recorded,
+                Err(safe_cex_engine::request_context::Error::Capacity)
+            ) {
+                cx.http_write_fact(&context, fact, Some(RejectionReports::default()))
+            } else {
+                recorded
+            };
+            if recorded.is_err() {
+                return;
             }
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
-        job.effective |= succeeded;
         job.ids.extend(ids);
         job.outstanding = job.outstanding.saturating_sub(1);
         if job.outstanding == 0 {
@@ -1573,26 +1858,111 @@ impl BinanceFutures {
     }
 }
 
-/// A trading failure classified by its Binance code; code 0 is a transport
-/// failure, a non-JSON HTTP error or an unproven acknowledgement.
-fn failure(code: i64, message: String) -> VenueError {
-    let (kind, outcome) = match code {
-        0 | -1000 => (None, Outcome::Unknown),
-        -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
-        -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
-        -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
-        -1003 | -1015 => (Some(ErrorKind::RateLimited), Outcome::Rejected),
-        -1022 | -2008 | -2014 | -2015 => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
-        -1002 => (Some(ErrorKind::AuthPermission), Outcome::Rejected),
-        -1199..=-1100 | -4999..=-4000 => (Some(ErrorKind::InvalidInput), Outcome::Rejected),
-        _ => (Some(ErrorKind::Rejected), Outcome::Rejected),
+/// Binance native codes and documented statuses
+/// (developers.binance.com/docs/derivatives/usds-margined-futures/error-code).
+const BINANCE: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(-1000),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1007),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1001),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1006),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1008),
+            verdict: Verdict::Refused(ErrorKind::VenueUnavailable),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1003),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1015),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1022),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2008),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2014),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2015),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1002),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-1199, -1100),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-4999, -4000),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    // Non-negative codes are success envelopes, never failure evidence.
+    success: &[Key::Range(0, i64::MAX)],
+    // Every other documented code is a pre-execution refusal.
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    // "4XX return codes are used for malformed requests"; 418 is an IP auto-ban
+    // and 429 a rate limit. 403 is the WAF, but a bare edge 403 may be another
+    // block, so it is a plain refusal. 409 (partial cancel-replace) is not one.
+    status: &[
+        (400, Verdict::Refused(ErrorKind::InvalidInput)),
+        (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+        (403, Verdict::Refused(ErrorKind::Rejected)),
+        (418, Verdict::Refused(ErrorKind::RateLimited)),
+        (429, Verdict::Refused(ErrorKind::RateLimited)),
+    ],
+};
+
+/// Whether a native batch-item code leaves its write unproven. Code 0 is a
+/// missing item code, which proves nothing.
+fn item_unknown(code: i64) -> bool {
+    let native = Native {
+        code: NativeCode::Int(code),
+        message: "",
     };
-    let mut error = VenueError::new(message.clone()).outcome(outcome);
-    error.kind = kind;
-    if code != 0 {
-        error = error.venue_code(code.to_string()).venue_message(message);
-    }
-    error
+    code == 0 || matches!(BINANCE.verdict(&native, Intent::Place), Verdict::Unknown(_))
+}
+
+#[cfg(test)]
+#[test]
+fn binance_code_table_satisfies_the_engine_invariants() {
+    safe_cex_engine::classify::assert_table(&BINANCE);
 }
 
 /// Refused before any request was sent.
@@ -1835,7 +2205,7 @@ impl BinanceFutures {
                 let native_regular = self.is_inverse() || !self.order_uses_strategy(order);
                 let closed = order.status == OrderStatus::Closed;
                 if !native_regular {
-                    self.observe_strategy_terminal(&symbol, id);
+                    self.observe_strategy_terminal(cx, &symbol, id);
                 } else {
                     let native = if self.is_spot() || self.options.portfolio_margin {
                         self.spot_native_order_id(&symbol, id)
@@ -1844,16 +2214,16 @@ impl BinanceFutures {
                     };
                     if let Some(native) = native {
                         if closed {
-                            self.observe_native_terminal(&symbol, native, filled);
+                            self.observe_native_terminal(cx, &symbol, native, filled);
                         } else {
-                            self.observe_unquantified_cancel(&symbol, native, filled);
+                            self.observe_unquantified_cancel(cx, &symbol, native, filled);
                         }
                     }
                 }
             }
         }
         mark_canceled_preserving_closed(cx, ids);
-        self.fence_order_snapshots();
+        self.fence_order_snapshots(cx);
     }
 
     fn cancel_target_is_current(
@@ -1895,7 +2265,7 @@ impl BinanceFutures {
 
     fn observe_captured_cancel(
         &mut self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         target: &CancelTarget,
         strategy: bool,
         current: bool,
@@ -1903,9 +2273,9 @@ impl BinanceFutures {
         let Some(native) = target.native else { return };
         if strategy {
             if self.options.portfolio_margin {
-                self.observe_native_strategy_terminal(&target.symbol, native);
+                self.observe_native_strategy_terminal(cx, &target.symbol, native);
             } else {
-                self.observe_strategy_terminal(&target.symbol, &target.id);
+                self.observe_strategy_terminal(cx, &target.symbol, &target.id);
             }
         } else {
             let order = current.then(|| cx.store.order(&target.id)).flatten();
@@ -1913,9 +2283,9 @@ impl BinanceFutures {
                 .known_native_filled(&target.symbol, native)
                 .max(order.map_or(0.0, |order| order.filled));
             if order.is_some_and(|order| order.status == OrderStatus::Closed) {
-                self.observe_native_terminal(&target.symbol, native, filled);
+                self.observe_native_terminal(cx, &target.symbol, native, filled);
             } else {
-                self.observe_unquantified_cancel(&target.symbol, native, filled);
+                self.observe_unquantified_cancel(cx, &target.symbol, native, filled);
             }
         }
     }
@@ -1935,7 +2305,7 @@ impl BinanceFutures {
             }
         }
         mark_canceled_preserving_closed(cx, &unchanged);
-        self.fence_order_snapshots();
+        self.fence_order_snapshots(cx);
     }
 
     fn cancel_target(&self, order: &Order) -> CancelTarget {
@@ -1996,7 +2366,7 @@ impl BinanceFutures {
                 order.last_update = now;
             });
         }
-        self.observe_native_terminal(&ack.symbol, ack.order_id, final_filled);
+        self.observe_native_terminal(cx, &ack.symbol, ack.order_id, final_filled);
         current
     }
 
@@ -2010,6 +2380,8 @@ impl BinanceFutures {
         cx: &mut Cx<'_, Pending>,
         proof: CancelProof,
         body: &str,
+        known_effects: &mut bool,
+        unproven: &mut bool,
     ) -> Option<(i64, String)> {
         let invalid = || {
             Some((
@@ -2080,7 +2452,9 @@ impl BinanceFutures {
                 let Ok(rows) = serde_json::from_str::<Vec<CancelRow>>(body) else {
                     return invalid();
                 };
-                let mut error = (rows.len() != targets.len()).then(|| {
+                let mismatched = rows.len() != targets.len();
+                *unproven |= mismatched;
+                let mut error = mismatched.then(|| {
                     (
                         0,
                         "Binance batch cancellation response count does not match request"
@@ -2095,18 +2469,24 @@ impl BinanceFutures {
                                 .iter()
                                 .find(|target| target.native == Some(ack.order_id))
                             else {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                                 continue;
                             };
                             if !seen.insert(ack.order_id) || !self.valid_cancel_ack(target, &ack) {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                                 continue;
                             }
-                            if !self.apply_cancel_ack(cx, target, &ack) {
+                            if self.apply_cancel_ack(cx, target, &ack) {
+                                *known_effects = true;
+                            } else {
+                                *unproven = true;
                                 error.get_or_insert_with(|| invalid().unwrap());
                             }
                         }
                         CancelRow::Error { code, msg } => {
+                            *unproven |= item_unknown(code);
                             error.get_or_insert((code, msg));
                         }
                     }
@@ -2156,7 +2536,7 @@ impl BinanceFutures {
                     }
                 }
                 mark_canceled_preserving_closed(cx, &unchanged);
-                self.fence_order_snapshots();
+                self.fence_order_snapshots(cx);
             }
             CancelProof::SymbolAll { targets, strategy } => {
                 #[derive(serde::Deserialize)]
@@ -2378,7 +2758,7 @@ mod audit_tests {
                     orders: vec![limit()],
                 }),
             );
-            let actions: Vec<_> = engine.drain_actions().collect();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.);
             assert!(
                 !actions
                     .iter()
@@ -2458,6 +2838,30 @@ mod audit_tests {
                     let label = format!("{variant:?} hung={hung} {command:?}");
                     engine.handle(1000.0, Event::Command(command));
                     let mut actions: Vec<_> = engine.drain_actions().collect();
+                    let preparations: Vec<_> = actions
+                        .iter()
+                        .filter_map(|action| match action {
+                            Action::ManagedHttp(action) => match action.as_ref() {
+                                safe_cex_engine::request_context::HttpAction::Prepare {
+                                    preparation,
+                                    ..
+                                } => Some(*preparation),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect();
+                    for preparation in preparations {
+                        engine.http_prepared(
+                            1000.,
+                            preparation,
+                            safe_cex_engine::request_context::Prepared {
+                                id: 1,
+                                expires_at: None,
+                            },
+                        );
+                    }
+                    actions.extend(engine.drain_actions());
                     if hung {
                         let timers: Vec<_> = actions
                             .iter()
@@ -2563,13 +2967,14 @@ mod audit_tests {
                         orders: vec![limit(); 6],
                     }),
                 );
-                let first: Vec<_> = engine
-                    .drain_actions()
-                    .filter_map(|a| match a {
-                        Action::Http(r) => Some(r),
-                        _ => None,
-                    })
-                    .collect();
+                let first: Vec<_> =
+                    safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.)
+                        .into_iter()
+                        .filter_map(|a| match a {
+                            Action::Http(r) => Some(r),
+                            _ => None,
+                        })
+                        .collect();
                 assert_eq!(first.len(), 1, "{variant:?}");
                 let request = &first[0];
                 let body = if request.url.contains("batchOrders") {
@@ -2598,7 +3003,7 @@ mod audit_tests {
                         },
                     );
                 }
-                let actions: Vec<_> = engine.drain_actions().collect();
+                let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1001.);
                 assert!(
                     !actions.iter().any(|a| matches!(a, Action::Http(_))),
                     "{variant:?}"
@@ -2617,14 +3022,85 @@ mod audit_tests {
                 );
                 assert_eq!(
                     failures[0].outcome,
-                    Some(safe_cex_engine::Outcome::Unknown),
+                    if accepted {
+                        None
+                    } else {
+                        Some(safe_cex_engine::Outcome::Unknown)
+                    },
                     "{variant:?} accepted={accepted}"
                 );
-                if accepted && variant == Variant::CoinM {
+                if accepted {
                     assert!(!failures[0].partial.as_ref().unwrap().order_ids.is_empty());
                 }
             }
         }
+    }
+
+    #[test]
+    fn unproven_native_job_discard_matches_only_the_sealed_owner_generation() {
+        use safe_cex_engine::{Response, Venue};
+        let mut engine = engine(Variant::UsdM, usize::MAX);
+        engine.handle(
+            1000.,
+            Event::Command(Command::PlaceOrders {
+                command: 98,
+                orders: vec![limit(); 6],
+            }),
+        );
+        let old = engine.venue().trading.jobs[&98].context.clone().unwrap();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1001.);
+        let request = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Http(http) => Some(http.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            1002.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 503,
+                    headers: "",
+                    body: "unproven",
+                },
+            },
+        );
+        let dropped = engine.venue().trading.jobs.is_empty();
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            1003.,
+            Event::Command(Command::PlaceOrders {
+                command: 98,
+                orders: vec![limit()],
+            }),
+        );
+        let current = engine.venue().trading.jobs[&98].context.clone().unwrap();
+        assert_ne!(old.owner(), current.owner());
+        let (mut native, _) = crate::test_config::Options::default().build();
+        native.trading.jobs.insert(
+            98,
+            super::Job {
+                context: Some(current.clone()),
+                ..Default::default()
+            },
+        );
+        native.discard_unproven_http_command(old.owner());
+        assert!(
+            native.trading.jobs.contains_key(&98),
+            "old owner cannot drop current native plan"
+        );
+        native.discard_unproven_http_command(current.owner());
+        let current_dropped = native.trading.jobs.is_empty();
+        assert!(
+            dropped,
+            "central unproven seal must discard queued native work"
+        );
+        assert!(
+            current_dropped,
+            "matching generation must discard its native plan"
+        );
     }
 
     #[test]

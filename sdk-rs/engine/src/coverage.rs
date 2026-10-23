@@ -8,11 +8,13 @@
 use crate::log::code;
 use crate::{Cx, Level};
 use std::borrow::Borrow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 /// Bound on remembered identities; past it the snapshot counts as unidentified.
 const MAX_PROTECTED: usize = 4096;
+/// Persistent diagnostic memory has its own limit, independent of coverage.
+const MAX_REPORTS: usize = 4096;
 
 #[derive(Clone)]
 pub struct RowAdmission<K> {
@@ -146,6 +148,230 @@ pub fn row_skipped<P>(cx: &mut Cx<'_, P>, level: Level, message: impl Into<Strin
     cx.notice(level, code::ROW_SKIPPED, message);
 }
 
+/// Duplicate-inclusive row count with an exact first-label distinction.
+/// Anonymous and empty labels are different; a later row never replaces either.
+#[derive(Default)]
+pub struct RowCount {
+    count: usize,
+    first: Option<Option<String>>,
+}
+
+impl RowCount {
+    pub fn add(&mut self, id: Option<&str>) {
+        self.count += 1;
+        self.first.get_or_insert_with(|| id.map(str::to_owned));
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    pub fn any(&self) -> bool {
+        self.count > 0
+    }
+
+    pub fn first(&self) -> Option<Option<&str>> {
+        self.first.as_ref().map(|id| id.as_deref())
+    }
+
+    pub fn summary(&self, format: impl FnOnce(&Self) -> String) -> Option<String> {
+        self.first.as_ref().map(|_| format(self))
+    }
+}
+
+/// First-seen unique known IDs, plus every anonymous or empty-ID row.
+#[derive(Default)]
+pub struct RowKeys {
+    ids: Vec<String>,
+    anonymous: usize,
+}
+
+impl RowKeys {
+    pub fn add(&mut self, id: Option<&str>) {
+        match id.filter(|id| !id.is_empty()) {
+            Some(id) if !self.ids.iter().any(|known| known == id) => self.ids.push(id.into()),
+            Some(_) => (),
+            None => self.anonymous += 1,
+        }
+    }
+
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    pub fn into_ids(self) -> Vec<String> {
+        self.ids
+    }
+
+    pub fn anonymous(&self) -> usize {
+        self.anonymous
+    }
+
+    pub fn count(&self) -> usize {
+        self.ids.len() + self.anonymous
+    }
+
+    pub fn any(&self) -> bool {
+        !self.ids.is_empty() || self.anonymous > 0
+    }
+
+    pub fn summary(&self, format: impl FnOnce(&Self) -> String) -> Option<String> {
+        self.any().then(|| format(self))
+    }
+}
+
+/// Report one native group, independently of its row count and host filtering.
+pub fn row_summary<P>(cx: &mut Cx<'_, P>, level: Level, summary: Option<String>) -> bool {
+    match summary {
+        Some(message) => {
+            row_skipped(cx, level, message);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Repeat policy for persistent row diagnostics; independent of row admission.
+#[derive(Clone, Copy)]
+pub enum RowRepeat {
+    /// Report an identity once until it is forgotten or the memory clears.
+    Once,
+    /// Also report the first Error after a previous non-Error report.
+    ErrorUpgrade,
+    /// Report whenever the exact message differs from the last report.
+    ChangedMessage,
+}
+
+#[derive(Clone)]
+enum ReportState {
+    Seen,
+    Error(bool),
+    Message(String),
+}
+
+/// Persistent diagnostic memory shared by REST/WS row consumers. This does not
+/// decide coverage, retain rows or make a snapshot eligible for publication.
+#[derive(Clone)]
+pub struct RowReports<K> {
+    remembered: HashMap<K, ReportState>,
+    repeat: RowRepeat,
+    bounded: bool,
+}
+
+impl<K> Default for RowReports<K> {
+    fn default() -> Self {
+        Self::new(RowRepeat::Once)
+    }
+}
+
+impl<K> RowReports<K> {
+    /// Clear the whole memory before the next report at the shared 4096 limit,
+    /// even if its key was already remembered. This is not an LRU cache.
+    pub fn new(repeat: RowRepeat) -> Self {
+        Self {
+            remembered: HashMap::new(),
+            repeat,
+            bounded: true,
+        }
+    }
+
+    /// Preserve native fixed-kind or otherwise explicitly unbounded memory.
+    pub fn unbounded(repeat: RowRepeat) -> Self {
+        Self {
+            bounded: false,
+            ..Self::new(repeat)
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.remembered.clear();
+    }
+}
+
+impl<K: Eq + Hash> RowReports<K> {
+    /// An empty group re-arms only this key; a present empty string is a report.
+    pub fn report_summary<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        key: K,
+        level: Level,
+        summary: Option<String>,
+    ) -> bool {
+        match summary {
+            Some(message) => self.report(cx, key, level, message),
+            None => {
+                self.forget(&key);
+                false
+            }
+        }
+    }
+
+    /// Return whether repeat suppression admitted a call to `row_skipped`.
+    /// Host filtering never changes memory, this result, or health accounting.
+    pub fn report<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        key: K,
+        level: Level,
+        message: impl Into<String>,
+    ) -> bool {
+        if self.bounded && self.remembered.len() >= MAX_REPORTS {
+            self.clear();
+        }
+        let previous = self.remembered.get(&key);
+        match (self.repeat, previous) {
+            (RowRepeat::Once, Some(_)) => return false,
+            (RowRepeat::ErrorUpgrade, Some(ReportState::Error(errored)))
+                if *errored || level != Level::Error =>
+            {
+                return false;
+            }
+            _ => (),
+        }
+        let message = message.into();
+        if let (RowRepeat::ChangedMessage, Some(ReportState::Message(text))) =
+            (self.repeat, previous)
+            && text == &message
+        {
+            return false;
+        }
+        let state = match self.repeat {
+            RowRepeat::Once => ReportState::Seen,
+            RowRepeat::ErrorUpgrade => ReportState::Error(level == Level::Error),
+            RowRepeat::ChangedMessage => ReportState::Message(message.clone()),
+        };
+        self.remembered.insert(key, state);
+        row_skipped(cx, level, message);
+        true
+    }
+
+    pub fn forget<Q: Eq + Hash + ?Sized>(&mut self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+    {
+        self.remembered.remove(key).is_some()
+    }
+}
+
+impl RowReports<String> {
+    /// A clean snapshot rearms only its native namespace; otherwise only mapped
+    /// identities rearm. The empty identity is a valid namespaced key.
+    pub fn rearm_namespace<'a>(
+        &mut self,
+        prefix: &str,
+        clean: bool,
+        mapped: impl IntoIterator<Item = &'a str>,
+    ) {
+        if clean {
+            self.remembered.retain(|key, _| !key.starts_with(prefix));
+        } else {
+            for key in mapped {
+                self.forget(&format!("{prefix}{key}"));
+            }
+        }
+    }
+}
+
 /// Builds a private list snapshot row by row: accepted rows are pushed, rows
 /// that cannot be mapped are rejected, and `commit` returns the accepted rows
 /// plus the store's current copies that a rejection protects. Venues call it in
@@ -230,7 +456,10 @@ impl<K: Eq + Hash, T> SnapshotBuilder<K, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RowAdmission, SnapshotBuilder, SnapshotCoverage, row_skipped};
+    use super::{
+        RowAdmission, RowCount, RowKeys, RowRepeat, RowReports, SnapshotBuilder, SnapshotCoverage,
+        row_skipped, row_summary,
+    };
     use crate::book::Book;
     use crate::{Action, Command, Cx, Level, Notice, Response, SocketId, TimerId, Venue};
 
@@ -450,5 +679,268 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    fn reporting_probe(cx: &mut Cx<'_, ()>) {
+        let mut once = RowReports::<String>::default();
+        assert!(once.report(cx, "".into(), Level::Warn, "once"));
+        assert!(!once.report(cx, "".into(), Level::Error, "once upgraded"));
+        assert!(once.forget(""));
+        assert!(!once.forget(""));
+        assert!(once.report(cx, "".into(), Level::Error, "once rearmed"));
+
+        let mut upgrades = RowReports::new(RowRepeat::ErrorUpgrade);
+        for (level, admitted) in [
+            (Level::Warn, true),
+            (Level::Error, true),
+            (Level::Warn, false),
+            (Level::Error, false),
+        ] {
+            assert_eq!(upgrades.report(cx, "key", level, "upgrade"), admitted);
+        }
+        // Error first is already final, regardless of subsequent message text.
+        assert!(upgrades.report(cx, "error-first", Level::Error, "error first"));
+        assert!(!upgrades.report(cx, "error-first", Level::Warn, "different"));
+
+        let mut changed = RowReports::unbounded(RowRepeat::ChangedMessage);
+        for (text, level, admitted) in [
+            ("A", Level::Warn, true),
+            ("A", Level::Error, false),
+            ("B", Level::Warn, true),
+            ("A", Level::Warn, true),
+        ] {
+            assert_eq!(changed.report(cx, "kind", level, text), admitted);
+        }
+        changed.clear();
+        assert!(changed.report(cx, "kind", Level::Warn, "A"));
+    }
+
+    #[test]
+    fn persistent_reports_preserve_repeat_policies_codes_levels_and_health() {
+        let mut engine = crate::test_support::seeded_engine(AdmissionProbe(reporting_probe));
+        engine.start(1.0);
+        assert_eq!(engine.health().rows_skipped, 9);
+        let events: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event)) => Some(event),
+                _ => None,
+            })
+            .collect();
+        let expected = [
+            (Level::Warn, "once"),
+            (Level::Error, "once rearmed"),
+            (Level::Warn, "upgrade"),
+            (Level::Error, "upgrade"),
+            (Level::Error, "error first"),
+            (Level::Warn, "A"),
+            (Level::Warn, "B"),
+            (Level::Warn, "A"),
+            (Level::Warn, "A"),
+        ];
+        assert_eq!(events.len(), expected.len());
+        for (event, (level, message)) in events.iter().zip(expected) {
+            assert_eq!(event.code, crate::log::code::ROW_SKIPPED);
+            assert_eq!((event.level, event.message.as_str()), (level, message));
+        }
+    }
+
+    #[test]
+    fn filtered_reports_still_remember_repeats_and_count_health_once() {
+        let mut engine = crate::test_support::seeded_engine(AdmissionProbe(reporting_probe));
+        engine.set_log_level(Level::Error);
+        engine.start(1.0);
+        assert_eq!(engine.health().rows_skipped, 9);
+        let events: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(event)) => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 3);
+        assert!(events.iter().all(|event| event.level == Level::Error));
+    }
+
+    fn namespace_probe(cx: &mut Cx<'_, ()>) {
+        let mut reports = RowReports::new(RowRepeat::ErrorUpgrade);
+        for key in ["order:", "order:x", "holding:x", "preorder:x"] {
+            assert!(reports.report(cx, key.to_owned(), Level::Warn, key));
+        }
+        reports.rearm_namespace("order:", false, ["x"]);
+        assert!(reports.report(cx, "order:x".into(), Level::Warn, "mapped"));
+        assert!(!reports.report(cx, "order:".into(), Level::Warn, "unknown"));
+        assert!(!reports.report(cx, "holding:x".into(), Level::Warn, "peer"));
+        reports.rearm_namespace("order:", true, std::iter::empty());
+        assert!(reports.report(cx, "order:".into(), Level::Warn, "clean unknown"));
+        assert!(reports.report(cx, "order:x".into(), Level::Warn, "clean known"));
+        assert!(!reports.report(cx, "holding:x".into(), Level::Warn, "peer"));
+        assert!(!reports.report(cx, "preorder:x".into(), Level::Warn, "not a prefix"));
+        // An empty mapped native identity also rearms its namespaced sentinel.
+        reports.rearm_namespace("order:", false, [""]);
+        assert!(reports.report(cx, "order:".into(), Level::Warn, "mapped unknown"));
+    }
+
+    #[test]
+    fn namespace_rearm_preserves_peer_memory_and_empty_identity() {
+        let mut engine = crate::test_support::seeded_engine(AdmissionProbe(namespace_probe));
+        engine.start(1.0);
+        assert_eq!(engine.health().rows_skipped, 8);
+    }
+
+    fn capacity_probe(cx: &mut Cx<'_, ()>) {
+        let mut bounded = RowReports::default();
+        for key in 0..4096 {
+            assert!(bounded.report(cx, key, Level::Warn, "bounded"));
+        }
+        // Capacity reset precedes even a duplicate lookup, forgetting all peers.
+        assert!(bounded.report(cx, 0, Level::Warn, "boundary duplicate"));
+        assert!(!bounded.report(cx, 0, Level::Warn, "repeat"));
+        assert!(bounded.report(cx, 1, Level::Warn, "old peer forgotten"));
+        let mut unbounded = RowReports::unbounded(RowRepeat::Once);
+        for key in 0..4097 {
+            assert!(unbounded.report(cx, key, Level::Warn, "unbounded"));
+        }
+        assert!(!unbounded.report(cx, 0, Level::Warn, "unbounded repeat"));
+        assert!(unbounded.forget(&0));
+        assert!(unbounded.report(cx, 0, Level::Warn, "unbounded rearm"));
+    }
+
+    #[test]
+    fn bounded_memory_clears_before_duplicate_lookup_unbounded_memory_does_not() {
+        let mut engine = crate::test_support::seeded_engine(AdmissionProbe(capacity_probe));
+        // Exercise capacity without accumulating thousands of host notices.
+        engine.set_log_level(Level::Error);
+        engine.start(1.0);
+        assert_eq!(engine.health().rows_skipped, 4098 + 4098);
+        assert!(
+            !engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::Notice(Notice::Event(_))))
+        );
+    }
+
+    #[test]
+    fn grouped_collectors_preserve_distinct_count_and_first_label_policies() {
+        let mut count = RowCount::default();
+        assert!(!count.any());
+        assert_eq!(count.first(), None);
+        assert_eq!(count.summary(|_| panic!("empty formatter")), None);
+        for first in [None, Some(""), Some("z")] {
+            let mut count = RowCount::default();
+            for label in [first, Some("a"), Some("a"), None] {
+                count.add(label);
+            }
+            assert_eq!(count.count(), 4);
+            assert!(count.any());
+            assert_eq!(count.first(), Some(first));
+            let mut calls = 0;
+            assert_eq!(
+                count.summary(|_| {
+                    calls += 1;
+                    String::new()
+                }),
+                Some(String::new())
+            );
+            assert_eq!(calls, 1);
+        }
+        count.add(None);
+        assert_eq!(count.first(), Some(None));
+        let mut keys = RowKeys::default();
+        assert!(!keys.any());
+        assert_eq!(keys.summary(|_| panic!("empty formatter")), None);
+        for label in [Some("z"), Some("a"), Some("z"), None, Some("")] {
+            keys.add(label);
+        }
+        assert_eq!(keys.ids(), ["z", "a"]);
+        assert_eq!(keys.anonymous(), 2);
+        assert_eq!(keys.count(), 4);
+        assert!(keys.any());
+        let mut calls = 0;
+        assert_eq!(
+            keys.summary(|_| {
+                calls += 1;
+                "group".into()
+            })
+            .as_deref(),
+            Some("group")
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(keys.into_ids(), ["z", "a"]);
+    }
+
+    fn summary_probe(cx: &mut Cx<'_, ()>) {
+        assert!(!row_summary(cx, Level::Error, None));
+        assert!(row_summary(cx, Level::Error, Some("group".into())));
+        assert!(row_summary(cx, Level::Warn, Some(String::new())));
+        let mut reports = RowReports::unbounded(RowRepeat::ChangedMessage);
+        for (key, summary, expected) in [
+            ("a", Some("A"), true),
+            ("b", Some("B"), true),
+            ("a", Some("A"), false),
+            ("a", None, false),
+            ("b", Some("B"), false),
+            ("a", Some("A"), true),
+            ("a", Some(""), true),
+        ] {
+            assert_eq!(
+                reports.report_summary(cx, key, Level::Warn, summary.map(str::to_owned)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn grouped_summary_rearm_preserves_peers_empty_messages_codes_levels_and_health() {
+        for filtered in [false, true] {
+            let mut engine = crate::test_support::seeded_engine(AdmissionProbe(summary_probe));
+            if filtered {
+                engine.set_log_level(Level::Error);
+            }
+            engine.start(1.0);
+            assert_eq!(engine.health().rows_skipped, 6);
+            let events: Vec<_> = engine
+                .drain_actions()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::Event(event)) => Some(event),
+                    _ => None,
+                })
+                .collect();
+            let expected: &[&str] = if filtered {
+                &["group"]
+            } else {
+                &["group", "", "A", "B", "A", ""]
+            };
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|e| e.message.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for (i, event) in events.iter().enumerate() {
+                assert_eq!(event.code, crate::log::code::ROW_SKIPPED);
+                assert_eq!(event.level, if i == 0 { Level::Error } else { Level::Warn });
+            }
+        }
+    }
+
+    fn empty_capacity_probe(cx: &mut Cx<'_, ()>) {
+        let mut reports = RowReports::default();
+        for key in 0..4096 {
+            assert!(reports.report_summary(cx, key, Level::Warn, Some("seen".into())));
+        }
+        assert!(!reports.report_summary(cx, usize::MAX, Level::Warn, None));
+        assert!(!reports.report_summary(cx, 0, Level::Warn, None));
+        assert!(!reports.report_summary(cx, 1, Level::Error, Some("remembered peer".into())));
+        assert!(reports.report_summary(cx, 0, Level::Error, Some(String::new())));
+    }
+
+    #[test]
+    fn empty_summary_at_capacity_forgets_only_its_key_without_clearing_peers() {
+        let mut engine = crate::test_support::seeded_engine(AdmissionProbe(empty_capacity_probe));
+        engine.set_log_level(Level::Error);
+        engine.start(1.0);
+        assert_eq!(engine.health().rows_skipped, 4097);
     }
 }

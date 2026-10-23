@@ -93,6 +93,15 @@ yarn test           # Vitest
   function. Keep the nested `new Promise` limited to the response event bridge;
   async Promise executors swallow thrown authentication failures and leave the
   caller pending.
+- The adapter's `prepare(config)` awaits connection/time-sync/authentication
+  without sending `rpc.http`. Its one-use `bind(finalConfig)` validates and
+  serializes the final packet; `ready()` checks the original deadline and socket
+  authentication epoch. `dispatch()` calls raw WebSocket.send synchronously.
+  Managed requests accept exact string bodies, reject Axios parameter/body
+  transformations, and negotiate raw responses even on the default adapter.
+  `prepareLegacy` and the Axios function retain the existing parser/simulation
+  behavior and provide no engine release guarantee. An epoch change invalidates
+  a managed preparation before dispatch; cancellation never closes a shared peer.
 - Axios `config.timeout` is one deadline for the complete tunnel request, not
   only the post-send response wait. Token retrieval, socket/time sync,
   authentication, simulation, and response handling all consume the same

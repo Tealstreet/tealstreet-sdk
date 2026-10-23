@@ -11,6 +11,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
@@ -21,6 +22,7 @@ use wire::*;
 const REST: &str = "https://api.backpack.exchange";
 const WS: &str = "wss://ws.backpack.exchange";
 const MAX_BUFFER: usize = 2000;
+const PUBLIC_READ_HEADERS: &[(&str, &str)] = &[("X-Broker-Id", "1200")];
 
 #[derive(Default)]
 pub struct Options {
@@ -44,7 +46,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 pub enum Pending {
     Identity(CommandId),
     BookQuery {
-        command: CommandId,
+        context: Context,
     },
     Account(account::Request),
     Trade(trading::Request),
@@ -777,8 +779,8 @@ impl Venue for Backpack {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if let Pending::BookQuery { command } = pending {
-            self.book_query_response(cx, command, response);
+        if let Pending::BookQuery { context } = pending {
+            self.book_query_response(cx, &context, response);
             return;
         }
         if let Pending::Identity(command) = pending {
@@ -994,16 +996,46 @@ impl Venue for Backpack {
             ),
         }
     }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::BookQuery { context } => {
+                // Preserve the public query's existing error presentation from #1680.
+                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::BookQuery { context } => {
+                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+            }
+            pending => self.on_sign_error(cx, pending, error),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Identity(command) = pending {
             self.identity_failed(cx, command, error);
             return;
         }
         match pending {
-            Pending::BookQuery { command } => cx.fail(
-                command,
-                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
-            ),
+            Pending::BookQuery { context } => {
+                let _ = cx.fail_context(
+                    &context,
+                    depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+                );
+            }
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => {
                 let error = safe_cex_engine::VenueError::new(error)
@@ -1011,7 +1043,7 @@ impl Venue for Backpack {
                     .outcome(safe_cex_engine::Outcome::Unknown);
                 self.trade_failed(cx, request, error)
             }
-            Pending::History(request) => cx.fail(request.command, error),
+            Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Depth { symbol, generation }
                 if self
                     .books
@@ -1160,15 +1192,29 @@ impl Venue for Backpack {
                     true,
                 );
             }
-            Command::FetchOrderBook {
-                command, symbol, ..
-            } => self.get(
-                cx,
-                "/api/v1/depth",
-                [("symbol".into(), symbol)].into(),
-                Pending::BookQuery { command },
-                false,
-            ),
+            Command::FetchOrderBook { symbol, .. } => {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                let params = [("symbol".into(), symbol)].into();
+                let url = format!("{REST}/api/v1/depth?{}", sign::query(&params));
+                if let Err((pending, error)) = cx.request_managed_with_headers(
+                    context.clone(),
+                    Method::Get,
+                    url,
+                    PUBLIC_READ_HEADERS,
+                    None,
+                    Pending::BookQuery { context },
+                ) {
+                    self.on_http_preparation_failed(cx, pending, error, error.venue_error());
+                }
+            }
             Command::Query { command, query } => self.history_command(cx, command, query),
             command => self.trade_command(cx, command),
         }

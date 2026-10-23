@@ -7,6 +7,7 @@ import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { prepareRecordedHttp } from '../support/managedHttp';
 import { OrderSide } from '../../types';
 
 it.each([false, true])(
@@ -35,6 +36,7 @@ it.each([false, true])(
       timeInForce: 'GTC',
     };
     const transport: Transport = {
+      prepareHttp: prepareRecordedHttp,
       now: () => 1_700_000_000_000,
       connect: (url, handlers) => {
         if (url.includes('/ws-api/')) privateMessage = handlers.onMessage;

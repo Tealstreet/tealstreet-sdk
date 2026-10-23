@@ -27,8 +27,16 @@ struct Rig {
 }
 impl Rig {
     fn take(&mut self, engine: &mut Engine<Blofin>) -> Vec<Action> {
+        let actions = engine.drain_actions().collect();
+        self.collect(actions)
+    }
+    fn take_prepared(&mut self, engine: &mut Engine<Blofin>, now: f64) -> Vec<Action> {
+        let actions = safe_cex_engine::test_support::prepared_actions(engine, now);
+        self.collect(actions)
+    }
+    fn collect(&mut self, actions: Vec<Action>) -> Vec<Action> {
         let mut rest = Vec::new();
-        for action in engine.drain_actions() {
+        for action in actions {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
@@ -46,7 +54,7 @@ impl Rig {
         }
         let (timer, at) = self.timers.remove(0);
         engine.handle(at, Event::TimerFired { timer });
-        Some((at, self.take(engine)))
+        Some((at, self.take_prepared(engine, at)))
     }
     fn until(
         &mut self,
@@ -115,15 +123,19 @@ fn private_connect(out: &[Action]) -> Option<SocketId> {
 /// Loads the catalogue; returns the margin and position-mode reads and the private socket.
 fn to_settings(engine: &mut Engine<Blofin>, rig: &mut Rig) -> (Action, Action, SocketId) {
     engine.start(0.);
-    let instruments = rig.take(engine).remove(0);
+    let instruments = rig.take_prepared(engine, 0.).remove(0);
     respond(engine, &instruments, 200, INSTRUMENTS, 1.);
-    let out = rig.take(engine);
+    let out = rig.take_prepared(engine, 1.);
     let margin = out.iter().find(|a| get("margin-mode")(a)).unwrap().clone();
     let mode = out
         .iter()
         .find(|a| get("position-mode")(a))
         .unwrap()
         .clone();
+    // This fixture exercises private settings, not an unanswered public read.
+    let tickers = out.iter().find(|a| get("market/tickers")(a)).unwrap();
+    respond(engine, tickers, 200, r#"{"code":"0","data":[]}"#, 1.);
+    rig.take(engine);
     (margin, mode, private_connect(&out).unwrap())
 }
 
@@ -316,9 +328,9 @@ fn missing_passphrase_fails_startup() {
     }));
     let mut rig = Rig::default();
     engine.start(0.);
-    let instruments = rig.take(&mut engine).remove(0);
+    let instruments = rig.take_prepared(&mut engine, 0.).remove(0);
     respond(&mut engine, &instruments, 200, INSTRUMENTS, 1.);
-    rig.take(&mut engine);
+    rig.take_prepared(&mut engine, 1.);
     assert_eq!(rig.failures.len(), 1);
     assert_eq!(rig.failures[0].message, "BloFin requires a passphrase");
     assert_eq!(rig.failures[0].kind, Some(ErrorKind::InvalidInput));

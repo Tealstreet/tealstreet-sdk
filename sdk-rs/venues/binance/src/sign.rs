@@ -145,6 +145,7 @@ pub(crate) struct Http {
     query: Query,
     recv_window: Option<f64>,
     signed: bool,
+    header_policy: safe_cex_engine::signing_headers::ResultHeaderPolicy,
 }
 impl Http {
     pub fn new(
@@ -158,7 +159,17 @@ impl Http {
             query,
             recv_window,
             signed,
+            header_policy: Default::default(),
         }
+    }
+    pub fn with_header_policy(
+        mut self,
+        policy: safe_cex_engine::signing_headers::ResultHeaderPolicy,
+    ) -> Self {
+        if self.signed {
+            self.header_policy = policy;
+        }
+        self
     }
 }
 fn bytes(bytes: impl Into<Vec<u8>>) -> PayloadPart {
@@ -189,6 +200,9 @@ fn hex(bytes: &[u8]) -> String {
     safe_cex_crypto::hex(bytes)
 }
 impl SignStep for Http {
+    fn result_header_policy(&self) -> safe_cex_engine::signing_headers::ResultHeaderPolicy {
+        self.header_policy
+    }
     fn prepare(
         &mut self,
         outbound: &mut Action,

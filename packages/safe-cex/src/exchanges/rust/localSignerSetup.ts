@@ -27,7 +27,7 @@ const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => 
   if (trimCredential !== undefined && typeof trimCredential !== 'boolean') return invalidMetadata();
   return { stableId, secretEncoding, trimCredential } as LocalIdentityMetadata;
 };
-const signerMetadata = (input: unknown): LocalSignerMetadata => {
+export const parseLocalSignerMetadata = (input: unknown): LocalSignerMetadata => {
   if (input === undefined) return {};
   const value = record(input, ['primary', 'secondary']);
   return { primary: identityMetadata(value.primary), secondary: identityMetadata(value.secondary) };
@@ -38,30 +38,34 @@ const signerMetadata = (input: unknown): LocalSignerMetadata => {
 const credentialPresent = (key: string | undefined, trim: boolean): boolean =>
   typeof key === 'string' && (trim ? key.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '') : key).length > 0;
 
-const effectiveMetadata = (
+export const effectiveIdentityMetadata = (
   metadata: LocalIdentityMetadata | undefined,
   policy: IdentitySetupPolicy | undefined,
 ): LocalIdentityMetadata | undefined =>
   policy?.trimCredential === undefined ? metadata : { ...metadata, trimCredential: policy.trimCredential };
 
-/** Required-field checks happen before any generic options retain credentials.
- * Missing fallback is validation-only here: trusted Rust setup aliases opaque
- * refs, so the secondary setup must keep its original absent/empty distinction. */
-const validatePassphrase = (
+/** One required-field/fallback policy for trusted local and callback setup.
+ * Local setup validates but retains the original absent input for Rust's ref
+ * aliasing; callback setup uses the resolution to assign the same owned ref. */
+export const resolveSetupPassphrase = (
   slot: 'primary' | 'secondary',
   complete: boolean,
   passphrase: string | undefined,
   primaryPassphrase: string | undefined,
   policy: IdentitySetupPolicy | undefined,
   publicDataOnly: boolean,
-): void => {
+): Readonly<{ value?: string; inheritPrimary: boolean }> => {
   const rule = policy?.passphrase;
-  if (!complete || rule === undefined || rule === 'optional' || (rule === 'requiredForPrivate' && slot === 'primary' && publicDataOnly)) return;
-  const effective = rule === 'requiredWithPrimaryFallback' && (passphrase === undefined || passphrase === null) ? primaryPassphrase : passphrase;
-  if (typeof effective !== 'string' || effective.length === 0) {
+  const inheritPrimary = slot === 'secondary' && rule === 'requiredWithPrimaryFallback'
+    && (passphrase === undefined || passphrase === null);
+  const effective = inheritPrimary ? primaryPassphrase : passphrase;
+  const required = complete && rule !== undefined && rule !== 'optional'
+    && !(rule === 'requiredForPrivate' && slot === 'primary' && publicDataOnly);
+  if (required && (typeof effective !== 'string' || effective.length === 0)) {
     const message = `Rust engine ${slot} signing credentials require a passphrase`;
     throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
   }
+  return { value: typeof effective === 'string' ? effective : undefined, inheritPrimary };
 };
 
 /** Trusted local-provider setup. Secret strings stay inside this capsule until
@@ -73,9 +77,9 @@ export class LocalSignerSetup {
   readonly credentialPresence: CredentialPresence;
 
   constructor(options: ExchangeOptions, policy: CredentialSetupPolicy = {}) {
-    const setupMetadata = signerMetadata(options.localSigner);
-    const primaryMetadata = effectiveMetadata(setupMetadata.primary, policy.primary);
-    const secondaryMetadata = effectiveMetadata(setupMetadata.secondary, policy.secondary);
+    const setupMetadata = parseLocalSignerMetadata(options.localSigner);
+    const primaryMetadata = effectiveIdentityMetadata(setupMetadata.primary, policy.primary);
+    const secondaryMetadata = effectiveIdentityMetadata(setupMetadata.secondary, policy.secondary);
     const secondary =
       options.secondary_key !== undefined ||
       options.secondary_secret !== undefined ||
@@ -91,8 +95,8 @@ export class LocalSignerSetup {
       secret: Boolean(options.secret),
     });
     this.primaryComplete = this.credentialPresence.key && this.credentialPresence.secret;
-    validatePassphrase('primary', this.primaryComplete, options.passphrase, options.passphrase, policy.primary, options.publicDataOnly === true);
-    validatePassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
+    resolveSetupPassphrase('primary', this.primaryComplete, options.passphrase, options.passphrase, policy.primary, options.publicDataOnly === true);
+    resolveSetupPassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
     this.#credentials = {
       ...(options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined
         ? { primary: { ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase } }

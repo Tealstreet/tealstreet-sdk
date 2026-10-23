@@ -1,7 +1,7 @@
 use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
 use safe_cex_engine::execution::{Arithmetic, Cursor};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -15,25 +15,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const ROOT: &str = "/api/v3/brokerage";
 const STATUSES: [&str; 5] = ["PENDING", "OPEN", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 const MAX_ROWS: usize = 10000;
-const SKIP_LOG_LIMIT: usize = 4_096;
-/// Logs a skipped row once per key, allowing one Error upgrade if its kept copy is lost.
-fn log_skip(
-    cx: &mut Cx<'_, Pending>,
-    logged: &mut HashMap<String, bool>,
-    key: String,
-    level: Level,
-    message: impl Into<String>,
-) {
-    if logged.len() >= SKIP_LOG_LIMIT {
-        logged.clear();
-    }
-    let error = level == Level::Error;
-    if logged.get(&key).is_some_and(|&errored| errored || !error) {
-        return;
-    }
-    logged.insert(key, error);
-    cx.notice(level, code::ROW_SKIPPED, message);
-}
 fn skip_level(kept: bool) -> Level {
     if kept { Level::Warn } else { Level::Error }
 }
@@ -41,21 +22,6 @@ fn order_kept(store: &safe_cex_engine::Store, terminal: &HashSet<String>, id: &s
     store
         .order(id)
         .is_some_and(|o| !terminal.contains(id) || o.status != OrderStatus::Open)
-}
-/// Re-arms the skip logs under `prefix`: every one after a clean snapshot, else the mapped keys.
-fn rearm_skips<'a>(
-    logged: &mut HashMap<String, bool>,
-    prefix: &str,
-    clean: bool,
-    mapped: impl Iterator<Item = &'a str>,
-) {
-    if clean {
-        logged.retain(|key, _| !key.starts_with(prefix));
-    } else {
-        for key in mapped {
-            logged.remove(&format!("{prefix}{key}"));
-        }
-    }
 }
 /// INTX UPnL: the sum over committed positions, retained copies of skipped rows included.
 fn committed_upnl(store: &safe_cex_engine::Store) -> f64 {
@@ -178,11 +144,12 @@ pub(crate) struct Account {
     // Open orders the engine cannot represent (e.g. brackets placed on Coinbase).
     foreign: HashMap<String, String>,
     /// `position:`, `order:` or `holding:` plus the identity (empty if none) of logged skips.
-    skip_logged: HashMap<String, bool>,
+    skip_logged: RowReports<String>,
 }
 impl Account {
     pub(crate) fn new() -> Self {
         Self {
+            skip_logged: RowReports::new(RowRepeat::ErrorUpgrade),
             supervisor: Supervisor::new(Config {
                 idle_timeout_ms: 30_000.0,
                 backoff_base_ms: 2_000.0,
@@ -1320,7 +1287,7 @@ impl Coinbase {
                             };
                             let level = if stored { Level::Warn } else { Level::Error };
                             let key = format!("position:{}", symbol.as_deref().unwrap_or(""));
-                            log_skip(cx, &mut self.account.skip_logged, key, level, message);
+                            self.account.skip_logged.report(cx, key, level, message);
                             rows.reject(symbol);
                             return Ok(());
                         }
@@ -1344,7 +1311,7 @@ impl Coinbase {
                                     skip_level(cx.store.orders().iter().any(|o| {
                                         order_kept(cx.store, &self.account.terminal, &o.id)
                                     }));
-                                log_skip(cx, logged, "order:".into(), level, message);
+                                logged.report(cx, "order:".into(), level, message);
                                 s.unidentified = true;
                                 return Ok(());
                             };
@@ -1352,7 +1319,7 @@ impl Coinbase {
                                 format!("Coinbase skipped unmappable order {id}: {error}");
                             let level =
                                 skip_level(order_kept(cx.store, &self.account.terminal, &id));
-                            log_skip(cx, logged, format!("order:{id}"), level, message);
+                            logged.report(cx, format!("order:{id}"), level, message);
                             s.skipped.insert(id, symbol);
                             return Ok(());
                         }
@@ -1661,9 +1628,8 @@ impl Coinbase {
                             } else {
                                 Level::Warn
                             };
-                            log_skip(
+                            self.account.skip_logged.report(
                                 cx,
-                                &mut self.account.skip_logged,
                                 format!("order:{id}"),
                                 level,
                                 format!("Coinbase skipped unmappable order {id}: {error}"),
@@ -1720,9 +1686,8 @@ impl Coinbase {
                                 } else {
                                     Level::Warn
                                 };
-                                log_skip(
+                                self.account.skip_logged.report(
                                     cx,
-                                    &mut self.account.skip_logged,
                                     format!("order:{id}"),
                                     level,
                                     format!("Coinbase skipped unmappable order {id}: {error}"),
@@ -1828,9 +1793,8 @@ impl Coinbase {
                     };
                     for b in r.breakdown.spot_positions {
                         if b.asset.is_empty() {
-                            log_skip(
+                            self.account.skip_logged.report(
                                 cx,
-                                &mut self.account.skip_logged,
                                 "holding:".into(),
                                 skip_level(held(cx, None)),
                                 "Coinbase skipped spot holding without an asset",
@@ -1845,9 +1809,8 @@ impl Coinbase {
                             || b.available_to_trade_crypto.0 < 0.0
                             || b.available_to_trade_crypto.0 > b.total_balance_crypto.0
                         {
-                            log_skip(
+                            self.account.skip_logged.report(
                                 cx,
-                                &mut self.account.skip_logged,
                                 format!("holding:{}", b.asset),
                                 skip_level(held(cx, Some(&b.asset))),
                                 format!("Coinbase skipped invalid spot holding {}", b.asset),
@@ -1865,8 +1828,7 @@ impl Coinbase {
                             },
                         });
                     }
-                    rearm_skips(
-                        &mut self.account.skip_logged,
+                    self.account.skip_logged.rearm_namespace(
                         "holding:",
                         coins.rejected() == 0,
                         coins.rows().iter().map(|c| c.currency.as_str()),
@@ -1921,8 +1883,7 @@ impl Coinbase {
                             })
                         }
                     }
-                    rearm_skips(
-                        &mut self.account.skip_logged,
+                    self.account.skip_logged.rearm_namespace(
                         "position:",
                         builder.rejected() == 0,
                         builder.rows().iter().map(|p| p.symbol.as_str()),
@@ -2028,8 +1989,7 @@ impl Coinbase {
         if s.revision < self.account.snapshot_revision {
             return;
         }
-        rearm_skips(
-            &mut self.account.skip_logged,
+        self.account.skip_logged.rearm_namespace(
             "order:",
             s.skipped.is_empty() && !s.unidentified,
             s.rows.keys().map(String::as_str),
@@ -2267,9 +2227,8 @@ impl Coinbase {
                         let skipped = skipped.filter(|_| snapshot);
                         if let Some(s) = &mut self.account.snapshot {
                             if let Some((id, symbol)) = skipped {
-                                log_skip(
+                                self.account.skip_logged.report(
                                     cx,
-                                    &mut self.account.skip_logged,
                                     format!("order:{id}"),
                                     skip_level(order_kept(cx.store, &self.account.terminal, &id)),
                                     format!("Coinbase skipped unmappable order {id}: {error}"),

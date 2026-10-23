@@ -6,15 +6,18 @@ use crate::{Options, encoded_path, interval, sign, success};
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Rejection, Report};
 use safe_cex_engine::fence::StaleGuard;
+use safe_cex_engine::history::{Completion, HistoryRows};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
-    SocketId, TimerId, Venue,
+    SocketId, TimerId, Venue, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -23,13 +26,16 @@ use wire::*;
 const REST: &str = "https://api.kucoin.com";
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 const SKIP_LOG_LIMIT: usize = 4_096;
+const EXECUTION_PROGRESS_LIMIT: usize = 20_000;
 
 pub enum Pending {
     Markets {
+        context: Context,
         rows: Vec<Market>,
         invalid: bool,
     },
     Tickers {
+        context: Context,
         rows: Vec<Ticker>,
         invalid: bool,
     },
@@ -48,8 +54,16 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
-    Fills(CommandId),
+    Fills(Box<HistoryRows<String>>),
     Account(CommandId),
+}
+impl Pending {
+    fn discovery_context(&self) -> Option<&Context> {
+        match self {
+            Self::Markets { context, .. } | Self::Tickers { context, .. } => Some(context),
+            _ => None,
+        }
+    }
 }
 pub struct ReadOrders {
     revision: u64,
@@ -57,6 +71,8 @@ pub struct ReadOrders {
     symbol: String,
     page: u32,
     rows: SnapshotBuilder<String, Order>,
+    /// Raw validated REST prefixes, never cached display replacements.
+    seeds: Vec<(String, Cursor)>,
     lookup: Option<(CommandId, String)>,
 }
 struct Socket {
@@ -120,6 +136,8 @@ pub struct KucoinSpot {
     terminal_order: VecDeque<String>,
     fills: HashSet<String>,
     fill_order: VecDeque<String>,
+    execution_progress: BTreeMap<String, Cursor>,
+    execution_order: VecDeque<String>,
 }
 impl KucoinSpot {
     pub fn new(options: Options) -> Self {
@@ -164,33 +182,66 @@ impl KucoinSpot {
             terminal_order: Default::default(),
             fills: Default::default(),
             fill_order: Default::default(),
+            execution_progress: Default::default(),
+            execution_order: Default::default(),
         }
     }
-    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        self.streamed(
-            cx,
-            if tickers {
-                "/api/v1/market/allTickers"
-            } else {
-                "/api/v2/symbols"
+    fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
             },
-            if tickers {
-                ArrayAt::Path(&["data", "ticker"])
-            } else {
-                ArrayAt::EnvelopeField("data")
-            },
-            if tickers {
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.discovery.failed(cx, tickers);
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    error.venue_error().message,
+                );
+                return;
+            }
+        };
+        let (path, at, pending) = if tickers {
+            (
+                "/api/v1/market/allTickers",
+                ArrayAt::Path(&["data", "ticker"]),
                 Pending::Tickers {
+                    context: context.clone(),
                     rows: vec![],
                     invalid: false,
-                }
-            } else {
+                },
+            )
+        } else {
+            (
+                "/api/v2/symbols",
+                ArrayAt::EnvelopeField("data"),
                 Pending::Markets {
+                    context: context.clone(),
                     rows: vec![],
                     invalid: false,
-                }
-            },
-        );
+                },
+            )
+        };
+        match cx.request_managed_with_headers(
+            context,
+            Method::Get,
+            format!("{REST}{path}"),
+            sign::PUBLIC_HEADERS,
+            None,
+            pending,
+        ) {
+            Ok(id) => cx.stream_response(id, at),
+            Err((pending, error)) => {
+                self.on_request_failed(cx, pending, &error.venue_error().message)
+            }
+        }
     }
     fn request(
         &self,
@@ -586,6 +637,18 @@ impl KucoinSpot {
             rows.reject(Some(id.to_owned()));
         }
     }
+    /// Native retention only; validation and monotonic progress come from the engine.
+    fn remember_execution(&mut self, id: String, cursor: Cursor) {
+        if !self.execution_progress.contains_key(&id) {
+            self.execution_order.push_back(id.clone());
+            if self.execution_order.len() > EXECUTION_PROGRESS_LIMIT
+                && let Some(old) = self.execution_order.pop_front()
+            {
+                self.execution_progress.remove(&old);
+            }
+        }
+        self.execution_progress.insert(id, cursor);
+    }
     fn private_message(&mut self, cx: &mut Cx<'_, Pending>, m: Message<'_>) {
         if m.topic.starts_with("/account/balance") {
             self.balance_revision += 1;
@@ -647,7 +710,44 @@ impl KucoinSpot {
                     row.ts.map_or(order.last_update, |n| n.0)
                 )
             };
-            if amount > 0.0 && self.fills.insert(key.clone()) {
+            let cursor = self
+                .execution_progress
+                .get(row.id())
+                .copied()
+                .unwrap_or_default();
+            let (cursor, report) = if row.match_size.is_some() {
+                // No native endpoint: validate the authoritative last independently
+                // of retained progress, and never install its synthetic next value.
+                let cursor = if row.cumulative().is_some() {
+                    cursor
+                } else {
+                    Cursor::default()
+                };
+                (
+                    cursor,
+                    Report::Last {
+                        amount,
+                        cumulative: row.cumulative(),
+                        price,
+                    },
+                )
+            } else {
+                (
+                    cursor,
+                    Report::Cumulative {
+                        quantity: amount,
+                        price: CumulativePrice::Direct(price),
+                    },
+                )
+            };
+            let delivery = match cursor.prepare(report, Arithmetic::Binary) {
+                Ok(delivery) => delivery,
+                Err(Rejection::QuantityRegressed) => None,
+                Err(_) => return,
+            };
+            if let Some(delivery) = delivery
+                && self.fills.insert(key.clone())
+            {
                 self.fill_order.push_back(key);
                 if self.fill_order.len() > 20_000
                     && let Some(k) = self.fill_order.pop_front()
@@ -659,9 +759,12 @@ impl KucoinSpot {
                     order_id: order.id.clone(),
                     symbol: order.symbol.clone(),
                     side: order.side,
-                    price,
-                    amount,
+                    price: delivery.price(),
+                    amount: delivery.amount(),
                 });
+                if row.match_size.is_none() || row.cumulative().is_some() {
+                    self.remember_execution(row.id().to_owned(), delivery.next());
+                }
             }
         }
         let old = cx.store.order(row.id());
@@ -940,14 +1043,20 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if pending
+            .discovery_context()
+            .is_some_and(|context| cx.validate_http_context(context).is_err())
+        {
+            return;
+        }
         match pending {
-            Pending::Markets { rows, invalid: _ } => {
+            Pending::Markets { rows, .. } => {
                 match serde_json::from_str::<Instrument>(item).map(Instrument::market) {
                     Ok(market) if market.precision.is_tradable() => rows.push(market),
                     _ => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
-            Pending::Tickers { rows, invalid: _ } => match serde_json::from_str::<Price>(item) {
+            Pending::Tickers { rows, .. } => match serde_json::from_str::<Price>(item) {
                 Ok(r) => rows.push(r.ticker()),
                 Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
@@ -959,6 +1068,15 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Some(context) = pending.discovery_context() {
+            if cx.validate_http_context(context).is_err() {
+                let _ = cx.finish_http_context(context);
+                return;
+            }
+            if cx.finish_http_context(context).is_err() {
+                return;
+            }
+        }
         if let Pending::Bullet {
             channel,
             generation,
@@ -984,7 +1102,7 @@ impl Venue for KucoinSpot {
             }
         };
         match pending {
-            Pending::Markets { rows, invalid } => {
+            Pending::Markets { rows, invalid, .. } => {
                 if invalid || rows.is_empty() {
                     self.discovery.failed(cx, false);
                     return;
@@ -1002,7 +1120,9 @@ impl Venue for KucoinSpot {
                     cx.store.set_balance(Balance::default());
                 }
             }
-            Pending::Tickers { mut rows, invalid } => {
+            Pending::Tickers {
+                mut rows, invalid, ..
+            } => {
                 rows.retain(|r| cx.store.market(&r.symbol).is_some());
                 if invalid || rows.is_empty() {
                     self.discovery.failed(cx, true);
@@ -1102,6 +1222,7 @@ impl Venue for KucoinSpot {
                     symbol: String::new(),
                     page: 1,
                     rows: SnapshotBuilder::default(),
+                    seeds: vec![],
                     lookup: None,
                 };
                 if let Some(symbol) = r.symbols.pop_front() {
@@ -1168,6 +1289,7 @@ impl Venue for KucoinSpot {
                         );
                         return;
                     }
+                    let seed = Cursor::seed(o.filled, None).expect("validated REST quantity");
                     if let Some(current) = cx.store.order(&o.id) {
                         if o.last_update < current.last_update || o.amount < current.filled {
                             o = current.clone();
@@ -1177,6 +1299,7 @@ impl Venue for KucoinSpot {
                         }
                     }
                     if !self.terminal.contains(&o.id) && o.status == OrderStatus::Open {
+                        r.seeds.push((o.id.clone(), seed));
                         r.rows.push(o);
                     }
                 }
@@ -1214,6 +1337,11 @@ impl Venue for KucoinSpot {
                     } else {
                         self.orders_loading = false;
                         if r.revision == self.revision {
+                            for (id, seed) in r.seeds {
+                                if !self.execution_progress.contains_key(&id) {
+                                    self.remember_execution(id, seed);
+                                }
+                            }
                             self.rearm_skips("order:", clean, mapped);
                             cx.store.set_orders(rows);
                         } else {
@@ -1269,7 +1397,7 @@ impl Venue for KucoinSpot {
                     Err(error) => cx.fail(command, error),
                 };
             }
-            Pending::Fills(command) => {
+            Pending::Fills(mut owner) => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Execution<'a> {
@@ -1299,16 +1427,28 @@ impl Venue for KucoinSpot {
                             commission_asset: r.fee_currency,
                         });
                     }
-                    serde_json::to_string(&rows).map_err(|e| e.to_string())
+                    rows.iter()
+                        .map(|row| serde_json::to_string(row).map_err(|e| e.to_string()))
+                        .collect::<Result<Vec<_>, _>>()
                 })();
                 match out {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(rows) => {
+                        for row in rows {
+                            owner.stage(row);
+                        }
+                        owner.accept_page();
+                        owner.finish(cx, Ok(()));
+                    }
+                    Err(error) => owner.finish(cx, Err(VenueError::new(error))),
                 }
             }
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Some(context) = pending.discovery_context() {
+            // Engine-admitted failures may retire after the original deadline.
+            let _ = cx.finish_http_context(context);
+        }
         let discovery = matches!(&pending, Pending::Markets { .. } | Pending::Tickers { .. });
         match pending {
             Pending::Bullet {
@@ -1339,9 +1479,12 @@ impl Venue for KucoinSpot {
                 self.write_failed(cx, j, crate::wire::write_failure(0, "", error.into()));
                 return;
             }
-            Pending::Candles { command, .. }
-            | Pending::Fills(command)
-            | Pending::Account(command) => {
+            Pending::Fills(owner) => {
+                cx.command_error(owner.command(), error);
+                owner.finish(cx, Err(VenueError::new(error)));
+                return;
+            }
+            Pending::Candles { command, .. } | Pending::Account(command) => {
                 cx.command_error(command, error);
                 cx.fail(command, error);
                 return;
@@ -1539,7 +1682,17 @@ impl KucoinSpot {
                 if let Some(n) = to_ms {
                     path.push_str(&format!("&endAt={}", n as u64));
                 }
-                self.request(cx, Method::Get, &path, None, true, Pending::Fills(command));
+                self.request(
+                    cx,
+                    Method::Get,
+                    &path,
+                    None,
+                    true,
+                    Pending::Fills(Box::new(HistoryRows::new(
+                        Completion::new(command),
+                        |rows| Ok(format!("[{}]", rows.join(","))),
+                    ))),
+                );
             }
             Query::OrderByClientId {
                 symbol,
@@ -1573,6 +1726,7 @@ impl KucoinSpot {
                             symbol,
                             page: 1,
                             rows: SnapshotBuilder::default(),
+                            seeds: vec![],
                             lookup: Some((command, client_order_id)),
                         },
                     );
@@ -1632,5 +1786,28 @@ mod security_credentials {
             let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
             assert!(venue.credentials.is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod execution_retention {
+    use super::*;
+
+    #[test]
+    fn retained_execution_prefix_has_an_independent_bounded_fifo() {
+        let mut venue = KucoinSpot::new(Options::default());
+        let cursor = Cursor::seed(0.5, None).unwrap();
+        for index in 0..EXECUTION_PROGRESS_LIMIT {
+            venue.remember_execution(index.to_string(), cursor);
+        }
+        // Updating an admitted endpoint does not allocate/refresh a FIFO slot.
+        venue.remember_execution("0".into(), Cursor::seed(0.7, None).unwrap());
+        assert_eq!(venue.execution_order.len(), EXECUTION_PROGRESS_LIMIT);
+        venue.remember_execution("new".into(), cursor);
+        assert!(!venue.execution_progress.contains_key("0"));
+        assert!(venue.execution_progress.contains_key("1"));
+        assert_eq!(venue.execution_progress.len(), EXECUTION_PROGRESS_LIMIT);
+        // Retention and dedupe remain independent native history domains.
+        assert!(venue.fills.is_empty() && venue.terminal.is_empty());
     }
 }

@@ -7,9 +7,10 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Candle, Interval, Limits, Market, MinMax, PositionSide, Precision, Ticker,
 };
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryEvidence, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, VenueError,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -20,6 +21,14 @@ pub struct ContractConfig {
     pub default_initial_margin_rate: f64,
     pub max_market_price_range: f64,
 }
+pub struct Candles {
+    context: Context,
+    symbol: String,
+    url: String,
+    retries: u8,
+    signature_retried: bool,
+}
+
 pub enum Request {
     Markets {
         rows: Vec<Market>,
@@ -27,23 +36,17 @@ pub enum Request {
         /// Native and display names of malformed market rows.
         skipped: Vec<(String, String)>,
     },
-    Candles {
-        command: CommandId,
-        symbol: String,
-    },
 }
 impl Request {
     pub(crate) fn reset(&mut self) {
-        if let Self::Markets {
+        let Self::Markets {
             rows,
             contracts,
             skipped,
-        } = self
-        {
-            rows.clear();
-            contracts.clear();
-            skipped.clear();
-        }
+        } = self;
+        rows.clear();
+        contracts.clear();
+        skipped.clear();
     }
 }
 pub struct Depth {
@@ -221,11 +224,11 @@ impl ApexOmni {
         request: &mut Request,
         item: &str,
     ) {
-        if let Request::Markets {
+        let Request::Markets {
             rows,
             contracts,
             skipped,
-        } = request
+        } = request;
         {
             let Ok(raw) = serde_json::from_str::<wire::Contract<'_>>(item) else {
                 safe_cex_engine::startup::skipped_row(cx);
@@ -361,62 +364,6 @@ impl ApexOmni {
                 self.connect_public(cx);
                 self.start_private(cx);
             }
-            Request::Candles { command, symbol } => {
-                if !success {
-                    cx.fail(command, "ApeX candle request failed");
-                    return;
-                }
-                let rows = envelope
-                    .and_then(|e| e.data)
-                    .and_then(|data| {
-                        serde_json::from_str::<HashMap<String, Vec<wire::Kline>>>(data.get()).ok()
-                    })
-                    .and_then(|mut rows| rows.remove(&symbol));
-                let Some(rows) = rows else {
-                    cx.fail(command, "Malformed ApeX candle response");
-                    return;
-                };
-                if rows.iter().any(|row| row.t < 0.0 || row.t.fract() != 0.0) {
-                    cx.fail(command, "Invalid ApeX candle timestamp");
-                    return;
-                }
-                let received = rows.len();
-                let mut rows: Vec<_> = rows
-                    .into_iter()
-                    .map(|r| Candle {
-                        timestamp: r.t / 1000.0,
-                        open: r.o,
-                        high: r.h,
-                        low: r.l,
-                        close: r.c,
-                        volume: r.v,
-                    })
-                    .collect();
-                rows.retain(|row| {
-                    if valid_candle(row) {
-                        return true;
-                    }
-                    cx.notice(
-                        Level::Warn,
-                        code::ROW_SKIPPED,
-                        format!("ApeX skipped invalid {symbol} candle at {}", row.timestamp),
-                    );
-                    false
-                });
-                if received > 0 && rows.is_empty() {
-                    cx.fail(command, "No usable ApeX candles");
-                    return;
-                }
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                {
-                    let result: Result<String, String> =
-                        serde_json::to_string(&rows).map_err(|e| e.to_string());
-                    match result {
-                        Ok(data) => cx.done(command, data),
-                        Err(error) => cx.fail(command, error),
-                    }
-                };
-            }
         }
     }
     pub(crate) fn public_failed(
@@ -434,9 +381,171 @@ impl ApexOmni {
                 );
                 self.public.seed_retry.failed(cx, ());
             }
-            Request::Candles { command, .. } => cx.fail(command, error.to_owned()),
         }
     }
+    pub(crate) fn candle_failed(cx: &mut Cx<'_, Pending>, request: Candles, error: VenueError) {
+        let _ = cx.fail_context(&request.context, error);
+    }
+
+    fn queue_candles(&mut self, cx: &mut Cx<'_, Pending>, request: Candles) {
+        if let Err((pending, error)) = cx.request_managed(
+            request.context.clone(),
+            Method::Get,
+            request.url.clone(),
+            None,
+            Pending::Candles(request),
+        ) {
+            self.failed(cx, pending, error.venue_error());
+        }
+    }
+
+    fn start_candles(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: String,
+        params: Vec<(String, String)>,
+    ) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::ReadFailure,
+        }) else {
+            return;
+        };
+        let url = format!("{}/v3/klines?{}", self.rest, crate::sign::query(&params));
+        self.queue_candles(
+            cx,
+            Candles {
+                context,
+                symbol,
+                url,
+                retries: 0,
+                signature_retried: false,
+            },
+        );
+    }
+
+    fn retry_candles(&mut self, cx: &mut Cx<'_, Pending>, mut request: Candles) {
+        match cx.http_retry_context(&request.context, RetryEvidence::ReadFailure) {
+            Ok(context) => {
+                request.context = context;
+                self.queue_candles(cx, request);
+            }
+            Err(error) => Self::candle_failed(cx, request, error.venue_error()),
+        }
+    }
+
+    pub(crate) fn candle_transport_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Candles,
+        error: VenueError,
+    ) {
+        if let Err(error) = cx.validate_http_context(&request.context) {
+            Self::candle_failed(cx, request, error.venue_error());
+        } else if request.retries < 3 {
+            request.retries += 1;
+            self.retry_candles(cx, request);
+        } else {
+            Self::candle_failed(cx, request, error);
+        }
+    }
+
+    pub(crate) fn candle_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Candles,
+        response: Response<'_>,
+    ) {
+        if cx
+            .validate_read_http_delivery(&request.context, &request.context)
+            .is_err()
+        {
+            return;
+        }
+        match crate::api_response(response) {
+            crate::ApiResponse::SignatureRefusal(_) if !request.signature_retried => {
+                request.signature_retried = true;
+                self.retry_candles(cx, request);
+                return;
+            }
+            crate::ApiResponse::Failed(error) | crate::ApiResponse::SignatureRefusal(error) => {
+                // Public reads retain the legacy message-only native error contract.
+                Self::candle_failed(cx, request, VenueError::new(error.message));
+                return;
+            }
+            crate::ApiResponse::Success => {}
+        }
+        let Candles {
+            context, symbol, ..
+        } = request;
+        let envelope = serde_json::from_str::<wire::Envelope<'_>>(response.body).ok();
+        let success = (200..300).contains(&response.status)
+            && envelope
+                .as_ref()
+                .is_some_and(|e| e.code.unwrap_or(0.0) == 0.0 && e.data.is_some());
+        if !success {
+            let _ = cx.fail_context(&context, "ApeX candle request failed");
+            return;
+        }
+        let rows = envelope
+            .and_then(|e| e.data)
+            .and_then(|data| {
+                serde_json::from_str::<HashMap<String, Vec<wire::Kline>>>(data.get()).ok()
+            })
+            .and_then(|mut rows| rows.remove(&symbol));
+        let Some(rows) = rows else {
+            let _ = cx.fail_context(&context, "Malformed ApeX candle response");
+            return;
+        };
+        if rows.iter().any(|row| row.t < 0.0 || row.t.fract() != 0.0) {
+            let _ = cx.fail_context(&context, "Invalid ApeX candle timestamp");
+            return;
+        }
+        let received = rows.len();
+        let mut rows: Vec<_> = rows
+            .into_iter()
+            .map(|r| Candle {
+                timestamp: r.t / 1000.0,
+                open: r.o,
+                high: r.h,
+                low: r.l,
+                close: r.c,
+                volume: r.v,
+            })
+            .collect();
+        rows.retain(|row| {
+            if valid_candle(row) {
+                return true;
+            }
+            cx.notice(
+                Level::Warn,
+                code::ROW_SKIPPED,
+                format!("ApeX skipped invalid {symbol} candle at {}", row.timestamp),
+            );
+            false
+        });
+        if received > 0 && rows.is_empty() {
+            let _ = cx.fail_context(&context, "No usable ApeX candles");
+            return;
+        }
+        rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+        {
+            let result: Result<String, String> =
+                serde_json::to_string(&rows).map_err(|e| e.to_string());
+            match result {
+                Ok(data) => {
+                    let _ = cx.done_context(&context, data);
+                }
+                Err(error) => {
+                    let _ = cx.fail_context(&context, error);
+                }
+            }
+        };
+    }
+
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         let host = if self.options.testnet {
             "qa-quote.omni.apex.exchange"
@@ -872,14 +981,7 @@ impl ApexOmni {
                 if native != "D" {
                     params.push(("end".into(), (end.floor() as i64).to_string()));
                 }
-                if let Err(error) = self.signed(
-                    cx,
-                    crate::sign::Request::get("/v3/klines", params),
-                    Pending::Public(Request::Candles { command, symbol }),
-                    None,
-                ) {
-                    cx.fail(command, error);
-                }
+                self.start_candles(cx, symbol, params);
             }
             other => return Err(other),
         }

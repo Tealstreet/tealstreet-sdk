@@ -118,7 +118,7 @@ impl H {
     }
     fn collect(&mut self) {
         let mut receipts = Vec::new();
-        for action in self.e.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.e, self.now) {
             if let Action::Notice(Notice::CommandProgress {
                 receipts: actual, ..
             }) = &action
@@ -2030,4 +2030,359 @@ fn balance_events_faster_than_the_heal_read_cannot_starve_the_balance() {
         h.timer(250.0);
         read = h.http("/accounts?type=trade");
     }
+}
+
+fn cumulative_match(id: &str, filled: f64) -> Value {
+    json!({"orderId":id,"symbol":"BTC-USDT","type":"match","orderType":"limit","status":"match","side":"buy","size":"2","filledSize":filled,"remainSize":2.0-filled,"price":"90","matchPrice":"89.5","ts":1700000000001000000u64})
+}
+
+#[test]
+fn cumulative_fallback_emits_only_successive_suffixes_and_uses_raw_identity() {
+    let mut h = H::new(true);
+    for (filled, previous) in [(0.75, 0.5), (1.0, 0.75)] {
+        let event = cumulative_match("order-1", filled);
+        h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+        assert_eq!(h.fill_rows(), vec![(89.5, filled - previous)]);
+        // The native heuristic key uses the raw cumulative amount, not delta.
+        h.ws(true, "/spotMarket/tradeOrdersV2", event);
+        assert!(h.fill_rows().is_empty());
+    }
+}
+
+#[test]
+fn cumulative_fallback_retains_bootstrap_prefix_after_terminal_removal() {
+    let mut h = H::new(true);
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"canceled","status":"done","ts":1700000000004000000u64}));
+    assert!(h.e.store().orders().is_empty());
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("order-1", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
+    assert!(h.e.store().orders().is_empty());
+}
+
+#[test]
+fn cumulative_fallback_retains_bootstrap_prefix_after_rest_absence() {
+    let mut h = H::new(true);
+    h.timer(POLL_MS);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":[]}}"#,
+    );
+    assert!(h.e.store().orders().is_empty());
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("order-1", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
+}
+
+#[test]
+fn cumulative_fallback_seeds_healthy_peers_of_rejected_rest_rows() {
+    let mut h = H::new(true);
+    h.timer(POLL_MS);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    let mut peer: Value = serde_json::from_str(ORDER).unwrap();
+    peer["id"] = json!("healthy-peer");
+    peer["dealSize"] = json!(0.4);
+    peer["remainSize"] = json!(1.6);
+    h.reply("/active/page", &json!({"code":"200000","data":{"totalPage":1,"items":[peer,{"id":"order-1","symbol":"BTC-USDT"}]}}).to_string());
+    assert_eq!(h.e.store().orders().len(), 2);
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("healthy-peer", 0.6),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.6 - 0.4)]);
+}
+
+#[test]
+fn cumulative_fallback_does_not_reseed_live_progress_from_later_rest() {
+    let mut h = H::new(true);
+    h.timer(POLL_MS);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    let mut row: Value = serde_json::from_str(ORDER).unwrap();
+    row["dealSize"] = json!(0.8);
+    row["remainSize"] = json!(1.2);
+    h.reply(
+        "/active/page",
+        &json!({"code":"200000","data":{"totalPage":1,"items":[row]}}).to_string(),
+    );
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("order-1", 0.9),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.9 - 0.5)]);
+}
+
+#[test]
+fn cumulative_fallback_does_not_consume_non_match_display_progress() {
+    let mut h = H::new(true);
+    let mut update = cumulative_match("order-1", 0.7);
+    update["type"] = json!("update");
+    update["status"] = json!("open");
+    h.ws(true, "/spotMarket/tradeOrdersV2", update);
+    assert_eq!(h.e.store().orders()[0].filled, 0.7);
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("order-1", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
+}
+
+#[test]
+fn cumulative_fallback_preserves_presence_based_selected_fields_and_retry() {
+    let mut h = H::new(true);
+    let mut event = cumulative_match("order-1", 0.7);
+    event["tradeId"] = json!("retry-selected-price");
+    event["matchPrice"] = json!(0);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+    assert!(h.fill_rows().is_empty());
+    event["matchPrice"] = json!(89.5);
+    event["matchSize"] = json!(0);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+    assert!(h.fill_rows().is_empty());
+    event["matchSize"] = json!(0.2);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.2)]);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event);
+    assert!(h.fill_rows().is_empty());
+}
+
+#[test]
+fn cumulative_fallback_does_not_expand_to_deal_size_only() {
+    let mut h = H::new(true);
+    let mut event = cumulative_match("order-1", 0.7);
+    event.as_object_mut().unwrap().remove("filledSize");
+    event["dealSize"] = json!(0.7);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event);
+    assert!(h.fill_rows().is_empty());
+}
+
+#[test]
+fn cumulative_fallback_keeps_authoritative_last_quantity_exact() {
+    let mut h = H::new(true);
+    let mut event = cumulative_match("order-1", 0.7);
+    event["tradeId"] = json!("authoritative");
+    event["matchSize"] = json!(0.1 + 0.2);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event);
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.1 + 0.2)]);
+}
+
+#[test]
+fn cumulative_fallback_quiet_regressions_do_not_hide_terminal_display_updates() {
+    let mut h = H::new(true);
+    for (index, filled) in [0.5, 0.4].into_iter().enumerate() {
+        let mut event = cumulative_match("order-1", filled);
+        event["tradeId"] = json!(format!("quiet-{index}"));
+        event["ts"] = json!(1700000000002000000u64 + index as u64 * 1000000);
+        if index == 1 {
+            event["status"] = json!("done");
+        }
+        h.ws(true, "/spotMarket/tradeOrdersV2", event);
+        assert!(h.fill_rows().is_empty());
+    }
+    assert!(h.e.store().orders().is_empty());
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("order-1", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
+}
+
+#[test]
+fn cumulative_fallback_duplicate_direct_identity_cannot_consume_new_progress() {
+    let mut h = H::new(true);
+    let mut event = cumulative_match("order-1", 0.7);
+    event["matchSize"] = json!(0.2);
+    event["tradeId"] = json!("same-execution");
+    h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.2)]);
+    event["filledSize"] = json!(1.0);
+    event["remainSize"] = json!(1.0);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event);
+    assert!(h.fill_rows().is_empty());
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("order-1", 1.2),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 1.2 - 0.7)]);
+}
+
+#[test]
+fn cumulative_fallback_unanchored_direct_fill_never_invents_a_prefix() {
+    let mut h = H::new(true);
+    let mut event = cumulative_match("order-1", 0.7);
+    event.as_object_mut().unwrap().remove("filledSize");
+    event.as_object_mut().unwrap().remove("remainSize");
+    event["matchSize"] = json!(0.2);
+    event["tradeId"] = json!("unanchored");
+    h.ws(true, "/spotMarket/tradeOrdersV2", event);
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.2)]);
+    // There is no native interval mapping for the prior last fill. Do not
+    // fabricate one by adding its amount to the bootstrap prefix.
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("order-1", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
+}
+
+#[test]
+fn cumulative_fallback_keeps_filled_size_endpoint_separate_from_deal_size() {
+    let mut h = H::new(true);
+    let mut event = cumulative_match("order-1", 0.7);
+    event["dealSize"] = json!(0.9);
+    event["remainSize"] = json!(1.1);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event);
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
+}
+
+#[test]
+fn cumulative_fallback_stale_rest_candidates_cannot_establish_a_prefix() {
+    let mut h = H::new(true);
+    h.timer(POLL_MS);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    let request = h.http("/active/page");
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"update","status":"open","price":"91","ts":1700000000003000000u64}));
+    let mut peer: Value = serde_json::from_str(ORDER).unwrap();
+    peer["id"] = json!("stale-peer");
+    h.respond(
+        &request,
+        200,
+        &json!({"code":"200000","data":{"totalPage":1,"items":[peer]}}).to_string(),
+    );
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("stale-peer", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7)]);
+}
+
+#[test]
+fn cumulative_fallback_seeds_healthy_peers_even_when_rejection_identity_is_unknown() {
+    let mut h = H::new(true);
+    h.timer(POLL_MS);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    let mut peer: Value = serde_json::from_str(ORDER).unwrap();
+    peer["id"] = json!("unknown-rejection-peer");
+    h.reply(
+        "/active/page",
+        &json!({"code":"200000","data":{"totalPage":1,"items":[peer,{}]}}).to_string(),
+    );
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("unknown-rejection-peer", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
+}
+
+#[test]
+fn cumulative_fallback_raw_key_deduplicates_authoritative_same_native_amount() {
+    let mut h = H::new(true);
+    let mut event = cumulative_match("order-1", 0.7);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
+    event["matchSize"] = json!(0.7);
+    h.ws(true, "/spotMarket/tradeOrdersV2", event);
+    assert!(h.fill_rows().is_empty());
+}
+
+#[test]
+fn cumulative_fallback_lookup_results_cannot_establish_a_prefix() {
+    let mut h = H::new(true);
+    h.command(Command::Query {
+        command: 80,
+        query: Query::OrderByClientId {
+            symbol: "BTC-USDT".into(),
+            client_order_id: "lookup-peer".into(),
+        },
+    });
+    let mut peer: Value = serde_json::from_str(ORDER).unwrap();
+    peer["id"] = json!("lookup-peer");
+    peer["clientOid"] = json!("lookup-peer");
+    h.reply(
+        "/active/page",
+        &json!({"code":"200000","data":{"totalPage":1,"items":[peer]}}).to_string(),
+    );
+    assert_eq!(h.done(80).unwrap()["found"], true);
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("lookup-peer", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7)]);
+}
+
+#[test]
+fn cumulative_fallback_failed_later_page_cannot_establish_a_prefix() {
+    let mut h = H::new(true);
+    h.timer(POLL_MS);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    let mut peer: Value = serde_json::from_str(ORDER).unwrap();
+    peer["id"] = json!("failed-page-peer");
+    h.reply(
+        "/active/page",
+        &json!({"code":"200000","data":{"totalPage":2,"items":[peer]}}).to_string(),
+    );
+    h.reply("/active/page", r#"{"code":"400100","msg":"denied"}"#);
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("failed-page-peer", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7)]);
+}
+
+#[test]
+fn cumulative_fallback_seeds_raw_rest_prefix_not_newer_cached_display() {
+    let mut h = H::new(true);
+    let mut update = cumulative_match("raw-prefix-peer", 0.9);
+    update["type"] = json!("update");
+    update["status"] = json!("open");
+    update["ts"] = json!(1700000000003000000u64);
+    h.ws(true, "/spotMarket/tradeOrdersV2", update);
+    h.timer(POLL_MS);
+    h.reply(
+        "/active/symbols",
+        r#"{"code":"200000","data":{"symbols":["BTC-USDT"]}}"#,
+    );
+    let mut peer: Value = serde_json::from_str(ORDER).unwrap();
+    peer["id"] = json!("raw-prefix-peer");
+    h.reply(
+        "/active/page",
+        &json!({"code":"200000","data":{"totalPage":1,"items":[peer]}}).to_string(),
+    );
+    assert_eq!(h.e.store().order("raw-prefix-peer").unwrap().filled, 0.9);
+    h.ws(
+        true,
+        "/spotMarket/tradeOrdersV2",
+        cumulative_match("raw-prefix-peer", 0.7),
+    );
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.7 - 0.5)]);
 }

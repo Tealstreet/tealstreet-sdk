@@ -52,8 +52,12 @@ engine without starting it; a failed load lists tools from base answers and
 surfaces on the first call. Failed native startup is retried with a fresh account on the next tool call;
 concurrent calls share the replacement startup. Keep shutdown reading
 `instance.exchange` at call time, since destructuring would retain the failed
-account. Rust accounts reject `EXCHANGE_SIGNER_HEADER` before issuing requests;
-the native signer cannot invoke that JS HMAC callback.
+account. Rust accounts admit `EXCHANGE_SIGNER_HEADER` only for aliases whose
+shared construction policy enables PayloadSigner. Their trusted setup installs
+the existing JS callback as the injected provider and retains REST-only private
+feeds; generic options contain neither callback nor raw credentials. Other Rust
+families still reject it before issuing requests. Provider callbacks remain
+local to this process; no serialized callback or local-secret fallback is added.
 Rust accounts keep their public feeds active because native ticker tools read
 the current engine store. Do not apply the TS-only public-socket suppression to
 Rust; Binance's REST seed alone would freeze its quote tools. The protocol test

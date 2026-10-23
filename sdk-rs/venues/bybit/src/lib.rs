@@ -58,6 +58,7 @@ const ENVIRONMENT_PROBE_TIMEOUT_MS: u32 = 2_000;
 
 #[derive(Clone, Default)]
 pub struct Options {
+    pub signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     /// Optional tighter signing receive window in milliseconds.
     pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::signing::Identity>,
@@ -244,6 +245,7 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     recv_window: Option<u32>,
     category: Category,
     primary_category: Category,
@@ -443,7 +445,7 @@ impl BybitLinear {
                             fees: (category == Category::Option).then(HashMap::new),
                             ..Startup::default()
                         },
-                        account: account::AccountState::default(),
+                        account: account::AccountState::new(),
                     });
                 }
             }
@@ -468,6 +470,7 @@ impl BybitLinear {
             .flatten()
             .filter(|identity| identity.validate().is_ok());
         Self {
+            signing_policy: options.signing_policy,
             category,
             primary_category: category,
             products,
@@ -506,7 +509,7 @@ impl BybitLinear {
                 ..Startup::default()
             },
             discovery_paused_until: 0.0,
-            account: account::AccountState::default(),
+            account: account::AccountState::new(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
             balance_info: None,
@@ -642,11 +645,10 @@ impl BybitLinear {
             let Some(credentials) = credentials else {
                 return;
             };
-            Some(sign::Http::new(
-                credentials.clone(),
-                rest.payload.clone(),
-                self.recv_window,
-            ))
+            Some(
+                sign::Http::new(credentials.clone(), rest.payload.clone(), self.recv_window)
+                    .with_header_policy(self.signing_policy.header_policy()),
+            )
         } else {
             None
         };
@@ -696,6 +698,9 @@ impl BybitLinear {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        if channel == Channel::Private && !cx.private_feed_policy().streaming() {
+            return;
+        }
         let url = match channel {
             Channel::Public => self.paths.public_ws.as_str(),
             Channel::Private => self.paths.private_ws.as_str(),
@@ -936,7 +941,8 @@ impl BybitLinear {
         if credentials.validate().is_err() {
             return false;
         }
-        let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window);
+        let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window)
+            .with_header_policy(self.signing_policy.header_policy());
         self.environment_probe_attempted = true;
         let timer = cx.set_timer(f64::from(ENVIRONMENT_PROBE_TIMEOUT_MS));
         self.environment_probe = Some(EnvironmentProbe {
@@ -2155,6 +2161,7 @@ impl Venue for BybitLinear {
             } else {
                 safe_cex_engine::AccountLookup::Query
             },
+            income_history: !self.variant.is_spot() && !self.variant.is_hyro(),
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
             market_refresh: true,
@@ -2399,9 +2406,6 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.refresh_timer(cx, timer) {
-            return;
-        }
         if self
             .environment_probe
             .as_ref()

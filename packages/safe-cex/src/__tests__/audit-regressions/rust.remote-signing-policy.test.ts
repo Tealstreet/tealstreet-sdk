@@ -1,0 +1,35 @@
+import { describe, expect, it } from 'vitest';
+import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
+import type { ExchangeName, ExchangeOptions } from '../../types';
+
+describe('shared delegated signing declarations', () => {
+  const binance: ExchangeName[] = ['binance', 'binancepm', 'binanceinverse', 'binancespot'];
+  const bybit: ExchangeName[] = ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'];
+  it.each([...binance, ...bybit])('%s declares one REST-only PayloadSigner policy', (name) => {
+    const policy = deriveRemoteSigningPolicy(name);
+    expect(policy?.payloadRestOnly).toBe(true);
+    expect(policy?.protectedHeaders).toEqual(binance.includes(name) ? [] : ['X-BAPI-SIGN', 'X-BAPI-API-KEY', 'X-BAPI-TIMESTAMP']);
+  });
+  it.each([...binance, ...bybit])('%s distinguishes reviewed runtime admission from future codec policy', (name) => {
+    expect(deriveRemoteSigningPolicy(name)).toMatchObject({
+      enabled: true,
+      payloadSupported: name !== 'hyrotrader',
+    });
+  });
+  it('declarations retain the landed dispatch-signing flags without enabling other families', () => {
+    for (const name of binance) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
+    for (const name of bybit) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
+    for (const name of ['mexc', 'kraken'] as ExchangeName[]) expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
+  });
+  it.each([
+    ['okx', 'OK-ACCESS-PASSPHRASE'], ['okxeu', 'OK-ACCESS-PASSPHRASE'],
+    ['okxdemo', 'OK-ACCESS-PASSPHRASE'], ['okxeudemo', 'OK-ACCESS-PASSPHRASE'],
+    ['bitget', 'ACCESS-PASSPHRASE'], ['bitgetinverse', 'ACCESS-PASSPHRASE'], ['bitgetusdc', 'ACCESS-PASSPHRASE'],
+  ] as const)('%s declares presentation without enabling dispatch or remote admission', (name, passphraseHeader) => {
+    const policy = deriveRemoteSigningPolicy(name);
+    expect(policy).toMatchObject({ signatureEncoding: 'base64', passphraseHeader });
+    expect(policy?.enabled).not.toBe(true);
+    expect(policy?.payloadSupported).not.toBe(true);
+    expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(false);
+  });
+});

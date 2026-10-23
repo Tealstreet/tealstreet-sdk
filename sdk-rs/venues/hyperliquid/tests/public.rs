@@ -3,6 +3,9 @@
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 
+#[path = "../../../engine/tests/support/public_managed_headers.rs"]
+mod public_managed_headers;
+
 fn response(engine: &mut Engine<Hyperliquid>, request: RequestId, body: &str) {
     engine.handle(
         1000.0,
@@ -180,8 +183,8 @@ fn posted_candle_read_preserves_body_and_streams() {
             to_ms: Some(60000.0),
         }),
     );
-    let req = e
-        .drain_actions()
+    let req = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -196,6 +199,7 @@ fn posted_candle_read_preserves_body_and_streams() {
             r#"{"type":"candleSnapshot","req":{"coin":"BTC","interval":"1m","startTime":0,"endTime":60000}}"#
         )
     );
+    public_managed_headers::assert_native_public_intent_survives_managed_release(&req);
     response(
         &mut e,
         req.id,
@@ -275,8 +279,8 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
             to_ms: Some(90_000_000.0),
         }),
     );
-    let r = e
-        .drain_actions()
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
