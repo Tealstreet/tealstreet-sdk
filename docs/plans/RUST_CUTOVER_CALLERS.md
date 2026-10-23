@@ -5650,7 +5650,10 @@ with that managed adapter.
 Store metadata tokens and background observations bind to the Store issuer;
 foreign, default or exhausted authority cannot publish. These settings fences
 provide no HTTP delivery, observer or command completion authority. BingX's
-joined Plan/observer conversion activates only with the shared planned-execution
-seam and its independent-observer controls. Callers retain native fallback and
-error handling; no numeric fallback can stand in for managed completion.
+joined commands now receive the shared Plan's uniform result or typed failure,
+once per surviving observer. Each observer can expire or detach independently;
+a live peer retains the physical work, while the last observer leaving revokes
+its unsent work and publication authority. Store contains no numeric command
+waiter list or terminal fan-out. Callers retain native fallback and error
+handling; no numeric fallback stands in for managed completion.
 See [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).

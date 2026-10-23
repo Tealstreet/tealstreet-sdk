@@ -702,18 +702,52 @@ impl Store {
     pub fn begin_metadata(
         &mut self,
         symbol: &str,
-        command: crate::CommandId,
         publish: bool,
         fallback: crate::metadata::Fallback,
-    ) -> Result<crate::metadata::Admission, crate::VenueError> {
-        self.metadata_state()
-            .begin(symbol, command, publish, fallback)
+    ) -> Result<crate::metadata::Token, crate::VenueError> {
+        self.metadata_state().begin(symbol, publish, fallback)
     }
 
     pub fn metadata_eligible(&self, token: &crate::metadata::Token) -> bool {
         self.metadata
             .as_ref()
             .is_some_and(|metadata| metadata.eligible(token))
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub fn metadata_work(
+        &self,
+        key: &crate::metadata::WorkKey,
+    ) -> Option<crate::engine::ExecutionHandle> {
+        self.metadata.as_ref()?.lookup_work(key)
+    }
+    #[cfg(feature = "http-plans")]
+    pub fn metadata_work_space(&self, symbol: &str) -> bool {
+        self.metadata
+            .as_ref()
+            .is_none_or(|state| state.work_space(symbol))
+    }
+    #[cfg(feature = "http-plans")]
+    pub fn metadata_executions(
+        &self,
+    ) -> Vec<(crate::metadata::Token, crate::engine::ExecutionHandle)> {
+        self.metadata
+            .as_ref()
+            .map_or_else(Vec::new, |state| state.work_handles())
+    }
+    #[cfg(feature = "http-plans")]
+    pub fn bind_metadata_work(
+        &mut self,
+        key: crate::metadata::WorkKey,
+        handle: crate::engine::ExecutionHandle,
+    ) -> Result<crate::metadata::Token, crate::VenueError> {
+        self.metadata_state().bind_work(key, handle)
+    }
+    #[cfg(feature = "http-plans")]
+    pub fn retire_metadata_work(&mut self, token: &crate::metadata::Token) {
+        if let Some(state) = self.metadata.as_mut() {
+            state.retire_work(token);
+        }
     }
 
     pub fn metadata_observation(&mut self) -> crate::metadata::Observation {
@@ -764,12 +798,12 @@ impl Store {
     }
 
     /// Completes ownership and publishes a full validated proposal atomically.
-    /// Native caches must be updated infallibly before notifying its waiters.
+    /// Native caches update before the separate engine-owned Plan terminal.
     pub fn finish_metadata(
         &mut self,
         token: &crate::metadata::Token,
         result: Result<crate::metadata::Proposal, crate::VenueError>,
-    ) -> Option<crate::metadata::Completion> {
+    ) -> Option<crate::metadata::Resolution> {
         let symbol = self.metadata.as_ref()?.symbol(token)?.to_owned();
         let cached = self.setting(&symbol);
         let (completion, publication) = self.metadata.as_mut()?.complete(token, result, cached)?;

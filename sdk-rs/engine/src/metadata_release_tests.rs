@@ -3,7 +3,9 @@
 use super::*;
 use crate::read_scheduler::{self as reads, Scheduler};
 use crate::request_context as http;
-use crate::{Action, Engine, Event, Method, Notice, RequestId, Response, SocketId, TimerId, Venue};
+use crate::{
+    Action, Cx, Engine, Event, Method, Notice, RequestId, Response, SocketId, TimerId, Venue,
+};
 
 fn policy() -> reads::Policy {
     reads::Policy {
@@ -15,15 +17,12 @@ fn policy() -> reads::Policy {
         retry: reads::RetryPolicy::default(),
     }
 }
-fn token(store: &mut crate::Store, command: u32) -> Token {
-    let Admission::Start(token) = store
-        .begin_metadata("BTC", command, true, Fallback::CompleteSetting)
+fn token(store: &mut crate::Store, _command: u32) -> Token {
+    store
+        .begin_metadata("BTC", true, Fallback::CompleteSetting)
         .unwrap()
-    else {
-        panic!("new metadata owner required")
-    };
-    token
 }
+
 fn reserve() -> (crate::Store, Token, Scheduler<Token, u8>, reads::Attempt) {
     let mut store = crate::Store::default();
     let key = token(&mut store, 7);
@@ -320,7 +319,7 @@ impl Venue for PublicMetadata {
             .store
             .finish_metadata(&pending.token, Err(error.clone()))
             .unwrap();
-        assert_eq!(done.commands(), [7]);
+        assert!(done.result().is_err());
         cx.fail_context(&pending.root, error).unwrap();
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
@@ -392,7 +391,7 @@ impl Venue for PublicMetadata {
             .store
             .finish_metadata(&pending.token, Ok(proposal()))
             .unwrap();
-        assert_eq!(done.commands(), [7]);
+        assert!(done.result().is_ok());
         assert!(done.published);
         cx.done_context(&pending.root, "{}".into()).unwrap();
     }

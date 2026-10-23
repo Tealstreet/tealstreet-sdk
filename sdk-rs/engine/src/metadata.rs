@@ -1,13 +1,12 @@
 //! Per-symbol metadata ownership. Dispatch, leases and retry permission remain
-//! with RequestContext/read_scheduler; this module owns waiters and publication.
+//! with the engine Plan/group owner; this module owns publication only.
 use crate::fence::{Epoch, Stamp};
 use crate::store::MarketSetting;
-use crate::{CommandId, Cx, ErrorKind, Outcome, VenueError};
+use crate::{CommandId, ErrorKind, Outcome, VenueError};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const MAX_ATTEMPTS: usize = 256;
-const MAX_WAITERS: usize = 64;
 const MAX_SYMBOLS: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -21,12 +20,6 @@ pub struct Observation(Option<Stamp>);
 pub enum Fallback {
     IndependentRails,
     CompleteSetting,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Admission {
-    Start(Token),
-    Joined,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -115,26 +108,16 @@ pub struct Value {
 
 /// Publication already happened atomically inside Store. The flag permits an
 /// adapter's infallible native-cache/position-fence update before notification.
-pub struct Completion {
+pub struct Resolution {
     pub published: bool,
-    commands: Vec<CommandId>,
     result: Result<Value, VenueError>,
 }
-impl Completion {
-    pub fn finish<P>(self, cx: &mut Cx<'_, P>, encode: impl FnOnce(Value) -> String) {
-        let result = self.result.map(encode);
-        for command in self.commands {
-            match &result {
-                Ok(value) => cx.done(command, value.clone()),
-                Err(error) => cx.fail(command, error.clone()),
-            }
-        }
-    }
-    pub fn commands(&self) -> &[CommandId] {
-        &self.commands
-    }
+impl Resolution {
     pub fn result(&self) -> &Result<Value, VenueError> {
         &self.result
+    }
+    pub fn into_result(self) -> Result<Value, VenueError> {
+        self.result
     }
 }
 
@@ -144,7 +127,6 @@ struct Attempt {
     global: Option<Stamp>,
     publish: bool,
     fallback: Fallback,
-    commands: Vec<CommandId>,
 }
 
 #[derive(Default)]
@@ -157,6 +139,8 @@ pub(crate) struct State {
     current: HashMap<String, Token>,
     attempts: HashMap<Token, Attempt>,
     writes: HashMap<CommandId, Option<String>>,
+    #[cfg(feature = "http-plans")]
+    work: work::Index<crate::engine::ExecutionHandle>,
 }
 impl State {
     fn tick(&mut self) -> Option<Stamp> {
@@ -253,33 +237,12 @@ impl State {
     pub(crate) fn begin(
         &mut self,
         symbol: &str,
-        command: CommandId,
         publish: bool,
         fallback: Fallback,
-    ) -> Result<Admission, VenueError> {
+    ) -> Result<Token, VenueError> {
         let publish = publish && !self.write_pending(symbol);
         if self.epoch.stamp().is_none() {
             return Err(invalid("metadata token space exhausted"));
-        }
-        if self
-            .attempts
-            .values()
-            .any(|read| read.commands.contains(&command))
-        {
-            return Err(invalid("duplicate metadata command owner"));
-        }
-        if let Some(token) = self.current.get(symbol)
-            && let Some(read) = self.attempts.get_mut(token)
-            && self.revisions.get(symbol) == Some(&read.revision)
-            && read.global == self.global
-            && read.publish == publish
-            && read.fallback == fallback
-        {
-            if read.commands.len() >= MAX_WAITERS {
-                return Err(invalid("metadata waiter capacity exceeded"));
-            }
-            read.commands.push(command);
-            return Ok(Admission::Joined);
         }
         if self.attempts.len() >= MAX_ATTEMPTS
             || (!self.revisions.contains_key(symbol) && self.revisions.len() >= MAX_SYMBOLS)
@@ -304,16 +267,17 @@ impl State {
                 global: self.global.clone(),
                 publish,
                 fallback,
-                commands: vec![command],
             },
         );
-        Ok(Admission::Start(token))
+        Ok(token)
     }
     pub(crate) fn eligible(&self, token: &Token) -> bool {
+        self.current(token) && self.attempts.get(token).is_some_and(|read| read.publish)
+    }
+    pub(crate) fn current(&self, token: &Token) -> bool {
         self.live(&token.0)
             && self.attempts.get(token).is_some_and(|read| {
-                read.publish
-                    && read.global == self.global
+                read.global == self.global
                     && self.revisions.get(&read.symbol) == Some(&read.revision)
                     && self.current.get(&read.symbol) == Some(token)
             })
@@ -326,9 +290,11 @@ impl State {
         token: &Token,
         result: Result<Proposal, VenueError>,
         cached: Option<MarketSetting>,
-    ) -> Option<(Completion, Option<MarketSetting>)> {
+    ) -> Option<(Resolution, Option<MarketSetting>)> {
         let eligible = self.eligible(token);
         let read = self.attempts.remove(token)?;
+        #[cfg(feature = "http-plans")]
+        self.work.remove(token);
         if self.current.get(&read.symbol) == Some(token) {
             self.current.remove(&read.symbol);
         }
@@ -380,9 +346,8 @@ impl State {
             self.changed(Some(&read.symbol));
         }
         Some((
-            Completion {
+            Resolution {
                 published: publication.is_some(),
-                commands: read.commands,
                 result,
             },
             publication,
@@ -414,18 +379,13 @@ mod tests {
     fn start(
         store: &mut Store,
         symbol: &str,
-        command: u32,
+        _command: u32,
         publish: bool,
         fallback: Fallback,
     ) -> Token {
-        let Admission::Start(token) = store
-            .begin_metadata(symbol, command, publish, fallback)
-            .unwrap()
-        else {
-            panic!("new attempt expected")
-        };
-        token
+        store.begin_metadata(symbol, publish, fallback).unwrap()
     }
+
     fn proposal(buy: f64, sell: f64) -> Proposal {
         Proposal::complete(Snapshot::new(setting(buy, sell)).unwrap())
     }
@@ -493,20 +453,13 @@ mod tests {
     }
 
     #[test]
-    fn joined_owners_share_one_atomic_publication() {
+    fn one_token_publishes_atomically_only_once() {
         let mut store = Store::default();
         let token = start(&mut store, "BTC", 1, true, Fallback::IndependentRails);
-        assert_eq!(
-            store
-                .begin_metadata("BTC", 2, true, Fallback::IndependentRails)
-                .unwrap(),
-            Admission::Joined
-        );
         let done = store
             .finish_metadata(&token, Ok(proposal(7.0, 9.0)))
             .unwrap();
         assert!(done.published);
-        assert_eq!(done.commands(), [1, 2]);
         assert_eq!(store.setting("BTC"), Some(setting(7.0, 9.0)));
         assert!(
             store
@@ -516,17 +469,13 @@ mod tests {
         assert_eq!(store.setting("BTC"), Some(setting(7.0, 9.0)));
     }
     #[test]
-    fn failed_attempt_retains_settings_and_releases_all_waiters() {
+    fn failed_attempt_retains_settings_and_retires_its_token() {
         let mut store = Store::default();
         store.update_setting("BTC", |s| *s = setting(20.0, 20.0));
         let token = start(&mut store, "BTC", 1, true, Fallback::CompleteSetting);
-        store
-            .begin_metadata("BTC", 2, true, Fallback::CompleteSetting)
-            .unwrap();
         let error = VenueError::new("timeout").kind(ErrorKind::Timeout);
         let done = store.finish_metadata(&token, Err(error.clone())).unwrap();
         assert!(!done.published);
-        assert_eq!(done.commands(), [1, 2]);
         assert_eq!(done.result().as_ref().unwrap_err(), &error);
         assert_eq!(store.setting("BTC"), Some(setting(20.0, 20.0)));
         let next = start(&mut store, "BTC", 3, true, Fallback::CompleteSetting);
@@ -547,7 +496,6 @@ mod tests {
         let next = start(&mut store, "BTC", 2, true, Fallback::IndependentRails);
         let stale = store.finish_metadata(&old, Ok(proposal(7.0, 9.0))).unwrap();
         assert!(!stale.published);
-        assert_eq!(stale.commands(), [1]);
         assert_eq!(stale.result().as_ref().unwrap().buy, 30.0);
         assert!(store.metadata_eligible(&next));
         assert!(
@@ -660,49 +608,40 @@ mod tests {
         assert_eq!(store.setting("BTC"), Some(setting(7.0, 9.0)));
     }
     #[test]
-    fn waiter_capacity_and_duplicate_owners_fail_without_dropping_the_original() {
+    fn attempt_capacity_refuses_without_dropping_existing_tokens() {
         let mut store = Store::default();
-        let token = start(&mut store, "BTC", 1, true, Fallback::CompleteSetting);
-        assert!(
+        let first = start(&mut store, "BTC", 1, true, Fallback::CompleteSetting);
+        for id in 1..MAX_ATTEMPTS {
             store
-                .begin_metadata("BTC", 1, true, Fallback::CompleteSetting)
-                .is_err()
-        );
-        for id in 2..=MAX_WAITERS as u32 {
-            assert_eq!(
-                store
-                    .begin_metadata("BTC", id, true, Fallback::CompleteSetting)
-                    .unwrap(),
-                Admission::Joined
-            );
+                .begin_metadata(&format!("market-{id}"), true, Fallback::CompleteSetting)
+                .unwrap();
         }
         assert!(
             store
-                .begin_metadata("BTC", 1000, true, Fallback::CompleteSetting)
+                .begin_metadata("overflow", true, Fallback::CompleteSetting)
                 .is_err()
         );
-        let done = store
-            .finish_metadata(&token, Ok(proposal(7.0, 9.0)))
-            .unwrap();
-        assert_eq!(done.commands().len(), MAX_WAITERS);
+        assert!(store.metadata_eligible(&first));
+        assert!(
+            store
+                .finish_metadata(&first, Ok(proposal(7.0, 9.0)))
+                .unwrap()
+                .published
+        );
+        assert!(
+            store
+                .begin_metadata("overflow", true, Fallback::CompleteSetting)
+                .is_ok()
+        );
     }
     #[test]
     fn token_exhaustion_fails_closed_without_reusing_identity() {
         let mut state = State::default();
-        let Admission::Start(token) = state
-            .begin("BTC", 1, true, Fallback::CompleteSetting)
-            .unwrap()
-        else {
-            panic!()
-        };
+        let token = state.begin("BTC", true, Fallback::CompleteSetting).unwrap();
         state.epoch.exhaust_for_test();
         state.changed(Some("BTC"));
         assert!(!state.eligible(&token));
-        assert!(
-            state
-                .begin("BTC", 2, true, Fallback::CompleteSetting)
-                .is_err()
-        );
+        assert!(state.begin("BTC", true, Fallback::CompleteSetting).is_err());
     }
     #[test]
     fn background_issue_order_is_stable_in_either_completion_order() {
@@ -823,7 +762,10 @@ mod tests {
                 Err(VenueError::new("canceled").kind(ErrorKind::Timeout)),
             )
             .unwrap();
-        assert_eq!(old.commands(), [1]);
+        assert_eq!(
+            old.result().as_ref().unwrap_err().kind,
+            Some(ErrorKind::Timeout)
+        );
         assert!(store.metadata_eligible(&next));
         store.metadata_write_started(81, None).unwrap();
         assert!(store.metadata_write_pending("ETH"));
@@ -845,7 +787,7 @@ mod tests {
         }
         assert!(
             store
-                .begin_metadata("overflow", 999, true, Fallback::IndependentRails)
+                .begin_metadata("overflow", true, Fallback::IndependentRails)
                 .is_err()
         );
         let first = tokens[0].clone();
@@ -872,15 +814,10 @@ mod tests {
         }
         assert!(
             state
-                .begin("overflow", 1, true, Fallback::IndependentRails)
+                .begin("overflow", true, Fallback::IndependentRails)
                 .is_err()
         );
-        let Admission::Start(token) = state
-            .begin("S0", 1, true, Fallback::IndependentRails)
-            .unwrap()
-        else {
-            panic!()
-        };
+        let token = state.begin("S0", true, Fallback::IndependentRails).unwrap();
         state.changed(Some("overflow"));
         assert!(!state.eligible(&token));
         assert_eq!(state.revisions.len(), MAX_SYMBOLS);
@@ -890,3 +827,9 @@ mod tests {
 #[cfg(test)]
 #[path = "metadata_release_tests.rs"]
 mod release_tests;
+
+#[cfg(feature = "http-plans")]
+#[path = "metadata_work.rs"]
+mod work;
+#[cfg(feature = "http-plans")]
+pub use work::{CredentialSubject, NativeWork, WorkKey};

@@ -795,3 +795,20 @@ On exact513985923bb, the refreshed BingX account target executes78PASS and
 five assertion failures: the same two entry-capacity and three coalescing
 controls named above. No setup failure or ignored test is counted. Native-owner
 plan review is CLEAR; same-policy-only joining is explicit.
+
+
+### First executed direct-cutover checkpoint
+
+On the reviewed current stack the native BingX account target now passes all
+83 controls, including the five original assertion failures above with their
+bodies unchanged. The Store API returns Resolution only; numeric waiter lists,
+Joined admission and metadata Completion::finish are removed. Its 34 focused
+metadata/publication/release controls pass after adapting own publication-only
+tests. The bounded full-equality index controls use inert numeric payloads only
+as pure lookup data, never fabricated execution Contexts or runtime authority.
+Native key construction includes primary subject and selected identity, slot,
+intent, operation, symbol/native, endpoint sequence, waits/concurrency, root and
+per-call bounds, attempts/retry window, retry, publication and fallback policy.
+The native Plan constants and dispatch recipe remain unchanged. Observer-specific
+and caller-boundary controls, strict/feature checks and independent source review
+remain readiness gates; no merge or final CI readiness is claimed.

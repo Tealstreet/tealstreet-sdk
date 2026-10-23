@@ -89,7 +89,6 @@ pub struct Account {
     orders_revision: u64,
     positions_revision: u64,
     settings_revision: u64,
-    metadata_generations: HashMap<String, u64>,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
     positions_in_flight: Option<u64>,
@@ -301,23 +300,11 @@ impl Account {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         credentials: Option<&Credentials>,
-        command: u32,
+        _command: u32,
         symbol: String,
         publish: bool,
     ) {
-        let Some(credentials) = credentials else {
-            cx.fail(
-                command,
-                metadata_error("BingX metadata requires credentials"),
-            );
-            return;
-        };
-        let Some(market) = cx.store.market(&symbol) else {
-            cx.fail(command, metadata_error("Unknown BingX market"));
-            return;
-        };
-        let native = market.id.clone();
-        self.start_metadata(cx, credentials, symbol, native, publish);
+        self.start_metadata(cx, credentials, symbol, publish);
     }
     /// Keeps earlier malformed markets the new catalogue still lacks; returns the
     /// malformed count before and after.
@@ -1775,7 +1762,6 @@ mod sign_failure_owners {
         a.key_in_flight = true;
         a.socket = Some(SocketId(44));
         a.keepalive = Some(TimerId(77));
-        a.metadata_generations.insert("BTCUSDT".into(), 1);
         let request = match kind {
             0 => Request::Balance {
                 revision: 1,
