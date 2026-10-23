@@ -1,0 +1,568 @@
+{
+  "schema": 1,
+  "sdkRef": "2badd1cb0e3217b844e73d6b81ec023b3abc6d8b",
+  "scope": "Immutable source inventory, not live readiness; family HTTP counts repeat for aliases, never sum alias rows. Socket #1771 is reviewed/CI-green but not landed at this pin.",
+  "sourceFiles": [
+    {
+      "path": "packages/safe-cex/src/exchanges/registry.ts",
+      "sha256": "90e6346d0e299d4eace6eda917b9fe530aac7d900c8964aea1da39e72340b446"
+    },
+    {
+      "path": "packages/safe-cex/src/exchanges/rust/rust.exchange.ts",
+      "sha256": "f556065693332a4575ffd64587b4e1a97d948c3d3dd9cec67a24468005b58908"
+    },
+    {
+      "path": "packages/safe-cex/src/exchanges/rust/construction-rules.json",
+      "sha256": "29b47e4f06c8f3d98333ea657edd04bb0fa16380f553177263da6856cf3ebc18"
+    },
+    {
+      "path": "sdk-rs/scripts/request-legacy-sites.json",
+      "sha256": "ad3b4cba7b9ab86c64996de1d2b0f9625363e5a5c4a427e2e77f5cb80d124e10"
+    }
+  ],
+  "venues": [
+    {
+      "alias": "apexomni",
+      "family": "apexomni",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 37,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "asterdex",
+      "family": "asterdex",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 71,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "backpack",
+      "family": "backpack",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 27,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "binance",
+      "family": "binance",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "binanceinverse",
+      "family": "binance",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "binancepm",
+      "family": "binance",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "binancespot",
+      "family": "binance",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bingx",
+      "family": "bingx",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 43,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bitget",
+      "family": "bitget",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bitgetinverse",
+      "family": "bitget",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bitgetusdc",
+      "family": "bitget",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bitrue",
+      "family": "bitrue",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 42,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bitunix",
+      "family": "bitunix",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 23,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": [
+        "live-evidence-not-certified",
+        "frozen-artifact-compatibility-unverified",
+        "bitunix-socket-remove-before-master"
+      ]
+    },
+    {
+      "alias": "blofin",
+      "family": "blofin",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 23,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "breakoutprop",
+      "family": "breakoutprop",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 21,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bybit",
+      "family": "bybit",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 54,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bybitdemo",
+      "family": "bybit",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 54,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bybitinverse",
+      "family": "bybit",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 54,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "bybitspot",
+      "family": "bybit",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 54,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "coinbase",
+      "family": "coinbase",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "coinbasespot",
+      "family": "coinbase",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 34,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "cryptocom",
+      "family": "cryptocom",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 30,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "grvt",
+      "family": "grvt",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 56,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "hyperliquid",
+      "family": "hyperliquid",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 50,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "hyperliquidspot",
+      "family": "hyperliquid",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 50,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "hyrotrader",
+      "family": "bybit",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 54,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "kodiakfi",
+      "family": "orderly",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 29,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "kraken",
+      "family": "kraken",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 47,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "krakenspot",
+      "family": "kraken",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 47,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "kucoin",
+      "family": "kucoin",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 80,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "kucoinspot",
+      "family": "kucoin",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 80,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "lighter",
+      "family": "lighter",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 46,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "lighter-robinhood",
+      "family": "lighter",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 46,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "mexc",
+      "family": "mexc",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 29,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "mode",
+      "family": "orderly",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 29,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "okx",
+      "family": "okx",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 45,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "okxdemo",
+      "family": "okx",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 45,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "okxeu",
+      "family": "okx",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 45,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "okxeudemo",
+      "family": "okx",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 45,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "paradex",
+      "family": "paradex",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 56,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "phemex",
+      "family": "phemex",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 50,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "polymarket",
+      "family": "polymarket",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 35,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "salsadex",
+      "family": "orderly",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 29,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "tealstreet-dex",
+      "family": "orderly",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 29,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "txflow",
+      "family": "txflow",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 25,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "weex",
+      "family": "weex",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 51,
+      "dispatchSigningDeclared": true,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "what",
+      "family": "orderly",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 29,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "woo",
+      "family": "woo",
+      "rustRegistered": true,
+      "registryDefault": "typescript",
+      "familyLegacyHttpSites": 37,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    },
+    {
+      "alias": "woofi",
+      "family": "orderly",
+      "rustRegistered": true,
+      "registryDefault": "rust",
+      "familyLegacyHttpSites": 29,
+      "dispatchSigningDeclared": false,
+      "socketCore": "not-landed-at-pin",
+      "liveAccountShapes": [],
+      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
+    }
+  ]
+}
