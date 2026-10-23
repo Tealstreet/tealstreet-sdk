@@ -18,6 +18,7 @@ enum Fact {
 struct Probe {
     fact: Fact,
     fact_on_failure: Fact,
+    classified: bool,
     finish_first: bool,
     retire_in_response: Option<Session>,
     facts: Vec<Result<(), Error>>,
@@ -31,6 +32,7 @@ impl Default for Probe {
         Self {
             fact: Fact::None,
             fact_on_failure: Fact::None,
+            classified: false,
             finish_first: false,
             retire_in_response: None,
             facts: vec![],
@@ -77,7 +79,16 @@ impl Venue for Probe {
         if session && self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
-        if pending.0.operation() == Operation::Mutation
+        if pending.0.operation() == Operation::Mutation && session && self.classified {
+            self.facts.push(
+                cx.http_write_fact(
+                    &pending.0,
+                    crate::classify::WriteFact::Accepted { order_ids: vec![] },
+                    None,
+                )
+                .map(drop),
+            );
+        } else if pending.0.operation() == Operation::Mutation
             && session
             && let Some(fact) = fact(self.fact)
         {
@@ -798,4 +809,20 @@ fn queued_session_packets_redact_the_listen_key() {
     .unwrap();
     let debug = format!("{:?}", engine.drain_actions().collect::<Vec<_>>());
     assert!(!debug.contains("secret-key"), "{debug}");
+}
+
+#[test]
+fn a_session_write_accepted_through_the_classifier_resolves_without_order_ids() {
+    let mut engine = engine();
+    engine.venue.classified = true;
+    let session = open(&mut engine, false);
+    let token = session_write(&mut engine, &session, 1.);
+    let request = release(&mut engine, token, 2.);
+    respond(&mut engine, request, 3., "{\"listenKey\":\"k\"}");
+    assert_eq!(engine.venue.facts, [Ok(())]);
+    assert!(
+        with(&mut engine, 4., |cx| cx
+            .session_context(&session, policy(Operation::Mutation)))
+        .is_ok()
+    );
 }
