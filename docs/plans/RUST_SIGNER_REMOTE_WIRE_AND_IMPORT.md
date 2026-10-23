@@ -62,7 +62,7 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
    Widths are validated per algorithm (`SignRequest::validate_result`). A v2
    request answered without `v: 2` is an error.
 3. **Capability negotiation.** The browser advertises
-   `signOps: {v: 2, recipes: [...], slots: [...]}` in `InitPayload`, which is
+   `signOps: {v: 2, recipes: [...]}` in `InitPayload`, which is
    included in `getInitFingerprint`.
    - `recipes` lists the recipe ids from the venue features compiled into
      that browser's WASM build. It is not a list of algorithms: a browser can
@@ -92,8 +92,6 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
    - Each venue exposes one canonicalizer, preimage to digest or message plus
      classification, used by both the server recipe and the browser, so the
      two cannot drift.
-   - The `signOps` a browser advertises are derived from the venue features
-     compiled into its WASM build.
    - It reuses `LocalSigner::sign_now`, including role binding of extra refs.
    - **Deadlines.** Raise the browser cap from the current 5 s, keeping:
      browser cap + round trip < the server engine's sign deadline < the 15 s
@@ -185,7 +183,7 @@ Consequences for this plan:
   decision: stop now, or keep until the hosted-leases hardening. If adopted,
   hosted (`hostedMode` / `remoteSigner`) Rust construction for Paradex and
   Polymarket is refused when `key` parses as private-key material. The engine would otherwise hold a key it is meant never to see.
-  The refusal is typed (`invalidInput` / `notSent`) and never echoes the key.
+  The refusal is typed (`invalidInput`, at construction) and never echoes the key.
 
 ### Proof
 
@@ -201,6 +199,8 @@ Both halves need tests for each adopting family:
   - a Hyperliquid main-wallet key is refused;
   - Coinbase claim bounds and denied `uri` paths are refused;
   - a Backpack withdraw instruction is refused;
+  - an Orderly method or path outside the venue is refused;
+  - Stark and zkLink L2 transfers and vault moves are refused;
   - an unadvertised recipe is refused before sending.
 - **Shared canonicalizer:** the server recipe and the browser produce
   identical signed bytes for the same inputs.
