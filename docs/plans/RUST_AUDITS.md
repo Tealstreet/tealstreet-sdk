@@ -2078,3 +2078,14 @@ error-classification policy is duplicated. Exact source inventory remains 84
 occurrences: the original shared streamed helper still serves unmigrated candles,
 so this area justifies no ratchet prune or zero-legacy claim. The complete venue
 inventory and remaining prerequisites are committed in PR #1819.
+
+## BloFin candle entry fallback retirement
+
+The final numeric candle refusal recorded in the earlier BloFin public-read
+audit is removed. Initial admission uses the landed engine command-entry seam;
+shared rejection owns the pre-Context terminal. Candle payloads no longer carry
+a numeric command ID, and physical callbacks complete through their Managed
+Context. The remaining discovery error fallback accepts only Markets/Tickers.
+No venue admission policy or finalizer is introduced. The exact own inventory
+shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
+closed/private history and trading remain tracked with their original owners.

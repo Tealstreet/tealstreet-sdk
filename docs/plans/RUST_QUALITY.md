@@ -587,3 +587,15 @@ so 20-second expiry cannot conceal missing retirement. Native startup/valuation,
 broker, secondary identity and socket-policy assertions retain their original
 payloads, using the shared prepared transport fixture. The real WASM boundary
 fixture explicitly supplies that same existing test transport preparation contract.
+
+## BloFin candle command-entry regression proof
+
+Two original-source assertion failures pin typed invalid-clock and registry
+capacity rejection before Context issuance. The capacity fixture fills genuine
+background roots in an earlier no-ID callback, repeats270 refusals at one clock,
+explicitly retires the roots and successfully reuses the command ID without
+expiry. Duplicate parked entry preserves the original preparation and one
+completion. Another fixed-clock control runs270 market refusals,270 interval
+refusals and270 successes with stale previous-response probes. Existing native
+candle mapping, validation precedence and preparation/expiry assertions remain.
+This closes the earlier pre-Context numeric refusal gap using the shared seam.

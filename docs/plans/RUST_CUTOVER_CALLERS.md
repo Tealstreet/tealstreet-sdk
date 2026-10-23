@@ -4564,3 +4564,13 @@ discovery retry callback. Unusable lists preserve existing quotes. Catalogue suc
 still starts private snapshots before ticker readiness; usable tickers still wake
 wallet valuation and public/private bullet acquisition. Candle, private-signing,
 setting no-op and capability behavior retain their existing paths.
+
+## BloFin candle command admission
+
+FetchCandles admits its original Read owner through the shared genuine command
+entry before market/interval preflight or managed HTTP. Initial capacity and
+invalid-clock refusals now carry the engine's typed reason and Read outcome
+convention; they emit exactly one failure without a fabricated Context or numeric
+fallback. A duplicate entry leaves the original preparation and completion
+authority intact. Existing market-before-interval validation, native candle
+request bytes, result sorting and preparation/release/expiry behavior remain.

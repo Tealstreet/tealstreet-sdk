@@ -57,3 +57,18 @@ updated source scope above is re-reviewed before production. New own draft1865
 claims lib.rs for frozen PublicTrades callback hooks; report that whole-file
 collision and await overseer authorization before the separate candle source
 edit. Tests-first in unclaimed managed_public.rs can proceed independently.
+
+## Executed entry proof
+
+Overseer explicitly authorized overlap with our own frozen1865/lib.rs distinct
+hunks: whichever lands second integrates the first. All three revised plan
+reviews are CLEAN. Tests-first58e1d928002 executes two original-source assertion
+RED failures (missing typed invalid-clock and capacity kinds) plus nine GREEN
+compatibility controls; the production change makes all eleven GREEN without
+changing the frozen test file. Capacity/reuse and preflight/success cleanup stay
+at one clock and do not depend on elapsed expiry.
+
+Source/adversarial, caller/documentation and full-map implementation reviews are
+CLEAN; architecture No. Scanner proves23 occurrences in19 hash rows across four
+files, removing only the lib497d count-one site. Full native and strict gates
+follow the genuine current-landing integration before CI.
