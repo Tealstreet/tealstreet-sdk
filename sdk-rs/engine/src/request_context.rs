@@ -1,10 +1,23 @@
 //! Semantic HTTP ownership and the final controllable transport handoff.
+//! Whole-plan and Preflight APIs require the `http-plans` Cargo feature.
 //!
 //! This module owns no requests, credentials, clocks or network executor. A host
 //! prepares its route first; the engine checks a single-use permit immediately
 //! before that prepared executor hands the request to the transport API.
 use crate::signing::{KeyRef, SignReceipt};
 use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
+
+#[cfg(feature = "http-plans")]
+#[path = "request_context_plan.rs"]
+pub mod plan;
+
+#[cfg(feature = "http-plans")]
+#[path = "request_context_owner.rs"]
+mod ownership;
+#[cfg(feature = "http-plans")]
+pub use ownership::{
+    HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
+};
 
 #[path = "http_evidence.rs"]
 mod evidence;
@@ -173,6 +186,16 @@ pub struct Credential {
     pub reference: KeyRef,
 }
 
+impl Credential {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        if self.reference.0.is_empty() || self.reference.0.len() > 256 {
+            Err(Error::Invalid)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pacing {
     pub group: u32,
@@ -227,9 +250,7 @@ impl Context {
             || !deadline.is_finite()
             || deadline <= created_at
             || pacing.is_some_and(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.)
-            || credential
-                .as_ref()
-                .is_some_and(|c| c.reference.0.is_empty() || c.reference.0.len() > 256)
+            || credential.as_ref().is_some_and(|c| c.validate().is_err())
         {
             return Err(Error::Invalid);
         }
@@ -255,6 +276,12 @@ impl Context {
         self.issuer
             .as_ref()
             .is_some_and(|own| std::sync::Arc::ptr_eq(own, issuer))
+    }
+    pub(crate) fn same_issuer(&self, other: &Self) -> bool {
+        match (&self.issuer, &other.issuer) {
+            (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
+            _ => false,
+        }
     }
     pub fn leg(&self) -> u64 {
         self.leg
@@ -547,6 +574,7 @@ enum State {
 /// context; command evidence is retained separately until command sealing.
 pub struct Lifecycle {
     context: Context,
+    deadline: f64,
     attempt: Attempt,
     state: State,
     signature: SignReceipt,
@@ -565,6 +593,7 @@ pub enum Claim {
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
+            deadline: context.deadline(),
             context,
             attempt,
             state: State::Preparing,
@@ -574,6 +603,32 @@ impl Lifecycle {
             permits: 0,
             preparation: 0,
         }
+    }
+
+    /// Pure physical-window metadata, never engine issuance or retry authority.
+    /// A plan may narrow the logical bound; route/signature renewal cannot
+    /// extend this attempt's original deadline.
+    pub fn with_deadline(
+        context: Context,
+        attempt: Attempt,
+        created_at: f64,
+        deadline: f64,
+    ) -> Result<Self, Error> {
+        if !created_at.is_finite()
+            || !deadline.is_finite()
+            || deadline <= created_at
+            || deadline > context.deadline()
+        {
+            return Err(Error::Invalid);
+        }
+        let mut lifecycle = Self::new(context, attempt);
+        lifecycle.deadline = deadline;
+        Ok(lifecycle)
+    }
+
+    /// Immutable physical cap; it never grants more time than the Context.
+    pub fn deadline(&self) -> f64 {
+        self.deadline
     }
     pub fn context(&self) -> &Context {
         &self.context
@@ -683,8 +738,7 @@ impl Lifecycle {
         if permit != expected {
             return Err(Error::Revoked);
         }
-        let mut release =
-            HttpRelease::new(self.attempt, time, self.signature, self.context.deadline)?;
+        let mut release = HttpRelease::new(self.attempt, time, self.signature, self.deadline)?;
         if route.expires_at.is_some_and(|at| time.raw_ms >= at)
             || self.signed_revision.is_some_and(|rev| rev != time.revision)
             || time.raw_ms >= self.fresh_until
@@ -692,7 +746,7 @@ impl Lifecycle {
             return Err(Error::Stale);
         }
         if let Some(at) = pacing.check(self.context.pacing, time.raw_ms)? {
-            return if at >= self.context.deadline {
+            return if at >= self.deadline {
                 Err(Error::TimedOut)
             } else {
                 Ok(Claim::WaitUntil(at))
@@ -764,7 +818,7 @@ impl Lifecycle {
         if !now.is_finite() {
             return Err(Error::Invalid);
         }
-        Ok(now >= self.context.deadline && self.settle())
+        Ok(now >= self.deadline && self.settle())
     }
 }
 
@@ -837,6 +891,9 @@ pub enum WriteResult {
     /// Native ACK proves both effects and a definitive refusal, even when it
     /// creates no order IDs (for example, a partially cancelled batch).
     KnownPartial(VenueError),
+    /// Native ACK proves a validated subset of effects, while other effects
+    /// remain unresolved. Publish only that subset; never retry the whole write.
+    PartialUnknown(VenueError),
     Failed(VenueError),
 }
 
@@ -844,7 +901,10 @@ impl WriteResult {
     fn order_ids(&self) -> &[String] {
         match self {
             Self::Accepted { order_ids } => order_ids,
-            Self::Rejected(error) | Self::KnownPartial(error) | Self::Failed(error) => error
+            Self::Rejected(error)
+            | Self::KnownPartial(error)
+            | Self::PartialUnknown(error)
+            | Self::Failed(error) => error
                 .partial
                 .as_ref()
                 .map_or(&[], |partial| partial.order_ids.as_slice()),
@@ -927,6 +987,29 @@ pub struct CommandWrites {
     evidence: evidence::EvidenceBudget,
 }
 impl CommandWrites {
+    /// Prepare the full declared journal before plan admission. Logical legs
+    /// include unselected fallback branches; neither registration nor retry
+    /// may grow this backing after the plan's resources have committed.
+    #[cfg(any(test, feature = "http-plans"))]
+    pub(crate) fn new_reserved(capacity: usize, logical_legs: usize) -> Result<Self, Error> {
+        let mut writes = Self::new(capacity)?;
+        if logical_legs == 0 || logical_legs > capacity {
+            return Err(Error::Capacity);
+        }
+        writes
+            .attempts
+            .try_reserve_exact(capacity)
+            .map_err(|_| Error::Capacity)?;
+        // Existing journal registration/replacement permissions remain intact.
+        // Reserve their full shared upper bound too, so even an underdeclared
+        // logical shape cannot trigger later growth of this backing.
+        writes
+            .legs
+            .try_reserve_exact(capacity)
+            .map_err(|_| Error::Capacity)?;
+        Ok(writes)
+    }
+
     pub fn new(capacity: usize) -> Result<Self, Error> {
         if capacity == 0 || capacity > evidence::MAX_ATTEMPTS {
             return Err(Error::Capacity);
@@ -1070,6 +1153,50 @@ impl CommandWrites {
                 superseded: false,
             }));
         Ok(())
+    }
+
+    /// Failure-only continuation for a direct replacement that never sent.
+    /// The active-parent lookup intentionally cannot authorize this old delivery.
+    pub(crate) fn unreleased_replacement_child(
+        &self,
+        previous: RequestId,
+        parent_leg: u64,
+        child: u64,
+    ) -> bool {
+        if self.sealed {
+            return false;
+        }
+        let Some(old) = self.attempts.iter().find(|attempt| attempt.id == previous) else {
+            return false;
+        };
+        if old.leg != parent_leg
+            || !old.released
+            || old.id_overflow
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self
+                .attempts
+                .iter()
+                .rfind(|attempt| attempt.leg == old.leg)
+                .is_none_or(|attempt| attempt.id != previous)
+            || self
+                .attempts
+                .iter()
+                .any(|attempt| attempt.leg == child && attempt.released)
+        {
+            return false;
+        }
+        let Some(parent) = self
+            .legs
+            .iter()
+            .position(|leg| leg.id == old.leg && leg.superseded)
+        else {
+            return false;
+        };
+        self.legs.iter().any(|leg| {
+            leg.id == child
+                && !leg.superseded
+                && leg.parent.is_some_and(|(index, _)| index == parent)
+        })
     }
 
     fn occupied(&self) -> usize {
@@ -1217,6 +1344,23 @@ impl CommandWrites {
         status: u16,
         capture: impl FnOnce(&mut UnprovenEvidence),
     ) -> Result<(), Error> {
+        self.capture_unproven_result(id, |budget| UnprovenEvidence::new(budget, status), capture)
+    }
+
+    pub(crate) fn unproven_native_result(
+        &mut self,
+        id: RequestId,
+        capture: impl FnOnce(&mut UnprovenEvidence),
+    ) -> Result<(), Error> {
+        self.capture_unproven_result(id, |budget| Ok(UnprovenEvidence::native(budget)), capture)
+    }
+
+    fn capture_unproven_result(
+        &mut self,
+        id: RequestId,
+        writer: impl FnOnce(evidence::EvidenceBudget) -> Result<UnprovenEvidence, Error>,
+        capture: impl FnOnce(&mut UnprovenEvidence),
+    ) -> Result<(), Error> {
         if self.sealed {
             return Err(Error::State);
         }
@@ -1232,7 +1376,7 @@ impl CommandWrites {
         if !attempt.released || attempt.result.is_some() {
             return Err(Error::State);
         }
-        let mut evidence = UnprovenEvidence::new(self.evidence, status)?;
+        let mut evidence = writer(self.evidence)?;
         capture(&mut evidence);
         let (budget, error, overflow) = evidence.finish();
         self.attempts[index].result = Some(WriteResult::Failed(error));
@@ -1285,6 +1429,66 @@ impl CommandWrites {
         self.report_messages = report_messages;
         Ok(())
     }
+    /// Publication follows this attempt's normalized native facts, not the
+    /// aggregate outcome of its siblings. This check consumes no authority.
+    pub(crate) fn validate_effects(&self, id: RequestId) -> Result<(), Error> {
+        let attempt = self.validate_recorded_attempt(id)?;
+        if !matches!(
+            attempt.result,
+            Some(
+                WriteResult::Accepted { .. }
+                    | WriteResult::KnownPartial(_)
+                    | WriteResult::PartialUnknown(_)
+            )
+        ) {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_housekeeping(&self, id: RequestId) -> Result<(), Error> {
+        self.validate_recorded_attempt(id).map(|_| ())
+    }
+
+    fn validate_recorded_attempt(&self, id: RequestId) -> Result<&WriteAttempt, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let attempt = self
+            .attempts
+            .iter()
+            .find(|a| a.id == id)
+            .ok_or(Error::Invalid)?;
+        if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        if !attempt.released || attempt.id_overflow || attempt.result.is_none() {
+            return Err(Error::State);
+        }
+        Ok(attempt)
+    }
+
+    /// Failure-only structural progress. This grants no publication or retry
+    /// authority, including for evidence-only IDs on a failed native reply.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn validate_failed_attempt(&self, id: RequestId) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        let attempt = self
+            .attempts
+            .iter()
+            .find(|attempt| attempt.id == id)
+            .ok_or(Error::Invalid)?;
+        if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        if attempt.id_overflow || !matches!(attempt.result, Some(WriteResult::Failed(_))) {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
     /// Seal success only when every terminal logical leg is proven accepted.
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.
@@ -1310,17 +1514,36 @@ impl CommandWrites {
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
+        let (error, budget) = self.failure_projection(fallback)?;
+        self.evidence = budget;
+        self.sealed = true;
+        Ok(error)
+    }
+
+    /// Project the current physical facts without sealing or charging fallback
+    /// evidence. This grants no completion, retry or observer authority. The
+    /// execution owner supplies presentation-only observer termination errors.
+    pub fn project_failure(&self, fallback: VenueError) -> Result<VenueError, Error> {
+        self.failure_projection(fallback).map(|(error, _)| error)
+    }
+
+    fn failure_projection(
+        &self,
+        fallback: VenueError,
+    ) -> Result<(VenueError, evidence::EvidenceBudget), Error> {
         if self.sealed {
             return Err(Error::State);
         }
-        self.sealed = true;
+        let mut projected_budget = self.evidence;
         let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
-                && (matches!(a.result, None | Some(WriteResult::Failed(_)))
-                    || self.attempts[index + 1..]
-                        .iter()
-                        .any(|later| later.leg == a.leg && !later.released))
+                && (matches!(
+                    a.result,
+                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_))
+                ) || self.attempts[index + 1..]
+                    .iter()
+                    .any(|later| later.leg == a.leg && !later.released))
         }) || self.legs.iter().any(|leg| {
             !leg.superseded
                 && leg.parent.is_some()
@@ -1343,6 +1566,7 @@ impl CommandWrites {
             Some(
                 WriteResult::Rejected(error)
                 | WriteResult::KnownPartial(error)
+                | WriteResult::PartialUnknown(error)
                 | WriteResult::Failed(error),
             ) => Some(error.clone()),
             _ => None,
@@ -1369,8 +1593,8 @@ impl CommandWrites {
                     .flat_map(WriteResult::order_ids)
                     .map(String::as_str)
                     .collect();
-                let (budget, error, fallback_overflow) = self.evidence.error(fallback, &known);
-                self.evidence = budget;
+                let (budget, error, fallback_overflow) = projected_budget.error(fallback, &known);
+                projected_budget = budget;
                 overflow |= fallback_overflow;
                 error
             }
@@ -1413,7 +1637,7 @@ impl CommandWrites {
         if overflow {
             evidence::mark_id_overflow(&mut error);
         }
-        Ok(error)
+        Ok((error, projected_budget))
     }
 
     /// Retain each terminal logical-leg refusal for the existing reporting path.

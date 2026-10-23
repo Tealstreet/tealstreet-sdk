@@ -1,5 +1,11 @@
 # Phase 9: consumer cutover readiness
 
+Sam's current rollout mechanism is the [per-user hard-cut bundle switch](RUST_BUNDLE_ROLLOUT.md):
+frozen TS app/server versus new Rust app/server for every held venue. Its cohort,
+shared-state and rollback rules supersede older per-account/default-switch
+recommendations below; the evidence and reconciliation requirements still apply.
+This is preparation only, with no deployment or flag change.
+
 For current landing → master blockers, see [Sam’s merge checklist](RUST_MASTER_MERGE_BLOCKERS.md).
 
 Branch: `feat/rust-cutover-readiness`, based on `origin/feat/rust-rewrite`.
