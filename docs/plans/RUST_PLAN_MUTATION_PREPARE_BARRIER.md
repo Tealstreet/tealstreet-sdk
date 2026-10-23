@@ -56,24 +56,46 @@ Provisional internal phases:
    Before any member release, reserve all fallible per-member reconciliation and
    journal evidence so failure of a later member cannot introduce a new local
    preparation refusal after an earlier member escaped. No per-member on_release
-   side effect runs in fallible preparation. Existing on_release hooks run once
-   per actual released member after commit.
+   side effect runs in fallible preparation. Today's on_http_release is FALLIBLE and can mutate Pending or return a
+   Scheduled lease; it cannot run unchanged after group commit. G2b requires a
+   shared release-admission prepare/commit split: side-effect-free preparation
+   over immutable Pending computes the checked admission/lease and reserves
+   storage for every member, followed by infallible move-only commit/notification.
+   All members are prepared before any Pending/release state mutates. The single
+   request path cuts over to the same choke point. An opaque legacy hook whose
+   effects cannot be staged is incompatible and refuses group admission; do not
+   invoke it optimistically, clone arbitrary venue state, or silently bypass it.
+   The exact prepared-admission representation remains core API review work.
 5. Retiring/finished: failure before commit invalidates all members first, then
    cancels provider/routes/timers and retires the group through the common Plan
    funnel. No duplicate terminal or late receipt may reopen it.
 
-The exact host release protocol is an OPEN API-fit decision: today's individual
+The host release protocol is one synchronous checked GROUP claim, as required
+by core and consumer review. Exact Rust shape is pending API fit: today's individual
 claim_http permits a host to interleave awaits/clock advances between two claims.
 A boolean 'all signed' in claim_http is insufficient for the stated guarantee if
 a later claim can fail a fresh preparation check after the first escaped. The
-reviewed seam must use either one synchronous checked group claim yielding all
-requests, with all final fallible checks before its first release, or an equally
-strict group token/protocol that proves the same boundary. It cannot weaken
+reviewed seam uses one synchronous checked group claim yielding all requests,
+with all final fallible checks before its first release; no independently
+claimable member tokens survive the group commit. It cannot weaken
 final send validation, extend deadlines or claim physical network atomicity.
-The host must invoke each transport send immediately in the documented commit
-turn; synchronous transport exceptions after release remain Unknown/effectful,
-not rolled back to NotSent. Host adaptation is shared engine/host work, not a
+The host must finish resource checks before the claim and invoke each transport
+send immediately in the documented commit turn, with no await, actor hop or
+reentrant engine callback between sends; synchronous transport exceptions after release remain Unknown/effectful,
+not rolled back to NotSent. Group claim captures one raw time and validates
+every immutable deadline at that boundary. If the host observes expiry before a
+member's physical send after commit, it must not invoke transport: report that
+committed release as a transport failure under the existing conservative Unknown
+projection, preserving any sibling effects. Never renew or reprepare a committed
+member. Pre-commit expiry instead stays Timeout/NotSent. This boundary and the
+host inline expiry guard require explicit shared-host tests before runtime freeze. Host adaptation is shared engine/host work, not a
 venue-only queue. No API spelling is frozen before core review.
+
+Pacing is never waived by a group boolean. First-slice group admission rejects
+any resolved nonzero per-member/shared floor that would separate the members'
+physical sends. This includes engine-configured floors, not merely the Plan's
+pacing field. A future grouped pacing reservation needs its own reviewed contract;
+serial/read behavior remains unchanged. Pin refusal before IDs and zero HTTP.
 
 ## Freshness, reprepare and retirement
 
@@ -84,7 +106,10 @@ If one member's prepared resource/signature becomes stale before commit, hold
 the entire group, invalidate the stale preparation generation and reprepare
 within the same declared bounds. Fresh entropy draws remain deterministic per
 member/reprepare generation; late old receipts are inert. If the bound is lost,
-fail the whole uncommitted step with zero HTTP. Do not re-sign already released
+fail the whole uncommitted step with zero HTTP. Reprepare is still unreleased
+work, not a resend: it consumes neither CallBound physical attempt credits nor
+a native definitive-refusal resend grant. A later real native 10002 after release
+must retain exactly its one permitted grant. Do not re-sign already released
 members or reopen a committed step.
 
 Parent/command retirement or poison invalidates every unreleased member before
@@ -99,7 +124,10 @@ journal release facts begin only at real release. Use the shared classification
 and central prepare/commit seal for failures; provider errors are not native auth
 proof. For a command with no earlier release, a pre-commit group failure is typed
 NotSent once. Earlier effects force the ordinary Partial/Unknown projection,
-with accepted IDs and native evidence retained. No local outcome ladder.
+with accepted IDs and native evidence retained. No local outcome ladder. Preserve provider/recipe typed kind but do not count a
+pre-release refusal as auth_failures; it is not a venue credential answer.
+Before commit, order-lock state stays unsent: no uncertain fence and no
+reconcile_uncertain work. After release, a real Unknown member fences normally.
 
 #1939 only governs independently delivered failures/replies after the barrier
 opens; it does not provide preparation atomicity. G2c configuration snapshot
@@ -138,3 +166,11 @@ Architecture gate: shared parallel mutation preparation and release choke point.
 No eager signing, per-venue group registry, fake Context, root renewal or outcome
 reimplementation. CALLERS must state the zero-pre-release-HTTP guarantee and its
 limit: once transport release begins, no venue execution atomicity is promised.
+
+## Classification and consumer review
+
+Consumer4yjlw0 cleared the plan with one synchronous group claim and stale-member
+reprepare only. Classifierdazzy3 cleared projection with required auth-health,
+order-lock, reprepare-budget and pre/post-commit expiry controls. Coreuufub4
+requires the fallible release-admission split and pacing refusal above; these are
+concrete shared source prerequisites, not runtime approval.
