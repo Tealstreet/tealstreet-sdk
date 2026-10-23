@@ -57,6 +57,8 @@ pub struct BreakoutProp {
     /// does not succeed retires it, so a reissue is a new generation and the
     /// engine drops late answers to the abandoned one.
     login_session: Option<safe_cex_engine::request_context::Session>,
+    /// A 2xx login awaiting body acceptance; only an accepted token proves it.
+    answered_login: Option<safe_cex_engine::request_context::Context>,
     auth_failed: bool,
     auth_error: String,
     auth_draining: bool,
@@ -203,6 +205,7 @@ impl BreakoutProp {
             options,
             session: session::Session::default(),
             login_session: None,
+            answered_login: None,
             auth_failed: false,
             auth_error: String::new(),
             auth_draining: false,
@@ -835,7 +838,10 @@ impl BreakoutProp {
                 let queued = std::mem::take(&mut self.queue);
                 for pending in queued {
                     let mut unsent = not_sent(error);
-                    unsent.kind = failure.kind;
+                    // Only a credential refusal types the work it never sent.
+                    unsent.kind = failure.kind.filter(|kind| {
+                        matches!(kind, ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
+                    });
                     self.fail_operation(cx, pending.operation, unsent);
                 }
                 self.auth_draining = was_draining;
@@ -872,8 +878,15 @@ impl BreakoutProp {
                 self.arm_poll(cx);
             }
             Operation::Candles { command, .. } => {
-                // The whole typed failure: a session refusal keeps its kind.
-                let error = failure;
+                // A session refusal keeps its type; other failures stay text.
+                let error = if matches!(
+                    failure.kind,
+                    Some(ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
+                ) {
+                    failure
+                } else {
+                    VenueError::new(failure.message)
+                };
                 cx.fail(command, error)
             }
         }
@@ -913,17 +926,14 @@ impl Venue for BreakoutProp {
     ) {
         if let Some(context) = pending.context.take() {
             if (200..300).contains(&response.status) {
-                let _ = cx.http_write_fact(
-                    &context,
-                    safe_cex_engine::classify::WriteFact::Accepted { order_ids: vec![] },
-                    None,
-                );
-                let _ = cx.finish_http_context(&context);
+                self.answered_login = Some(context);
             } else {
                 self.retire_login_session(cx);
             }
         }
         if self.auth_failed {
+            self.answered_login = None;
+            self.retire_login_session(cx);
             let error = unanswered(&pending.operation, self.auth_error.clone());
             self.fail_operation(cx, pending.operation, error);
             return;
@@ -1005,8 +1015,25 @@ impl Venue for BreakoutProp {
                 }
             }
             Operation::Login => {
-                if let Err(error) = self.session.accept(response.body, cx.now) {
-                    self.fail_operation(cx, Operation::Login, error.into());
+                let context = self.answered_login.take();
+                match self.session.accept(response.body, cx.now) {
+                    Ok(()) => {
+                        if let Some(context) = context {
+                            let _ = cx.http_write_fact(
+                                &context,
+                                safe_cex_engine::classify::WriteFact::Accepted {
+                                    order_ids: vec![],
+                                },
+                                None,
+                            );
+                            let _ = cx.finish_http_context(&context);
+                        }
+                    }
+                    Err(error) => {
+                        // Unproven: the next login must be a new generation.
+                        self.retire_login_session(cx);
+                        self.fail_operation(cx, Operation::Login, error.into());
+                    }
                 }
             }
             Operation::Discover => {

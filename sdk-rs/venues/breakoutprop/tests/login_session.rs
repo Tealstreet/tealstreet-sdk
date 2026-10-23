@@ -1,5 +1,6 @@
 //! The DXtrade password login runs as an engine session write on the primary
 //! private egress. No credentials or live requests are used.
+mod support;
 use safe_cex_engine::request_context::{HttpAction, RoutingIntent};
 use safe_cex_engine::{Action, Method};
 use safe_cex_venue_breakoutprop::{BreakoutProp, Options};
@@ -46,5 +47,28 @@ fn login_is_prepared_on_the_primary_private_egress_with_its_bound() {
     assert_eq!(
         request.headers,
         [("Content-Type", "application/json".to_owned())]
+    );
+}
+
+#[test]
+fn only_a_credential_refusal_types_the_waiters_it_never_sent() {
+    let mut rig = support::Rig::defaults();
+    rig.command(safe_cex_engine::Command::FetchCandles {
+        command: 9,
+        symbol: "ETHUSD".into(),
+        interval: safe_cex_engine::model::Interval::H1,
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    let login = rig.next_request();
+    assert!(login.url.ends_with("/login"));
+    rig.reply(&login, 429, "{}");
+    let [error] = rig.failures.as_slice() else {
+        panic!("one failed waiter: {:?}", rig.failures);
+    };
+    assert_eq!(
+        error.kind, None,
+        "a throttled login is not the waiter's kind"
     );
 }

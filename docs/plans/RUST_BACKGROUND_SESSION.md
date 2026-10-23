@@ -304,12 +304,15 @@ All three fail on the legacy source.
     from `drive`, so venue pacing (rolling 5/1000 ms) and queue order are
     unchanged.
   - **Not repeat-safe**, per the contract above. Any login that does not
-    succeed (transport failure, expiry, non-2xx or refusal) retires the
-    session. A reissue (the existing 1/2/3 s network retries) opens a new
+    succeed (transport failure, expiry, non-2xx, a 2xx whose token is
+    unusable, or refusal) retires the session. Only an accepted token records
+    `Accepted`. A reissue (the existing 1/2/3 s network retries) opens a new
     generation, so the engine drops late answers to an abandoned login.
-- **Typed failure.** A login 401/403 is `http_failure(status)`. Queued waiters
-  get NotSent errors that keep that kind, and the candle waiter receives the
-  whole typed error instead of its text.
+- **Typed failure.** A login 401/403 is `http_failure(status)`. Queued waiters,
+  including candle commands, get NotSent errors carrying
+  `AuthInvalid`/`AuthPermission`. Every other login or discover failure
+  leaves waiters untyped as before (pinned by
+  `only_a_credential_refusal_types_the_waiters_it_never_sent`).
 - **Not included.** Discover and token-bearing reads and writes stay on the
   generic sender. They adopt `session_scoped_context` with their slices.
 
