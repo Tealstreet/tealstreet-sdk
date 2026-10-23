@@ -70,7 +70,7 @@ pub enum Pending {
 struct Connection {
     feed: Option<FeedId>,
     opening_ping: Option<u64>,
-    request: std::cell::Cell<u32>,
+    rpc_id: std::cell::Cell<u32>,
 }
 struct BookState {
     users: u32,

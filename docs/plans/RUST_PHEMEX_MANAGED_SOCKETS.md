@@ -228,3 +228,14 @@ counted as RED. New controls add Shared/Disabled private financial publication,
 prelogin denial with a current accepted positive, and old-epoch denial alongside
 a real new-epoch orders snapshot. Source-review, actual dependency landing,
 strict checks and full CPU/memory/size/replay CI remain separate gates.
+
+## Conservative request inventory precision
+
+The lexical request checker also froze the old public RPC counter named request:
+lib.rs f9764ec2239f809efce38c8d387de2eb9e144668ccf4e1d4193e1859c5e5e05f
+(two member references) and8e74b914b9159816adc7eb353d1c728eaea647260ac64fac31e4b967a6dab017
+(one format macro containing that field). The managed public formatter names
+that Cell rpc_id to describe its native purpose. Prune only those three removed
+lexical occurrences; this is NOT an HTTP RequestContext migration or new allowance.
+Every actual HTTP builder/legacy call remains unchanged. Exact public wire-ID
+controls prove the counter still starts at1 and preserves accepted send order.

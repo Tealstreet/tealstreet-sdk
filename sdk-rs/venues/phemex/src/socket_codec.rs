@@ -106,11 +106,11 @@ impl PhemexPerpetuals {
     fn public_frame(&self, method: &str, params: String) -> Result<String, SocketError> {
         let id = self
             .public
-            .request
+            .rpc_id
             .get()
             .checked_add(1)
             .ok_or(SocketError::Capacity)?;
-        self.public.request.set(id);
+        self.public.rpc_id.set(id);
         Ok(format!(
             r#"{{"id":{id},"method":"{method}","params":{params}}}"#
         ))
