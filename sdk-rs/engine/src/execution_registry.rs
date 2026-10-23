@@ -223,6 +223,11 @@ impl ContextRegistry {
             .and_then(|owner| owner.context_root().cloned())
     }
 
+    #[cfg(test)]
+    pub(in crate::engine) fn execution_count(&self) -> usize {
+        self.executions.roots.len()
+    }
+
     pub(super) fn forget_observer(&mut self, command: CommandId) {
         self.executions.observers.remove(&command);
     }
