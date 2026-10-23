@@ -1446,6 +1446,14 @@ impl CommandWrites {
     /// authority, including for evidence-only IDs on a failed native reply.
     #[cfg(feature = "http-plans")]
     pub(crate) fn validate_failed_attempt(&self, id: RequestId) -> Result<(), Error> {
+        if self.failed_attempt(id)?.id_overflow {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn failed_attempt(&self, id: RequestId) -> Result<&WriteAttempt, Error> {
         if self.sealed {
             return Err(Error::State);
         }
@@ -1457,24 +1465,23 @@ impl CommandWrites {
         if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
             return Err(Error::Revoked);
         }
-        if attempt.id_overflow || !matches!(attempt.result, Some(WriteResult::Failed(_))) {
+        if !matches!(attempt.result, Some(WriteResult::Failed(_))) {
             return Err(Error::State);
         }
-        Ok(())
+        Ok(attempt)
     }
 
     #[cfg(feature = "http-plans")]
     pub(crate) fn failed_attempt_error(&self, id: RequestId) -> Result<VenueError, Error> {
-        self.validate_failed_attempt(id)?;
-        let Some(WriteResult::Failed(error)) = self
-            .attempts
-            .iter()
-            .find(|attempt| attempt.id == id)
-            .and_then(|attempt| attempt.result.as_ref())
-        else {
+        let attempt = self.failed_attempt(id)?;
+        let Some(WriteResult::Failed(error)) = &attempt.result else {
             return Err(Error::State);
         };
-        Ok(error.clone())
+        let mut error = error.clone();
+        if attempt.id_overflow {
+            evidence::mark_id_overflow(&mut error);
+        }
+        Ok(error)
     }
 
     /// Seal success only when every terminal logical leg is proven accepted.

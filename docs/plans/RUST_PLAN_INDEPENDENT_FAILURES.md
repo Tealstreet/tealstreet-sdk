@@ -96,3 +96,10 @@ failed-attempt error is passed into the existing owned-failure wrapper only for
 an opted-in Mutation Plan, and Read opt-in is refused in admission validation.
 The source does not add a hook, retry, journal or timer. The final-seal reconcile
 control and fresh full CI still require actual combo-3b integration.
+
+Independent review found an overflow edge in the initial routing checkpoint:
+error retrieval reused the stronger settlement gate and skipped typed cleanup
+when native evidence exceeded its ID budget. Original assertion RED 6a6efe66725
+reproduces it. Callback error retrieval now retains the bounded IDs and overflow
+marker independently of settlement; finish_plan_failed_call still refuses State,
+so the wrapper auto-seals once and never submits a sibling after overflow.
