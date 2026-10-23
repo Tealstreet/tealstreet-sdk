@@ -204,6 +204,29 @@ Independent adversarial review: CLEAN. Its minor findings are addressed:
 policy-owned seed encoding, the narrowed field vocabulary, the CI feature-off
 step, the seed wipe and role binding. CI owns the WASM size and timing gates.
 
+## Local non-HMAC primitives (P2)
+
+Plan and implementation, 2026-10-23, stacked on the schema extension above.
+The local provider implements the declared `Ed25519`, `Es256`,
+`Secp256k1Digest` and `StarkDigest` contracts. Each arm sits behind its own
+crypto feature: `ed25519`, `es256`, `secp256k1` and `stark`.
+
+- **Gating.** The venue-facing primitive modules stay available. A family
+  enables its arm only when it signs through the provider, so other WASM
+  builds do not link that code. A disabled arm returns `Unsupported`.
+- **Exact contracts.**
+  - `Ed25519`: 32-byte seed, exact message, 64-byte signature.
+  - `Es256`: PKCS8 or SEC1 P-256 DER from trusted PEM decoding; one SHA-256
+    of the message; fixed r || s.
+  - `Secp256k1Digest`: 32-byte key and exact 32-byte digest;
+    r || s || recovery 0/1 (not ethers' 27/28).
+  - `StarkDigest`: canonical 32-byte big-endian felts for key and digest
+    (values at or above the modulus and a zero key refuse); r || s.
+- **Proof.** Independent vectors: Node Ed25519, RFC 6979 A.2.5 P-256 "sample",
+  pinned-ethers recoverable signatures and starknet.js signatures. Each arm
+  has width refusals, and the disabled-arm `Unsupported` test runs in CI with
+  the features on and off.
+
 ## Signer capability (command admission, ahead of P8)
 
 Owner claude-19pt8s; consumer codex-hcmq3f (ApeX Amend and batch). Approved
