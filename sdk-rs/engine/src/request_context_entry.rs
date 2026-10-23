@@ -156,6 +156,36 @@ enum State {
 }
 
 impl<P> Io<P> {
+    #[cfg(feature = "http-plans")]
+    pub(super) fn fresh_command_entry(&self) -> bool {
+        self.command_entry.as_ref().is_some_and(|entry| {
+            entry.state == State::Fresh
+                && entry.resources == self.next_id
+                && self.http_delivery.is_none()
+        })
+    }
+
+    pub(super) fn command_receipt(&self) -> Result<(u64, f64), crate::request_context::Error> {
+        use crate::request_context::Error;
+        let entry = self.command_entry.as_ref().ok_or(Error::Revoked)?;
+        if self.http_delivery.is_some()
+            || !matches!(entry.state, State::Fresh | State::Bound | State::Legacy)
+        {
+            return Err(Error::Revoked);
+        }
+        let (receipt, deadline) = self.command_waits.stamp(entry.command).ok_or({
+            if self.command_waits.receipts == u64::MAX {
+                Error::Capacity
+            } else {
+                Error::Revoked
+            }
+        })?;
+        if entry.receipt != Some(receipt) {
+            return Err(Error::Revoked);
+        }
+        Ok((receipt, deadline))
+    }
+
     pub(super) fn begin_command_entry(&mut self, command: Option<CommandId>) {
         assert!(self.command_entry.is_none(), "nested native command entry");
         self.command_entry = command.map(|command| Entry {
@@ -262,14 +292,8 @@ impl<P> Cx<'_, P> {
     /// callback (before or after admission, never once rejected or spent)
     /// and only for its own receipt. `None` in every borrowed callback.
     pub fn command_wait(&self) -> Option<CommandWait> {
-        let entry = self.io.command_entry.as_ref()?;
-        if self.io.http_delivery.is_some()
-            || !matches!(entry.state, State::Fresh | State::Bound | State::Legacy)
-        {
-            return None;
-        }
-        let (receipt, deadline) = self.io.command_waits.stamp(entry.command)?;
-        if entry.receipt != Some(receipt) || !self.now.is_finite() {
+        let (_, deadline) = self.io.command_receipt().ok()?;
+        if !self.now.is_finite() {
             return None;
         }
         let left = (deadline - self.now).floor();
@@ -354,10 +378,11 @@ impl<P> Cx<'_, P> {
                     .expect("active command entry");
                 assert!(entry.command == command && entry.state == State::Bound);
                 entry.state = State::Rejected;
-                let mut error = reason.venue_error();
-                if operation == Operation::Read {
-                    error.outcome = None;
-                }
+                let error = if operation == Operation::Read {
+                    reason.read_venue_error()
+                } else {
+                    reason.venue_error()
+                };
                 #[cfg(feature = "order-locks")]
                 {
                     self.io.order_locks.finish(command, true);
