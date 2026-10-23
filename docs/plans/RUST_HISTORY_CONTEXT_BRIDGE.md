@@ -241,7 +241,7 @@ Read mutation/numeric construction and E0451 for authority construction.
 
 Core callback controls use a cfg(test)-private authority wrapper only around the
 first genuine command Read root issued immediately at fixture entry. They do not
-certify constructor binding or a production venue migration. Fourteen controls
+certify constructor binding or a production venue migration. Fifteen controls
 exercise real Prepare/Bind/Claim and exact managed callbacks: two-page recovery,
 strict reject/encoder failure, page binding and discarded-prefix identity reuse,
 readmission after mutable diagnostics, mutation-sibling failure/finalizer denial,
@@ -281,3 +281,14 @@ returns State until explicit safe discard clears the binding and pending ids.
 The same-leg no-discard refusal and explicit discard/re-admission positive are
 both required. This accessor is coordinated in uufub4's registry region before
 source edits; the original-root constructor dependency remains separate.
+
+Attempt-binding correction checkpoint d39711cac42 has independent adversarial
+source and registry-owner static reviews CLEAN. The fifteen managed core tests
+pass, as do 604 engine tests with all features, six history doctests and strict
+all-target/all-feature engine Clippy. The original three numeric integration
+regressions remain RED until the public constructor migration. The old reviewed
+#1830 2d8de248f64 is integrated only as a local predecessor; constructor exposure
+and publication await the owner's single announced composed #1830 pin, after
+which integration and verification must bind that exact source. No final CI,
+native two-venue receipt, public constructor readiness or merge is claimed by
+this local checkpoint.

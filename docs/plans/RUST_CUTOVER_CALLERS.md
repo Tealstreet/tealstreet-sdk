@@ -4378,13 +4378,16 @@ authority when a lifecycle check refuses it. Plan and joined-observer ownership
 use their own explicit APIs.
 
 Native adapters use the borrowed admission guard for row staging, identities,
-accepted output and coverage. The guard checks the exact current HTTP leg;
-native response validation and publication freshness are separate requirements.
+accepted output and coverage. The guard checks the exact current HTTP leg and
+physical attempt; native response validation and publication freshness are
+separate requirements.
 Scope the guard around admission, drop it before mutable Cx diagnostics or Store
 publication, and re-admit if more staging follows. Native cache/Store effects
 outside the history owner require the same synchronous root/leg check.
 Read cursor identities stay page-local until admission, so a discarded failed
-prefix cannot suppress those rows in a later retry.
+prefix cannot suppress those rows in a later retry. Discard the failed staged
+page before retry admission; a different physical attempt is refused until that
+binding and its unvalidated rows and identities are cleared.
 
 Migrate a venue's owner to the Read type as a whole. Handle or deliberately
 ignore a Context ownership error; never unwrap it or retry through numeric
