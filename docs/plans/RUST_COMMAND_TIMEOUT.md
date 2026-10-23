@@ -62,8 +62,8 @@ Revised after uufub4's API-fit review (2026-10-24).
    - An engine refusal before the venue's entry (unsupported action, options,
      order-lock refusal) runs inside that command's own entry. A duplicate
      id's refusal therefore cannot clear the live command's stamp. An
-     asynchronous terminal outside any entry ends that id's live wait,
-     because host replies are keyed by id.
+     asynchronous terminal outside any entry ends that id's uncarried live
+     wait, because host replies are keyed by id.
    - The stamp is keyed by command id with a receipt sequence, its exact
      receipt identity. A receipt whose id already has a live stamp (a
      duplicate live command) does not replace it. That entry has no stamp of
@@ -74,9 +74,13 @@ Revised after uufub4's API-fit review (2026-10-24).
      receipt sequence, so a duplicate entry's terminal can never delete the
      first command's live stamp. A reused id after a genuine terminal starts
      fresh.
-   - Storage is bounded by the commands awaiting a reply. Nothing prunes a
-     stamp by capacity or expiry, so a live or deferred command past its
-     deadline still reads `Expired`.
+   - A stamp that a held or deferred command still carries leaves only with
+     that command's own terminal, so the command still reads `Expired` past its
+     deadline. A terminal outside any entry cannot remove it, because the
+     carrying command has not run.
+   - Beyond 4096 stamps, expired stamps that nothing carries are dropped.
+     Without that, a venue that never answers a command would grow the table
+     without bound.
    - The receipt sequence never wraps: once exhausted, a receipt goes
      unstamped and the getter answers `None`.
 4. **API.** `Cx::command_wait() -> Option<CommandWait>`, with `enum
