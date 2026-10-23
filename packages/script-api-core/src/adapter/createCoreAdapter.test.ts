@@ -5,6 +5,7 @@ import type { HostBindings, HostWriteEvent } from './HostBindings';
 import { describe, expect, it, vi } from 'vitest';
 
 import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
+
 import { isErrorReported, markErrorReported } from '@tealstreet/safe-cex/src/commandOutcome';
 
 import { ScriptBatchOrderError } from '../index';
@@ -195,18 +196,35 @@ describe('createCoreAdapter', () => {
 
     it('retains canonical SDK facts and reporting state without copying arbitrary fields', async () => {
       const fields = {
-        partialOrderIds: ['accepted-1'], outcome: 'unknown', kind: 'network', code: 'native-code',
-        retryAfterMs: 250, command: 'placeOrders', commandId: 17, receiptKey: 'receipt-17',
-        clientOrderIds: ['requested-1'], actualClientOrderIds: ['wire-1'], failedOrderIndex: 1,
+        partialOrderIds: ['accepted-1'],
+        outcome: 'unknown',
+        kind: 'network',
+        code: 'native-code',
+        retryAfterMs: 250,
+        command: 'placeOrders',
+        commandId: 17,
+        receiptKey: 'receipt-17',
+        clientOrderIds: ['requested-1'],
+        actualClientOrderIds: ['wire-1'],
+        failedOrderIndex: 1,
         orderIdentities: [{ symbol: 'BTCUSDT', kind: 'clientOrderId', identity: 'wire-1' }],
       };
-      const failure = Object.freeze(Object.assign(new Error('native message'), fields, { privateContext: 'not public' }));
+      const failure = Object.freeze(
+        Object.assign(new Error('native message'), fields, { privateContext: 'not public' }),
+      );
       markErrorReported(failure);
       expect(Object.hasOwn(failure, 'errorReported')).toBe(false);
       const { host } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
-      const caught = await createCoreAdapter(host).placeOrders(batch, 'main').catch((error: unknown) => error);
+      const caught = await createCoreAdapter(host)
+        .placeOrders(batch, 'main')
+        .catch((error: unknown) => error);
       expect(caught).toBeInstanceOf(ScriptBatchOrderError);
-      expect(caught).toMatchObject({ ...fields, message: 'native message', name: 'ScriptBatchOrderError', cause: failure });
+      expect(caught).toMatchObject({
+        ...fields,
+        message: 'native message',
+        name: 'ScriptBatchOrderError',
+        cause: failure,
+      });
       expect(isErrorReported(caught)).toBe(true);
       for (const key of Object.keys(fields)) expect(Object.hasOwn(caught as object, key)).toBe(true);
       expect(caught).not.toHaveProperty('privateContext');

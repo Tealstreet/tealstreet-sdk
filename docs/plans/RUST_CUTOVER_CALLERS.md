@@ -5120,7 +5120,6 @@ The previously audited caller scope remains: no default direct NX/CLI/MCP
 snapshot producer was established. This transport migration does not claim
 listener/chart migration, NX deployment or live private connectivity.
 
-
 ## Script adapter batch failures retain SDK-reported IDs
 
 `createCoreAdapter.placeOrders` rejects with the exported `ScriptBatchOrderError`
@@ -5129,7 +5128,10 @@ message is the original SDK message, and `cause` retains the original failure.
 The error owns a frozen copy of those IDs and preserves a valid `outcome`
 (`notSent`, `rejected` or `unknown`) exactly; a missing outcome stays absent. Valid
 nonnegative integer `partialOrderCount` and `totalOrderCount` remain available.
-Ordinary failures and local validation errors retain their original identity.
+Other allowlisted SDK fields and reporting state remain on the rejected error
+through the canonical `serializeCommandError` validator; arbitrary cause fields
+are not promoted. Ordinary failures and local validation errors retain their
+original identity.
 
 The failed host write event stays `ok: false` with its existing error string,
 and carries the same partial IDs, outcome and valid counts. It does not expose
