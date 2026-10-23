@@ -208,3 +208,23 @@ test('absolute raw path cannot traverse an ignored symlink before dot-dot', t =>
   original.report.artifacts[0].path = `${out}/link/../raw0.json`;
   assert.throws(() => capturePublicRaw({ root: options.root, report: original.report }));
 });
+
+test('workspace CLI bin links seal their tracked app target and refuse later mutation', t => {
+  const options = fixture(t);
+  const relativeBin = 'apps/cli/bin/tealstreet.cjs';
+  write(options.root, relativeBin, 'module.exports = "fixture CLI entry";\n');
+  fs.mkdirSync(path.join(options.root, 'node_modules/.bin'));
+  fs.symlinkSync('../../apps/cli/bin/tealstreet.cjs', path.join(options.root, 'node_modules/.bin/tealstreet'));
+  git(options.root, 'add', relativeBin);
+  git(options.root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'tracked workspace CLI bin');
+  options.run.head_sha = options.job.head_sha = git(options.root, 'rev-parse', 'HEAD');
+  const state = prepareCollection(options);
+  const manifest = JSON.parse(fs.readFileSync(path.join(options.destination, 'manifest.json')));
+  assert(manifest.entries.some(entry => entry.path === relativeBin && entry.type === 'file'));
+  assert(manifest.entries.some(entry => entry.path === 'apps/cli/bin' && entry.type === 'directory'));
+  const source = readSourceTree(options.root);
+  assert(source.selected.some(entry => entry.path === relativeBin));
+  fs.appendFileSync(path.join(options.root, relativeBin), '// changed\n');
+  assert.throws(() => readSourceTree(options.root), /inputs are dirty/);
+  assert.throws(() => beforeCpuCase({ state, args: args(state.claims[0]) }), /collision/);
+});
