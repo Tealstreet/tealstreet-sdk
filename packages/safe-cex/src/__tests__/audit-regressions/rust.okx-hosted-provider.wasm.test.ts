@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 const stamp = 1_709_209_849_123;
 const iso = '2024-02-29T12:30:49.123Z';
@@ -99,6 +100,7 @@ it.each(aliases)('actual WASM %s native private/business login dispatch uses the
   const market = { instId: 'BTC-USDT-SWAP', instType: 'SWAP', ctType: 'linear', ctVal: '0.01', ctValCcy: 'BTC', settleCcy: 'USDT',
     state: 'live', lotSz: '0.01', tickSz: '0.1', minSz: '0.01', maxLmtSz: '1000', maxMktSz: '1000', lever: '100' };
   setRustEngineTransport(() => ({
+    prepareHttp: prepareRecordedHttp,
     now: () => stamp,
     request: async ({ url, headers }) => {
       requests.push({ url, headers });
