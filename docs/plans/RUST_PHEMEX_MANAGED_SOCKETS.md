@@ -282,3 +282,15 @@ ratchet invocation at the merge commit compared its adapter-only first parent
 landing boundary. Final checked PR descendants and CI must retain the direct
 actual17/18 comparison with no new predicate or intermediate landing.
 Fresh combined CI and independent cross-review are separate publication gates.
+
+
+The combined secret scan found one additional historical occurrence of the
+same synthetic HMAC-SHA256 vector in signer RED77f3a83f9fa9,
+tests/dispatch_signing.rs line424. Python hmac independently recomputed it
+from literal key/secret and payload key1700000060. Only that exact historical
+commit/path/rule/line is allowlisted. Gitleaks8.30.1 scans the complete42-commit
+actual6c7..a487 PR range clean after the correction. A separate unallowlisted
+synthetic high-entropy credential still produces one finding. An initial detector
+probe with a TEST_ONLY prefix was ignored by the scanner's existing default
+fixture policy, so it was replaced by this independently working control. No
+runtime, test assertion, signature value, rule or path-wide allowance changed.
