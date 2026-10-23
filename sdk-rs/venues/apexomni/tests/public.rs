@@ -236,7 +236,7 @@ fn fetch_candles_uses_seconds_bounds_daily_omission_and_sorted_results() {
             to_ms: Some(1_700_000_000_000.0),
         }),
     );
-    let r = requests(&mut e).remove(0);
+    let r = prepared_requests(&mut e, 1_700_000_000_000.0).remove(0);
     assert!(r.headers.is_empty());
     assert!(r.url.contains("interval=D"));
     assert!(r.url.contains("start=1699827200"));
@@ -472,7 +472,7 @@ fn candle_query_actions(body: &str) -> Vec<Action> {
             to_ms: None,
         }),
     );
-    let request = requests(&mut e).remove(0);
+    let request = prepared_requests(&mut e, 100.0).remove(0);
     response(&mut e, &request, 101.0, body);
     e.drain_actions().collect()
 }
