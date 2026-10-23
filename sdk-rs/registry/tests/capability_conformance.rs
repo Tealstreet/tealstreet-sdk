@@ -55,7 +55,7 @@ impl Visit for BookProbe<'_> {
                 limit: Some(1),
             }),
         );
-        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0);
+        let actions = engine.drain_actions().collect::<Vec<_>>();
         let requests = actions
             .iter()
             .filter_map(|action| match action {
