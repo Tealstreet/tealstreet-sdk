@@ -229,3 +229,13 @@ Actual-WASM hosted alias positives and replay remain CI gates.
    OKX's 5 s account retry timer, which is an existing venue-local retry.
 4. Rebase timing: should this branch wait for #1773 to land, or ride on its
    head?
+
+## Owner decisions (claude-ddi2il, 2026-10-24)
+
+1. The four `trade_command` entry refusals stay in this slice. Each admits a
+   terminal-only Mutation Context and refuses it NotSent at the owner cap
+   (precedent: #1921).
+2. Delete the unreachable "already running" arm (`trading.rs` ~243). Add an
+   engine test proving a duplicate active command ID is rejected before the
+   venue sees it, so the deletion is evidence-backed.
+3. Build on #1773's head and re-integrate #1773's actual landing when it lands.
