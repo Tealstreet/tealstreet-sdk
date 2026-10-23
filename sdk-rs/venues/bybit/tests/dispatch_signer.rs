@@ -177,13 +177,16 @@ fn failed(actions: &[Action], command: u32) -> safe_cex_engine::VenueError {
         })
         .collect();
     assert_eq!(failures.len(), 1, "exactly one owned failure");
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Http(_)
-            | Action::Sign { .. }
-            | Action::WsSend { .. }
-            | Action::Notice(Notice::CommandDone { .. })
-    )));
+    // Only the engine's one fresh reconcile order read may follow; never a write.
+    let reconcile = |a: &Action| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("/v5/order/realtime"));
+    assert!(!actions.iter().any(|a| !reconcile(a)
+        && matches!(
+            a,
+            Action::Http(_)
+                | Action::Sign { .. }
+                | Action::WsSend { .. }
+                | Action::Notice(Notice::CommandDone { .. })
+        )));
     failures[0].clone()
 }
 
@@ -217,8 +220,8 @@ fn all_aliases_prepare_get_at_dispatch_using_selected_key_and_clamped_window() {
                     },
                 }),
             );
-            engine.prepare_dispatch(1234.75);
-            let actions: Vec<_> = engine.drain_actions().collect();
+            // Account reads are managed: the fixture driver prepares and signs them.
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1234.75);
             let mut signed = 0;
             for action in actions {
                 if let Action::Http(request) = action {
@@ -851,23 +854,33 @@ fn refused_retry_after_initial_dispatch(
     let mut actions: Vec<_> = if variant.is_hyro() {
         h.engine.drain_actions().collect()
     } else {
-        managed(&mut h.engine, h.now)
+        prepare_parked(&mut h.engine, h.now)
     };
-    if variant.is_hyro() {
-        // The established Hyro path reconciles the earlier dispatched create;
-        // no new mutation may be emitted on this provider failure.
-        let (attempt, repair) = work(actions);
-        assert_eq!(repair.context.method, "GET");
-        assert!(repair.context.path.starts_with("/v5/order/realtime"));
-        h.engine.handle(
-            h.now,
-            Event::Signed {
-                attempt,
-                result: Err(SignError::Refused),
-            },
-        );
-        actions = h.engine.drain_actions().collect();
-    }
+    // Both paths reconcile the earlier dispatched create with one signed order
+    // read; no new mutation may be emitted on this provider failure.
+    let (attempt, repair) = work(actions.clone());
+    assert_eq!(repair.context.method, "GET");
+    assert!(repair.context.path.starts_with("/v5/order/realtime"));
+    h.engine.handle(
+        h.now,
+        Event::Signed {
+            attempt,
+            result: Err(SignError::Refused),
+        },
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if !r.url.contains("/v5/order/realtime"))),
+        "no write resend"
+    );
+    // The only signing job here is the reconcile read checked above.
+    actions.retain(|a| !matches!(a, Action::Sign { .. }) && !matches!(a, Action::Http(_)));
+    actions.extend(if variant.is_hyro() {
+        h.engine.drain_actions().collect::<Vec<_>>()
+    } else {
+        managed(&mut h.engine, h.now)
+    });
     let error = failed(&actions, 42);
     assert!(!error.message.contains("dispatch-secret"));
     assert!(!error.message.contains("https://"));

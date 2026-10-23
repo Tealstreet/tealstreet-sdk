@@ -115,7 +115,7 @@ fn call_bound<'a>(after_refusal: &'a [StepBound<'a>]) -> CallBound<'a> {
 }
 
 /// Bybit names its own clock in a recv-window refusal; it corrects ours.
-fn server_time(message: &str) -> Option<f64> {
+pub(crate) fn server_time(message: &str) -> Option<f64> {
     message
         .find("server_timestamp[")
         .map(|at| &message[at + 17..])
@@ -1438,7 +1438,7 @@ impl BybitLinear {
     }
 
     /// Reconcile unknown or absent-order writes with one fresh order read per
-    /// product; an in-flight read gets a follow-up instead.
+    /// product; an in-flight read predates the write, so it is not joined.
     pub(crate) fn reconcile_ordinary(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.variant.is_hyro() || self.credentials.is_none() {
             return;
@@ -1446,7 +1446,7 @@ impl BybitLinear {
         let selected = self.category;
         for category in self.categories() {
             self.select_category(category);
-            self.refetch_orders(cx);
+            self.reconcile_orders(cx);
         }
         self.select_category(selected);
     }

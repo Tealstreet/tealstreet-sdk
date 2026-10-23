@@ -675,41 +675,166 @@ impl BybitLinear {
     }
 
     /// Public startup discovery on its own Background Read with a 20 s window.
-    /// A refused admission or queue fails the read like transport loss, so it
-    /// retries through the same category backoff.
     fn send_discovery(&mut self, cx: &mut Cx<'_, Pending>, rest: Rest, then: Then) {
+        self.send_read(cx, rest, then);
+    }
+
+    /// One Background Read with a 20 s window: public, or signed with the read
+    /// key for GETs (else the primary). A refused admission or queue fails the
+    /// read like transport loss, so it takes the caller's own retry path.
+    fn send_read(&mut self, cx: &mut Cx<'_, Pending>, rest: Rest, then: Then) {
+        use safe_cex_engine::request_context::Scope;
         if self.config_error.is_some() {
             return;
         }
-        let url = format!("{}{}?{}", self.paths.rest, rest.path, rest.payload);
-        let context = match cx.http_context(
-            safe_cex_engine::request_context::Scope::Background,
-            candles::read_policy(),
-        ) {
+        let Some(policy) = self.read_policy(rest.signed, candles::read_policy().timeout_ms) else {
+            return;
+        };
+        let context = match cx.http_context(Scope::Background, policy) {
             Ok(context) => context,
             Err(error) => {
                 return self.on_public_response(cx, then, Err(&error.venue_error().message));
             }
         };
+        self.queue_read(cx, context, rest, then);
+    }
+
+    /// Read authority: public, or signed with the read key for GETs (else the
+    /// primary); `None` when a signed read has no credential. A signed read is
+    /// re-read once after a native signature refusal.
+    pub(crate) fn read_policy(
+        &self,
+        signed: bool,
+        timeout_ms: u32,
+    ) -> Option<safe_cex_engine::request_context::Policy> {
+        use safe_cex_engine::request_context::{Credential, Policy, RetryPolicy};
+        let credential = if signed {
+            let (slot, identity) = match (&self.read_credentials, &self.credentials) {
+                (Some(read), _) => (safe_cex_engine::CredentialSlot::Secondary, read),
+                (None, Some(primary)) => (safe_cex_engine::CredentialSlot::Primary, primary),
+                (None, None) => return None,
+            };
+            Some(Credential {
+                slot,
+                reference: identity.credential.clone(),
+            })
+        } else {
+            None
+        };
+        Some(Policy {
+            credential,
+            timeout_ms,
+            retry: if signed {
+                RetryPolicy::ReadFailure
+            } else {
+                RetryPolicy::Never
+            },
+            ..candles::read_policy()
+        })
+    }
+
+    pub(crate) fn queue_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        context: safe_cex_engine::request_context::Context,
+        rest: Rest,
+        then: Then,
+    ) {
+        let mut url = format!("{}{}", self.paths.rest, rest.path);
+        if !rest.payload.is_empty() {
+            url.push('?');
+            url.push_str(&rest.payload);
+        }
+        let signing = rest.signed.then(|| {
+            let identity = self
+                .read_credentials
+                .as_ref()
+                .or(self.credentials.as_ref())
+                .expect("a signed read was admitted with a credential");
+            sign::Http::new(identity.clone(), rest.payload.clone(), self.recv_window)
+                .with_header_policy(self.signing_policy.header_policy())
+        });
+        let stream = rest.stream;
         let pending = Pending {
             category: self.category,
             rest,
             then,
             read: Some(context.clone()),
         };
-        match cx.request_managed_with_headers(
-            context,
-            Method::Get,
-            url,
-            &[("X-Referer", sign::BROKER_ID)],
-            None,
-            pending,
-        ) {
-            Ok(request) => cx.stream_response(request, ArrayAt::Path(MARKETS_PATH)),
+        let queued = match signing {
+            Some(signing) => cx.request_signed_managed(
+                context,
+                Method::Get,
+                url,
+                None,
+                Box::new(signing),
+                pending,
+            ),
+            None => cx.request_managed_with_headers(
+                context,
+                Method::Get,
+                url,
+                &[("X-Referer", sign::BROKER_ID)],
+                None,
+                pending,
+            ),
+        };
+        match queued {
+            Ok(request) if stream => cx.stream_response(request, ArrayAt::Path(MARKETS_PATH)),
+            Ok(_) => {}
             Err((pending, error)) => {
                 self.on_public_response(cx, pending.then, Err(&error.venue_error().message));
             }
         }
+    }
+
+    /// Re-read a signed read once on a native 10002/10004 refusal, through the
+    /// shared classifier; text alone never re-reads.
+    fn reread(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: &mut Option<Pending>,
+        response: &Response<'_>,
+    ) -> bool {
+        use safe_cex_engine::classify::{self, Native, NativeCode, ReadRetry, Released};
+        use safe_cex_engine::request_context::RetryEvidence;
+        let Some(current) = pending.as_ref().filter(|p| p.rest.signed && !p.rest.resent) else {
+            return false;
+        };
+        let Some(read) = current.read.clone() else {
+            return false;
+        };
+        let Some((code, message)) = venue_error(response) else {
+            return false;
+        };
+        let parsed = serde_json::from_str::<Status>(response.body)
+            .ok()
+            .and_then(|status| status.ret_code)
+            .is_some();
+        let native = parsed.then_some(Native {
+            code: NativeCode::Int(code),
+            message: &message,
+        });
+        let failure = classify::read(
+            &trading::codes::BYBIT,
+            Released::Response(response),
+            native.as_ref(),
+            message.clone(),
+        );
+        if failure.retry != Some(ReadRetry::NativeResend) {
+            return false;
+        }
+        let Ok(retry) = cx.http_retry_context(&read, RetryEvidence::ReadFailure) else {
+            return false;
+        };
+        // Bybit names its own clock in the raw refusal, before any sanitizing.
+        if let Some(server) = trading::ordinary::server_time(response.body) {
+            cx.observe_protocol_time(server);
+        }
+        let mut taken = pending.take().expect("checked above");
+        taken.rest.resent = true;
+        self.queue_read(cx, retry, taken.rest, taken.then);
+        true
     }
 
     /// Resend a rejected request once with a fresh signature; false when it
@@ -909,7 +1034,7 @@ impl BybitLinear {
         {
             self.startup.fees_in_flight = true;
             let query = Query::new().str("category", self.paths.category);
-            self.send(
+            self.send_read(
                 cx,
                 Rest::get("/v5/account/fee-rate", query).streamed().signed(),
                 Then::Fees(HashMap::new()),
@@ -2374,6 +2499,13 @@ impl Venue for BybitLinear {
             if cx.validate_http_context(&read).is_err() {
                 return;
             }
+            let mut pending = Some(pending);
+            if self.reread(cx, &mut pending, &response) {
+                return;
+            }
+            let Some(pending) = pending else {
+                return;
+            };
             self.on_public_response(cx, pending.then, Ok(response));
             let _ = cx.finish_http_context(&read);
             return;
@@ -2405,6 +2537,14 @@ impl Venue for BybitLinear {
                 Self::candles_failed(cx, read, error);
             }
             return;
+        }
+        // A signed managed read's signature/timestamp refusal carries no list:
+        // classify it (one re-read) and fail with the sanitized message.
+        if pending.rest.signed
+            && pending.read.is_some()
+            && matches!(venue_error(&response), Some((10002 | 10004, _)))
+        {
+            return self.on_response(cx, pending, response);
         }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still
@@ -2517,7 +2657,10 @@ impl Venue for BybitLinear {
         }
         self.select_category(pending.category);
         let mut pending = Some(pending);
-        if self.resend(cx, &mut pending, error) {
+        // A managed read never takes the legacy text resend.
+        if pending.as_ref().is_some_and(|p| p.read.is_none())
+            && self.resend(cx, &mut pending, error)
+        {
             return;
         }
         let Some(Pending {

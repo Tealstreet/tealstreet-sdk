@@ -8,7 +8,8 @@ impl Visit for Start {
     type Output = Vec<Action>;
     fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
         engine.start(1_700_000_000_000.0);
-        engine.drain_actions().collect()
+        // Startup reads are managed: the fixture driver prepares and signs them.
+        safe_cex_engine::test_support::prepared_actions(&mut engine, 1_700_000_000_000.0)
     }
 }
 
@@ -63,9 +64,7 @@ fn all_bybit_aliases_accept_setup_and_ordinary_startup_gets_use_secondary() {
             // Hyro waits for its catalogue before private startup; provider setup
             // must construct without pretending it has issued ordinary V5 reads.
             assert!(signed.is_empty());
-            // Public discovery is managed: it starts as a Prepare, not raw HTTP.
-            assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(m)
-                if matches!(m.as_ref(), safe_cex_engine::request_context::HttpAction::Prepare { .. }))));
+            assert!(!requests.is_empty());
             continue;
         }
         assert!(
@@ -123,4 +122,37 @@ fn injected_refs_work_without_flat_credentials_and_missing_provider_is_refused()
     )
     .unwrap();
     assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if r.headers.iter().any(|(k,v)| *k == "X-BAPI-API-KEY" && v == "injected-key"))));
+}
+
+struct Registered;
+impl Visit for Registered {
+    type Output = safe_cex_engine::signing::Identities;
+    fn visit<V: Venue + 'static>(self, engine: Engine<V>) -> Self::Output {
+        engine.identities().clone()
+    }
+}
+
+#[test]
+fn trusted_construction_registers_the_venue_identities_for_capability_admission() {
+    let mut input = options("bybit");
+    input.key = Some("primary-key".into());
+    input.secret = Some("primary-secret".into());
+    input.read_credentials = Some(safe_cex_engine::ReadCredentials {
+        key: "secondary-key".into(),
+        secret: "secondary-secret".into(),
+        passphrase: None,
+    });
+    let registered = build(
+        "bybit",
+        input,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Registered,
+    )
+    .unwrap();
+    let primary = registered.primary.expect("primary refs registered");
+    let secondary = registered.secondary.expect("secondary refs registered");
+    assert_ne!(primary.signing, secondary.signing);
+    // Refs only: no key material is registered with the engine.
+    let serialized = serde_json::to_string(&(primary, secondary)).unwrap();
+    assert!(!serialized.contains("primary-secret") && !serialized.contains("secondary-secret"));
 }

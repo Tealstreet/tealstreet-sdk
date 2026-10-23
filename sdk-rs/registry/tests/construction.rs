@@ -366,12 +366,24 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
             "{venue}"
         );
     }
-    // AsterDEX signs with the wallet private key, from auth or the secret.
+    // AsterDEX V3 signs with the auth wallet key; setup resolves V3 from its shape.
+    let wallet = "0x1111111111111111111111111111111111111111";
     construct(
         "asterdex",
-        r#"{"remoteSigning":true,"key":"k","asterdex":{"privateKey":"p"}}"#,
+        &format!(
+            r#"{{"remoteSigning":true,"key":"{wallet}","applicationId":"{wallet}","asterdex":{{"privateKey":"0x{}"}}}}"#,
+            "12".repeat(32)
+        ),
     )
     .unwrap();
+    // A wallet key that is not V3-shaped resolves V1, which has no secret to sign with.
+    assert_eq!(
+        rejected(
+            "asterdex",
+            r#"{"remoteSigning":true,"key":"k","asterdex":{"privateKey":"p"}}"#
+        ),
+        message
+    );
     assert_eq!(
         rejected(
             "asterdex",
@@ -622,8 +634,9 @@ fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics(
         type Output = Vec<safe_cex_engine::Action>;
         fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
             engine.start(1_000.0);
-            let request = engine
-                .drain_actions()
+            // The fee read is managed: the fixture driver completes its preparation.
+            let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     safe_cex_engine::Action::Http(request)
                         if request.url.contains("/v5/account/fee-rate") =>
