@@ -339,3 +339,29 @@ not need it. Final intended scope remains nine own paths with no engine or
 registry test delta. Command-entry, signer and session adoption remain separate
 slices. Focused/full native checks and independent incremental reviews are
 recorded on the PR before readiness; fresh CI and an overseer window still apply.
+
+
+## Phase two: genuine candle command entry
+
+Base: actual `bc91dc15d705f7d388ab3df46fa8c3ffb9395822`, after the first managed candle slice #1804.
+Use actual #1830 `admit_http_command` in `public.rs::start_candles` with the
+existing public Read policy, 20-second root and read retry budget. The engine
+owns initial rejection and its terminal; remove the helper's numeric command ID,
+error return and the caller's numeric failure fallback. Keep native interval
+validation before entry, and preserve query bytes, retries and delivery codecs.
+No signer, session, engine or private source edits are needed.
+
+Regression controls first: invalid command clocks and initial context capacity
+must each reject once with the shared typed Read error and no write outcome,
+without HTTP/preparation/timer work. A refused entry must not occupy a generation;
+a fresh query and an existing parked owner must still complete normally. Verify
+these controls assert RED on the original helper before its replacement.
+
+Prune only the removed initial-failure fingerprint from ApeX public.rs, leaving
+its unsupported-interval preflight for the reviewed local-completion path.
+Append the resulting initial-error contract to CALLERS. Run all existing candle
+controls, full ApeX/Binance tests, strict all-target Clippy, scoped formatting,
+bans and both request-context checks. Independent source/adversarial, caller and
+full-map reviews must answer the architecture gate. No merge during the current
+MEXC/header-seam hold; genuinely integrate any newly landed shared engine seam
+and obtain fresh CI before a later venue window.
