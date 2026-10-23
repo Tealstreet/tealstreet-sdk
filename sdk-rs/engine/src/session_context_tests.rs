@@ -1287,3 +1287,59 @@ fn execution_observers_and_session_waiters_exclude_each_other() {
         "an observer root cannot park behind a session"
     );
 }
+
+#[cfg(feature = "http-plans")]
+#[test]
+fn a_planned_command_is_refused_a_session_wait_instead_of_parking() {
+    use crate::request_context::plan::{CallBound, RetryWindow, StepBound};
+    use crate::request_context::{PlanPolicy, PreflightPolicy, PreflightPurpose};
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let leg = with(&mut engine, 1., |cx| {
+        let preflight = cx
+            .issue_preflight(
+                7,
+                PreflightPolicy {
+                    purpose: PreflightPurpose::ReadOnly,
+                    read_credential: None,
+                    write_credential: None,
+                },
+            )
+            .unwrap();
+        let calls = [CallBound {
+            timeout_ms: 20_000,
+            attempts: 1,
+            retry_window: RetryWindow::FreshAttempt,
+            after_refusal: &[],
+        }];
+        let steps = [StepBound {
+            wait_ms: 0,
+            calls: &calls,
+        }];
+        let plan = cx
+            .admit_plan(
+                &preflight,
+                &steps,
+                PlanPolicy {
+                    operation: Operation::Read,
+                    credential: None,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        let slot = cx.plan_slots(&plan).unwrap().remove(0);
+        cx.plan_leg_context(&plan, &slot).unwrap()
+    });
+    assert!(matches!(leg.owner(), Owner::Command { id: 7, .. }));
+    // The Plan sequences its own legs: the venue gets its pending back now.
+    let refused = with(&mut engine, 1., |cx| {
+        cx.session_wait(&session, &leg, Pending(leg.clone()))
+    });
+    assert!(matches!(refused, Err((Pending(back), Error::State)) if back == leg));
+    assert!(engine.io.session_waits.entries.is_empty(), "nothing parked");
+    assert!(
+        with(&mut engine, 2., |cx| cx.session_ready(&session)).is_empty(),
+        "readiness has no planned leg to re-dispatch"
+    );
+}
