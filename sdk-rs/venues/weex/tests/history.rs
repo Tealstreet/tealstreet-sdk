@@ -2,18 +2,20 @@
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Query, RequestId, Response,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
 use serde::Deserialize;
+use support::setup::Options;
 
 const NOW: f64 = 1_764_505_700_000.0;
 const DAY: f64 = 86_400_000.0;
 fn engine() -> Engine<WeexFutures> {
-    safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    support::setup::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
         ..Options::default()
-    }))
+    })
 }
 fn command(e: &mut Engine<WeexFutures>, query: Query) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::Query { command: 7, query }));
@@ -507,7 +509,7 @@ struct PublicTrade {
 }
 #[test]
 fn public_trades_need_no_credentials_and_keep_milliseconds() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options::default()));
+    let mut e = support::setup::engine(Options::default());
     let actions = command(
         &mut e,
         Query::PublicTrades {
@@ -709,7 +711,7 @@ fn malformed_streamed_fill_rows_fail_the_whole_query() {
 }
 #[test]
 fn private_queries_without_credentials_complete_without_http() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options::default()));
+    let mut e = support::setup::engine(Options::default());
     let actions = command(&mut e, income(Some(NOW), Some(NOW + 100.0)));
     assert_eq!(result(&actions).unwrap(), "[]");
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
@@ -1503,4 +1505,35 @@ fn empty_fill_identity_semantic_marker_survives_error_only_logging_before_succes
         "host/worker fixture must equal actual native marker"
     );
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:1,result})if result.contains("good"))));
+}
+
+#[test]
+fn provider_refusal_after_an_accepted_page_rejects_strictly_without_partial_rows() {
+    let mut e = support::setup::engine_with_provider(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            ..Options::default()
+        },
+        |inner| std::sync::Arc::new(support::setup::Gated::new(inner, &[true, false])),
+    );
+    let actions = command(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let actions = response(&mut e, NOW, request(&actions, "/order/history").id, NORMAL);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/allAlgoOrders"))),
+        "the refused page is never released"
+    );
+    let error = result(&actions).unwrap_err();
+    assert!(!error.is_empty());
 }

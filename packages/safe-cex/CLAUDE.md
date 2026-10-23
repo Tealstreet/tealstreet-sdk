@@ -44,7 +44,7 @@ package setting; measured performance evidence covers WASM.
 
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
-Binance's four aliases and Bybit's five aliases. High-level credential input is consumed by a trusted
+Binance's four aliases, Bybit's five aliases and WEEX (hosted admission disabled). High-level credential input is consumed by a trusted
 `LocalSignerSetup` before `BaseExchange` retains options; generic options contain
 no primary/secondary signing credentials. The WASM constructor's optional third
 argument is private provider setup, separate from engine-options JSON. Cached
@@ -62,7 +62,8 @@ Trusted signer setup uses shared declarative per-family/per-slot normalization
 from construction-rules.json. Unspecified fields preserve caller trimCredential
 metadata; MEXC forces primary credential trimming and secondary preservation.
 The same field policy declares primary required-for-private passphrases and
-required secondary passphrases with primary fallback for OKX and Bitget aliases.
+required secondary passphrases with primary fallback for OKX and Bitget aliases
+and WEEX.
 Missing/JSON-null secondary passphrases inherit an opaque primary reference;
 explicit empty never inherits. Public mode bypasses only the primary requirement,
 while secondary validation stays active. Shared publicMode intent takes precedence
@@ -563,6 +564,14 @@ upstream specifications, verified audit evidence, or an explicit runtime
 contract documented in this CLAUDE.md tree. Tests committed to the package must
 be deterministic and must not require network access, API keys, or local secret
 files. Live probes belong outside the test runner and outside `src/exchanges/`.
+
+The shared Vitest setup denies and records unstubbed fetch, XHR send and socket
+connections. Cleanup rejects recorded attempts even when exchange code catches
+the immediate error. Supply explicit local fixture facts instead of relying on
+an endpoint response. An intentional in-process socket fixture must bind loopback
+and use the test guard's exact-port allowance, revoked in `finally`; there is no
+blanket localhost or exchange-host exception. See
+`docs/plans/TS_UNIT_TRANSPORT_ISOLATION.md` for the test-only boundary.
 
 Vitest discovers deterministic `*.test.*` files throughout `src/` and excludes
 only explicitly named `*.integration.test.*` and `*.network.test.*` suites.
