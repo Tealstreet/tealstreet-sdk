@@ -5201,6 +5201,191 @@ remain. Numeric overflow in rows beyond the requested output limit still rejects
 whole snapshot. Native status/code510 classification, code/message and bounded retry
 hint remain; live rate limits pause depth and account reads without resending.
 Results never change subscribed books, account state or credential health.
+
+## Backpack and Paradex order snapshot freshness
+
+Backpack and Paradex publish order snapshots through the engine's shared
+freshness token. Reads invalidated by native writes cannot replace Store orders
+or their native signing, terminal or trigger metadata. Existing per-order venue
+timestamps, terminal retention and Paradex amend-evidence checks still protect
+against lagging server data. Backpack keeps its newer-read-wins behavior; repair
+requests start only after an accepted snapshot.
+
+Backpack retains pending trigger relabeling when a stale or failed read is
+discarded, so a retained take-profit receives its correct kind when the ticker
+seed arrives. Fully validated native Pair acknowledgements also fence older
+reads, including when no row is stored locally; malformed response identities
+keep their existing rejection behavior. Command IDs, receipts, completion shapes,
+fill quantities and signing payloads retain their native contracts.
+
+If snapshot authority is permanently exhausted, these families emit an Error
+snapshot-discard notice and issue no order read. Account cycles continue through
+their ordinary next stage and poll schedule; accepted native writes and stream
+updates remain usable. Existing SDK callers need no new option or state migration.
+
+### Lighter cached leverage and account-tier Read ownership
+
+`fetchLeverage` and the `FetchAccountTier` extension now admit the engine's genuine
+current Read command before consulting their synchronous caches. Finite admitted
+calls retain leverage JSON, native missing-setting errors and tier string/null;
+tier fetch remains cache-only and does not trigger accountLimits refresh.
+
+At shared owner capacity or with a non-finite clock, these calls now produce one
+typed engine Read refusal (no financial outcome) rather than bypassing admission.
+They allocate no HTTP, preparation, signer, socket or timer and need no new
+transport hook or external caller signature. Duplicate IDs cannot replace a live
+owner, and immediate completion releases capacity for the next call. SetAccountTier,
+account refresh cadence, signing and all other commands keep their native paths.
+
+## Script adapter batch failures retain SDK-reported IDs
+
+`createCoreAdapter.placeOrders` rejects with the exported `ScriptBatchOrderError`
+when its SDK failure contains a nonempty string array of `partialOrderIds`. Its
+message is the original SDK message, and `cause` retains the original failure.
+The error owns a frozen copy of those IDs and preserves a valid `outcome`
+(`notSent`, `rejected` or `unknown`) exactly; a missing outcome stays absent. Valid
+nonnegative integer `partialOrderCount` and `totalOrderCount` remain available.
+Other allowlisted SDK fields and reporting state remain on the rejected error
+through the canonical `serializeCommandError` validator; arbitrary cause fields
+are not promoted. Ordinary failures and local validation errors retain their
+original identity.
+
+The failed host write event stays `ok: false` with its existing error string,
+and carries the same partial IDs, outcome and valid counts. It does not expose
+them as successful `orderIds`. The successful batch result remains unchanged.
+Web, CLI and mobile host bindings share this adapter contract.
+
+Scripts catching the rejected batch and hosts consuming `HostWriteEvent` can
+reconcile the reported IDs separately. A partial failure is never whole-batch
+success or permission to retry the entire batch. An `unknown` outcome remains
+uncertain evidence; callers must not upgrade it to confirmed placement. An
+uncaught `runScript` failure still has a string-only `RunScriptResult.error`, so
+Agent/automation hosts must retain the failed write event for these details.
+
+## WOO family WASM venue throughput
+
+Standalone WOO family builds compile the WOO venue crate at opt-level3. This
+applies to public and private WOO execution in browser/Worker and Node family
+artifacts. Callers download a larger module within the existing fixed size cap;
+SDK construction, endpoints, signing, transports, row shapes and errors retain
+their contracts. Combined/native builds continue using the package size profile;
+this supersedes the earlier package-profile description for the WOO family only.
+[Profile and controls](RUST_WOO_PUBLIC_CPU.md).
+
+## SDK master fee subjects and Lighter placement identities
+
+Hyperliquid fee reads use the nonempty vault, then nonempty applicationId trading
+account, never the API-agent key. Empty identity strings are absent in the same
+existing account selector used for other account reads; an empty vault no longer
+masks a configured master. Agent discovery finishes before fee/private bootstrap.
+Public-only and unresolved startup retain default taker0.00045/maker0.00015 with
+no userFees request. Configured private accounts retain their native fee response
+and fallback behavior.
+
+Robinhood Lighter defaults to integrator47296 on both deployments, with maker0 /
+taker250 attribution. An explicit integrator override wins; ordinary Lighter's
+mainnet158385 and testnet no-default behavior is unchanged. Existing tier and
+builder-approval preflights run before nonce allocation/submission. A parsed
+missing, expired or insufficient approval blocks, as do existing405/429 handling;
+malformed responses and other lookup/transport failures retain the adapter's
+existing best-effort continuation. This parity change does not tighten that
+failure policy. Callers must approve the Robinhood partner identity for attributed
+placements to be accepted by the venue.
+Every prepared lot, bracket leg, single and batch reserves a positive48-bit
+client-order index from the existing instance namespace. Current time/entropy is
+reconsidered for every reservation; a backward clock or failed/unknown send never
+releases its prior index. Exhaustion rejects before submission rather than
+wrapping to a reused identity. Transaction nonces and signer authority are separate.
+
+## Robinhood master-parity fixture provenance
+
+The real-WASM boundary fixture now supplies an approved test integrator matching
+the alias or explicit override, and asserts the signed Robinhood47296 attributes.
+Production approval refusal, signer indices, slippage, settings and tier behavior
+remain unchanged. The two private replay tape identities reflect the authorized
+master/harness integrator change; their eleven existing diagnostics each and all
+public declarations are unchanged. Raw replay reports remain FAIL with known
+failures; this content-hash refresh does not establish complete venue parity.
+
+## Managed native-plan admission and preflight
+
+Rust embedders enable the engine's `http-plans` Cargo feature to use Preflight
+and Plan APIs. Bybit and BingX enable it through their venue dependencies. Other
+standalone families omit Plan state, scheduling and callbacks until their own
+adoption enables the feature; ordinary managed Context behavior is unchanged.
+A venue overriding `on_http_plan_ready` or `on_http_owner_retired` must enable
+`http-plans` in its own engine dependency; workspace feature unification does
+not establish that its standalone family configuration has opted in.
+
+Managed commands using Preflight retain one command generation while prerequisite
+reads run. Each read keeps its declared deadline and retry policy. Whole-plan
+admission starts only after the final native steps are known; it reserves the
+complete declared work, including pacing, retry attempts and replacement branches,
+before the first write. The checked native envelope can exceed 120 seconds; there
+is no fixed product command cap. Repeated external mode changes may restart
+preflight reads without a new whole-preflight limit.
+
+Initial admission belongs to the genuine command callback. An unissued read
+refusal emits one typed failure without a write outcome; an unissued write
+refusal reports NotSent. NX must consume that failure once. A cached terminal,
+issued owner or rejected entry cannot be reminted in the same callback.
+
+Resource refusal before a write Plan is admitted leaves the preflight owner able
+to report its typed failure and proves no Plan write was sent. Once work is
+released, a timeout or later queue/preparation refusal retains all prior accepted
+facts and unresolved effects in the command journal. NX must retain the structured
+kind/outcome, reconcile Unknown effects through reads, and avoid optimistic
+success or automatic write resend. A classified, effects-free resend uses the
+engine's exact-attempt grant within the original declared call and Plan bounds.
+
+Native codecs validate the exact current Plan delivery before changing cache or
+Store state. Structural slot completion proves no financial effect by itself;
+only validated write facts grant those effects. Delayed route preparation,
+binding, signing and dispatch keep the captured physical deadline. Readiness
+callbacks expose only their own declared eligible work and never borrow another
+HTTP response or command's entry authority.
+
+A cancel deferred behind a Plan is processed when the placement owner seals,
+including root expiry and readiness preparation refusal. It does not require an
+unrelated later event to resume or receive its typed terminal result. Existing
+uncertainty fences still decide whether that cancel can run.
+
+A Read Plan may return its native current-settings fallback after the first
+validated response without issuing a remaining declared read. The engine checks
+the current DATA call and retires only unissued work; this cannot complete a
+write or abandon another selected call. The original deadline and native cache
+publication rules stay in force. NX receives the native result once and must not
+treat successful local fallback as proof that cache or Store state was refreshed.
+
+
+### Proven subset with unresolved write remainder
+
+| Native proof | Command outcome | NX handling |
+| --- | --- | --- |
+| A validated subset took effect; other targets remain unresolved (`PartialUnknown`) | `Unknown`, with bounded proven IDs and batch position metadata when available | Keep the proven subset, reconcile the remainder through reads, and never resend the whole write. |
+| A complete mixed acceptance/refusal is proven (`KnownPartial`) | Partial failure with the resolved facts | Keep accepted results and report refused targets. |
+| Count-mismatched, empty-ID or wholly unproven ACK (`Failed`) | `Unknown`; retained IDs are evidence only | Reconcile through reads; infer no Store effect or optimistic success from those IDs. |
+
+A satisfied native cancel may prove a subset without creating IDs. That proof
+still leaves any unresolved targets Unknown; a successful subset never cleans up
+the remainder or extends its deadline.
+
+## Shared ticker symbol lookup
+
+Ticker symbol reads and updates use the shared Store index. Ticker row order,
+last-duplicate lookup winner, replacement/delisting and append-only recovery
+indices retain their contracts. Full snapshots and dirty-field deltas keep the
+same row identities and signed-zero behavior. Venue code and cached row-index
+consumers continue using the same Store API.
+
+Each independently loaded engine/account Store owns its ticker index. The measured
+native 965-symbol example adds 55,743 bytes (about 54.4 KiB) retained index allocation
+per Store; replacement peak adds 111,486 bytes (about 108.9 KiB) per Store while old
+and new maps coexist. Ten similarly sized independent Stores therefore add about
+544 KiB retained, with about 1.06 MiB additional peak if all replace concurrently.
+The cost occurs per Store, not per message, and grows with symbol count/string
+length and hash-table capacity steps. These are native index-only measurements;
+actual process/browser/WASM costs include allocator and memory-page effects.
 ## Bitunix synchronous history Read completion
 
 Local history exits retain their original command Read authority through shared

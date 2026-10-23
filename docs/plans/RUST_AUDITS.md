@@ -2312,6 +2312,96 @@ live cooldown remain unchanged. Exact pruning removes8 occurrences/7 entries;
 there is no signer migration, local timer/classifier, retry executor or numeric
 Context lookup. Architecture No: existing shared custody and lifecycle are
 consumed. The separate reviewed startup fix is retained as a stack dependency.
+
+### Snapshot-token fan-out: Backpack and Paradex
+
+At actual848924, only Binance and Bitunix used the engine's financial snapshot
+admission token. The complete27-crate inventory (including nested Spot adapters)
+is in RUST_FINANCIAL_SNAPSHOT_FRESHNESS. Backpack and Paradex now use that same
+Store boundary for whole-read admission, native caches and row replacement;
+per-ID timestamps, terminal state, amend evidence and other domain clocks remain.
+This is engine-consumer fan-out, not another per-venue freshness counter.
+
+Two Backpack defects were independently reproduced on unchanged production:
+
+- A stale streamed order read, or a failed current streamed read, could erase an
+  accepted unpriced trigger's pending relabel bookkeeping before final snapshot
+  admission. When the ticker seed arrived, the retained take-profit stayed
+  classified as StopLoss. Mapping-time insert/remove decisions are now staged
+  and applied only after token admission; the two independent controls fail on
+  original code and pass after adoption.
+- A fully accepted native Pair ACK did not advance the order-read fence. An older
+  empty read could remove a retained order, or an older nonempty read could
+  inject a row into an empty Store after that ACK. The accepted, fully validated
+  identity set now invalidates shared snapshot authority. Both original-RED
+  controls pass after adoption; a malformed-identity negative retains its old
+  behavior and command correlation/result shape.
+
+Four native assertion REDs cover these two classes. Exact final fixture/source/
+log bindings are sealed in receipt
+`95ebc65eecbd8e231407715231058a93bd6662737d124f3e2eeae3ead5b2f2af`.
+Paradex's native amend-ACK compatibility control passes original code; its two
+Store-invalidation/exhaustion controls exercise the newly adopted API and are
+not claimed as production defects. Capture exhaustion admits no unfenced read
+and preserves native account-cycle progress. Final current-head CI, actual queued
+integration and full authenticated raw proof remain separate merge gates.
+
+### Lighter cached reads: remove legacy numeric completion
+
+The cached FetchLeverage and FetchAccountTier branches consume shared initial
+Read admission and Context terminals. This closes their capacity/invalid-clock
+admission bypass without fabricating HTTP or financial evidence. Rejected and
+revoked entries return without numeric fallback; cache data and native errors
+remain unchanged after admission. Exactly three lexical sites are removed:
+Lighter46→43, lib5→3, limits6→5. SetAccountTier's separate identical numeric fail
+fingerprint remains counted. No held trading or engine source is changed.
+
+## WOO family ticker decoding compiler policy
+
+The WOO family retained shared speed defaults, while its explicit venue package
+profile still used opt-level z. A names-preserved profile identified generated
+Tick deserialization as the main sampled ingress cost. The existing family build
+mechanism now overrides only the WOO venue package to opt-level3; no second
+parser, Store lookup, numeric codec or engine policy is introduced. Original
+regression evidence is the reported landing CPU miss at28.838ms versus27.68ms.
+Interleaved unchanged-source artifacts show a local median23.105→18.957ms;
+exact-head CI's fixed public/private, CPU, memory and size gates remain acceptance
+requirements. [Scope, raw evidence and limitations](RUST_WOO_PUBLIC_CPU.md).
+
+## SDK master Hyperliquid/Lighter parity
+
+~~Public or unresolved Hyperliquid startup asks userFees with an absent subject,
+and an empty vault masks a configured trading account.~~ The existing identity
+selector now follows master's nonempty vault/applicationId precedence; public or
+unresolved fees retain metadata defaults without HTTP. Actual agent discovery
+still establishes identity before private reads.
+
+~~Robinhood placements omit the newly configured integrator47296, and the
+instance client-order-index allocator wraps after its positive48-bit maximum.~~
+Robinhood uses its configured native builder and existing approval preflights.
+Each existing per-leg mint reservation considers the current candidate and
+retains monotonic state; exhaustion refuses without wrap. No transaction nonce,
+managed ownership, retry or outcome policy is introduced. No legacy inventory
+site changes; all incoming maps and the #1869 TS reference/harness remain exact.
+
+## Native mode-preflight redo liveness
+
+Repeated external mode changes can make an adapter redo its prerequisite mode
+reads indefinitely. Each request remains bounded by its declared read policy,
+but the final write-plan root starts only when the native write steps are fixed.
+No arbitrary whole-preflight or 120-second product cap is added. A finite redo
+limit would change caller-visible liveness policy and needs a separate decision.
+
+## Shared ticker lookup CPU headroom
+
+A named WASM profile identifies indirect symbol comparisons in Store::ticker_index
+as a substantial public-data cost. The shared Store now uses the existing
+HashMap<Box<str>,u32> index representation for borrowed symbol lookup, rebuilding
+in input order and releasing obsolete keys/capacity on replacement. This applies
+to every venue using symbol lookup; WOO's cached-index WS reducer remains outside
+that hot path. No authority policy, codec, venue-specific shortcut or legacy-site
+exemption changes. Exact paired CI performance and family memory/size gates remain
+separate evidence from diagnostic profiles.
 ## Bitunix local history authority adoption
 
 Five synchronous history terminal expressions now consume genuine command-entry
