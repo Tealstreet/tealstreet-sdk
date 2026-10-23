@@ -105,7 +105,7 @@ fn retry_timer(actions: &[Action], now: f64) -> TimerId {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_))),
+            .any(|a| matches!(a, Action::Http(_)) || matches!(a, Action::ManagedHttp(h) if matches!(h.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))),
         "retry must yield to startup Backoff: {actions:?}"
     );
     no_command(actions);

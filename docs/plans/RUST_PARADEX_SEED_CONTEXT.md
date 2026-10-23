@@ -51,3 +51,15 @@ Plan audit: independent source/caller/full-map exploration found no held source
 or test-file collision; the unheld startup_resilience fixture also needs the
 shared handshake. All fixture timers must remain visible. Source adoption must
 handle refused issuance and managed queue errors without command-ID fallback.
+
+## Implementation checkpoint
+
+`d8e8c5f9e91` compiles and all four controls fail against the original source at
+legacy send assertions. The implementation removes only fingerprint
+`daa9160114df450bc32e689954faee7fd2d88713b62477953faf17c6ac8e3ebf`.
+Source/adversarial, caller and full-map independent reviews are CLEAN; the latter
+also verified fixture token identity apart from the shared handshake. Strict
+all-target Paradex Clippy, scoped fmt, bans, ratchet and 13 checker controls pass.
+Complete Paradex + Binance suites and CI are required before ready/merge.
+A test assertion was corrected to permit managed Cancel cleanup while continuing
+to reject any new Prepare/Bind/HTTP before startup Backoff fires.

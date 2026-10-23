@@ -3,6 +3,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
@@ -10,6 +11,7 @@ use safe_cex_engine::{
 use std::collections::{HashMap, HashSet};
 
 pub enum Request {
+    ManagedSeed(Context, Box<Request>),
     Markets {
         rows: Vec<Market>,
         bands: HashMap<String, f64>,
@@ -132,16 +134,46 @@ impl Paradex {
                 },
             )
         };
-        let id = cx.request_streamed(
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(_) => {
+                self.public_failed(cx, request, "Paradex discovery lifecycle is unavailable");
+                return;
+            }
+        };
+        let pending = Pending::Public(Request::ManagedSeed(context.clone(), Box::new(request)));
+        match cx.request_managed(
+            context,
             Method::Get,
             format!("{}{path}", self.rest()),
-            vec![],
-            ArrayAt::Field("results"),
-            Pending::Public(request),
-        );
-        // Markets and tickers deserialize every row's identity first.
-        cx.venue_parses_items(id);
+            None,
+            pending,
+        ) {
+            Ok(id) => {
+                cx.stream_response(id, ArrayAt::Field("results"));
+                // Markets and tickers deserialize every row's identity first.
+                cx.venue_parses_items(id);
+            }
+            Err((Pending::Public(seed), error)) => {
+                self.public_failed(
+                    cx,
+                    seed,
+                    &format!("Paradex discovery queue refused: {error:?}"),
+                );
+            }
+            Err(_) => unreachable!("public discovery preserves its pending value"),
+        }
     }
+
     fn public_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
@@ -613,6 +645,11 @@ impl Paradex {
         item: &str,
     ) {
         match request {
+            Request::ManagedSeed(context, seed) => {
+                if cx.validate_http_context(context).is_ok() {
+                    self.public_item(cx, seed, item);
+                }
+            }
             Request::Markets {
                 rows,
                 bands,
@@ -747,6 +784,20 @@ impl Paradex {
         request: Request,
         response: Response<'_>,
     ) {
+        let request = match request {
+            Request::ManagedSeed(context, seed) => {
+                // Engine dispatch fences this exact managed attempt. Check its
+                // live Read authority before publishing, then retire before
+                // native decoding can take any success/error early return.
+                let live = cx.validate_http_context(&context).is_ok();
+                let _ = cx.finish_http_context(&context);
+                if !live {
+                    return;
+                }
+                *seed
+            }
+            other => other,
+        };
         if let Err(e) = check(&response) {
             self.public_failed(cx, request, &e);
             return;
@@ -878,6 +929,11 @@ impl Paradex {
         error: &str,
     ) {
         match request {
+            Request::ManagedSeed(context, seed) => {
+                // Expired handles may still retire; a failure never publishes.
+                let _ = cx.finish_http_context(&context);
+                self.public_failed(cx, *seed, error);
+            }
             Request::Markets { .. } | Request::Tickers { .. } => {
                 let markets = matches!(request, Request::Markets { .. });
                 cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
