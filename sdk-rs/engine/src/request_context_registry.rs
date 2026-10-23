@@ -135,6 +135,10 @@ impl ContextRegistry {
         if scope == Scope::Background && policy.operation == Operation::Mutation {
             return Err(Error::Invalid);
         }
+        // A member's only physical work is its execution's.
+        if matches!(scope, Scope::Command(id) if self.is_observer(id)) {
+            return Err(Error::Revoked);
+        }
         if (scope == Scope::Execution)
             != parent.is_some_and(|parent| matches!(parent.owner(), Owner::Execution { .. }))
         {

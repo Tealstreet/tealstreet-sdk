@@ -74,6 +74,7 @@ impl ContextRegistry {
             return Err(Error::Invalid);
         }
         let member = self.observer_member(founder, key, now)?;
+        self.contexts.retain(|_, old| old.deadline() > now);
         if self.contexts.len() >= CAPACITY {
             return Err(Error::Capacity);
         }
@@ -184,7 +185,10 @@ impl ContextRegistry {
 
     pub(in crate::engine) fn expire_executions(&mut self, now: f64) -> Vec<Sealed> {
         let mut sealed = Vec::new();
-        for execution in self.executions.roots.values() {
+        // Deterministic notice order across executions expiring together.
+        let mut roots = self.executions.roots.iter().collect::<Vec<_>>();
+        roots.sort_unstable_by_key(|(identity, _)| **identity);
+        for (_, execution) in roots {
             sealed.extend(self.executions.groups.expire(*execution, now));
         }
         let groups = &self.executions.groups;
@@ -210,7 +214,7 @@ impl ContextRegistry {
             .map(|owner| owner.completion_root.clone())
     }
 
-    pub(in crate::engine) fn forget_observer(&mut self, command: CommandId) {
+    pub(super) fn forget_observer(&mut self, command: CommandId) {
         self.executions.observers.remove(&command);
     }
 }

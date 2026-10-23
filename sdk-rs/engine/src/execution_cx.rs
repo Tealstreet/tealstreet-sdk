@@ -43,6 +43,9 @@ impl<P> Cx<'_, P> {
         window: Window,
         key: &str,
     ) -> Result<ExecutionHandle, Error> {
+        if self.io.http_delivery.is_some() {
+            return Err(Error::Revoked);
+        }
         if !self.io.next_id.available(1) {
             return Err(Error::Capacity);
         }
@@ -63,6 +66,10 @@ impl<P> Cx<'_, P> {
         root: &Context,
         key: &str,
     ) -> Result<Joined, Error> {
+        if self.io.http_delivery.is_some() {
+            return Err(Error::Revoked);
+        }
+        self.sweep_executions();
         let joined = self
             .io
             .request_contexts
@@ -100,6 +107,8 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Revoked);
         }
+        // Owners already past their deadline time out before any projection.
+        self.sweep_executions();
         let sealed = self
             .io
             .request_contexts
@@ -108,12 +117,22 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
-    /// Seal every live observer with one error, inside or outside a delivery.
+    /// Seal every live observer with one error, outside any delivery or in
+    /// one of this execution's own deliveries.
     pub fn abort_execution(
         &mut self,
         execution: &ExecutionHandle,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        if self
+            .io
+            .http_delivery
+            .as_ref()
+            .is_some_and(|delivery| delivery.context.owner() != execution.0.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        self.sweep_executions();
         let error = error.into();
         let sealed = self
             .io
@@ -142,15 +161,16 @@ impl<P> Cx<'_, P> {
 
     fn finish_sealed(&mut self, sealed: Vec<Sealed>) {
         for seal in sealed {
-            match self.io.request_contexts.observer_authority(&seal) {
-                Some(root) => {
-                    let finished =
-                        self.finish_command_as(seal.command, seal.result, Some(&root), true);
-                    debug_assert!(finished.is_ok(), "observer seal {finished:?}");
-                }
-                None => self.io.request_contexts.forget_observer(seal.command),
-            }
+            // Entry-owned observer roots are retained until this exact seal.
+            let root = self
+                .io
+                .request_contexts
+                .observer_authority(&seal)
+                .expect("retained observer root");
+            let finished = self.finish_command_as(seal.command, seal.result, Some(&root), true);
+            assert!(finished.is_ok(), "observer seal {finished:?}");
         }
+        self.io.revoke_unsent_execution_legs();
         self.io.rearm_execution_timer();
     }
 

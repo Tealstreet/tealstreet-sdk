@@ -2904,6 +2904,8 @@ impl<V: Venue> Engine<V> {
         self.assert_live();
         self.io.dispatch_now = now;
         self.io.http_responses.prune(now);
+        // Expired observers detach before any delivery can project to them.
+        self.sweep_executions(now);
         if self.expire_http_timer(now, &event) {
             self.sweep_executions(now);
             if self.venue.cancel_needs_stored_order() {

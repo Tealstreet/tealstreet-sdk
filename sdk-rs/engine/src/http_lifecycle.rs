@@ -230,6 +230,27 @@ impl<P> Io<P> {
         }
     }
 
+    /// Unsent legs of an execution with no live owner get no send right.
+    pub(super) fn revoke_unsent_execution_legs(&mut self) {
+        let revoked = self
+            .managed_http
+            .iter()
+            .filter(|(_, managed)| {
+                matches!(
+                    managed.lifecycle.context().owner(),
+                    crate::request_context::Owner::Execution { .. }
+                ) && managed.lifecycle.release().is_none()
+                    && !self
+                        .request_contexts
+                        .execution_live(managed.lifecycle.context())
+            })
+            .map(|(request, _)| *request)
+            .collect::<Vec<_>>();
+        for request in revoked {
+            self.discard_managed(request);
+        }
+    }
+
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
@@ -462,6 +483,7 @@ impl<V: Venue> Engine<V> {
         }
         self.io.request_contexts.exit_delivery(&delivery);
         self.finish_event_scope(now);
+        self.sweep_executions(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }

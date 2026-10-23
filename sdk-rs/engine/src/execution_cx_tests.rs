@@ -351,3 +351,83 @@ fn an_execution_with_no_live_observer_never_releases_its_leg() {
     }
     assert!(run.done().is_empty());
 }
+
+#[test]
+fn a_member_cannot_issue_its_own_physical_request() {
+    let mut run = Run::new(GroupProbe::default());
+    run.handle(1., fetch(1));
+    let root = run.engine.venue().roots[&1].clone();
+    let mut cx = Cx {
+        now: 2.,
+        store: &mut run.engine.store,
+        io: &mut run.engine.io,
+    };
+    assert_eq!(
+        cx.http_leg_context(&root, read_policy(500)),
+        Err(crate::request_context::Error::Revoked)
+    );
+    assert_eq!(
+        cx.http_context(Scope::Command(1), read_policy(500)),
+        Err(crate::request_context::Error::Revoked)
+    );
+}
+
+#[test]
+fn a_response_after_an_observer_deadline_times_it_out_before_projection() {
+    let mut run = Run::new(GroupProbe {
+        complete: true,
+        timeouts: HashMap::from([(2, 100)]),
+        ..Default::default()
+    });
+    run.handle(1., fetch(1));
+    run.handle(2., fetch(2));
+    let request = run.release(3.);
+    // The host has not delivered the execution timer yet.
+    run.respond(150., request);
+    assert_eq!(run.failed(), [(2, Some(ErrorKind::Timeout))]);
+    assert_eq!(run.done(), [(1, "\"k1\"".to_owned())]);
+}
+
+#[test]
+fn abort_before_release_cancels_the_unsent_leg_immediately() {
+    let mut run = Run::new(GroupProbe::default());
+    run.handle(1., fetch(1));
+    let execution = run.engine.venue().execution.clone().unwrap();
+    let mut cx = Cx {
+        now: 2.,
+        store: &mut run.engine.store,
+        io: &mut run.engine.io,
+    };
+    cx.abort_execution(&execution, VenueError::new("stop"))
+        .unwrap();
+    assert!(run.engine.io.managed_http.is_empty());
+    run.actions.extend(run.engine.drain_actions());
+    assert!(run.actions.iter().any(|action| matches!(
+        action,
+        Action::ManagedHttp(action) if matches!(**action, HttpAction::Cancel { .. })
+    )));
+    assert_eq!(run.failed(), [(1, None)]);
+}
+
+#[test]
+fn a_detached_founder_leaves_the_shared_request_to_the_joiner() {
+    let mut run = Run::new(GroupProbe {
+        complete: true,
+        ..Default::default()
+    });
+    run.handle(1., fetch(1));
+    run.handle(2., fetch(2));
+    let root = run.engine.venue().roots[&1].clone();
+    let mut cx = Cx {
+        now: 3.,
+        store: &mut run.engine.store,
+        io: &mut run.engine.io,
+    };
+    cx.detach_execution_observer(&root, VenueError::new("cancelled"))
+        .unwrap();
+    assert_eq!(run.engine.io.managed_http.len(), 1);
+    let request = run.release(4.);
+    run.respond(5., request);
+    assert_eq!(run.done(), [(2, "\"k2\"".to_owned())]);
+    assert_eq!(run.engine.venue().publications, 1);
+}
