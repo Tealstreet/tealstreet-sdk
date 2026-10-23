@@ -632,6 +632,41 @@ impl<P> Cx<'_, P> {
         self.seal_plan(plan, Some(result), None)
     }
 
+    /// Complete a Read from the current validated DATA call, retiring only
+    /// unissued remainder. Call before `finish_plan_call`; another selected
+    /// call, write plan, failed delivery or expired authority cannot use this.
+    /// This grants no cache or Store publication eligibility.
+    pub fn done_read_plan_after_data(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        result: String,
+    ) -> Result<(), Error> {
+        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Read {
+            return Err(Error::Invalid);
+        }
+        self.validate_plan_delivery(plan, context)?;
+        let index = body.schedule.ordinal(slot)?;
+        if !body.entries[index]
+            .call
+            .as_ref()
+            .is_some_and(|call| call.context == *context)
+        {
+            return Err(Error::Revoked);
+        }
+        if body.entries.iter().enumerate().any(|(other, entry)| {
+            other != index && (entry.call.is_some() || entry.credit == Credit::Issued)
+        }) {
+            return Err(Error::State);
+        }
+        // All recoverable refusals precede settlement. The existing DATA
+        // settlement records exact handoff custody for the terminal operation.
+        self.finish_plan_call(plan, slot, context)?;
+        self.seal_plan(plan, Some(result), None)
+    }
+
     /// Failure-only retirement; expired authority never creates fresh sends.
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
         self.seal_plan(plan, None, Some(error.into()))

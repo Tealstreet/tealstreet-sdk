@@ -4918,3 +4918,10 @@ A cancel deferred behind a Plan is processed when the placement owner seals,
 including root expiry and readiness preparation refusal. It does not require an
 unrelated later event to resume or receive its typed terminal result. Existing
 uncertainty fences still decide whether that cancel can run.
+
+A Read Plan may return its native current-settings fallback after the first
+validated response without issuing a remaining declared read. The engine checks
+the current DATA call and retires only unissued work; this cannot complete a
+write or abandon another selected call. The original deadline and native cache
+publication rules stay in force. NX receives the native result once and must not
+treat successful local fallback as proof that cache or Store state was refreshed.
