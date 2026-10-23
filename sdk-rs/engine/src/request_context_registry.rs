@@ -35,6 +35,10 @@ mod read_delivery_tests;
 #[path = "execution_registry.rs"]
 mod execution;
 
+#[cfg(test)]
+#[path = "request_context_background_delivery_tests.rs"]
+mod background_delivery_tests;
+
 struct CommandOwner {
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
@@ -1138,6 +1142,29 @@ impl<P> Cx<'_, P> {
             .commands
             .get(&id)
             .is_none_or(|owner| owner.context_root() != Some(root))
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
+    /// Validate a Background Read in this exact managed HTTP callback. Publish
+    /// synchronously after validation, before retiring the Context. Native
+    /// response validity and publication freshness remain separate requirements.
+    /// Failure callbacks also carry delivery identity, but prove no response data.
+    /// This grants no send, retry, session or command completion authority.
+    pub fn validate_background_read_http_delivery(&self, context: &Context) -> Result<(), Error> {
+        self.validate_http_context(context)?;
+        if context.operation() != Operation::Read
+            || !matches!(context.owner(), Owner::Background { .. })
+        {
+            return Err(Error::Invalid);
+        }
+        if self
+            .io
+            .http_delivery
+            .as_ref()
+            .is_none_or(|delivery| delivery.context != *context)
         {
             return Err(Error::Revoked);
         }

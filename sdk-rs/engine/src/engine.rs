@@ -1482,6 +1482,10 @@ struct Io<P> {
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
+    /// Trusted-construction refs per slot, used only for capability admission.
+    identities: crate::signing::Identities,
+    /// Algorithms a host-fulfilled (Action::Sign) signer declared at install.
+    host_algorithms: Option<Vec<crate::signing::Algorithm>>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
     streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
@@ -1512,13 +1516,17 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
     #[cfg(feature = "managed-sockets")]
-    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal>,
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal<P>>,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_bytes: usize,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_next: u64,
     #[cfg(feature = "managed-sockets")]
     socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuations: std::collections::VecDeque<managed_sockets::Continuation<P>>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuation_bytes: usize,
 }
 
 impl<P> Default for Io<P> {
@@ -1561,6 +1569,8 @@ impl<P> Default for Io<P> {
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
+            identities: Default::default(),
+            host_algorithms: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
             streams: HashMap::new(),
@@ -1595,6 +1605,10 @@ impl<P> Default for Io<P> {
             socket_proposal_next: 0,
             #[cfg(feature = "managed-sockets")]
             socket_after: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuations: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuation_bytes: 0,
         }
     }
 }
@@ -1688,6 +1702,47 @@ impl<P> Cx<'_, P> {
     fn managed_send_allowed(&self, _socket: SocketId) -> bool {
         true
     }
+    /// Admission check for a command that releases several signed requests:
+    /// every need must be supported before the first release, so a refusal
+    /// is a whole-command NotSent rather than a partial effect.
+    pub fn can_sign(
+        &self,
+        slot: CredentialSlot,
+        needs: &[crate::signing::Need],
+    ) -> Result<(), crate::signing::SignError> {
+        use crate::signing::{Capability, KeyUse, SignError};
+        let identity = match slot {
+            CredentialSlot::Primary => self.io.identities.primary.as_ref(),
+            CredentialSlot::Secondary => self.io.identities.secondary.as_ref(),
+        }
+        .ok_or(SignError::InvalidRequest)?;
+        // Resolve every ref first, so a malformed command is InvalidRequest
+        // regardless of the order of its needs.
+        let keys = needs
+            .iter()
+            .map(|need| match need.key {
+                KeyUse::Signing => Some(&identity.signing),
+                KeyUse::Extra(extra) => identity.extra.get(&extra),
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or(SignError::InvalidRequest)?;
+        for (need, key) in needs.iter().zip(keys) {
+            let capability = match (&self.io.signer, &self.io.host_algorithms) {
+                (Some(signer), _) => signer.can_sign(key, need.algorithm),
+                (None, Some(declared)) if declared.contains(&need.algorithm) => {
+                    Capability::Supported
+                }
+                (None, Some(_)) => Capability::Unsupported,
+                // No Rust provider means the host fulfils Action::Sign; undeclared is unknown.
+                (None, None) => Capability::Unknown,
+            };
+            if capability != Capability::Supported {
+                return Err(SignError::Unsupported);
+            }
+        }
+        Ok(())
+    }
+
     /// Calibrated venue UTC for outbound timestamps, absolute expiry and
     /// time-based nonces. Timers, deadlines and emitted data retain `self.now`.
     pub fn protocol_now(&self) -> f64 {
@@ -2643,6 +2698,15 @@ pub trait Venue {
         Err(crate::socket_lifecycle::SocketError::NotPermitted)
     }
     #[cfg(feature = "managed-sockets")]
+    fn on_socket_interests_released(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _epoch: crate::socket_lifecycle::Epoch,
+        _pending: Self::Pending,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Ok(())
+    }
+    #[cfg(feature = "managed-sockets")]
     fn encode_socket_interests(
         &self,
         _store: &Store,
@@ -2872,6 +2936,38 @@ impl<V: Venue> Engine<V> {
     }
     pub fn signer(&self) -> Option<crate::signing::Provider> {
         self.io.signer.clone()
+    }
+
+    /// Trusted construction registers the same refs the venue holds, so
+    /// command admission can resolve a slot without trusting the venue's claim.
+    pub fn set_identities(
+        &mut self,
+        identities: crate::signing::Identities,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(
+                VenueError::new("Identities must be configured before startup")
+                    .kind(ErrorKind::InvalidInput),
+            );
+        }
+        self.io.identities = identities;
+        Ok(())
+    }
+    pub fn identities(&self) -> &crate::signing::Identities {
+        &self.io.identities
+    }
+
+    /// A host signer fulfilling Action::Sign declares what it can sign; undeclared is unknown.
+    pub fn set_host_algorithms(
+        &mut self,
+        algorithms: Option<Vec<crate::signing::Algorithm>>,
+    ) -> Result<(), VenueError> {
+        if self.started {
+            return Err(VenueError::new("Signer must be configured before startup")
+                .kind(ErrorKind::InvalidInput));
+        }
+        self.io.host_algorithms = algorithms;
+        Ok(())
     }
 
     /// Delegated REST-only intent does not disable account reads or writes.
@@ -4499,6 +4595,11 @@ impl<V: Venue> Engine<V> {
         self.flush_http_owner_retirements();
         self.assert_live();
         self.io.assert_actions_safe();
+        #[cfg(feature = "managed-sockets")]
+        if !self.io.socket_continuations.is_empty() {
+            self.arm_socket_continuations(self.io.dispatch_now);
+            self.io.assert_actions_safe();
+        }
         self.io.actions.drain(..)
     }
 
