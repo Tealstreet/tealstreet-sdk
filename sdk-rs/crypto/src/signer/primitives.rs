@@ -70,21 +70,34 @@ pub(super) fn secp256k1_digest(key: &[u8], digest: &[u8]) -> Result<Vec<u8>, Sig
     }
 }
 
-/// 32-byte big-endian non-zero Stark key; 32-byte big-endian field digest;
+/// Stark curve order n; keys must satisfy 1 <= key < n, as in starknet.js.
+#[cfg(feature = "stark")]
+const STARK_ORDER: [u8; 32] = [
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xb7, 0x81, 0x12, 0x6d, 0xca, 0xe7, 0xb2, 0x32, 0x1e, 0x66, 0xa2, 0x41, 0xad, 0xc6, 0x4d, 0x2f,
+];
+
+/// 32-byte big-endian Stark key in [1, n); 32-byte big-endian field digest;
 /// big-endian r || s. Deterministic RFC 6979, matching starknet.js.
 pub(super) fn stark_digest(key: &[u8], digest: &[u8]) -> Result<Vec<u8>, SignError> {
     #[cfg(feature = "stark")]
     {
         use starknet_crypto::Felt;
+        // The byte copy is wiped; starknet-crypto's Felt type cannot be.
         let felt = |bytes: &[u8]| -> Result<Felt, SignError> {
-            let bytes: [u8; 32] = bytes.try_into().map_err(|_| SignError::InvalidRequest)?;
+            let bytes = zeroize::Zeroizing::new(
+                <[u8; 32]>::try_from(bytes).map_err(|_| SignError::InvalidRequest)?,
+            );
             // Reject values at or above the field modulus instead of reducing them.
             let felt = Felt::from_bytes_be(&bytes);
-            if felt.to_bytes_be() != bytes {
+            if felt.to_bytes_be() != *bytes {
                 return Err(SignError::InvalidRequest);
             }
             Ok(felt)
         };
+        if key >= &STARK_ORDER[..] {
+            return Err(SignError::InvalidRequest);
+        }
         let (r, s) = crate::starknet::sign(&felt(digest)?, &felt(key)?)
             .map_err(|_| SignError::InvalidRequest)?;
         let mut output = Vec::with_capacity(64);
@@ -166,6 +179,20 @@ mod tests {
             ))
         );
         assert_eq!(es256(&der[..20], b"sample"), Err(SignError::InvalidRequest));
+        // The same key in a PKCS8 envelope takes the first import path.
+        let mut pkcs8 = vec![
+            0x30, 0x4d, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d,
+            0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x04, 0x33,
+        ];
+        pkcs8.extend(&der);
+        assert!(
+            p256::SecretKey::from_sec1_der(&pkcs8).is_err(),
+            "PKCS8 path exercised"
+        );
+        assert_eq!(
+            es256(&pkcs8, b"sample").unwrap(),
+            es256(&der, b"sample").unwrap()
+        );
     }
 
     #[cfg(feature = "secp256k1")]
@@ -206,6 +233,10 @@ mod tests {
             assert_eq!(stark_digest(&key, &digest).unwrap(), expected);
         }
         let one = word("0x1");
+        assert_eq!(
+            stark_digest(&STARK_ORDER, &one),
+            Err(SignError::InvalidRequest)
+        );
         assert_eq!(
             stark_digest(&[0xff; 32], &one),
             Err(SignError::InvalidRequest)
