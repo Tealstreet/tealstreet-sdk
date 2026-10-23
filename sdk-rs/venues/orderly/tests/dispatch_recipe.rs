@@ -138,8 +138,13 @@ fn dispatch_recipe_headers_equal_the_legacy_signer_for_every_method() {
                 *method,
                 (*path).to_owned(),
                 body.map(str::to_owned),
-                Box::new(sign::Http::new(identity.clone(), ACCOUNT, *method, path))
-                    as Box<dyn SignStep>,
+                Box::new(sign::Http::new(
+                    identity.clone(),
+                    ACCOUNT,
+                    *method,
+                    REST,
+                    path,
+                )) as Box<dyn SignStep>,
             )
         })
         .collect();
@@ -174,17 +179,31 @@ fn dispatch_recipe_headers_equal_the_legacy_signer_for_every_method() {
 #[test]
 fn a_recipe_for_a_different_request_is_refused_before_any_http() {
     let (_, identity) = provider();
-    let released = run(vec![(
-        Method::Post,
-        "/v1/order".into(),
-        Some("{}".into()),
-        Box::new(sign::Http::new(
-            identity,
-            ACCOUNT,
+    // Different route, another host, and a recipe naming only a suffix of the
+    // real path: none may be signed for the request that would go out.
+    for (origin, path) in [
+        (REST, "/v1/withdraw"),
+        ("https://evil.example", "/v1/order"),
+        (REST, "/order"),
+        ("https://api.orderly.org/v1", "/order"),
+    ] {
+        let released = run(vec![(
             Method::Post,
-            "/v1/withdraw",
-        )),
-    )]);
-    assert!(released.is_empty());
-    assert_eq!(FAILURES.with(|failures| failures.borrow().len()), 1);
+            "/v1/order".into(),
+            Some("{}".into()),
+            Box::new(sign::Http::new(
+                identity.clone(),
+                ACCOUNT,
+                Method::Post,
+                origin,
+                path,
+            )),
+        )]);
+        assert!(released.is_empty(), "{origin}{path}");
+        assert_eq!(
+            FAILURES.with(|failures| failures.borrow().len()),
+            1,
+            "{origin}{path}"
+        );
+    }
 }

@@ -104,11 +104,14 @@ fn headers(
 
 /// Dispatch recipe for one private Orderly REST request: the provider presents
 /// the `ed25519:` public key and signs the exact textsign bytes at release.
-/// `path` includes the query; the body is read from the outbound request.
+/// `origin` is the REST base (scheme://host, no path) and `path` includes the
+/// query; the outbound URL must be exactly `origin + path`. The body is read
+/// from the outbound request.
 pub struct Http {
     identity: safe_cex_engine::signing::Identity,
     account: String,
     method: Method,
+    origin: String,
     path: String,
     prepared: Option<(String, String)>,
 }
@@ -117,12 +120,14 @@ impl Http {
         identity: safe_cex_engine::signing::Identity,
         account: &str,
         method: Method,
+        origin: &str,
         path: &str,
     ) -> Self {
         Self {
             identity,
             account: account.into(),
             method,
+            origin: origin.into(),
             path: path.into(),
             prepared: None,
         }
@@ -141,7 +146,17 @@ impl safe_cex_engine::SignStep for Http {
             return Err(SignError::InvalidRequest);
         };
         // The outbound must be exactly the request this recipe canonicalises.
-        if http.method != self.method || !http.url.ends_with(&self.path) {
+        // The origin is scheme://host only, so the signed path is the real
+        // URL path from its root and the split cannot be shifted.
+        let bare_origin = self
+            .origin
+            .split_once("://")
+            .is_some_and(|(_, host)| !host.is_empty() && !host.contains(['/', '?', '#']));
+        if http.method != self.method
+            || !bare_origin
+            || !self.path.starts_with('/')
+            || http.url.strip_prefix(&self.origin) != Some(self.path.as_str())
+        {
             return Err(SignError::InvalidRequest);
         }
         let stamp = dispatch.stamp_ms();
