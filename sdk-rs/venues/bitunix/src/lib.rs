@@ -5,7 +5,7 @@ mod history;
 mod recovery;
 #[cfg(test)]
 mod secondary_tests;
-mod sign;
+pub mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
