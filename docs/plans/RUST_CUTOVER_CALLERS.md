@@ -5756,3 +5756,20 @@ Caller-visible changes:
   empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
   Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
   caller migration.
+
+## Backpack transitional dual custody (remove before master)
+
+The Backpack registry arm installs a provider copy of the configured API key
+and Ed25519 seed, and passes its identity to the venue for managed trading.
+Engine options still hold the raw key and seed, but only for the unadopted
+account-read and private-WS paths ([RUST_BACKPACK_SIGNER_ADMISSION.md](RUST_BACKPACK_SIGNER_ADMISSION.md),
+option B, approved by claude-ddi2il).
+
+- A malformed or non-32-byte base64 seed is now refused at construction, typed
+  invalid input. It was previously a CONFIG_INVALID notice at account start.
+- TS construction is unchanged: `dispatchSigning` is off for backpack.
+- External signers and injected refs are still refused for backpack.
+- This must be removed before master. It ends when account reads, private WS
+  auth and repair adopt the provider (codex-hcmq3f). The raw fields are then
+  dropped from venue options.
+

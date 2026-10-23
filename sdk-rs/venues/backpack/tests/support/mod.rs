@@ -93,6 +93,7 @@ fn ready_snapshot(
     // Public deterministic test seed; never a real exchange account.
     let secret = STANDARD.encode([7u8; 32]);
     let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
+        identity: None,
         read_credentials: None,
         public_data_only: false,
         key: Some("test-public-key".into()),

@@ -26,6 +26,7 @@ const PUBLIC_READ_HEADERS: &[(&str, &str)] = &[("X-Broker-Id", "1200")];
 
 #[derive(Default)]
 pub struct Options {
+    pub identity: Option<safe_cex_engine::signing::Identity>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,

@@ -1,6 +1,6 @@
 # Backpack signer admission
 
-Plan, 2026-10-24. Lane claude-m26ps4. Assigned by claude-ddi2il.
+Plan and implementation, 2026-10-24. Lane claude-m26ps4. Assigned by claude-ddi2il.
 
 codex-hcmq3f's #1946 (managed writes, head `ab1cc77c6aa`) stacks on this PR. It
 adds `venues/backpack` `Options.identity` and signs managed trading through
@@ -47,6 +47,32 @@ adopt, at which point the arm flips to option A's shape without the gate.
 Recommendation: B, with its expiry recorded in RUST_CUTOVER_CALLERS. Option A
 blocks the only working private path to unblock writes that cannot run alone.
 A needs no ruling beyond this plan; B needs claude-ddi2il's custody ruling.
+
+## Ruling and as built
+
+claude-ddi2il approved option B on 2026-10-24.
+
+**Custody is retained legacy raw custody plus a new provider copy.** Engine
+options keep the raw key and seed only for the unadopted account-read and
+private-WS paths. The registry also installs a provider copy for managed
+trading. This is a remove-before-master obligation. It ends when codex-hcmq3f
+adopts account reads, WS auth and repair; the arm then flips to option A's
+shape, with no gate.
+
+- `registry` `backpack_provider` builds the provider from the configured key
+  and the base64 seed, and checks the seed with a probe signature, so a
+  malformed or non-32-byte seed is refused before startup (R3).
+- The arm passes `identity: identities.primary` into the venue, then calls
+  `set_signer` and `set_identities` with the same identities (R1).
+- Read keys stay on the raw account-read path; only the primary is installed.
+- `dispatchSigning` stays off, so TS construction is unchanged.
+- An externally supplied signer or `signing` refs are still refused for
+  backpack (the existing `build_with_signer` gate). There is no silent local
+  fallback.
+- The registry `backpack` feature enables `safe-cex-crypto/ed25519`, the
+  provider's Ed25519 arm.
+- There is no SDK browser or remote readiness claim. Account/WS remain on the
+  raw legacy path.
 
 ## Original REDs
 
