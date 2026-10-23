@@ -5135,6 +5135,56 @@ Repeated live command IDs retain the engine duplicate diagnostic without a
 second result or replacement request. The original candle owner can still finish.
 Subscription fallback polling retains its background owner and generation cleanup.
 
+## KuCoin Spot candle Read authority
+
+FetchCandles admits its original Public Read owner before interval preflight and
+uses prepared unsigned HTTP with the declared ordered public headers. Its
+20-second budget includes preparation. Exact physical delivery is checked before
+row staging and result publication; stale, unclaimed and expired responses cannot
+complete it. Unsupported interval preflight gains Unsupported/NotSent metadata.
+Initial admission refusal has the shared typed reason and no Read outcome;
+immediate HTTP-queue refusal retains NotSent.
+
+Preparation, transport and expiry failures retain their typed errors and the
+existing correlated error companion before rejection. Decoded malformed candle
+rows and unsupported preflight keep their companion-free failure timeline. The
+native query order, flooring/u64 casts, default500/cap1500, unknown-symbol HTTP,
+candle codec, duplicate timestamps, oversized results and ascending sorting are
+preserved. Private credentials, successful setting no-ops and capability policy
+retain their existing behavior.
+
+## MEXC initial plan-list credential refusal
+
+An initial Plan snapshot with an existing parsed native credential refusal now
+rejects startup with AuthInvalid, AuthExpired or AuthPermission, matching the
+initial position-mode read. Native venueCode and venueMessage are preserved,
+including complete error envelopes without a data list. A primary-key AuthInvalid rejection
+still deactivates; secondary-key refusal retains the existing non-deactivation
+policy. Startup publishes one terminal failure and cannot initialize orders or
+resume account polling, snapshot pages or asset refreshes through late callbacks.
+
+Transient failures, bare HTTP401/403 without a parsed native refusal, successful
+envelopes missing their list and refusals after initial orders loaded retain
+their existing retry behavior. No caller option or credential migration is
+required; callers awaiting startup receive the existing typed rejection.
+
+## Phemex unsigned candle command transport
+
+Phemex FetchCandles uses prepared managed HTTP when neither its constructed
+primary nor secondary credential container exists. Custom transports prepare,
+bind and synchronously claim that public request; no legacy send fallback is
+used in this branch. The original issued20-second Read deadline covers route
+waiting and released HTTP. Initial admission rejection is typed, exactly once
+and has no write outcome; released Network/Timeout failures declare the public
+read NotSent. Late or duplicate callbacks cannot finish a reused command ID,
+change account credentials or pause a later read.
+
+Credentialed public candles retain their existing native signed request path,
+including primary/secondary GET selection even with public_data_only. This
+partial change does not migrate signing or require credential transfer. Native
+host selection, symbol mapping/encoding, interval and limit/from/to rules,
+data.rows mapping, sorted results, errors and current rate-limit pause remain.
+
 ## WOO family WASM venue throughput
 
 Standalone WOO family builds compile the WOO venue crate at opt-level3. This
