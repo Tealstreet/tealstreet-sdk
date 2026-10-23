@@ -2391,3 +2391,28 @@ reads indefinitely. Each request remains bounded by its declared read policy,
 but the final write-plan root starts only when the native write steps are fixed.
 No arbitrary whole-preflight or 120-second product cap is added. A finite redo
 limit would change caller-visible liveness policy and needs a separate decision.
+
+## Shared ticker lookup CPU headroom
+
+A named WASM profile identifies indirect symbol comparisons in Store::ticker_index
+as a substantial public-data cost. The shared Store now uses the existing
+HashMap<Box<str>,u32> index representation for borrowed symbol lookup, rebuilding
+in input order and releasing obsolete keys/capacity on replacement. This applies
+to every venue using symbol lookup; WOO's cached-index WS reducer remains outside
+that hot path. No authority policy, codec, venue-specific shortcut or legacy-site
+exemption changes. Exact paired CI performance and family memory/size gates remain
+separate evidence from diagnostic profiles.
+
+## Draft socket lifecycle architecture adoption
+
+The shared Supervisor alone did not own current epochs, auth acceptance,
+subscription coverage or invalidation. The draft Engine socket lifecycle now
+owns those boundaries for OKX and rejects late ingress before health
+or native mutation. Review found and corrected inactive retry-stop ownership,
+unexpected-close accounting, per-event health reset, silent callback errors and
+cleanup loss on queue exhaustion. Safe-integer physical IDs use the landed shared allocator; full family adoption and deployed cutover
+proof remain open. No allocator change is included in this socket draft.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.

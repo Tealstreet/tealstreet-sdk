@@ -949,3 +949,32 @@ before the two-hash refresh, and zero errors/eleven known afterward; the public
 report remains186 known. Every diagnostic path/rationale and all other manifest
 entries are byte-preserved; the original reports remain strict FAIL. No replay,
 local release build, new declaration, threshold or comparison-policy change.
+
+## Shared ticker index compatibility and measurement
+
+Tests and generic benchmark were committed before the representation change. All
+29 Store controls pass before and after, including duplicate-winner dirty masks,
+append-only recovery and repeated large/small/empty replacements releasing obsolete
+capacity. The unchanged-source nine-pair KuCoin Spot gate miss supplies performance
+RED; functional compatibility is intentionally GREEN on the baseline.
+
+The same965-symbol sequence and2,500,000 native lookups retain checksum1236723300:
+99.489 to23.099ns per lookup in elapsed wall time. Native index-only allocation
+measurement reports3860 to59603 retained bytes and7720 to119206 replacement-peak
+bytes; both release all index capacity at empty replacement. This is a measured
+memory tradeoff, not whole-venue or WASM allocation accounting. Full CI checks
+all venue memory and WASM size budgets, including Aster, and paired CPU medians.
+
+## Draft Engine socket lifecycle references
+
+OKX adopt one Engine registry/driver for epoch admission, typed auth,
+shared Supervisor deadlines/backoff, transactional complete interests, replay,
+retirement and required Store invalidation. Native codecs retain venue payloads
+and role policies. Original runtime controls pin retired open/close rejection
+and expiry-before-late-pong; shared controls cover bounded queues, health,
+retry revocation, signed-output retirement and transactional same-interest book
+repair. This is a OKX-only preparation, using the landed physical-ID seam; final CI evidence is separate; other families remain open.
+
+The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
+temporary socket inventory records that deferred family. No source or gate
+claim is inherited from the historical two-family experiment.
