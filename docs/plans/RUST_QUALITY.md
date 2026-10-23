@@ -520,3 +520,17 @@ bounded duplicate replacement after eviction, two/four candidate requests,
 signature reset, concurrent owners and persistent live cache. Native endpoint
 selection/upsert facts remain local; no new owner/pager/marker policy or shared
 signing-provenance implementation is copied into the venue.
+
+
+## Orderly shared history controls
+
+The original seventeen integration controls establish the native baseline.
+Failing-first controls pin typed first failures, accepted-page continuation
+recovery and regular-to-algo failure recovery. The corrected controls assert
+failed-prefix exclusion, filtered-only refusal, strict native metadata/progress
+checks, the total fifty-page budget with a terminal fiftieth page, separate stage
+identity/limits, concurrent command attribution and strict signing refusal.
+Existing funding spacing and delayed-timer, nested algo, canonical ID, native
+identity, empty/malformed page and final-format tests remain in the focused
+Orderly suite. Two old whole-read continuation/algo-error assertions are explicitly
+superseded by accepted-only partial output plus the shared incomplete warning.

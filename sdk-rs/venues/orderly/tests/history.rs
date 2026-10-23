@@ -148,7 +148,7 @@ fn order_specific_fills_use_documented_endpoint_and_exact_client_filters() {
 }
 
 #[test]
-fn paged_fills_deduplicate_overlaps_and_reject_failed_continuations() {
+fn paged_fills_deduplicate_overlaps_and_warn_on_failed_continuations() {
     let (mut e, _) = ready();
     actions(&mut e);
     ask(&mut e, fills(None, None, 100));
@@ -175,10 +175,11 @@ fn paged_fills_deduplicate_overlaps_and_reject_failed_continuations() {
         503,
         r#"{"success":false,"message":"busy"}"#,
     );
-    assert!(
-        result(&mut e).is_err(),
-        "never return first-page success after failure"
-    );
+    // Supersedes the old whole-read refusal: only the validated first page is
+    // recoverable, and the shared owner marks that result incomplete.
+    let rows: Vec<FillResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
 }
 
 #[test]
@@ -508,7 +509,7 @@ fn pagination_has_a_hard_fifty_page_budget_and_checks_metadata() {
 }
 
 #[test]
-fn oversized_page_and_failed_algo_history_never_return_partial_results() {
+fn oversized_page_rejects_and_failed_algo_history_recovers_validated_regular_orders() {
     let (mut e, _) = ready();
     actions(&mut e);
     ask(
@@ -547,7 +548,9 @@ fn oversized_page_and_failed_algo_history_never_return_partial_results() {
         401,
         r#"{"success":false,"message":"unauthorized"}"#,
     );
-    assert!(result(&mut e).is_err());
+    let rows: Vec<OrderResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
 }
 
 #[test]
@@ -754,7 +757,7 @@ fn owned_first_failures_are_typed_and_filtered_rows_cannot_authorize_partial() {
                     2500.0,
                     Event::HttpFailed {
                         request: r.id,
-                        error: "offline".into(),
+                        error: "offline",
                     },
                 ),
             }
@@ -780,7 +783,7 @@ fn owned_later_failures_return_only_accepted_pages_with_one_warning() {
                 2500.0,
                 Event::HttpFailed {
                     request: r.id,
-                    error: "offline".into(),
+                    error: "offline",
                 },
             ),
             _ => {
@@ -882,4 +885,77 @@ fn owned_fifty_page_budget_spans_regular_and_algo_but_terminal_fiftieth_succeeds
             assert_eq!(rows.len(), 50);
         }
     }
+}
+
+#[test]
+fn owned_stage_identity_and_limits_keep_algo_rows_in_final_sort() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    ask(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    );
+    let r = request(&mut e);
+    // A native total beyond the result limit must not add regular-page I/O.
+    reply(&mut e, &r, 200, &page(HIST_ORDER, 2, 1));
+    let r = request(&mut e);
+    assert!(r.url.contains("/algo/orders") && r.url.contains("page=1"));
+    let algo = HIST_ORDER
+        .replace("order_id", "algo_order_id")
+        .replace("\"type\":\"LIMIT\"", "\"algo_type\":\"LIMIT\"")
+        .replace("\"created_time\":2000", "\"created_time\":2100");
+    // Same native ID in another endpoint is a separate identity.
+    reply(&mut e, &r, 200, &page(&algo, 1, 1));
+    let rows: Vec<OrderResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, false).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].created_time, 2100.0);
+}
+
+#[test]
+fn owned_concurrent_reads_do_not_share_rows_or_markers() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    ask(&mut e, fills(None, None, 100));
+    let first = request(&mut e);
+    ask_with_id(&mut e, 78, fills(None, None, 100));
+    let other = request(&mut e);
+    reply(&mut e, &first, 200, &page(FILL, 2, 1));
+    let next = request(&mut e);
+    reply(&mut e, &other, 200, &page("", 0, 1));
+    assert_eq!(owned_terminal(&mut e, 78, false).unwrap(), "[]");
+    reply(&mut e, &next, 503, r#"{"success":false,"message":"busy"}"#);
+    let rows: Vec<FillResult> =
+        serde_json::from_str(&owned_terminal(&mut e, 77, true).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn owned_signing_refusal_after_accepted_page_is_strict() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    ask(&mut e, fills(None, None, 100));
+    let r = request(&mut e);
+    let body = page(FILL, 2, 1);
+    // A bad host clock makes native header preparation refuse the continuation.
+    // It must never turn accepted output into a partial signing success.
+    e.handle(
+        -1.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
+        },
+    );
+    let error = owned_terminal(&mut e, 77, false).unwrap_err();
+    assert!(error.message.contains("invalid clock"));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
 }

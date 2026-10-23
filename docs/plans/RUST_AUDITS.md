@@ -1998,3 +1998,16 @@ nonempty paths retain native/cache selection; bounded native upsert remains an
 endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+
+## Orderly accepted-page history ownership
+
+Orderly history adopts the existing engine CursorHistory owner without a new
+engine API or venue-local completion implementation. The single cursor walk
+retains the total fifty-page regular/algo budget; native metadata census and
+per-stage limit remain venue facts. Actual later read failures recover only
+accepted eligible output with the owned warning, while native proof and signing
+refusals remain strict. Failed streamed prefixes and filtered rows never authorize
+recovery. Request builders, signing, timers, account reducers and Store are
+unchanged. Exact request inventory shrinks from thirteen to nine entries by
+removing four numeric finalizers, with no additions or checker changes.

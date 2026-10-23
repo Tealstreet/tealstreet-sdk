@@ -2180,3 +2180,24 @@ WASM/full replay/size/timing sweep. Self-audit source and adversarial cases befo
 draft publication. Caller-visible changes carry their CALLERS section in this
 PR, with behavior wording only. #1783 and #1784 are final-proof dependencies;
 current queue and separate announced guard/merge rules remain in force.
+
+
+Orderly local implementation receipt: plan `0615cec06d9` precedes regression-only
+`b0f7a0fe62d`. Original production passes all seventeen existing controls; the
+new five controls give three assertion failures and two compatibility passes.
+The existing shared owner turns those three groups green. Eight owned-history
+controls now cover first/later HTTP, transport, malformed and row failures, strict
+proof refusals, stage failure/identity/limits, aggregate budget, concurrent owner
+attribution and signing refusal. Together with the existing cases all twenty-five
+history controls pass. Two former whole-read-failure assertions now explicitly
+require the accepted-only partial and warning contract.
+
+The source audit compares admission, funding scheduling, native request/signing
+builder and row mapping blocks byte-for-byte with the original base: all equal.
+The separate adversarial audit checks failed-page exclusion, filtered-only
+refusal, native proof strictness, no page-budget reset, terminal page fifty,
+independent concurrent commands, native stage identity and signing refusal.
+The exact inventory is a pure thirteen-to-nine prune, every other map and the
+checker remain identical. Strict Clippy/fmt, bans and inventory controls pass.
+Final draft evidence and later dependency integrations belong in the PR body;
+no local release WASM or replay performance run is used.
