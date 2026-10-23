@@ -212,3 +212,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Kucoin RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_KUCOIN_REQUEST_CONTEXT.md](RUST_KUCOIN_REQUEST_CONTEXT.md) |
 | Bitrue RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_BITRUE_REQUEST_CONTEXT.md](RUST_BITRUE_REQUEST_CONTEXT.md) |
 | Bitunix RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_BITUNIX_REQUEST_CONTEXT.md](RUST_BITUNIX_REQUEST_CONTEXT.md) |
+| Kraken futures and Spot RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_KRAKEN_REQUEST_CONTEXT.md](RUST_KRAKEN_REQUEST_CONTEXT.md) |
