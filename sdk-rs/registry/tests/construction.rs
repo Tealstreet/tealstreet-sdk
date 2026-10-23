@@ -74,7 +74,7 @@ fn secondary_read_credentials_need_a_key_and_secret() {
 #[test]
 fn passphrase_venues_refuse_private_accounts_without_one() {
     for (venues, message) in [
-        (&["weex"][..], "WEEX requires a passphrase"),
+        (&["weex"][..], "Invalid local signer setup"),
         (
             &["bitget", "bitgetusdc", "bitgetinverse"][..],
             "Bitget requires a passphrase",
@@ -465,7 +465,7 @@ fn sdk_public_mode_is_resolved_before_native_credential_validation() {
             "weex",
             r#"{"publicDataOnly":true,"key":"k","secret":"s","publicMode":{"requested":false}}"#
         ),
-        "WEEX requires a passphrase"
+        "Invalid local signer setup"
     );
 }
 

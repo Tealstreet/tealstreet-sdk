@@ -673,7 +673,7 @@ impl Venue for AsterDex {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
-            stp_controls: true,
+            stp_controls: self.version == Version::V3,
             isolated_book_subscriptions: true,
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             account: safe_cex_engine::AccountLookup::Query,

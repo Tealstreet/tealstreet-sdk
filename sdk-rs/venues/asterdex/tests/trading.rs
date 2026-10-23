@@ -1053,3 +1053,15 @@ fn trading_failures_carry_the_aster_code_kind_and_outcome() {
         );
     }
 }
+
+#[test]
+fn capability_profile_v1_does_not_advertise_stp() {
+    let h = Harness::new();
+    assert!(!h.engine.capabilities().stp_controls);
+}
+
+#[test]
+fn capability_profile_v3_keeps_stp_advertised() {
+    let h = Harness::options(v3_options());
+    assert!(h.engine.capabilities().stp_controls);
+}
