@@ -415,8 +415,23 @@ Session waiter-drain control passes independently.
 The overseer moved #1896 to combo-5b and assigned the Session runtime guard to
 claude-55ao7t with codex-uufub4 review. The guard denies Session lifetime/drain
 operations only during retained-Preflight/Plan activation, with Error::State;
-session_wait returns its pending unchanged and checks exact activation ownership.
+session_wait returns its pending unchanged without parking it in that scope.
 Start, Session response/failure, socket and timer callbacks retain their normal
 Session authority. #1897's future session_scoped_context adopts the same guard
-in its own owner branch. Runtime Session source is still unchanged here; these
-controls are RED and the composition stays on hold until the reviewed fix.
+in its own owner branch.
+
+Owner-authored guard eb233c1c7f3 is now merged. A further genuine Plan-ready
+control at df486b0bc24 exposed the same drain-before-denial path through
+on_http_plan_ready; its native 1ms Plan wait and TimerFired reach that callback.
+Owner follow-up cfbec2c7c4c extends the single predicate to either readiness
+marker, leaving the seven call sites unchanged. It is merged without local
+runtime edits. Both markers refuse Session work before mutation; the active
+Plan's own leg and readiness APIs remain available.
+
+The three original Preflight assertions and the additional Plan-ready assertion
+now pass. The first failing Plan-ready case proved waiter drainage; the remaining
+six operations execute in the GREEN matrix, not as independently reproduced REDs.
+Recovery proves the preserved waiter and one Context terminal, without claiming
+a physical send. Focused checks also retain ordinary Session callbacks and
+positive own-Plan behavior. Core review and fresh exact-head CI remain required
+before freezing for combo-5b; this checkpoint grants no merge permission.

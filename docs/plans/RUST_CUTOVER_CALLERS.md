@@ -5966,3 +5966,10 @@ NX consumes that one terminal and keeps any prior uncertain effects for ordinary
 reconciliation. Ready custody cannot submit or retire another command's work.
 Root expiry and preparation refusal wake the successor in the same engine event;
 no unrelated feed event is needed. No host wire or signer capability is added.
+
+While either retained-Preflight readiness or Plan readiness owns the callback,
+Session creation, derived legs, retirement and waiter changes refuse with State
+before reserving IDs or consuming timers/continuations. Session-ready/failed
+drains return empty; session_wait returns its pending unchanged. Read-only
+session_live and the active Plan's own APIs remain available. Ordinary Session,
+socket, timer and startup callbacks retain their existing Session authority.
