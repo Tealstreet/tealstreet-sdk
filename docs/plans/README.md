@@ -199,3 +199,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Capability and compiled-feature conformance | Planned CI checker | When changing a capability, command decoder feature or shipped family | [RUST_CAPABILITY_CONFORMANCE.md](RUST_CAPABILITY_CONFORMANCE.md) |
 | Managed unsigned HTTP headers | Planned shared prerequisite | Before adapting a native signer with static public headers to managed preparation. | [RUST_UNSIGNED_HTTP_HEADERS.md](RUST_UNSIGNED_HTTP_HEADERS.md) |
 | Managed read response authority | Shared prerequisite | Before publishing paired-read responses or managed companion completion events. | [RUST_READ_RESPONSE_AUTHORITY.md](RUST_READ_RESPONSE_AUTHORITY.md) |
+| Bitrue RequestContext | Committed inventory/plan | Before migrating this venue’s REST or completion authority. | [RUST_BITRUE_REQUEST_CONTEXT.md](RUST_BITRUE_REQUEST_CONTEXT.md) |
