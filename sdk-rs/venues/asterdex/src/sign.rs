@@ -11,6 +11,9 @@ use safe_cex_engine::url;
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep, num};
 use serde::Deserialize;
 
+mod remote;
+pub use remote::REMOTE_RECIPES;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Version {
