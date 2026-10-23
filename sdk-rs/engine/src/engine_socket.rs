@@ -558,7 +558,7 @@ impl<V: Venue> Engine<V> {
                         store: &mut self.store,
                         io: &mut self.io,
                     };
-                    self.venue.on_message(&mut cx, socket, text);
+                    Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
                 }
             }
             Event::WsBinary { data, .. } => {

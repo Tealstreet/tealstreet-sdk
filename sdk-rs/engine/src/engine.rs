@@ -3034,6 +3034,18 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    // Managed and legacy text use the same native callback boundary.
+    #[cfg(feature = "managed-sockets")]
+    #[inline(never)]
+    fn deliver_socket_message(
+        venue: &mut V,
+        cx: &mut Cx<'_, V::Pending>,
+        socket: SocketId,
+        text: &str,
+    ) {
+        venue.on_message(cx, socket, text);
+    }
+
     fn handle_event(&mut self, now: f64, event: Event<'_>) {
         let request = match &event {
             Event::HttpResponse { request, .. }
@@ -3204,7 +3216,10 @@ impl<V: Venue> Engine<V> {
             }
             Event::WsMessage { socket, text } => {
                 cx.io.sockets.received(socket, now, &mut cx.io.health);
-                self.venue.on_message(&mut cx, socket, text)
+                #[cfg(feature = "managed-sockets")]
+                Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+                #[cfg(not(feature = "managed-sockets"))]
+                self.venue.on_message(&mut cx, socket, text);
             }
             Event::WsClosed { socket, code } => {
                 for timer in cx.io.signing.close_socket(socket) {

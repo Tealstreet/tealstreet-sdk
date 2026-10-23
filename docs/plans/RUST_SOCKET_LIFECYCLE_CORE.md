@@ -1342,3 +1342,14 @@ existing temporary managed-sockets boundary while deferring Bitunix adoption,
 a deeper redesign, or an explicitly decided Bitunix-specific objective. Do not
 change any threshold, profile or adoption gate without that decision. Same-runner
 WASM and fresh final CI/proof remain required before a performance-ready claim.
+
+Phase L preservation verification is complete: both independent plan and source
+reviews are CLEAR. Removing only the helper and its two substitutions recovers
+engine.rs and engine_socket.rs byte-for-byte from the rollback checkpoint. The
+lifecycle production prefix is exact verified J; all 46 lifecycle test names
+remain, with only two private representation assertions adapted. All 1,461
+four-crate native tests across 70 targets, strict all-feature and feature-off
+Clippy, formatting, bans and shrink-only ratchets pass. No callback guard,
+Context construction, health update, expiry/HTTP/fatal/event/drain boundary or
+native codec moved. This establishes preservation only. The last isolated
+measurement and emitted-code inspection decide whether the helper is useful.
