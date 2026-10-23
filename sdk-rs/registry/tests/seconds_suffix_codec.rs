@@ -80,7 +80,9 @@ impl Visit for Logins {
             .unwrap();
         engine.start(NOW);
         for step in 0..8 {
-            let out: Vec<_> = engine.drain_actions().collect();
+            // Managed reads (OKX account config) need the prepared release handshake.
+            let out =
+                safe_cex_engine::test_support::prepared_actions(&mut engine, NOW + f64::from(step));
             if out.is_empty() {
                 break;
             }
