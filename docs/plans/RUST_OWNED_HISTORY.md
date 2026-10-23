@@ -2171,7 +2171,8 @@ signing work, Store publication or native lookup is introduced by the query.
 Existing argument/admission behavior and all unrelated commands are unchanged.
 
 PublicTrades retains its exact existing refusal message but completes through
-Completion with ErrorKind::Unsupported and no added write outcome. It emits no
+Completion with ErrorKind::Unsupported and Outcome::NotSent, matching the
+existing pre-I/O refusal convention (no request was issued). It emits no
 result or incomplete marker. OrderByClientId retains the exact nondefinitive
 miss JSON (found:false, definitive:false), delivered through Completion in the
 stub branches with no unrelated history marker. Hyperliquid's existing earlier
@@ -2183,7 +2184,8 @@ CALLERS in the same PR must state: historical list payload remains [], but each
 unsupported fills/orders/income read now has one owned incomplete warning before
 completion; callers must correlate fields.command, gate coverage and avoid
 treating [] as authoritative absence. Public-trade errors now have Unsupported
-kind with unchanged text/no write outcome. Lookup shape and live Store/cache
+kind plus NotSent with unchanged text, denoting a pre-I/O refusal rather than
+a native rejection. Lookup shape and live Store/cache
 access stay separate. State behavior only (no draft/proof/merge status), and do
 not claim NX integration or closure. Native unsupported capabilities remain
 unsupported; no production-request success is inferred from a stub response.
@@ -2205,3 +2207,9 @@ fingerprint growth stops rather than adding a bootstrap. Independent plan review
 must be CLEAN before implementation; independent source/caller/map review before
 the draft. Corepack Yarn only, never bare/Volta yarn, npx or account-policy. No
 local release WASM/full replay/timing matrix. Keep #1796 CI watch active.
+
+Independent plan review of `7fa7280571c` is CLEAN before implementation. Adopt
+its two notes: match the existing Unsupported/NotSent convention for public
+read refusal; CALLERS must advise capability-gating unsupported polling and
+deduplicating user-facing alerts while preserving every command's coverage
+fact. Do not rate-limit or suppress coverage inside the engine owner.
