@@ -28,6 +28,11 @@ struct CommandOwner {
     mutation_declared: bool,
     pending: usize,
     deliveries: usize,
+    /// The logical command's intent, captured when its first context is
+    /// issued during command dispatch. `None`: issued outside dispatch.
+    intent: Option<crate::classify::Intent>,
+    /// Engine-validated narrowing for individual legs (see `http_write_leg_intent`).
+    leg_intents: Vec<(u64, crate::classify::Intent)>,
 }
 
 #[derive(Clone)]
@@ -48,6 +53,8 @@ pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
     contexts: HashMap<u64, Context>,
     commands: HashMap<CommandId, CommandOwner>,
+    /// The command being dispatched to the venue and its intent.
+    pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
 }
 
 impl ContextRegistry {
@@ -160,6 +167,11 @@ impl ContextRegistry {
                     mutation_declared: context.operation() == Operation::Mutation,
                     pending: 0,
                     deliveries: 0,
+                    intent: self
+                        .dispatch
+                        .filter(|(command, _)| *command == id)
+                        .map(|(_, intent)| intent),
+                    leg_intents: Vec::new(),
                 });
         }
         self.contexts.insert(identity, context.clone());
@@ -839,20 +851,21 @@ impl<P> Cx<'_, P> {
         native: Option<&crate::classify::Native<'_>>,
         message: impl Into<String>,
     ) -> Result<crate::classify::Fact, Error> {
-        self.current_write_delivery(context)?;
         let (status, headers) = self.io.http_write_reply.as_ref().ok_or(Error::State)?;
         let response = crate::Response {
             status: *status,
             headers,
             body: "",
         };
+        let delivery = self.current_write_delivery(context)?;
         Ok(crate::classify::fact(
             table,
-            self.write_intent(context),
+            self.write_intent(context)?,
             crate::classify::Released::Response(&response),
             native,
             message,
-        ))
+        )
+        .for_attempt(delivery.attempt.request))
     }
 
     /// Record the delivered write attempt's native answer. Refusals exist only
@@ -865,8 +878,24 @@ impl<P> Cx<'_, P> {
         reports: Option<RejectionReports>,
     ) -> Result<Option<ResendGrant>, Error> {
         let delivery = self.current_write_delivery(context)?;
+        if !fact.belongs_to(delivery.attempt.request) {
+            return Err(Error::Revoked);
+        }
         let resendable = fact.resendable();
-        let result = fact.into_result();
+        let result = match fact.into_result() {
+            // A placement acknowledgement must name what it placed.
+            WriteResult::Accepted { order_ids }
+                if order_ids.is_empty()
+                    && self.write_intent(context)? == crate::classify::Intent::Place =>
+            {
+                WriteResult::Failed(
+                    VenueError::new("Placement acknowledgement has no native order ID")
+                        .kind(crate::ErrorKind::Internal)
+                        .outcome(crate::Outcome::Unknown),
+                )
+            }
+            result => result,
+        };
         // Accepted facts carry no rejection reports.
         let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
         self.record_write(&delivery, result, reports)?;
@@ -933,21 +962,74 @@ impl<P> Cx<'_, P> {
             headers,
             body: "",
         };
-        let intent = self.write_intent(context);
+        let intent = self.write_intent(context)?;
         let result = crate::classify::batch(table, intent, &response, expected, items, message)?;
         let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
         self.record_write(&delivery, result.clone(), reports)?;
         Ok(result)
     }
 
-    /// Venue actions and background writes have no command intent; they
-    /// classify as placements, which no `Satisfied` row can match.
-    fn write_intent(&self, context: &Context) -> crate::classify::Intent {
-        match context.owner() {
-            Owner::Command { id, .. } => self.io.command_intents.get(&id).copied(),
-            _ => None,
+    /// The intent the engine recorded for this leg's logical command.
+    /// Background (session) writes classify as placements; a command owner
+    /// created outside dispatch has no trusted intent.
+    fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
+        let Owner::Command { id, generation } = context.owner() else {
+            return Ok(crate::classify::Intent::Place);
+        };
+        let owner = self
+            .io
+            .request_contexts
+            .commands
+            .get(&id)
+            .filter(|owner| owner.generation == generation)
+            .ok_or(Error::Revoked)?;
+        let leg = owner
+            .leg_intents
+            .iter()
+            .find(|(leg, _)| *leg == context.leg())
+            .map(|(_, intent)| *intent);
+        leg.or(owner.intent).ok_or(Error::State)
+    }
+
+    /// Narrow one leg's intent where the command implies it: an amend's
+    /// replacement placement is a Place, a placement's attached protection is
+    /// a Setting. Nothing ever becomes a Cancel.
+    pub fn http_write_leg_intent(
+        &mut self,
+        context: &Context,
+        intent: crate::classify::Intent,
+    ) -> Result<(), Error> {
+        use crate::classify::Intent;
+        self.io.request_contexts.validate(context, self.now)?;
+        let Owner::Command { id, generation } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        let owner = self
+            .io
+            .request_contexts
+            .commands
+            .get_mut(&id)
+            .filter(|owner| owner.generation == generation)
+            .ok_or(Error::Revoked)?;
+        if owner
+            .leg_intents
+            .iter()
+            .any(|(leg, _)| *leg == context.leg())
+        {
+            return Err(Error::Duplicate);
         }
-        .unwrap_or(crate::classify::Intent::Place)
+        let allowed = matches!(
+            (owner.intent, intent),
+            (Some(Intent::Amend), Intent::Place) | (Some(Intent::Place), Intent::Setting)
+        );
+        if !allowed || context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        if owner.leg_intents.len() >= CAPACITY {
+            return Err(Error::Capacity);
+        }
+        owner.leg_intents.push((context.leg(), intent));
+        Ok(())
     }
 
     /// A resend of a write refused with a `RefusedResend` verdict. The journal
@@ -1566,6 +1648,157 @@ mod write_tests {
     }
 
     #[test]
+    fn write_facts_are_bound_to_their_attempt_intent_and_placement_ids() {
+        use crate::classify::{self, CodeTable, Intent, Native, NativeCode, Verdict, WriteFact};
+        const REFUSE: CodeTable = CodeTable {
+            rows: &[],
+            success: &[],
+            unlisted: Verdict::Refused(crate::ErrorKind::Rejected),
+            status: &[],
+        };
+        let native = Native {
+            code: NativeCode::Int(-1),
+            message: "refused",
+        };
+        let released = |intent: Option<Intent>| {
+            let mut io = super::super::Io::<()>::default();
+            io.request_contexts.dispatch = intent.map(|intent| (7, intent));
+            let context = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts.dispatch = None;
+            for id in [11, 12] {
+                let _ = io
+                    .request_contexts
+                    .register_attempt(&context, RequestId(id), 0.);
+            }
+            *io.request_contexts
+                .release_flag(&context, RequestId(11))
+                .unwrap()
+                .unwrap() = true;
+            io.http_delivery = Some(delivery(&context, 11));
+            io.http_write_reply = Some((400, String::new()));
+            (io, context)
+        };
+
+        // A fact classified for one attempt cannot be recorded on another.
+        let (mut io, context) = released(Some(Intent::Place));
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let fact = cx
+            .classify_write(&context, &REFUSE, Some(&native), "x")
+            .unwrap();
+        cx.io.http_delivery = Some(delivery(&context, 12));
+        let failed = WriteFact::Failed {
+            fact: fact.clone(),
+            known_effects: false,
+        };
+        assert_eq!(
+            cx.http_write_fact(&context, failed, None).unwrap_err(),
+            Error::Revoked
+        );
+        // An attempt-free fact may only be an unproven answer.
+        cx.io.http_delivery = Some(delivery(&context, 11));
+        let (_, error) = classify::write(
+            &REFUSE,
+            Intent::Place,
+            classify::Released::Transport,
+            None,
+            "x",
+        );
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        let forged = classify::fact(
+            &REFUSE,
+            Intent::Place,
+            classify::Released::Response(&crate::Response {
+                status: 400,
+                headers: "",
+                body: "",
+            }),
+            Some(&native),
+            "x",
+        );
+        let forged = WriteFact::Failed {
+            fact: forged,
+            known_effects: false,
+        };
+        assert_eq!(
+            cx.http_write_fact(&context, forged, None).unwrap_err(),
+            Error::Revoked
+        );
+        // A placement acknowledgement without native IDs proves nothing.
+        let empty = WriteFact::Accepted {
+            order_ids: Vec::new(),
+        };
+        cx.http_write_fact(&context, empty, None).unwrap();
+        let Seal::Failure(error, _) = cx.io.request_contexts.seal(
+            7,
+            Some(&delivery(&context, 11)),
+            Some(&context),
+            Some(VenueError::new("fallback")),
+        ) else {
+            panic!("an empty placement ACK cannot seal success");
+        };
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+
+        // Owners issued outside command dispatch have no trusted intent.
+        let (mut io, context) = released(None);
+        let mut store = Store::default();
+        let cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.classify_write(&context, &REFUSE, Some(&native), "x")
+                .unwrap_err(),
+            Error::State
+        );
+    }
+
+    #[test]
+    fn leg_intents_only_narrow_what_the_command_implies() {
+        use crate::classify::Intent;
+        for (commanded, leg, allowed) in [
+            (Intent::Amend, Intent::Place, true),
+            (Intent::Place, Intent::Setting, true),
+            (Intent::Amend, Intent::Cancel, false),
+            (Intent::Cancel, Intent::Place, false),
+            (Intent::Place, Intent::Cancel, false),
+        ] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            io.request_contexts.dispatch = Some((7, commanded));
+            let context = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts.dispatch = None;
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let narrowed = cx.http_write_leg_intent(&context, leg);
+            assert_eq!(narrowed.is_ok(), allowed, "{commanded:?} -> {leg:?}");
+            if allowed {
+                assert_eq!(cx.write_intent(&context), Ok(leg));
+                assert_eq!(
+                    cx.http_write_leg_intent(&context, leg),
+                    Err(Error::Duplicate)
+                );
+            } else {
+                assert_eq!(cx.write_intent(&context), Ok(commanded));
+            }
+        }
+    }
+
+    #[test]
     fn classification_takes_intent_from_the_command_and_status_from_the_engine() {
         use crate::classify::{
             CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
@@ -1591,18 +1824,17 @@ mod write_tests {
             ),
             // An amend's cancel leg can never inherit cancel success.
             (Some(Intent::Amend), Verdict::Unknown(None)),
-            // A venue action has no command intent and classifies conservatively.
-            (None, Verdict::Unknown(None)),
+            // A venue action classifies conservatively as a placement.
+            (Some(Intent::Place), Verdict::Unknown(None)),
         ] {
             let mut io = super::super::Io::<()>::default();
             let mut store = Store::default();
+            io.request_contexts.dispatch = intent.map(|intent| (7, intent));
             let context = io
                 .request_contexts
                 .issue(1, Scope::Command(7), policy(), 0.)
                 .unwrap();
-            if let Some(intent) = intent {
-                io.command_intents.insert(7, intent);
-            }
+            io.request_contexts.dispatch = None;
             io.http_delivery = Some(delivery(&context, 11));
             let cx = Cx {
                 now: 1.,

@@ -271,6 +271,8 @@ pub fn error(
 pub struct Fact {
     verdict: Verdict,
     error: VenueError,
+    /// The managed attempt whose reply was classified.
+    attempt: Option<crate::RequestId>,
 }
 
 impl Fact {
@@ -285,6 +287,11 @@ impl Fact {
     /// Native order IDs this reply carried: reconciliation evidence only.
     pub fn with_order_ids(mut self, order_ids: &[String]) -> Self {
         self.error = self.error.partial_ids(order_ids);
+        self
+    }
+
+    pub(crate) fn for_attempt(mut self, attempt: crate::RequestId) -> Self {
+        self.attempt = Some(attempt);
         self
     }
 
@@ -308,6 +315,7 @@ pub fn fact(
     Fact {
         verdict,
         error: error(verdict, intent, released, native, message),
+        attempt: None,
     }
 }
 
@@ -318,6 +326,7 @@ pub fn unproven_reply(message: impl Into<String>) -> Fact {
         error: VenueError::new(message)
             .kind(ErrorKind::Internal)
             .outcome(Outcome::Unknown),
+        attempt: None,
     }
 }
 
@@ -349,10 +358,19 @@ impl WriteFact {
                 },
                 Verdict::Unknown(_) => WriteResult::Failed(fact.error),
                 _ if known_effects => WriteResult::KnownPartial(fact.error),
-                Verdict::Satisfied(_) => WriteResult::KnownPartial(fact.error),
-                Verdict::Refused(_) | Verdict::RefusedResend(_) => {
-                    WriteResult::Rejected(fact.error)
-                }
+                _ => WriteResult::Rejected(fact.error),
+            },
+        }
+    }
+
+    /// A refusal must be the classifier's fact about this exact attempt; an
+    /// attempt-free fact can only be an unproven (Unknown) answer.
+    pub(crate) fn belongs_to(&self, attempt: crate::RequestId) -> bool {
+        match self {
+            Self::Accepted { .. } => true,
+            Self::Failed { fact, .. } => match fact.attempt {
+                Some(own) => own == attempt,
+                None => matches!(fact.verdict, Verdict::Unknown(_)),
             },
         }
     }

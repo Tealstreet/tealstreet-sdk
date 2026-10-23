@@ -1763,6 +1763,8 @@ mod tests {
         } else {
             RetryPolicy::Never
         };
+        // Issued as if dispatched from a placement command.
+        engine.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
         let mut cx = Cx {
             now: at,
             store: &mut engine.store,
@@ -1783,6 +1785,7 @@ mod tests {
                 },
             )
             .unwrap();
+        cx.io.request_contexts.dispatch = None;
         let request = if signed {
             cx.request_signed_managed(
                 context.clone(),
@@ -2709,30 +2712,6 @@ mod tests {
                 ][state]
             );
         }
-    }
-
-    #[test]
-    fn commands_record_their_write_intent_until_they_finish() {
-        let (mut engine, _) = start(Probe::default());
-        engine.handle(
-            1.,
-            Event::Command(Command::CancelSymbolOrders {
-                command: 9,
-                symbol: "BTCUSDT".into(),
-            }),
-        );
-        assert_eq!(engine.venue.command_calls, vec![9]);
-        assert_eq!(
-            engine.io.command_intents.get(&9),
-            Some(&crate::classify::Intent::Cancel)
-        );
-        Cx {
-            now: 2.,
-            store: &mut engine.store,
-            io: &mut engine.io,
-        }
-        .fail(9, "done");
-        assert!(engine.io.command_intents.is_empty());
     }
 
     #[test]

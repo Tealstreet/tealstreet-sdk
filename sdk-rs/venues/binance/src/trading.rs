@@ -948,23 +948,23 @@ impl BinanceFutures {
             if !batch_reports && !SILENT_CODES.contains(&code) {
                 reports.push(message.clone());
             }
-            if let Some(job) = self.trading.jobs.get_mut(&command) {
-                if native_response {
-                    // Code 0 is no native code: a non-JSON HTTP error or an
-                    // unproven acknowledgement. The engine classifies both.
-                    let native = (code != 0).then_some(Native {
-                        code: NativeCode::Int(code),
-                        message: &message,
-                    });
-                    let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &message)
-                    else {
-                        return;
-                    };
-                    native_fact = Some(if unproven { fact.unproven() } else { fact });
-                }
-                if !continue_after_item_refusal {
-                    job.stop = true;
-                }
+            if native_response {
+                // Code 0 is no native code: a non-JSON HTTP error or an
+                // unproven acknowledgement. The engine classifies both.
+                let native = (code != 0).then_some(Native {
+                    code: NativeCode::Int(code),
+                    message: &message,
+                });
+                let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &message)
+                else {
+                    return;
+                };
+                native_fact = Some(if unproven { fact.unproven() } else { fact });
+            }
+            if let Some(job) = self.trading.jobs.get_mut(&command)
+                && !continue_after_item_refusal
+            {
+                job.stop = true;
             }
         }
         if native_response {

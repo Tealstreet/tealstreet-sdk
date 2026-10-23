@@ -662,10 +662,10 @@ pub enum Command {
 
 impl Command {
     /// The logical intent a write under this command serves. Venue actions
-    /// have none; their writes classify conservatively as placements.
-    pub(crate) fn write_intent(&self) -> Option<crate::classify::Intent> {
+    /// classify conservatively as placements.
+    pub(crate) fn write_intent(&self) -> crate::classify::Intent {
         use crate::classify::Intent;
-        Some(match self {
+        match self {
             Self::PlaceOrders { .. } => Intent::Place,
             Self::CancelOrders { .. }
             | Self::CancelOrdersWithSymbols { .. }
@@ -675,8 +675,9 @@ impl Command {
             | Self::SetMarginType { .. }
             | Self::SetPositionMode { .. }
             | Self::SetStpMode { .. } => Intent::Setting,
-            _ => return None,
-        })
+            Self::Venue { .. } => Intent::Place,
+            _ => Intent::Read,
+        }
     }
 
     pub(crate) fn completion_id(&self) -> Option<CommandId> {
@@ -1415,9 +1416,6 @@ struct Io<P> {
     // Typed cause of the HttpFailed being delivered: Network from the host,
     // Timeout when the engine expires a released request at its deadline.
     http_failure_kind: ErrorKind,
-    // What each live command asked for, so the classifier never takes the
-    // intent from a venue (an amend's cancel leg is still an amend).
-    command_intents: HashMap<CommandId, crate::classify::Intent>,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
@@ -1471,7 +1469,6 @@ impl<P> Default for Io<P> {
             request_contexts: Default::default(),
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
-            command_intents: HashMap::new(),
             http_write_reply: None,
             http_responses: Default::default(),
             http_write_revision: 0,
@@ -2143,7 +2140,6 @@ impl<P> Cx<'_, P> {
             Err(error) => (None, Some(error)),
         };
         let mut write_sealed = false;
-        self.io.command_intents.remove(&command);
         let result = match self.io.request_contexts.seal(
             command,
             self.io.http_delivery.as_ref(),
@@ -3206,7 +3202,9 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Event::Command(Command::Venue { command, action }) => {
+                cx.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.request_contexts.dispatch = None;
             }
             Event::Command(Command::FetchAccount { command })
                 if self.venue.capabilities().account == AccountLookup::Unsupported =>
@@ -3284,11 +3282,13 @@ impl<V: Venue> Engine<V> {
                         return;
                     }
                 }
-                if let (Some(id), Some(intent)) = (command.completion_id(), command.write_intent())
-                {
-                    cx.io.command_intents.insert(id, intent);
-                }
+                // The classifier takes intent from the command, never the venue
+                // (an amend's cancel leg is still an amend).
+                cx.io.request_contexts.dispatch = command
+                    .completion_id()
+                    .map(|id| (id, command.write_intent()));
                 self.venue.on_command(&mut cx, command);
+                cx.io.request_contexts.dispatch = None;
             }
         }
         self.finish_event_scope(now);

@@ -762,7 +762,7 @@ impl SendPacing {
 }
 
 /// Proof that the engine classified this attempt's refusal as `RefusedResend`.
-/// Only `Cx::http_write_failure` creates one.
+/// Only `Cx::http_write_fact` creates one, once per logical leg.
 #[derive(Debug)]
 pub struct ResendGrant {
     pub(crate) attempt: RequestId,
