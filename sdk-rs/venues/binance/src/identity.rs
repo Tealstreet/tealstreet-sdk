@@ -95,17 +95,13 @@ impl BinanceFutures {
         };
         let context = match Self::read_context(
             cx,
-            command,
             Some(Credential {
                 slot,
                 reference: credentials.credential.clone(),
             }),
         ) {
             Ok(context) => context,
-            Err(error) => {
-                finish_unissued(cx, command, Err(error.message));
-                return;
-            }
+            Err(_) => return, // Engine owns initial admission rejection.
         };
         self.managed_read(
             cx,

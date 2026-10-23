@@ -27,6 +27,8 @@ struct CommandOwner {
     completion_root: Context,
     /// Owner retention only. This never extends any issued logical deadline.
     last_deadline: f64,
+    /// Genuine initial entry holds its generation until typed terminal cleanup.
+    entry_owned: bool,
     writes: Option<CommandWrites>,
     mutation_declared: bool,
     pending: usize,
@@ -55,13 +57,55 @@ pub(super) struct ContextRegistry {
 }
 
 impl ContextRegistry {
+    pub(super) fn command_entry_unowned(&self, command: CommandId) -> bool {
+        !self.commands.contains_key(&command)
+    }
+
+    pub(super) fn prepare_command_entry(&mut self, command: CommandId, now: f64) -> bool {
+        let Some(owner) = self.commands.get(&command) else {
+            return true;
+        };
+        if !now.is_finite()
+            || owner.entry_owned
+            || now < owner.last_deadline
+            || owner.writes.is_some()
+            || owner.pending != 0
+            || owner.deliveries != 0
+        {
+            return false;
+        }
+        let old = Owner::Command {
+            id: command,
+            generation: owner.generation,
+        };
+        self.commands.remove(&command);
+        self.contexts.retain(|_, context| context.owner() != old);
+        true
+    }
+
     pub(super) fn command_live(&self, id: CommandId, now: f64) -> bool {
         self.commands.get(&id).is_some_and(|owner| {
-            now < owner.last_deadline
+            !now.is_finite()
+                || owner.entry_owned
+                || now < owner.last_deadline
                 || owner.writes.is_some()
                 || owner.pending > 0
                 || owner.deliveries > 0
         })
+    }
+
+    pub(super) fn retain_command_entry(&mut self, context: &Context) {
+        assert!(
+            context.issued_by(&self.issuer),
+            "foreign command entry root"
+        );
+        let Owner::Command { id, generation } = context.owner() else {
+            panic!("command entry must issue a command root");
+        };
+        let owner = self.commands.get_mut(&id).expect("issued command entry");
+        assert!(owner.generation == generation && owner.completion_root == *context);
+        assert!(!owner.entry_owned, "command entry already retained");
+        owner.entry_owned = true;
     }
 
     fn issue(
@@ -100,10 +144,14 @@ impl ContextRegistry {
         // A delayed original timer must not let unrelated new work erase sent
         // evidence. Active journals are bounded and survive live-handle expiry.
         self.commands.retain(|_, old| {
-            old.last_deadline > now || old.writes.is_some() || old.pending > 0 || old.deliveries > 0
+            old.entry_owned
+                || old.last_deadline > now
+                || old.writes.is_some()
+                || old.pending > 0
+                || old.deliveries > 0
         });
         if matches!(scope, Scope::Command(id) if self.commands.get(&id)
-            .is_some_and(|owner| (owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0) && now >= owner.last_deadline))
+            .is_some_and(|owner| (owner.entry_owned || owner.writes.is_some() || owner.pending > 0 || owner.deliveries > 0) && now >= owner.last_deadline))
         {
             return Err(Error::State);
         }
@@ -159,6 +207,16 @@ impl ContextRegistry {
         let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
             parent.deadline().min(now + f64::from(policy.timeout_ms))
         });
+        if let Scope::Command(id) = scope
+            && let Some(owner) = self.commands.get(&id).filter(|owner| owner.entry_owned)
+        {
+            if now >= owner.completion_root.deadline() {
+                return Err(Error::State);
+            }
+            if deadline > owner.completion_root.deadline() {
+                return Err(Error::Invalid);
+            }
+        }
         // Validate before committing an owner, context, pending slot or action.
         let mut context = Context::new(
             owner,
@@ -194,6 +252,7 @@ impl ContextRegistry {
                     generation,
                     completion_root: context.clone(),
                     last_deadline,
+                    entry_owned: false,
                     writes: None,
                     mutation_declared: context.operation() == Operation::Mutation,
                     pending: 0,
@@ -527,7 +586,7 @@ impl ContextRegistry {
             || self
                 .commands
                 .get(&command)
-                .is_some_and(|owner| owner.mutation_declared)
+                .is_some_and(|owner| owner.entry_owned || owner.mutation_declared)
         {
             return Err(Error::Revoked);
         }
@@ -667,6 +726,9 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         parent: Option<&Context>,
     ) -> Result<Context, Error> {
+        if !self.io.entry_context_allowed(scope) {
+            return Err(Error::Revoked);
+        }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = if let Some(parent) = parent {
             self.io
@@ -723,6 +785,26 @@ impl<P> Cx<'_, P> {
             || owner.writes.is_some()
         {
             return Err(Error::Invalid);
+        }
+        Ok(())
+    }
+
+    /// Bind a read-only completion owner to its exact original root, including
+    /// constructors and no-I/O terminal paths. This grants no send permission.
+    /// Expiry follows the existing completion rules, never renews a request.
+    pub fn validate_read_root_context(&self, root: &Context) -> Result<(), Error> {
+        self.validate_read_completion_context(root)?;
+        let Owner::Command { id, .. } = root.owner() else {
+            return Err(Error::Invalid);
+        };
+        if self
+            .io
+            .request_contexts
+            .commands
+            .get(&id)
+            .is_none_or(|owner| owner.completion_root != *root)
+        {
+            return Err(Error::Revoked);
         }
         Ok(())
     }
