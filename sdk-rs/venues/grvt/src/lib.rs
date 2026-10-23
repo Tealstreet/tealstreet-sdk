@@ -1080,8 +1080,8 @@ impl Venue for Grvt {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
-        if let Some(context) = pending.context.take() {
-            self.login_failed(cx, context, pending);
+        if pending.context.take().is_some() {
+            self.login_failed(cx, pending);
             return;
         }
         let read = match &pending.job {

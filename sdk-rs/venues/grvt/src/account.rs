@@ -61,8 +61,9 @@ pub(crate) struct Account {
     progress: HashMap<String, OrderProgress>,
     pub socket: Option<SocketId>,
     started: bool,
-    /// Engine session owning API-key logins. Repeat-safe: every login only
-    /// mints an independent cookie (the legacy path reissued it five times).
+    /// Engine session owning API-key logins. Not repeat-safe: a login that
+    /// does not succeed retires it, so a reissue is a new generation and the
+    /// engine drops late answers to the abandoned one.
     login_session: Option<safe_cex_engine::request_context::Session>,
     login_pending: bool,
     waiting: Vec<Pending>,
@@ -841,7 +842,7 @@ impl Grvt {
                     .and_then(|(selection, _)| selection.session_egress());
                 cx.open_session(SessionPolicy {
                     credential: None,
-                    repeat_safe: true,
+                    repeat_safe: false,
                     private_egress,
                 })
             }
@@ -887,22 +888,20 @@ impl Grvt {
                 .map(|(pending, _)| pending),
             Err(_) => Some(pending),
         };
-        if let Some(mut pending) = refused {
-            if let Some(context) = pending.context.take() {
-                let _ = cx.finish_http_context(&context);
-            }
+        if refused.is_some() {
+            self.retire_login_session(cx);
             self.account_login_unavailable(cx);
         }
     }
-    /// A login that never produced a response: reissue it as a new session
-    /// operation, up to the legacy budget of five.
-    pub(crate) fn login_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        context: safe_cex_engine::request_context::Context,
-        pending: Pending,
-    ) {
-        let _ = cx.finish_http_context(&context);
+    fn retire_login_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(session) = self.account.login_session.take() {
+            let _ = cx.retire_session(&session);
+        }
+    }
+    /// A login that never produced a response: retire its session and reissue
+    /// on a new generation, up to the legacy budget of five.
+    pub(crate) fn login_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+        self.retire_login_session(cx);
         if pending.attempts < 5 && !self.account.authentication_failed {
             self.send_login(cx, pending.body, pending.attempts + 1);
         } else {
@@ -923,10 +922,11 @@ impl Grvt {
                 safe_cex_engine::classify::WriteFact::Accepted { order_ids: vec![] },
                 None,
             );
+            let _ = cx.finish_http_context(&context);
+        } else {
+            // Unproven: the next login must be a new generation.
+            self.retire_login_session(cx);
         }
-        // Refusals fail closed and retire the session; a repeat-safe session
-        // needs no proven fact for them.
-        let _ = cx.finish_http_context(&context);
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
         if self.account.authentication_failed {
@@ -1091,9 +1091,7 @@ impl Grvt {
         if let Some(timer) = self.account.login_retry.take() {
             cx.clear_timer(timer);
         }
-        if let Some(session) = self.account.login_session.take() {
-            let _ = cx.retire_session(&session);
-        }
+        self.retire_login_session(cx);
         cx.notice(Level::Error, code,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
     }
     fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {

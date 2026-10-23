@@ -77,7 +77,6 @@ impl Harness {
 }
 
 #[test]
-
 fn login_is_prepared_on_the_primary_private_egress_with_its_bound() {
     let mut engine = engine();
     engine.start(NOW);
@@ -136,7 +135,6 @@ fn login_is_prepared_on_the_primary_private_egress_with_its_bound() {
 }
 
 #[test]
-
 fn a_hung_login_is_reissued_at_its_bound() {
     let mut h = Harness::started();
     if let Some(i) = h
@@ -169,4 +167,36 @@ fn a_hung_login_is_reissued_at_its_bound() {
         2,
         "the engine bounds the login and the venue reissues it"
     );
+    // The reissue runs on a new session generation: a late success to the
+    // abandoned login installs nothing.
+    let logins: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.ends_with(LOGIN))
+        .map(|r| r.id)
+        .collect();
+    let answer = |h: &mut Harness, request| {
+        h.engine.handle(
+            h.now,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+                    body: r#"{"status":"success","sub_account_id":"777"}"#,
+                },
+            },
+        );
+        h.collect();
+    };
+    let summaries = |h: &Harness| {
+        h.requests
+            .iter()
+            .filter(|r| r.url.ends_with("aggregated_account_summary"))
+            .count()
+    };
+    answer(&mut h, logins[0]);
+    assert_eq!(summaries(&h), 0, "the abandoned login's answer is dropped");
+    answer(&mut h, logins[1]);
+    assert_eq!(summaries(&h), 1, "the current login opens the account");
 }

@@ -291,26 +291,38 @@ source):
   with exact URL, body and the three static headers.
 - A hung login is reissued at its engine bound when the host reports
   nothing. Every due timer fires in real order.
+  - The same test also proves a late success to the abandoned login installs
+    nothing, while the current login opens the account.
 
 **Shape.**
-- **Session.** One repeat-safe keyless session owns API-key logins:
+- **Session.** One keyless session owns API-key logins:
   - `private_egress` comes from a `Slots` `SessionAuth` selection over the
     configured key.
   - Each login is its own session Mutation with `RetryPolicy::Never` and the
     20 s host default the unmanaged login relied on.
   - It is sent through `request_managed_with_headers`; the API key stays in
     the body.
-  - Repeat-safe: a login only mints an independent cookie, and the legacy path
-    already reissued it five times.
+- **Repeat-safety decision: not repeat-safe**, per the contract above (GRVT
+  and BreakoutProp relogin retire and open a new generation).
+  - **Evidence.** No GRVT documentation says whether a second API-key login
+    leaves an earlier cookie valid. Repeat-safety would need that cited venue
+    fact, so the session takes the conservative contract.
+  - **Cost.** None to the caller. The legacy path already sent each reissue
+    as a fresh request after a failure, so the budget and timing are the
+    same; only the fence is new.
+  - **Rule.** Any login that does not succeed (transport failure, expiry,
+    unproven 2xx, refusal or failed preparation) retires the session. The
+    reissue opens a new generation, so the engine drops the abandoned login's
+    late answer.
+  - Retry count and presentation are unchanged.
 - **Outcomes.**
-  - An answered login records `Accepted` when GRVT returns success with both
-    session headers, then finishes. The existing `account_response` and
-    `account_failed` presentation is unchanged.
-  - A transport failure or expiry reissues a new session operation, up to the
+  - Success with both session headers records `Accepted`, then finishes. The
+    existing `account_response` and `account_failed` presentation is
+    unchanged.
+  - Transport failure or expiry retires the session and reissues, up to the
     legacy budget of five, then `account_login_unavailable`. The existing
     network-retry fixtures pin this.
-  - `fail_authentication` retires the session. The next login opens a new
-    generation, and the engine drops late answers to the retired one.
+  - `fail_authentication` retires the session.
 - **Waiting reads.** They stay in the venue's `account.waiting`. The #1842
   gate needs managed owners, and those reads are still legacy. A failed login
   settles them from its session callback (the #1897 completion fix).
