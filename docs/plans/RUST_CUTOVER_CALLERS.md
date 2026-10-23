@@ -5745,3 +5745,19 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
+
+
+### Bybit option trading on the ordinary Plan path (slice 4a)
+
+Option `placeOrders`, `updateOrder`, `cancelOrders`, `cancelSymbolOrders`,
+leverage and margin settings now follow the ordinary Bybit contract above.
+Request bodies are unchanged.
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| A batch of option orders where some are refused | Failure `KnownPartial` with `partialOrderIds` for the placed ones (was success with those IDs) | Same as ordinary D4; rides the same NX confirmation. |
+| An option amend whose acknowledgement names another order | `Unknown` (was success) | Reconcile through reads; never resend. |
+| An option cancel answered "order not exists" (`110001`) | Success; the row stays until the one fresh order read the engine requests (was a local Cancelled) | Do not expect the row to vanish on the ACK. |
+| Option writes after a lost or uncertain reply | Resend only on a classified `10002`/`10004` refusal, never on text or transport loss | None. |
+| Option leverage, margin or position-mode setting | `NotSent` `unsupported`, now worded for options (was the spot wording) | Do not offer settings for options. |
+

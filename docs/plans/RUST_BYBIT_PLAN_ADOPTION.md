@@ -217,6 +217,8 @@ temporary dual path, which needs owner sign-off under the direct-cutover rule.
 - D5 scope: every option-symbol command (placement, amend, cancel, cancel-all,
   settings) stays on the legacy pipeline; the same remove-before-master-merge
   obligation covers it.
+  Retired for options by slice 4a ([RUST_BYBIT_OPTIONS.md](RUST_BYBIT_OPTIONS.md)):
+  option commands now take this ordinary path, and only Hyro remains legacy.
 - C: every Unknown ordinary seal reconciles with exactly one fresh order read;
   tests answer it and assert no write, resend or success refresh.
 - F: `continue_on_error` is a caller contract. A provider refusal or lost
