@@ -2,7 +2,7 @@
 //! account diagnostics have an explicit scope and never claim a query owner.
 use crate::log::code;
 use crate::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Stall, Step};
-use crate::request_context::{Context, Error as ContextError};
+use crate::request_context::{Attempt, Context, Error as ContextError};
 use crate::{CommandId, Cx, ErrorKind, Level, Value, VenueError};
 
 /// Missing coverage in automatic account reconciliation, not a user query.
@@ -102,7 +102,7 @@ impl HistoryAuthority for LegacyAuthority {
 /// Opaque original Read-root ownership. Only the engine may construct it.
 pub struct ReadAuthority {
     root: Box<Context>,
-    page: Option<Context>,
+    page: Option<(Context, Attempt)>,
     identities: PageIdentities,
 }
 
@@ -805,15 +805,23 @@ impl ReadCompletion {
         &self.authority.root
     }
     pub fn validate_delivery<P>(&self, cx: &Cx<'_, P>, leg: &Context) -> Result<(), ContextError> {
-        cx.validate_read_http_delivery(self.root(), leg)?;
-        if self.authority.page.as_ref().is_some_and(|page| page != leg) {
+        self.delivery_attempt(cx, leg).map(|_| ())
+    }
+    fn delivery_attempt<P>(&self, cx: &Cx<'_, P>, leg: &Context) -> Result<Attempt, ContextError> {
+        let attempt = cx.read_http_delivery_attempt(self.root(), leg)?;
+        if self
+            .authority
+            .page
+            .as_ref()
+            .is_some_and(|(page, bound)| page != leg || *bound != attempt)
+        {
             return Err(ContextError::State);
         }
-        Ok(())
+        Ok(attempt)
     }
-    fn bind_page(&mut self, leg: &Context) {
+    fn bind_page(&mut self, leg: &Context, attempt: Attempt) {
         if self.authority.page.is_none() {
-            self.authority.page = Some(leg.clone());
+            self.authority.page = Some((leg.clone(), attempt));
         }
     }
 }
@@ -841,16 +849,19 @@ pub struct RowsAdmission<'a, 'io, T, P> {
     owner: &'a mut ReadHistoryRows<T>,
     _cx: &'a Cx<'io, P>,
     leg: &'a Context,
+    attempt: Attempt,
 }
 pub struct CursorAdmission<'a, 'io, T, P> {
     owner: &'a mut ReadCursorHistory<T>,
     _cx: &'a Cx<'io, P>,
     leg: &'a Context,
+    attempt: Attempt,
 }
 pub struct RangeAdmission<'a, 'io, T, P> {
     owner: &'a mut ReadRangeHistory<T>,
     _cx: &'a Cx<'io, P>,
     leg: &'a Context,
+    attempt: Attempt,
 }
 
 impl<T> ReadHistoryRows<T> {
@@ -865,11 +876,12 @@ impl<T> ReadHistoryRows<T> {
         cx: &'a Cx<'io, P>,
         leg: &'a Context,
     ) -> Result<RowsAdmission<'a, 'io, T, P>, ContextError> {
-        self.validate_delivery(cx, leg)?;
+        let attempt = self.completion.delivery_attempt(cx, leg)?;
         Ok(RowsAdmission {
             owner: self,
             _cx: cx,
             leg,
+            attempt,
         })
     }
 }
@@ -885,11 +897,12 @@ impl<T> ReadCursorHistory<T> {
         cx: &'a Cx<'io, P>,
         leg: &'a Context,
     ) -> Result<CursorAdmission<'a, 'io, T, P>, ContextError> {
-        self.validate_delivery(cx, leg)?;
+        let attempt = self.rows.completion.delivery_attempt(cx, leg)?;
         Ok(CursorAdmission {
             owner: self,
             _cx: cx,
             leg,
+            attempt,
         })
     }
 }
@@ -905,21 +918,22 @@ impl<T> ReadRangeHistory<T> {
         cx: &'a Cx<'io, P>,
         leg: &'a Context,
     ) -> Result<RangeAdmission<'a, 'io, T, P>, ContextError> {
-        self.validate_delivery(cx, leg)?;
+        let attempt = self.rows.completion.delivery_attempt(cx, leg)?;
         Ok(RangeAdmission {
             owner: self,
             _cx: cx,
             leg,
+            attempt,
         })
     }
 }
 impl<T, P> RowsAdmission<'_, '_, T, P> {
     pub fn stage(&mut self, row: T) {
-        self.owner.completion.bind_page(self.leg);
+        self.owner.completion.bind_page(self.leg, self.attempt);
         self.owner.stage_inner(row);
     }
     pub fn accept_page(&mut self) {
-        self.owner.completion.bind_page(self.leg);
+        self.owner.completion.bind_page(self.leg, self.attempt);
         self.owner.accept_page_inner();
     }
 }
@@ -937,7 +951,7 @@ impl<T, P> CursorAdmission<'_, '_, T, P> {
     }
 
     pub fn fresh(&mut self, identity: String) -> bool {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         self.owner
             .rows
             .completion
@@ -946,42 +960,42 @@ impl<T, P> CursorAdmission<'_, '_, T, P> {
             .fresh(&self.owner.walk, identity)
     }
     pub fn stage(&mut self, row: T) {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         self.owner.stage_inner(row);
     }
     pub fn advance(&mut self, page: CursorPage) -> CursorStep {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         self.commit_page_identities();
         self.owner.advance_page(page)
     }
     pub fn advance_probe(&mut self, page: CursorPage) -> CursorStep {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         if !self.owner.stage_has_rows && self.owner.rows.staged_len() == 0 {
             self.commit_page_identities();
         }
         self.owner.advance_probe_inner(page)
     }
     pub fn advance_with_coverage(&mut self, page: CursorPage, gap: Option<String>) -> CursorStep {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         self.commit_page_identities();
         self.owner.advance_coverage_inner(page, gap)
     }
 }
 impl<T, P> RangeAdmission<'_, '_, T, P> {
     pub fn stage(&mut self, row: T, facts: PageRow) {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         self.owner.stage_inner(row, facts);
     }
     pub fn accept_page(&mut self) {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         self.owner.accept_page_inner(None, |_| true);
     }
     pub fn accept_page_where(&mut self, retain: impl FnMut(&T) -> bool) {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         self.owner.accept_page_inner(None, retain);
     }
     pub fn accept_page_with_coverage(&mut self, gap: Option<String>) {
-        self.owner.rows.completion.bind_page(self.leg);
+        self.owner.rows.completion.bind_page(self.leg, self.attempt);
         self.owner.accept_page_inner(gap, |_| true);
     }
 }

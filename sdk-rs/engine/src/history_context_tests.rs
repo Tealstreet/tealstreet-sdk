@@ -157,6 +157,10 @@ impl Venue for Fixture {
         let duplicate = first_root_owner(command, root.clone());
         let leg = cx.http_leg_context(&root, policy()).unwrap();
         let wrong_leg = cx.http_leg_context(&root, policy()).unwrap();
+        assert!(
+            cx.read_http_delivery_attempt(&root, &leg).is_err(),
+            "command entry has no physical delivery"
+        );
         let history = CursorHistory::new(
             owner,
             CursorWalk::new(4),
@@ -282,6 +286,7 @@ impl Venue for Fixture {
                 {
                     let mut admission = pending.history.admit(cx, &pending.leg).unwrap();
                     assert!(admission.fresh("same-id".into()));
+                    assert!(admission.fresh("failed-only".into()));
                     admission.stage("999".into());
                 }
                 if !matches!(pending.profile.as_str(), "binding" | "physical-binding") {
@@ -333,9 +338,46 @@ impl Venue for Fixture {
             return;
         }
         if matches!(pending.profile.as_str(), "binding" | "physical-binding") {
+            let before = (
+                pending.history.accepted_len(),
+                pending.history.staged_len(),
+                pending.history.pages(),
+                pending.history.cursor().map(str::to_owned),
+                pending
+                    .history
+                    .rows
+                    .completion
+                    .authority
+                    .identities
+                    .0
+                    .clone(),
+                pending.history.rows.completion.authority.page.clone(),
+            );
             assert!(
-                pending.history.admit(cx, &pending.leg).is_err(),
-                "a different leg cannot admit a previous staged page"
+                matches!(
+                    pending.history.admit(cx, &pending.leg),
+                    Err(ContextError::State)
+                ),
+                "a different physical attempt or sibling cannot admit a previous staged page"
+            );
+            let after = (
+                pending.history.accepted_len(),
+                pending.history.staged_len(),
+                pending.history.pages(),
+                pending.history.cursor().map(str::to_owned),
+                pending
+                    .history
+                    .rows
+                    .completion
+                    .authority
+                    .identities
+                    .0
+                    .clone(),
+                pending.history.rows.completion.authority.page.clone(),
+            );
+            assert_eq!(
+                before, after,
+                "denial leaves rows, ids, cursor and binding unchanged"
             );
             assert!(pending.history.discard_staged_page());
         }
@@ -343,6 +385,7 @@ impl Venue for Fixture {
             pending.profile.as_str(),
             "retry" | "binding" | "physical-retry" | "physical-binding"
         ) {
+            assert!(!pending.history.walk.contains_identity("failed-only"));
             let mut admission = pending.history.admit(cx, &pending.leg).unwrap();
             assert!(
                 admission.fresh("same-id".into()),
@@ -350,6 +393,8 @@ impl Venue for Fixture {
             );
             admission.stage("1".into());
             assert_eq!(admission.advance(page(None)), CursorStep::Done);
+            assert!(!pending.history.walk.contains_identity("failed-only"));
+            assert!(pending.history.rows.completion.authority.page.is_none());
             pending.history.finish(cx, Ok(())).unwrap();
             return;
         }
