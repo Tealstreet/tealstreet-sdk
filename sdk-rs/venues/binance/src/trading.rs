@@ -571,6 +571,9 @@ impl BinanceFutures {
         };
         job.outstanding = step.len();
         let root = job.context.clone().expect("managed job has an authority");
+        // A placement's conflicting-order cancel is a cancel leg; an
+        // amendment's cancel stays part of the amend.
+        let amending = job.amendment.is_some();
         for planned in step {
             let credentials = self
                 .credentials
@@ -590,6 +593,12 @@ impl BinanceFutures {
                     retry: RetryPolicy::Never,
                 },
             );
+            let context = context.and_then(|context| {
+                if matches!(planned.call, Call::Cancel { .. }) && !amending {
+                    cx.http_write_leg_intent(&context, Intent::Cancel)?;
+                }
+                Ok(context)
+            });
             let Ok(context) = context else {
                 self.trading.jobs.remove(&command);
                 let _ = cx.fail_context(

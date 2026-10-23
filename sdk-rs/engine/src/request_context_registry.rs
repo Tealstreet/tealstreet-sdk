@@ -991,9 +991,10 @@ impl<P> Cx<'_, P> {
         leg.or(owner.intent).ok_or(Error::State)
     }
 
-    /// Narrow one leg's intent where the command implies it: an amend's
-    /// replacement placement is a Place, a placement's attached protection is
-    /// a Setting. Nothing ever becomes a Cancel.
+    /// Narrow one leg's intent, before its first attempt, where the command
+    /// implies it: an amend's replacement is a Place; a placement may first
+    /// cancel conflicting orders or set a protection setting. An amend's own
+    /// cancel leg can never become a Cancel. The command's own intent is a no-op.
     pub fn http_write_leg_intent(
         &mut self,
         context: &Context,
@@ -1018,9 +1019,20 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Duplicate);
         }
+        if owner
+            .writes
+            .as_ref()
+            .is_some_and(|writes| writes.latest(context.leg()).is_some())
+        {
+            return Err(Error::State);
+        }
+        if owner.intent == Some(intent) && context.operation() == Operation::Mutation {
+            return Ok(());
+        }
         let allowed = matches!(
             (owner.intent, intent),
-            (Some(Intent::Amend), Intent::Place) | (Some(Intent::Place), Intent::Setting)
+            (Some(Intent::Amend), Intent::Place)
+                | (Some(Intent::Place), Intent::Cancel | Intent::Setting)
         );
         if !allowed || context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
@@ -1767,9 +1779,11 @@ mod write_tests {
         for (commanded, leg, allowed) in [
             (Intent::Amend, Intent::Place, true),
             (Intent::Place, Intent::Setting, true),
+            // A placement's conflicting-order cancel is a real cancel.
+            (Intent::Place, Intent::Cancel, true),
             (Intent::Amend, Intent::Cancel, false),
             (Intent::Cancel, Intent::Place, false),
-            (Intent::Place, Intent::Cancel, false),
+            (Intent::Setting, Intent::Cancel, false),
         ] {
             let mut io = super::super::Io::<()>::default();
             let mut store = Store::default();
@@ -1796,6 +1810,32 @@ mod write_tests {
                 assert_eq!(cx.write_intent(&context), Ok(commanded));
             }
         }
+        // The command's own intent is a no-op; nothing narrows after a send.
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        io.request_contexts.dispatch = Some((7, Intent::Place));
+        let context = io
+            .request_contexts
+            .issue(1, Scope::Command(7), policy(), 0.)
+            .unwrap();
+        io.request_contexts.dispatch = None;
+        io.request_contexts
+            .register_attempt(&context, RequestId(11), 0.)
+            .unwrap();
+        let mut cx = Cx {
+            now: 1.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.http_write_leg_intent(&context, Intent::Place),
+            Err(Error::State)
+        );
+        assert_eq!(
+            cx.http_write_leg_intent(&context, Intent::Cancel),
+            Err(Error::State)
+        );
+        assert_eq!(cx.write_intent(&context), Ok(Intent::Place));
     }
 
     #[test]
