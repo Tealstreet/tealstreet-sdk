@@ -229,15 +229,26 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     }
     const url = `https://api.github.com/repos/${repository}/${path}`;
     const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-    let response = await fetchImpl(url, { method: 'GET', headers, redirect: 'manual', cache: 'no-store' });
-    const initialStatus = response.status;
-    if (binary && response.status === 302) {
-      const location = new URL(response.headers.get('location'));
-      check(location.protocol === 'https:' && !location.username && !location.password && /(?:\.githubusercontent\.com|\.blob\.core\.windows\.net)$/.test(location.hostname), 'untrusted artifact/log redirect');
-      response = await fetchImpl(location.href, { method: 'GET', redirect: 'error', cache: 'no-store' });
+    let response, initialStatus, raw;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await fetchImpl(url, { method: 'GET', headers, redirect: 'manual', cache: 'no-store' });
+        initialStatus = response.status;
+        if (binary && response.status === 302) {
+          const location = new URL(response.headers.get('location'));
+          check(location.protocol === 'https:' && !location.username && !location.password && /(?:\.githubusercontent\.com|\.blob\.core\.windows\.net)$/.test(location.hostname), 'untrusted artifact/log redirect');
+          response = await fetchImpl(location.href, { method: 'GET', redirect: 'error', cache: 'no-store' });
+        }
+        check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
+        raw = Buffer.from(await response.arrayBuffer()); check(raw.length > 0 && raw.length <= 512 * 1024 * 1024, 'empty/oversized GitHub response');
+        break;
+      } catch (error) {
+        // Retrieval of the same immutable bytes can recover one closed socket.
+        // This never repeats a measurement or accepts an HTTP refusal.
+        if (!(immutable && binary && attempt === 0 && error instanceof TypeError && error.cause?.code === 'UND_ERR_SOCKET')) throw error;
+        console.warn(`Retrying immutable evidence read after socket closure: ${path}`);
+      }
     }
-    check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
-    const raw = Buffer.from(await response.arrayBuffer()); check(raw.length > 0 && raw.length <= 512 * 1024 * 1024, 'empty/oversized GitHub response');
     const contentSha256 = sha(raw), snapshotKey = `${path}\0${contentSha256}`;
     if (!snapshotKeys.has(snapshotKey)) {
       snapshots.push({ path, status: initialStatus, finalStatus: response.status, sha256: contentSha256, raw: Buffer.from(raw) }); snapshotKeys.add(snapshotKey);

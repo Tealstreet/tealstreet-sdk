@@ -187,10 +187,12 @@ test('only a completed physical log may recover one socket closure', async () =>
   assert.deepEqual(await reader.getLog(5), raw);
   assert.deepEqual(await reader.getLog(5), raw);
   assert.equal(logCalls, 2);
-  let calls = 0;
-  const otherError = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; throw new TypeError('different failure', { cause: { code: 'OTHER' } }); } });
-  await assert.rejects(otherError.getArtifactBytes(700), /different failure/);
-  assert.equal(calls, 1);
+  for (const failure of [new TypeError('different failure', { cause: { code: 'OTHER' } }), new Error('different failure', { cause: { code: 'UND_ERR_SOCKET' } })]) {
+    let calls = 0;
+    const otherError = createGithubReader({ repository: 'org/repo', fetch: async () => { calls++; throw failure; } });
+    await assert.rejects(otherError.getArtifactBytes(700), /different failure/);
+    assert.equal(calls, 1);
+  }
 });
 
 test('immutable CDN recovery repeats the same authority and never forwards its credential', async () => {
