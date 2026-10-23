@@ -628,7 +628,17 @@ unknown-market refusal, then calls `begin_planned_execution` once. Do not call
 separate `admit_plan`. Capacity/refusal must preserve the original command-owner
 REDs' exact typed error, including no write outcome for Read admission failure.
 
-Check Store space without mutation before admission. Only after Plan admission
+Check Store space without mutation before admission. A full distinct-key index
+uses a genuine `admit_http_command(Read)` root solely to carry a synchronous
+`fail_context` refusal, with no Preflight, Plan, numeric terminal or retained
+root/timer/index entry. The Read capacity error has Internal kind and outcome
+None; compare its complete value to genuine admission capacity in the same
+harness, rather than relying on Error::venue_error defaults. Engine admission
+may itself refuse first. Prove index saturation separately in the core: at 256
+entries a distinct key refuses, same-key lookup returns its handle, and pruning
+a dead handle frees a slot. Native engine pools need not permit a 257th owner;
+do not fabricate one to prove the index. Assert refusal-only pool counts return
+to their prior values within the same callback. Only after Plan admission
 succeeds create/bind its freshness token and work-index entry, before any native
 request. A failure to bind retires that exact admitted Plan without I/O or a
 stray index entry. Failed Plan admission cannot supersede an older read. A new
