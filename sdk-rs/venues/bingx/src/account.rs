@@ -2082,6 +2082,12 @@ mod sign_failure_owners {
             })
             .collect::<Vec<_>>();
         assert_eq!(failures, [&error]);
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Deactivate)
+        ) || matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code == safe_cex_engine::log::code::AUTH_REJECTED
+        )));
+
         assert!(!actions.iter().any(|action| matches!(
             action,
             Action::Http(_) | Action::Sign { .. } | Action::WsClose { .. }

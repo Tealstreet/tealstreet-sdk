@@ -37,6 +37,7 @@ struct Harness {
     errors: Vec<String>,
     done: Vec<(u32, Result<String, String>)>,
     command_errors: Vec<(u32, String)>,
+    failures: Vec<(u32, safe_cex_engine::VenueError)>,
 }
 impl Harness {
     fn new() -> Self {
@@ -72,6 +73,7 @@ impl Harness {
             errors: Vec::new(),
             done: Vec::new(),
             command_errors: Vec::new(),
+            failures: Vec::new(),
         };
         h.engine.start(h.now);
         h.collect();
@@ -96,7 +98,8 @@ impl Harness {
                     self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.done.push((command, Err(error.legacy_text())))
+                    self.done.push((command, Err(error.legacy_text())));
+                    self.failures.push((command, error));
                 }
                 Action::Notice(Notice::CommandError { command, message }) => {
                     self.command_errors.push((command, message))
@@ -2317,6 +2320,7 @@ fn metadata_write_provider_refusal_releases_pending_owner_before_next_read() {
         let mut h = Harness::finish_ready(h, OPEN);
         refuse.store(true, std::sync::atomic::Ordering::SeqCst);
         let requests = h.requests.len();
+        let auth_failures = h.engine.health().auth_failures;
         h.event(Event::Command(if margin {
             Command::SetMarginType {
                 command: 944,
@@ -2342,6 +2346,21 @@ fn metadata_write_provider_refusal_releases_pending_owner_before_next_read() {
             h.requests.len(),
             requests,
             "provider refusal releases no HTTP"
+        );
+        assert_eq!(
+            h.failures
+                .iter()
+                .filter(|(id, _)| *id == 944)
+                .collect::<Vec<_>>(),
+            vec![&(
+                944,
+                safe_cex_engine::signing::SignError::Refused.venue_error()
+            )]
+        );
+        assert_eq!(
+            h.engine.health().auth_failures,
+            auth_failures,
+            "provider refusal emits neither auth.rejected nor deactivation"
         );
         assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
         refuse.store(false, std::sync::atomic::Ordering::SeqCst);
