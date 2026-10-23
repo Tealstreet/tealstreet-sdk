@@ -50,7 +50,7 @@ pub enum Pending {
     Orders(ReadOrders),
     Write(trading::Job),
     Candles {
-        command: CommandId,
+        context: Context,
         rows: Vec<Candle>,
         invalid: bool,
     },
@@ -282,15 +282,6 @@ impl KucoinSpot {
             format!("{REST}{}", encoded_path(path)),
             headers,
             body,
-            pending,
-        );
-    }
-    fn streamed(&self, cx: &mut Cx<'_, Pending>, path: &str, at: ArrayAt, pending: Pending) {
-        cx.request_streamed(
-            Method::Get,
-            format!("{REST}{path}"),
-            sign::public_headers(),
-            at,
             pending,
         );
     }
@@ -1043,6 +1034,11 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::Candles { context, .. } = pending
+            && cx.validate_read_http_delivery(context, context).is_err()
+        {
+            return;
+        }
         if pending
             .discovery_context()
             .is_some_and(|context| cx.validate_http_context(context).is_err())
@@ -1068,6 +1064,11 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Candles { context, .. } = &pending
+            && cx.validate_read_http_delivery(context, context).is_err()
+        {
+            return;
+        }
         if let Some(context) = pending.discovery_context() {
             if cx.validate_http_context(context).is_err() {
                 let _ = cx.finish_http_context(context);
@@ -1352,15 +1353,16 @@ impl Venue for KucoinSpot {
             }
             Pending::Write(job) => self.write_response(cx, job, data),
             Pending::Candles {
-                command,
+                context,
                 mut rows,
                 invalid,
             } => {
                 if invalid {
-                    cx.fail(command, "invalid KuCoin Spot candles");
+                    let _ =
+                        cx.fail_context(&context, VenueError::new("invalid KuCoin Spot candles"));
                 } else {
                     rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(command, serde_json::to_string(&rows).unwrap());
+                    let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
                 }
             }
             Pending::Account(command) => {
@@ -1444,6 +1446,19 @@ impl Venue for KucoinSpot {
             }
         }
     }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        self.on_http_failed(cx, pending, error);
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Candles { context, .. } => {
+                if cx.command_error_context(&context, &error.message).is_ok() {
+                    let _ = cx.fail_context(&context, error);
+                }
+            }
+            other => self.on_request_failed(cx, other, &error.message),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Some(context) = pending.discovery_context() {
             // Engine-admitted failures may retire after the original deadline.
@@ -1484,7 +1499,11 @@ impl Venue for KucoinSpot {
                 owner.finish(cx, Err(VenueError::new(error)));
                 return;
             }
-            Pending::Candles { command, .. } | Pending::Account(command) => {
+            pending @ Pending::Candles { .. } => {
+                self.on_http_failed(cx, pending, VenueError::new(error));
+                return;
+            }
+            Pending::Account(command) => {
                 cx.command_error(command, error);
                 cx.fail(command, error);
                 return;
@@ -1595,15 +1614,30 @@ impl Venue for KucoinSpot {
             }
             Command::SetTickerSymbols { .. } => {}
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval: i,
                 limit,
                 from_ms,
                 to_ms,
             } => {
+                let context = match cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) {
+                    Ok(context) => context,
+                    Err(_) => return,
+                };
                 let Ok((minutes, native)) = interval(i) else {
-                    cx.fail(command, i.unsupported("KuCoin Spot"));
+                    let _ = cx.fail_context(
+                        &context,
+                        VenueError::new(i.unsupported("KuCoin Spot"))
+                            .kind(safe_cex_engine::ErrorKind::Unsupported)
+                            .outcome(safe_cex_engine::Outcome::NotSent),
+                    );
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);
@@ -1620,16 +1654,21 @@ impl Venue for KucoinSpot {
                     (start / 1000.0).floor() as u64,
                     (end / 1000.0).floor() as u64
                 );
-                self.streamed(
-                    cx,
-                    &path,
-                    ArrayAt::EnvelopeField("data"),
+                match cx.request_managed_with_headers(
+                    context.clone(),
+                    Method::Get,
+                    format!("{REST}{path}"),
+                    sign::PUBLIC_HEADERS,
+                    None,
                     Pending::Candles {
-                        command,
+                        context,
                         rows: vec![],
                         invalid: false,
                     },
-                );
+                ) {
+                    Ok(id) => cx.stream_response(id, ArrayAt::EnvelopeField("data")),
+                    Err((pending, error)) => self.on_sign_error(cx, pending, error.venue_error()),
+                }
             }
             Command::Query { command, query } => self.query(cx, command, query),
             other => self.trade(cx, other),
