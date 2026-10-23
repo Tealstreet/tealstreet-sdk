@@ -286,8 +286,8 @@ plus JWT) and Polymarket (EIP-712 plus L2 HMAC).
 
 **Tests.**
 - Engine: local `Supported`/`Unsupported` per ordinary ref, extra role and
-  feature; an unregistered slot or missing ref is `InvalidRequest`; `Unknown` default fails closed; no provider
-  is `Unavailable`.
+  feature; an unregistered slot or missing ref is `InvalidRequest`; `Unknown` default fails closed; a host with no
+  declaration is `Unknown`, and a later undeclared install clears an earlier one.
 - Host: a host.mjs provider with and without a declared list; a
   `remoteSignerProvider` refusing `zkLinkContract` and accepting
   `hmacSha256`.

@@ -136,10 +136,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
         algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
     ) -> Result<(), safe_cex_engine::VenueError> {
         self.set_signer(None)?;
-        match algorithms {
-            Some(algorithms) => self.set_host_algorithms(algorithms),
-            None => Ok(()),
-        }
+        self.set_host_algorithms(algorithms)
     }
     fn prepare_dispatch(&mut self, now: f64) {
         Engine::prepare_dispatch(self, now);

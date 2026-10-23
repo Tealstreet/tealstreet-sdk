@@ -1794,10 +1794,16 @@ fn capability_admission_fails_closed_for_missing_refs_and_undeclared_hosts() {
         can_sign_with(&mut engine, Primary, &AMEND_NEEDS),
         Err(SignError::InvalidRequest)
     );
-    engine.set_host_algorithms(vec![HmacSha256]).unwrap();
+    engine.set_host_algorithms(Some(vec![HmacSha256])).unwrap();
     assert_eq!(
         can_sign_with(&mut engine, Primary, &AMEND_NEEDS[..1]),
         Ok(())
+    );
+    // A later undeclared install clears the earlier declaration.
+    engine.set_host_algorithms(None).unwrap();
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS[..1]),
+        Err(SignError::Unsupported)
     );
 
     let mut provider_default = crate::test_support::seeded_engine(TestVenue::default());
@@ -1815,7 +1821,7 @@ fn capability_admission_fails_closed_for_missing_refs_and_undeclared_hosts() {
     let mut started = crate::test_support::seeded_engine(TestVenue::default());
     started.start(1000.);
     assert!(started.set_identities(capability_identities()).is_err());
-    assert!(started.set_host_algorithms(vec![HmacSha256]).is_err());
+    assert!(started.set_host_algorithms(Some(vec![HmacSha256])).is_err());
 }
 
 /// Admitted everything, then lost capability after its first signature.

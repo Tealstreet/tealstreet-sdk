@@ -2711,13 +2711,13 @@ impl<V: Venue> Engine<V> {
     /// A host signer fulfilling Action::Sign declares what it can sign; undeclared is unknown.
     pub fn set_host_algorithms(
         &mut self,
-        algorithms: Vec<crate::signing::Algorithm>,
+        algorithms: Option<Vec<crate::signing::Algorithm>>,
     ) -> Result<(), VenueError> {
         if self.started {
             return Err(VenueError::new("Signer must be configured before startup")
                 .kind(ErrorKind::InvalidInput));
         }
-        self.io.host_algorithms = Some(algorithms);
+        self.io.host_algorithms = algorithms;
         Ok(())
     }
 
