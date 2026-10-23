@@ -135,6 +135,7 @@ enum ExtraFieldPolicy {
 #[serde(rename_all = "camelCase")]
 enum ExtraKey {
     ZklinkSeed,
+    L1Wallet,
 }
 
 #[derive(Debug, Deserialize)]
