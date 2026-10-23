@@ -1,6 +1,7 @@
 //! A rare configuration validation must not change account settings or reconciliation state.
+use crate::dispatch_signing::Http;
 use crate::{Pending, Task, WeexFutures, account_wire::AccountConfig};
-use safe_cex_engine::request_context::Context;
+use safe_cex_engine::request_context::{Context, Credential, Operation, Policy, RetryPolicy};
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Serialize)]
@@ -10,19 +11,6 @@ struct Identity {
     #[serde(skip_serializing_if = "Option::is_none")]
     affiliate_id: Option<String>,
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, VenueError>) {
-    let result = result.and_then(|identity| {
-        serde_json::to_string(&identity).map_err(|e| VenueError::new(e.to_string()))
-    });
-    match result {
-        Ok(data) => cx.done(command, data),
-        Err(error) => {
-            cx.command_error(command, &error.message);
-            cx.fail(command, error);
-        }
-    }
-}
-
 /// The account ID is the caller-assigned primary stableId from trusted setup.
 fn unavailable() -> VenueError {
     VenueError::new("WEEX account identity requires a trusted primary stableId")
@@ -49,45 +37,115 @@ impl Code {
     }
 }
 impl WeexFutures {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, _command: CommandId) {
         if self.invalid_read_credentials {
-            finish(cx, command, Err(crate::READ_CREDENTIALS_INVALID.into()));
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            Self::identity_failed(cx, &context, crate::READ_CREDENTIALS_INVALID);
             return;
         }
         let (Some(_), Some(signer)) = (
             &self.credentials.primary,
             self.credentials.select(Method::Get),
         ) else {
-            finish(
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            Self::identity_failed(
                 cx,
-                command,
-                Err("WEEX account identity requires a non-public primary key".into()),
+                &context,
+                "WEEX account identity requires a non-public primary key",
             );
             return;
         };
         if self.identity.is_none() {
-            finish(cx, command, Err(unavailable()));
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            Self::identity_failed(cx, &context, unavailable());
             return;
         }
         if cx.now < self.paused_until {
-            finish(
-                cx,
-                command,
-                Err("WEEX account reads are rate limited".into()),
-            );
+            let Ok(context) = cx.admit_http_command(Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            Self::identity_failed(cx, &context, "WEEX account reads are rate limited");
             return;
         }
-        if let Err(error) = crate::managed::read(
-            cx,
-            signer,
-            command,
+        let (identity, slot) = signer;
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: Some(Credential {
+                slot,
+                reference: identity.credential.clone(),
+            }),
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let recipe = Http::new(
+            identity.clone(),
+            Method::Get,
             "/capi/v3/account/accountConfig".into(),
-            self.seed_generation,
-            |context| Task::Identity { context },
-        ) {
-            finish(cx, command, Err(error));
+            None,
+        );
+        let (url, _, body) = recipe.unsigned();
+        let pending = Pending {
+            task: Task::Identity {
+                context: context.clone(),
+            },
+            invalid: false,
+            skipped: Vec::new(),
+            seed_generation: self.seed_generation,
+        };
+        if cx
+            .request_signed_managed(
+                context.clone(),
+                Method::Get,
+                url,
+                body,
+                Box::new(recipe),
+                pending,
+            )
+            .is_err()
+        {
+            crate::managed::reject(
+                cx,
+                &context,
+                VenueError::new("WEEX managed read lifecycle is unavailable")
+                    .kind(ErrorKind::Internal)
+                    .outcome(Outcome::NotSent),
+            );
         }
     }
+
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,
