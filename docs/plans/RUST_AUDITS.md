@@ -2124,3 +2124,47 @@ One existing numeric failure remains solely when Context issuance itself refuses
 before returning authority; its removal belongs to the shared pre-authority
 failure seam. All other venue maps remain exact. This closes this candle area
 only, not the remaining public/private/history/signing inventory or master gate.
+
+## Paradex independent startup authority
+
+~~Paradex public catalog and ticker seeds bypass managed HTTP authority and can
+remain pending without an engine-owned original deadline.~~ Independent background
+Read Contexts now own preparation, release and each 20-second attempt. Native
+staging commits only on successful validated delivery; refusal, expiry and
+transport failure retire authority before the existing startup Backoff runs.
+Candle fallback, authenticated/account/history and joined startup work remain in
+their previously committed inventory; this closes only public_seed's send site.
+
+## Hyperliquid perps candle Context authority
+
+Perps candles use actual shared command admission, unsigned static-header ingress,
+exact read delivery validation and Context terminals. Native row parsing, body
+geometry and the existing single HTTP status codec remain. Spot candles preserve
+their legacy protocol branch; no signer, retry, deadline or classification core
+is implemented in the adapter. All 52 inventory occurrences (41 fingerprints)
+remain because spot and other paths still use every shared lexical site. This
+runtime area makes no inventory deletion or all-family closure claim.
+
+## BloFin candle entry fallback retirement
+
+The final numeric candle refusal recorded in the earlier BloFin public-read
+audit is removed. Initial admission uses the landed engine command-entry seam;
+shared rejection owns the pre-Context terminal. Candle payloads no longer carry
+a numeric command ID, and physical callbacks complete through their Managed
+Context. The remaining discovery error fallback accepts only Markets/Tickers.
+No venue admission policy or finalizer is introduced. The exact own inventory
+shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
+closed/private history and trading remain tracked with their original owners.
+
+
+## TxFlow indexed history ownership
+
+TxFlow now adopts existing CursorHistory for native identity observations, staged
+page admission, accepted rows and completion. The native 2000-step/200000-cap
+indexed sequence maps to shared cursor tokens with 101 pages per income stage.
+Empty/no-new continuation and cap proof refusals remain strict; actual later
+failures recover only prior accepted eligible output with one owner warning.
+Income stage restart retains the same output owner and identities. Native
+info payload, archived instrument mapping, financial codecs, full pagination
+before sorting/truncation and Store isolation remain unchanged. Exact history
+legacy inventory prunes eleven to six sites, zero additions or checker changes.
