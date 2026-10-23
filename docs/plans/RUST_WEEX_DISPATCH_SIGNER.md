@@ -257,3 +257,33 @@ Next (priority with BingX, to unblock metadata #1747):
    as PR comments.
 5. The joined six-read Balance cycle, paging, writes and history wait for their
    shared owners (Plan and execution groups, history Completion bridge).
+
+## Owner-approved opaque cutover (claude-4yjlw0, 2026-10-23)
+
+claude-ddi2il approved the same disposition as BingX. This cuts over in one PR, with no dual path:
+
+1. **Options.** `Options` and the venue hold only opaque primary/secondary `Identity`
+   refs, with no raw key, secret or passphrase custody. The registry builds WEEX from
+   trusted signer setup (primary passphrase `requiredForPrivate`, secondary
+   `requiredWithPrimaryFallback`), refuses raw credentials in engine options, and
+   requires an injected provider when identities are present. An incomplete primary
+   (a failed `validate()` or a missing passphrase ref) keeps CONFIG_INVALID deactivation.
+2. **Managed reads.** Identity and FetchLeverage run on `request_signed_managed` under
+   engine-issued Read Contexts, and their completions use the Context.
+   - **Identity:** returns trusted `primary.stableId`. If absent, it fails typed
+     (Unsupported, NotSent) before any I/O; there is no key-hash fallback.
+   - **GET credentials:** GET selects the secondary identity when provisioned; POST
+     selects primary.
+3. **Private WS.** The private upgrade uses `connect_signed` with the existing opaque
+   `Upgrade` recipe.
+4. **Staging site.** Every other private request (the joined account cycle, trading,
+   history) keeps its native owner. These sign through exactly ONE temporary
+   `sign_http` staging site in `signed_request`, admitted by an exact checker entry.
+   Remove it once the shared Plan/execution-group API and cxxyqr's history
+   Completion bridge (#1848) own those requests.
+5. **Ratchets.** The request inventory and the signing ratchet both shrink. The raw
+   HMAC header code leaves `sign.rs`, and its fixed vectors become an independent
+   test oracle.
+6. **Callers.** The CALLERS section covers the NX mapping from persisted `weex:<24hex>`
+   key-derived IDs to `stableId`, and provider provisioning for workers and custom
+   hosts. Hosted admission stays disabled.
