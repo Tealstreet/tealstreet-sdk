@@ -96,7 +96,10 @@ impl RemoteRecipe for Standard {
             serde_json::from_str(payload).map_err(|_| SignError::Refused)?;
         if serde_json::to_string(&params).ok().as_deref() != Some(payload)
             || !params.contains_key("timestamp")
-            || !params.contains_key("recvWindow")
+            || !params
+                .get("recvWindow")
+                .and_then(|window| window.parse::<u64>().ok())
+                .is_some_and(|window| (1..=60_000).contains(&window))
             || params.keys().any(|key| {
                 !matches!(key.as_str(), "timestamp" | "recvWindow")
                     && !SIGNED_PARAMS.contains(&key.as_str())
@@ -324,6 +327,10 @@ mod tests {
         });
         for (field, value) in [
             ("payload", serde_json::json!(r#"{"b":"1","a":"2"}"#)),
+            (
+                "payload",
+                serde_json::json!(r#"{"recvWindow":"600000","symbol":"X","timestamp":"1"}"#),
+            ),
             (
                 "payload",
                 serde_json::json!(
