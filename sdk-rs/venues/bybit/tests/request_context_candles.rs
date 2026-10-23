@@ -2,9 +2,7 @@
 //! product-not-enabled refusal on the engine's managed Read authority.
 mod support;
 use safe_cex_engine::model::{Interval, OrderSide, OrderType, PlaceOrderOpts};
-use safe_cex_engine::{
-    Command, ErrorKind, Event, Notice, Outcome, Query, VenueAction, VenueError,
-};
+use safe_cex_engine::{Command, ErrorKind, Event, Notice, Outcome, Query, VenueAction, VenueError};
 use safe_cex_venue_bybit::Variant;
 use support::{Harness, Options};
 
@@ -17,7 +15,11 @@ fn ready() -> Harness {
         secret: Some("secret".into()),
         ..Options::default()
     });
-    for path in ["/v5/account/info", "/v5/account/fee-rate", "status=PreLaunch"] {
+    for path in [
+        "/v5/account/info",
+        "/v5/account/fee-rate",
+        "status=PreLaunch",
+    ] {
         if h.has_request(path) {
             h.respond(
                 path,
@@ -152,7 +154,11 @@ fn a_candle_stream_ending_mid_list_is_a_malformed_reply_and_publishes_nothing() 
     h.event(Event::HttpEnd { request: kline.id });
     let error = failure(&h, 45);
     assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert!(!h.done.iter().any(|(id, result)| *id == 45 && result.is_ok()));
+    assert!(
+        !h.done
+            .iter()
+            .any(|(id, result)| *id == 45 && result.is_ok())
+    );
 }
 
 #[test]
@@ -181,7 +187,10 @@ fn cached_balance_info_and_disabled_product_refusals_need_command_authority() {
         );
         assert_eq!(h.done.iter().filter(|(id, _)| *id == command).count(), 1);
     }
-    assert!(h.requests.is_empty(), "no HTTP for a cached or refused answer");
+    assert!(
+        h.requests.is_empty(),
+        "no HTTP for a cached or refused answer"
+    );
     // Freeing one owner lets the cached answer complete with no I/O.
     let read = reads.into_iter().next().unwrap();
     h.reply(read.id, 200, r#"{"retCode":10001,"retMsg":"params error"}"#);

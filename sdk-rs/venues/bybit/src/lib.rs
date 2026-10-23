@@ -1,5 +1,6 @@
 //! Bybit V5 products and compatible HyroTrader accounts on the sans-I/O engine.
 mod account;
+mod candles;
 mod closed;
 mod history;
 pub mod hosted_signing;
@@ -141,10 +142,7 @@ pub enum Then {
         tickers: Vec<Ticker>,
     },
     Options(options::Request),
-    Klines {
-        command: CommandId,
-        candles: Vec<Candle>,
-    },
+    Candles(candles::Read),
     Account(account::Request),
     Trade(trading::Request),
     /// An ordinary write or mode read on the engine's Preflight/Plan core.
@@ -1605,45 +1603,6 @@ impl BybitLinear {
             }
         }
     }
-
-    fn fetch_candles(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        symbol: &str,
-        interval: Interval,
-        (limit, from_ms, to_ms): (Option<u32>, Option<f64>, Option<f64>),
-    ) {
-        if self.category_for(symbol) == Category::Option {
-            cx.fail(command, "Bybit has no candles for options");
-            return;
-        }
-        if !self.category_enabled(self.category_for(symbol)) {
-            cx.fail(command, "Bybit product is not enabled");
-            return;
-        }
-        let Some(code) = interval_code(interval) else {
-            cx.fail(command, interval.unsupported("Bybit"));
-            return;
-        };
-        let query = Query::new()
-            .str("category", self.paths.category)
-            .str("symbol", symbol)
-            .str("interval", code)
-            // Like TS, a limit asks for the newest bars up to `to`; `from` only bounds an unlimited read.
-            .opt_num("start", from_ms.filter(|_| limit.is_none_or(|n| n == 0)))
-            .opt_num("end", to_ms)
-            .num(
-                "limit",
-                f64::from(limit.filter(|n| *n > 0).unwrap_or(500).min(1000)),
-            );
-        let candles = Vec::new();
-        self.send(
-            cx,
-            Rest::get("/v5/market/kline", query).streamed(),
-            Then::Klines { command, candles },
-        );
-    }
 }
 
 fn on_item_public(
@@ -1696,20 +1655,6 @@ fn on_item_public(
                         &t,
                         variant == Variant::Linear && category == Category::Inverse,
                     ));
-                }
-            }
-            Then::Klines { candles, .. } => {
-                if let Ok(KlineRow(row)) = serde_json::from_str::<KlineRow>(item)
-                    && row.len() >= 6
-                {
-                    candles.push(Candle {
-                        timestamp: float(&row[0]) / 1000.0,
-                        open: float(&row[1]),
-                        high: float(&row[2]),
-                        low: float(&row[3]),
-                        close: float(&row[4]),
-                        volume: float(&row[5]),
-                    });
                 }
             }
             _ => {}
@@ -1827,17 +1772,8 @@ impl BybitLinear {
                 }
             }
             Then::Options(request) => self.on_options_response(cx, request, response),
-            Then::Klines {
-                command,
-                mut candles,
-            } => match failure {
-                Some(error) => cx.fail(command, format!("Bybit klines: {error}")),
-                None => {
-                    // Bybit lists newest first.
-                    candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    cx.done(command, serde_json::to_string(&candles).unwrap_or_default());
-                }
-            },
+            // Managed kline reads never reach the legacy public path.
+            Then::Candles(_) => {}
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Trade(request) => self.on_trade_response(cx, request, response),
             // Ordinary responses and failures never reach the public path.
@@ -2165,6 +2101,7 @@ impl Venue for BybitLinear {
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending.then {
             Then::Ordinary(request) => self.on_ordinary_leg_failed(cx, request, error),
+            Then::Candles(read) => Self::candles_failed(cx, read, error),
             then => self.on_request_failed(
                 cx,
                 Pending {
@@ -2347,6 +2284,10 @@ impl Venue for BybitLinear {
             self.on_ordinary_response(cx, request, response);
             return;
         }
+        if let Then::Candles(read) = pending.then {
+            Self::candles_response(cx, read, &response);
+            return;
+        }
         let mut pending = Some(pending);
         if self.resend(cx, &mut pending, response.body) {
             return;
@@ -2363,6 +2304,18 @@ impl Venue for BybitLinear {
         pending: Pending,
         response: Response<'_>,
     ) {
+        // A native kline refusal is typed; a success without its list proves nothing.
+        if let Then::Candles(read) = pending.then {
+            if venue_error(&response).is_some() {
+                Self::candles_response(cx, read, &response);
+            } else {
+                let error =
+                    VenueError::new("Bybit klines: response did not contain the expected list")
+                        .kind(ErrorKind::Internal);
+                Self::candles_failed(cx, read, error);
+            }
+            return;
+        }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still
         // requires its streamed list.
@@ -2390,6 +2343,7 @@ impl Venue for BybitLinear {
             return;
         }
         match &mut pending.then {
+            Then::Candles(read) => Self::candles_item(cx, read, item),
             Then::RefreshMarkets(page) => self.refresh_item(page, item),
             Then::Account(request) => self.on_account_item(cx, request, item),
             Then::Options(request) => options::on_item(request, item),
@@ -2413,6 +2367,10 @@ impl Venue for BybitLinear {
         // independent-order leg retires alone.
         if let Then::Ordinary(request) = pending.then {
             self.on_ordinary_leg_failed(cx, request, error);
+            return;
+        }
+        if let Then::Candles(read) = pending.then {
+            Self::candles_failed(cx, read, error);
             return;
         }
         if pending.rest.resent {
@@ -2444,6 +2402,11 @@ impl Venue for BybitLinear {
             // pre-transport (signing) failure.
             let error = VenueError::new(error).outcome(safe_cex_engine::Outcome::NotSent);
             self.on_ordinary_leg_failed(cx, request, error);
+            return;
+        }
+        if let Then::Candles(read) = pending.then {
+            let error = VenueError::new(error).outcome(safe_cex_engine::Outcome::NotSent);
+            Self::candles_failed(cx, read, error);
             return;
         }
         if matches!(&pending.then, Then::RefreshMarkets(_)) {
@@ -2500,8 +2463,12 @@ impl Venue for BybitLinear {
                 to_ms,
             } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
             safe_cex_engine::VenueAction::FetchBalanceInfo => {
+                // A cached answer still needs this command's own authority.
+                let Ok(context) = cx.admit_http_command(candles::read_policy()) else {
+                    return;
+                };
                 let info = self.balance_info.clone().unwrap_or_else(|| "null".into());
-                cx.done(command, info);
+                let _ = cx.done_context(&context, info);
             }
             _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
@@ -2547,10 +2514,14 @@ impl Venue for BybitLinear {
                 | Command::Query { command, .. } => Some(*command),
                 _ => None,
             };
-            if let Some(id) = id {
-                let error = safe_cex_engine::VenueError::new("Bybit product is not enabled")
-                    .outcome(safe_cex_engine::Outcome::NotSent);
-                cx.fail(id, error);
+            if id.is_some() {
+                // A refusal before any I/O still needs this command's authority.
+                if let Ok(context) = cx.admit_http_command(candles::read_policy()) {
+                    let error = safe_cex_engine::VenueError::new("Bybit product is not enabled")
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    let _ = cx.fail_context(&context, error);
+                }
             } else {
                 cx.notice(
                     Level::Warn,
@@ -2578,14 +2549,15 @@ impl Venue for BybitLinear {
             Command::UnsubscribeCandles { symbol, interval } => {
                 self.on_candle_command(cx, symbol, interval, false)
             }
+            // The engine binds the command when the read is admitted.
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 limit,
                 from_ms,
                 to_ms,
-            } => self.fetch_candles(cx, command, &symbol, interval, (limit, from_ms, to_ms)),
+            } => self.fetch_candles(cx, &symbol, interval, (limit, from_ms, to_ms)),
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),
         }
