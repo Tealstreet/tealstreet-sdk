@@ -725,3 +725,18 @@ per-rail fallback and typed provider-refusal/pending-retirement controls pass.
 The native request declarations, signer recipe and supplied typed failures are
 unchanged. This restores the documented nonpublication contract; full typed-key
 execution coalescing and its remaining gates are still separate pending work.
+
+
+### Remaining native checkpoint failures
+
+Independent all-target verification of 29d1d29d984 reports 92 BingX tests
+passing and five failing. Two are the original genuine command-owner capacity
+REDs. The other three are the pending full joined conversion controls:
+metadata_owner_coalesces_each_native_leg_and_completes_both_callers,
+metadata_owner_fails_both_joined_callers_and_keeps_good_settings, and
+metadata_pending_write_is_sticky_and_eligible_queries_coalesce. They fail
+identically before the pending-write fix and must all pass before readiness;
+none is ignored or treated as a supported exception. The original Prepare RED
+now passes through the real native managed path. Current full scanner failures
+are only newer KuCoin/Lighter inventory reductions against the moved landing;
+actual integration remains required before final scanner/CI evidence.
