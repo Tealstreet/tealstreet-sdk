@@ -83,3 +83,44 @@ The no-work steady ingress path must remain allocation-free.
    CPU/memory/size gates honestly. Send the green frozen PR/head to the auditor
    for combo-3b first if ready, otherwise combo-4. No merge without train GO;
    separate fresh scope/unowned/revert guard then head-matched merge.
+
+## Concrete API candidate
+
+`Cx::set_socket_interests_then(feed, desired, required_keys, pending)` performs
+one atomic admission and returns the existing proposal ID. Existing
+set_socket_interests/repair APIs retain their contracts. Required keys must be
+unique members of desired; the engine captures their exact canonical Interest
+values. The current epoch must exist. Pending uses the existing venue type,
+with no new numeric terminal or HTTP authority. The combined proposal/pending
+count and retained interest bytes share bounded credits; a wakeup TimerId comes
+from the landed checked allocator only after every preflight succeeds.
+
+The proposal carries the pending record until commit; failure cancels it. A
+later replacement/repair rebinds the continuation to the latest revision only
+while every required Interest is unchanged. A removed required key cancels the
+work immediately, even if a later proposal re-adds it. This prevents a removed
+and re-created book from inheriting an old seed. Unrelated additive interests
+retain needed work, which waits for the newer full convergence. Replay also
+updates the bound revision for the same current epoch. Native WOO declares its
+book topic; OKX declares the fixed private interests for its refresh.
+
+`Venue::on_socket_interests_released(cx, epoch, pending)` is default-noop and
+runs on an engine-owned wakeup after the earlier handoff, never inside frame
+drain. Final drain arms it only after dispatch/fencing has settled, with a
+read-only fresh readiness/expiry/signing/revision check and no remaining frame
+batches. Arming adds only the ordinary SetTimer action; it invokes no callback
+and cannot mutate the socket. The host processes that timer after the preceding
+WsSend actions. The wakeup validates the sealed epoch/revision receipt, consumes
+and frees custody before invocation, and uses the same event/fatal/retirement
+rails as ordinary socket ingress. Early, duplicate and cancelled timers are inert.
+
+If another proposal arrives between handoff and wakeup, the engine cancels that
+wakeup, applies the required-interest rule, and waits for a new final handoff.
+No callback can retroactively fence the prerequisite frames from an earlier
+returned batch. Callback-created work is ordinary HTTP under normal contexts;
+it does not inherit a command/response/Plan/Preflight activation loan.
+
+No new host wire action or peer ACK is introduced. Tests compare concatenated
+ordered host batches, firing only the actual engine wakeup, and retain the exact
+native baseline comparison. The new internal scheduling turn is a caller-visible
+timing change and must be documented; no timeout or account policy is enlarged.
