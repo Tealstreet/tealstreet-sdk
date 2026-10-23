@@ -608,7 +608,7 @@ impl BinanceFutures {
         self.account_request_failed(cx, request, format!("network error: {error}"));
     }
 
-    fn account_request_failed(
+    pub(crate) fn account_request_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,

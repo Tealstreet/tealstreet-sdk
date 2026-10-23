@@ -5,7 +5,7 @@ use crate::account::Request;
 use crate::{BinanceFutures, Pending, Query, sign};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Session, SessionPolicy};
-use safe_cex_engine::{Cx, ErrorKind, Method, Venue, VenueError};
+use safe_cex_engine::{Cx, Method};
 
 /// Same raw bound as the other Binance background requests.
 const SESSION_TIMEOUT_MS: u32 = 20_000;
@@ -31,7 +31,9 @@ impl BinanceFutures {
         // outcome is harmless: the session is repeat-safe.
         if method == Method::Post || session.is_none() {
             if let Some(old) = session.take() {
-                let _ = cx.retire_session(&old);
+                // Nothing parks on a listenKey session, so it has no waiters.
+                let waiters = cx.retire_session(&old);
+                debug_assert!(waiters.is_ok_and(|waiters| waiters.is_empty()));
             }
             match cx.open_session(SessionPolicy {
                 credential: Some(credential.clone()),
@@ -80,11 +82,18 @@ impl BinanceFutures {
         }
     }
 
+    /// A local refusal, not a network failure: report it as such, then take
+    /// the native create/keepalive retry path.
     fn session_unavailable(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
-        self.on_sign_error(
-            cx,
-            pending,
-            VenueError::new("Binance listenKey session is unavailable").kind(ErrorKind::Internal),
-        );
+        let pending = match pending {
+            Pending::Background(context, pending) => {
+                let _ = cx.finish_http_context(&context);
+                *pending
+            }
+            pending => pending,
+        };
+        if let Pending::Account(request) = pending {
+            self.account_request_failed(cx, request, "listenKey session is unavailable".into());
+        }
     }
 }
