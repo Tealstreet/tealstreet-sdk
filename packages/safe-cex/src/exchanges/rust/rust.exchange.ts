@@ -81,7 +81,7 @@ import {
   workerCallClientOrderIds,
 } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import { deriveBridgeConstruction, derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
+import { deriveBridgeConstruction, derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupMapping, deriveSignerSetupPolicy } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { type AsterDEXPublicSetup, mapAsterDEXSignerSetup } from './asterdexSignerSetup';
 import { LocalSignerSetup, withoutSigningCredentials } from './localSignerSetup';
@@ -620,7 +620,7 @@ export class RustEngineExchange extends BaseExchange {
     const delegatedPolicy = deriveRemoteSigningPolicy(exchangeName);
     const delegatedMode = selectDelegatedSigningMode(options);
     const delegated = delegatedPolicy?.enabled === true && delegatedMode !== undefined;
-    const aster = bridgeConstruction.dispatchSigning && !delegated && exchangeName === 'asterdex'
+    const aster = bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'asterdex'
       ? mapAsterDEXSignerSetup(options) : undefined;
     const signerSetup = bridgeConstruction.dispatchSigning
       ? delegated ? new DelegatedSignerSetup(exchangeName, options)

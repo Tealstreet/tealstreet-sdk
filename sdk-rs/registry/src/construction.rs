@@ -29,6 +29,14 @@ struct Rule {
     bridge: BridgeRule,
     signer_setup: CredentialSetupPolicy,
     remote_signing: RemoteSigningPolicy,
+    setup_mapping: Option<SetupMapping>,
+}
+
+/// A family whose trusted setup maps account fields before provider install.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetupMapping {
+    /// Version-resolved V1/V3 slots and the read agent's primary-wallet alias.
+    Asterdex,
 }
 
 struct BridgeRule {
@@ -92,6 +100,11 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
 }
 
 include!(concat!(env!("OUT_DIR"), "/construction_rules.rs"));
+
+/// The declared family setup mapping, if any.
+pub fn signer_setup_mapping(venue: &str) -> Option<SetupMapping> {
+    venue_rule(venue).and_then(|rule| rule.setup_mapping)
+}
 
 /// Family declarations are compiled from the shared construction table.
 pub fn signer_setup_policy(venue: &str) -> CredentialSetupPolicy {
