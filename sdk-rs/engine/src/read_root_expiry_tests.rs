@@ -9,8 +9,11 @@ use std::rc::Rc;
 
 // Cutover adapter: the tracked caller-wait root. An expired wait leaves the
 // entry Fresh for the sole expiry helper; a missing receipt refuses itself.
-fn admit_root<P>(cx: &mut Cx<'_, P>) -> Option<Context> {
-    match cx.admit_caller_read_root(None, None) {
+fn admit_root<P>(
+    cx: &mut Cx<'_, P>,
+    pacing: Option<crate::request_context::Pacing>,
+) -> Option<Context> {
+    match cx.admit_caller_read_root(None, pacing) {
         Ok(root) => Some(root),
         Err(crate::request_context::CommandEntryError::Revoked) => {
             let _ = cx.reject_expired_command(Operation::Read);
@@ -53,6 +56,10 @@ struct Probe {
     sibling: Option<Result<Context, crate::request_context::Error>>,
     /// Each retirement hook call: the owner and how many continuations.
     retired: Vec<(crate::request_context::Owner, usize)>,
+    pacing: Option<crate::request_context::Pacing>,
+    /// After admission, try to found an execution on the tracked root.
+    convert: bool,
+    converted: Option<Result<(), crate::request_context::Error>>,
 }
 
 impl Probe {
@@ -108,9 +115,21 @@ impl Venue for Probe {
             cx.done(command, r#"["7"]"#.into());
             return;
         }
-        let Some(root) = admit_root(cx) else {
+        let Some(root) = admit_root(cx, self.pacing) else {
             return;
         };
+        if self.convert {
+            self.converted = Some(
+                cx.begin_execution(
+                    &root,
+                    leg_policy(),
+                    crate::execution_group::Window::UntilTerminal,
+                    "converted",
+                )
+                .map(|_| ()),
+            );
+            return;
+        }
         if self.mutation_sibling {
             // Within the root's bound, so only the plain-Read rule can refuse.
             let mut policy = leg_policy();
@@ -543,7 +562,10 @@ fn the_old_root_timer_is_inert_after_a_same_id_arrival() {
     let old_timer = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms: 1_000. } => Some(timer),
+            Action::SetTimer {
+                timer,
+                at_ms: 1_000.,
+            } => Some(timer),
             _ => None,
         })
         .expect("one engine root timer");
@@ -752,4 +774,153 @@ fn drain_actions_expires_at_the_last_observed_engine_time() {
     e.io.dispatch_now = 1_000.;
     let actions: Vec<_> = e.drain_actions().collect();
     assert_strict_timeout(&actions, 7, 0, "drain at dispatch_now");
+}
+
+// Custody controls from the 031c829395c source review.
+
+/// The next engine resource identity, without spending one for the caller.
+fn next_id(e: &mut Engine<Probe>) -> u64 {
+    let id = e.io.reserve_ids(1).expect("an identity").start;
+    e.io.next_id = crate::resource_ids::ResourceIds::starting_at(id);
+    id
+}
+
+#[test]
+fn admission_without_root_and_timer_identities_is_refused_typed() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    e.io.next_id =
+        crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID);
+    let ran = catch_unwind(AssertUnwindSafe(|| receive(&mut e, 0., 7, 1_000)));
+    assert!(ran.is_ok() && !e.failed(), "no panic, no poisoned engine");
+    assert!(!e.venue.roots.contains_key(&7));
+    assert!(e.io.read_roots.is_empty(), "no ghost tracked root");
+    let (terminals, _) = outcome(&e.drain_actions().collect::<Vec<_>>(), 7);
+    assert!(matches!(terminals.as_slice(), [Err(error)] if error.outcome.is_none()));
+}
+
+#[test]
+fn a_terminal_with_no_identities_left_still_expires_and_keeps_later_roots() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    receive(&mut e, 0., 8, 2_000);
+    e.drain_actions().for_each(drop);
+    e.io.next_id =
+        crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
+    let ran = catch_unwind(AssertUnwindSafe(|| tick(&mut e, 1_000.)));
+    assert!(ran.is_ok() && !e.failed(), "expiry needs no fresh identity");
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_strict_timeout(&actions, 7, 0, "root 7");
+    assert!(e.io.read_roots.iter().any(|(_, id, ..)| *id == 8));
+}
+
+#[test]
+fn an_invalid_pacing_refusal_spends_no_identity() {
+    let mut e = engine(Probe {
+        park: true,
+        pacing: Some(crate::request_context::Pacing {
+            group: 1,
+            minimum_gap_ms: f64::NAN,
+        }),
+        ..Default::default()
+    });
+    let before = next_id(&mut e);
+    receive(&mut e, 0., 7, 1_000);
+    assert!(!e.venue.roots.contains_key(&7));
+    assert_eq!(next_id(&mut e), before, "refused before any spend");
+}
+
+#[test]
+fn a_refused_mutation_sibling_spends_no_identity() {
+    let spent = |sibling: bool| {
+        let mut e = engine(Probe {
+            park: true,
+            mutation_sibling: sibling,
+            ..Default::default()
+        });
+        let before = next_id(&mut e);
+        receive(&mut e, 0., 7, 1_000);
+        next_id(&mut e) - before
+    };
+    assert_eq!(spent(true), spent(false));
+}
+
+#[test]
+fn a_tracked_root_cannot_found_an_execution() {
+    let mut e = engine(Probe {
+        park: true,
+        convert: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    assert_eq!(
+        e.venue.converted,
+        Some(Err(crate::request_context::Error::Invalid))
+    );
+}
+
+#[test]
+fn an_early_root_timer_re_arms_for_its_exact_deadline() {
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1_000.,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("root timer");
+    e.handle(999.5, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        outcome(&actions, 7).0.is_empty(),
+        "still live before its deadline"
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms: 1_000., .. })),
+        "the one-shot wake-up is not lost"
+    );
+}
+
+#[test]
+fn a_poisoned_engine_runs_no_expiry_cleanup() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let mut e = engine(Probe {
+        park: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    e.io.http_owner_poison = true;
+    let ran = catch_unwind(AssertUnwindSafe(|| tick(&mut e, 1_000.)));
+    assert!(ran.is_err(), "a poisoned engine traps");
+    assert!(e.venue.retired.is_empty(), "no hook before the trap");
+    assert!(e.venue.parked.contains_key(&7));
+}
+
+#[test]
+fn the_sweep_reserves_all_cleanup_actions_before_marking() {
+    let mut e = engine(Probe::default());
+    for command in 1..=16 {
+        receive(&mut e, 0., command, 30_000);
+    }
+    released(&mut e, 0.);
+    e.io.actions.shrink_to_fit();
+    tick(&mut e, 30_000.);
+    let reserved = e.io.read_root_sweep_capacity.expect("a sweep ran");
+    assert_eq!(e.io.actions.capacity(), reserved, "no growth after marking");
 }

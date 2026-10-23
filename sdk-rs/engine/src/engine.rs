@@ -1493,6 +1493,9 @@ struct Io<P> {
     read_roots: Vec<(f64, CommandId, u64)>,
     read_root_timer: Option<(TimerId, f64)>,
     read_roots_expiring: bool,
+    /// Action capacity right after the sweep's reservation, for tests.
+    #[cfg(test)]
+    read_root_sweep_capacity: Option<usize>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
@@ -1585,6 +1588,8 @@ impl<P> Default for Io<P> {
             read_roots: Vec::with_capacity(256),
             read_root_timer: None,
             read_roots_expiring: false,
+            #[cfg(test)]
+            read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
             pending: HashMap::new(),

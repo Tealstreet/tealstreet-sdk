@@ -96,6 +96,10 @@ impl<V: Venue> Engine<V> {
             );
             cleanup.push((owner, requests, pending));
         }
+        #[cfg(test)]
+        {
+            io.read_root_sweep_capacity = Some(io.actions.capacity());
+        }
         // Mark every due root first: no cleanup can publish for another.
         for &(id, generation) in &due {
             io.request_contexts.expire_read_root(id, generation);
