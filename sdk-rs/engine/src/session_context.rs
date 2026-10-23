@@ -234,10 +234,11 @@ impl ContextRegistry {
 
 impl<P> Cx<'_, P> {
     /// Session lifetimes belong to session, socket and timer callbacks. A
-    /// retained owner's readiness scope may not mint, retire or drain them.
+    /// retained Preflight's or a Plan's readiness scope may not mint, retire
+    /// or drain them.
     pub(super) fn session_scope(&self) -> Result<(), Error> {
         #[cfg(feature = "http-plans")]
-        if self.io.http_preflight_ready.is_some() {
+        if self.io.http_preflight_ready.is_some() || self.io.http_plan_ready.is_some() {
             return Err(Error::State);
         }
         Ok(())
