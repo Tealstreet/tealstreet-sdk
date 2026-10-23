@@ -116,3 +116,50 @@ before assigning their costs to those native hotspots.
 
 Plan and initial profile are sent to the overseer before performance code. The
 1.20x median target remains unproven. No merge window is requested for code yet.
+
+## Named WASM result and shared index implementation plan
+
+The owner authorized a names-preserved diagnostic build with the existing opt3,
+serde_json opt3 and Binaryen132 -Oz profile. Direct named steady samples show
+Store::ticker_index14.164ms inclusive of47.294ms WASM ingress, memcmp13.040ms self,
+Price deserialize13.085ms, parse_decimal2.084ms, sweep_executions1.083ms. This build
+is not the shipped artifact: noncustom sections differ, so function indices were
+not mapped between builds. Raw named capture and names-attribution.json accompany
+the earlier evidence. This confirms lookup as the preferred shared fix.
+
+Implementation base is actual landing `b627e1bf6e9857158e41e14a49e1faa05572efc5`;
+the profile docs were genuinely merged at `b087d556441`. #1747 owner codex-cxxyqr
+explicitly granted a coordinated store.rs ticker-index window for this standalone
+PR to land first; #1747 will integrate it afterward. Preserve every metadata and
+settings hunk. Other shared source files remain outside scope. Guard #1886 belongs
+to claude-fe7lgm and is reviewed separately, not duplicated in this PR.
+
+Replace only Store's indirect sorted Vec ticker_by_symbol with the same existing
+HashMap<Box<str>,u32> representation used by market indexes. The map provides
+borrowed-str lookup without allocation per event, and reuses existing shared
+hash-map code. set_tickers rebuilds it in input order so the final duplicate wins;
+ensure_ticker inserts only a newly appended row. Preserve ticker Vec order, row
+indices, replacement/delisting, unknown-symbol behavior, dirty masks, signed-zero
+semantics, loaded flags, funding and snapshot behavior. No venue source change,
+cached venue key, new parser, custom hasher, credential or authority bypass.
+
+Commit a generic Store lookup benchmark and compatibility controls before source.
+Record unchanged-source results and checksum; baseline performance RED is the
+actual nine-pair public gate miss above, not an invented functional failure.
+Compatibility tests should pass on unchanged production. Compare the same corpus
+and benchmark after the single source move. Benchmark numbers describe wall time;
+full CI paired medians establish the >=1.20x KuCoin Spot target. Measure retained
+memory and shipped WASM size for every family, particularly Aster's tight budget;
+the extra copied ticker keys must not silently consume a size/memory allowance.
+
+WOO's public WS apply_ticks already uses cached venue indices and update_ticker_at
+(woo/src/lib.rs:272,295), so it does not traverse ticker_index on that steady path.
+Its periodic Funding response uses symbol updates, but that is not the hot WS
+branch. The overseer has this evidence for a separate WOO headroom assignment;
+WOO's complete CI replay remains a no-regression check in this shared index PR.
+
+Independent plan/source/adversarial/full-map reviews must verify that this is one
+shared Store change for every venue and that all index-coherence contracts hold.
+Run engine, KuCoin and Binance native tests, strict scoped lint/fmt and bans.
+Fresh full CI across all venues is required; no source-equivalent shortcut for a
+shared-crate change. No merge without an exclusive engine window and fresh guard.
