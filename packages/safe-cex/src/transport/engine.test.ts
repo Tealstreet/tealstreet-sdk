@@ -972,6 +972,43 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     expect(raw.connect).toHaveBeenCalledTimes(1);
   });
 
+  // Final ruling on #1890: TS #8093's tunnel bars are host route data, not venue counters.
+  const tunnelHost = 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private';
+  const dialTunnel = (routed: ReturnType<typeof createEngineTransport>, raw: ReturnType<typeof makeRaw>, open: boolean, message?: string) => {
+    const before = raw.connect.mock.calls.length;
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    if (raw.connect.mock.calls.length === before) return 'relay';
+    const socket = raw.connect.mock.lastCall!;
+    if (open) socket[1].onOpen();
+    if (message) socket[1].onMessage(message);
+    return socket[0];
+  };
+
+  it('a tunnel advances to the relay after two opens closed before a login answer', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
+    expect(dialTunnel(routed, raw, true)).toBe(tunnelHost);
+    expect(dialTunnel(routed, raw, true, 'pong')).toBe(tunnelHost);
+    expect(dialTunnel(routed, raw, true)).toBe('relay');
+  });
+
+  it('a tunnel advances after six failed connects, and an answered open resets the count', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
+    for (let attempt = 0; attempt < 5; attempt++) expect(dialTunnel(routed, raw, false)).toBe(tunnelHost);
+    expect(dialTunnel(routed, raw, true, '{"event":"login","code":"0"}')).toBe(tunnelHost);
+    for (let attempt = 0; attempt < 6; attempt++) expect(dialTunnel(routed, raw, false)).toBe(tunnelHost);
+    expect(dialTunnel(routed, raw, false)).toBe('relay');
+  });
+
+  it('the direct candidate keeps the two-silent-connect rule', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    expect(dialTunnel(routed, raw, false)).toBe(privateUrl);
+    expect(dialTunnel(routed, raw, false)).toBe(privateUrl);
+    expect(dialTunnel(routed, raw, false)).toBe('relay');
+  });
+
   it('a peer close never reports route exhaustion', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options(), raw);

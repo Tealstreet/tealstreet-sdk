@@ -71,10 +71,19 @@ export type WsStrategy =
     relayWhenTunnelled?: boolean;
     initialSilentConnects?: number;
     ignoredMessages?: string[];
+    // Thresholds for leaving a TUNNEL candidate (proxy host or relay); the direct
+    // venue URL keeps the two-silent-connect rule (Bitget: 2 opens closed before
+    // a login answer, 6 connects that never opened).
+    tunnelAdvance?: TunnelAdvance;
     // Venue URLs that take this strategy instead of their channel's default
     // (Bitget UTA's v3 private socket on the privateUta strategy).
     matchUrls?: string[];
   };
+
+export interface TunnelAdvance {
+  silentOpens: number;
+  failedConnects: number;
+}
 
 export interface ExchangeWsRouting {
   public?: WsStrategy;

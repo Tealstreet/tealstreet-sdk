@@ -93,6 +93,19 @@ pub struct WsRoute {
     pub initial_silent_connects: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignored_messages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel_advance: Option<TunnelAdvance>,
+}
+
+/// Thresholds for leaving a tunnel candidate (proxy host or relay), which
+/// replace the silent-connect rule there; the direct venue URL keeps it.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelAdvance {
+    /// Opens that closed before any venue frame (Bitget: before a login answer).
+    pub silent_opens: usize,
+    /// Attempts that never opened; an outage does this too, hence a higher bar.
+    pub failed_connects: usize,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -163,8 +176,11 @@ pub(crate) struct RoutingState {
 #[derive(Default)]
 struct SocketAttempts {
     connected: bool,
+    opened: bool,
     message: bool,
     silent: usize,
+    silent_opens: usize,
+    failed_connects: usize,
     candidate: usize,
     ignored_messages: Vec<String>,
 }
@@ -332,14 +348,31 @@ impl RoutingState {
                 ..SocketAttempts::default()
             });
         // Refusal evidence is a reply, not silence: it never counts as silent.
+        let tunnel = route
+            .tunnel_advance
+            .filter(|_| attempts.candidate > 0 || route.host.is_some());
         if attempts.connected && !reject {
-            attempts.silent = if attempts.message {
-                0
+            if tunnel.is_some() {
+                if !attempts.opened {
+                    attempts.failed_connects += 1;
+                } else {
+                    attempts.failed_connects = 0;
+                    attempts.silent_opens = if attempts.message {
+                        0
+                    } else {
+                        attempts.silent_opens + 1
+                    };
+                }
             } else {
-                attempts.silent.saturating_add(1)
-            };
+                attempts.silent = if attempts.message {
+                    0
+                } else {
+                    attempts.silent.saturating_add(1)
+                };
+            }
         }
         attempts.connected = true;
+        attempts.opened = false;
         attempts.message = false;
         let fallback = route.fallback.as_deref().filter(|url| !url.is_empty());
         let mut candidates = vec![route.host.as_deref().unwrap_or(original)];
@@ -352,19 +385,30 @@ impl RoutingState {
         // Refused egress advances exactly one candidate and wins over recovery;
         // an exhausted chain is reported back instead of dialled.
         let mut exhausted = false;
+        let due = match tunnel {
+            Some(limit) => {
+                attempts.silent_opens >= limit.silent_opens
+                    || attempts.failed_connects >= limit.failed_connects
+            }
+            None => attempts.silent >= 2,
+        };
+        let before = attempts.candidate;
         if reject {
             if attempts.candidate + 1 < candidates.len() {
                 attempts.candidate += 1;
             } else {
                 exhausted = true;
             }
-            attempts.silent = 0;
         } else if recover && fallback.is_some() {
             attempts.candidate = candidates.len() - 1;
-            attempts.silent = 0;
-        } else if attempts.silent >= 2 && attempts.candidate + 1 < candidates.len() {
+        } else if due && attempts.candidate + 1 < candidates.len() {
             attempts.candidate += 1;
+        }
+        // Every switch, or a refusal reply, starts the counters over.
+        if reject || attempts.candidate != before || (recover && fallback.is_some()) {
             attempts.silent = 0;
+            attempts.silent_opens = 0;
+            attempts.failed_connects = 0;
         }
         let mut url = candidates[attempts.candidate.min(candidates.len() - 1)].to_owned();
         if url != original {
@@ -396,6 +440,12 @@ impl RoutingState {
             key,
             relay,
             exhausted,
+        }
+    }
+
+    pub fn opened(&self, key: &str) {
+        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key) {
+            attempts.opened = true;
         }
     }
 
@@ -1142,6 +1192,125 @@ mod tests {
             recover,
             reject_route,
         })
+    }
+
+    /// Bitget's proxied private chain: ws-proxy host, relay, then fallback.
+    fn tunnelled() -> (RoutingState, &'static str) {
+        let mut plan = RoutingPlan::default();
+        plan.ws.private.host = Some("wss://proxy.invalid/private".into());
+        plan.ws.private.relay = Some("wss://relay.invalid/private".into());
+        plan.ws.private.fallback = Some("wss://fallback.invalid/private".into());
+        plan.ws.private.tunnel_advance = Some(TunnelAdvance {
+            silent_opens: 2,
+            failed_connects: 6,
+        });
+        (state(plan), "wss://venue.invalid/private")
+    }
+
+    fn dial(state: &RoutingState, url: &str, opened: bool, message: bool) -> String {
+        let selected = state.socket(
+            url,
+            vec![],
+            Some(safe_cex_engine::SocketChannel::Private),
+            context(false, false),
+        );
+        if opened {
+            state.opened(&selected.key);
+        }
+        if message {
+            state.message(&selected.key, "venue-frame");
+        }
+        selected.url
+    }
+
+    #[test]
+    fn a_tunnel_advances_after_two_opens_closed_before_any_venue_frame() {
+        let (state, url) = tunnelled();
+        assert_eq!(
+            dial(&state, url, true, false),
+            "wss://proxy.invalid/private"
+        );
+        assert_eq!(
+            dial(&state, url, true, false),
+            "wss://proxy.invalid/private"
+        );
+        assert_eq!(
+            dial(&state, url, true, false),
+            "wss://relay.invalid/private"
+        );
+    }
+
+    #[test]
+    fn a_tunnel_advances_after_six_failed_connects_and_an_open_resets_them() {
+        let (state, url) = tunnelled();
+        for _ in 0..5 {
+            assert_eq!(
+                dial(&state, url, false, false),
+                "wss://proxy.invalid/private"
+            );
+        }
+        // An open clears failed connects; its venue frame clears silent opens.
+        assert_eq!(dial(&state, url, true, true), "wss://proxy.invalid/private");
+        for _ in 0..6 {
+            assert_eq!(
+                dial(&state, url, false, false),
+                "wss://proxy.invalid/private"
+            );
+        }
+        assert_eq!(
+            dial(&state, url, false, false),
+            "wss://relay.invalid/private"
+        );
+    }
+
+    #[test]
+    fn one_relay_strike_does_not_exhaust_the_relay() {
+        let (state, url) = tunnelled();
+        dial(&state, url, true, false);
+        let relay = state.socket(
+            url,
+            vec![],
+            Some(safe_cex_engine::SocketChannel::Private),
+            context(true, false),
+        );
+        assert_eq!(relay.url, "wss://relay.invalid/private");
+        // One close before login, then one failed connect: still the relay.
+        state.opened(&relay.key);
+        assert_eq!(
+            dial(&state, url, false, false),
+            "wss://relay.invalid/private"
+        );
+        assert_eq!(dial(&state, url, true, true), "wss://relay.invalid/private");
+        assert_eq!(
+            dial(&state, url, true, false),
+            "wss://relay.invalid/private"
+        );
+        assert_eq!(
+            dial(&state, url, true, false),
+            "wss://relay.invalid/private"
+        );
+        assert_eq!(
+            dial(&state, url, true, false),
+            "wss://fallback.invalid/private"
+        );
+    }
+
+    #[test]
+    fn the_direct_candidate_keeps_the_two_silent_connect_rule() {
+        let mut plan = RoutingPlan::default();
+        plan.ws.private.relay = Some("wss://relay.invalid/private".into());
+        plan.ws.private.tunnel_advance = Some(TunnelAdvance {
+            silent_opens: 2,
+            failed_connects: 6,
+        });
+        let state = state(plan);
+        let url = "wss://venue.invalid/private";
+        assert_eq!(dial(&state, url, false, false), url);
+        assert_eq!(dial(&state, url, false, false), url);
+        assert_eq!(
+            dial(&state, url, false, false),
+            "wss://relay.invalid/private"
+        );
     }
 
     #[test]

@@ -348,6 +348,9 @@ impl Transport for NetworkTransport {
                     let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await;
                     return;
                 }
+                if let (Some(state), Some(key)) = (&routing, &key) {
+                    state.opened(key);
+                }
                 let _ = events.send(HostEvent::WsOpened(socket));
                 for message in queued {
                     if !matches!(

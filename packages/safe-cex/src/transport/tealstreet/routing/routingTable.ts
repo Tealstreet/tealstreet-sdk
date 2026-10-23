@@ -112,6 +112,9 @@ const okxeuWs: WsGroup = {
 // Bitget checks the key's bound IP on private login (40018), so a proxied
 // account dials ws-proxy (the IP the add-account form asks Bitget users to bind)
 // and then the relay, which egresses from the same fleet as its REST.
+// TS #8093's tunnel bars: 2 opens that closed before a login answer, or 6
+// connects that never opened (an outage does that too, hence the higher bar).
+const BITGET_TUNNEL_ADVANCE = { silentOpens: 2, failedConnects: 6 };
 const bitgetWs: WsGroup = {
   // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
   public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
@@ -123,6 +126,7 @@ const bitgetWs: WsGroup = {
     relayUpstream: RELAY_UPSTREAM.bitgetPrivate,
     relayWhenTunnelled: true,
     ignoredMessages: ['pong'],
+    tunnelAdvance: BITGET_TUNNEL_ADVANCE,
   },
   privateUta: {
     kind: 'proxyConditional',
@@ -131,6 +135,7 @@ const bitgetWs: WsGroup = {
     relayUpstream: RELAY_UPSTREAM.bitgetPrivateUta,
     relayWhenTunnelled: true,
     ignoredMessages: ['pong'],
+    tunnelAdvance: BITGET_TUNNEL_ADVANCE,
     matchUrls: [BASE_WS_PRIVATE_UTA_URL],
   },
 };

@@ -130,10 +130,13 @@ describe('routing table / resolver (Epic 1 net)', () => {
     // Literal on purpose: sdk-rs's routing.mjs loads this file with a fixed import map.
     const bitgetRelay = (version: 'v2' | 'v3') =>
       `wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2F${version}%2Fws%2Fprivate`;
-    // The relay is the egress Bitget binds keys to, so it is offered ungated.
+    // The relay is the egress Bitget binds keys to, so it is offered ungated;
+    // tunnel thresholds and non-proof pongs hold on either resolution.
+    const tunnelAdvance = { silentOpens: 2, failedConnects: 6 };
     expect(resolveExchangeRouting('bitget', offProxy).wsPrivate).toEqual({
       tunnelled: false,
       relayRequired: true,
+      tunnelAdvance,
       fallback: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
       ignoredMessages: ['pong'],
       relay: bitgetRelay('v2'),
@@ -141,6 +144,8 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('bitget', proxy).wsPrivate).toEqual({
       tunnelled: true,
       relayRequired: true,
+      tunnelAdvance,
+      ignoredMessages: ['pong'],
       host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
       relay: bitgetRelay('v2'),
     });
@@ -148,6 +153,8 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('bitget', proxy).wsPrivateUta).toEqual({
       tunnelled: true,
       relayRequired: true,
+      tunnelAdvance,
+      ignoredMessages: ['pong'],
       matchUrls: ['wss://ws.bitget.com/v3/ws/private'],
       host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private',
       relay: bitgetRelay('v3'),

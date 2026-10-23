@@ -12275,7 +12275,11 @@
           "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ]
+          ],
+          "tunnelAdvance": {
+            "silentOpens": 2,
+            "failedConnects": 6
+          }
         },
         "business": {}
       },
@@ -12318,7 +12322,11 @@
             "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
-            ]
+            ],
+            "tunnelAdvance": {
+              "silentOpens": 2,
+              "failedConnects": 6
+            }
           }
         }
       ]
@@ -12588,7 +12596,11 @@
           "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ]
+          ],
+          "tunnelAdvance": {
+            "silentOpens": 2,
+            "failedConnects": 6
+          }
         },
         "business": {}
       },
@@ -12631,7 +12643,11 @@
             "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
-            ]
+            ],
+            "tunnelAdvance": {
+              "silentOpens": 2,
+              "failedConnects": 6
+            }
           }
         }
       ]
@@ -12741,7 +12757,11 @@
           "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ]
+          ],
+          "tunnelAdvance": {
+            "silentOpens": 2,
+            "failedConnects": 6
+          }
         },
         "business": {}
       },
@@ -12784,7 +12804,11 @@
             "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
-            ]
+            ],
+            "tunnelAdvance": {
+              "silentOpens": 2,
+              "failedConnects": 6
+            }
           }
         }
       ]
@@ -12891,7 +12915,11 @@
           "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ]
+          ],
+          "tunnelAdvance": {
+            "silentOpens": 2,
+            "failedConnects": 6
+          }
         },
         "business": {}
       },
@@ -12934,7 +12962,11 @@
             "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
-            ]
+            ],
+            "tunnelAdvance": {
+              "silentOpens": 2,
+              "failedConnects": 6
+            }
           }
         }
       ]
@@ -13035,7 +13067,11 @@
           "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "ignoredMessages": [
             "pong"
-          ]
+          ],
+          "tunnelAdvance": {
+            "silentOpens": 2,
+            "failedConnects": 6
+          }
         },
         "business": {}
       },
@@ -13078,7 +13114,11 @@
             "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
-            ]
+            ],
+            "tunnelAdvance": {
+              "silentOpens": 2,
+              "failedConnects": 6
+            }
           }
         }
       ]

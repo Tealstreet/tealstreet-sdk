@@ -20,6 +20,8 @@ export interface ResolvedWs {
   matchUrls?: string[];
   /** The relay is the egress a venue binds keys to, so hosts offer it ungated. */
   relayRequired?: boolean;
+  /** Per-kind thresholds for leaving a tunnel candidate. */
+  tunnelAdvance?: { silentOpens: number; failedConnects: number };
 }
 
 export interface ResolvedRouting {

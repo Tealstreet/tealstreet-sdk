@@ -38,6 +38,7 @@ export interface EngineWsRoute {
   relay?: string;
   initialSilentConnects?: number;
   ignoredMessages?: string[];
+  tunnelAdvance?: { silentOpens: number; failedConnects: number };
 }
 
 /** Serializable host policy; contains no venue credentials or proxy JWT. */
@@ -177,6 +178,7 @@ const wsRoute = (route: ResolvedWs): EngineWsRoute => ({
   ...((isWsRelayEnabled() || route.relayRequired) && route.relay ? { relay: route.relay } : {}),
   ...(route.initialSilentConnects !== undefined ? { initialSilentConnects: route.initialSilentConnects } : {}),
   ...(route.ignoredMessages ? { ignoredMessages: route.ignoredMessages } : {}),
+  ...(route.tunnelAdvance ? { tunnelAdvance: route.tunnelAdvance } : {}),
 });
 
 // Declared URL-scoped private routes, e.g. a Bitget UTA account's v3 socket.
@@ -843,7 +845,7 @@ export const createEngineTransport = (
       const key = `${channel}:${handlers.context?.feed ?? ''}:${url.split('?')[0]}`;
       let fallback = fallbacks.get(key);
       if (!fallback) {
-        fallback = new WsDirectFallback(2, route.initialSilentConnects);
+        fallback = new WsDirectFallback(2, route.initialSilentConnects, route.tunnelAdvance);
         fallbacks.set(key, fallback);
       }
       // Refused egress advances exactly one candidate and wins over recovery. A
@@ -860,6 +862,7 @@ export const createEngineTransport = (
           return { send: () => {}, close: () => { exhausted = true; } };
         }
       } else if (handlers.context?.recover && route.fallback) fallback.preferFallback();
+      fallback.primaryTunnel = route.host !== undefined && route.host !== url;
       const target = fallback.resolveUrl(route.host ?? url, route.relay, route.fallback);
       const connection = requireSocketHeaders(target);
       const upgrade = AxiosHeaders.from(handlers.headers ?? {});
@@ -876,8 +879,18 @@ export const createEngineTransport = (
         fallback?.onMessage();
         handlers.onBinary?.(data);
       };
+      const onOpen = () => {
+        fallback?.onOpen();
+        handlers.onOpen();
+      };
       if (connection?.kind !== 'relay')
-        return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
+        return transport.connect(target, {
+          ...handlers,
+          headers,
+          onOpen,
+          onMessage: receive,
+          onBinary: receiveBinary,
+        });
       let socket: { send(text: string): void; close(): void } | undefined;
       let closed = false;
       let opened = false;
@@ -900,7 +913,7 @@ export const createEngineTransport = (
               opened = true;
               for (const text of pending) relay.send(text);
               pending.length = 0;
-              handlers.onOpen();
+              onOpen();
             }
           });
           const decode = socketMessages(

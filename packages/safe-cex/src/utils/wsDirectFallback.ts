@@ -27,13 +27,30 @@ export class WsDirectFallback {
   private preferLast = false;
   private candidateCount = 0;
   private advancePending = false;
+  private opened = false;
+  private silentOpens = 0;
+  private failedConnects = 0;
+  /** The host sets this when the primary candidate is itself a tunnel (proxy host). */
+  primaryTunnel = false;
 
   // Some TS sockets count startup itself as their first silent attempt.
+  // `tunnel` replaces the silent-connect rule while a tunnel candidate is active.
   constructor(
     private readonly maxSilentConnects = 2,
     initialSilentConnects = 0,
+    private readonly tunnel?: { silentOpens: number; failedConnects: number },
   ) {
     this.silentConnects = initialSilentConnects;
+  }
+
+  private onTunnel(): boolean {
+    return this.tunnel !== undefined && (this.activeIndex > 0 || this.primaryTunnel);
+  }
+
+  private resetCounters(): void {
+    this.silentConnects = 0;
+    this.silentOpens = 0;
+    this.failedConnects = 0;
   }
 
   /** A host recovery signal chooses the last declared candidate and stays there. */
@@ -51,22 +68,33 @@ export class WsDirectFallback {
     this.candidateCount = candidates.length;
     if (this.advancePending && this.activeIndex < candidates.length) {
       this.activeIndex++;
-      this.silentConnects = 0;
+      this.resetCounters();
       this.advancePending = false;
       this.connects++;
       this.messages = 0;
+      this.opened = false;
       return candidates[this.activeIndex - 1];
     }
     this.advancePending = false;
+    const tunnel = this.onTunnel() ? this.tunnel : undefined;
     if (this.connects > 0) {
-      this.silentConnects = this.messages === 0 ? this.silentConnects + 1 : 0;
+      if (!tunnel) this.silentConnects = this.messages === 0 ? this.silentConnects + 1 : 0;
+      else if (!this.opened) this.failedConnects++;
+      else {
+        this.failedConnects = 0;
+        this.silentOpens = this.messages === 0 ? this.silentOpens + 1 : 0;
+      }
     }
     this.connects++;
     this.messages = 0;
+    this.opened = false;
     if (this.preferLast) this.activeIndex = candidates.length;
-    if (this.silentConnects >= this.maxSilentConnects && this.activeIndex < candidates.length) {
+    const due = tunnel
+      ? this.silentOpens >= tunnel.silentOpens || this.failedConnects >= tunnel.failedConnects
+      : this.silentConnects >= this.maxSilentConnects;
+    if (due && this.activeIndex < candidates.length) {
       this.activeIndex++;
-      this.silentConnects = 0;
+      this.resetCounters();
     }
     return this.activeIndex === 0 ? primaryUrl : (candidates[this.activeIndex - 1] ?? primaryUrl);
   }
@@ -80,6 +108,11 @@ export class WsDirectFallback {
     if (this.activeIndex >= this.candidateCount) return false;
     this.advancePending = true;
     return true;
+  };
+
+  /** Call when this connection opened; only tunnel thresholds read it. */
+  onOpen = (): void => {
+    this.opened = true;
   };
 
   /** Call from the socket's message handler. */

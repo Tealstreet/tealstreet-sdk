@@ -100,4 +100,45 @@ describe('host fallback recovery policy', () => {
     direct.preferFallback();
     expect(direct.resolveUrl(DIRECT)).toBe(DIRECT);
   });
+
+  describe('tunnel thresholds', () => {
+    const PROXY = 'wss://proxy.example';
+    const tunnel = () => {
+      const f = new WsDirectFallback(2, 0, { silentOpens: 2, failedConnects: 6 });
+      f.primaryTunnel = true;
+      return f;
+    };
+
+    it('one relay strike does not leave the relay; a second silent open does', () => {
+      const f = tunnel();
+      expect(f.resolveUrl(PROXY, RELAY, ATHENA)).toBe(PROXY);
+      expect(f.rejectCurrent()).toBe(true);
+      expect(f.resolveUrl(PROXY, RELAY, ATHENA)).toBe(RELAY);
+      f.onOpen(); // strike 1: opened, closed before any frame
+      expect(f.resolveUrl(PROXY, RELAY, ATHENA)).toBe(RELAY);
+      expect(f.resolveUrl(PROXY, RELAY, ATHENA)).toBe(RELAY); // a failed connect is a separate count
+      f.onOpen();
+      f.onMessage(); // a login answer resets silent opens
+      expect(f.resolveUrl(PROXY, RELAY, ATHENA)).toBe(RELAY);
+      f.onOpen();
+      expect(f.resolveUrl(PROXY, RELAY, ATHENA)).toBe(RELAY);
+      f.onOpen();
+      expect(f.resolveUrl(PROXY, RELAY, ATHENA)).toBe(ATHENA);
+    });
+
+    it('switching candidates starts both counts over', () => {
+      const f = tunnel();
+      for (let attempt = 0; attempt < 6; attempt++) expect(f.resolveUrl(PROXY, RELAY)).toBe(PROXY);
+      expect(f.resolveUrl(PROXY, RELAY)).toBe(RELAY);
+      f.onOpen();
+      expect(f.resolveUrl(PROXY, RELAY)).toBe(RELAY);
+    });
+
+    it('a direct primary keeps the silent-connect rule', () => {
+      const f = new WsDirectFallback(2, 0, { silentOpens: 2, failedConnects: 6 });
+      expect(f.resolveUrl(DIRECT, RELAY)).toBe(DIRECT);
+      expect(f.resolveUrl(DIRECT, RELAY)).toBe(DIRECT);
+      expect(f.resolveUrl(DIRECT, RELAY)).toBe(RELAY);
+    });
+  });
 });
