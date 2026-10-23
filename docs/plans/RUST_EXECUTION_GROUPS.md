@@ -483,8 +483,9 @@ policy; its controls were kept and extended.
   Plan seal gets the physical journal's non-consuming projection
   (`project_failure`, computed while the owner and binding are live; nothing
   is sealed, charged or copied): Unknown for a released write, with the
-  accepted ID prefix. While a peer remains, "nothing sent yet" becomes
-  Unknown, since the shared write may still go out. The Plan seal's own
+  accepted ID prefix. While a peer remains the outcome is always Unknown:
+  neither "nothing sent yet" nor "every released write refused" rules out a
+  later declared write going out. The Plan seal's own
   projection still reaches the remaining observers verbatim.
 - **Group ids:** `Groups::next` cannot overflow: every begin first reserves
   one engine id (ceiling 2^53-1), so `next` stays below that.

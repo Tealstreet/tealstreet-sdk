@@ -167,9 +167,8 @@ impl ContextRegistry {
     }
 
     /// A planned observer leaving before the Plan seal is told what the shared
-    /// journal knows now, without sealing or charging it: Unknown for a
-    /// released write, with its accepted IDs. While a peer remains, nothing
-    /// sent yet is still not proof that nothing will be.
+    /// journal knows now, without sealing or charging it: its accepted IDs,
+    /// and Unknown while a peer remains (more declared work may still send).
     #[cfg(feature = "http-plans")]
     fn project_early(&self, sealed: &mut Sealed) {
         let (Some(execution), Err(error)) = (sealed.early, &mut sealed.result) else {
@@ -186,9 +185,9 @@ impl ContextRegistry {
             return;
         };
         if let Ok(mut projected) = writes.project_failure(error.clone()) {
-            if projected.outcome == Some(crate::Outcome::NotSent)
-                && self.executions.groups.may_publish(execution)
-            {
+            // A live peer keeps the Plan's declared work open, so no current
+            // answer (nothing sent, all refused) can rule out a later effect.
+            if self.executions.groups.may_publish(execution) {
                 projected.outcome = Some(crate::Outcome::Unknown);
             }
             *error = projected;
