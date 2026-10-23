@@ -1205,6 +1205,7 @@ impl<P> Cx<'_, P> {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
             Owner::Session { generation } => {
+                self.session_scope()?;
                 let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
                 return self.io.request_contexts.issue_session(
                     identity,

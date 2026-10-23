@@ -233,9 +233,20 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    /// Session lifetimes belong to session, socket and timer callbacks. A
+    /// retained owner's readiness scope may not mint, retire or drain them.
+    pub(super) fn session_scope(&self) -> Result<(), Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.http_preflight_ready.is_some() {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
     /// Issue a session owner. It reserves no HTTP, timer or socket and has no
     /// deadline; each operation captures its own bound in `session_context`.
     pub fn open_session(&mut self, policy: SessionPolicy) -> Result<Session, Error> {
+        self.session_scope()?;
         let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         self.io.request_contexts.sessions.open(generation, policy)?;
         Ok(Session::new(&self.io.request_contexts.issuer, generation))
@@ -247,6 +258,7 @@ impl<P> Cx<'_, P> {
     /// Record a write's codec fact before `finish_http_context`: finishing
     /// first discards the attempt, and its outcome stays unknown.
     pub fn session_context(&mut self, session: &Session, policy: Policy) -> Result<Context, Error> {
+        self.session_scope()?;
         let generation = self.io.request_contexts.validate_session(session)?;
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         self.io
@@ -263,6 +275,7 @@ impl<P> Cx<'_, P> {
         &mut self,
         session: &Session,
     ) -> Result<Vec<(Context, P, VenueError)>, Error> {
+        self.session_scope()?;
         let generation = self.io.request_contexts.validate_session(session)?;
         let waiters = self.drain_waits(generation, VenueError::new("Session retired"));
         self.io.retire_http_owner(session.owner());
@@ -283,6 +296,7 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> Result<(), (P, Error)> {
         let checked = (|| {
+            self.session_scope()?;
             let generation = self.io.request_contexts.validate_session(session)?;
             self.io.request_contexts.validate(owner, self.now)?;
             // An owner waiting on its own session could never become ready.
@@ -344,6 +358,9 @@ impl<P> Cx<'_, P> {
     /// their continuation is never stranded. A foreign handle drains nothing.
     #[must_use = "returned waiters must be failed or re-dispatched"]
     pub fn session_ready(&mut self, session: &Session) -> Vec<Waiter<P>> {
+        if self.session_scope().is_err() {
+            return vec![];
+        }
         let Ok(generation) = self.io.request_contexts.validate_session(session) else {
             return vec![];
         };
@@ -370,6 +387,9 @@ impl<P> Cx<'_, P> {
         session: &Session,
         error: VenueError,
     ) -> Vec<(Context, P, VenueError)> {
+        if self.session_scope().is_err() {
+            return vec![];
+        }
         match self.io.request_contexts.validate_session(session) {
             Ok(generation) => self.drain_waits(generation, error),
             Err(_) => vec![],
