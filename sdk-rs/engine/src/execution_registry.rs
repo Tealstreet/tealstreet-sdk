@@ -13,8 +13,8 @@ pub(super) struct Executions {
 
 impl ContextRegistry {
     /// Cheap per-event guard: most engines never hold an execution.
-    /// Every observer, queued owner, leg count and deadline lives in a group,
-    /// so an empty group map means nothing can expire or be revoked.
+    /// Every expirable owner, queued owner, leg count and deadline lives in a
+    /// group, so an empty group map means nothing can expire or be revoked.
     pub(in crate::engine) fn has_executions(&self) -> bool {
         !self.executions.groups.is_empty()
     }

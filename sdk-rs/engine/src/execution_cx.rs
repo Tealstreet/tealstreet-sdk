@@ -18,7 +18,12 @@ impl ExecutionHandle {
 
 impl<P> Io<P> {
     pub(super) fn rearm_execution_timer(&mut self) {
-        let next = self.request_contexts.next_execution_deadline();
+        // Called on every HTTP completion; skip the scan when no group exists.
+        let next = if self.request_contexts.has_executions() {
+            self.request_contexts.next_execution_deadline()
+        } else {
+            None
+        };
         if self.execution_timer.map(|(_, at)| at) == next {
             return;
         }
