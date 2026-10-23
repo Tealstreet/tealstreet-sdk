@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 mod support;
 
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::{Action, Command, Engine, Event, Method, Notice, Response, SocketId};
-use safe_cex_venue_okx::{Okx, Options};
-use support::*;
+use safe_cex_venue_okx::Okx;
 
 // OKX v5 Get instruments / positions / orders schemas. EEA advertises X-Perps
 // as FUTURES with ruleType=xperp; other dated futures remain out of scope.
@@ -36,7 +37,7 @@ fn ticker(id: &str) -> String {
 fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
     let eea = options.eea;
     let private = options.key.is_some();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(options));
+    let mut e = crate::support::engine(options);
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     assert!(is_get(&a, "instruments?instType=SWAP"));
@@ -323,10 +324,10 @@ fn inverse_and_xperp_writes_keep_native_lots_and_exact_instrument_identity() {
 }
 #[test]
 fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -357,10 +358,10 @@ fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
 
 #[test]
 fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -391,10 +392,10 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
 
 #[test]
 fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -548,10 +549,10 @@ fn collateral_uses_exact_swap_mark_not_xperp_basis() {
 }
 #[test]
 fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -587,10 +588,10 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
         (r#""last":"40000""#, r#""last":"bad""#),
         (r#""bidPx":"39999.9""#, r#""bidPx":"bad""#),
     ] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea: true,
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let a = actions(&mut e).remove(0);
         reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -622,10 +623,10 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
 
 #[test]
 fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         eea: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -935,9 +936,10 @@ fn missing_order_currency_reserves_proven_settlement_on_rest_and_websocket() {
 }
 
 mod product_semantics {
-    use super::support::*;
+    use crate::support::FixtureOptions as Options;
+    use crate::support::*;
     use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, SocketId};
-    use safe_cex_venue_okx::{Okx, Options};
+    use safe_cex_venue_okx::Okx;
 
     // OKX instruments API: inverse ctVal is quote currency; xperp rows use FUTURES.
     // https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments
@@ -947,13 +949,13 @@ mod product_semantics {
         TICKER.replace("BTC-USDT-SWAP", id)
     }
     fn startup(eea: bool, private: bool) -> (Engine<Okx>, Vec<Action>) {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea,
             key: private.then(|| "test-key".into()),
             secret: private.then(|| "test-secret".into()),
             passphrase: private.then(|| "test-passphrase".into()),
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         assert!(
@@ -1091,10 +1093,10 @@ mod product_semantics {
 
     #[test]
     fn failed_second_eea_catalog_page_never_publishes_a_partial_set() {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea: true,
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(INVERSE), 1.0);
@@ -1516,7 +1518,7 @@ mod product_semantics {
         // Recorded public instruments payload, 2026-10-20. The venue omits caps
         // for unavailable iceberg/trigger/TWAP orders while publishing real limits.
         let row = include_str!("fixtures/crml-preopen.json");
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+        let mut e = crate::support::engine(Options::default());
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(
@@ -1544,7 +1546,7 @@ mod product_semantics {
         for value in ["malformed", "-1", "NaN", "inf", "0"] {
             let mut row = native.clone();
             row["maxTriggerSz"] = value.into();
-            let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+            let mut e = crate::support::engine(Options::default());
             e.start(0.0);
             let request = actions(&mut e).remove(0);
             reply(
@@ -1569,7 +1571,7 @@ mod product_semantics {
         ] {
             row[key] = "".into();
         }
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+        let mut e = crate::support::engine(Options::default());
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(&row.to_string()), 1.0);
@@ -1580,10 +1582,10 @@ mod product_semantics {
     #[test]
     fn untraded_xperp_blank_last_is_unavailable_and_partial_stream_keeps_known_trade() {
         // Actual EEA ticker TEST002-USD_UM_XPERP-310822 publishes last/open24h="".
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea: true,
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -1638,7 +1640,7 @@ mod product_semantics {
     #[test]
     fn nonempty_malformed_native_last_seeds_zero_and_keeps_the_ticker_row() {
         for last in ["garbage", "NaN", "inf"] {
-            let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+            let mut e = crate::support::engine(Options::default());
             e.start(0.0);
             let request = actions(&mut e).remove(0);
             reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -2309,12 +2311,12 @@ mod product_semantics {
 
 #[test]
 fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: Some("k".into()),
         secret: Some("s".into()),
         passphrase: Some("p".into()),
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     let broken = r#"{"instType":"SWAP","instId":"ETH-USDT-SWAP","ctType":"linear","ctVal":"bad"}"#;

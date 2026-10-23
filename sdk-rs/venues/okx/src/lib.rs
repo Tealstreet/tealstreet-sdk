@@ -1,6 +1,9 @@
 //! OKX swaps and EEA X-Perps on the sans-I/O engine.
 mod account;
 mod closed;
+/// Opaque canonical recipes signed by the injected dispatch provider.
+#[path = "sign/dispatch.rs"]
+pub mod dispatch_signing;
 mod history;
 mod sign;
 mod socket_codec;
@@ -12,37 +15,24 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
-use sign::Credentials;
 use std::collections::{HashMap, HashSet};
 
 const PUBLIC: usize = 0;
 const BUSINESS: usize = 2;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Options {
     pub testnet: bool,
     pub eea: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub passphrase: Option<String>,
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.passphrase);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
+    pub credentials: Option<Identity>,
+    pub read_credentials: Option<Identity>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -123,8 +113,8 @@ pub struct CandleRead {
 }
 
 pub struct Okx {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
-    credentials: Option<Credentials>,
+    options: Options,
+    credentials: Option<Identity>,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
@@ -185,22 +175,10 @@ impl Okx {
     }
 
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
-        let credentials = if options.public_data_only {
-            None
-        } else {
-            options
-                .key
-                .as_ref()
-                .filter(|s| !s.is_empty())
-                .zip(options.secret.as_ref().filter(|s| !s.is_empty()))
-                .zip(options.passphrase.as_ref().filter(|s| !s.is_empty()))
-                .map(|((key, secret), passphrase)| Credentials {
-                    key: key.clone(),
-                    secret: secret.clone(),
-                    passphrase: passphrase.clone(),
-                })
-        };
+        let credentials = options
+            .credentials
+            .clone()
+            .filter(|identity| !options.public_data_only && identity.validate().is_ok());
         let login = credentials.is_some();
         Self {
             options,
@@ -305,38 +283,8 @@ impl Okx {
         format!("wss://{host}/ws/v5/{path}")
     }
 
-    fn headers(
-        &self,
-        now: f64,
-        method: Method,
-        path: &str,
-        body: &str,
-        private: bool,
-    ) -> Vec<(&'static str, String)> {
-        if private && (method != Method::Get || self.options.read_credentials.is_none()) {
-            return self.primary_headers(now, method, path, body);
-        }
-        let read = (method == Method::Get)
-            .then_some(self.options.read_credentials.as_ref())
-            .flatten();
-        let secondary = read.map(|r| Credentials {
-            key: r.key.clone(),
-            secret: r.secret.clone(),
-            passphrase: r
-                .passphrase
-                .clone()
-                .or_else(|| self.options.passphrase.clone())
-                .unwrap_or_default(),
-        });
-        let mut headers = if private {
-            secondary
-                .as_ref()
-                .or(self.credentials.as_ref())
-                .map(|c| c.headers(now, method.as_str(), path, body))
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+    fn headers(&self, method: Method) -> Vec<(&'static str, String)> {
+        let mut headers = Vec::new();
         if self.options.testnet {
             headers.push(("x-simulated-trading", "1".into()));
         }
@@ -346,25 +294,29 @@ impl Okx {
         headers
     }
 
-    pub(crate) fn primary_headers(
+    fn sign_request(
         &self,
-        now: f64,
+        cx: &mut Cx<'_, Pending>,
+        request: safe_cex_engine::RequestId,
         method: Method,
         path: &str,
-        body: &str,
-    ) -> Vec<(&'static str, String)> {
-        let mut headers = self
-            .credentials
-            .as_ref()
-            .map(|c| c.headers(now, method.as_str(), path, body))
-            .unwrap_or_default();
-        if self.options.testnet {
-            headers.push(("x-simulated-trading", "1".into()));
+        private: bool,
+        primary: bool,
+    ) {
+        if private {
+            let identity = if method == Method::Get && !primary {
+                self.options
+                    .read_credentials
+                    .as_ref()
+                    .or(self.credentials.as_ref())
+            } else {
+                self.credentials.as_ref()
+            };
+            cx.sign_http(
+                request,
+                Box::new(sign::Http::new(identity.cloned(), path.into())),
+            );
         }
-        if method != Method::Get {
-            headers.push(("Content-Type", "application/json".into()));
-        }
-        headers
     }
 
     /// Product chains carry earlier products' rows so a later failure republishes nothing.
@@ -420,15 +372,33 @@ impl Okx {
         );
     }
 
+    pub(crate) fn get(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        private: bool,
+        pending: Pending,
+    ) {
+        let request = cx.request(
+            Method::Get,
+            format!("{}{path}", self.rest()),
+            self.headers(Method::Get),
+            None,
+            pending,
+        );
+        self.sign_request(cx, request, Method::Get, path, private, false);
+    }
+
     fn list(&self, cx: &mut Cx<'_, Pending>, path: &str, private: bool, pending: Pending) {
-        let headers = self.headers(cx.now, Method::Get, path, "", private);
-        cx.request_streamed(
+        let headers = self.headers(Method::Get);
+        let request = cx.request_streamed(
             Method::Get,
             format!("{}{path}", self.rest()),
             headers,
             ArrayAt::EnvelopeField("data"),
             pending,
         );
+        self.sign_request(cx, request, Method::Get, path, private, false);
     }
 
     fn ensure_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
@@ -763,11 +733,21 @@ impl Venue for Okx {
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.live_tickers.begin();
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read
-                .validate()
-                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
-        {
+        let validation = self
+            .credentials
+            .iter()
+            .chain(self.options.read_credentials.iter())
+            .try_for_each(|identity| {
+                identity.validate().and_then(|_| {
+                    identity
+                        .passphrase
+                        .as_ref()
+                        .filter(|r| !r.0.is_empty())
+                        .map(|_| ())
+                        .ok_or("OKX signing credentials require a passphrase")
+                })
+            });
+        if let Err(error) = validation {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             self.account.startup_rejected = true;
             cx.startup_failed(
@@ -1335,6 +1315,22 @@ impl Venue for Okx {
             );
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
+            Pending::Closed(request) => Self::closed_sign_failed(cx, request, error),
+            Pending::Account(account::Request::Leverage { command, .. })
+            | Pending::History(history::Request { command, .. })
+            | Pending::Candles { command, .. } => cx.fail(command, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Account(account::Request::Config { .. }) = &pending {
             self.config_unanswered();
