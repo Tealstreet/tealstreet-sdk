@@ -661,6 +661,24 @@ pub enum Command {
 }
 
 impl Command {
+    /// The logical intent a write under this command serves. Venue actions
+    /// have none; their writes classify conservatively as placements.
+    pub(crate) fn write_intent(&self) -> Option<crate::classify::Intent> {
+        use crate::classify::Intent;
+        Some(match self {
+            Self::PlaceOrders { .. } => Intent::Place,
+            Self::CancelOrders { .. }
+            | Self::CancelOrdersWithSymbols { .. }
+            | Self::CancelSymbolOrders { .. } => Intent::Cancel,
+            Self::AmendOrder { .. } | Self::AmendOrderWithSymbol { .. } => Intent::Amend,
+            Self::SetLeverage { .. }
+            | Self::SetMarginType { .. }
+            | Self::SetPositionMode { .. }
+            | Self::SetStpMode { .. } => Intent::Setting,
+            _ => return None,
+        })
+    }
+
     pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
@@ -1397,6 +1415,11 @@ struct Io<P> {
     // Typed cause of the HttpFailed being delivered: Network from the host,
     // Timeout when the engine expires a released request at its deadline.
     http_failure_kind: ErrorKind,
+    // What each live command asked for, so the classifier never takes the
+    // intent from a venue (an amend's cancel leg is still an amend).
+    command_intents: HashMap<CommandId, crate::classify::Intent>,
+    // Status and headers of the managed write reply being delivered.
+    http_write_reply: Option<(u16, String)>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
@@ -1448,6 +1471,8 @@ impl<P> Default for Io<P> {
             request_contexts: Default::default(),
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
+            command_intents: HashMap::new(),
+            http_write_reply: None,
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: HashMap::new(),
@@ -2118,6 +2143,7 @@ impl<P> Cx<'_, P> {
             Err(error) => (None, Some(error)),
         };
         let mut write_sealed = false;
+        self.io.command_intents.remove(&command);
         let result = match self.io.request_contexts.seal(
             command,
             self.io.http_delivery.as_ref(),
@@ -3257,6 +3283,10 @@ impl<V: Venue> Engine<V> {
                         cx.fail(command, "Options are not enabled on this account");
                         return;
                     }
+                }
+                if let (Some(id), Some(intent)) = (command.completion_id(), command.write_intent())
+                {
+                    cx.io.command_intents.insert(id, intent);
                 }
                 self.venue.on_command(&mut cx, command);
             }

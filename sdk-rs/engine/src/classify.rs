@@ -64,8 +64,9 @@ pub enum Key {
     /// Inclusive.
     Range(i64, i64),
     Text(&'static str),
-    /// Exact prefix of the native message field, only for code-less venues.
-    MessagePrefix(&'static str),
+    /// The exact native message, only for code-less venues. The venue codec
+    /// strips only its documented suffix grammar before building `Native`.
+    Message(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,7 +132,7 @@ impl Key {
             (Self::Int(key), NativeCode::Int(code)) => key == code,
             (Self::Range(low, high), NativeCode::Int(code)) => (low..=high).contains(&code),
             (Self::Text(key), NativeCode::Text(code)) => key == code,
-            (Self::MessagePrefix(prefix), NativeCode::None) => native.message.starts_with(prefix),
+            (Self::Message(message), NativeCode::None) => native.message == message,
             _ => false,
         }
     }
@@ -196,7 +197,7 @@ pub fn verdict(
         Released::Transport => return Verdict::Unknown(Some(ErrorKind::Network)),
         Released::Response(response) => response,
     };
-    if let Some(verdict) = unproven(response) {
+    if let Some(verdict) = unproven_status(response) {
         return verdict;
     }
     // A code-less envelope that matches no message row is no native evidence.
@@ -212,7 +213,7 @@ pub fn verdict(
 }
 
 /// Rule 3, shared with the managed-write guard: 408 and 5xx prove nothing.
-fn unproven(response: &Response<'_>) -> Option<Verdict> {
+fn unproven_status(response: &Response<'_>) -> Option<Verdict> {
     match crate::request_context::ResponseProof::from_status(response.status) {
         crate::request_context::ResponseProof::Unproven(kind) => Some(Verdict::Unknown(Some(kind))),
         crate::request_context::ResponseProof::NativeCodec => None,
@@ -264,6 +265,105 @@ pub fn error(
     error
 }
 
+/// A classified write failure. Only the classifier creates one, so a venue
+/// cannot turn status or exception text into a refusal fact.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Fact {
+    verdict: Verdict,
+    error: VenueError,
+}
+
+impl Fact {
+    pub fn verdict(&self) -> Verdict {
+        self.verdict
+    }
+
+    pub fn error(&self) -> &VenueError {
+        &self.error
+    }
+
+    /// Native order IDs this reply carried: reconciliation evidence only.
+    pub fn with_order_ids(mut self, order_ids: &[String]) -> Self {
+        self.error = self.error.partial_ids(order_ids);
+        self
+    }
+
+    /// The codec cannot prove this reply. Only ever weakens the fact.
+    pub fn unproven(mut self) -> Self {
+        self.verdict = Verdict::Unknown(self.verdict.kind());
+        self.error.outcome = Some(Outcome::Unknown);
+        self
+    }
+}
+
+/// A released write's classified answer (rules 2-6).
+pub fn fact(
+    table: &CodeTable,
+    intent: Intent,
+    released: Released<'_>,
+    native: Option<&Native<'_>>,
+    message: impl Into<String>,
+) -> Fact {
+    let verdict = verdict(table, intent, released, native);
+    Fact {
+        verdict,
+        error: error(verdict, intent, released, native, message),
+    }
+}
+
+/// A 2xx whose success envelope or acknowledgement does not prove the write.
+pub fn unproven_reply(message: impl Into<String>) -> Fact {
+    Fact {
+        verdict: Verdict::Unknown(Some(ErrorKind::Internal)),
+        error: VenueError::new(message)
+            .kind(ErrorKind::Internal)
+            .outcome(Outcome::Unknown),
+    }
+}
+
+/// One write attempt's native answer, for `Cx::http_write_fact`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WriteFact {
+    Accepted {
+        order_ids: Vec<String>,
+    },
+    /// `known_effects`: the codec proves part of this request took effect
+    /// (for example a partially cancelled batch).
+    Failed {
+        fact: Fact,
+        known_effects: bool,
+    },
+}
+
+impl WriteFact {
+    pub(crate) fn into_result(self) -> crate::request_context::WriteResult {
+        use crate::request_context::WriteResult;
+        match self {
+            Self::Accepted { order_ids } => WriteResult::Accepted { order_ids },
+            Self::Failed {
+                fact,
+                known_effects,
+            } => match fact.verdict {
+                Verdict::Satisfied(_) if !known_effects => WriteResult::Accepted {
+                    order_ids: Vec::new(),
+                },
+                Verdict::Unknown(_) => WriteResult::Failed(fact.error),
+                _ if known_effects => WriteResult::KnownPartial(fact.error),
+                Verdict::Satisfied(_) => WriteResult::KnownPartial(fact.error),
+                Verdict::Refused(_) | Verdict::RefusedResend(_) => {
+                    WriteResult::Rejected(fact.error)
+                }
+            },
+        }
+    }
+
+    /// Only a whole, effects-free refusal can earn a resend.
+    pub(crate) fn resendable(&self) -> bool {
+        matches!(self, Self::Failed { fact, known_effects: false }
+            if matches!(fact.verdict, Verdict::RefusedResend(_)) && fact.error.partial.is_none())
+    }
+}
+
 /// Legacy (unmanaged) lookup: transitional, deleted with the request bridge.
 /// It never closes a P0 aggregation row and grants no resend.
 pub fn write(
@@ -273,8 +373,8 @@ pub fn write(
     native: Option<&Native<'_>>,
     message: impl Into<String>,
 ) -> (Verdict, VenueError) {
-    let verdict = verdict(table, intent, released, native);
-    (verdict, error(verdict, intent, released, native, message))
+    let fact = fact(table, intent, released, native, message);
+    (fact.verdict, fact.error)
 }
 
 /// One acknowledgement row of a batch write, in caller order.
@@ -300,7 +400,7 @@ pub(crate) fn batch(
         return Err(crate::request_context::Error::Invalid);
     }
     let released = Released::Response(response);
-    if let Some(verdict) = unproven(response) {
+    if let Some(verdict) = unproven_status(response) {
         let error = self::error(verdict, intent, released, None, message);
         return Ok(WriteResult::Failed(error));
     }
@@ -412,18 +512,18 @@ pub fn assert_table(table: &CodeTable) {
     let prefixes = table
         .rows
         .iter()
-        .filter(|row| matches!(row.key, Key::MessagePrefix(_)))
+        .filter(|row| matches!(row.key, Key::Message(_)))
         .count();
     assert!(
         prefixes == 0 || prefixes == table.rows.len(),
-        "MessagePrefix rows are only for code-less venues"
+        "Message rows are only for code-less venues"
     );
     assert!(
         !table
             .rows
             .iter()
-            .any(|row| matches!(row.key, Key::MessagePrefix(""))),
-        "an empty MessagePrefix matches every message"
+            .any(|row| matches!(row.key, Key::Message(""))),
+        "an empty Message row is no evidence"
     );
     for (index, (status, verdict)) in table.status.iter().enumerate() {
         assert!(
@@ -453,7 +553,7 @@ fn keys_overlap(a: Key, b: Key) -> bool {
         (Some((a_low, a_high)), Some((b_low, b_high))) => a_low <= b_high && b_low <= a_high,
         _ => match (a, b) {
             (Key::Text(a), Key::Text(b)) => a == b,
-            (Key::MessagePrefix(a), Key::MessagePrefix(b)) => a.starts_with(b) || b.starts_with(a),
+            (Key::Message(a), Key::Message(b)) => a == b,
             _ => false,
         },
     }

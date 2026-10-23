@@ -798,7 +798,8 @@ impl<P> Cx<'_, P> {
     /// Record only native codec facts for the exact currently delivered attempt.
     /// Transport and signing failures are recorded by the engine, never inferred
     /// from venue exception text or a caller-provided numeric request id.
-    pub fn http_write_result(
+    #[cfg(test)]
+    pub(crate) fn http_write_result(
         &mut self,
         context: &Context,
         result: WriteResult,
@@ -813,7 +814,8 @@ impl<P> Cx<'_, P> {
     /// Native reports are published centrally with the terminal logical legs.
     /// Capacity refusal leaves facts untouched: retry with empty reports to keep
     /// native facts/partial IDs. Never bypass a provenance or state refusal.
-    pub fn http_write_result_with_reports(
+    #[cfg(test)]
+    pub(crate) fn http_write_result_with_reports(
         &mut self,
         context: &Context,
         result: WriteResult,
@@ -828,54 +830,75 @@ impl<P> Cx<'_, P> {
             .result_with_reports(delivery, result, reports)
     }
 
-    /// Record a classified native failure for the delivered write attempt.
-    /// The engine, not the venue, turns the verdict into the journal fact; a
-    /// `RefusedResend` verdict also returns the only grant a resend accepts.
+    /// Classify the delivered write reply. The engine supplies the status,
+    /// headers and the command's intent; the codec supplies native evidence.
+    pub fn classify_write(
+        &self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        native: Option<&crate::classify::Native<'_>>,
+        message: impl Into<String>,
+    ) -> Result<crate::classify::Fact, Error> {
+        self.current_write_delivery(context)?;
+        let (status, headers) = self.io.http_write_reply.as_ref().ok_or(Error::State)?;
+        let response = crate::Response {
+            status: *status,
+            headers,
+            body: "",
+        };
+        Ok(crate::classify::fact(
+            table,
+            self.write_intent(context),
+            crate::classify::Released::Response(&response),
+            native,
+            message,
+        ))
+    }
+
+    /// Record the delivered write attempt's native answer. Refusals exist only
+    /// as classifier facts; a whole `RefusedResend` refusal returns the only
+    /// grant a resend accepts (one per logical leg).
+    pub fn http_write_fact(
+        &mut self,
+        context: &Context,
+        fact: crate::classify::WriteFact,
+        reports: Option<RejectionReports>,
+    ) -> Result<Option<ResendGrant>, Error> {
+        let delivery = self.current_write_delivery(context)?;
+        let resendable = fact.resendable();
+        let result = fact.into_result();
+        // Accepted facts carry no rejection reports.
+        let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
+        self.record_write(&delivery, result, reports)?;
+        if !resendable {
+            return Ok(None);
+        }
+        match self.io.request_contexts.grant_resend(&delivery) {
+            Ok(()) => Ok(Some(ResendGrant {
+                attempt: delivery.attempt.request,
+            })),
+            Err(Error::RetryForbidden) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Classify and record one whole native failure for the delivered attempt.
     /// `reports: None` keeps the default one-message rejection reporting.
-    #[allow(clippy::too_many_arguments)]
     pub fn http_write_failure(
         &mut self,
         context: &Context,
         table: &crate::classify::CodeTable,
-        intent: crate::classify::Intent,
-        response: &crate::Response<'_>,
         native: Option<&crate::classify::Native<'_>>,
         message: impl Into<String>,
         reports: Option<RejectionReports>,
     ) -> Result<(crate::classify::Verdict, Option<ResendGrant>), Error> {
-        use crate::classify::{self, Released, Verdict};
-        let delivery = self.current_write_delivery(context)?;
-        let released = Released::Response(response);
-        let verdict = classify::verdict(table, intent, released, native);
-        let error = classify::error(verdict, intent, released, native, message);
-        let (result, reports) = match verdict {
-            Verdict::Refused(_) | Verdict::RefusedResend(_) => {
-                (WriteResult::Rejected(error), reports)
-            }
-            Verdict::Unknown(_) => (WriteResult::Failed(error), reports),
-            // Accepted facts carry no rejection reports.
-            Verdict::Satisfied(_) => (
-                WriteResult::Accepted {
-                    order_ids: Vec::new(),
-                },
-                None,
-            ),
+        let fact = self.classify_write(context, table, native, message)?;
+        let verdict = fact.verdict();
+        let failed = crate::classify::WriteFact::Failed {
+            fact,
+            known_effects: false,
         };
-        self.record_write(&delivery, result, reports)?;
-        if !matches!(verdict, Verdict::RefusedResend(_)) {
-            return Ok((verdict, None));
-        }
-        match self.io.request_contexts.grant_resend(&delivery) {
-            Ok(()) => {}
-            Err(Error::RetryForbidden) => return Ok((verdict, None)),
-            Err(error) => return Err(error),
-        }
-        Ok((
-            verdict,
-            Some(ResendGrant {
-                attempt: delivery.attempt.request,
-            }),
-        ))
+        Ok((verdict, self.http_write_fact(context, failed, reports)?))
     }
 
     /// A 2xx whose success envelope or acknowledgement does not prove the write.
@@ -884,32 +907,47 @@ impl<P> Cx<'_, P> {
         context: &Context,
         message: impl Into<String>,
     ) -> Result<(), Error> {
-        let delivery = self.current_write_delivery(context)?;
-        let error = VenueError::new(message)
-            .kind(crate::ErrorKind::Internal)
-            .outcome(crate::Outcome::Unknown);
-        self.record_write(&delivery, WriteResult::Failed(error), None)
+        let failed = crate::classify::WriteFact::Failed {
+            fact: crate::classify::unproven_reply(message),
+            known_effects: false,
+        };
+        self.http_write_fact(context, failed, None).map(|_| ())
     }
 
     /// One batch acknowledgement, items in caller order. The engine checks the
     /// item count, joins accepted IDs and chooses Accepted, Rejected, KnownPartial
     /// or Failed. `message` is the venue's existing text for a failed batch.
-    #[allow(clippy::too_many_arguments)]
     pub fn http_write_batch(
         &mut self,
         context: &Context,
         table: &crate::classify::CodeTable,
-        intent: crate::classify::Intent,
-        response: &crate::Response<'_>,
         expected: usize,
         items: &[crate::classify::BatchItem<'_>],
         message: impl Into<String>,
         reports: Option<RejectionReports>,
     ) -> Result<WriteResult, Error> {
         let delivery = self.current_write_delivery(context)?;
-        let result = crate::classify::batch(table, intent, response, expected, items, message)?;
+        let (status, headers) = self.io.http_write_reply.as_ref().ok_or(Error::State)?;
+        let response = crate::Response {
+            status: *status,
+            headers,
+            body: "",
+        };
+        let intent = self.write_intent(context);
+        let result = crate::classify::batch(table, intent, &response, expected, items, message)?;
+        let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
         self.record_write(&delivery, result.clone(), reports)?;
         Ok(result)
+    }
+
+    /// Venue actions and background writes have no command intent; they
+    /// classify as placements, which no `Satisfied` row can match.
+    fn write_intent(&self, context: &Context) -> crate::classify::Intent {
+        match context.owner() {
+            Owner::Command { id, .. } => self.io.command_intents.get(&id).copied(),
+            _ => None,
+        }
+        .unwrap_or(crate::classify::Intent::Place)
     }
 
     /// A resend of a write refused with a `RefusedResend` verdict. The journal
@@ -1524,6 +1562,68 @@ mod write_tests {
     fn accepted() -> WriteResult {
         WriteResult::Accepted {
             order_ids: vec!["accepted-id".into()],
+        }
+    }
+
+    #[test]
+    fn classification_takes_intent_from_the_command_and_status_from_the_engine() {
+        use crate::classify::{
+            CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
+        };
+        const GONE: CodeTable = CodeTable {
+            rows: &[Row {
+                key: Key::Int(-2011),
+                verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+                only: Some(Intent::Cancel),
+            }],
+            success: &[],
+            unlisted: Verdict::Unknown(None),
+            status: &[],
+        };
+        let native = Native {
+            code: NativeCode::Int(-2011),
+            message: "Unknown order sent.",
+        };
+        for (intent, expected) in [
+            (
+                Some(Intent::Cancel),
+                Verdict::Satisfied(SatisfiedIntent::Cancel),
+            ),
+            // An amend's cancel leg can never inherit cancel success.
+            (Some(Intent::Amend), Verdict::Unknown(None)),
+            // A venue action has no command intent and classifies conservatively.
+            (None, Verdict::Unknown(None)),
+        ] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            let context = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            if let Some(intent) = intent {
+                io.command_intents.insert(7, intent);
+            }
+            io.http_delivery = Some(delivery(&context, 11));
+            let cx = Cx {
+                now: 1.,
+                store: &mut store,
+                io: &mut io,
+            };
+            assert_eq!(
+                cx.classify_write(&context, &GONE, Some(&native), "x"),
+                Err(Error::State),
+                "no delivered reply"
+            );
+            cx.io.http_write_reply = Some((400, String::new()));
+            let fact = cx
+                .classify_write(&context, &GONE, Some(&native), "x")
+                .unwrap();
+            assert_eq!(fact.verdict(), expected, "{intent:?}");
+            cx.io.http_write_reply = Some((503, String::new()));
+            let fact = cx
+                .classify_write(&context, &GONE, Some(&native), "x")
+                .unwrap();
+            assert!(matches!(fact.verdict(), Verdict::Unknown(Some(_))));
         }
     }
 

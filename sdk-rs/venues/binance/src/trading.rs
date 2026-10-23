@@ -7,7 +7,7 @@ use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::classify::{
-    self, CodeTable, Intent, Key, Native, NativeCode, Released, Row, Verdict,
+    CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
 };
 use safe_cex_engine::json::{ArrayAt, ArraySplitter, ItemCheck};
 use safe_cex_engine::log::code;
@@ -17,7 +17,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::request_context::{
     Context, Credential, Operation, Owner, Policy, RejectionReports, RetryPolicy, Scope,
-    UnprovenEvidence, WriteResult,
+    UnprovenEvidence,
 };
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -724,7 +724,7 @@ impl BinanceFutures {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        self.on_trade_result(cx, request, response, None);
+        self.on_trade_result(cx, request, response);
     }
     pub(crate) fn on_trade_sign_failed(
         &mut self,
@@ -732,15 +732,13 @@ impl BinanceFutures {
         request: Request,
         error: VenueError,
     ) {
-        let message = error.message.clone();
-        self.on_trade_result(cx, request, Err(&message), Some(error));
+        self.on_trade_result(cx, request, Err(&error.message));
     }
     fn on_trade_result(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         response: Result<Response<'_>, &str>,
-        signing_error: Option<VenueError>,
     ) {
         let Request {
             command,
@@ -748,7 +746,6 @@ impl BinanceFutures {
             call,
         } = request;
         let native_response = response.is_ok();
-        let http = response.ok();
 
         let mut reports = Vec::new();
         let mut batch_reports = false;
@@ -838,8 +835,7 @@ impl BinanceFutures {
                                 (Some(id), None) => ids.push(id.to_string()),
                                 (_, code) => {
                                     let code = code.unwrap_or(0);
-                                    unproven |= failure(code, String::new(), None).outcome
-                                        == Some(Outcome::Unknown);
+                                    unproven |= item_unknown(code);
                                     rejection.get_or_insert((
                                         code,
                                         item.msg
@@ -947,48 +943,54 @@ impl BinanceFutures {
             }
             (_, Err(error)) => Some(error),
         };
-        let mut native_fact_error = None;
+        let mut native_fact = None;
         if let Some((code, message)) = error {
             if !batch_reports && !SILENT_CODES.contains(&code) {
                 reports.push(message.clone());
             }
             if let Some(job) = self.trading.jobs.get_mut(&command) {
-                let mut failed = signing_error
-                    .clone()
-                    .unwrap_or_else(|| failure(code, message, http.as_ref()));
-                if unproven {
-                    failed.outcome = Some(Outcome::Unknown);
+                if native_response {
+                    // Code 0 is no native code: a non-JSON HTTP error or an
+                    // unproven acknowledgement. The engine classifies both.
+                    let native = (code != 0).then_some(Native {
+                        code: NativeCode::Int(code),
+                        message: &message,
+                    });
+                    let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &message)
+                    else {
+                        return;
+                    };
+                    native_fact = Some(if unproven { fact.unproven() } else { fact });
                 }
-                native_fact_error = Some(failed.clone());
                 if !continue_after_item_refusal {
                     job.stop = true;
                 }
             }
         }
         if native_response {
-            let fact = match native_fact_error {
-                Some(mut error) => {
-                    if !ids.is_empty() || !evidence_ids.is_empty() {
-                        let partial_ids: Vec<_> =
-                            ids.iter().chain(&evidence_ids).cloned().collect();
-                        error = error.partial_ids(&partial_ids);
-                    }
-                    if unproven || error.outcome == Some(Outcome::Unknown) {
-                        WriteResult::Failed(error)
-                    } else if known_cancel_effects {
-                        WriteResult::KnownPartial(error)
-                    } else {
-                        WriteResult::Rejected(error)
+            let fact = match native_fact {
+                Some(fact) => {
+                    let evidence: Vec<_> = ids.iter().chain(&evidence_ids).cloned().collect();
+                    WriteFact::Failed {
+                        fact: if evidence.is_empty() {
+                            fact
+                        } else {
+                            fact.with_order_ids(&evidence)
+                        },
+                        known_effects: known_cancel_effects,
                     }
                 }
-                None => WriteResult::Accepted {
+                None => WriteFact::Accepted {
                     order_ids: ids.clone(),
                 },
             };
             let metadata = RejectionReports::new(reports).unwrap_or_default();
-            let recorded = cx.http_write_result_with_reports(&context, fact.clone(), metadata);
-            let recorded = if recorded == Err(safe_cex_engine::request_context::Error::Capacity) {
-                cx.http_write_result_with_reports(&context, fact, RejectionReports::default())
+            let recorded = cx.http_write_fact(&context, fact.clone(), Some(metadata));
+            let recorded = if matches!(
+                recorded,
+                Err(safe_cex_engine::request_context::Error::Capacity)
+            ) {
+                cx.http_write_fact(&context, fact, Some(RejectionReports::default()))
             } else {
                 recorded
             };
@@ -1939,37 +1941,20 @@ const BINANCE: CodeTable = CodeTable {
     ],
 };
 
-/// A trading failure classified by the engine from its Binance code. Code 0
-/// is no native code: a transport failure, an unproven acknowledgement, or a
-/// non-JSON HTTP error. `http` is `None` for an item inside a 2xx batch.
-fn failure(code: i64, message: String, http: Option<&Response<'_>>) -> VenueError {
-    let item = Response {
-        status: 200,
-        headers: "",
-        body: "",
-    };
-    let response = http.unwrap_or(&item);
-    let native = (code != 0).then_some(Native {
+/// Whether a native batch-item code leaves its write unproven. Code 0 is a
+/// missing item code, which proves nothing.
+fn item_unknown(code: i64) -> bool {
+    let native = Native {
         code: NativeCode::Int(code),
-        message: &message,
-    });
-    if native.is_none() && (200..300).contains(&response.status) {
-        return VenueError::new(message).outcome(Outcome::Unknown);
-    }
-    let (_, error) = classify::write(
-        &BINANCE,
-        Intent::Place,
-        Released::Response(response),
-        native.as_ref(),
-        message.clone(),
-    );
-    error
+        message: "",
+    };
+    code == 0 || matches!(BINANCE.verdict(&native, Intent::Place), Verdict::Unknown(_))
 }
 
 #[cfg(test)]
 #[test]
 fn binance_code_table_satisfies_the_engine_invariants() {
-    classify::assert_table(&BINANCE);
+    safe_cex_engine::classify::assert_table(&BINANCE);
 }
 
 /// Refused before any request was sent.
@@ -2493,8 +2478,7 @@ impl BinanceFutures {
                             }
                         }
                         CancelRow::Error { code, msg } => {
-                            *unproven |= failure(code, String::new(), None).outcome
-                                == Some(Outcome::Unknown);
+                            *unproven |= item_unknown(code);
                             error.get_or_insert((code, msg));
                         }
                     }

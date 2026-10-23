@@ -873,6 +873,7 @@ impl<V: Venue> Engine<V> {
                     &self.store,
                     &mut self.io.actions,
                 );
+                self.io.http_write_reply = Some((response.status, response.headers.to_owned()));
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -882,6 +883,7 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
+                self.io.http_write_reply = None;
             }
             self.io.http_delivery = previous;
             self.io.request_contexts.exit_delivery(&delivery);
@@ -1081,12 +1083,7 @@ mod tests {
         ) {
             self.receipts += 1;
         }
-        fn on_response(
-            &mut self,
-            cx: &mut Cx<'_, Pending>,
-            pending: Pending,
-            response: Response<'_>,
-        ) {
+        fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
             self.responses += 1;
             if self.hostile_response_patch {
                 cx.store
@@ -1099,9 +1096,7 @@ mod tests {
                     "write cannot inherit a prior read fence"
                 );
                 if self.retry_refusal && self.responses == 1 {
-                    use crate::classify::{
-                        CodeTable, Intent, Key, Native, NativeCode, Row, Verdict,
-                    };
+                    use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
                     const TIMESTAMP: CodeTable = CodeTable {
                         rows: &[Row {
                             key: Key::Int(10002),
@@ -1120,8 +1115,6 @@ mod tests {
                         .http_write_failure(
                             &pending.0,
                             &TIMESTAMP,
-                            Intent::Place,
-                            &response,
                             Some(&native),
                             "native timestamp refusal",
                             None,
@@ -2716,6 +2709,30 @@ mod tests {
                 ][state]
             );
         }
+    }
+
+    #[test]
+    fn commands_record_their_write_intent_until_they_finish() {
+        let (mut engine, _) = start(Probe::default());
+        engine.handle(
+            1.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 9,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        assert_eq!(engine.venue.command_calls, vec![9]);
+        assert_eq!(
+            engine.io.command_intents.get(&9),
+            Some(&crate::classify::Intent::Cancel)
+        );
+        Cx {
+            now: 2.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .fail(9, "done");
+        assert!(engine.io.command_intents.is_empty());
     }
 
     #[test]

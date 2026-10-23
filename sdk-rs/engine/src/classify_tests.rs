@@ -40,7 +40,7 @@ const ROWS: &[Row] = &[
 
 const PREFIX: CodeTable = CodeTable {
     rows: &[Row {
-        key: Key::MessagePrefix("Order was never placed"),
+        key: Key::Message("Order was never placed, already canceled, or filled"),
         verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
         only: Some(Intent::Cancel),
     }],
@@ -160,7 +160,7 @@ fn intent_scoped_rows_win_and_satisfied_never_leaks_to_another_intent() {
     );
     let prefix = Native {
         code: NativeCode::None,
-        message: "Order was never placed, already canceled, or filled.",
+        message: "Order was never placed, already canceled, or filled",
     };
     let on = |status, native: &Native<'_>, intent| {
         verdict(
@@ -177,6 +177,15 @@ fn intent_scoped_rows_win_and_satisfied_never_leaks_to_another_intent() {
     // No row for Amend: the code-less envelope is no evidence, so a 2xx stays malformed.
     assert_eq!(
         on(200, &prefix, Intent::Amend),
+        Verdict::Unknown(Some(ErrorKind::Internal))
+    );
+    // Exact match only: an unstripped or foreign suffix is no success evidence.
+    let suffixed = Native {
+        code: NativeCode::None,
+        message: "Order was never placed, already canceled, or filled; reason=other",
+    };
+    assert_eq!(
+        on(200, &suffixed, Intent::Cancel),
         Verdict::Unknown(Some(ErrorKind::Internal))
     );
     assert_table(&PREFIX);
@@ -459,7 +468,7 @@ fn satisfied_cancel_items_are_effects_without_ids() {
 }
 
 #[test]
-#[should_panic(expected = "only for code-less venues")]
+#[should_panic(expected = "Message rows are only for code-less venues")]
 fn assert_table_rejects_message_rows_beside_codes() {
     const BAD: &[Row] = &[
         Row {
@@ -468,7 +477,7 @@ fn assert_table_rejects_message_rows_beside_codes() {
             only: None,
         },
         Row {
-            key: Key::MessagePrefix("x"),
+            key: Key::Message("x"),
             verdict: Verdict::Unknown(None),
             only: None,
         },
