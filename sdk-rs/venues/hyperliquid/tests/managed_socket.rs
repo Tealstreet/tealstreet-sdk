@@ -58,6 +58,53 @@ fn public_open() -> (Engine<Hyperliquid>, SocketId) {
     (engine, socket)
 }
 
+fn private_connecting_before_mode() -> (Engine<Hyperliquid>, SocketId, safe_cex_engine::HttpRequest)
+{
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
+        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        ..Options::default()
+    }));
+    engine.start(1000.0);
+    let mut socket = None;
+    let mut mode = None;
+    for _ in 0..20 {
+        let actions: Vec<_> = engine.drain_actions().collect();
+        if actions.is_empty() {
+            return (engine, socket.unwrap(), mode.unwrap());
+        }
+        for action in actions {
+            match action {
+                Action::Http(request) => {
+                    let body = match support::kind(&request).as_str() {
+                        "metaAndAssetCtxs" => support::META,
+                        "perpDexs" => "[null]",
+                        "userAbstraction" => {
+                            assert!(mode.replace(request).is_none());
+                            continue;
+                        }
+                        "userFees" => r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
+                        "clearinghouseState" => support::STATE,
+                        "frontendOpenOrders" => "[]",
+                        "maxBuilderFee" => "30",
+                        other => panic!("unexpected pre-mode read {other}"),
+                    };
+                    support::reply(&mut engine, &request, 200, body);
+                }
+                Action::WsConnect {
+                    socket: current,
+                    channel,
+                    ..
+                } => {
+                    assert_eq!(channel, Some(SocketChannel::Private));
+                    assert!(socket.replace(current).is_none());
+                }
+                _ => {}
+            }
+        }
+    }
+    panic!("pre-mode discovery did not settle");
+}
+
 #[test]
 fn accepted_public_open_preserves_exact_native_fixed_wire() {
     let (mut engine, socket) = public_open();
@@ -353,4 +400,65 @@ fn private_reconnect_hands_subscriptions_off_before_account_refresh() {
         private.iter().all(|index| *index < refresh),
         "full-action native handoff order"
     );
+    let public = actions
+        .iter()
+        .position(|a| match a {
+            Action::WsSend { text, .. } => text.contains(r#""type":"allMids""#),
+            _ => false,
+        })
+        .unwrap();
+    assert!(
+        refresh < public,
+        "original native trace is private, HTTP, public"
+    );
+}
+
+#[test]
+fn unresolved_mode_does_not_park_the_native_open_refresh() {
+    let (mut engine, socket, _mode) = private_connecting_before_mode();
+    engine.handle(2000.0, Event::WsOpened { socket });
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Http(request) if support::kind(request) == "clearinghouseState")));
+    assert!(
+        !actions.iter().any(|a| match a {
+            Action::WsSend { text, .. } => serde_json::from_str::<serde_json::Value>(text).unwrap()
+                ["subscription"]["user"]
+                .is_string(),
+            _ => false,
+        }),
+        "unresolved mode emits no private subscription obligation"
+    );
+}
+
+#[test]
+fn mode_before_first_open_still_refreshes_spot_without_a_subscription() {
+    let (mut engine, _socket, mode) = private_connecting_before_mode();
+    support::reply(&mut engine, &mode, 200, "\"portfolioMargin\"");
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Http(request) if support::kind(request) == "spotClearinghouseState")));
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+}
+
+#[test]
+fn mode_while_closed_still_refreshes_spot_without_a_subscription() {
+    let (mut engine, socket, mode) = private_connecting_before_mode();
+    engine.handle(2000.0, Event::WsClosed { socket, code: 1006 });
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        2001.0,
+        Event::HttpResponse {
+            request: mode.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "\"portfolioMargin\"",
+            },
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Http(request) if support::kind(request) == "spotClearinghouseState")));
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
 }

@@ -158,3 +158,18 @@ source is still byte-identical. Three additional original working controls
 pass: Shared/Disabled private financial ingress, standalone spot's five exact
 depth variants, and the full-action private reconnect subscription-before-HTTP
 order. The resulting run is 5 assertion REDs and 6 GREENs, zero ignored.
+
+The mode-boundary closure adds 3 more native working controls: mode response
+before first open, mode response while closed, and open before mode response.
+Each proves its no-private-frame refresh obligation remains synchronous/native.
+The first fixture run omitted maxBuilderFee; adding that native response fixed
+the fixture without touching production. The complete run is now 14 tests:
+5 original assertion REDs and 9 GREENs, zero ignored. The reconnect control also
+pins the original unfiltered private/HTTP/public order before its explicitly
+reviewed transition to the shared handoff ordering.
+
+Ownership is coordinated: zs5e83 has no active lib/account claim; fe7lgm owns
+history.rs and only its Pending/callback/pump_reads branches, which stay exact;
+19pt8s confirms no socket-region claim and requires both existing wallet-check
+sites/outcomes to remain exact. Native coupling reviews of the original plan
+and controls are bounded read-only clearances, not production certification.
