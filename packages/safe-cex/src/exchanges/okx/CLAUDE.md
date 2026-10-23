@@ -1231,3 +1231,27 @@ Rust closed-position caps and ordinary history caps/cursor stalls emit
 The host flags only the owning result and routes its warning to that caller.
 EEA composite-source cap/cursor failures still reject; strict financial rows,
 caps, cursors and retained-row policies are unchanged.
+
+
+## Rust signer migration checkpoint
+
+The draft Rust adoption stages native private HTTP and private/business login
+through the engine SignStep/provider. Venue options contain opaque identity refs;
+trusted setup owns key, secret and passphrase material, including absent-only
+secondary passphrase fallback. Native GET reads prefer secondary; client-ID lookup,
+ordered writes and both WS login channels stay primary. Public requests remain
+unsigned. Setup validation may report sanitized `Invalid local signer setup`
+before startup rather than the TS client error text.
+
+The draft integrates the landed shared encoding/passphrase presentation core.
+Hosted HTTP reuses `okx.signing.ts`, a standalone request serializer also used by
+the TS API interceptor; no TS venue is constructed. Four-alias browser and
+keyless RemoteSigner captures use owned primary refs and Base64 output.
+Native private/business WS work has three typed byte parts (seconds, GET,
+/users/self/verify), whose concatenation and MAC are unchanged. That shape lets
+the shared bridge preserve numeric legacy `extraData.timestamp` from the exact
+prepared receipt without confusing an HTTP preimage with WS work. Native login
+JSON keeps its existing string timestamp. Private PayloadSigner remains typed
+unsupported/notSent; RemoteSigner wins and cannot fall back. Hosted admission
+still requires positive actual-WASM tests and final CI/replay proof before merge.
+No caller may restore raw secrets to sanitized options or use a local fallback.

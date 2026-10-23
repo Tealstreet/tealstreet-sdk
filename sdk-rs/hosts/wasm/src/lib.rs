@@ -843,14 +843,15 @@ impl WasmEngine {
             None
         };
         #[cfg(feature = "dispatch-signing")]
-        let hosted_identity = dispatch_signing
-            .then(|| {
-                options
-                    .signing
-                    .clone()
-                    .map(|identities| (venue.to_owned(), identities))
-            })
-            .flatten();
+        let hosted_identity = (dispatch_signing
+            && safe_cex_venues::hosted_signing::admitted(venue, &options))
+        .then(|| {
+            options
+                .signing
+                .clone()
+                .map(|identities| (venue.to_owned(), identities))
+        })
+        .flatten();
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
         let inner = safe_cex_venues::build_with_signer(
@@ -1298,6 +1299,40 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "asterdex")]
+    #[test]
+    fn hosted_signing_identity_exists_only_for_aster_v1_accounts() {
+        let engine = |options: &str, setup: &str| {
+            let Ok(engine) = crate::WasmEngine::new("asterdex", options, Some(setup.into())) else {
+                panic!("trusted Aster setup must construct");
+            };
+            engine
+        };
+        let v1 = engine(
+            r#"{"asterdex":{"apiVersion":"v1"}}"#,
+            r#"{"primary":{"key":"api-key","secret":"api-secret"}}"#,
+        );
+        assert!(v1.hosted_identity.is_some());
+        let v3 = engine(
+            r#"{"applicationId":"0x2222222222222222222222222222222222222222","asterdex":{"apiVersion":"v3","signerAddress":"0x1111111111111111111111111111111111111111"}}"#,
+            &format!(
+                r#"{{"primary":{{"key":"0x1111111111111111111111111111111111111111","secret":"{}","secretEncoding":"hex"}}}}"#,
+                "12".repeat(32)
+            ),
+        );
+        // A V3 wallet key must never be offered to the hosted HMAC capture,
+        // including when no apiVersion accompanies setup-held V3 material.
+        assert!(v3.hosted_identity.is_none());
+        let unversioned = engine(
+            r#"{"applicationId":"0x2222222222222222222222222222222222222222","asterdex":{"signerAddress":"0x1111111111111111111111111111111111111111"}}"#,
+            &format!(
+                r#"{{"primary":{{"key":"0x1111111111111111111111111111111111111111","secret":"{}","secretEncoding":"hex"}}}}"#,
+                "12".repeat(32)
+            ),
+        );
+        assert!(unversioned.hosted_identity.is_none());
+    }
+
     #[cfg(feature = "bybit")]
     mod bybit_signer_construction {
         use crate::WasmEngine;
@@ -1494,7 +1529,7 @@ mod tests {
 
         #[cfg(feature = "bitunix")]
         #[test]
-        fn shared_provider_feature_does_not_adopt_unmigrated_public_bitunix() {
+        fn shared_provider_feature_keeps_managed_public_bitunix_unsigned() {
             let Ok(mut engine) =
                 super::super::WasmEngine::new("bitunix", r#"{"publicDataOnly":true}"#, None)
             else {
@@ -1503,17 +1538,62 @@ mod tests {
             assert!(!engine.dispatch_signing);
             assert!(!engine.requires_external_signer());
             #[derive(serde::Deserialize)]
+            struct Packet {
+                request: u64,
+                url: String,
+                method: String,
+                headers: Vec<(String, String)>,
+            }
+            #[derive(serde::Deserialize)]
             struct Outbound {
                 op: String,
-                url: Option<String>,
+                phase: Option<String>,
+                intent: Option<String>,
+                preparation: Option<String>,
+                permit: Option<String>,
+                packet: Option<Packet>,
             }
             let actions: Vec<Outbound> = serde_json::from_str(&engine.start(1000.)).unwrap();
-            assert!(actions.iter().any(|action| {
-                action.op == "http"
-                    && action
-                        .url
-                        .as_deref()
-                        .is_some_and(|url| url.contains("/api/v1/futures/market/"))
+            let preparation = actions
+                .iter()
+                .find(|action| {
+                    action.op == "managedHttp"
+                        && action.phase.as_deref() == Some("prepare")
+                        && action
+                            .packet
+                            .as_ref()
+                            .is_some_and(|packet| packet.url.contains("/api/v1/futures/market/"))
+                })
+                .expect("managed public discovery must prepare before release");
+            assert_eq!(preparation.intent.as_deref(), Some("public"));
+            assert!(actions.iter().all(|action| action.op != "http"));
+            let token = preparation.preparation.as_deref().unwrap();
+            assert!(engine.http_preparation_pending(token));
+            let bound: Vec<Outbound> =
+                serde_json::from_str(&engine.http_prepared(token, "1", None, 1000.).unwrap())
+                    .unwrap();
+            let binding = bound
+                .iter()
+                .find(|action| {
+                    action.op == "managedHttp" && action.phase.as_deref() == Some("bind")
+                })
+                .expect("public transport must bind before claim");
+            assert_eq!(binding.preparation.as_deref(), Some(token));
+            let unsigned = preparation.packet.as_ref().unwrap();
+            let released = binding.packet.as_ref().unwrap();
+            assert_eq!(released.request, unsigned.request);
+            assert_eq!(released.url, unsigned.url);
+            assert_eq!(released.method, "GET");
+            assert_eq!(released.headers, unsigned.headers);
+            assert_eq!(
+                engine.http_claim(binding.permit.as_deref().unwrap(), 1000.),
+                r#"{"status":"released"}"#
+            );
+            assert!(bound.iter().all(|action| {
+                !matches!(
+                    action.op.as_str(),
+                    "http" | "sign" | "signPayload" | "signedOutbound"
+                )
             }));
             assert!(actions.iter().all(|action| {
                 !matches!(

@@ -74,6 +74,7 @@ struct RemoteSigningWire {
 enum RemoteExtraData {
     BybitExpiry,
     BinanceSpot,
+    OkxTimestamp,
 }
 
 #[derive(Default, Deserialize)]
