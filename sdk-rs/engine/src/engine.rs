@@ -849,6 +849,9 @@ mod command_entry_tests;
 #[cfg(test)]
 #[path = "command_wait_tests.rs"]
 mod command_wait_tests;
+#[cfg(test)]
+#[path = "read_root_expiry_tests.rs"]
+mod read_root_expiry_tests;
 
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
