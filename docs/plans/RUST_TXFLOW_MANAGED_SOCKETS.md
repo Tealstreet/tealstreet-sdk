@@ -64,8 +64,10 @@ No borrowed command, HTTP, Plan or signer activation is introduced.
 Native startup account reads are independent and stay at their existing startup
 point. Do not blanket-delay startup, public-only or zero-private-obligation work.
 A private node open still invokes native account refresh when user() yields no
-subscription address; preserve its existing started/inflight guards and immediate
-zero-obligation path, without inventing an epoch or private interest.
+subscription address; invoke existing guarded account_refresh directly from the
+genuine current node Ready in that case. Do not fabricate a private interest or
+an empty-required continuation merely to obtain a wake. public_data_only retains
+its native no-refresh path; no fake started/inflight state is permitted.
 Preserve the native150ms ordering trace as a named original positive before
 changing the intentional HTTP position. The existing opening path can issue
 refresh HTTP while private frames remain paced; a separate original assertion
@@ -77,7 +79,13 @@ obligation. If necessary, keep only a native refresh-due intent like the reviewe
 HL mapping; it grants no epoch, timer, send or publication authority. Shared
 matching-feed retirement/backoff owns recovery. Fresh Ready registers a new
 handoff, and only transfer to the existing native read/inflight owner consumes
-that intent. A refused repair does not cancel still-needed committed work; an
+that intent, including work already legitimately owned under the native inflight
+contract. Proposal success, queued frames and callback entry alone do not consume
+it. If account.started is false, retain only the intent: native account_start
+keeps its existing refresh and existing poll, and those paths discharge it only
+after current native read/inflight custody is established. Do not force another
+refresh, spin, or add a timer. The zero-address no-op has no fabricated private
+obligation to retain. A refused repair does not cancel still-needed committed work; an
 old/superseded wake cannot erase newer due work. No direct-read fallback or venue
 retry timer is permitted. Source review must pin this transfer boundary.
 
@@ -204,3 +212,22 @@ The implementation must prove that refresh-due is consumed only when the existin
 native read/inflight owner accepts custody. Refused or partial handoff, admitted
 work retirement and stale wakes must preserve any newer due obligation. Shared
 API/custody review and production verification remain separate gates.
+
+
+## Bounded shared API/custody plan review
+
+codex-uufub4 cleared the b007/8b36 plan direction on existing1943 without a new
+seam,1970 opt-in or auth barrier. This is plan/API clearance only; its independent
+archived execution was still in progress when reported and is not claimed here.
+Production/source/runtime review remains separate.
+
+For nonempty private keys, atomically register the complete desired node batch
+and exact canonical required private keys. The released handoff waits for every
+paced batch and reads current native generation/inflight/revisions at callback.
+Required source controls include zero-address no artificial work; callback-time
+inflight changes; capacity refusal then freed capacity and genuine reconnect;
+admitted continuation retirement; old stale wake while newer work waits;
+Shared/Disabled private financial publication; and partial150ms batch release
+without early HTTP. Startup reads remain independent. Both the native-owner
+transfer boundary and the pre-start startup/poll ownership rule above are
+implementation gates, not a new authority or venue scheduling mechanism.
