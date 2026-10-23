@@ -455,7 +455,7 @@ impl BinanceFutures {
             }
             _ => return,
         };
-        if self.credentials.primary().is_none() {
+        if !self.credentials.has_primary() {
             let error = not_sent("Binance trading needs an API key").kind(ErrorKind::AuthInvalid);
             cx.fail(id, error);
             return;
