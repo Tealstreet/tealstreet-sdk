@@ -2691,3 +2691,39 @@ blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
 full bans and both request-context checks (15tests) PASS. Three independent
 implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
 prune is verified; the parallel #1951 history prune is not credited here.
+
+### Binance identity terminal provenance
+
+The local identity error helper reuses existing Read entry and typed identity
+error completion. Its unused numeric success arm and numeric command argument
+are removed. Successful credential selection, HTTP preparation and response
+handling remain exact to actual `15bd7821b52`; no shared API, session, signing,
+history, account reducer or Store changes are involved. The listen-key owner
+confirmed the identity helper and distant FetchAccount dispatch arm are clear;
+the existing command-entry capacity assertion is preserved.
+
+Pure inventory prune removes only `venues/binance/src/identity.rs`:
+`c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548: 1`
+and `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa: 1`.
+All other manifest bytes/maps remain exact; Binance shrinks from 26 fingerprints
+/ 30 occurrences to 24 / 28. No rehash, site growth or checker exemption.
+
+## Phemex unsigned public-trades Context ownership
+
+The unsigned /md/v2/trade query now owns one genuine public Read root and
+managed delivery, including its existing native pause queue. Row admission and
+terminal ownership use ReadCompletion/ReadHistoryRows; stale429 cannot extend a
+pause, and typed preparation/network/expiry errors survive to the correct owner.
+Native signed public/private, income, identity, trading and socket paths remain
+held consumers. Their shared legacy fingerprints are retained. Only the public
+tuple codec's conservative f913fd4f macro occurrence is removed (1F/1O); this is
+not a claim that the shared physical request funnel has migrated.
+
+## Selected managed signed Read composition
+
+Shared admission/selection/queue/refusal composition is additive in engine
+selected_read.rs, with genuine callback and original-generation controls. The
+original BingX/WEEX copies erase capacity denial fields; those two native
+assertion REDs are retained for separate consumer adoption, not marked fixed by
+engine probes. No venue P0, private signer, Plan history or inventory-zero
+claim is closed by this library seam.

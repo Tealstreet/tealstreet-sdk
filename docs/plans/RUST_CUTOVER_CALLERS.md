@@ -5949,6 +5949,221 @@ legacy account-repair adoption must remove retained raw material, end dual custo
 and complete ref-only admission. The admission implementation is separate work
 owned by claude-m26ps4; this ruling alone claims no SDK availability or merge.
 
+## Binance identity local refusal custody
+
+Binance USD-M and portfolio-margin `fetchAccount` preflight refusals use genuine
+engine Read command admission before publishing a result. Missing, disabled or
+incomplete credentials retain their existing message and one correlated
+diagnostic followed by one terminal when admission succeeds. If the engine
+context registry is full, the engine instead emits one Internal failure,
+`Engine request capacity reached`, with no extra diagnostic or transport.
+These Read failures carry no mutation outcome.
+
+Local identity refusals release their Read ownership immediately, including
+repeated calls with the same command number. They do not issue HTTP/signatures
+or mutate account snapshots. Valid identity reads retain the selected signer,
+request bytes, routes and `userId` shape. Spot and COIN-M identity remain
+capability-refused before venue dispatch.
+
+
+## Hyperliquid whole-family managed socket lifecycle
+
+Hyperliquid perps, standalone spot and merged spot accounts use one managed
+socket for their public and private topics. Connect10s, idle45s, ping15s and
+native retry/JSON behavior remain unchanged. Duplicate opens and retired or
+idle-expired ingress cannot replay subscriptions or publish financial/market
+data, even when a watchdog callback arrives late. Shared/Disabled public-feed
+policy still permits native private traffic while suppressing direct public
+subscriptions and publication.
+
+For an actual private subscription obligation, the complete private-then-public
+frame batch is handed to the host before a subsequent ordinary timer ingress
+starts the native account/spot refresh. This moves refresh HTTP after the public
+frames compared with the earlier private/HTTP/public opening trace; it promises
+host handoff ordering, neither peer acknowledgement nor a later JavaScript turn.
+Custom hosts must dispatch returned actions in order and deliver timers through
+normal engine ingress. Mode resolution still synchronously clears its own timer.
+Shared subscription capacity refusal reconnects through the native backoff;
+mode-completion intent survives refusal and retirement until a fresh handoff
+transfers its spot refresh to the native read owner. Stale or duplicate wakeups
+cannot consume or repeat that work. Final book unsubscriptions retain native
+l2Book-before-bbo order and the five ordered spot depth variants.
+Refreshes with no private frames (not open, unresolved mode or no private user)
+retain their native behavior instead of waiting for nonexistent convergence.
+
+Book/candle refcounts, spot depth variants, account snapshot/revision guards,
+HTTP request and signer formats, history and cached lookup/candle results retain
+their native semantics. A stale handoff cannot start a refresh on a retired feed.
+Bitunix retains the separately tracked legacy boundary under Sam's decision.
+
+## Phemex unsigned public-trades request custody
+
+Phemex fetchPublicTrades uses a managed public Read when both constructed
+credential containers are absent. Its original 20 s command deadline includes
+route preparation and the existing rate-limit pause. A pause wake after that
+deadline fails typed Timeout without sending; it releases the native active
+history slot. Host setup and network failures retain their typed kind and
+venue metadata without credential-auth evidence. Initial Read admission has
+outcome None; pre-release route refusal retains the shared NotSent outcome,
+while released network failures retain outcome None.
+
+The one-response snapshot keeps the native URL, unsigned headers, tuple codec,
+occurrence-based duplicate identities, stable descending sort and output limit
+(default100, clamp1..200). More than1000 tuples or any malformed row rejects the
+whole page; no accepted prefix or incomplete marker is published. Direct and
+streamed responses validate exact delivery custody before staging, completion
+or the common429 pause update. Expired/duplicate input cannot finish a reused
+command or pause its replacement. Rare history does not mutate live account data.
+
+Credentialed public trades retain their existing signed route and wire contract,
+including public_data_only and secondary-only configurations. Private reads,
+identity, income, trading, signing and socket behavior remain on their current
+paths. Those consumers still require the inventoried shared legacy funnel.
+
+## Selected managed signed Read helper
+
+The engine offers one selected-identity Read composition for genuine command
+entry and Background reads. Selection, opaque identity, slot, egress and account
+evidence stay coupled across the original Context generation and any permitted
+physical retry; method does not choose credentials. Timeout, pacing and retry
+remain explicit native declarations. Entry rejection is already terminal; queue
+or retry refusal preserves its exact error and original pending/wrapper. Missing
+command credentials use terminal-only local Read admission, with optional native
+diagnostic before the sole typed failure and no I/O. Caller codecs still own
+publication, completion, native error tables and body interpretation.
+
+This additive engine seam does not migrate BingX/WEEX issuers in this PR; their
+original native capacity assertions remain RED on the separately held consumer
+branch. It introduces no new NX/Agent caller timeout or cancellation behavior.
+Pre-issued external Contexts, Plan/Slot admission, writes and WS remain outside
+this API. G2 owns the separate trusted subject/config-generation retirement gap.
+
+## OKX dispatch signer adoption (draft; CI evidence pending)
+
+This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
+Native HTTP and private/business WS stage canonical work through the shared
+engine signer. Trusted setup consumes primary/secondary credentials before
+venue construction; generic options carry opaque identities, not secrets or
+passphrases. Native ordinary private GET uses secondary when configured;
+ordered writes, client-ID lookup and both WS login channels use primary.
+The primary passphrase is required for private accounts. An absent secondary
+passphrase inherits the primary provider ref; explicit empty is rejected.
+
+The #1714/#1728 worker/bootstrap requirements apply: provision the provider in
+the engine-owning realm, including rotation/reload/disposal, rather than copying
+sanitized `exchange.options`. Public/private readiness must use construction
+metadata. No new persisted account-ID mapping is introduced. Live/demo/EEA roots
+and proxy/CORS requirements remain as documented in the OKX integration guide.
+Typed signer refusal before the first write is `notSent`; earlier accepted
+bracket effects retain the existing aggregate outcome. Provider refusal cannot
+mean lookup absence or an empty completed financial snapshot.
+
+The draft now consumes actual #1757 and #1763. Browser `signHttpRequest` and
+`signWsAuth` use the shared owned provider without constructing a TS OKX venue;
+only the standalone request serializer survives deletion of TS venue classes.
+Keyless `remoteSigner` is declared for all four aliases. Its existing external
+wire is unchanged: each alias keeps its own label, Base64 MACs and WS
+`extraData.timestamp` as integer seconds derived from prepared work. The
+primary-only external wire cannot select a secondary identity: a native read
+requiring that identity refuses before callback/I/O, never silently uses primary.
+Hosted capture itself signs with primary even when secondary is configured.
+
+Private `PayloadSigner` remains typed `unsupported` / `notSent` at setup,
+including when a local secret is also supplied. The TS OKX interceptor never
+invokes that callback, so this does not remove a working combination. RemoteSigner
+wins when both callbacks are supplied, with no local or payload fallback.
+Passphrase material is separately provisioned into trusted Present-only provider
+custody; neither generic options, the external wire nor callback receiver retains
+it. Browser/worker providers must be provisioned in their executing realm.
+
+Native and SDK controls are passing; actual-WASM hosted/native-login tests and
+full CI/replay proof are pending. This section describes the proposed contract,
+not a landed or live-capture claim. [Family plan](RUST_OKX_DISPATCH_SIGNER.md),
+[landed shared presentation](RUST_HOSTED_SIGNER_PRESENTATION.md).
+
+### OKX caller adoption: leverage, config read and trade entry (slice 1)
+
+This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_ADOPTION.md).
+
+- **`fetchLeverage`** is admitted as one command Read before any refusal. It
+  then sends one managed signed GET using the read key when configured, else
+  the primary key. An unanswered read fails once with kind `timeout` at the
+  shared 20 s deadline. A late reply publishes no leverage and adds no second
+  terminal. More than 256 outstanding managed reads give one typed capacity
+  failure before any HTTP; an answered read frees capacity. Provider refusal
+  stays one `notSent` failure.
+- **The startup config read** is a Background managed Read with no retry. An
+  unanswered read ends at the shared 20 s deadline and enters OKX's existing
+  startup backoff, so it is re-sent one jittered backoff step later. It no
+  longer stays in flight forever. 50113 counting, documented key rejections
+  and the 30 s configured poll are unchanged.
+- **Refusals are unchanged.** `unknown market`, `OKX leverage requires
+  credentials`, `Only cross mode is supported`, `OKX account is not ready` and
+  planning `invalidInput` refusals keep their text, kind and outcome. The
+  trade refusals stay `notSent` through a terminal-only Mutation owner and
+  leave no order lock behind. A duplicate active command ID is refused by the
+  engine before OKX sees it, so OKX's own "command is already running" text is
+  gone.
+- Both reads now emit `ManagedHttp` preparation, as Binance, BingX and WEEX
+  already do. The demo `x-simulated-trading: 1` header comes from the
+  recipe's unsigned-header declaration. Writes, history, candles and socket
+  login are unchanged.
+
+### OKX caller adoption: fetchCandles (slice 2)
+
+This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_CANDLES.md).
+
+- **Bounded by one deadline.** Candle reads stay public and unsigned, with
+  the same URLs, limits, history fallback and row shape. They are now managed
+  public reads. The recent page and the history fallback share one 20 s
+  budget per command, so the fallback gets only what is left of it.
+- **Soft-empty on any post-send failure.** A venue error, HTTP error, bad row,
+  transport failure or timeout still gives one error event and then an empty
+  `[]` result. An unanswered read ends with the error event `HTTP request
+  timed out`. A late reply after the result is ignored. If the history
+  fallback cannot be admitted (capacity), the soft result applies, because
+  the recent page was already sent. More than 256 outstanding managed reads
+  are refused with one typed capacity failure before any HTTP.
+- **Pre-send deadline is hard.** If the host never finishes route
+  preparation, nothing is sent and the deadline gives one typed failure
+  (`HTTP request timed out`, Timeout, NotSent) with no `[]` result.
+- **Refusals are unchanged.** Unknown market still answers `[]`. Invalid
+  bounds and unsupported bars keep their text, with no kind or outcome. Live
+  candle subscriptions are unchanged.
+
+## Public derivations through the signer (P4)
+
+The engine signer gains two non-secret operations, `PublicAddress` and
+`PublicKey` (`RUST_SIGNER_PREREQUISITES.md`, "Public derivations (P4)").
+No venue uses them yet; the Hyperliquid, TxFlow, GRVT and Polymarket
+conversions adopt them. Caller-visible changes:
+
+- **`IdentitySetupPolicy.signing_algorithm`.** A new optional field declares a
+  slot's signing ref an asymmetric key (`ed25519`, `es256`, `secp256k1Digest`
+  or `starkDigest`). Rust literal constructors must set it, or use
+  `..Default::default()`. The TS `IdentitySetupPolicy` type and
+  `construction-rules.json` gain the optional `signingAlgorithm` key. A MAC
+  algorithm is refused, and so is an aliased secondary that declares a
+  different algorithm from its primary.
+- **Only a declared ref answers.** A provider answers a public operation only
+  for a ref that setup policy declared for exactly that algorithm. An HMAC,
+  undeclared, credential, passphrase or extra-role ref is refused, so no
+  secret is fingerprinted. `LocalSigner::insert` drops a replaced ref's
+  declaration.
+- **`Operation` gains two variants.** Exhaustive matches on
+  `safe_cex_engine::signing::Operation` outside this repo must add them.
+  Injected providers may refuse them (`InvalidRequest`/`Unsupported`); result
+  widths are exact (20-byte address, 32-byte Ed25519 key or Stark felt).
+- **`safe_cex_venues::fetch_public`.** Trusted setup asks a local provider
+  inline for public values: at most 4 public-only operations, validated first.
+  A host or remote provider gets `Unavailable` and nothing is scheduled. Every
+  answer is checked as a canonical curve value (Stark x, Ed25519 point), and a malformed one
+  is `InvalidResult`. Those accounts
+  supply the value as bound account metadata instead.
+- **`safe_cex_crypto::ethereum::signed_by`.** A shared pre-release check that
+  a low-s host/remote signature recovers to the bound actual signer. Families call
+  it before release; it never compares with expected venue config.
+
 ## Explicit request egress (#1833) and Plan/preflight issuance
 
 #1833 captures explicit egress (`Primary`, `PublicCors`, `Direct`) when a
