@@ -6,11 +6,13 @@ use crate::request_context::{
     Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RejectionReports,
     ResendGrant, RetryEvidence, Scope, WriteResult,
 };
+#[cfg(feature = "http-plans")]
+use crate::request_context::{
+    HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
+};
 use std::collections::HashMap;
 #[cfg(feature = "http-plans")]
 use std::collections::VecDeque;
-#[cfg(feature = "http-plans")]
-use crate::request_context::{HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose};
 
 const CAPACITY: usize = 256;
 
@@ -51,7 +53,10 @@ struct CommandOwner {
 }
 
 enum CommandPhase {
-    Context { root: Context, entry_owned: bool },
+    Context {
+        root: Context,
+        entry_owned: bool,
+    },
     #[cfg(feature = "http-plans")]
     Preflight(preflight::State),
     #[cfg(feature = "http-plans")]
@@ -243,8 +248,10 @@ impl ContextRegistry {
         };
         let owner = self.commands.get_mut(&id).expect("issued command entry");
         assert_eq!(owner.generation, generation);
-        let CommandPhase::Context { root, entry_owned } = &mut owner.phase else {
-            panic!("command entry must retain a Context root");
+        let (root, entry_owned) = match &mut owner.phase {
+            CommandPhase::Context { root, entry_owned } => (root, entry_owned),
+            #[cfg(feature = "http-plans")]
+            _ => panic!("command entry must retain a Context root"),
         };
         assert_eq!(root, context);
         assert!(!*entry_owned, "command entry already retained");
@@ -325,8 +332,7 @@ impl ContextRegistry {
                     root,
                     entry_owned: true,
                 } => Some(root),
-                #[cfg(feature = "http-plans")]
-            _ => None,
+                _ => None,
             })
         {
             if now >= root.deadline() {
@@ -562,7 +568,10 @@ impl ContextRegistry {
         let pending = owner.pending.checked_add(1).ok_or(Error::Capacity)?;
         if context.operation() == Operation::Mutation {
             #[cfg(feature = "http-plans")]
-            if matches!(owner.phase, CommandPhase::Planned(_)) {
+            let reserved = matches!(owner.phase, CommandPhase::Planned(_));
+            #[cfg(not(feature = "http-plans"))]
+            let reserved = false;
+            if reserved {
                 if owner
                     .writes
                     .as_ref()
@@ -1275,11 +1284,11 @@ impl<P> Cx<'_, P> {
     }
 
     fn validate_write_delivery_phase(&self, context: &Context) -> Result<(), Error> {
+        #[cfg(feature = "http-plans")]
         if let Some(plan) = self.io.request_contexts.plan_from_context(context) {
-            self.validate_plan_delivery(&plan, context)
-        } else {
-            self.validate_http_context(context)
+            return self.validate_plan_delivery(&plan, context);
         }
+        self.validate_http_context(context)
     }
 
     fn validate_http_write_record(
@@ -2721,8 +2730,7 @@ mod write_tests {
                 crate::Action::Notice(Notice::CommandError { message, .. }) => {
                     Some(message.as_str())
                 }
-                #[cfg(feature = "http-plans")]
-            _ => None,
+                _ => None,
             })
             .collect();
         assert_eq!(messages, ["A1", "A2", "B1", "B2"]);
@@ -2797,8 +2805,7 @@ mod write_tests {
                 .iter()
                 .filter_map(|a| match a {
                     crate::Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
-                    #[cfg(feature = "http-plans")]
-            _ => None,
+                    _ => None,
                 })
                 .collect::<Vec<_>>();
             if state == 3 {
@@ -2813,8 +2820,7 @@ mod write_tests {
                         0 => Some(Outcome::NotSent),
                         1 => Some(Outcome::Unknown),
                         2 => Some(Outcome::Rejected),
-                        #[cfg(feature = "http-plans")]
-            _ => None,
+                        _ => None,
                     }
                 );
                 if state == 4 {

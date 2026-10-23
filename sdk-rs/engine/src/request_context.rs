@@ -1,4 +1,5 @@
 //! Semantic HTTP ownership and the final controllable transport handoff.
+//! Whole-plan and Preflight APIs require the `http-plans` Cargo feature.
 //!
 //! This module owns no requests, credentials, clocks or network executor. A host
 //! prepares its route first; the engine checks a single-use permit immediately
@@ -951,7 +952,8 @@ impl CommandWrites {
     /// Prepare the full declared journal before plan admission. Logical legs
     /// include unselected fallback branches; neither registration nor retry
     /// may grow this backing after the plan's resources have committed.
-    pub fn new_reserved(capacity: usize, logical_legs: usize) -> Result<Self, Error> {
+    #[cfg(any(test, feature = "http-plans"))]
+    pub(crate) fn new_reserved(capacity: usize, logical_legs: usize) -> Result<Self, Error> {
         let mut writes = Self::new(capacity)?;
         if logical_legs == 0 || logical_legs > capacity {
             return Err(Error::Capacity);
@@ -1430,6 +1432,7 @@ impl CommandWrites {
 
     /// Failure-only structural progress. This grants no publication or retry
     /// authority, including for evidence-only IDs on a failed native reply.
+    #[cfg(feature = "http-plans")]
     pub(crate) fn validate_failed_attempt(&self, id: RequestId) -> Result<(), Error> {
         if self.sealed {
             return Err(Error::State);

@@ -1506,10 +1506,10 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             command_entry: None,
-    #[cfg(feature = "http-plans")]
+            #[cfg(feature = "http-plans")]
             http_plan_ready: None,
             http_owner_poison: false,
-    #[cfg(feature = "http-plans")]
+            #[cfg(feature = "http-plans")]
             http_plan_poison: false,
             http_responses: Default::default(),
             http_write_revision: 0,
@@ -3924,19 +3924,27 @@ impl<V: Venue> Engine<V> {
 
     fn plan_callback_failed(&self) -> bool {
         #[cfg(feature = "http-plans")]
-        { self.io.http_plan_poison }
+        {
+            self.io.http_plan_poison
+        }
         #[cfg(not(feature = "http-plans"))]
-        { false }
+        {
+            false
+        }
     }
 
     #[cfg(not(feature = "http-plans"))]
     fn flush_http_plans(&mut self, _now: f64) {}
 
     #[cfg(not(feature = "http-plans"))]
-    fn expire_plan_timer(&mut self, _now: f64, _event: &Event<'_>) -> bool { false }
+    fn expire_plan_timer(&mut self, _now: f64, _event: &Event<'_>) -> bool {
+        false
+    }
 
     #[cfg(not(feature = "http-plans"))]
-    fn flush_http_owner_retirements(&mut self) { self.assert_live(); }
+    fn flush_http_owner_retirements(&mut self) {
+        self.assert_live();
+    }
 
     fn assert_retirement_safe(&self) {
         assert!(
@@ -8105,6 +8113,6 @@ mod fill_frame_tests {
 #[path = "signing_tests.rs"]
 mod dispatch_signing_tests;
 
-#[cfg(all(test, feature = "order-locks"))]
+#[cfg(all(test, feature = "order-locks", feature = "http-plans"))]
 #[path = "http_plan_boundary_tests.rs"]
 mod http_plan_boundary_tests;

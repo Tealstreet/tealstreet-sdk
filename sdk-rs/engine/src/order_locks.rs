@@ -305,6 +305,7 @@ impl OrderLocks {
     }
 
     /// New owned preflight cannot erase evidence of an earlier legacy send.
+    #[cfg(feature = "http-plans")]
     pub fn can_manage_unsent(&self, command: CommandId) -> bool {
         self.active
             .iter()

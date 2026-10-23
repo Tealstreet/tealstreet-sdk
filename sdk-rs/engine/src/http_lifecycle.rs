@@ -45,6 +45,7 @@ impl Managed {
         }
     }
 
+    #[cfg(feature = "http-plans")]
     pub(super) fn released_delivery(&self, delivery: &request_context_registry::Delivery) -> bool {
         self.delivery() == *delivery
             && self.lifecycle.release().is_some()
@@ -162,8 +163,7 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         recipe: ManagedRecipe,
         pending: P,
-        #[cfg(feature = "http-plans")]
-        admission: Option<&request_context_registry::OwnedAdmission>,
+        #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
         let (step, public_headers) = match recipe {
             ManagedRecipe::Unsigned(headers) => (None, headers),
@@ -225,7 +225,12 @@ impl<P> Cx<'_, P> {
         #[cfg(not(feature = "http-plans"))]
         let (request, generation, timer, deadline) = {
             let ids = self.io.reserve_ids(3).expect("preflighted HTTP identities");
-            (RequestId(ids.start), ids.start + 1, TimerId(ids.start + 2), context.deadline())
+            (
+                RequestId(ids.start),
+                ids.start + 1,
+                TimerId(ids.start + 2),
+                context.deadline(),
+            )
         };
         let http = HttpRequest {
             id: request,
@@ -274,6 +279,7 @@ impl<P> Cx<'_, P> {
             }
             return Err((pending, error));
         }
+        #[cfg(feature = "http-plans")]
         if let Some(admission) = admission {
             self.io.request_contexts.commit_owned_admission(admission);
         }
@@ -359,6 +365,7 @@ impl<P> Io<P> {
     }
 
     pub(super) fn retire_http_command(&mut self, command: CommandId) {
+        #[cfg(feature = "http-plans")]
         if let Some(timer) = self.request_contexts.plan_timer(command) {
             self.timers.remove(&timer);
             self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
