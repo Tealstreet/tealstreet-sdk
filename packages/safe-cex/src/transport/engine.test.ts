@@ -943,6 +943,25 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     expect(raw.connect.mock.calls.every(([, handler]) => Object.keys(handler.headers ?? {}).length === 0)).toBe(true);
   });
 
+  // TS #8093 parity: UTA owns the privateUta route (v3 tunnel and relay), never v2.
+  const utaRelay = 'wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate';
+  it('proxied UTA private sockets take the v3 tunnel route', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
+    routed.connect(utaUrl, withContext('account', false, 'private'));
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private');
+  });
+
+  it('direct UTA private sockets walk to the v3 relay on silence and never touch v2', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    for (let attempt = 0; attempt < 4; attempt++) routed.connect(utaUrl, withContext('account', false, 'private'));
+    const urls = raw.connect.mock.calls.map(([url]) => url);
+    expect(urls[0]).toBe(utaUrl);
+    expect(urls).toContain(utaRelay);
+    expect(urls.some((url) => url.includes('v2'))).toBe(false);
+  });
+
   it.each([
     ['pong', true],
     ['{"event":"login","code":"0"}', false],
