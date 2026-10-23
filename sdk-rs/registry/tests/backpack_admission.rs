@@ -95,11 +95,15 @@ fn registry_installs_the_provider_and_identity_from_the_configured_seed() {
 
 #[test]
 fn malformed_or_wrong_length_seeds_are_refused_at_setup() {
-    for secret in ["not base64!".to_owned(), base64(&[7; 31]), base64(&[7; 64])] {
+    for (secret, message) in [
+        ("not base64!".to_owned(), "Invalid Backpack base64 seed"),
+        (base64(&[7; 31]), "Backpack Ed25519 seed must be 32 bytes"),
+        (base64(&[7; 64]), "Backpack Ed25519 seed must be 32 bytes"),
+    ] {
         let Err(error) = construct(json!({ "key": "public-api-key", "secret": secret })) else {
             panic!("a malformed seed must be refused at setup");
         };
-        assert!(error.contains("Backpack"), "{error}");
+        assert_eq!(error, message);
     }
 }
 

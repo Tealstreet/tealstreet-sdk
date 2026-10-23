@@ -73,6 +73,12 @@ shape, with no gate.
   provider's Ed25519 arm.
 - There is no SDK browser or remote readiness claim. Account/WS remain on the
   raw legacy path.
+- At adoption, delete `backpack_provider` rather than reuse it. Switch to the
+  rules-driven path (`dispatchSigning` plus `signerSetup.primary.secretEncoding:
+  base64`, through `prepare_local_signer_for`). If other families need a
+  seed-width check, it belongs in a generic setup-policy check. #1946 also
+  enables `safe-cex-crypto/ed25519` in the venue crate, so one of the two
+  feature lines can go once it lands.
 
 ## Original REDs
 
