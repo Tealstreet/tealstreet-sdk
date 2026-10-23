@@ -32,6 +32,7 @@ fn fully_recovered_replacement_supersedes_only_terminal_parent_failure() {
     writes.register(RequestId(2), 20).unwrap();
     writes.replace(RequestId(1), &[30, 40]).unwrap();
     assert_eq!(writes.latest(10), None);
+    let _ = writes.grant_resend(RequestId(1));
     assert_eq!(
         writes.retry(RequestId(1), RequestId(9)),
         Err(Error::Capacity)
@@ -167,6 +168,7 @@ fn replacement_reservation_is_atomic_and_counts_against_physical_retry_capacity(
     writes
         .result(RequestId(3), rejected("child refusal"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(3));
     assert_eq!(
         writes.retry(RequestId(3), RequestId(5)),
         Err(Error::Capacity)
@@ -203,6 +205,7 @@ fn only_latest_effects_free_released_refusal_can_be_replaced() {
         assert_eq!(writes.latest(10), Some(RequestId(1)));
     }
     let mut writes = parent(4);
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     assert_eq!(
         writes.replace(RequestId(1), &[30]),
@@ -248,12 +251,14 @@ fn nested_single_child_groups_remain_bounded_without_packed_order_overflow() {
 fn retried_ancestors_and_replacement_children_keep_physical_send_history() {
     for completion in ["parked", "provider", "rejected", "accepted"] {
         let mut writes = parent(9);
+        let _ = writes.grant_resend(RequestId(1));
         writes.retry(RequestId(1), RequestId(2)).unwrap();
         writes.released(RequestId(2)).unwrap();
         writes
             .result(RequestId(2), rejected("parent retry refused"))
             .unwrap();
         writes.replace(RequestId(2), &[30]).unwrap();
+        let _ = writes.grant_resend(RequestId(2));
         assert_eq!(
             writes.retry(RequestId(2), RequestId(8)),
             Err(Error::RetryForbidden)
@@ -267,6 +272,7 @@ fn retried_ancestors_and_replacement_children_keep_physical_send_history() {
         writes
             .result(RequestId(3), rejected("child refusal"))
             .unwrap();
+        let _ = writes.grant_resend(RequestId(3));
         writes.retry(RequestId(3), RequestId(4)).unwrap();
         match completion {
             "provider" => writes
