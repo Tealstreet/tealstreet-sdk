@@ -88,3 +88,11 @@ GREEN controls (default direct abort and ordinary Read admission). The RED log
 is local `/tmp/codex-plan-independent-original-red.log`. No gateway delivery
 behavior changed at this checkpoint. The per-seal #1857 reconcile assertion is
 still pending genuine integration of that prerequisite.
+
+## Narrow routing checkpoint
+
+The unchanged six control bodies now all pass on the routing correction: captured
+failed-attempt error is passed into the existing owned-failure wrapper only for
+an opted-in Mutation Plan, and Read opt-in is refused in admission validation.
+The source does not add a hook, retry, journal or timer. The final-seal reconcile
+control and fresh full CI still require actual combo-3b integration.

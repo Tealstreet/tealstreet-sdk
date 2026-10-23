@@ -5508,3 +5508,18 @@ adapter fallback or result. Capacity refusal uses the shared Internal error;
 invalid raw clock admission uses InvalidInput, both without a Read financial
 outcome. Repeated commands can recover when unrelated roots retire. Callers need
 no new endpoint, retry or history marker handling for this local-only slice.
+
+## Independent Mutation Plan gateway failures
+
+PlanPolicy.independent_calls defaults to false at existing admission sites. A
+Mutation caller may opt in at admission for its native continue_on_error batch.
+An exact delivered unproven 408/5xx then reaches typed on_http_failed with the
+already-recorded Unknown fact and bounded evidence IDs; it never reaches DATA
+or grants a resend. The handler settles only an independent failed call through
+finish_plan_failed_call and advances its sibling. It declines settlement for a
+dependent follow-up, preserving the whole-Plan abort. A declining handler is
+auto-sealed once; Read admission with this flag is Invalid. Final completion
+still projects the one shared journal, including accepted IDs and uncertainty.
+
+BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
+The core declaration alone does not migrate either venue or remove legacy sites.

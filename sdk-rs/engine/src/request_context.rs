@@ -1463,6 +1463,20 @@ impl CommandWrites {
         Ok(())
     }
 
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn failed_attempt_error(&self, id: RequestId) -> Result<VenueError, Error> {
+        self.validate_failed_attempt(id)?;
+        let Some(WriteResult::Failed(error)) = self
+            .attempts
+            .iter()
+            .find(|attempt| attempt.id == id)
+            .and_then(|attempt| attempt.result.as_ref())
+        else {
+            return Err(Error::State);
+        };
+        Ok(error.clone())
+    }
+
     /// Seal success only when every terminal logical leg is proven accepted.
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.

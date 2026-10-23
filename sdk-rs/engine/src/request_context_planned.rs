@@ -276,6 +276,26 @@ impl ContextRegistry {
             .then(|| state.body[0].handle.clone())
     }
 
+    pub(in super::super) fn independent_plan_failure(
+        &self,
+        delivery: &Delivery,
+    ) -> Option<VenueError> {
+        let plan = self.plan_from_context(&delivery.context)?;
+        let body = self.plan_body(&plan).ok()?;
+        if !body.policy.independent_calls || body.policy.operation != Operation::Mutation {
+            return None;
+        }
+        let Owner::Command { id, .. } = plan.owner() else {
+            return None;
+        };
+        self.commands
+            .get(&id)?
+            .writes
+            .as_ref()?
+            .failed_attempt_error(delivery.attempt.request)
+            .ok()
+    }
+
     fn validate_plan(&self, handle: &Plan, now: f64) -> Result<&Body, Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
@@ -322,7 +342,10 @@ impl<P> Cx<'_, P> {
             PreflightPurpose::ReadOnly => (Operation::Read, intent.read_credential),
             PreflightPurpose::WriteAfterReads => (Operation::Mutation, intent.write_credential),
         };
-        if policy.operation != operation || policy.credential != credential {
+        if (policy.independent_calls && operation != Operation::Mutation)
+            || policy.operation != operation
+            || policy.credential != credential
+        {
             return Err(Error::Invalid);
         }
         let schedule = Schedule::from_steps(steps)?;

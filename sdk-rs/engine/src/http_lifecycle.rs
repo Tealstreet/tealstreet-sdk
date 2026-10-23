@@ -1083,7 +1083,18 @@ impl<V: Venue> Engine<V> {
                         io: &mut self.io,
                     };
                     #[cfg(feature = "http-plans")]
-                    let sealed = if let Some(plan) = &plan {
+                    let sealed = if let Some(failure) =
+                        cx.io.request_contexts.independent_plan_failure(&delivery)
+                    {
+                        cx.with_owned_read_failure(
+                            || failure.clone(),
+                            |cx| {
+                                self.venue
+                                    .on_http_failed(cx, pending.value, failure.clone())
+                            },
+                        );
+                        Ok(())
+                    } else if let Some(plan) = &plan {
                         cx.fail_plan(plan, error)
                     } else {
                         cx.fail_context(&delivery.context, error)
