@@ -1302,3 +1302,15 @@ blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
 full bans and both request-context checks (15tests) PASS. Three independent
 implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
 prune is verified; the parallel #1951 history prune is not credited here.
+
+### Binance identity preflight Read admission
+
+Plan `3a0598f1892` precedes original-control commit `84e327e2c8f`.
+With unchanged production, four real full-registry controls are assertion RED:
+missing/disabled/incomplete-primary/incomplete-secondary identity preflights
+publish local messages rather than the engine's capacity refusal. The existing
+valid-command capacity control and all six identity compatibility controls are
+GREEN, including 300 same-clock/same-command local refusals and exact selected
+signer request bytes. The same eleven tests pass after conversion, with no
+transport, extra diagnostic or Store mutation on initial admission refusal.
+No manufactured Context or fixture bypass is used.

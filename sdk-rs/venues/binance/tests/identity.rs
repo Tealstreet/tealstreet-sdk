@@ -257,3 +257,16 @@ fn spot_and_coin_m_identity_is_refused_by_capability_before_io() {
         assert_eq!(engine.account_snapshot_frame(NOW), before);
     }
 }
+
+#[test]
+fn repeated_local_identity_refusals_preserve_messages_and_release_read_custody() {
+    let mut engine = seeded(Options::default());
+    let before = engine.account_snapshot_frame(NOW).to_vec();
+    for _ in 0..300 {
+        assert_eq!(
+            result(ask(&mut engine), true).unwrap_err(),
+            "Binance account identity requires credentials"
+        );
+        assert_eq!(engine.account_snapshot_frame(NOW), before);
+    }
+}
