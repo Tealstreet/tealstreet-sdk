@@ -16,6 +16,10 @@ const CAPACITY: usize = 256;
 mod preflight_tests;
 
 #[cfg(test)]
+#[path = "request_context_preflight_entry_tests.rs"]
+mod preflight_entry_tests;
+
+#[cfg(test)]
 #[path = "request_context_replacement_registry_tests.rs"]
 mod replacement_tests;
 
