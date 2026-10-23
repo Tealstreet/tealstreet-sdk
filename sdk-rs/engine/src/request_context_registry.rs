@@ -1011,7 +1011,8 @@ impl ContextRegistry {
                 id: command,
                 generation: owner.generation,
             };
-            self.contexts.retain(|_, context| context.owner() != retired);
+            self.contexts
+                .retain(|_, context| context.owner() != retired);
             self.forget_read_mark(retired);
         }
         true
