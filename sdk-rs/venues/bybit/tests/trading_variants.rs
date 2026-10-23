@@ -1680,15 +1680,20 @@ fn local_cancel_tombstone_filters_replica_stale_reads_issued_after_ack() {
             command: 95,
             ids: vec!["retired".into()],
         });
-        h.respond(
-            if variant.is_hyro() {
-                "/v5/order/cancel"
-            } else {
-                "/v5/order/cancel-batch"
-            },
-            200,
-            r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
-        );
+        if variant.is_hyro() {
+            // "Cancel Order", the documented single-cancel acknowledgement (D).
+            h.respond(
+                "/v5/order/cancel",
+                200,
+                r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"retired","orderLinkId":""},"retExtInfo":{},"time":1}"#,
+            );
+        } else {
+            h.respond(
+                "/v5/order/cancel-batch",
+                200,
+                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+            );
+        }
         assert!(h.engine.store().order("retired").is_none());
         // The stale replica read starts after cancellation is already acknowledged.
         for (terminal, reconnect) in [(false, false), (true, false), (false, true)] {
@@ -3139,4 +3144,59 @@ fn managed_recv_window_resends_carry_the_venue_clock() {
         Some((h.now + 600_000.).floor().to_string()),
         "mode-read retry uses the corrected clock"
     );
+}
+
+// Hyro H1 original REDs: non-placement Hyro commands run on the ordinary Plan path.
+
+/// H1a: a Hyro cancel is one admitted Plan call with its native window.
+#[test]
+fn hyro_cancel_runs_on_the_ordinary_plan_with_a_native_window() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 95, vec![order("BTCUSDT", 1.0)]);
+    created(&mut h, "plan-cancel");
+    h.command(Command::CancelOrders {
+        command: 96,
+        ids: vec!["plan-cancel".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    assert_eq!(cancel.timeout_ms, Some(20_000), "a managed Plan call");
+}
+
+/// H1b: a lost Hyro cancel reconciles with one fresh Hyro snapshot.
+#[test]
+fn a_lost_hyro_cancel_reconciles_with_a_fresh_snapshot() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 97, vec![order("BTCUSDT", 1.0)]);
+    created(&mut h, "lost-cancel");
+    h.command(Command::CancelOrders {
+        command: 98,
+        ids: vec!["lost-cancel".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    h.event(Event::HttpFailed {
+        request: cancel.id,
+        error: "connection reset",
+    });
+    assert!(
+        h.has_request("/v5/order/realtime"),
+        "the uncertain write is reconciled by a fresh order read"
+    );
+}
+
+/// H1c: host text that resembles a signature refusal never resends a write.
+#[test]
+fn hyro_cancel_is_never_resent_on_text_alone() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 99, vec![order("BTCUSDT", 1.0)]);
+    created(&mut h, "text-cancel");
+    h.command(Command::CancelOrders {
+        command: 100,
+        ids: vec!["text-cancel".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    h.event(Event::HttpFailed {
+        request: cancel.id,
+        error: "network lost; error sign",
+    });
+    assert!(!h.has_request("/v5/order/cancel"), "no write resend");
 }

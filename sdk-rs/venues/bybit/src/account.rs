@@ -1232,6 +1232,19 @@ impl BybitLinear {
         }
     }
 
+    /// Reconcile an uncertain Hyro write with a fresh atomic snapshot; reads
+    /// already out predate the write, so they are abandoned, not joined.
+    pub(crate) fn reconcile_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Before the subscribe ack, its own snapshot follows and reconciles.
+        if !self.account.authed || self.account.handshake.is_some() {
+            return;
+        }
+        self.drop_account_reads(cx);
+        self.account.wallet_in_flight = false;
+        self.account.wallet_epoch = self.account.wallet_epoch.wrapping_add(1);
+        self.start_hyro_snapshot(cx);
+    }
+
     fn start_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.snapshot = Some(HyroSnapshot {
             revision: self.account.revision,
@@ -1344,6 +1357,8 @@ impl BybitLinear {
         self.commit_balance(cx);
         self.account.orders_snapshot_version += 1;
         self.account.ready = true;
+        // A complete committed snapshot is the fresh order read for the fence.
+        cx.orders_reconciled(None);
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {

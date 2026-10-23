@@ -5895,3 +5895,20 @@ No other venue inventory, shared checker, allowance or signer source changes.
 | `refreshMarkets` on a shared public-feed consumer | Typed `NotSent` `unsupported` under the command's admitted authority (was the same kind with no outcome); text unchanged | Refresh the shared source instead. |
 | Invalid options during a refresh walk | Every joined caller fails `NotSent` `invalidInput` at once (was silent until the 30 s deadline; not reachable through startup today) | None. |
 
+
+### Bybit Hyro non-placement commands on the ordinary Plan (Hyro H1)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Hyro `amendOrder`, `cancelOrders`, `cancelSymbolOrders`, `setLeverage`, `setMarginType`, `setPositionMode` run as managed Plan calls (placements stay legacy until H2) | Unchanged shapes; each write leg has its own managed window | None. |
+| Any of them while Hyro private state is reconnecting | Typed `NotSent` before any I/O; a later leg that finds it recovering fails `NotSent` with the legacy recovering text | None. |
+| Hyro "not modified" / "already gone" answers | Classified by native code only (`34040` Satisfied; `110001`/`170213` cancel Satisfied and fenced); text no longer decides | None. |
+| A Hyro write resend | Only on a native `10002`/`10004`; host-error text never resends | None. |
+| An unknown or absent-order Hyro write | One fresh full Hyro snapshot reconciles it and clears the order fence (Hyro never cleared it before) | None. |
+
+Unverified wire assumption (ruling D): no HyroTrader cancel/amend reply has
+been captured. A reply without `result.orderId`, or an "already gone" answer
+without native `110001`/`170213`, seals Unknown and reconciles via a fresh
+snapshot; it is never reported gone. Follow-up: capture real Hyro cancel,
+amend and already-gone replies when a Hyro account is available, then pin
+them as fixtures.
