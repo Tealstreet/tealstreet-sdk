@@ -22,6 +22,15 @@ fn requests(e: &mut Driver) -> Vec<HttpRequest> {
         })
         .collect()
 }
+fn candle_requests(e: &mut Driver, now: f64) -> Vec<HttpRequest> {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
 fn reply(e: &mut Driver, r: &HttpRequest, body: &str) {
     e.handle(
         1000.0,
@@ -469,7 +478,7 @@ fn bounded_candle_reads_use_history_seconds_and_sort_and_filter_results() {
                 to_ms: to,
             }),
         );
-        let request = requests(&mut e).pop().unwrap();
+        let request = candle_requests(&mut e, 300_000.).pop().unwrap();
         assert!(
             request.url.ends_with(&format!(
                 "/v1/tv/kline_history?symbol=PERP_BTC_USDC&resolution=1m&limit=2{suffix}"
@@ -515,7 +524,7 @@ fn candle_history_no_data_and_future_lower_bound_return_empty() {
                 to_ms: None,
             }),
         );
-        let mut out = actions(&mut e);
+        let mut out = safe_cex_engine::test_support::prepared_actions(&mut e, 300_000.);
         if future {
             assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
         } else {
@@ -557,7 +566,7 @@ fn malformed_history_candles_fail_instead_of_publishing_partial_rows() {
                 to_ms: Some(240_000.0),
             }),
         );
-        let request = requests(&mut e).pop().unwrap();
+        let request = candle_requests(&mut e, 1000.).pop().unwrap();
         reply(&mut e, &request, body);
         assert!(
             actions(&mut e).iter().any(|a| matches!(
@@ -590,7 +599,7 @@ fn candle_reads_reject_missing_timestamp_invalid_ohlc_and_failed_envelope() {
                 to_ms: None,
             }),
         );
-        let r = requests(&mut e).pop().unwrap();
+        let r = candle_requests(&mut e, 1000.).pop().unwrap();
         reply(&mut e, &r, body);
         assert!(actions(&mut e).iter().any(|a| matches!(
             a,
@@ -687,7 +696,7 @@ fn broker_listed_markets_keep_usdc_quote_unique_identity_and_native_requests() {
             to_ms: None,
         }),
     );
-    let r = requests(&mut e).pop().unwrap();
+    let r = candle_requests(&mut e, 2000.).pop().unwrap();
     assert!(r.url.contains("symbol=PERP_XLM_USDC_mythos&type=1m"));
     e.handle(
         2000.0,
