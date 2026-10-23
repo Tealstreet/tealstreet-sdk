@@ -5,6 +5,7 @@ use safe_cex_engine::de::optional_number;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::time;
 use safe_cex_engine::{Cx, Method, Query, Response, TimerId};
 use serde::de::{self, Visitor};
@@ -287,6 +288,26 @@ struct TradeRow {
     buyer_maker: bool,
 }
 
+fn local_result(cx: &mut Cx<'_, Pending>, result: Result<&str, &str>) {
+    let Ok(context) = cx.admit_http_command(Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }) else {
+        return;
+    };
+    match result {
+        Ok(value) => {
+            let _ = cx.done_context(&context, value.into());
+        }
+        Err(error) => {
+            let _ = cx.fail_context(&context, error);
+        }
+    }
+}
+
 impl History {
     pub fn query(
         &mut self,
@@ -301,7 +322,7 @@ impl History {
                 Query::PublicTrades { .. } | Query::OrderByClientId { .. }
             )
         {
-            cx.done(command, "[]".into());
+            local_result(cx, Ok("[]"));
             return;
         }
         let mut read = Read {
@@ -319,9 +340,9 @@ impl History {
         };
         match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(
-                    command,
-                    "BingX client order lookup is not supported by the Rust engine",
+                local_result(
+                    cx,
+                    Err("BingX client order lookup is not supported by the Rust engine"),
                 );
                 return;
             }
@@ -333,7 +354,7 @@ impl History {
                 limit,
             } => {
                 let Some(symbol) = symbol else {
-                    cx.done(command, "[]".into());
+                    local_result(cx, Ok("[]"));
                     return;
                 };
                 read.kind = Kind::Fills;
@@ -385,7 +406,7 @@ impl History {
         }
         if let (Some(from), Some(to)) = (read.from, read.to) {
             if !from.is_finite() || !to.is_finite() || from > to {
-                cx.fail(command, "invalid history time range");
+                local_result(cx, Err("invalid history time range"));
                 return;
             }
             if matches!(read.kind, Kind::Fills) {

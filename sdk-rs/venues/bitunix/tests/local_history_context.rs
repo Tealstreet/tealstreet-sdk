@@ -85,7 +85,7 @@ fn seeded(keyed: bool) -> Engine<Probe> {
     e.set_public_feed_policy(PublicFeedPolicy::Direct).unwrap();
     e.start(0.);
     loop {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.);
         if actions.is_empty() {
             break;
         }
