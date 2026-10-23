@@ -1,6 +1,7 @@
 //! Request-owned REST snapshots never enter the streaming book cache.
 use crate::{Backpack, Pending};
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Outcome, Response, VenueError};
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::{Cx, ErrorKind, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 #[derive(Deserialize)]
@@ -90,13 +91,16 @@ impl Backpack {
     pub(crate) fn book_query_response(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        context: &Context,
         response: Response<'_>,
     ) {
+        if cx.validate_read_http_delivery(context, context).is_err() {
+            return;
+        }
         let envelope = serde_json::from_str::<Envelope<'_>>(response.body);
         if (200..300).contains(&response.status) && envelope.is_err() {
-            cx.fail(
-                command,
+            let _ = cx.fail_context(
+                context,
                 failure("Invalid Backpack order-book envelope", ErrorKind::Internal),
             );
             return;
@@ -147,7 +151,7 @@ impl Backpack {
                     (seconds * 1000.0).min(safe_cex_engine::startup::MAX_RATE_LIMIT_PAUSE_MS),
                 );
             }
-            cx.fail(command, error);
+            let _ = cx.fail_context(context, error);
             return;
         }
         let result = serde_json::from_str::<Snapshot<'_>>(response.body)
@@ -167,8 +171,12 @@ impl Backpack {
                 })
             });
         match result {
-            Ok(json) => cx.done(command, json),
-            Err(error) => cx.fail(command, error),
+            Ok(json) => {
+                let _ = cx.done_context(context, json);
+            }
+            Err(error) => {
+                let _ = cx.fail_context(context, error);
+            }
         }
     }
 }

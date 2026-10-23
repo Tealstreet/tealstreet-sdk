@@ -676,6 +676,9 @@ impl Venue for Polymarket {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             max_leverage: safe_cex_engine::MaxLeverage::Rails,
             order_book_query: true,
+            fill_history: false,
+            order_history: false,
+            income_history: false,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
