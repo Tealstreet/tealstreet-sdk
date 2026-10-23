@@ -4625,3 +4625,15 @@ numeric completion or automatic resubmission.
 The original 20-second root, independent retry budgets, exact response fence,
 query/result codec and native unsupported-interval preflight remain. Admission
 of a fresh command grants no additional rights to later retries or callbacks.
+
+## MEXC candle initial command admission
+
+`FetchCandles` borrows initial HTTP command ownership directly from the engine,
+without passing a numeric command ID to issuance or falling back to a numeric
+terminal. Invalid command time and exhausted owner capacity emit one typed
+InvalidInput/Internal rejection before any Context or transport exists. These
+initial read rejections have no write outcome or credential evidence. A later
+valid invocation may reuse the rejected ID, and capacity refusal preserves all
+existing parked reads. Revoked entry custody grants no adapter completion.
+The existing 20-second public Read policy, no-retry behavior and issued-Context
+transport/expiry error contract remain in force.
