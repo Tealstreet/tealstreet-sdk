@@ -8,6 +8,7 @@ fn credential_options_contain_only_opaque_refs_and_debug_redacts_them() {
             signing: KeyRef("audit-signing-reference".into()),
             passphrase: None,
             stable_id: None,
+            extra: Default::default(),
         }),
         ..Options::default()
     };
