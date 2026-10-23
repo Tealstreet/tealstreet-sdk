@@ -266,7 +266,11 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
 - **Binding.** A public value is account metadata bound to the trusted
   identity, slot, exact designated `KeyRef`, algorithm or closed role, and
   generation.
-- **Missing or conflicting metadata refuses setup.** There is no fallback to
+- **Distinct roles.** The TxFlow agent address is not the main wallet,
+  application or vault, and the Polymarket `l1Wallet` address is not the
+  imported L2 API identity, funder or maker. Each binds only to its own key
+  role.
+- **Missing or conflicting metadata refuses setup**, before any private I/O. There is no fallback to
   another ref or slot.
 - **What a declared value is.** Trusted account configuration. It is not a
   cryptographically verified derivation, and never a new subject or nonce
@@ -289,12 +293,17 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
   family's signature is recoverable (EIP-712/191 for Hyperliquid, TxFlow,
   GRVT and Polymarket), dispatch recovers the signer and compares it with
   the declared value *before* physical release, import or any private
-  effect. A mismatch refuses. A family that cannot verify before release
+  effect, in `SignStep::apply` or the P8 verifier. A mismatch refuses with
+  zero HTTP; this is never a post-send startup check. The comparison is
+  against the declared *signer* only: the Polymarket SignerType3 contract
+  maker or funder is never compared as if it were the recovered wallet. A
+  family that cannot verify before release
   stays held for an explicit owner decision rather than trusting the
   declaration.
 - **P6b consumes this channel.** The `l1Wallet` address comes from
   `fetch_public` (local) or bound metadata (host/remote). P6b has no
   separate setup-metadata path and no run-time `PublicAddress` fallback.
+  P4 does not by itself make P6b or keyless import ready.
 
 **JS.** No new `SignOperation` kinds: under A nothing at run time asks a
 host for a public value. Host and remote metadata is keyed by ref in the
