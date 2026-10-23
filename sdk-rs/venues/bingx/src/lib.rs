@@ -3,6 +3,7 @@ pub mod account;
 pub mod account_wire;
 mod history;
 mod identity;
+mod managed;
 pub mod paths;
 pub mod sign;
 mod trading;
@@ -23,22 +24,11 @@ use sign::{Credentials, Params};
 use std::collections::HashMap;
 use wire::*;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub read_credentials: Option<safe_cex_engine::signing::Identity>,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
 }
 
 pub enum Pending {
@@ -73,6 +63,7 @@ pub struct Signed {
     params: Params,
     at: Option<ArrayAt>,
     resent: bool,
+    context: Option<safe_cex_engine::request_context::Context>,
 }
 
 /// Signs and sends a request; signed requests can be re-signed after a 100001.
@@ -85,25 +76,52 @@ pub(crate) fn issue(
     at: Option<ArrayAt>,
     pending: Pending,
 ) -> RequestId {
-    let (url, headers, body) = params
-        .clone()
-        .into_request(method, path, credentials, cx.now);
     let pending = if credentials.is_some() && sign::signs(path) {
         Pending::Signed(Box::new(Signed {
             inner: pending,
             method,
             path,
-            params,
+            params: params.clone(),
             at,
             resent: false,
+            context: None,
         }))
     } else {
         pending
     };
-    match at {
+    stage(cx, credentials, method, path, params, at, pending)
+}
+
+/// Stage native intent; only shared dispatch can materialize credentials.
+/// This is the one temporary legacy provider staging site.
+pub fn stage<P>(
+    cx: &mut Cx<'_, P>,
+    credentials: Option<&Credentials>,
+    method: Method,
+    path: &'static str,
+    params: Params,
+    at: Option<safe_cex_engine::json::ArrayAt>,
+    pending: P,
+) -> safe_cex_engine::RequestId {
+    let recipe = credentials.map(|c| {
+        sign::dispatch::Http::new(c.identity(method).clone(), method, path, params.clone())
+    });
+    let (url, headers, body) = params.render(
+        method,
+        path,
+        vec![(
+            sign::unsigned_headers(method)[0].0,
+            sign::unsigned_headers(method)[0].1.into(),
+        )],
+    );
+    let id = match at {
         Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
         None => cx.request(method, url, headers, body, pending),
+    };
+    if let Some(recipe) = recipe {
+        cx.sign_http(id, Box::new(recipe));
     }
+    id
 }
 
 pub(crate) fn signature_rejected(body: &str) -> bool {
@@ -203,7 +221,6 @@ pub struct Bingx {
 
 impl Bingx {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let config_error = options
             .read_credentials
             .as_ref()
@@ -212,14 +229,11 @@ impl Bingx {
             None
         } else {
             options
-                .key
-                .as_ref()
-                .zip(options.secret.as_ref())
-                .filter(|(k, s)| !k.is_empty() && !s.is_empty())
-                .map(|(key, secret)| Credentials {
-                    key: key.clone(),
-                    secret: secret.clone(),
-                    read: options.read_credentials.clone(),
+                .credentials
+                .filter(|identity| identity.validate().is_ok())
+                .map(|primary| Credentials {
+                    primary,
+                    read: options.read_credentials,
                 })
         };
         Self {
@@ -280,21 +294,64 @@ impl Bingx {
         self.retries.failed(cx, kind);
     }
 
+    fn candle_response_context(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        context: &safe_cex_engine::request_context::Context,
+        response: Response<'_>,
+        rows: Vec<Candle>,
+        valid: bool,
+    ) {
+        let result = success(response).and_then(|_| {
+            if valid {
+                candle_data(rows)
+            } else {
+                Err("malformed BingX list row".into())
+            }
+        });
+        match result {
+            Ok(data) => {
+                let _ = cx.done_context(context, data);
+            }
+            Err(error) => {
+                let _ = cx.command_error_context(context, error.clone());
+                let _ = cx.fail_context(context, error);
+            }
+        }
+    }
+
     fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &'static str, pending: Pending) {
         if !self.tickers_committed
             && matches!(&pending, Pending::Daily { .. } | Pending::Premium { .. })
         {
             self.live_tickers.begin();
         }
-        issue(
-            cx,
-            self.credentials.as_ref(),
-            Method::Get,
-            path,
-            Params::new(),
-            Some(ArrayAt::EnvelopeField("data")),
-            pending,
-        );
+        if let Some(credentials) = &self.credentials {
+            if let Err((pending, error)) = managed::read(
+                cx,
+                credentials,
+                managed::Read {
+                    method: Method::Get,
+                    path,
+                    params: Params::new(),
+                    at: Some(ArrayAt::EnvelopeField("data")),
+                },
+                pending,
+                safe_cex_engine::request_context::Scope::Background,
+            ) {
+                self.on_sign_error(cx, *pending, error);
+            }
+        } else {
+            issue(
+                cx,
+                None,
+                Method::Get,
+                path,
+                Params::new(),
+                Some(ArrayAt::EnvelopeField("data")),
+                pending,
+            );
+        }
     }
 
     fn resend(&self, cx: &mut Cx<'_, Pending>, signed: Signed) {
@@ -311,10 +368,6 @@ impl Bingx {
             at,
             ..
         } = signed;
-        let (url, headers, body) =
-            params
-                .clone()
-                .into_request(method, path, self.credentials.as_ref(), cx.now);
         let scope = match &inner {
             Pending::Account(request) => account::auth_scope(request),
             _ => None,
@@ -323,16 +376,52 @@ impl Bingx {
             inner,
             method,
             path,
-            params,
+            params: params.clone(),
             at,
             resent: true,
+            context: None,
         }));
-        let id = match at {
-            Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
-            None => cx.request(method, url, headers, body, pending),
-        };
+        let id = stage(
+            cx,
+            self.credentials.as_ref(),
+            method,
+            path,
+            params,
+            at,
+            pending,
+        );
         if let (Some(scope), Some(credentials)) = (scope, self.credentials.as_ref()) {
             account::tag_read(cx, id, method, credentials, scope);
+        }
+    }
+
+    fn resend_managed(&mut self, cx: &mut Cx<'_, Pending>, mut signed: Signed) {
+        // A refused envelope cannot contribute rows or decode status to a
+        // later successful physical attempt of the same logical candle read.
+        if let Pending::Candles { rows, valid, .. } = &mut signed.inner {
+            rows.clear();
+            *valid = true;
+        }
+        let scope = match &signed.inner {
+            Pending::Account(request) => account::auth_scope(request),
+            _ => None,
+        };
+        let Some(credentials) = self.credentials.as_ref() else {
+            self.on_sign_error(
+                cx,
+                Pending::Signed(Box::new(signed)),
+                safe_cex_engine::VenueError::new("BingX managed read has no credentials"),
+            );
+            return;
+        };
+        let method = signed.method;
+        match managed::retry(cx, credentials, signed) {
+            Ok(id) => {
+                if let Some(scope) = scope {
+                    account::tag_read(cx, id, method, credentials, scope);
+                }
+            }
+            Err((pending, error)) => self.on_sign_error(cx, *pending, error),
         }
     }
 
@@ -876,10 +965,27 @@ impl Venue for Bingx {
         }
         let pending = match pending {
             Pending::Signed(signed) => {
-                if !signed.resent && signature_rejected(response.body) {
-                    self.resend(cx, *signed);
+                if !signed.resent
+                    && !matches!(&signed.inner, Pending::Identity(_))
+                    && signature_rejected(response.body)
+                {
+                    if signed.context.is_some() {
+                        self.resend_managed(cx, *signed);
+                    } else {
+                        self.resend(cx, *signed);
+                    }
                 } else {
-                    self.on_response(cx, signed.inner, response);
+                    let context = signed.context;
+                    match (&context, signed.inner) {
+                        (Some(context), Pending::Identity(_)) => {
+                            self.identity_response_context(cx, context, response)
+                        }
+                        (Some(context), Pending::Candles { rows, valid, .. }) => {
+                            self.candle_response_context(cx, context, response, rows, valid)
+                        }
+                        (_, pending) => self.on_response(cx, pending, response),
+                    }
+                    managed::finish(cx, context);
                 }
                 return;
             }
@@ -1028,15 +1134,12 @@ impl Venue for Bingx {
             }
             Pending::Candles {
                 command,
-                mut rows,
+                rows,
                 valid: true,
-            } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
-            }
+            } => match candle_data(rows) {
+                Ok(data) => cx.done(command, data),
+                Err(error) => cx.fail(command, error),
+            },
             pending => self.on_request_failed(cx, pending, "malformed BingX list row"),
         }
     }
@@ -1047,10 +1150,33 @@ impl Venue for Bingx {
         response: Response<'_>,
     ) {
         match pending {
-            Pending::Signed(signed) if !signed.resent && signature_rejected(response.body) => {
-                self.resend(cx, *signed)
+            Pending::Signed(signed)
+                if !signed.resent
+                    && !matches!(&signed.inner, Pending::Identity(_))
+                    && signature_rejected(response.body) =>
+            {
+                if signed.context.is_some() {
+                    self.resend_managed(cx, *signed);
+                } else {
+                    self.resend(cx, *signed);
+                }
             }
-            Pending::Signed(signed) => self.on_stream_error(cx, signed.inner, response),
+            Pending::Signed(signed) => {
+                if signed.context.is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
+                    self.on_request_failed(
+                        cx,
+                        Pending::Signed(signed),
+                        &format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        ),
+                    );
+                } else {
+                    let context = signed.context;
+                    self.on_stream_error(cx, signed.inner, response);
+                    managed::finish(cx, context);
+                }
+            }
             pending => self.on_request_failed(
                 cx,
                 pending,
@@ -1061,6 +1187,48 @@ impl Venue for Bingx {
             ),
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        mut error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Signed(signed) => {
+                if let Some(context) = &signed.context
+                    && matches!(
+                        &signed.inner,
+                        Pending::Identity(_) | Pending::Candles { .. }
+                    )
+                {
+                    let _ = cx.command_error_context(context, error.message.clone());
+                    let _ = cx.fail_context(context, error);
+                    managed::finish(cx, signed.context);
+                    return;
+                }
+                if signed.resent && matches!(&signed.inner, Pending::Trade(_)) {
+                    // Only the retry was refused before release. The original
+                    // write reached the venue, so reconciliation is still required.
+                    error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+                }
+                let context = signed.context;
+                self.on_sign_error(cx, signed.inner, error);
+                managed::finish(cx, context);
+            }
+            Pending::Identity(command) => identity::fail_command(cx, command, error),
+            Pending::History(request) => self.history.on_sign_failed(cx, request, error),
+            Pending::Trade(request) => {
+                self.trading
+                    .on_sign_failed(cx, self.credentials.as_ref(), request, error)
+            }
+            Pending::Account(request) => {
+                if let Some(credentials) = &self.credentials {
+                    self.account.on_sign_failed(cx, request, error, credentials);
+                }
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let discovery = matches!(
             &pending,
@@ -1068,7 +1236,20 @@ impl Venue for Bingx {
         );
         match pending {
             Pending::Signed(signed) => {
+                if let Some(context) = &signed.context
+                    && matches!(
+                        &signed.inner,
+                        Pending::Identity(_) | Pending::Candles { .. }
+                    )
+                {
+                    let _ = cx.command_error_context(context, error.to_owned());
+                    let _ = cx.fail_context(context, error);
+                    managed::finish(cx, signed.context);
+                    return;
+                }
+                let context = signed.context;
                 self.on_request_failed(cx, signed.inner, error);
+                managed::finish(cx, context);
                 return;
             }
             Pending::Identity(command) => {
@@ -1270,19 +1451,37 @@ impl Venue for Bingx {
                     .str("interval", interval.as_str())
                     .num("startTime", start)
                     .num("endTime", end);
-                issue(
-                    cx,
-                    self.credentials.as_ref(),
-                    Method::Get,
-                    paths::KLINES,
-                    params,
-                    Some(ArrayAt::EnvelopeField("data")),
-                    Pending::Candles {
-                        command,
-                        rows: Vec::new(),
-                        valid: true,
-                    },
-                );
+                let pending = Pending::Candles {
+                    command,
+                    rows: Vec::new(),
+                    valid: true,
+                };
+                if let Some(credentials) = &self.credentials {
+                    if let Err((pending, error)) = managed::read(
+                        cx,
+                        credentials,
+                        managed::Read {
+                            method: Method::Get,
+                            path: paths::KLINES,
+                            params,
+                            at: Some(ArrayAt::EnvelopeField("data")),
+                        },
+                        pending,
+                        safe_cex_engine::request_context::Scope::Command(command),
+                    ) {
+                        self.on_sign_error(cx, *pending, error);
+                    }
+                } else {
+                    issue(
+                        cx,
+                        None,
+                        Method::Get,
+                        paths::KLINES,
+                        params,
+                        Some(ArrayAt::EnvelopeField("data")),
+                        pending,
+                    );
+                }
             }
             other => {
                 self.account.bump_orders();
@@ -1356,6 +1555,11 @@ fn reread_partial<P>(
         );
     }
     *stalls < 5
+}
+
+fn candle_data(mut rows: Vec<Candle>) -> Result<String, String> {
+    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    serde_json::to_string(&rows).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -3,9 +3,11 @@ use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, Response,
     Venue,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
+use support::setup::Options;
 fn engine() -> Engine<WeexFutures> {
-    safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options::default()))
+    support::setup::engine(Options::default())
 }
 fn ask(e: &mut Engine<WeexFutures>, command: u32, symbol: &str, limit: Option<u32>) -> HttpRequest {
     e.handle(
@@ -99,7 +101,9 @@ const BOOK: &str = r#"{"lastUpdateId":900719925474099312345678901234567890,"bids
 #[test]
 fn native_capability_admits_book_queries() {
     assert!(
-        WeexFutures::new(Options::default())
+        support::setup::Options::default()
+            .build()
+            .0
             .capabilities()
             .order_book_query
     );
