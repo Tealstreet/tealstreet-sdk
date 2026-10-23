@@ -212,3 +212,102 @@ and 27 occurrences (from seven/30/32); all other inventory maps remain intact.
 Full native/static gates and independent implementation reviews are recorded on
 the PR before readiness. Source/caller plan reviews confirmed the initial
 admission outcome exception and architecture gate No.
+
+
+## P0 write adoption, classifier pin 2026-10-23
+
+Audited actual `6741c1c6609437e32090c76745a56ca6c2262445`. This appendix
+supersedes earlier draft WRITE API names. It adds plans/regressions only.
+
+| Audit row | Reverified native path | Required caller contract |
+| --- | --- | --- |
+| #2 | `trading.rs::trade_command` marks every explicit CancelOrders step optional; `trade_failed` logs and advances; `run_trade` completes Done([]) even when all cancels failed. | Each requested leg contributes its own fact; all-failed cancellation is a terminal failure, never successful empty output. |
+| #20 | Pair response validation exits on any invalid/failed row before copying accepted IDs from the response into the job. | Preserve each independently validated native ID as reconciliation evidence on the failure; missing or contradictory rows stay uncertain. |
+
+Current `http_failure` distinguishes AuthInvalid/Permission/RateLimited by
+status only; Pair has `operation`, `clientId`, `id`, symbol/side/type identity
+facts. Do not manufacture a native code table by promoting arbitrary statuses
+or exception strings. Start one CodeTable with explicit unlisted Unknown and
+only existing finite native code distinctions whose refusal evidence is
+verified; empty rows/statuses is safer than guessing. Move native error `code`
+fields as typed codes when present; `operation: Ok` alone is not a complete
+success. The Pair codec must validate correlation/uniqueness before claiming
+caller attribution, while retaining independently valid IDs even when row
+count is wrong. Do not infer succeeded/total/failed_index for incomplete ACKs.
+
+### Landed classifier and write-journal boundary
+
+Use actual #1837 (`e0322577e354739dde6d7e5011e74ab660145885`), not the
+older draft signatures. Declare one family `classify::CodeTable` with `rows`,
+`success`, explicit `unlisted: Verdict::Unknown(None)` and evidence-backed
+`status` entries only. `Key::Message` is exact and code-less; never mix message
+and code rows or introduce substring/prefix inference. Decode integer codes
+strictly via the native codec / `classify::decode_int`, never through f64.
+Engine precedence owns transport, 408/5xx, native evidence, status and malformed
+success. A native code or 2xx alone never proves successful execution.
+
+A genuine command Context uses the actual command entry and real credential;
+managed signed HTTP carries it through Pending. At the exact delivered attempt,
+`classify_write(&ctx, &TABLE, native, message)` creates the failure Fact.
+`http_write_fact(&ctx, WriteFact::Failed { fact, known_effects }, reports)`
+records it; `http_write_failure` is the whole-failure shortcut. Complete native
+success reports `WriteFact::Accepted { order_ids }`; malformed success uses
+`http_write_unproven`. A real batch acknowledgement uses `http_write_batch`
+with caller-ordered items and the native expected count. The codec proves
+identity/uniqueness and correlation; preserve individually known IDs as
+reconciliation evidence without invented caller counts on an incomplete reply.
+
+Only the engine's opaque resend grant may feed `http_resend_context`, retaining
+the original root, deadline and one-shot budget. Use `http_write_leg_intent`
+only for permitted intent narrowing before release. Finish once through
+`done_context`/`fail_context`; CommandWrites owns aggregation, partial IDs and
+whole-command demotion. Do not use private engine-test-only `http_write_result`,
+transitional unmanaged `classify::write`, local status/outcome ladders or a
+numeric completion fallback. A preparation refusal's local NotSent fact is
+valid, but prior released siblings still determine the whole-command outcome.
+
+No runtime conversion is authorized in this plan/tests slice. Missing reusable
+signing, session, Plan/CallWindow or reconciliation ownership remains a shared
+prerequisite; no per-venue replacement. On adoption, reverify actual seam pins,
+remove RED ignore markers while retaining behavior assertions, prune only the
+venue's genuinely removed legacy fingerprints, and add a landed CALLERS
+appendix. Plan/tests preparation neither prunes inventory nor closes P0 rows.
+
+### Phases, file reservations and RED controls
+
+Single ordinary placement/cancel comes before paired placements, optional
+bracket children, cancel-many and amend cancel/replace plans. Managed signing
+needs claude-19pt8s's Backpack recipe plus actual Ed25519 provider #1844; its
+recipe branch is based on the landed depth slice and does not own lib/account/
+trading conversion. No eager Ed25519 through unsigned static headers. Declare
+native X-Broker-Id/body/credential identity exactly through managed signed
+preparation. Multi-leg commands wait for genuine shared Plan admission.
+Preserve native receipt timing, UINT32 client IDs, minimum sizing, generated
+replacement identities, bracket relationships and cancel/fill races.
+
+At this audit #1787 holds account/trading source and their test files; #1870
+holds lib.rs and candle/public tests. This slice touches none of them. Add a
+new `tests/write_adoption_red.rs` using the unchanged existing support fixture:
+(1) stored order 123, explicit CancelOrders, native HTTP refusal -> one failure
+and no Done; (2) Pair returns a valid first row plus failed second row ->
+Unknown with first ID preserved; (3) Pair returns only the valid first row ->
+Unknown with evidence-only Partial, no invented total or failed_index.
+Read actual generated clientId/side values from the request, never hardcode
+random identities. Run `cargo test -p safe-cex-venue-backpack --test
+write_adoption_red p0_write_ -- --ignored --nocapture`. All three must compile
+and fail their original behavior assertion; the ignore markers explicitly
+await adoption, not a passing production claim.
+
+Future controls include all cancel legs failing transport, mixed required and
+optional child failures, reversed ACK order, duplicate/unknown client IDs,
+contradictory symbols, 408/5xx refusal-looking bodies, prior accepted effects
+followed by preparation NotSent, and duplicate/late/wrong-attempt delivery.
+Known partial definitive effects need structured IDs without forcing Unknown;
+unresolved legs require Unknown. Shared CommandWrites, not optional-step
+logging or `effective` demotion, owns the whole-command verdict.
+Recheck the frozen inventory above on adoption, prune only actual vanished
+Backpack entries and add CALLERS then. No manifest change in this slice.
+
+Architecture gate: No for native Engine regressions and shared API planning.
+Future implementation gates: Backpack + Binance, scoped strict Clippy/fmt,
+bans, both ratchets, three clean independent reviews and exact-head CI.
