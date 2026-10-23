@@ -970,6 +970,34 @@ scalar `event_code` and the event object in extra data; explicit tags still win.
 | CLI `apps/cli/src/oneShotResult.ts:41-56` (`KEY_REJECTION`), `connect-error.ts:13-17`, `log-classify.ts:30-57` | key-rejection, `authentication`/`token`/`401`/`timed out`, critical log keywords | Partial: `code === 'COMMAND_TIMEOUT'` works for command timeouts; #1450 teaches `findKeyRejection` the engine wording | auth: startup `kind` (#1482); a runtime rejection raises `authFailureStreak` (#1450) and counts `auth.rejected` in `getHealth()` (#1388) |
 | exchange-server `alerts.ts:82-89`, SDK `unknownSendOutcome.ts:10-13` | `Invalid API-key`, `Way too many requests`, `banned until`, signer messages | Blocked: process-handler reasons never see the error object | `kind: 'authInvalid'\|'rateLimited'` where the object is reachable; signer messages stay JS |
 
+Typed managed-write failures (#1816, #1838; backfill). For a Binance managed
+write that fails without a usable native answer, the `kind` changes but the
+outcome and message do not:
+- engine deadline expiry of a released write: `kind` was `network`, now
+  `timeout`;
+- a delivered reply that is not UTF-8 or exceeds the response bounds: `kind`
+  was `network`, now `internal`;
+- host transport loss: still `network`.
+
+The `outcome` stays `unknown` and the message text is unchanged. Callers
+branching on `kind === 'network'` for these Binance write failures should also
+accept `timeout` and `internal`. Venues adopting the typed `Venue::on_http_failed` hook see the same
+kinds; others are unchanged.
+
+Engine error classification (Binance, [plan](RUST_ERROR_CLASSIFICATION.md)):
+message text is unchanged. A Binance write that fails with a non-JSON HTTP
+error used to carry `outcome: unknown` with no `kind`. It now has these fields:
+- 429 or 418: `rejected` + `rateLimited`, plus `retryAfterMs` when the
+  response carries a Retry-After header;
+- 400: `rejected` + `invalidInput`;
+- 401: `rejected` + `authInvalid`;
+- 403: `rejected` + `rejected`;
+- 409 and other statuses: still `unknown`.
+
+Native `-1003`/`-1015` rate-limit refusals also gain `retryAfterMs` when the
+header is present. Callers branching on `isUnknownOutcome` see fewer unknowns
+for these answers; nothing that matched on text changes.
+
 ### Build and delivery steps
 
 | Host | Today | Needed for the engine |
@@ -4322,6 +4350,16 @@ waiters as Internal/Unknown once and answer later joins with the terminal notice
 without constructing a snapshot from the failed engine. Recreate the engine to
 resume work; neither adapter restarts it automatically.
 
+## Bitget family WASM speed profile (option A)
+
+Bitget and Bitget USDC family artifacts use the shared speed defaults for the
+host, engine and inherited dependencies, alongside the common serde_json
+throughput setting. Consumers download a larger WASM module; the fixed family
+size budget still applies. SDK construction, commands, transports, payloads and
+row shapes keep their existing contracts. CPU objectives and all strict
+correctness checks retain their existing thresholds and known-failure policies.
+Combined and native release builds keep their existing profile selection.
+
 
 ## AsterDEX, GRVT and TxFlow row-reporting adoption (2026-10-23)
 
@@ -4334,6 +4372,198 @@ separate WS behavior. GRVT retains namespace isolation, unfiltered duplicate
 coin rearm, filtered order/position rearm and rearming before per-row timestamp
 rejection on a current response. Callers retain the same account data, command
 outcomes, health policy, transports, signing and snapshot/financial authority.
+## Engine-owned initial command admission
+
+Adapters use `admit_http_command(policy)` at the start of a genuine engine command
+callback, before HTTP, WebSocket, timer or signing work. The engine correlates
+this entry with the command being delivered; adapters do not supply a numeric
+command ID. An initial policy, clock or capacity refusal emits one structured
+command failure without issuing a Context or sending work. Read failures carry
+no write outcome; an unissued mutation is `NotSent`. Binance candle, account
+identity and trade-root admission use this path. Native input/planning failures
+keep their existing behavior.
+
+NX handles an admission rejection once using its typed category and message;
+it must not append a numeric failure, optimistic success or automatic duplicate
+submission. Resource capacity reports `Internal`; invalid initial context policy
+or time reports `InvalidInput`. These local failures prove nothing about an
+already-owned or previously sent command. A revoked entry has no completion
+rights and must not finalize another generation. The returned Context remains
+the authority for successful admission, including cached/no-I/O read completion
+and native single-owner WebSocket callbacks. Child legs and retries keep their
+existing explicit Context APIs and original deadlines.
+
+A caught native command-callback panic permanently fences the engine, including
+held transport permits, pending signer completions and venue-bearing queries.
+Hosts dispose the failed engine through their terminal-failure path; NX retains
+prior-sent uncertainty and reconciles through a new healthy engine. An engine
+panic does not prove `NotSent` for work released earlier.
+
+Shared read owners can validate that a handle is the exact original Read root
+before binding completion authority or publishing a no-I/O completion companion.
+A same-owner child, foreign issuer, mutation-bearing owner or sealed generation
+is refused. This check retains completion expiry semantics and grants no new
+send, retry, publication or joined-observer authority.
+
+A successfully admitted initial command retains its completion generation until
+typed terminal cleanup, including native single-owner WebSocket reads with no
+managed HTTP attempt. Unrelated work and deadline expiry cannot erase it or
+reuse its command ID; NX receives the original native timeout once. Only the
+issued Context can complete that generation. An expired root still grants no
+send or publication rights, and unparented siblings cannot extend its bound.
+Outstanding owners count toward the existing 256-owner capacity until cleanup;
+adapters must finalize them through their existing native terminal callbacks.
+
+
+### Coinbase deferred candles on catalogue failure
+
+A `FetchCandles` command waiting for Coinbase public catalogue startup now fails once if its current catalogue fails. Its error has kind `internal`, message `Coinbase public catalogue unavailable`, the original discovery failure in `venueMessage`, and no financial outcome. Initial empty catalogues follow the existing discovery failure/backoff path; empty individual Products pages/families remain allowed until the complete aggregate is known. A stale Products generation cannot settle a current waiting command.
+
+Subscriptions remain queued in their original order and resume on catalogue recovery. Discovery retries and the shared native 334-ms REST pacing remain in place. Recovery does not replay rejected candle commands; callers may submit a fresh query. This containment uses the existing failure/completion path; managed request adoption remains a separate change.
+
+
+### ApeX Omni managed public candle reads
+
+`FetchCandles` uses one engine-owned public Read context. Route preparation,
+final claim, response processing and all retries share the original 20-second
+raw deadline from command admission. A response at or after that deadline cannot
+publish candle results or row warnings. Custom transports must implement managed
+prepare/bind/ready/dispatch; a request-only adapter fails explicitly rather than
+servicing the read through a fallback.
+
+The native retry budgets remain independent: up to three actual transport read
+retries and one signature-refusal resend, at most five physical attempts in
+combination. Every attempt passes managed preparation and final release admission.
+A route/preparation refusal retains its supplied typed error and does not enter
+the network retry loop. Transport exhaustion carries kind `network`; undecodable
+HTTP reply exhaustion retains the engine's `internal` kind. Original deadline
+expiry carries kind `timeout`. Context admission/retry failures use the
+shared engine classification. Initial pre-context refusal can still complete
+through the existing numeric error path; an issued owner always finalizes with
+its Context, without numeric fallback.
+
+Arguments, unsigned URL/body/headers, daily-end omission, sorted candle JSON,
+row-skipped messages, wholly invalid rejection and valid-empty success retain
+their native contract. Native API/row/envelope failures preserve the existing
+message-only public-read errors; they do not borrow mutation Unknown/Rejected
+outcomes from the private error codec. Worker/hosted callers must preserve typed
+preparation/network/internal/timeout failures and treat the rejected read as unavailable.
+Private reads/writes, history alternatives, discovery, local cached commands and
+capability defaults are separate from this candle migration. This behavior does
+not establish downstream deployment or live venue connectivity.
+
+The shared context-error converter's `notSent` describes the refused local
+operation only. It does not establish that earlier read attempts never reached
+the venue or that a whole multi-step command was unsent. Mutation journals
+retain their separate authoritative release/outcome aggregation.
+
+## BloFin managed public discovery and candle reads
+
+BloFin instruments, ticker seeds and candle queries use the shared prepared HTTP
+lifecycle with explicit public routing and no signing credential. Their original
+20-second bound includes route preparation; preparation alone cannot release
+HTTP or admit a response. Late, duplicate and unreleased responses cannot publish
+the catalogue/ticker seed or complete an old candle command generation. Discovery
+retries retain the existing startup backoff and row recovery behavior.
+
+Candle results retain their existing JSON fields, seconds, ascending order and
+native volume mapping. Unknown markets reject as `invalidInput`/`notSent` before
+unsupported interval validation; unsupported intervals reject as
+`unsupported`/`notSent`. A refused prepared transport retains its typed error,
+including `unsupported` and `notSent`; a parked preparation that reaches its
+original deadline rejects as `timeout`/`notSent`. Custom BloFin transports must
+implement preparation/binding/final synchronous handoff, and cannot service these
+reads through only legacy `request()`.
+
+NX `fetchOHLCV` consumers (`components/dom/Dom.tsx:237` and
+`lightweightCharts/SafeCexKLinesChart.tsx:29`), candle-server and worker/hosted
+error receivers must preserve those structured fields and handle the rejected
+query promise. Custom transport providers must implement the shared managed
+HTTP contract when upgrading. SDK call arguments, result units and subscriptions
+remain the same; this establishes no NX deployment or private-request migration.
+
+## Bitrue FIFO public read Context
+
+Bitrue candle and public-trade commands retain the genuine engine-issued Read
+Context through their native per-channel FIFO, timer and response callbacks. Each
+owner keeps its original 5000ms deadline, including queue wait. A correlated reply
+at or after that bound cannot decode or complete the head, clear its timer, or
+advance the queue. The existing timer still closes the socket and fails every
+pending owner, including live peers on other channels.
+
+The shared entry owner retains completion generation through delayed timer delivery
+and unrelated admissions. A repeated in-flight numeric command ID cannot acquire a
+new timer or request. Admission refusal is completed once by the engine, without
+adapter numeric fallback. Native preflight order/messages, 32-owner queue cap,
+empty-cb_id compatibility, timer-derived correlation shape, candle timestamp/volume
+normalization and trade payloads retain their contracts. Wrong or duplicate explicit
+correlation IDs cannot consume the next owner. Rejected/malformed heads fail once
+and allow the next live owner to proceed. No HTTP operation or joined group is
+introduced for these single-owner native reads.
+
+
+### Kraken Spot managed command OHLC
+
+Spot FetchCandles requires managed prepare/bind/final release under one raw 20-second deadline, including all four possible transport attempts. Native GET pair aliases, interval and floor-seconds since remain; limit/to_ms and native last remain ignored. Malformed rows reject the whole response, and successful results stay sorted. Native API/row failures remain message-only.
+
+Three retries now re-enter managed preparation immediately rather than waiting in a zero-delay native timer queue, so expiry stays engine-owned while routing is parked. Exhaustion retains its native warning and the engine-supplied typed failure kind, including actual #1838 integrity errors. Preparation denial never spends a network retry. Expired/retired callbacks cannot publish results or diagnostics or complete a reused command. A shared context error's local notSent does not prove that earlier physical reads were never sent. Initial pre-context failure, unsupported interval, background discovery and signed/futures paths remain separate migration tails.
+
+
+### Orderly managed command candles
+
+The six Orderly broker frontends prepare, bind and claim unsigned command candle requests through the managed transport. Each invocation selects bounded `/v1/tv/kline_history` or streamed `/v1/kline`, retaining native symbol, interval, bounds, limits, filters, sorting and result codecs. Neither branch adds automatic retries. Native malformed/failed responses keep message-only read errors; a failed stream cannot publish its valid prefix.
+
+One raw 20-second root starts before preparation. Unsupported transport preparation and actual network, timeout or integrity failures retain their typed category. Exact delivery validation precedes rows, diagnostics and contextual completion; expired/retired callbacks cannot publish for a reused command. Initial pre-Context issuance refusal, invalid/unsupported/future-empty local branches, cached account identity and signed/background/history/trading paths remain separate migration tails. A context error's local notSent is not proof that earlier physical reads were never sent.
+
+## MEXC single public candle read Context
+
+`FetchCandles` retains one engine Read Context from command admission through
+route preparation, binding and final release. Hosts must execute managed HTTP
+preparation/binding/final claim and handoff before sending the unsigned public
+GET. Native test fixtures use the shared prepared-actions executor. Preparation
+time consumes the
+original 20-second budget. Expiry rejects once, and late/duplicate transport
+callbacks cannot complete a reused numeric command or update HTTP429 pause state.
+Typed route refusals, Network failures and Timeout expiry retain their causes;
+public reads provide no account credential evidence. Existing unsupported
+interval/unknown-market messages, native error messages and no-retry policy stay.
+
+Candle query and results retain native symbol/interval encoding, floor-second
+bounds/timestamps, OHLCV ordering, all rows when no limit is supplied and tail
+selection for an explicit limit (including zero). Unequal native columns fail
+atomically. A current HTTP429 response still pauses depth and account reads.
+The other MEXC HTTP consumers keep their existing transport paths.
+
+## Public managed HTTP static headers
+
+Native adapters can use `Cx::request_managed_with_headers` for public requests
+with fixed codec headers, including JSON POST `Content-Type`. The engine validates
+the ordered static declaration and captures it once before allocating transport
+resources. Invalid headers return the original pending value with typed refusal.
+Header names, values, duplicate order and absent versus empty bodies retain their
+declared bytes through the existing prepare/bind/claim path.
+
+Credential-bearing contexts still require the signed entry point and trusted
+provider. Static headers grant no additional routing, retry, command, publication
+or financial authority. Original Context deadlines and atomic resource admission
+apply; host, WASM and SDK transport schemas are unchanged.
+
+## KuCoin Spot unsigned discovery Context
+
+KuCoin Spot catalogue and ticker seeds use the shared managed HTTP lifecycle with
+public intent, including when private credentials are configured. The native
+X-CHANNEL-API-CODE=3zexp then Content-Type=application/json headers retain their
+order and bytes. Catalogue rows come from `data`; ticker rows come from
+`data.ticker`. A request identity alone cannot publish discovery rows before the
+prepared transport is bound and the engine releases it. Expired or duplicate
+responses cannot overwrite the catalogue or ticker seed.
+
+The original 20-second read deadline includes preparation. An admitted preparation,
+transport, envelope or list failure retires its read Context before the native
+discovery retry callback. Unusable lists preserve existing quotes. Catalogue success
+still starts private snapshots before ticker readiness; usable tickers still wake
+wallet valuation and public/private bullet acquisition. Candle, private-signing,
+setting no-op and capability behavior retain their existing paths.
 
 ## Backpack and Paradex order snapshot freshness
 

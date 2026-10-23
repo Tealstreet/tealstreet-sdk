@@ -914,3 +914,55 @@ fn unproven_batch_error_object_keeps_bounded_native_diagnostics_without_ids() {
     assert!(h.engine.store().orders().is_empty());
     assert!(!h.has_request("/fapi/v1/order"));
 }
+
+#[test]
+fn documented_rate_limit_statuses_without_a_code_are_typed_refusals() {
+    use safe_cex_engine::ErrorKind;
+    for (status, headers, outcome, kind, retry) in [
+        (
+            429,
+            "Retry-After: 3\r\n",
+            Some(Outcome::Rejected),
+            Some(ErrorKind::RateLimited),
+            Some(3_000.),
+        ),
+        (
+            418,
+            "",
+            Some(Outcome::Rejected),
+            Some(ErrorKind::RateLimited),
+            None,
+        ),
+        (
+            403,
+            "",
+            Some(Outcome::Rejected),
+            Some(ErrorKind::Rejected),
+            None,
+        ),
+        // 409 can mean a partially successful cancel-replace: never a refusal.
+        (409, "", Some(Outcome::Unknown), None, None),
+    ] {
+        let mut h = ready();
+        let order = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+        )
+        .unwrap();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 730,
+            orders: vec![order],
+        }));
+        let request = h.take("/fapi/v1/order");
+        h.reply(
+            request.id,
+            status,
+            headers,
+            "<html>Too Many Requests</html>",
+        );
+        let failure = &h.failures.iter().find(|(id, _)| *id == 730).unwrap().1;
+        assert_eq!(failure.outcome, outcome, "{status}");
+        assert_eq!(failure.kind, kind, "{status}");
+        assert_eq!(failure.retry_after_ms, retry, "{status}");
+        assert!(failure.message.contains("HTTP"), "{status}");
+    }
+}

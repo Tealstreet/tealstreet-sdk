@@ -190,3 +190,249 @@ be implemented by this execution-group work.
 
 Architecture gate: No. The proposed engine group is the shared owner for two
 different consumers; neither may create its own observer/completion mechanism.
+
+## Lane handover and exact inventory (claude-fe7lgm, 2026-10-23)
+
+Ownership moved from uufub4 to claude-fe7lgm. Base `fa5d5fb90c4`. Everything
+above is retained; this section adds the inventory and settles the open API
+choices so that step 1 of the committable sequence can be reviewed.
+
+Definition: one physical request (or one shared read sequence) whose result
+seals more than one logical owner. Per-channel FIFO queues, one-command
+multi-leg fan-out and one-request-per-command maps are excluded. All sites
+below finish owners through legacy numeric `cx.done`/`cx.fail`; no managed
+Context today has more than one owner (`Owner::Command` or `Owner::Background`).
+
+### A. Joined result: group authority consumers
+
+| Site | Owners and join | Terminal and expiry today | Group need |
+| --- | --- | --- | --- |
+| Bybit Hyro, `bybit/src/hyro.rs` `Group.waiters` (start_hyro_place, advance_hyro, pause_hyro, on_hyro_sign_failed) | Identical serialized order list joins at any time, also restarting a paused group; waiters not deduplicated | One shared done/fail loop; no group or owner deadline; a silently unsent request strands every waiter | Mutation execution, shared journal, observer progress, retained intent/continuation (Hyro phase) |
+| Metadata #1747, `engine::metadata` `Attempt.commands` (`Completion::finish`, BingX `begin_metadata` refusal) | Same symbol, revision, `global` stamp, publish and fallback joins the current attempt; a pending write downgrades `publish` before matching | Loop of numeric done/fail; per-owner expiry absent | Read execution, join until terminal, freshness token stays in metadata |
+| Bitrue FetchLeverage, `bitrue/src/account.rs` `leverage_queries: Vec<(CommandId, String)>` (account_command, report_leverage_error, finish_leverage) | Command appends, bumps `settings_revision`, joins the background account snapshot | Per-owner projection from one snapshot; no deadline; stale-revision snapshots re-read without bound; a failed older snapshot fails owners that joined after its send | Background-rooted read with command observers joined before release; per-observer projection; per-observer expiry (codex-9czdjh requirement; consumer record #1819 `RUST_BITRUE_REQUEST_CONTEXT.md`) |
+| Bybit RefreshMarkets, `bybit/src/refresh.rs` `Walk.waiters` | Joins while a walk is active | One 30 s walk timer set by the first owner; late joiners inherit it; all fail together | Multi-page read execution with an engine bound; per-observer expiry; public, unsigned |
+
+### B. Prerequisite gates: not this authority
+
+Paradex JWT queue (`paradex/src/account.rs` queue/auth_failed), GRVT login
+(`grvt/src/account.rs` `waiting`), BreakoutProp Login/Discover
+(`breakoutprop/src/lib.rs` queue), AsterDex clock sync (`awaiting_clock`) and
+Coinbase startup deferral (`deferred`). Success re-dispatches each owner as its
+own request, so there is no shared result. Failure fans out because the
+prerequisite failed. None is an execution group. Owner ruling (2026-10-23):
+Paradex, GRVT and BreakoutProp go to claude-55ao7t's background-session gate
+(#1815; gate API in #1842, stacked on #1832); the credential core (#1805) supplies only key/subject. AsterDex is
+clock-lane (codex-5c57jl) and Coinbase is with codex-hcmq3f (fixed by #1843, landed `43c5d6152c3`). Reported hang risks: Coinbase drains deferred
+`FetchCandles` only on catalogue success (`public_pending`), never from
+`public_failed`; GRVT owners wait on a 5 s retry timer with no own deadline;
+Paradex owners are bounded only by the auth transport timeout. AsterDex is not
+a hang: every clock outcome re-dispatches `awaiting_clock`, and the clock read
+has a 5 s timeout.
+
+### C. Single command waiting on background evidence: later adoption
+
+Bitrue protection census (`bitrue/src/trading.rs` `census`), Lighter
+reduce-only wait (`lighter/src/trading.rs` `position_wait`, own 10 s timer),
+TxFlow identity wait, Orderly protective wait and Lighter limits gate. One
+command, so no sibling suppression is possible. They may later become
+one-observer background-rooted executions; this is not part of the first two
+references.
+
+### D. Excluded
+
+Orderly cancel-all supersession and engine order-lock cancel-all fencing are
+command-arrival fan-out, not one response. The native host's fatal settle is
+host teardown. Bitrue public candles/trades are a per-channel FIFO (one reply
+pops one owner), confirmed by codex-9czdjh.
+
+## Settled API choices for review
+
+Revised after independent adversarial review (3 blockers, 4 major resolved).
+
+1. **Owner and bound.** Add `Owner::Execution { id, generation }`, issued by
+   the registry. A command-founded execution's raw deadline is
+   `min(begin + timeout_ms, founder root deadline)`: a short founder cannot
+   mint a long execution, and no observer, join or validated progress ever
+   raises it. Every leg is issued through `http_leg_context` with the
+   execution Context as parent and inherits that exact bound; retries and
+   BingX's second leg never exceed it. Because the execution is capped by its
+   founder, released work after every observer detaches is still bounded.
+   `Mutation` executions need a command founder and admit only command
+   observers.
+2. **Background-observed reads (Bitrue).** This amends "no implicit background
+   cache-warming observer" above explicitly, without weakening it: there is
+   still no implicit observer. An existing `Owner::Background` read Context
+   may be named the execution root at begin (`Read` only). `Owner::Execution`
+   remains the single physical-leg authority: the background root's legs are
+   execution legs like any other, with no side table and no second route. The
+   one group read gate checks the exact execution, its epoch/liveness and the
+   current freshness token before codec, native-cache or Store changes. It
+   admits publication only while the background root generation is still live
+   or a live command observer survives; with neither, the reply retires
+   unpublished. Command observers receive only projections. The execution
+   bound is the background root's deadline. No background root can carry a
+   mutation.
+3. **Observer.** `Observer` is opaque: execution id/generation, command id and
+   command generation, minted from the command's own issued root Context. Its
+   effective deadline is `min(own root deadline, execution deadline)`.
+   Membership counts in the spent-entry guard and `command_live` (uufub4's
+   command-entry pin), so a reused CommandId can never inherit an observer's
+   generation. Numeric `done`/`fail`, a second execution or an independent
+   physical leg for a member command are refused (exclusive whole-command
+   composition). Joining the same generation twice is idempotent.
+4. **Join window.** Declared at begin. `BeforeRelease` closes joining at the
+   execution's first leg release, so one execution never spans re-read
+   attempts with ineligible observers. A later joiner enters a bounded
+   pending-successor state of the same background root: it is already an
+   observer with its own expiry timer, and begin of that root's next read
+   adopts it atomically. If the root issues no further read before the
+   observer's deadline, it expires through choice 6 like any other observer. `UntilTerminal` covers
+   metadata, Hyro and RefreshMarkets (mid-walk joins over concurrent category
+   and cursor legs). Metadata freshness and Bitrue settings revision stay in
+   their own owners; the window is liveness, not publication.
+5. **Terminal, projection and progress.** Each observer carries a bounded venue
+   key (≤128 bytes, for example the symbol). Three engine-validated calls:
+   `complete_execution(delivery, |key| result)` in the exact group delivery
+   callback; `abort_execution(handle, error)` outside a delivery (Hyro pause or
+   finish from command arrival). For a Mutation the outcome is always the
+   journal projection; the venue error supplies only message and kind, and an
+   outcome only for work that was never released; `execution_progress(handle, receipts)`, which
+   fans identity receipts out to every live observer and retains a bounded
+   snapshot replayed once to a later joiner, never as a new send. Each validates
+   every observer and seals each live one exactly once. A Mutation execution
+   seals one shared `CommandWrites` journal exactly once at execution
+   terminal; each surviving observer is then finished through `finish_command`
+   with its own validated root as authority and that one projection. A detach
+   or timeout before terminal reads a non-consuming projection of the same
+   journal for that observer only (NotSent if nothing was released, else
+   Unknown with the known partial IDs) and never retires shared physical work
+   while a peer survives. There is no per-observer journal and no numeric
+   member seal. Progress only notifies; it never completes an owner.
+   Late joins (clarified with uufub4, 2026-10-23): an exact identical-intent
+   join after release (same native work, orderLinkIds, policy, credential and
+   publish shape) inherits the same proven accepted facts and prior-release
+   uncertainty. It never gets a cleaner outcome than the founder, never
+   causes a duplicate physical effect and never extends the execution root.
+   Fully resolved facts may project the same success when native intent and
+   IDs are truly identical; an unresolved prior release stays Unknown. The
+   non-consuming projection keeps every known money fact within the existing
+   ID/text budgets, and detached sent writes keep reconciliation evidence even
+   with zero observers. A different shape must not join.
+6. **Expiry: one terminal path.** The engine arms one execution timer at
+   `min(earliest observer deadline strictly earlier than the execution
+   deadline, execution deadline while no leg is in flight)`. Observer
+   deadlines detach only those observers. "No leg in flight" covers between
+   legs, paused, a pending successor not yet issued and after an early leg
+   failure; issuing a leg drops the execution-deadline term and retiring the
+   last leg restores it, so exactly one path owns the execution deadline. If an observer
+   detach and a leg timeout fall on the same instant, the detach runs first and
+   the leg callback sees only the remaining observers. Read → `ErrorKind::Timeout`;
+   Mutation → journal projection (`NotSent` only if nothing was released).
+   Siblings continue. While a leg is in flight there is no second timer at the
+   execution deadline; the leg's physical timer fires there. The engine sweeps
+   executions at event entry, so at that instant the execution bound seals
+   every remaining observer first (Read → typed Timeout, Mutation → journal
+   projection) and the leg failure then reaches the venue with nothing left to
+   seal (amended after the RefreshMarkets review: a venue leg handler must not
+   relabel the owners' timeout as a transport failure). A leg that ends earlier (a
+   shortened `request_timeout`) is an ordinary leg failure; the venue may
+   issue another leg within the execution bound. Explicit `detach_observer`
+   uses the observer path.
+7. **Last observer gone.** Unsent work is revoked as a typed pre-send denial (no
+   transport failure, backoff or credential evidence). A released
+   command-rooted read retires without publication. A background-rooted read
+   keeps its background publication rights. Released writes keep only the
+   existing bounded late-ACK reconciliation custody.
+8. **Order locks and custody.** Beginning or joining a Mutation execution calls
+   `order_locks.manage` for that observer command. The shared journal seal
+   drives `managed_resolved` per observer. Late-ACK custody
+   (`http_reconciliation.rs`) is keyed by `Owner::Execution` and projects to its
+   observers; no observer escapes the order-lock fence.
+9. **Capacity.** Each execution is a Context in the shared 256 `contexts` map,
+   and its legs count against the 256 `managed_http` map. Observers count
+   against the 256 command owners, at most 64 per execution (metadata's
+   `MAX_WAITERS`). There is no separate execution cap, so metadata's 256
+   attempts are not reduced. Begin and join reserve before committing; refusal
+   leaves the execution, its observers and its evidence unchanged.
+10. **Hyro continuation.** A sealed or expired execution cannot reopen. Hyro's
+    retained intent (planned lots, orderLinkIds, uncertainty) needs a separate
+    engine continuation token backed by reconciliation-proven retry, specified
+    in the Hyro phase after ordinary Bybit adoption and
+    `RUST_COMMAND_REPLACEMENTS.md`. The core exposes only terminal state.
+11. **Entry custody.** Command-entry custody (#1830) is used only for the
+    initial begin or join, inside the command's own genuine callback. Later
+    legs, retries and responses use the issued opaque execution authority and
+    never mint or reborrow a command-entry loan.
+12. **Refusal before a Context exists.** Only begin can fail before a Context
+    is issued (a join always holds the command's root Context). Such a refusal
+    (BingX `begin_metadata`) uses the planned command-entry rejection for
+    unissued commands (uufub4, `feat/rust-http-command-entry`: plan text and a
+    RED test at `044cede2f08`, not yet implemented), never a numeric
+    `cx.fail`.
+
+## Consumer order and current blockers
+
+No consumer is on managed signed HTTP yet: Bybit, Bitrue, BingX and WEEX all
+still sign through the legacy path (BingX's migration is #1779). So:
+
+1. Core: pure state tests (RED first), then managed-HTTP wiring with the
+   acceptance matrix above. New file `engine/src/execution_group.rs` plus
+   hooks in `request_context_registry.rs`, `request_context.rs`,
+   `http_lifecycle.rs`, `http_reconciliation.rs`, `order_locks.rs` and
+   `engine.rs`. Open #1816, #1818, #1808 and #1804 touch `http_lifecycle.rs`;
+   #1817 and #1771 touch `engine.rs`. A group form of
+   `validate_read_http_delivery` (today `Owner::Command` only) is part of core.
+2. Read reference: Bybit RefreshMarkets (public, unsigned, multi-page, joined
+   commands, shared deadline; `refresh.rs` is under no open PR). Prerequisites:
+   it is Bybit's first managed adoption, so sequence it with uufub4's parked
+   `feat/rust-bybit-context-groups` and open #1799 (both edit
+   `bybit/src/lib.rs`), and land the group read-delivery validator before
+   `commit_refresh` publishes to Store.
+3. Metadata (cxxyqr): after core step 3 and #1747 merge, adopt in its unsigned
+   release probes; private production adoption follows #1779 and the WEEX
+   signer, replacing the BingX `begin_metadata` numeric refusal (choice 11).
+4. Bitrue FetchLeverage (9czdjh, #1819): after Bitrue's signer migration; uses
+   the background-rooted read, `BeforeRelease` and per-observer projection.
+5. Hyro: after ordinary Bybit managed adoption and the continuation token.
+
+Each converted consumer prunes its own entries in
+`sdk-rs/scripts/request-legacy-sites.json` in the same PR.
+
+Architecture gate: No. This is one engine choke point for joined completion;
+the four group-A sites must adopt it rather than keep venue waiter loops.
+
+Sequencing (agreed with uufub4, 2026-10-23): core source is based on uufub4's
+committed command-entry pin (`feat/rust-http-command-entry`: registry
+`make_http_context` spent-entry guard, `command_live`, exact-read-root
+validator, `CommandEntryError`) plus reviewed #1808. It preserves #1792/#1789
+authority and the exact join/orphan-precodec matrix, and leaves uufub4's parked
+whole-plan work (`feat/rust-bybit-context-groups`) alone. The precise hook list
+goes to uufub4 before any production change; source conflicts go to the owner.
+
+## Implementation checkpoint (claude-fe7lgm, 2026-10-23)
+
+Branch `feat/rust-execution-group-state`, stacked exactly on reviewed #1830
+(`66cb32e8958`) and #1820 (`cb4b508b569`) under the standing seam
+authorization; landing merged at `a7f3494a430`.
+
+- Pure state: `engine/src/execution_group.rs` (32 controls, RED first).
+- Wiring: `Owner::Execution` legs through the registry's attempt accounting
+  (`execution_registry.rs`), venue API in `engine/src/execution_cx.rs`
+  (`begin_execution`, `join_execution`, `detach_execution_observer`,
+  `complete_execution`, `abort_execution`, `validate_execution_read_delivery`).
+  Begin/join run only in the observer command's genuine entry callback
+  (`Io::entry_bound`, cleared with uufub4). Observers are sealed only through
+  their execution; numeric and direct-root completion are refused. One engine
+  timer and an event-entry/post-callback sweep own expiry. Read executions
+  with command roots only.
+- Reference consumer: Bybit RefreshMarkets (`venues/bybit/src/refresh.rs`),
+  with legacy inventory pruned. Two review rounds on the wiring and one on the
+  consumer, with RED regressions for each fix.
+
+Still open: Mutation executions and the shared journal (Hyro), background
+roots and the pending successor (Bitrue), metadata adoption (after #1747 and
+the BingX/WEEX signers), and a second production consumer. Consumers call
+`admit_http_command` before any I/O or opaque work; `Revoked` then means
+existing or spent custody (no fresh first entry), so returning without a new
+terminal is correct (confirmed with uufub4).
+

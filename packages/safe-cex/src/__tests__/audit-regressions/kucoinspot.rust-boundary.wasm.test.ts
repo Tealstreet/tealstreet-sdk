@@ -8,6 +8,7 @@ import { expect, it } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { prepareRecordedHttp } from '../support/managedHttp';
 import { directTransport } from '../../transport/direct';
 import { MarginType, OrderSide, OrderType } from '../../types';
 
@@ -37,6 +38,7 @@ it.each([false, true])('preserves KuCoin HF context, quantities and exact broker
     createdAt: now,
   };
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => ++now,
     connect: (url, handlers) => {
       sockets.push(url);
