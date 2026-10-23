@@ -152,3 +152,63 @@ Source SHA256: `c8b68c5ee9554b9de0dc867aed79a159f4c1350e4e512d13315d054bfcca65a5
 | `a1c7fc500594612cd32082bb8ee3d5a96a6c5843791fcdd8818e1b60bcf53b7a` | 1 | 698 `run_trade` → WRITE | `cx.fail(command as CommandId, error)` |
 | `9ecfe514716e00b34e5c7703e920e8dc9024caab0837bbf2949a3a78d4eb842b` | 1 | 937 `trade_failed` → LEXICAL + WRITE | `matches!( request.step, Step::Place { optional: true, .. } \| Step::Cancel { optional: true, .. } )` |
 | `2364edc99329ee0ea1944828c497c7adcec199804350a5db2811f2906f0e4d92` | 1 | 954 `trade_failed` → WRITE | `cx.fail(request.command as CommandId, error)` |
+
+
+## Phase one: single command public depth on actual header admission
+
+Base: actual `2b1e35e50b2095c6651344fc5ffe0553ad456f35`, including command entry #1830 and static headers #1820.
+Scope is standalone FetchOrderBook only: lib.rs BookQuery entry/pending/response/
+failure dispatch, depth_query.rs completion authority, a dedicated managed test
+and the two narrow native query fixture drivers. Keep account/trading files and
+tests occupied by #1787 untouched; keep generic get(), discovery, history and
+subscription snapshot/recovery helpers unchanged.
+
+Admit a genuine public Read before request allocation, with one 20-second root,
+no credential, no pacing group and zero retries. Declare the exact static
+X-Broker-Id:1200 header through request_managed_with_headers; retain GET, native
+symbol encoding, no body and route None. Carry Context in BookQuery, validate
+exact delivery before native decoding and settle through contextual completion.
+Preserve the existing public response/status codec, native code/message and
+capped Retry-After. Contextual preparation, transport and native failures keep
+the approved public NotSent presentation without changing their typed kind.
+Initial engine admission rejection is the explicit new exception: it is a Read
+failure with no financial outcome; revoked entries grant no completion rights.
+
+Regression controls first must assert original-source RED at early opaque HTTP,
+then prove headers through Prepare/Bind/reprepare, exact parked/released expiry,
+no retries, typed refusal/integrity failures, duplicate/reused IDs and initial
+clock/capacity rejection. Preserve every native book oracle: all limits ignored,
+lexical IDs/server order/duplicate prices, zero sizes/totals, empty sides,
+whole-query failure, reverse concurrent completion and independence from
+subscription generations, Store caches and account auth. Keep fixture event
+clocks and all existing business assertions.
+
+Expected ratchet delta is only the BookQuery failure in lib.rs and four direct
+completions in depth_query.rs. The generic legacy sender remains for other
+consumers. The registry capability probe hits this new managed path; until
+#1818 lands, carry only its explicitly authorized identical generic fixture
+commit d654816753b3881b8ea0704d5758c65f7687a30f, without importing Crypto.com source.
+Re-integrate its actual landing before final proof when available.
+
+Append CALLERS including the initial-admission exception and the existing SDK
+startup-readiness caveat. Run Backpack/Binance full native tests, scoped strict
+Clippy/fmt, bans and both inventory checks. Obtain source/adversarial, caller and
+full-map reviews, a fresh exact integration CI proof, and a separately granted
+venue merge window. No venue classification, scheduler, signer or authority shim
+is introduced; TxFlow routing remains separately blocked on actual #1833.
+
+
+Phase-one checkpoint: `4bf299b52af` compiles all nine new lifecycle controls and
+all nine assert RED on early opaque HTTP before source adoption. The unchanged
+controls pass after adoption, including header re-preparation, typed refusal,
+parked/released expiry and initial rejection. Existing native query drivers use
+the shared prepared fixture helper at their original command clocks; business
+oracles and response clocks remain. Exact generic registry carry is `e83c805ae02`
+from authorized `d654816753b3`; no other Crypto.com source is imported.
+
+The scanner prune removes three depth_query.rs entries/four occurrences and one
+lib.rs BookQuery failure entry/occurrence. Backpack becomes six paths, 26 entries
+and 27 occurrences (from seven/30/32); all other inventory maps remain intact.
+Full native/static gates and independent implementation reviews are recorded on
+the PR before readiness. Source/caller plan reviews confirmed the initial
+admission outcome exception and architecture gate No.
