@@ -12,6 +12,7 @@ import type {
   UpdateOrderOpts,
 } from '@tealstreet/safe-cex/src/types';
 import type { Store } from '@tealstreet/safe-cex/src/store/store.interface';
+import type { CommandOutcome } from '@tealstreet/safe-cex/src/commandOutcome';
 
 import type { HistoricalPosition, PrintKind, RunCommandResult } from '../api/CoreApi.types';
 import type { MaybePromise } from './AdapterContext';
@@ -86,6 +87,11 @@ export interface HostWriteEvent {
   readonly ok: boolean;
   readonly orderIds?: readonly string[];
   readonly error?: string;
+  /** SDK-reported IDs on a failed batch; an `unknown` outcome remains uncertain. */
+  readonly partialOrderIds?: readonly string[];
+  readonly outcome?: CommandOutcome;
+  readonly partialOrderCount?: number;
+  readonly totalOrderCount?: number;
 }
 
 export interface HostBindings {
