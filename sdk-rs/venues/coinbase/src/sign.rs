@@ -169,41 +169,11 @@ impl Credentials {
         if !now.is_finite() || now < 0.0 || seconds >= (u64::MAX - 120) as f64 {
             return Err("Coinbase invalid clock".into());
         }
-        if uri.is_some_and(|value| {
-            value.is_empty() || value.len() > MAX_URI_BYTES || value.chars().any(char::is_control)
-        }) {
-            return Err("Coinbase invalid JWT URI".into());
-        }
-        if nonce.is_empty() || nonce.len() > 128 || nonce.chars().any(char::is_control) {
-            return Err("Coinbase invalid JWT nonce".into());
-        }
-        let nbf = seconds as u64;
-        // Keep the active TS claim contract; current Coinbase examples disagree.
-        let (alg, iss, aud) = match self.signer {
-            Signer::Es256(_) => ("ES256", "coinbase-cloud", None),
-            Signer::Ed25519(_) => ("EdDSA", "cdp", Some(["cdp_service"])),
+        let algorithm = match self.signer {
+            Signer::Es256(_) => JwtAlgorithm::Es256,
+            Signer::Ed25519(_) => JwtAlgorithm::EdDsa,
         };
-        let header = serde_json::to_vec(&Header {
-            alg,
-            typ: "JWT",
-            kid: &self.key,
-            nonce,
-        })
-        .map_err(|_| "Coinbase JWT header encoding failed")?;
-        let claims = serde_json::to_vec(&Claims {
-            iss,
-            aud,
-            nbf,
-            exp: nbf + 120,
-            sub: &self.key,
-            uri,
-        })
-        .map_err(|_| "Coinbase JWT claims encoding failed")?;
-        let input = format!(
-            "{}.{}",
-            URL_SAFE_NO_PAD.encode(header),
-            URL_SAFE_NO_PAD.encode(claims)
-        );
+        let input = signing_input(algorithm, &self.key, nonce, seconds as u64, uri)?;
         let signature = match &self.signer {
             Signer::Es256(key) => key.sign(input.as_bytes())?,
             Signer::Ed25519(seed) => {
@@ -220,11 +190,7 @@ impl Credentials {
         now: f64,
         fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
     ) -> Result<Vec<(&'static str, String)>, String> {
-        if !path.starts_with('/')
-            || path.starts_with("//")
-            || path.len() > MAX_URI_BYTES
-            || path.chars().any(char::is_control)
-        {
+        if !valid_request_path(path) {
             return Err("Coinbase invalid request path".into());
         }
         let pathname = path.split(['?', '#']).next().unwrap_or(path);
@@ -237,6 +203,317 @@ impl Credentials {
             ("Content-Type", "application/json".into()),
         ])
     }
+}
+
+/// JWT signature algorithm, fixed by the key's type at setup (non-secret).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JwtAlgorithm {
+    Es256,
+    EdDsa,
+}
+
+/// `base64url(header).base64url(claims)`: the exact JWS signing input every
+/// Coinbase signer (legacy, dispatch recipe, remote recipe) signs.
+fn signing_input(
+    algorithm: JwtAlgorithm,
+    kid: &str,
+    nonce: &str,
+    nbf: u64,
+    uri: Option<&str>,
+) -> Result<String, String> {
+    if uri.is_some_and(|value| {
+        value.is_empty() || value.len() > MAX_URI_BYTES || value.chars().any(char::is_control)
+    }) {
+        return Err("Coinbase invalid JWT URI".into());
+    }
+    if nonce.is_empty() || nonce.len() > 128 || nonce.chars().any(char::is_control) {
+        return Err("Coinbase invalid JWT nonce".into());
+    }
+    let exp = nbf.checked_add(120).ok_or("Coinbase invalid clock")?;
+    // Keep the active TS claim contract; current Coinbase examples disagree.
+    let (alg, iss, aud) = match algorithm {
+        JwtAlgorithm::Es256 => ("ES256", "coinbase-cloud", None),
+        JwtAlgorithm::EdDsa => ("EdDSA", "cdp", Some(["cdp_service"])),
+    };
+    let header = serde_json::to_vec(&Header {
+        alg,
+        typ: "JWT",
+        kid,
+        nonce,
+    })
+    .map_err(|_| "Coinbase JWT header encoding failed")?;
+    let claims = serde_json::to_vec(&Claims {
+        iss,
+        aud,
+        nbf,
+        exp,
+        sub: kid,
+        uri,
+    })
+    .map_err(|_| "Coinbase JWT claims encoding failed")?;
+    Ok(format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(header),
+        URL_SAFE_NO_PAD.encode(claims)
+    ))
+}
+
+const REST_ORIGIN: &str = "https://api.coinbase.com";
+
+/// Signed request path rules shared with the legacy signer: rooted, not
+/// protocol-relative, bounded and control-free.
+fn valid_request_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && path.len() <= MAX_URI_BYTES
+        && !path.chars().any(char::is_control)
+}
+
+/// One JWT at release: the nonce comes from engine signing entropy and `nbf`
+/// from the dispatch stamp; `exp` is fixed at `nbf + 120` and declared as the
+/// receipt expiry so a late result is never released under the old token.
+fn prepare_jwt(
+    dispatch: &safe_cex_engine::DispatchContext<'_>,
+    identity: &safe_cex_engine::signing::Identity,
+    key_name: &str,
+    algorithm: JwtAlgorithm,
+    uri: Option<&str>,
+    context: safe_cex_engine::signing::Context,
+) -> Result<(safe_cex_engine::signing::SignRequest, String), safe_cex_engine::signing::SignError> {
+    use safe_cex_engine::signing::{
+        Algorithm, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
+    };
+    let stamp = dispatch.stamp_ms();
+    let nbf = (stamp / 1_000.0).floor();
+    if !nbf.is_finite() || nbf < 0.0 || nbf >= (u64::MAX / 2000) as f64 {
+        return Err(SignError::InvalidRequest);
+    }
+    let nonce = safe_cex_crypto::uuid::uuid_with_entropy(|bytes| {
+        dispatch
+            .signing_bytes(bytes)
+            .map_err(|_| "Coinbase signing entropy unavailable".to_owned())
+    })
+    .map_err(|_| SignError::Unavailable)?;
+    let nbf = nbf as u64;
+    let input = signing_input(algorithm, key_name, &nonce, nbf, uri)
+        .map_err(|_| SignError::InvalidRequest)?;
+    let request = SignRequest {
+        receipt: SignReceipt {
+            stamp_ms: Some(stamp),
+            expiry_ms: Some(((nbf + 120) * 1000) as f64),
+        },
+        operations: vec![
+            Operation::Present {
+                key: identity.credential.clone(),
+            },
+            Operation::Sign {
+                algorithm: match algorithm {
+                    JwtAlgorithm::Es256 => Algorithm::Es256,
+                    JwtAlgorithm::EdDsa => Algorithm::Ed25519,
+                },
+                key: identity.signing.clone(),
+                payload: vec![PayloadPart::Bytes {
+                    bytes: input.clone().into_bytes(),
+                }],
+            },
+        ],
+        context,
+    };
+    Ok((request, input))
+}
+
+/// The presented credential must be this recipe's key name, so a provider
+/// presenting another key cannot sign for it; the signature is raw r||s or
+/// Ed25519, 64 bytes either way.
+fn finish_jwt(
+    key_name: &str,
+    input: &str,
+    result: &safe_cex_engine::signing::SignResult,
+) -> Result<String, safe_cex_engine::signing::SignError> {
+    use safe_cex_engine::signing::SignError;
+    if result.values.first().map(Vec::as_slice) != Some(key_name.as_bytes()) {
+        return Err(SignError::InvalidResult);
+    }
+    let signature = result
+        .values
+        .get(1)
+        .filter(|signature| signature.len() == 64)
+        .ok_or(SignError::InvalidResult)?;
+    Ok(format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature)))
+}
+
+/// Dispatch recipe for one private Coinbase REST request. `path` includes the
+/// query; the outbound URL must be exactly `https://api.coinbase.com` + path.
+/// The `uri` claim keeps only the pathname, as legacy does.
+pub struct Http {
+    identity: safe_cex_engine::signing::Identity,
+    key_name: String,
+    algorithm: JwtAlgorithm,
+    method: Method,
+    path: String,
+    prepared: Option<String>,
+}
+impl Http {
+    pub fn new(
+        identity: safe_cex_engine::signing::Identity,
+        key_name: &str,
+        algorithm: JwtAlgorithm,
+        method: Method,
+        path: &str,
+    ) -> Self {
+        Self {
+            identity,
+            key_name: key_name.into(),
+            algorithm,
+            method,
+            path: path.into(),
+            prepared: None,
+        }
+    }
+}
+impl safe_cex_engine::SignStep for Http {
+    fn prepare(
+        &mut self,
+        outbound: &mut safe_cex_engine::Action,
+        dispatch: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        let safe_cex_engine::Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        if http.method != self.method
+            || !valid_request_path(&self.path)
+            || http.url.strip_prefix(REST_ORIGIN) != Some(self.path.as_str())
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        let pathname = self.path.split(['?', '#']).next().unwrap_or(&self.path);
+        let uri = format!("{} api.coinbase.com{pathname}", self.method.as_str());
+        let (request, input) = prepare_jwt(
+            dispatch,
+            &self.identity,
+            &self.key_name,
+            self.algorithm,
+            Some(&uri),
+            safe_cex_engine::signing::Context {
+                venue: "coinbase".into(),
+                method: self.method.as_str().into(),
+                host: "api.coinbase.com".into(),
+                path: pathname.into(),
+            },
+        )?;
+        self.prepared = Some(input);
+        Ok(request)
+    }
+    fn apply(
+        &mut self,
+        outbound: &mut safe_cex_engine::Action,
+        result: &safe_cex_engine::signing::SignResult,
+    ) -> Result<(), safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        let safe_cex_engine::Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let input = self.prepared.take().ok_or(SignError::InvalidRequest)?;
+        let jwt = finish_jwt(&self.key_name, &input, result)?;
+        http.headers = vec![
+            ("Authorization", format!("Bearer {jwt}")),
+            ("Content-Type", "application/json".into()),
+        ];
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
+/// Dispatch recipe for one private-socket subscribe frame (`user` or
+/// `heartbeats`), with a JWT that carries no `uri` claim.
+pub struct WsSubscribe {
+    identity: safe_cex_engine::signing::Identity,
+    key_name: String,
+    algorithm: JwtAlgorithm,
+    channel: String,
+    prepared: Option<String>,
+}
+impl WsSubscribe {
+    pub fn new(
+        identity: safe_cex_engine::signing::Identity,
+        key_name: &str,
+        algorithm: JwtAlgorithm,
+        channel: &str,
+    ) -> Self {
+        Self {
+            identity,
+            key_name: key_name.into(),
+            algorithm,
+            channel: channel.into(),
+            prepared: None,
+        }
+    }
+}
+impl safe_cex_engine::SignStep for WsSubscribe {
+    fn prepare(
+        &mut self,
+        outbound: &mut safe_cex_engine::Action,
+        dispatch: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        if !matches!(outbound, safe_cex_engine::Action::WsSend { .. })
+            || !matches!(self.channel.as_str(), "user" | "heartbeats")
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        let (request, input) = prepare_jwt(
+            dispatch,
+            &self.identity,
+            &self.key_name,
+            self.algorithm,
+            None,
+            safe_cex_engine::signing::Context {
+                venue: "coinbase".into(),
+                method: "WS".into(),
+                host: "advanced-trade-ws-user.coinbase.com".into(),
+                path: self.channel.clone(),
+            },
+        )?;
+        self.prepared = Some(input);
+        Ok(request)
+    }
+    fn apply(
+        &mut self,
+        outbound: &mut safe_cex_engine::Action,
+        result: &safe_cex_engine::signing::SignResult,
+    ) -> Result<(), safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        let safe_cex_engine::Action::WsSend { text, .. } = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let input = self.prepared.take().ok_or(SignError::InvalidRequest)?;
+        let jwt = finish_jwt(&self.key_name, &input, result)?;
+        *text = subscribe_frame(&self.channel, jwt).map_err(|_| SignError::InvalidRequest)?;
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
+/// The private-socket subscribe frame, in the legacy field order.
+pub fn subscribe_frame(channel: &str, jwt: String) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct Sub<'a> {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        channel: &'a str,
+        jwt: String,
+    }
+    serde_json::to_string(&Sub {
+        kind: "subscribe",
+        channel,
+        jwt,
+    })
+    .map_err(|_| "Coinbase subscribe encoding failed".to_owned())
 }
 
 fn decode_base64(value: &str) -> Result<Zeroizing<Vec<u8>>, String> {

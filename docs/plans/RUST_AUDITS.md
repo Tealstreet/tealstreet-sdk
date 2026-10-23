@@ -2727,3 +2727,11 @@ original BingX/WEEX copies erase capacity denial fields; those two native
 assertion REDs are retained for separate consumer adoption, not marked fixed by
 engine probes. No venue P0, private signer, Plan history or inventory-zero
 claim is closed by this library seam.
+
+## BingX identity selected Read adoption
+
+FetchAccount now consumes actual #1962 rather than the legacy local completion
+and admission-error fallback. Its two identity terminal fingerprints are removed;
+family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
+typed Network/Timeout assertions pass alongside native wire/config/codec controls.
+The generic managed helper and all other family callers remain with their owners.
