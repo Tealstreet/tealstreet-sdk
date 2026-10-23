@@ -391,6 +391,20 @@ fn a_member_cannot_issue_its_own_physical_request() {
         cx.http_context(Scope::Command(1), read_policy(500)),
         Err(crate::request_context::Error::Revoked)
     );
+    // Nor may it send on the entry root it already holds.
+    let managed = cx.io.managed_http.len();
+    let sent = cx.request_managed(
+        root.clone(),
+        crate::Method::Get,
+        "https://venue.test/own-root".into(),
+        None,
+        root.clone(),
+    );
+    assert_eq!(
+        sent.map_err(|(_, error)| error),
+        Err(crate::request_context::Error::Revoked)
+    );
+    assert_eq!(cx.io.managed_http.len(), managed);
 }
 
 #[test]

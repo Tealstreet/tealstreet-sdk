@@ -299,6 +299,7 @@ impl ContextRegistry {
         self.executions
             .observers
             .insert(command, observer.expect("command-rooted execution"));
+        self.observe_execution_credential(command, &root);
         Ok(root)
     }
 
@@ -315,7 +316,18 @@ impl ContextRegistry {
         let command = member.command;
         let (observer, joined) = self.executions.groups.join(execution, member, now)?;
         self.executions.observers.insert(command, observer);
+        self.observe_execution_credential(command, execution_root);
         Ok(joined)
+    }
+
+    /// An observer seals through the shared execution: a signed execution's
+    /// auth-kind failure is credential evidence for every observing command.
+    fn observe_execution_credential(&mut self, command: CommandId, execution_root: &Context) {
+        if execution_root.credential().is_some()
+            && let Some(owner) = self.commands.get_mut(&command)
+        {
+            owner.credentialed = true;
+        }
     }
 
     pub(in crate::engine) fn execution_leg_issued(
