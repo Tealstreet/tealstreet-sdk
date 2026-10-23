@@ -38,7 +38,7 @@ Owner constraints carried unchanged:
 
 ### Credential selection, 27 families
 
-Secondary-read support (17): asterdex, backpack, binance, bingx, bitget,
+Secondary-read support (18 listed; cryptocom accepts but never uses it): asterdex, backpack, binance, bingx, bitget,
 bitrue, bitunix, blofin, bybit, coinbase, cryptocom (accepted, unused),
 kraken futures, kucoin, mexc, okx, phemex, weex, woo. No secondary: apexomni,
 breakoutprop, grvt, hyperliquid, lighter, orderly, paradex, polymarket, txflow,
@@ -93,7 +93,10 @@ Rule patterns (each a local copy of one policy):
     `hosts/native/src/routing.rs:186-222` and TS
     `packages/safe-cex/src/transport/engine.ts:808-821` pick the read egress
     from GET + read-header presence, the TS side with a hard-coded venue list
-    (binance, binancepm, binanceinverse, asterdex). `RequestRoute` has no
+    (binance, binancepm, binanceinverse, asterdex). TS also keeps a
+    `secondaryReadHeaders` map (`engine.ts:82-115`) and, under `readPublic`
+    (`:279`, `prepareHttp` `:798-803`), sends unsigned public GETs through the
+    read egress for every venue except those four. `RequestRoute` has no
     Secondary variant.
 11. **Registry construction:** AsterDEX read-agent exception
     (`registry/src/lib.rs:745-750`), Binance identities (`:1147-1165`). Hosted
@@ -160,7 +163,8 @@ HTTP method is never an input, end to end: every credential-bearing
 `HttpRequest` (legacy and managed) carries the selection's `RoutingIntent`
 (new `RequestRoute::Secondary` or an intent field), and hosts route on intent
 only. Phase 2 deletes the native GET/header inference and the TS venue list
-(inventory rule 10). `request_context::Credential.reference` becomes optional so
+(inventory rule 10). Public intent keeps today's `readPublic` public-egress
+routing as explicit host data, so public traffic routing does not change. `request_context::Credential.reference` becomes optional so
 raw-secret venues get Primary/Secondary intent rather than Public (agreed with
 codex-uufub4 before editing `request_context.rs`). Selection
 feeds codex-uufub4's `PreflightPolicy` read/write intents unchanged. Equal
@@ -276,7 +280,7 @@ Open PRs at the pin, by area:
 | Area | PRs |
 | --- | --- |
 | `engine/src` | #1771 (`engine.rs`, `signing_dispatch.rs`, socket auth), #1747 and #1798 (`engine/src/lib.rs`) |
-| Venues | #1771 bitunix/okx; #1773 okx; #1779 bingx; #1747 bingx/weex; #1785-#1788 aster/grvt/txflow/woo/cryptocom/backpack/paradex; #1793 mexc; #1795 phemex; #1796 woo; #1797 breakoutprop/hyperliquid/kraken; #1798 bitget/kraken + `engine/src/lib.rs`; #1799 aster/bybit/coinbase; #1800 polymarket |
+| Venues | #1771 bitunix/okx; #1773 okx; #1779 bingx; #1747 bingx/weex; #1785-#1788 aster/grvt/txflow/woo/cryptocom/backpack/paradex (#1786 also mexc/phemex/polymarket); #1791 orderly; #1793 mexc; #1794 txflow history; #1795 phemex; #1796 woo; #1797 breakoutprop/hyperliquid/kraken; #1798 bitget/kraken + `engine/src/lib.rs`; #1799 aster/bybit/coinbase; #1800 polymarket |
 | Lanes | #1802 BloFin request context (codex-9czdjh; KuCoin, Bitrue, Bitunix queued next); #1718 HMAC signer queue (codex-5c57jl; per-family slots and Kraken aliasing, covers BloFin/KuCoin) |
 
 Re-check before each PR.
