@@ -1926,8 +1926,10 @@ mod tests {
             [(20_000., 2, true), (1_000., 2, false), (1_000., 3, true)]
         {
             let mut store = Store::default();
-            let mut io = Io::<()>::default();
-            io.next_id = crate::resource_ids::ResourceIds::with_ceiling(ceiling);
+            let mut io = Io::<()> {
+                next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                ..Default::default()
+            };
             let mut cx = Cx {
                 now: 0.,
                 store: &mut store,
@@ -1970,8 +1972,10 @@ mod tests {
     fn snapshot_completion_capacity_preserves_proof_and_duplicate_is_inert() {
         for ceiling in [3, 4] {
             let mut store = Store::default();
-            let mut io = Io::<()>::default();
-            io.next_id = crate::resource_ids::ResourceIds::with_ceiling(ceiling);
+            let mut io = Io::<()> {
+                next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                ..Default::default()
+            };
             let mut cx = Cx {
                 now: 0.,
                 store: &mut store,
