@@ -813,3 +813,36 @@ barriers, partial release, stale pops, reconnection, group double clear and
 inactive stop_all. Inactive stop_all retains its existing queue behavior rather
 than inventing cleanup; its count remains accurate. No measured CPU result is
 claimed for this checkpoint.
+
+### Remaining Bitunix CPU after exact 9a1 measurement
+
+Run39890112113/head9a1d0dbddc1 attempt1 passes every OKX public objective,
+including xperp retained memory. Bitunix steadyCPU remains a real failure:
+Rust208.221ms vs TS213.992/target192.5928. Exact diagnostic archives/report
+remain `/tmp/codex-socket-9a1-metrics/report.json`, not final proof. No retry.
+
+Source hot-path audit finds a remaining native feed-vector scan solely to return
+Control::Other on every Bitunix public/business frame; those feeds have no native
+control messages, while private login/pong evidence remains significant. Next
+shared API: explicit ControlPolicy::{Native,None} on FeedPolicy. None is valid
+only with AuthMode::None and TrafficPolicy::AnyText. Engine bypasses only the
+pure native classification callback for that declaration, substitutes Other,
+and still runs the unchanged fresh Driver.control/epoch/expiry/traffic path and
+native message callback. OKX declares Native; Bitunix declares Native for private
+and None for control-free public/business. This is immutable codec data, not a
+venue shortcut or cached send/auth admission. Other policies reject the None
+combination before feed/runtime registration. Pin default/native classification,
+zero classifier calls for None, native message delivery and unchanged retirement
+at the exact idle bound, plus both family wire/auth controls.
+
+The fixed-policy representability audit also repeats the same interval list on
+every ingress/control check. Precompute only its shortest/longest positive delay
+in the driver Runtime at validated registration. Fresh raw-time admission checks
+both extremes at every existing boundary: IEEE monotonic addition proves every
+intermediate positive interval advances and remains finite iff both extremes do.
+Keep independent old-formula equivalence controls over finite/nonfinite, negative,
+subnormal, huge and rounding-boundary values; preserve all invalid-time and
+stale-timer controls. Supervisor remains the only deadline/backoff authority.
+No raw-now caching, deadline change, allocator/HTTP edit, frame policy or budget
+change. Review concrete API/tests before source; focused native/strict/fmt/bans,
+independent reviews and fresh CI must establish the remaining CPU objective.
