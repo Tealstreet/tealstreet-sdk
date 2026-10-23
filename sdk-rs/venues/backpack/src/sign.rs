@@ -73,6 +73,13 @@ impl SignStep for Http {
         {
             return Err(SignError::InvalidRequest);
         }
+        if request.method == Method::Get {
+            if request.body.is_some() {
+                return Err(SignError::InvalidRequest);
+            }
+        } else if json_rows(request.body.as_deref(), is_batch)? != request.rows {
+            return Err(SignError::InvalidRequest);
+        }
         let query = if request.method == Method::Get {
             query(&request.rows[0])
         } else {
@@ -141,8 +148,38 @@ impl SignStep for Http {
     }
 
     fn freshness_ms(&self) -> f64 {
+        // X-Window is the venue acceptance bound; queued material is refreshed
+        // after five seconds even when that native bound is longer.
         f64::from(self.request.window.clamp(1, 5000))
     }
+}
+
+fn json_rows(body: Option<&str>, batch: bool) -> Result<Vec<Params>, SignError> {
+    type Row = BTreeMap<String, Box<serde_json::value::RawValue>>;
+    let body = body.ok_or(SignError::InvalidRequest)?;
+    let rows: Vec<Row> = if batch {
+        serde_json::from_str(body).map_err(|_| SignError::InvalidRequest)?
+    } else {
+        vec![serde_json::from_str(body).map_err(|_| SignError::InvalidRequest)?]
+    };
+    rows.into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|(key, value)| {
+                    let raw = value.get();
+                    let value = if raw.starts_with('"') {
+                        serde_json::from_str::<String>(raw)
+                            .map_err(|_| SignError::InvalidRequest)?
+                    } else if raw == "true" || raw == "false" || raw.parse::<u32>().is_ok() {
+                        raw.into()
+                    } else {
+                        return Err(SignError::InvalidRequest);
+                    };
+                    Ok((key, value))
+                })
+                .collect()
+        })
+        .collect()
 }
 
 pub type Params = BTreeMap<String, String>;

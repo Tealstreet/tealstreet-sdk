@@ -17,6 +17,7 @@ struct Issue {
     identity: Identity,
     request: sign::Request,
     tamper: bool,
+    route: Option<String>,
 }
 impl Venue for Issue {
     type Pending = ();
@@ -39,7 +40,11 @@ impl Venue for Issue {
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
         let context = cx
             .admit_http_command(Policy {
-                operation: Operation::Mutation,
+                operation: if self.request.method == Method::Get {
+                    Operation::Read
+                } else {
+                    Operation::Mutation
+                },
                 credential: Some(safe_cex_engine::request_context::Credential {
                     slot: safe_cex_engine::CredentialSlot::Primary,
                     reference: self.identity.credential.clone(),
@@ -54,10 +59,22 @@ impl Venue for Issue {
         } else {
             self.request.body.clone()
         };
+        let query = if self.request.method == Method::Get {
+            sign::query(&self.request.rows[0])
+        } else {
+            String::new()
+        };
+        let suffix = if query.is_empty() {
+            String::new()
+        } else {
+            format!("?{query}")
+        };
         cx.request_signed_managed(
             context,
             self.request.method,
-            format!("https://api.backpack.exchange{}", self.request.path),
+            self.route.clone().unwrap_or_else(|| {
+                format!("https://api.backpack.exchange{}{suffix}", self.request.path)
+            }),
             body,
             Box::new(sign::Http::new(self.identity.clone(), self.request.clone())),
             (),
@@ -87,21 +104,31 @@ fn provider() -> (Arc<LocalSigner>, Identity) {
 }
 
 fn engine(request: sign::Request, tamper: bool) -> Engine<Issue> {
+    engine_route(request, tamper, None)
+}
+
+fn engine_route(request: sign::Request, tamper: bool, route: Option<String>) -> Engine<Issue> {
     let (provider, identity) = provider();
+    let command = if request.method == Method::Get {
+        Command::FetchLeverage {
+            command: 4,
+            symbol: "SOL_USDC_PERP".into(),
+        }
+    } else {
+        Command::CancelOrders {
+            command: 4,
+            ids: vec![],
+        }
+    };
     let mut engine = safe_cex_engine::test_support::seeded_engine(Issue {
         identity,
         request,
         tamper,
+        route,
     });
     engine.set_signer(Some(provider)).unwrap();
     engine.start(NOW);
-    engine.handle(
-        NOW,
-        Event::Command(Command::CancelOrders {
-            command: 4,
-            ids: vec![],
-        }),
-    );
+    engine.handle(NOW, Event::Command(command));
     engine
 }
 
@@ -279,6 +306,7 @@ fn delegated_ed25519_uses_only_the_remote_answer_after_signed_event() {
             window: 60000,
         },
         tamper: false,
+        route: None,
     });
     engine.set_signer(Some(Arc::new(Remote))).unwrap();
     engine.start(NOW);
@@ -320,9 +348,22 @@ fn delegated_ed25519_uses_only_the_remote_answer_after_signed_event() {
     assert_eq!(payload, &[PayloadPart::Bytes {
         bytes: b"instruction=orderCancel&orderId=123&symbol=SOL_USDC_PERP&timestamp=1700000000123&window=60000".to_vec(),
     }]);
-    // Node crypto.sign(null, text, PKCS8(seed=[9;32])); independent of this crate/provider.
+    // Node crypto.sign(null, the exact orderCancel preimage above, PKCS8(seed=[9;32])).
     let signature =
         "TmWNCZn0JG0hE4DL7IM6ffnz2PMij9L4ogbidW7PImn39Wy8x8IfH7dMy8sC2IwahHKaAykqeeuSCay9rCtKBw==";
+    let PayloadPart::Bytes { bytes } = &payload[0] else {
+        unreachable!()
+    };
+    assert!(
+        safe_cex_crypto::ed25519::verify(
+            bytes,
+            &STANDARD
+                .decode("/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=")
+                .unwrap(),
+            &STANDARD.decode(signature).unwrap()
+        )
+        .unwrap()
+    );
     let result = SignResult::new(
         vec![
             b"remote-only-public-key".to_vec(),
@@ -370,6 +411,49 @@ fn delegated_ed25519_uses_only_the_remote_answer_after_signed_event() {
     );
     assert!(
         !remote_actions(&mut engine)
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+}
+
+#[test]
+fn get_query_and_transport_route_are_bound_exactly() {
+    let params = row(&[("symbol", "SOL_USDC_PERP"), ("limit", "100")]);
+    let request = sign::Request {
+        method: Method::Get,
+        path: "/api/v1/orders".into(),
+        rows: vec![params.clone()],
+        body: None,
+        window: 60000,
+    };
+    let released = one(request.clone());
+    assert_eq!(
+        released.url,
+        "https://api.backpack.exchange/api/v1/orders?limit=100&symbol=SOL_USDC_PERP"
+    );
+    assert_eq!(
+        released.headers,
+        legacy_for_test().headers("orderQueryAll", &[params], NOW)
+    );
+    assert_eq!(released.body, None);
+    for url in [
+        "https://other.example/api/v1/orders?limit=100&symbol=SOL_USDC_PERP",
+        "https://api.backpack.exchange/extra/api/v1/orders?limit=100&symbol=SOL_USDC_PERP",
+    ] {
+        let mut engine = engine_route(request.clone(), false, Some(url.into()));
+        assert!(
+            !safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+    }
+    let mut mismatch = request;
+    mismatch.method = Method::Delete;
+    mismatch.path = "/api/v1/order".into();
+    mismatch.body = Some("{\"orderId\":\"other\"}".into());
+    let mut engine = engine(mismatch, false);
+    assert!(
+        !safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
             .iter()
             .any(|action| matches!(action, Action::Http(_)))
     );
