@@ -1,6 +1,7 @@
 //! Public REST snapshots belong to their command, never the subscription cache.
 use crate::{Cryptocom, Pending};
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Outcome, Response, VenueError};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Response, Venue, VenueError};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
@@ -111,10 +112,35 @@ fn snapshot<'a>(envelope: Envelope<'a>) -> Result<Output<'a>, VenueError> {
     }
 }
 impl Cryptocom {
+    pub(crate) fn fetch_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        if let Err((pending, reason)) = cx.request_managed(
+            context.clone(),
+            Method::Get,
+            format!(
+                "{}/public/get-book?instrument_name={}&depth=50",
+                self.rest,
+                crate::encode(symbol)
+            ),
+            None,
+            Pending::BookQuery { context },
+        ) {
+            self.on_sign_error(cx, pending, reason.venue_error());
+        }
+    }
+
     pub(crate) fn book_query_response(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        context: Context,
         response: Response<'_>,
     ) {
         let envelope = object::<Envelope<'_>>(response.body);
@@ -157,7 +183,7 @@ impl Cryptocom {
                     (seconds * 1000.0).min(safe_cex_engine::startup::MAX_RATE_LIMIT_PAUSE_MS),
                 );
             }
-            cx.fail(command, error);
+            let _ = cx.fail_context(&context, error);
             return;
         }
         let result = envelope
@@ -165,8 +191,12 @@ impl Cryptocom {
             .and_then(snapshot)
             .and_then(|book| serde_json::to_string(&book).map_err(|_| invalid()));
         match result {
-            Ok(json) => cx.done(command, json),
-            Err(error) => cx.fail(command, error),
+            Ok(json) => {
+                let _ = cx.done_context(&context, json);
+            }
+            Err(error) => {
+                let _ = cx.fail_context(&context, error);
+            }
         }
     }
 }
