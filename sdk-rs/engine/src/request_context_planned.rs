@@ -111,6 +111,53 @@ impl State {
 }
 
 impl ContextRegistry {
+    // Share cold terminal authority/journal work across all venue Pending types.
+    #[inline(never)]
+    fn plan_seal(
+        &mut self,
+        plan: &Plan,
+        now: f64,
+        delivery: Option<&Delivery>,
+        error: Option<VenueError>,
+    ) -> Result<(CommandId, Seal), Error> {
+        if !now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        let body = self.plan_body(plan)?;
+        let Owner::Command { id, .. } = plan.owner() else {
+            unreachable!()
+        };
+        let owner = &self.commands[&id];
+        let admitted = delivery.is_none() && owner.deliveries == 0
+            || delivery.is_some_and(|delivery| {
+                body.handoff.as_ref() == Some(delivery)
+                    || body.entries.iter().any(|entry| {
+                        entry.call.as_ref().is_some_and(|call| {
+                            call.matches(delivery)
+                                || (matches!(call.stage, Stage::Ready)
+                                    && call.admission.predecessor.as_ref() == Some(delivery))
+                        })
+                    })
+            });
+        if !admitted {
+            return Err(Error::Revoked);
+        }
+        let owner = self.commands.get_mut(&id).unwrap();
+        let seal = if let Some(writes) = owner.writes.as_mut() {
+            if error.is_none() && writes.succeed().is_ok() {
+                Seal::Success
+            } else {
+                let error = writes.fail(error.unwrap_or_else(|| {
+                    VenueError::new("Command writes are not all confirmed accepted")
+                }))?;
+                Seal::Failure(error, writes.reports().map(str::to_owned).collect())
+            }
+        } else {
+            Seal::Legacy(error)
+        };
+        Ok((id, seal))
+    }
+
     fn plan_body(&self, handle: &Plan) -> Result<&Body, Error> {
         if !handle.issued_by(&self.issuer) {
             return Err(Error::Revoked);
@@ -678,42 +725,12 @@ impl<P> Cx<'_, P> {
         result: Option<String>,
         error: Option<VenueError>,
     ) -> Result<(), Error> {
-        if !self.now.is_finite() {
-            return Err(Error::Invalid);
-        }
-        let body = self.io.request_contexts.plan_body(plan)?;
-        let Owner::Command { id, .. } = plan.owner() else {
-            unreachable!()
-        };
-        let owner = &self.io.request_contexts.commands[&id];
-        let delivery = self.io.http_delivery.as_ref();
-        let admitted = delivery.is_none() && owner.deliveries == 0
-            || delivery.is_some_and(|delivery| {
-                body.handoff.as_ref() == Some(delivery)
-                    || body.entries.iter().any(|entry| {
-                        entry.call.as_ref().is_some_and(|call| {
-                            call.matches(delivery)
-                                || (matches!(call.stage, Stage::Ready)
-                                    && call.admission.predecessor.as_ref() == Some(delivery))
-                        })
-                    })
-            });
-        if !admitted {
-            return Err(Error::Revoked);
-        }
-        let owner = self.io.request_contexts.commands.get_mut(&id).unwrap();
-        let seal = if let Some(writes) = owner.writes.as_mut() {
-            if error.is_none() && writes.succeed().is_ok() {
-                Seal::Success
-            } else {
-                let error = writes.fail(error.unwrap_or_else(|| {
-                    VenueError::new("Command writes are not all confirmed accepted")
-                }))?;
-                Seal::Failure(error, writes.reports().map(str::to_owned).collect())
-            }
-        } else {
-            Seal::Legacy(error)
-        };
+        let (id, seal) = self.io.request_contexts.plan_seal(
+            plan,
+            self.now,
+            self.io.http_delivery.as_ref(),
+            error,
+        )?;
         self.finish_sealed_command(id, result, seal)
     }
 

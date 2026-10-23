@@ -2202,6 +2202,7 @@ impl<P> Cx<'_, P> {
 
     // Validated Context, Plan and execution-observer seals share one terminal
     // cleanup/publication path without lending physical delivery authority.
+    #[inline(never)]
     fn finish_sealed_command(
         &mut self,
         command: CommandId,
