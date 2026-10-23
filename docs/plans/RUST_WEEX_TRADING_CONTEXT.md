@@ -53,14 +53,18 @@ separate slices. Preserve their current source byte-for-byte where possible.
    Enter `begin_preflight(WriteAfterReads)` in its genuine callback, before
    planner entropy, optimistic Store changes, command progress, refresh requests
    or any legacy operation. Capture the recipe-selected primary Credential
-   exactly; absence declares no send authority. Initial Rejected/Revoked returns
+   exactly. WriteAfterReads requires a real write credential; do not construct
+   it with None. Initial Rejected/Revoked returns
    immediately, without numeric `cx.fail` or an ID-taking issuance alias.
 2. Perform native validations and build the entire native Step list under that
    retained Preflight. A validation/credentials/duplicate conflict is either
    genuine typed entry rejection or `fail_preflight`, never a numeric fallback.
    A genuinely empty native job uses `done_empty_plan`, with no dummy request,
-   fabricated accepted fact or admitted-but-skipped slot. Preserve empty keyless
-   commands where their native behavior is success.
+   fabricated accepted fact or admitted-but-skipped slot. Keyless synchronous
+   refusals/no-ops instead obtain genuine initial terminal-only Mutation Context
+   authority with no credential, before any planner entropy or opaque work;
+   complete the native empty result or typed credentials failure, without I/O,
+   Context-to-Preflight conversion or fallback into a legacy dispatch path.
 3. Opt WEEX into engine `http-plans` in the actual adoption commit, then admit one
    complete serial Plan. One native Step becomes one serial single-call bound:
    20,000ms, one physical attempt, no fallback, no deliberate wait. The root is
