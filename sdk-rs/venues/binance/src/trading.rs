@@ -6,6 +6,9 @@ use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::classify::{
+    self, CodeTable, Intent, Key, Native, NativeCode, Released, Row, Verdict,
+};
 use safe_cex_engine::json::{ArrayAt, ArraySplitter, ItemCheck};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -745,6 +748,7 @@ impl BinanceFutures {
             call,
         } = request;
         let native_response = response.is_ok();
+        let http = response.ok();
 
         let mut reports = Vec::new();
         let mut batch_reports = false;
@@ -834,7 +838,7 @@ impl BinanceFutures {
                                 (Some(id), None) => ids.push(id.to_string()),
                                 (_, code) => {
                                     let code = code.unwrap_or(0);
-                                    unproven |= failure(code, String::new()).outcome
+                                    unproven |= failure(code, String::new(), None).outcome
                                         == Some(Outcome::Unknown);
                                     rejection.get_or_insert((
                                         code,
@@ -951,7 +955,7 @@ impl BinanceFutures {
             if let Some(job) = self.trading.jobs.get_mut(&command) {
                 let mut failed = signing_error
                     .clone()
-                    .unwrap_or_else(|| failure(code, message));
+                    .unwrap_or_else(|| failure(code, message, http.as_ref()));
                 if unproven {
                     failed.outcome = Some(Outcome::Unknown);
                 }
@@ -1844,26 +1848,127 @@ impl BinanceFutures {
     }
 }
 
-/// A trading failure classified by its Binance code; code 0 is a transport
-/// failure, a non-JSON HTTP error or an unproven acknowledgement.
-fn failure(code: i64, message: String) -> VenueError {
-    let (kind, outcome) = match code {
-        0 | -1000 => (None, Outcome::Unknown),
-        -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
-        -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
-        -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
-        -1003 | -1015 => (Some(ErrorKind::RateLimited), Outcome::Rejected),
-        -1022 | -2008 | -2014 | -2015 => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
-        -1002 => (Some(ErrorKind::AuthPermission), Outcome::Rejected),
-        -1199..=-1100 | -4999..=-4000 => (Some(ErrorKind::InvalidInput), Outcome::Rejected),
-        _ => (Some(ErrorKind::Rejected), Outcome::Rejected),
+/// Binance native codes and documented statuses
+/// (developers.binance.com/docs/derivatives/usds-margined-futures/error-code).
+const BINANCE: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(-1000),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1007),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1001),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1006),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1008),
+            verdict: Verdict::Refused(ErrorKind::VenueUnavailable),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1003),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1015),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1022),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2008),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2014),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2015),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1002),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-1199, -1100),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-4999, -4000),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    // Non-negative codes are success envelopes, never failure evidence.
+    success: &[Key::Range(0, i64::MAX)],
+    // Every other documented code is a pre-execution refusal.
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    // "4XX return codes are used for malformed requests"; 403 is the WAF limit,
+    // 418 an IP auto-ban and 429 a rate limit. 409 (partial cancel-replace) is not.
+    status: &[
+        (400, Verdict::Refused(ErrorKind::InvalidInput)),
+        (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+        (403, Verdict::Refused(ErrorKind::RateLimited)),
+        (418, Verdict::Refused(ErrorKind::RateLimited)),
+        (429, Verdict::Refused(ErrorKind::RateLimited)),
+    ],
+};
+
+/// A trading failure classified by the engine from its Binance code. Code 0
+/// is no native code: a transport failure, an unproven acknowledgement, or a
+/// non-JSON HTTP error. `http` is `None` for an item inside a 2xx batch.
+fn failure(code: i64, message: String, http: Option<&Response<'_>>) -> VenueError {
+    let item = Response {
+        status: 200,
+        headers: "",
+        body: "",
     };
-    let mut error = VenueError::new(message.clone()).outcome(outcome);
-    error.kind = kind;
-    if code != 0 {
-        error = error.venue_code(code.to_string()).venue_message(message);
+    let response = http.unwrap_or(&item);
+    let native = (code != 0).then_some(Native {
+        code: NativeCode::Int(code),
+        message: &message,
+    });
+    if native.is_none() && (200..300).contains(&response.status) {
+        return VenueError::new(message).outcome(Outcome::Unknown);
     }
+    let (_, error) = classify::write(
+        &BINANCE,
+        Intent::Place,
+        Released::Response(response),
+        native.as_ref(),
+        message.clone(),
+    );
     error
+}
+
+#[cfg(test)]
+#[test]
+fn binance_code_table_satisfies_the_engine_invariants() {
+    classify::assert_table(&BINANCE);
 }
 
 /// Refused before any request was sent.
@@ -2387,8 +2492,8 @@ impl BinanceFutures {
                             }
                         }
                         CancelRow::Error { code, msg } => {
-                            *unproven |=
-                                failure(code, String::new()).outcome == Some(Outcome::Unknown);
+                            *unproven |= failure(code, String::new(), None).outcome
+                                == Some(Outcome::Unknown);
                             error.get_or_insert((code, msg));
                         }
                     }
