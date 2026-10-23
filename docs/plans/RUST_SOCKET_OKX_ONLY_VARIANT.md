@@ -1,6 +1,9 @@
 # OKX-only socket-core variant (option 1 preparation)
 
-User-authorized preparation only; no merge. Preserve original #1771 remote head
+Sam selected option 1 for #1771: OKX uses the shared core and Bitunix remains legacy.
+The original #1771 history is retained; its source is replaced by this selected scope.
+A fresh integration and CI qualify the updated PR; landing still needs an explicit engine window.
+Historical preparation below preserved original #1771 remote head
 `dbde7c702e03bddec255b97449b5927bd0812f09` and local source head
 `ab6e90d2f83db9a290cfcdbb4b1f58db6c902b3d` unchanged. This new branch starts at
 actual #1820 `2b1e35e50b2095c6651344fc5ffe0553ad456f35`.
@@ -58,3 +61,21 @@ These new APIs conservatively spend fresh entry before attempted side effects;
 existing suppressed legacy behavior and all incoming HTTP guards stay intact.
 Native baseline checks before this correction are preservation only, not final
 CI qualification. Integrate actual #1837 before the new frozen CI run.
+
+## Selected scope and landing refresh
+
+Sam selected this option on 2026-10-23. Integrate current landing, keep every incoming
+HTTP/Context/entry/host/signing rail, and preserve the incoming Bitunix crate. The
+legacy Bitunix socket boundary is a **remove-before-master obligation**, unless Sam
+later approves a specific Bitunix endgame. Its presence is tracked in the shrinking
+socket family/site inventories and the [master blocker ledger](RUST_MASTER_MERGE_BLOCKERS.md).
+
+GitHub keeps the original #1771 head branch. A history-preserving merge records the
+old two-family branch without importing its superseded tree: the selected OKX-only
+tree remains exact. The decision/ledger commit follows that merge before push. No
+force push, rewritten commit, new ratchet exception, threshold or build-profile change.
+
+Verification: engine/OKX/Binance plus unchanged Bitunix all-target/all-feature tests,
+strict Clippy, feature-off Clippy, formatting and all bans/request/socket ratchets;
+review the incoming event/HTTP/fatal ordering; then fresh normal PR CI and replay
+gates. Request an engine window only when these checks and reviews are clear.
