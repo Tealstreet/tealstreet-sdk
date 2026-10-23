@@ -404,7 +404,9 @@ export class EngineHost {
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent }));
     try {
       const startedAt = this.transport.now();
-      const json = JSON.stringify(reply === undefined ? command : { ...command, command: reply });
+      // Reply commands carry the caller's effective wait; the engine bounds
+      // work that should not outlive it (RUST_COMMAND_TIMEOUT.md).
+      const json = JSON.stringify(reply === undefined ? command : { ...command, command: reply, timeoutMs });
       this.run(this.invoke(this.engine.command, json, startedAt));
       if (reply === undefined && this.deadError) return Promise.reject(this.deadError);
       const pending = this.commands.get(reply);

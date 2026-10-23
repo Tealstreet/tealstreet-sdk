@@ -1331,7 +1331,7 @@ async fn connection(
                         Ok(input) => {
                             let control = match input {
                                 HostInput::PublicFeedUpdate(_) => unreachable!("provider controls are rejected before command dispatch"),
-                                HostInput::Command(command) => Control::Command { client, command },
+                                HostInput::Command { command, .. } => Control::Command { client, command },
                                 HostInput::PollScaleChanged { scale, ceiling_ms } => {
                                     Control::PollScaleChanged { client, scale, ceiling_ms }
                                 }

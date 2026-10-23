@@ -24,8 +24,9 @@ pub(crate) struct PlacementAcks {
     /// Acknowledged ids not yet seen in the store, with their expiry.
     acked: Acked,
     /// Held commands, each with a hard cap; the live deadline is computed from
-    /// the acknowledgements it still awaits, so it never goes stale.
-    held: Vec<(Command, f64)>,
+    /// the acknowledgements it still awaits, so it never goes stale. Each
+    /// keeps the caller-wait receipt it arrived with.
+    held: Vec<(Command, f64, Option<u64>)>,
     /// Store order count at the last prune, to notice removals cheaply.
     pruned_orders: usize,
 }
@@ -205,9 +206,15 @@ impl PlacementAcks {
     /// command naming an id that an earlier held command names waits behind it,
     /// so writes to one order keep their arrival order.
     #[inline(never)]
-    pub fn hold(&mut self, store: &Store, command: &Command, now: f64) -> bool {
+    pub fn hold(
+        &mut self,
+        store: &Store,
+        command: &Command,
+        receipt: Option<u64>,
+        now: f64,
+    ) -> bool {
         let behind = named_ids(command).iter().any(|id| {
-            self.held.iter().any(|(held, _)| {
+            self.held.iter().any(|(held, ..)| {
                 named_ids(held)
                     .iter()
                     .any(|other| native(other) == native(id))
@@ -221,7 +228,8 @@ impl PlacementAcks {
         {
             return false;
         }
-        self.held.push((command.clone(), now + ACK_WAIT_MS));
+        self.held
+            .push((command.clone(), now + ACK_WAIT_MS, receipt));
         true
     }
 
@@ -234,7 +242,7 @@ impl PlacementAcks {
     /// Runs on every engine event, so with nothing held it scans the store only
     /// when its order count moved (an acknowledged order stored, then removed).
     #[inline(never)]
-    pub fn release(&mut self, store: &Store, now: f64) -> Vec<Command> {
+    pub fn release(&mut self, store: &Store, now: f64) -> Vec<(Command, Option<u64>)> {
         if self.held.is_empty() {
             self.acked.retain(|_, expiry| expiry > now);
             if !self.acked.is_empty() && store.orders().len() != self.pruned_orders {
@@ -249,17 +257,17 @@ impl PlacementAcks {
         let mut ready = Vec::new();
         let mut index = 0;
         while index < self.held.len() {
-            let (command, cap) = &self.held[index];
+            let (command, cap, _) = &self.held[index];
             if !self.behind(index)
                 && (now >= *cap || self.awaited_until(&stored, command, now).is_none())
             {
-                let (command, _) = self.held.remove(index);
+                let (command, _, receipt) = self.held.remove(index);
                 // An expired wait must not hold the same id again on dispatch.
                 for id in named_ids(&command) {
                     self.acked.remove(id);
                     self.acked.remove(native(id));
                 }
-                ready.push(command);
+                ready.push((command, receipt));
             } else {
                 index += 1;
             }
@@ -267,10 +275,15 @@ impl PlacementAcks {
         ready
     }
 
+    /// Caller-wait receipts the held commands carry.
+    pub fn receipts(&self) -> impl Iterator<Item = u64> + '_ {
+        self.held.iter().filter_map(|(.., receipt)| *receipt)
+    }
+
     /// Whether an earlier held write names the same order; it goes first.
     fn behind(&self, index: usize) -> bool {
         let command = &self.held[index].0;
-        self.held[..index].iter().any(|(earlier, _)| {
+        self.held[..index].iter().any(|(earlier, ..)| {
             named_ids(earlier).iter().any(|other| {
                 named_ids(command)
                     .iter()
@@ -291,7 +304,7 @@ impl PlacementAcks {
         (0..self.held.len())
             .filter(|&index| !self.behind(index))
             .map(|index| {
-                let (command, cap) = &self.held[index];
+                let (command, cap, _) = &self.held[index];
                 self.awaited_until(&stored, command, now)
                     .map_or(*cap, |until| until.min(*cap))
             })
