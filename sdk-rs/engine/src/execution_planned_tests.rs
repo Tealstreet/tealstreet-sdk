@@ -664,4 +664,25 @@ mod planned_execution {
             "only the Plan's write is prepared"
         );
     }
+
+    #[test]
+    fn the_last_observer_expiring_after_release_is_never_told_not_sent() {
+        let (mut e, _, actions) = shared_write(&[SHORT_FOLLOWER]);
+        let timer = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == 100. => Some(*timer),
+                _ => None,
+            })
+            .expect("short observer deadline");
+        detach_founder(&mut e, 50.);
+        e.drain_actions().for_each(drop);
+        e.handle(100., Event::TimerFired { timer });
+        let expired = e.drain_actions().collect::<Vec<_>>();
+        let short = terminals(&expired, SHORT_FOLLOWER);
+        assert_eq!(short.len(), 1);
+        let error = short[0].clone().unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::Timeout));
+        assert_ne!(error.outcome, Some(crate::Outcome::NotSent), "the write was released");
+    }
 }
