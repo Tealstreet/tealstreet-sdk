@@ -281,6 +281,32 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 
 Each adoption PR prunes its own rows.
 
+As built: `sdk-rs/scripts/check-credential-selection.py` +
+`credential-legacy-sites.json`, run by `check-bans.sh`. It freezes production
+venue sites naming `read_credentials`, `ReadCredentials`, `tag_account_read`,
+`ethereum_agent`, `nonce::next` or `NONCES`, plus native `Method::Get` egress
+inference and the TS method/venue-list inference. Inline `#[cfg(test)]` modules
+and test files are excluded. Option fields and setup validation that name
+`read_credentials` stay listed: the inventory is frozen, not required to reach
+zero.
+
+### C6. Explicit egress for unsigned requests (agreed with codex-uufub4)
+
+Bitrue's keyless catalog must leave via primary egress without a fabricated
+credential. The egress is captured at issuance, inside the same registry
+transaction, so the registered Context and completion root hold it exactly:
+- `Cx::http_context_with_egress(scope, policy, RoutingIntent)` is additive;
+  `http_context` passes none.
+- A credentialed context's egress must equal its slot's intent.
+- An unsigned context accepts only Primary (Public is a no-op; Secondary is
+  rejected).
+- Legs and retries inherit the egress and cannot widen it.
+- `routing_intent()` returns the egress, or the credential-derived intent when
+  none was given.
+
+uufub4's `admit_http_command_with_egress` later shares the same private
+transaction.
+
 ### C5. Out of scope here, owned elsewhere
 
 - WS/session auth credential use: always primary. `SessionAuth` adoption
