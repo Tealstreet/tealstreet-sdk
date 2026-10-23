@@ -24,7 +24,7 @@ const runtimePath = (path) => {
   if (path.startsWith('docs/') || /\.(?:md|rst|adoc)$/i.test(path) || path.startsWith('.git/') || path.startsWith('.aimux/')) return false;
   if (path.startsWith('sdk-rs/harness/out/') || path.startsWith('sdk-rs/target/') || path.startsWith('sdk-rs/hosts/wasm/pkg/')) return false;
   if (/\.(?:test|integration)\.[cm]?[jt]s$/.test(path)) return false;
-  return /^(?:sdk-rs|packages|thirdparty)\//.test(path) || path === WORKFLOW_PATH || /^\.github\/actions\/(?:prepare-yarn|install-yarn)\//.test(path) || /^(?:package\.json|yarn\.lock|tsconfig[^/]*\.json|\.yarnrc[^/]*|\.node-version|rust-toolchain(?:\.toml)?)$/.test(path);
+  return /^(?:sdk-rs|packages|thirdparty|apps)\//.test(path) || path === WORKFLOW_PATH || /^\.github\/actions\/(?:prepare-yarn|install-yarn)\//.test(path) || /^(?:package\.json|yarn\.lock|tsconfig[^/]*\.json|\.yarnrc[^/]*|\.node-version|rust-toolchain(?:\.toml)?)$/.test(path);
 };
 
 export function selectRuntimeInputs(gitTreeEntries) {

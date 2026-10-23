@@ -80,6 +80,7 @@ function apiFixture(value, mutate = () => {}) {
 
 test('input and key identity ignores provenance/docs/order, binds runtime/modes/public case', () => {
   const original = sourceInputFingerprint(entries);
+  assert.notEqual(sourceInputFingerprint([...entries, row('apps/cli/bin/tealstreet.cjs', 'CLI entry')]), original);
   assert.equal(sourceInputFingerprint([...entries].reverse().concat(row('docs/plan.md', 'new docs'))), original);
   assert.equal(cohortKey({ policySha256, inputsSha256, suite: 'bitget', case: caseValue, runId: 1, artifactId: 7 }), cohortKey({ policySha256, inputsSha256, suite: 'bitget', case: caseValue, runId: 999 }));
   for (const change of [rows => { rows[1].sha = git('changed runtime'); }, rows => { rows[1].mode = '100755'; }]) { const rows = clone(entries); change(rows); assert.notEqual(sourceInputFingerprint(rows), original); }

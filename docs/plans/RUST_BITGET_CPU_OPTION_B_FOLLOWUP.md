@@ -154,3 +154,14 @@ second and886 for all32 seconds, below the ordinary1000/hour repository token
 limit before concurrent activity. This is not a reservation against other CI;
 rate-limit, unavailable evidence and HTTP errors fail closed. No history scanner
 or token-limit exemption is introduced.
+
+## Workspace binary closure
+
+The initial live preparation exposed Yarn's workspace CLI binary link into
+`apps/cli/bin`, which a directory anchor alone could not seal. Include tracked
+app source in the conservative runtime projection alongside sdk-rs/packages/
+thirdparty. This seals the binary and its ancestor directories without sweeping
+ignored app build output. An original-source regression reproduces the exact
+unsealed-link error; corrected controls require the bin's bytes and source
+fingerprint membership, and reject later mutation before timing. The symlink
+validator remains strict; no target exemption or venue-local path is introduced.
