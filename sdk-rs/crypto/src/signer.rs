@@ -1321,6 +1321,39 @@ mod tests {
             exact.key(&ids.primary.unwrap().signing).unwrap(),
             "\u{a0}yourSecretKey \n".as_bytes()
         );
+        // The declared policy wins over contrary caller metadata, and trimming
+        // precedes decoding, so a pasted trailing newline on hex material decodes.
+        let off = CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                trim_signing: Some(false),
+                ..Default::default()
+            }),
+            secondary: None,
+        };
+        let (kept, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":" s ","trimSigning":true}}"#.into(),
+            off,
+        )
+        .unwrap();
+        assert_eq!(kept.key(&ids.primary.unwrap().signing).unwrap(), b" s ");
+        let (hex, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":"6162\n","secretEncoding":"hex"}}"#.into(),
+            policy,
+        )
+        .unwrap();
+        assert_eq!(hex.key(&ids.primary.unwrap().signing).unwrap(), b"ab");
+        // Rust White_Space includes NEL (U+0085) but not BOM (U+FEFF).
+        for (secret, installed) in [(r"\u0085s\u0085", "s"), (r"\ufeffs", "\u{feff}s")] {
+            let (signer, ids) = LocalSigner::from_json_with_policy(
+                format!(r#"{{"primary":{{"key":"k","secret":"{secret}"}}}}"#),
+                policy,
+            )
+            .unwrap();
+            assert_eq!(
+                signer.key(&ids.primary.unwrap().signing).unwrap(),
+                installed.as_bytes()
+            );
+        }
         // A whitespace-only signing key becomes absent material, not a ref.
         let (_, ids) = LocalSigner::from_json_with_policy(
             r#"{"primary":{"key":"k","secret":"  "}}"#.into(),

@@ -267,7 +267,8 @@ export interface LocalIdentityMetadata {
   stableId?: string;
   secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
   trimCredential?: boolean;
-  /** Policy-declared only: trim the signing key text once at trusted setup. */
+  /** Trim the signing-key text once at trusted setup. The SDK sets it only from
+   * the family's declared policy; caller metadata cannot. */
   trimSigning?: boolean;
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
