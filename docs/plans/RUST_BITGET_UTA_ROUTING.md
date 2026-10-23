@@ -19,51 +19,81 @@ the `private` channel. The host routes by channel, so:
 
 ## Design (shared choke points, not a Bitget-only router)
 
-1. **Engine `SocketContext.reject_route`.** A generic per-connect hint beside
-   `recover`. It means: the venue has evidence that the previous route's egress
-   was refused (a reply, not silence), so advance one candidate. No venue picks
-   URLs; route policy stays in the host.
-2. **Hosts honour it.** TS `transport/engine.ts` calls
-   `WsDirectFallback.rejectCurrent()` before `resolveUrl`. The native
-   `hosts/native/src/routing.rs` advances `attempts.candidate` by one. Both reset
-   the silent counter, matching `rejectCurrent`.
-3. **URL-scoped private routes.** Private sockets get the same data-driven
-   URL-rule list public sockets already use (`productRoutes` /
-   `public_ws_routes`). Bitget declares `/v3/ws/private` -> `wsPrivateUta`. The
-   `private` route's UTA `directUrls` bypass, and #1869's tunnelled `directUrls`
-   carry in `resolveExchangeRouting`, are then removed. The serialized native
-   routing plan gains `private_ws_routes`; the generated fixture is refreshed.
-4. **Bitget venue.** On a pre-authentication `event:error` with code 40018 or
-   40024, the venue does not report. It reconnects the private socket with
-   `reject_route`, keeps the existing supervisor backoff, and reports the
-   existing typed error once only after `ROUTE_CANDIDATES` (3: host, relay,
-   fallback) consecutive egress refusals in one unauthenticated streak. An
-   authenticated login resets the streak. Other login errors keep today's
-   classification. Known delta: a two-candidate route (tunnelled host plus relay)
-   reports one attempt later than TS, because the host does not report
-   exhaustion back. That is recorded, not hidden.
-5. **Pre-login tunnel closes.** TS also advances after repeated closes before
-   login on tunnel routes. The host's existing silent-connect walk already
-   advances on connects with no message. Closes after open but before login are
-   counted by the venue and signalled with the same `reject_route` hint, using
-   TS's thresholds.
+Revised after codex-5c57jl's socket-API review and claude-ddi2il's disposition,
+which rejected a fixed refusal count.
+
+1. **Engine `SocketContext.reject_route: bool`**, beside `recover` and identical
+   under both #1771 options.
+   - It is a one-connect edge: the venue sets it only from the current socket's
+     own epoch, and only for pre-login 40018/40024 reply evidence.
+   - Stale or duplicate evidence never sets it.
+   - Absent or false keeps today's behaviour and wire. One spelling,
+     `reject_route` / `rejectRoute`, is declared for TS, WASM and native, and
+     all literals and fixtures are updated.
+2. **Hosts own the chain.** On a `reject_route` connect, TS calls
+   `WsDirectFallback.rejectCurrent()` and native advances `attempts.candidate`.
+   - The host advances at most once, clamps to the actual chain, and resets
+     silence without a second silent advance in the same connect.
+   - `reject_route` takes precedence over `recover`; `recover` alone keeps
+     today's jump-to-last.
+3. **Typed exhaustion feedback.** When a `reject_route` connect has no remaining
+   candidate, the host does not dial. It emits `Event::WsRouteExhausted { socket }`.
+   - Only a host can produce this event: it is not a close and carries no peer
+     close code, so it cannot collide with a peer close.
+   - It is enqueued after `connect` returns, as an ordinary ingress event. It is
+     never re-entrant, and the engine drops it for a stale socket.
+   - The engine calls `Venue::on_route_exhausted`. The default maps to today's
+     close handling, so venues that don't opt in are unchanged.
+4. **URL-scoped private routes.** Private route rules are data-driven, mirroring
+   the public `productRoutes` / `public_ws_routes`.
+   - Bitget declares `/v3/ws/private` -> `wsPrivateUta`.
+   - The UTA `directUrls` bypass and #1869's tunnelled `directUrls` carry are
+     removed.
+   - The serialized native plan gains `private_ws_routes`, and its fixture is
+     refreshed.
+5. **Bitget venue, exact TS #8093 behaviour.**
+   - **Refusal:** pre-login 40018/40024 leads at once to reconnect with
+     `reject_route`, and nothing is reported.
+   - **Exhaustion:** `on_route_exhausted` for the current private socket reports
+     the existing typed egress refusal ONCE. The message says whether Tealstreet
+     egress routes were tried. Private reconnects then stop.
+   - **Non-terminal until exhaustion:** 40018/40024 are not a permanent auth
+     failure until then.
+   - **Separate counters:** carried over from TS. These are
+     `MAX_UNAUTHENTICATED_TUNNEL_CLOSES = 2` (a tunnel route that opens and
+     closes before any login answer) and `MAX_FAILED_TUNNEL_CONNECTS = 6`
+     (a tunnel route that never opens). Each sends `reject_route` once its
+     threshold is met.
+   - **Resets:** a login answered on a route resets these counters, and an
+     authenticated login resets everything.
 
 ## Tests (original REDs first)
 
-- TS host: a Rust private socket to `wss://ws.bitget.com/v3/ws/private` under
-  `tealstreetProxy` resolves to `/bitget/v3/private` (today: direct). A
-  `reject_route` connect advances host to relay to fallback.
-- Native host: the same two cases against the serialized plan.
-- Bitget venue: 40018 before login reconnects with `reject_route` and reports
-  nothing. Three consecutive refusals report once. Success resets the streak.
-  40024 is handled the same way. Other codes are unchanged.
-- The routing snapshot and the native-matrix fixture are refreshed. Only Bitget
-  rows change.
+- **TS host.** Proxied UTA uses `/bitget/v3/private`. Direct UTA walks to the v3
+  relay and never touches v2 (REDs committed).
+  - `reject_route` advances one candidate. On an exhausted chain it emits typed
+    exhaustion without dialling.
+  - `reject_route` wins over `recover`. A peer close with a 4xxx code is not
+    exhaustion. Exhaustion arrives after `connect` returns.
+- **Native host.** The same cases against the serialized plan.
+- **Bitget venue.**
+  - 40018 or 40024 before login reconnects with `reject_route` and reports
+    nothing.
+  - Exhaustion reports exactly once and stops reconnecting. That holds for a
+    two-candidate chain (relay off) and a three-candidate chain.
+  - One relay strike does not exhaust the relay.
+  - The 2 and 6 counter thresholds hold.
+  - Stale or duplicate exhaustion and refusals from an old epoch are inert.
+  - Other login codes are unchanged.
+- **Fixtures.** The routing snapshot and native-matrix fixture are refreshed;
+  only Bitget rows change.
 
 ## Ownership and gates
 
-The socket lifecycle core belongs to codex-5c57jl (#1771), so the
-`SocketContext` hint and host walk are agreed with it before edits.
+Socket core owner codex-5c57jl (#1771) cleared the `reject_route` name and
+shape (no #1771 edits). Its approval of the shared patch needs a reviewed pin
+covering provenance and ordering. The fixed-count variant was rejected by the
+overseer.
 Architecture gate: the route walk lives in the shared host/engine choke points.
 The venue supplies only native refusal evidence. CALLERS: a custom host must
 honour `reject_route` or Bitget UTA/egress parity is lost; no SDK option changes.
