@@ -536,6 +536,29 @@ mod planned_calls {
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))).count(), 1);
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))));
     }
+    #[test]
+    fn indexed_plan_retires_before_reused_command_generation() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, ..Default::default() });
+        start(&mut e, 0.);
+        let old = e.venue.plan.clone().unwrap();
+        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        assert!(e.io.request_contexts.has_plans());
+        Cx { now: 0., store: &mut e.store, io: &mut e.io }.fail_plan(&old, "cancelled").unwrap();
+        assert!(!e.io.request_contexts.has_plans());
+        e.drain_actions().for_each(drop);
+        let before = e.io.request_contexts.plan_scan_visits();
+        e.handle(1., Event::TimerFired { timer });
+        e.drain_actions().for_each(drop);
+        assert_eq!(e.io.request_contexts.plan_scan_visits(), before);
+        start(&mut e, 2.);
+        let new = e.venue.plan.clone().unwrap();
+        assert_ne!(new.owner(), old.owner());
+        assert!(e.io.request_contexts.has_plans());
+        e.drain_actions().for_each(drop);
+        e.handle(3., Event::TimerFired { timer });
+        assert_eq!(e.venue.retired, 1, "stale Plan timer cannot retire the new generation");
+        assert!(e.io.request_contexts.has_plans());
+    }
     fn start(engine: &mut Engine<Plans>, now: f64) {
         engine.start(now);
         let command = if engine.venue.write {
@@ -900,6 +923,7 @@ mod planned_calls {
             ));
             assert_eq!(cx.io.next_id, before);
             assert_eq!(cx.io.request_contexts.plan_context_storage().2, 0);
+            assert!(!cx.io.request_contexts.has_plans(), "refused admission cannot enter the index");
             assert!(cx.io.actions.is_empty());
             let calls = [CallBound {
                 attempts: 1,

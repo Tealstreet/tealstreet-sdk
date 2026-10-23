@@ -325,6 +325,11 @@ impl<P> Cx<'_, P> {
             .try_reserve(future)
             .map_err(|_| Error::Capacity)?;
         self.io.timers.try_reserve(1).map_err(|_| Error::Capacity)?;
+        self.io
+            .request_contexts
+            .plan_index
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)?;
         let io_count = 1 + count as u64 + 3 * attempts as u64;
         let signed = policy.credential.is_some();
         if !self.io.next_id.available(io_count)
@@ -381,6 +386,7 @@ impl<P> Cx<'_, P> {
         owner.leg_intents = leg_intents;
         owner.last_deadline = deadline;
         self.io.request_contexts.reserved_contexts = future;
+        self.io.request_contexts.plan_index.push(id);
         self.io.timers.insert(timer, ());
         self.rearm_plan(&handle);
         Ok(handle)
@@ -865,8 +871,13 @@ impl<P> Cx<'_, P> {
 }
 
 impl ContextRegistry {
+    pub(in super::super) fn has_plans(&self) -> bool {
+        !self.plan_index.is_empty()
+    }
+
     pub(in super::super) fn end_plan_admission(&mut self) {
-        for owner in self.commands.values_mut() {
+        for command in &self.plan_index {
+            let owner = self.commands.get_mut(command).expect("indexed Plan owner");
             #[cfg(any(test, feature = "test-support"))]
             self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             if let CommandPhase::Planned(state) = &mut owner.phase {
@@ -880,7 +891,8 @@ impl ContextRegistry {
     }
 
     pub(in super::super) fn next_plan_ready(&mut self, now: f64) -> Option<Plan> {
-        for owner in self.commands.values_mut() {
+        for command in &self.plan_index {
+            let owner = self.commands.get_mut(command).expect("indexed Plan owner");
             #[cfg(any(test, feature = "test-support"))]
             self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             let CommandPhase::Planned(state) = &mut owner.phase else {
@@ -908,7 +920,8 @@ impl ContextRegistry {
     }
 
     pub(in super::super) fn plan_for_timer(&self, timer: TimerId) -> Option<Plan> {
-        self.commands.values().find_map(|owner| {
+        self.plan_index.iter().find_map(|command| {
+            let owner = self.commands.get(command).expect("indexed Plan owner");
             #[cfg(any(test, feature = "test-support"))]
             self.plan_scan_visits.set(self.plan_scan_visits.get() + 1);
             let CommandPhase::Planned(state) = &owner.phase else {

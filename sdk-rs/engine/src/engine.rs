@@ -3793,6 +3793,9 @@ impl<V: Venue> Engine<V> {
     }
 
     fn flush_http_plans(&mut self, now: f64) {
+        if !self.io.request_contexts.has_plans() {
+            return;
+        }
         self.io.request_contexts.end_plan_admission();
         if !now.is_finite()
             || self.io.http_delivery.is_some()

@@ -155,6 +155,8 @@ pub(super) struct ContextRegistry {
     delivery_depth: usize,
     /// Logical identities promised to admitted plans but not yet issued.
     reserved_contexts: usize,
+    // Only admitted Plan owners; capacity is reserved before ID commitment.
+    plan_index: Vec<CommandId>,
     #[cfg(any(test, feature = "test-support"))]
     plan_scan_visits: std::cell::Cell<usize>,
 }
@@ -876,6 +878,11 @@ impl ContextRegistry {
                         return false;
                     }
                     if let CommandPhase::Planned(state) = &owner.phase {
+                        let Some(index) = self.plan_index.iter().position(|id| *id == command)
+                        else {
+                            return false;
+                        };
+                        self.plan_index.remove(index);
                         self.reserved_contexts -= state.unissued();
                     }
                     let preflight = Preflight::new(&self.issuer, command, owner.generation);
