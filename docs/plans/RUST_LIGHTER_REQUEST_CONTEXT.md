@@ -451,3 +451,13 @@ Context authority. Unknown tier remains null; existing loaded-tier/write control
 remain intact in account_limits.rs. Scanner-generated delta is exactly lib c5a…1
 and c873…1 plus limits417fc047…1; no other fingerprints are changed. Production
 uses only existing shared APIs, no new helper, transport, retry or signing path.
+
+Cached slice verification: 504 Lighter+Binance native tests across48 result groups,
+all8 focused controls, strict Lighter all-target/all-feature Clippy, scoped fmt,
+bans and both request-context checks (14 controls) pass. Genuine integration of
+actual #1871/#1872 at e233cb05dfb preserves their source and prunes; three shared
+doc conflicts keep complete incoming first plus exact611/868/777-byte own tails.
+No Rust runtime dependency of the tested Lighter/Binance closure changed during
+integration. Only the same8 own paths differ from the new landing. Fresh CI and
+independent implementation reviews are separate final gates; no WASM/replay or
+whole-venue closure is claimed by native evidence.

@@ -843,3 +843,9 @@ all aliases/networks, finite recovery, no-I/O/no-Store publication, slot reuse a
 controls remain unchanged, including cached standard tier and SetAccountTier.
 Independent plan source/adversarial, caller and full-map reviews are CLEAN;
 architecture gate No: no new local capacity, clock, retry or completion mechanism.
+
+Cached-slice verification passes504 Lighter+Binance native tests (48 result groups),
+strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both request
+checks/14 controls. Actual e233cb05dfb is genuinely integrated; its incoming
+KuCoin/MEXC source and prunes are preserved. CI owns WASM/replay/size/timing;
+native success alone does not claim these broad gates or whole-venue closure.
