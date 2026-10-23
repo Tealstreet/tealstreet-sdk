@@ -13,16 +13,38 @@ claude-4yjlw0 owns the signed-secondary dispatch migration and native recipe;
 codex-9czdjh owns unsigned/PublicTrades and the native history contracts.
 Their regions are history.rs and closed.rs, with lib.rs callback integration
 after the PublicTrades consumer releases it. Do not edit those regions in this
-engine PR. Coordinate background/mixed-leg dependencies with claude-hcmq3f.
+engine PR. Coordinate background/mixed-leg dependencies with codex-hcmq3f.
 
-BloFin native requirements: signed Secondary reads with passphrase fallback,
-nonempty-page continuation, at most 50 pages per family and unchanged-cursor
-refusal. A signing/preparation refusal is strict and typed, with no retry or
-auth inference; closed preparation failure must not enter response recovery.
-Actual later-page transport failure retains accepted-only recovery under the
-native retry contract. Obtain the exact per-family timeout, retry and combined
-query geometry from the native owner before constructing any Plan declaration;
-a page cap alone does not establish a whole-query deadline or resource bound.
+BloFin uses signed Secondary reads with passphrase fallback. The history and
+closed-position page caps are both 100; the account orders census's 50-response
+bound and continuation policy do not apply. Keep each query's native geometry:
+
+| Family | Continuation and terminal behavior |
+| --- | --- |
+| Closed positions | Page size 100; continue only when raw count >= 100. End on no new rows or unchanged cursor. A page cap or cursor cycle retains accepted rows with an owned incomplete marker. |
+| General Income | Continue when raw count >= 100 and the requested start has not been reached. Missing/repeated cursor or page-budget exhaustion rejects strictly, even after accepted rows. |
+| General Fills | Continue when raw count >= the clamped requested count, selected accepted+staged rows are still below that count, and the requested start has not been reached. Filtered rows can require additional pages; preserve strict cursor/budget rejection. |
+| OrderHistory | One response; the requested limit controls wire parameters only. Do not introduce pagination or local truncation. |
+
+Current wrapper behavior matters: general history and closed positions call
+CursorHistory::finish, which delegates to HistoryRows::finish_with. A later-page
+Err retains accepted rows and emits an owned incomplete marker; no accepted
+rows means rejection. The failed page's staged rows never enter that result.
+Primitive CursorWalk failure alone does not describe query completion.
+
+There is no local HTTP retry loop in these command histories. A later failure
+terminates or recovers accepted rows; never borrow account census retries or
+startup policy. There is no native per-call timeout or whole-query deadline:
+current requests use the engine default. The native owner must explicitly
+approve per-call timeout and checked whole-query geometry before a Plan is
+declared; no timeout is inferred from the page cap.
+
+Managed signing/preparation refusal must be strict and typed, with no retry or
+auth inference. General history already rejects header preparation strictly.
+Closed preparation currently uses legacy finish and can recover accepted rows;
+changing it to strict managed rejection is the approved caller-visible change,
+not a claim about current behavior. Its native owner must pin the original RED
+and the changed behavior, including no retained result or incomplete marker.
 
 AsterDEX and Lighter need the same shared authority later. Their native range,
 stage, timer and strict-financial contracts remain separately planned. This PR
@@ -89,14 +111,24 @@ both accepted-row publication and engine settlement. A rejected page cannot
 settle a slot; a refused settlement cannot leave rows accepted. There is no
 caller-provided settled flag or second slot table.
 
-API choice for uufub4 review: a Plan-specific admission guard may hold a mutable
-Cx borrow without exposing it, allowing checked settlement followed by an
-infallible shared-core acceptance. Alternatively use the existing shared
-prepared-settlement pattern with a private one-use token. Do not weaken the
-original Read guard or add unchecked mutator twins. Pin atomicity and borrow
-scope in a real callback control. Diagnostics happen after dropping the guard;
-further staging requires fresh admission. Native page selection/next send and
-timer continuation still use Plan slots and current shared authority.
+Use the #1894 prepare/commit settlement mechanism with a private one-use token
+retaining exclusive mutable Cx custody, or an exclusive mutable Cx guard if the
+lifecycle owner selects that signature. Prepare accepted-page storage before
+any infallible engine/history commit. A token may not release its borrow or
+expose Cx before commit. Pin that no Cx effect can interleave between slot
+settlement and page acceptance. Do not weaken the original Read guard or add
+unchecked mutator twins. Diagnostics happen after dropping custody; further
+staging requires fresh admission. Native next-slot sends and timer continuation
+still use shared Plan authority.
+
+Final-page DATA is a distinct prepared terminal/accept handoff. When unissued
+slots remain, done_read_plan_after_data must run before finish_plan_call. Do not
+settle the final call and then attempt that invalid early terminal. Prepare the
+page storage, finalizer result and terminal/marker resources under the same
+exclusive custody, then commit acceptance and the shared early Plan seal with
+no interleaved or fallible effect. Ordinary continuation settles once; early
+completion performs its own exact settlement once. Selected peers cannot be
+retired. Exact signatures for both handoffs remain an API gate.
 
 ### Terminal and failure contract
 
@@ -109,8 +141,11 @@ retire a different current slot. No numeric retry follows an authority denial.
 Successful final DATA may retire only unissued remainder under existing Read
 conditional-completion rules. A later actual released transport failure may
 produce native accepted-prefix recovery only through the new reviewed Read
-failure seam. It must prove exact selected Slot/Context/Attempt failure custody,
-retained owner authority, and the history core's accepted-only evidence. Failed
+failure seam. It must prove the exact latest released failed Slot/Context/Attempt,
+an engine-recorded transport cause, retained owner authority, and the history
+core's accepted-only evidence. Active { failed: true } is insufficient because
+provider and preparation failures can set it too. No caller error text, kind or
+boolean supplies that proof. Failed
 page rows/identities are excluded before retry or settlement. First-page failure
 and zero accepted filtered rows do not manufacture success. The first missing
 coverage cause and native final sorting/filtering/limits remain intact.
@@ -119,8 +154,9 @@ Preparation/signing/policy refusal stays strict even after accepted rows: no
 retained result or incomplete marker, and supplied typed error fields pass
 through without response/auth reinterpretation. Ordinary native errors follow
 the consumer's existing strict-versus-recoverable distinction. Root expiry and
-physical attempt expiry are distinct: review current shared expiry semantics
-before permitting a retained-result terminal. No new lease, deadline extension,
+physical attempt expiry are distinct. Root expiry grants no retained-result
+recovery permission; physical failure before a live root expires remains subject
+to exact engine failure-cause validation. No new lease, deadline extension,
 retry credit, send permission or failure-to-DATA conversion is introduced.
 
 ## Original REDs and required controls
@@ -132,6 +168,33 @@ A missing proposed API compile error is not original RED evidence. A legacy
 numeric Completion under a genuine Plan is a negative reproduction fixture
 only; it cannot become a production fallback. Preserve original assertions.
 
+### Runnable landed-source reproductions versus new API controls
+
+Before source, run and commit a genuine two-slot Read Plan fixture using only
+landed APIs. Accept the first released page, select/release the second slot and
+inject Event::HttpFailed for its current request. The reproduction retains the
+legacy numeric history owner only as a test seam: require exactly one Plan-owned
+partial terminal containing only the first page and its owned marker. Record
+actual output; the missing Read failure terminal must appear as an assertion
+failure, not as a missing-method compile error. A companion proves that current
+finish_plan_failed_call refuses Read and that first-page transport failure has
+one ordinary Plan failure and no rows/marker. These are separate assertions;
+the refused Mutation-only helper is never used as a production workaround.
+
+A second landed-source negative fixture retains a numeric Completion after its
+Plan seals, then tries to publish incomplete coverage from a stale callback.
+Require no marker or second terminal, with a live other owner as the positive
+control. Preserve terminal/marker assertions when the fixture seam moves to the
+new authority. Neither reproduction grants production numeric fallback.
+
+Constructor, opaque Slot admission, prepared accept/settle and new failure-cause
+API shape controls are implementation tests after signatures freeze. Do not
+claim they were executable REDs before that API existed. The BloFin closed
+preparation-refusal RED is a separately identified native-lane receipt. All
+listed reproductions still need execution; this plan claims no new RED result.
+
+### Required implementation and consumer controls
+
 - Two accepted pages on distinct serial slots terminate once with native-shaped
   rows through Plan custody; first page alone never completes the query.
 - Staging then failing a page excludes its rows and identities. Reselecting the
@@ -142,17 +205,30 @@ only; it cannot become a production fallback. Preserve original assertions.
   A live peer slot remains usable after each wrong-custody probe.
 - Strict preparation/provider refusal after a full accepted page yields the
   exact typed failure, no result/marker, no retry and no auth/deactivation event.
+  It cannot enter recovery even if the Plan call has Active { failed: true }.
 - Real later-page transport failure recovers accepted rows only where native
   policy permits; first-page and zero-accepted-row failures remain failures.
   Failed delivery never authorizes new rows, coverage or Store publication.
-- Early DATA terminal retires only unissued remainder. Settled/selected sibling
-  work cannot be skipped; marker/finalizer/storage preparation refusal leaves
+- A final short page accepts rows and completes early with unissued slots still
+  reserved, without a prior finish_plan_call. Ordinary continuation settles once;
+  selected sibling work cannot be skipped. Marker/finalizer/storage refusal leaves
   Plan/rows untouched and emits no marker.
 - Cursor, range and multi-stage completion retain accepted-stage baselines,
   dedupe and the first coverage gap. No timer can admit response data; only
   shared Plan authority may permit delayed next-slot sends.
 - Feature off preserves original-root/legacy behavior and excludes the new API.
   Mutation/unsupported Execution ownership is explicitly refused until reviewed.
+
+Standalone BloFin must explicitly enable engine `http-plans` in its dependency
+graph before adopting this authority; workspace feature unification is not
+proof. Require isolated BloFin feature/dependency checks, standalone family WASM
+size and its replay CPU gate (BloFin is replay-gated), plus existing correctness
+and memory gates. Report a size/CPU failure rather than waiving it. Engine
+feature-off checks must keep the new surface excluded.
+
+Capacity controls compare complete typed errors captured from genuine admission,
+not literal capacity text. #1877 changed the display text to `Engine request
+capacity reached`; that does not alter authority or the expected typed shape.
 
 Before source, uufub4 must clear exact page/settlement and Read failure-terminal
 contracts and both BloFin lanes must confirm native recovery and bound inputs.
@@ -164,3 +240,16 @@ and head-matched merge. Report a missing shared primitive or failing native
 contract rather than substituting venue policy. Update CALLERS only for the
 behavior actually activated by the implementation; this plan has no production
 caller change.
+
+
+## Native contract verification for plan review
+
+Independent focused runs on c69cccb8390 (source identical to actual #1848)
+passed the existing general later-income accepted-only recovery control,
+general first-page rejection matrix, closed second-page accepted-only recovery,
+and closed first-page rejection. The general later-failure matrix includes an
+actual HttpFailed case. This establishes the existing wrapper contract; it is
+not a new Plan-authority RED or a private managed consumer proof. Both BloFin
+reviewers agree on accepted-only later recovery and no local retries. Source and
+new API implementation remain gated on exact lifecycle signatures and explicit
+native timeout/bound decisions.
