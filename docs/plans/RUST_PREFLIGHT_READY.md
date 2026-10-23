@@ -68,7 +68,11 @@ progress uses the genuine bounded read delivery or admitted Plan readiness. A
 second park/activation cycle requires separately reviewed need and bounds; it is
 not silently permitted by this API. Preflight retention has the existing 256-owner
 bound and introduces no arbitrary 120-second queue deadline. Waiting does not
-mint or renew the eventual native Plan/call deadline.
+mint or renew the eventual native Plan/call deadline. For a FIFO chain,
+each admitted predecessor retires by its own immutable native Plan root and
+wakes the next, with at most one parked activation per retained owner under
+that same 256-owner cap. This is a structural chain bound, not a new entry
+clock. A parked Preflight is not joinable and is never a follower's entry.
 
 ## Engine event boundary and custody
 
@@ -78,9 +82,13 @@ allocate an unbounded side queue, generate IDs or consume Plan slot reservations
 Maintain an O(1) empty-ready guard and a bounded index of queued Preflights; never
 scan all Context/execution owners on every public event.
 
-After the outer command/HTTP/timer/signing/readiness callback and its existing
-owner-retirement cleanup have completed, the engine drains requested ready
-owners in request order. Before each callback, revalidate the exact live parked
+After the outer command/HTTP/timer/signing/readiness callback, its existing
+owner-retirement cleanup AND the post-event execution sweep have completed,
+the engine drains requested ready owners in request order. The existing
+execution sweep runs at handle entry and after settlement, timeout and
+preparation failure. An expiry/revoke cannot occur halfway through the ready
+callback; an execution begun there rearms the same execution timer as an
+initial entry callback. Before each callback, revalidate the exact live parked
 phase/generation and absence of outstanding work. Skip a retired generation;
 never redirect its notification to a reused numeric command ID. Drain only at
 the existing safe event-scope boundary: no recursive `finish_event_scope`, no
@@ -105,12 +113,48 @@ become send/success rights. Clear initial activation at its event boundary;
 Do not broaden public Context validators or let a Plan/readiness callback operate
 on another retained Preflight.
 
-Successful activation must consume the wake with a terminal, a genuine read, or
-a Plan transition. A default/unhandled callback is completed as one typed local
+The SAME scope must also reach physical submission at
+`ContextRegistry::owned_admission` / managed queue admission. Guarding only
+constructors/transitions is insufficient: initial selected `Stage::Ready` calls
+have predecessor None, as does the cleared delivery in B's ready callback.
+A retained C Context selected but not submitted in C's initial scope cannot be
+queued under B merely because both have no predecessor. Validate its exact
+activation owner/generation (or genuine predecessor DATA) at physical admission,
+including signed preparation, before IDs/actions commit. Shared Plan and
+planned-execution paths use the same check; no new Context cast or venue flag.
+
+Successful activation must consume the wake with a terminal, an actually
+SUBMITTED bounded managed Read (`Stage::Active`, whose lifecycle has an expiry),
+or a Plan transition with its root timer. Returning a selected `Stage::Ready`
+read Context alone is NOT progress: no HTTP action/timer exists at that point.
+Such a callback receives one shared failure/retirement, including cleanup of
+reserved call resources and preservation of imported facts. A selected Context
+cannot be saved to borrow authority in some future unrelated callback. A default/unhandled callback is completed as one typed local
 Internal/NotSent failure through the shared preflight failure/retirement path,
 not left silently stranded. A callback that panics poisons the engine under the
 existing callback discipline; scope tokens cannot leak after unwinding. Final
 policy/error wording is part of owner API-fit review before implementation.
+
+### Restricted retirement-to-wake handoff
+
+The existing `on_http_owner_retired(&HttpOwnerRetirement)` deliberately has no
+Cx. Engine-driven root expiry may call only that hook, so the Cx wake-intent
+method alone cannot advance B. Add an additive restricted callback, provisional
+name `on_http_owner_retired_preflight(owner) -> Option<Preflight>`. Its default
+calls the old cleanup hook exactly once and returns None. Engine retirement
+uses the new wrapper; existing implementations retain their cleanup unchanged.
+An adopting venue cleans up A and returns only its next already-parked B handle.
+No Store, send, completion, read or entry authority is provided to cleanup.
+
+After `complete_retirement` succeeds for the exact A token, validate and queue
+that returned B through the SAME bounded wake-intent transaction as
+`request_preflight_ready`. No nested callback, owner cast or fresh generation
+is created. A stale/foreign/retired/replaced-generation output cannot affect
+any live/new owner. Queue storage is already reserved; valid output cannot
+fail solely because cleanup has no allocator. Drain at the safe post-event
+boundary AFTER retirement and the execution sweep, including when expiry was
+engine-driven with no further external event. This is an API-fit proposal for
+uufub4, not permission to broaden the cleanup hook to a full Cx.
 
 All recoverable checks and resource reservations precede mutation. A failed
 activation/admission does not leave a half-queued owner, renew a bound, spend IDs,
@@ -124,7 +168,14 @@ claude-fe7lgm's `begin_planned_execution` uses the same retained-Preflight
 transition hook. It atomically admits the Plan, physical execution root and
 founder observer; it does not call a public Plan constructor then create a second
 owner. Ready custody may be consumed by that single transaction, once its
-source is reviewed. Observers cannot request/consume founder activation merely
+source is reviewed. The founder has no independent preflight deadline: its
+observer bound is the physical Plan root minted by that one final admission,
+exactly as ordinary `admit_plan` mints it from native declarations. Only followers
+carry their own original entry bounds, projected as min(own, physical). Nothing
+after admission renews any bound: park, wake, join, resume and progress do not.
+Waiting creates no separate clock or venue counter. This is fe7lgm's corrected
+R1-prime contract; the withdrawn proposal for a fixed founder entry deadline
+is not part of this seam. Observers cannot request/consume founder activation merely
 by sharing execution membership. Their detach/expiry does not donate entry.
 
 Readiness does not import facts, grant resend, resolve uncertainty or alter
@@ -153,13 +204,17 @@ Plan readiness remains unchanged; new generation after retired ID works.
 
 Negative controls snapshot owners/IDs/actions before refusal: wrong issuer,
 handle, generation or engine; B's handle supplied from A as direct admission;
-ordinary timer/WS callback; foreign Plan readiness; duplicate request; missing
-park; re-park/self-wake loop; selected or in-flight prerequisite read; already
+ordinary timer/WS callback; foreign Plan readiness; direct `request_managed`
+submission of C's retained selected Context during B-ready; duplicate request;
+missing park; re-park/self-wake loop; selected or in-flight prerequisite read; already
 admitted Plan; retired/cancelled owner; capacity refusal and invalid time.
 A queued ready notification for old B cannot activate a new B after ID reuse.
 A callback may not admit C, use A's order response token, or mutate a different
-owner. Late/duplicate HTTP/signature data remain fenced. Panic/default callback
+owner. Late/duplicate HTTP/signature data remain fenced. Panic/default/selected-but-unsubmitted callback
 controls verify no stale custody survives and no waiter is silently stranded.
+Explicitly prove A root expiry retires A and sends B in that SAME event without
+an unrelated follow-up event. Test the restricted retirement output's invalid,
+stale and reused-generation cases independently of the Cx wake method.
 
 Performance/feature controls: zero queue scans when empty even with ordinary
 Context/execution observers; at most one bounded activation per retained owner;
@@ -182,3 +237,20 @@ behavior and prunes no inventory. Landed caller details belong in implementation
 
 Architecture gate: shared engine activation custody, not a venue scheduling or
 ownership workaround. No merge without explicit overseer GO and its own window.
+
+
+## Independent plan audit, 2026-10-23
+
+Source/adversarial, caller and full-map audits checked both child diffs against
+reviewed #1873. Three findings are corrected above before source work: the
+no-Cx retirement hook needs a restricted typed wake output; actual physical
+submission must validate exact activation custody; selected-but-unsubmitted
+reads must fail/retire instead of stranding the owner. The caller review confirms
+native FIFO and result semantics remain venue inputs, with no GREEN adoption
+or P8 placement claim. No builds were performed by these read-only reviewers.
+
+Composition conditions R1-prime/R2/R3 are explicit: founder bound begins at the
+single Plan admission, followers keep their own bounds; drain after the execution
+sweep and rearm execution timers normally; retained Preflights are founder-only,
+not joinable. Pending-founder dedup belongs to the intent ledger, not this wake
+queue. Source controls and owner API-fit approval remain required.
