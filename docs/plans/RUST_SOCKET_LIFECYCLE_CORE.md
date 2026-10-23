@@ -683,3 +683,63 @@ this older socket branch against actual #1765; no exemption or inventory change
 is made here. Integrate current landing/shared prerequisites, rerun that gate,
 then obtain fresh CI before any readiness or memory/CPU/size claim. The existing
 numeric failures and separate safe-ID prerequisite remain open.
+
+
+## Measured failure follow-up on frozen SafeIDs
+
+The owner authorized exact-head stacking on SafeIDs #1789
+`076af5e782cf6588521543aada2bb98ba49bd6e6`. Integration `0b2b3be7aaf`
+retains incoming resource and HTTP rails. Two conflicts were resolved only after
+explicit owner disposition: per-action safe validation precedes the complete
+socket gate/callback block; drain validates before socket work, revalidates and
+retains the original socket fence/frame order plus final validation. Two
+independent ordering/full-tree reviews are CLEAR. A new original assertion RED
+proved a callback catching last-ID exhaustion allowed a second callback (2 vs 1);
+central postcallback fatal/output fences make it GREEN. All 585 all-feature
+engine controls and 614 four-crate unit controls pass, including HTTP-delivery
+isolation. SafeIDs CI is all43 green; its actual-WASM ingress fixture passes98.
+These are source/checkpoint facts, not final socket performance or merge proof.
+
+Historical failed source `5f901f18027516d7611b9fb42d8a84203affc8c3`, run
+39862993196 attempt1, remains the measured RED. Exact strict ZIPs were freshly
+downloaded for read-only profiling and digest verified: OKX artifact12463171541
+SHA25652d2a713149741c37bf57d598c6ba3a065fb5b56d705ec0b14ec4c61a97948c4;
+Bitunix12462836721 SHA25634ce6d44f5e326cd35eb37952c30117074887ff9e67a92bd6f5c20da4ff3a488.
+OKX EEA median retained bytes are7542392 vs TS7203920 and target6483528;
+Rust component medians: WASM4784128, JS heap2439896, buffers318368. Bitunix
+steady CPU is193.874ms vs TS202.186 and target181.9674ms; memory passes.
+No local performance execution, rerun, exception or altered threshold is used.
+
+Concrete shared changes, plan and audit before source:
+
+1. Replace owned subscription key/argument and coverage strings with immutable
+   shared text (`Arc<str>`), keeping public string bytes/order unchanged. The
+   canonical desired/released map keys reference the same key storage; identical
+   key/native argument text can share one allocation through a generic Interest
+   constructor/normalizer. Encoder scratch clones immutable handles, not payload
+   strings. Existing per-feed/aggregate logical byte reservations, count/frame
+   bounds, failure atomicity, release-only evidence and revision/epoch barriers
+   stay unchanged. Adapt the two native codecs only to supply this representation.
+   Original assertion-RED controls check desired key/argument aliasing, map-key
+   aliasing and final released/coverage storage identity; retain exact native wire,
+   replay/repair, partial-release and refused encoder/coverage controls.
+2. Add one lifecycle-owned index of current physical sockets to epochs. Begin
+   inserts only after full preflight; retire removes before callbacks/retry;
+   stop/permanent refusal use the same path. Runtime storage follows the already
+   append-only FeedId index. Driver ingress resolves the current epoch/runtime
+   once, reads its own Supervisor expiry directly and retains fresh time/epoch/
+   phase checks at BOTH ingress and control entry. No venue bypass/admission cache
+   or independent deadline is added. Keep stale/unknown sockets denied and empty
+   lifecycle Legacy behavior unchanged. Native controls cover multiple feeds,
+   healthy/expired neighbors, retire/reconnect, invalid time, duplicate sockets
+   and no resurrection; immutable current index remains bounded by MAX_FEEDS.
+3. Re-run independent source/adversarial/ordering reviews, engine/OKX/Bitunix/
+   Binance focused tests, strict all-target Clippy/fmt/bans, then push #1771 for
+   fresh full CI. CI decides both actual targets and all fixed budgets; no metric
+   claim follows from pointer tests/source inspection. The official gates and
+   raw output comparison are unchanged; matching SafeIDs actual ancestry and
+   subsequent required input integration remain merge prerequisites.
+
+Architecture gate: shared lifecycle storage and admission lookup are engine choke
+points, consumed by two different native codecs. No venue policy, allocator,
+HTTP release/authority, retry/auth semantics, budget or external wire change.

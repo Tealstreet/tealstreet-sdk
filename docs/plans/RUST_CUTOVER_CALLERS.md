@@ -4230,7 +4230,7 @@ successes and diagnostics stay suppressed. Native account streams settle owned
 waiters as Internal/Unknown once and answer later joins with the terminal notice
 without constructing a snapshot from the failed engine. Recreate the engine to
 resume work; neither adapter restarts it automatically.
-## Draft Engine socket lifecycle: OKX and Bitunix
+## Engine socket lifecycle: OKX and Bitunix
 
 The two reference families move authentication state, socket epochs, reconnect
 permission, subscription replay and retirement into the Engine lifecycle. Venue
@@ -4247,7 +4247,6 @@ freshness fences remain unchanged. Bitunix preserves pre-ACK reads, first-pong
 idle activation, and native 20-argument/250ms shard pacing. Consumer health sees
 one real host close and one reconnect, with no duplicate epoch effects.
 
-These are draft native reference changes. Physical host ID widening remains a
-separate prerequisite after RequestContext #1741; final actual CI/replay and
-caller/deployment validation are still required. Other venue families and NX
-socket migration remain open; existing signing and remote-signing wires remain.
+Physical socket identities use the shared host-safe integer boundary. Other
+venue families retain their existing socket paths. Existing signing and
+remote-signing wires remain unchanged.
