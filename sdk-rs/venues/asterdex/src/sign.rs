@@ -3,8 +3,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
 use safe_cex_crypto::{Encoding, eip712, ethereum, hmac_sha256};
+use safe_cex_engine::signing::{
+    Algorithm, Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
+    SignResult,
+};
 use safe_cex_engine::url;
-use safe_cex_engine::{Method, num};
+use safe_cex_engine::{Action, DispatchContext, Method, SignStep, num};
 use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -139,7 +143,7 @@ impl Query {
     }
 
     pub fn signed(
-        mut self,
+        self,
         credentials: &Credentials,
         method: Method,
         path: &str,
@@ -150,32 +154,105 @@ impl Query {
         if !now_ms.is_finite() || now_ms < 0.0 || now_ms > (u64::MAX / 1000) as f64 {
             return Err("Invalid Aster signing clock".into());
         }
-        // A retry reconstructs these fields from its unsigned business params.
+        let stamp = safe_cex_engine::time::wire_stamp_ms(now_ms);
+        let mode = if credentials.version == Version::V1 {
+            Mode::V1
+        } else {
+            let user = ethereum::get_address(credentials.user.as_deref().unwrap())?;
+            let signer = ethereum::get_address(credentials.signer.as_deref().unwrap())?;
+            // Aster's replay protection belongs to the agent address, across users.
+            let nonce = next_nonce(&signer, stamp as u64)?;
+            Mode::V3 {
+                user,
+                signer,
+                nonce,
+            }
+        };
+        let prepared = self.prepared(&mode, method, path, stamp, testnet)?;
+        let signature = match &prepared.preimage {
+            Preimage::Hmac(message) => hmac_sha256(
+                credentials.secret.as_bytes(),
+                message.as_bytes(),
+                Encoding::Hex,
+            ),
+            Preimage::Digest(digest) => {
+                let secret = if credentials.secret.starts_with("0x") {
+                    credentials.secret.clone()
+                } else {
+                    format!("0x{}", credentials.secret)
+                };
+                ethereum::sign_digest(digest, &secret)?
+            }
+        };
+        Ok(prepared.finish(&signature))
+    }
+
+    /// Canonical signing input for one attempt. Every mode first removes the
+    /// fields a retry regenerates from its unsigned business params.
+    fn prepared(
+        mut self,
+        mode: &Mode,
+        method: Method,
+        path: &str,
+        stamp_ms: f64,
+        testnet: bool,
+    ) -> Result<Prepared, String> {
         self.0.retain(|(key, _)| {
             !matches!(
                 key.as_str(),
                 "signature" | "timestamp" | "recvWindow" | "user" | "signer" | "nonce"
             )
         });
-        if credentials.version == Version::V1 {
+        let Mode::V3 {
+            user,
+            signer,
+            nonce,
+        } = mode
+        else {
+            self = self.num("recvWindow", 20_000.0).num("timestamp", stamp_ms);
+            return Ok(Prepared {
+                preimage: Preimage::Hmac(self.as_str()),
+                query: self,
+                encoded: true,
+            });
+        };
+        if code_endpoint(method, path) {
             self = self
-                .num("recvWindow", 20_000.0)
-                .num("timestamp", safe_cex_engine::time::wire_stamp_ms(now_ms));
-            let signature = hmac_sha256(
-                credentials.secret.as_bytes(),
-                self.as_str().as_bytes(),
-                Encoding::Hex,
-            );
-            return Ok(join(&self.str("signature", &signature).0, true));
+                .str("asterChain", if testnet { "Testnet" } else { "Mainnet" })
+                .str("user", user)
+                .str("signer", signer)
+                .str("nonce", &nonce.to_string());
+            return Ok(Prepared {
+                preimage: Preimage::Digest(code_digest(&self.as_str(), testnet)),
+                query: self,
+                encoded: false,
+            });
         }
-        let signer = ethereum::get_address(credentials.signer.as_deref().unwrap())?;
-        // Aster's replay protection belongs to the agent address, across users.
-        let nonce = next_nonce(&signer, safe_cex_engine::time::wire_stamp_ms(now_ms) as u64)?;
-        self.signed_v3(credentials, method, path, now_ms, testnet, nonce)
+        self = self.num("recvWindow", 20_000.0).num("timestamp", stamp_ms);
+        let sorted: BTreeMap<_, _> = self
+            .0
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let payload = serde_json::to_string(&sorted).map_err(|e| e.to_string())?;
+        let encoded = encode_standard_payload(&payload, user, signer, *nonce)?;
+        let digest = ethereum::ethereum_message_hash(&ethereum::keccak256(&encoded));
+        Ok(Prepared {
+            preimage: Preimage::Digest(digest),
+            query: self
+                .str("user", user)
+                .str("signer", signer)
+                .str("nonce", &nonce.to_string()),
+            encoded: true,
+        })
     }
+}
 
+/// Fixed-nonce V3 signing for the independent wire vectors.
+#[cfg(test)]
+impl Query {
     fn signed_v3(
-        mut self,
+        self,
         credentials: &Credentials,
         method: Method,
         path: &str,
@@ -183,41 +260,52 @@ impl Query {
         testnet: bool,
         nonce: u64,
     ) -> Result<String, String> {
-        let user = ethereum::get_address(credentials.user.as_deref().unwrap())?;
-        let signer = ethereum::get_address(credentials.signer.as_deref().unwrap())?;
-        let secret = if credentials.secret.starts_with("0x") {
-            credentials.secret.clone()
-        } else {
-            format!("0x{}", credentials.secret)
+        let mode = Mode::V3 {
+            user: ethereum::get_address(credentials.user.as_deref().unwrap())?,
+            signer: ethereum::get_address(credentials.signer.as_deref().unwrap())?,
+            nonce,
         };
-        let signature = if code_endpoint(method, path) {
-            self = self
-                .str("asterChain", if testnet { "Testnet" } else { "Mainnet" })
-                .str("user", &user)
-                .str("signer", &signer)
-                .str("nonce", &nonce.to_string());
-            let signature = code_signature(&self.as_str(), &secret, testnet)?;
-            return Ok(self.str("signature", &signature).as_str());
-        } else {
-            self = self
-                .num("recvWindow", 20_000.0)
-                .num("timestamp", safe_cex_engine::time::wire_stamp_ms(now_ms));
-            let sorted: BTreeMap<_, _> = self
-                .0
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
-            let payload = serde_json::to_string(&sorted).map_err(|e| e.to_string())?;
-            let encoded = encode_standard_payload(&payload, &user, &signer, nonce)?;
-            let digest = ethereum::ethereum_message_hash(&ethereum::keccak256(&encoded));
-            ethereum::sign_digest(&digest, &secret)?
+        let stamp = safe_cex_engine::time::wire_stamp_ms(now_ms);
+        let prepared = self.prepared(&mode, method, path, stamp, testnet)?;
+        let Preimage::Digest(digest) = &prepared.preimage else {
+            unreachable!("V3 always signs a digest")
         };
-        self = self
-            .str("user", &user)
-            .str("signer", &signer)
-            .str("nonce", &nonce.to_string())
-            .str("signature", &signature);
-        Ok(join(&self.0, true))
+        let secret = format!("0x{}", credentials.secret.trim_start_matches("0x"));
+        let signature = ethereum::sign_digest(digest, &secret)?;
+        Ok(prepared.finish(&signature))
+    }
+}
+#[cfg(test)]
+fn code_signature(query: &str, secret: &str, testnet: bool) -> Result<String, String> {
+    ethereum::sign_digest(&code_digest(query, testnet), secret)
+}
+
+/// Signing mode for one attempt. V3 addresses are checksummed public config.
+enum Mode {
+    V1,
+    V3 {
+        user: String,
+        signer: String,
+        nonce: u64,
+    },
+}
+
+enum Preimage {
+    /// HMAC-SHA256 over the raw (unencoded) query; hex signature.
+    Hmac(String),
+    /// secp256k1 over an EIP-191 or Code EIP-712 digest; 0x r||s||v(27/28).
+    Digest([u8; 32]),
+}
+
+struct Prepared {
+    preimage: Preimage,
+    query: Query,
+    /// Code endpoints keep the signed raw query; others use client encoding.
+    encoded: bool,
+}
+impl Prepared {
+    fn finish(self, signature: &str) -> String {
+        join(&self.query.str("signature", signature).0, self.encoded)
     }
 }
 
@@ -284,7 +372,7 @@ fn encode_standard_payload(
     Ok(encoded)
 }
 
-fn code_signature(query: &str, secret: &str, testnet: bool) -> Result<String, String> {
+fn code_digest(query: &str, testnet: bool) -> [u8; 32] {
     let mut domain = Vec::with_capacity(160);
     domain.extend(ethereum::keccak256(
         b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
@@ -296,11 +384,8 @@ fn code_signature(query: &str, secret: &str, testnet: bool) -> Result<String, St
     let mut message = [0; 64];
     message[..32].copy_from_slice(&ethereum::keccak256(b"Message(string msg)"));
     message[32..].copy_from_slice(&ethereum::keccak256(query.as_bytes()));
-    let digest =
-        eip712::hash_prehashed(ethereum::keccak256(&domain), ethereum::keccak256(&message));
-    ethereum::sign_digest(&digest, secret)
+    eip712::hash_prehashed(ethereum::keccak256(&domain), ethereum::keccak256(&message))
 }
-
 fn join(params: &[(String, String)], encoded: bool) -> String {
     let mut result = String::new();
     for (key, value) in params {
@@ -320,6 +405,172 @@ fn join(params: &[(String, String)], encoded: bool) -> String {
         }
     }
     result
+}
+
+/// Source of the V3 replay nonce, called at every preparation with the
+/// checksummed signer address. The engine-owned allocator replaces
+/// `interim_nonce` once it lands; no second allocator exists meanwhile.
+pub type NonceSource = Box<dyn FnMut(&DispatchContext<'_>, &str) -> Result<u64, SignError> + Send>;
+
+/// Interim V3 source: the existing per-signer allocator, fed the protocol stamp.
+pub fn interim_nonce() -> NonceSource {
+    Box::new(|dispatch, signer| {
+        next_nonce(signer, dispatch.stamp_ms() as u64).map_err(|_| SignError::Unavailable)
+    })
+}
+
+/// Selected signing contract for one recipe. V3 addresses are public config.
+pub enum Auth {
+    V1,
+    V3 {
+        user: String,
+        signer: String,
+        nonce: NonceSource,
+    },
+}
+
+/// Dispatch recipe for one private Aster request: V1 HMAC, V3 EIP-191 or
+/// Code EIP-712. It rebuilds the signed query at each preparation from the
+/// unsigned business params and writes the full signed URL at apply.
+pub struct Recipe {
+    identity: Identity,
+    auth: Auth,
+    method: Method,
+    origin: String,
+    path: String,
+    query: Query,
+    testnet: bool,
+    prepared: Option<Prepared>,
+}
+impl Recipe {
+    /// `origin` is the REST base URL; `path` includes the version prefix.
+    pub fn new(
+        identity: Identity,
+        auth: Auth,
+        method: Method,
+        origin: &str,
+        path: &str,
+        query: Query,
+        testnet: bool,
+    ) -> Result<Self, String> {
+        let auth = match auth {
+            Auth::V1 => Auth::V1,
+            Auth::V3 {
+                user,
+                signer,
+                nonce,
+            } => Auth::V3 {
+                user: ethereum::get_address(&user)?,
+                signer: ethereum::get_address(&signer)?,
+                nonce,
+            },
+        };
+        Ok(Self {
+            identity,
+            auth,
+            method,
+            origin: origin.into(),
+            path: path.into(),
+            query,
+            testnet,
+            prepared: None,
+        })
+    }
+}
+impl SignStep for Recipe {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let stamp = dispatch.stamp_ms();
+        let mode = match &mut self.auth {
+            Auth::V1 => Mode::V1,
+            Auth::V3 {
+                user,
+                signer,
+                nonce,
+            } => Mode::V3 {
+                nonce: nonce(dispatch, signer)?,
+                user: user.clone(),
+                signer: signer.clone(),
+            },
+        };
+        let code = matches!(mode, Mode::V3 { .. }) && code_endpoint(self.method, &self.path);
+        let prepared = self
+            .query
+            .clone()
+            .prepared(&mode, self.method, &self.path, stamp, self.testnet)
+            .map_err(|_| SignError::InvalidRequest)?;
+        let (algorithm, message) = match &prepared.preimage {
+            Preimage::Hmac(message) => (Algorithm::HmacSha256, message.as_bytes().to_vec()),
+            Preimage::Digest(digest) => (Algorithm::Secp256k1Digest, digest.to_vec()),
+        };
+        self.prepared = Some(prepared);
+        let (host, _) = self
+            .origin
+            .split_once("://")
+            .map(|(_, rest)| rest.split_once('/').unwrap_or((rest, "")))
+            .unwrap_or(("", ""));
+        Ok(SignRequest {
+            // Code queries carry a nonce, not a signed timestamp.
+            receipt: SignReceipt {
+                stamp_ms: (!code).then_some(stamp),
+                expiry_ms: None,
+            },
+            operations: vec![
+                Operation::Present {
+                    key: self.identity.credential.clone(),
+                },
+                Operation::Sign {
+                    algorithm,
+                    key: self.identity.signing.clone(),
+                    payload: vec![PayloadPart::Bytes { bytes: message }],
+                },
+            ],
+            context: Context {
+                venue: "asterdex".into(),
+                method: http.method.as_str().into(),
+                host: host.into(),
+                path: self.path.clone(),
+            },
+        })
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let key = result
+            .values
+            .first()
+            .and_then(|key| std::str::from_utf8(key).ok())
+            .filter(|key| !key.is_empty() && !key.contains(['\r', '\n']))
+            .ok_or(SignError::InvalidResult)?;
+        let raw = result.values.get(1).ok_or(SignError::InvalidResult)?;
+        let prepared = self.prepared.take().ok_or(SignError::InvalidRequest)?;
+        let signature = match prepared.preimage {
+            Preimage::Hmac(_) if raw.len() == 32 => safe_cex_crypto::hex(raw),
+            // Wire form is ethers' 0x r||s||v with v as 27/28.
+            Preimage::Digest(_) if raw.len() == 65 && raw[64] <= 1 => {
+                format!("0x{}{:02x}", safe_cex_crypto::hex(&raw[..64]), raw[64] + 27)
+            }
+            _ => return Err(SignError::InvalidResult),
+        };
+        http.url = format!(
+            "{}{}?{}",
+            self.origin,
+            self.path,
+            prepared.finish(&signature)
+        );
+        http.headers = vec![("X-MBX-APIKEY", key.into())];
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
 }
 
 #[cfg(test)]
