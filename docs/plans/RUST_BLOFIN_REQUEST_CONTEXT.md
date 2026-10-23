@@ -192,3 +192,17 @@ admission, retry or outcome algorithm is allowed. If adoption requires a missing
 shared primitive, stop that area, report the exact gap to its owning lane and
 the overseer, and continue independent single-request work. Include each review's
 explicit answer and any residual limitations in the PR body.
+
+## Command-entry prerequisite found after the inventory checkpoint
+
+At `7641650e7b1`, `Cx::http_context` can refuse capacity/policy/time admission
+before any Context exists (`engine/src/request_context_registry.rs:577-615`).
+Only numeric legacy failure can then reject that unissued command; the Binance
+reference retains that fallback too. `codex-uufub4` independently confirmed the
+gap, and the overseer assigned the shared typed entry/rejection seam as its first
+priority. Do not forge Context, hang the command, or hide numeric failure in a
+new helper. Pending the shared API, retain the exact existing `lib.rs:892`
+failure expression/site solely for unissued candle entry failure. Already-issued
+reads use Context completion. This first conversion can therefore prune four
+lib occurrences (28 to 24), with the fifth removed after the shared seam lands.
+The remaining site is a tracked zero-legacy blocker, not an exemption.
