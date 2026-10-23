@@ -34,7 +34,9 @@ pub mod signing_capture;
 mod signing_dispatch;
 pub mod signing_headers;
 pub mod signing_policy;
+mod signing_release;
 pub use signing_dispatch::{DispatchContext, SignStep};
+pub use signing_release::SigningRelease;
 pub mod socket;
 #[cfg(feature = "managed-sockets")]
 mod socket_driver;

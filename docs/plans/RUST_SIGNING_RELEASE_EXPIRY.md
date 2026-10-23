@@ -187,3 +187,25 @@ unreviewed dependencies or resolve a shared source conflict inside a combo.
 Shared implementation and actual consumer adoption are separate readiness
 claims. A legacy signed release cannot acquire managed Context or write facts
 from this observation; all classifier/journal custody stays unchanged.
+
+## Runtime checkpoint
+
+Both named reviewers cleared the API at `093a9d0ad45` before runtime. Actual
+combo landing `fade3aa0a41` is integrated by plain merge. The new module owns
+one checked projection; HttpRelease retains its existing lifecycle min. Managed
+claim prepares observation metadata before mutable admission, then publishes
+only at the existing post-release/post-write-mark hook. Legacy dispatch checks
+metadata after its existing final fences and before placing the outbound action
+in final order; invalid projection wipes the packet and follows typed failure,
+while stale projection uses the existing reprepare path.
+
+The original controls now pass unchanged apart from the labelled observation
+adapter. Ten integration controls pass with Plan/socket/order-lock features;
+the override hook explicitly refuses a second legacy notification, and duplicate
+claims stay inert. A private projector control covers invalid clocks, receipt
+values, overflow, non-advancing addition, stale/equality expiry and a valid
+working control. Existing signing (82), HTTP lifecycle (122) and request-context
+(47) scoped checks pass, including the unchanged old-hook-only observer tests.
+All ten controls and strict engine all-target Clippy also pass with the optional
+Plan/socket/order-lock features off. Runtime source and consumer review and
+fresh exact-head CI remain separate gates.

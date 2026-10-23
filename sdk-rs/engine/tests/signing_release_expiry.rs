@@ -1,11 +1,11 @@
-//! New-contract REDs for missing engine release metadata, plus native controls.
-//! The old receipt adapter never fabricates a raw deadline from protocol UTC.
+//! Original release-metadata assertions plus compatibility and custody controls.
+//! The original UTC-only adapter and its REDs are retained in Git history.
 #![cfg(feature = "test-support")]
 
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
     Admission, Claim, Credential, Error, HttpAction, HttpRelease, Operation as HttpOperation,
-    Permit, Policy, Prepared, RetryPolicy, Scope,
+    Permit, Policy, Prepared, ReleaseTime, RetryPolicy, Scope,
 };
 use safe_cex_engine::signing::{
     Algorithm, Context, KeyRef, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
@@ -68,6 +68,7 @@ struct Observation {
     request: RequestId,
     receipt: SignReceipt,
     raw_expiry: Option<f64>,
+    time: ReleaseTime,
 }
 struct Probe {
     offset: f64,
@@ -122,18 +123,24 @@ impl Venue for Probe {
             cx.sign_http(request, recipe);
         }
     }
-    fn on_signing_receipt(&mut self, target: SigningTarget<'_, Pending>, receipt: SignReceipt) {
+    fn on_signing_release(
+        &mut self,
+        target: SigningTarget<'_, Pending>,
+        release: safe_cex_engine::SigningRelease,
+    ) {
         let SigningTarget::Http { request, pending } = target else {
             panic!("fixture signs HTTP only");
         };
-        // Existing-API baseline: only UTC receipt metadata is observable.
-        // Cutover replaces this adapter with the reviewed release hook.
         self.observed.push(Observation {
             owner: pending.owner,
             request,
-            receipt,
-            raw_expiry: None,
+            receipt: release.receipt(),
+            raw_expiry: release.raw_expiry_ms(),
+            time: release.time(),
         });
+    }
+    fn on_signing_receipt(&mut self, _: SigningTarget<'_, Pending>, _: SignReceipt) {
+        panic!("an overridden release hook must not receive a second legacy notification");
     }
     fn on_sign_error(&mut self, _: &mut Cx<'_, Pending>, _: Pending, error: VenueError) {
         self.errors.push(error);
@@ -298,9 +305,24 @@ fn existing_protocol_receipt_and_exact_pending_target_remain_unchanged() {
     assert_eq!(records[0].request, packet.id);
     assert_eq!(records[0].receipt.stamp_ms, Some(6_000.));
     assert_eq!(records[0].receipt.expiry_ms, Some(66_000.));
+    assert_eq!(records[0].time.raw_ms, START + 100.);
+    assert_eq!(records[0].time.protocol_ms, START + 100. + 5_000.);
     assert!(packet.headers.contains(&("signature", "applied".into())));
     assert!(engine.drain_actions().next().is_none());
     assert_eq!(engine.venue().observed.len(), 1);
+}
+
+#[test]
+fn managed_duplicate_claim_cannot_observe_a_second_release() {
+    let (mut engine, permit) = managed_ready(false);
+    assert!(matches!(
+        engine.claim_http(START + 100., permit),
+        Ok(Claim::Released(_))
+    ));
+    assert_eq!(engine.claim_http(START + 101., permit), Err(Error::Revoked));
+    assert_eq!(engine.venue().admissions, 1);
+    assert_eq!(engine.venue().observed.len(), 1);
+    assert_eq!(engine.venue().observed[0].request, permit.attempt().request);
 }
 
 #[test]
