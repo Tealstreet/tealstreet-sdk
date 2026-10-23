@@ -5645,41 +5645,6 @@ unchanged and denied cache hits publish nothing. No credentials or route are
 borrowed for these no-I/O branches. Private fills, user-info, cache-miss paging,
 setters and successful margin/position no-ops retain native dispatch and policy.
 
-## Caller command wait in the engine (#1945)
-
-The WASM host now adds the effective caller wait to every reply command's
-native envelope as `timeoutMs`. The effective wait is the per-call
-`options.timeoutMs` if given, else the configured `rustCommandTimeoutMs`, and
-it is the same validated number that arms the host's own timer. No-reply
-controls send no field.
-
-- **Receipt stamp.** The engine stamps one absolute deadline per external
-  receipt. Native hosts and envelopes without the field get the SDK default of
-  120000 ms, stamped at receipt. Held and deferred commands keep the receipt
-  they arrived with.
-- **Refusals.** A present but invalid `timeoutMs` (null, non-integer, zero,
-  negative or over 2147483647) is refused at decode. A non-finite clock is
-  refused by `handle_command`, with a `JsError` and no dispatch.
-- **Venue behaviour.** Nothing changes until a venue adopts
-  `Cx::command_wait`.
-
-Two separate events, which callers must not conflate:
-
-- **Caller abandonment.** The host timer rejects the promise with
-  `COMMAND_TIMEOUT`. The engine keeps any in-flight transport, and a late
-  native reply is dropped by the host.
-- **Engine-root expiry.** An adopting venue uses the `Remaining` wait as its
-  original Read root and stops issuing work at that same absolute deadline. A
-  Fresh entry that is already expired ends through
-  `reject_expired_command`: one typed Timeout terminal with zero HTTP, timer or
-  Store effects, `NotSent` for a mutation and no outcome for a Read. After
-  admission, expiry ends through the existing Context or Plan authority and
-  never claims `NotSent`.
-
-Raising a caller's timeout lengthens an adopting venue's root but never
-renews it. Plan consumers are not capped by the caller wait until the
-separate receipt-cap seam (#1949) lands.
-
 ### Lighter public ticker seed uses managed Background Read
 
 The public `/api/v1/exchangeStats` GET now requires prepare/bind/claim support in
@@ -5744,3 +5709,85 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
+
+## Exact background read delivery
+
+Adapters publishing a one-leg Background Read use
+`validate_background_read_http_delivery` synchronously in its matching managed
+HTTP callback, before retiring the Context or changing native/cache/Store state.
+Logical liveness alone does not prove that a different live Context belongs to
+that response. Command, Execution and Session owners cannot use this Background-only gate.
+
+Native response validity and publication freshness remain separate checks. A
+failure callback can have valid delivery identity without response data to
+publish. A refused gate publishes no replacement response and grants no command
+completion, retry or send authority. SDK/NX order-error handling and native result
+shapes are unchanged; adopting venue adapters retain their own caller contracts.
+## AsterDEX dispatch signing admission
+
+AsterDEX now signs only through the injected provider at dispatch
+([RUST_ASTER_SIGNER_ADMISSION.md](RUST_ASTER_SIGNER_ADMISSION.md), phases 2-3).
+Caller-visible changes:
+
+- **Setup carries the material.** `key`, `secret`, `auth.privateKey`,
+  `secondary_key` and `secondary_secret` reach the provider through the one-use
+  setup channel (raw WASM constructor argument 3, or native legacy setup). Generic
+  options and `exchange.options` keep only the public `auth.userAddress` /
+  `auth.signerAddress`. Native callers passing `asterdex.privateKey`,
+  `asterdex.readKey`, `asterdex.readSecret` or top-level key/secret beside opaque
+  `signing` refs are refused as invalid input.
+- **Setup resolves `apiVersion`.** TS and native setup resolve V1/V3 from the
+  material's shape and send it explicitly; the venue refuses a missing or
+  contradictory version instead of guessing. Keyless V3 callers should set
+  `extra.asterdexApiVersion`, since nothing inferred admits a keyless account.
+- **Encodings.** V3 wallet keys are trimmed hex, with an optional `0x`/`0X`;
+  V1 HMAC secrets stay byte-exact UTF-8. A whitespace-only key is absent.
+- **Read agent.** With an `auth.privateKey` wallet, the read agent presents its
+  own key and signs with the primary wallet's provider ref (one copy, one
+  revocation point), as before. Otherwise it signs with its own secret.
+- **Main-wallet hint.** The V1 "API Wallet keys require the Main Wallet Address"
+  refusal now happens at setup, with the same message.
+- **Read agent errors fail closed.** An empty read secret, or a V3 read secret
+  that is not hex, refuses setup instead of failing only the signed reads.
+- **`fetchAccount().userId`.** Without an `accountAlias`, V3 falls back to the
+  public signer address, as before. V1 previously fell back to the API key; it
+  now uses the trusted primary `localSigner.primary.stableId` (WEEX precedent)
+  and otherwise fails typed (`unsupported`). It is never the key and never
+  empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
+  Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
+  caller migration.
+
+## Caller command wait in the engine (#1945)
+
+The WASM host now adds the effective caller wait to every reply command's
+native envelope as `timeoutMs`. The effective wait is the per-call
+`options.timeoutMs` if given, else the configured `rustCommandTimeoutMs`, and
+it is the same validated number that arms the host's own timer. No-reply
+controls send no field.
+
+- **Receipt stamp.** The engine stamps one absolute deadline per external
+  receipt. Native hosts and envelopes without the field get the SDK default of
+  120000 ms, stamped at receipt. Held and deferred commands keep the receipt
+  they arrived with.
+- **Refusals.** A present but invalid `timeoutMs` (null, non-integer, zero,
+  negative or over 2147483647) is refused at decode. A non-finite clock is
+  refused by `handle_command`, with a `JsError` and no dispatch.
+- **Venue behaviour.** Nothing changes until a venue adopts
+  `Cx::command_wait`.
+
+Two separate events, which callers must not conflate:
+
+- **Caller abandonment.** The host timer rejects the promise with
+  `COMMAND_TIMEOUT`. The engine keeps any in-flight transport, and a late
+  native reply is dropped by the host.
+- **Engine-root expiry.** An adopting venue uses the `Remaining` wait as its
+  original Read root and stops issuing work at that same absolute deadline. A
+  Fresh entry that is already expired ends through
+  `reject_expired_command`: one typed Timeout terminal with zero HTTP, timer or
+  Store effects, `NotSent` for a mutation and no outcome for a Read. After
+  admission, expiry ends through the existing Context or Plan authority and
+  never claims `NotSent`.
+
+Raising a caller's timeout lengthens an adopting venue's root but never
+renews it. Plan consumers are not capped by the caller wait until the
+separate receipt-cap seam (#1949) lands.
