@@ -38,6 +38,9 @@ the current hosted and remote shape.
 2. **Setup: KeyEncoding::Hex accepts an optional `0x`/`0X` prefix** (agreed
    with claude-19pt8s). P6b `l1Wallet` and ApeX `zklinkSeed` rely on it
    instead of stripping per family.
+   - P8 ships recipe ids `asterdex.v3.1` (EIP-191 standard) and
+     `asterdex.code.1`. The keyless V3/Code refusal lifts per recipe id once
+     a session advertises it.
 3. **Identity mapping** (trusted setup, TS `localSignerSetup.ts` and native
    `prepare_local_signer_with_policy`):
    - V1: `credential` = API key, `signing` = HMAC secret (UTF-8).
@@ -45,24 +48,26 @@ the current hosted and remote shape.
      signer address); `signing` = wallet private key (`auth.privateKey` or
      `secret`), declared hex.
    - V3 secondary reproduces today's quirk exactly. Read requests sign with the
-     primary wallet key (`lib.rs:205-206`). The secondary slot therefore gets
-     `credential` = read key and `signing` = the primary wallet material
-     installed again under the secondary slot. Raw `read_secret` is used only
-     when no primary wallet key exists.
+     primary wallet key (`lib.rs:205-206`). The secondary identity therefore
+     has `credential` = read key and `signing` = the primary slot's signing ref
+     (the same `KeyRef`, not a second copy of the material). Raw `read_secret`
+     is installed only when no primary wallet key exists. If setup cannot
+     share a ref across slots, both copies are revoked together.
    - User and signer addresses are public config and stay in `Options`; they
      never enter the identity.
    - No `stable_id` is required.
 4. **Version resolution without secrets.** `sign::resolve_version` today looks
-   at secret presence. The venue receives a non-secret `signing_present` flag
-   (true when the primary identity exists), so resolution is unchanged and no
-   material is read.
+   at secret presence. The venue derives presence from the primary identity
+   itself (`Options.credentials.is_some()`, i.e. `Slots::has_primary`), so
+   there is one source and keyless remote identities still count. Resolution
+   is unchanged and no material is read.
 5. **Nonce key.** V3's venue sequence is per signer address (public), so the
    engine domain keys on `NonceKey::ethereum_address(signer)`: an engine
    `NonceDomain` `ASTERDEX_V3` (ProtocolMs x1000, `u64::MAX`). This corrects
    RUST_CREDENTIAL_SELECTION C3's "remote-signed families require stable_id"
    to "require a non-secret key: a stable id, or a public identifier when the
-   venue's own domain is public". The P5 "never an address" line in
-   RUST_SIGNER_NON_HMAC_MIGRATIONS goes to claude-19pt8s to reconcile. Until
+   venue's own domain is public". RUST_SIGNER_NON_HMAC_MIGRATIONS P5 is
+   reconciled in this PR (claude-19pt8s approved the wording). Until
    `DispatchContext::reserve_nonce` exists (after #1771), the recipe keeps
    `interim_nonce()`; no second allocator.
 6. **Ownership** (agreed 2026-10-23).
