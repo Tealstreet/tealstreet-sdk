@@ -6,7 +6,6 @@ use safe_cex_venue_bingx::{Bingx, Options};
 
 fn identity(slot: &str) -> Identity {
     Identity {
-        extra: Default::default(),
         credential: KeyRef(format!("ref:{slot}-credential")),
         signing: KeyRef(format!("ref:{slot}-signing")),
         passphrase: None,
