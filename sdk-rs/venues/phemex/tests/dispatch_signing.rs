@@ -460,6 +460,8 @@ fn refused_provider_controls_native_read_before_any_http() {
         })
         .collect();
     assert_eq!(failures.len(), 1);
+    // engine/src/signing.rs SignError::venue_error maps Refused to InvalidInput
+    // and NotSent; these are the shared projection, not fixture policy.
     assert_eq!(failures[0].kind, Some(ErrorKind::InvalidInput));
     assert_eq!(failures[0].outcome, Some(Outcome::NotSent));
 }
@@ -518,10 +520,58 @@ fn calibrated_expiry(offset: f64) {
     let mut e = engine(primary(false), Some(local), Some(NOW + offset));
     let r = physical(&ask(&mut e, NOW), "/g-accounts/accountPositions");
     assert_eq!(
-        r.headers[1].1,
-        native_sign::Credentials::expiry(NOW + offset).to_string(),
-        "signing uses calibrated protocol UTC, not raw scheduling time"
+        r.headers,
+        native_sign::Credentials {
+            key: "key".into(),
+            secret: "secret".into(),
+        }
+        .headers(
+            "/g-accounts/accountPositions",
+            "currency=USDT",
+            "",
+            NOW + offset
+        ),
+        "signature, expiry and header order use calibrated protocol UTC"
     );
+}
+fn deferred_rounded_expiry(offset: f64, expected_expiry: f64) {
+    let (parked, local) = parked(true);
+    let protocol = NOW + offset;
+    let mut e = engine(primary(false), Some(parked), Some(protocol));
+    let output = ask(&mut e, NOW);
+    let (attempt, work) = stage(&output);
+    let expiry = native_sign::Credentials::expiry(protocol);
+    assert_eq!(expiry as f64 * 1000., expected_expiry);
+    assert_eq!(work.receipt.expiry_ms, Some(expected_expiry));
+    let result = local.sign_ready(&work).unwrap();
+    e.handle(NOW + 5., Event::Signed { attempt, result });
+    let r = physical(&actions(&mut e, NOW + 5.), "/g-accounts/accountPositions");
+    assert_eq!(r.headers[1].1, expiry.to_string());
+    assert_eq!(
+        r.headers,
+        native_sign::Credentials {
+            key: "key".into(),
+            secret: "secret".into(),
+        }
+        .headers(
+            "/g-accounts/accountPositions",
+            "currency=USDT",
+            "",
+            protocol
+        )
+    );
+}
+#[test]
+fn deferred_dispatch_rounds_down_before_the_half_second() {
+    deferred_rounded_expiry(499., NOW + 60_000.);
+}
+#[test]
+fn deferred_dispatch_rounds_up_at_the_half_second() {
+    deferred_rounded_expiry(500., NOW + 61_000.);
+}
+#[test]
+fn deferred_dispatch_rounds_a_negative_fractional_calibration() {
+    deferred_rounded_expiry(-30_000.4, NOW + 30_000.);
 }
 #[test]
 fn positive_calibration_changes_only_protocol_expiry() {
