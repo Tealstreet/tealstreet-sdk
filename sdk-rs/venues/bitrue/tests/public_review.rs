@@ -76,9 +76,9 @@ fn boot() -> (Engine<Bitrue>, SocketId) {
 fn message(e: &mut Engine<Bitrue>, socket: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket, text });
 }
-fn candles(e: &mut Engine<Bitrue>, command: u32, to: Option<f64>) {
+fn candles(e: &mut Engine<Bitrue>, now: f64, command: u32, to: Option<f64>) {
     e.handle(
-        2.0,
+        now,
         Event::Command(Command::FetchCandles {
             command,
             symbol: SYMBOL.into(),
@@ -199,11 +199,11 @@ fn different_trade_limits_are_serialized_and_mismatched_reply_ids_are_ignored() 
 #[test]
 fn different_candle_windows_do_not_share_the_first_response() {
     let (mut e, socket) = boot();
-    candles(&mut e, 1, Some(1704067200000.0));
+    candles(&mut e, 2.0, 1, Some(1704067200000.0));
     let actions: Vec<_> = e.drain_actions().collect();
     let first = requests(&actions).remove(0);
     assert_eq!(first.params.end_idx.as_deref(), Some("1704067200"));
-    candles(&mut e, 2, Some(1704153600000.0));
+    candles(&mut e, 2.0, 2, Some(1704153600000.0));
     assert!(requests(&e.drain_actions().collect::<Vec<_>>()).is_empty());
     message(
         &mut e,
@@ -237,7 +237,7 @@ fn different_candle_windows_do_not_share_the_first_response() {
 #[test]
 fn timed_out_reads_close_the_socket_and_late_responses_cannot_resolve_a_new_read() {
     let (mut e, socket) = boot();
-    candles(&mut e, 1, None);
+    candles(&mut e, 2.0, 1, None);
     let actions: Vec<_> = e.drain_actions().collect();
     let timer: TimerId = actions
         .iter()
@@ -257,7 +257,7 @@ fn timed_out_reads_close_the_socket_and_late_responses_cannot_resolve_a_new_read
             .any(|a| matches!(a,Action::WsClose{socket:s}if *s==socket))
     );
     let next = reconnect(&mut e, actions, 5002.0);
-    candles(&mut e, 2, None);
+    candles(&mut e, 6003.0, 2, None);
     let sent: Vec<_> = e.drain_actions().collect();
     let cb = requests(&sent).remove(0).params.cb_id;
     message(
@@ -284,7 +284,7 @@ fn timed_out_reads_close_the_socket_and_late_responses_cannot_resolve_a_new_read
 #[test]
 fn rejected_candle_history_never_returns_an_authoritative_empty_list() {
     let (mut e, socket) = boot();
-    candles(&mut e, 1, None);
+    candles(&mut e, 2.0, 1, None);
     e.drain_actions().for_each(drop);
     message(
         &mut e,
@@ -302,7 +302,7 @@ fn malformed_candle_dates_reject_empty_and_mixed_history_before_window_filtering
     let invalid = CANDLE.replace("2024-01-01", "2024-02-30");
     for rows in [invalid.clone(), format!("{CANDLE},{invalid}")] {
         let (mut e, socket) = boot();
-        candles(&mut e, 1, Some(1704067260000.0));
+        candles(&mut e, 2.0, 1, Some(1704067260000.0));
         e.drain_actions().for_each(drop);
         message(
             &mut e,

@@ -13,6 +13,10 @@ use std::collections::{BTreeMap, HashMap};
 const INTX: &str = "https://api.international.coinbase.com/api/v1/instruments/";
 const WS: &str = "wss://advanced-trade-ws.coinbase.com";
 
+#[cfg(test)]
+#[path = "../tests/support/deferred_generation.rs"]
+mod deferred_generation_tests;
+
 pub enum Request {
     Instruments {
         markets: Vec<Market>,
@@ -816,7 +820,7 @@ impl Coinbase {
                 invalid,
                 initial,
             } => {
-                if invalid && markets.is_empty() {
+                if markets.is_empty() && (initial || invalid) {
                     self.public_failed(
                         cx,
                         Request::Instruments {
@@ -970,6 +974,21 @@ impl Coinbase {
                     self.public.seed_tickers.extend(tickers);
                     self.public.seeds_left = self.public.seeds_left.saturating_sub(1);
                     if self.public.seeds_left == 0 {
+                        if self.public.seed_markets.is_empty() {
+                            self.public_failed(
+                                cx,
+                                Request::Products {
+                                    kind,
+                                    generation,
+                                    cursors: vec![],
+                                    markets: vec![],
+                                    tickers: vec![],
+                                    invalid: true,
+                                },
+                                "Coinbase catalogue contains no supported markets",
+                            );
+                            return;
+                        }
                         self.public.seeding = false;
                         cx.store
                             .set_markets(std::mem::take(&mut self.public.seed_markets));
@@ -1068,8 +1087,16 @@ impl Coinbase {
         pending: Request,
         error: &str,
     ) {
+        if let Request::Products { generation, .. } = &pending
+            && *generation != self.public.generation
+        {
+            return;
+        }
+        let mut failures = vec![];
         match pending {
-            Request::Candles { command, .. } => cx.fail(command, error),
+            Request::Candles { command, .. } => {
+                failures.push((command, safe_cex_engine::VenueError::new(error)));
+            }
             Request::Daily {
                 symbol, generation, ..
             } => {
@@ -1084,6 +1111,20 @@ impl Coinbase {
                 }
             }
             pending => {
+                for deferred in std::mem::take(&mut self.public.deferred) {
+                    if let Command::FetchCandles { command, .. } = deferred {
+                        failures.push((
+                            command,
+                            safe_cex_engine::VenueError::new(
+                                "Coinbase public catalogue unavailable",
+                            )
+                            .kind(safe_cex_engine::ErrorKind::Internal)
+                            .venue_message(error),
+                        ));
+                    } else {
+                        self.public.deferred.push(deferred);
+                    }
+                }
                 let key = match pending {
                     Request::Products { kind, .. } => Some(kind),
                     _ => None,
@@ -1094,6 +1135,9 @@ impl Coinbase {
                 }
                 self.public.retry.failed(cx, key);
             }
+        }
+        for (command, error) in failures {
+            cx.fail(command, error);
         }
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
