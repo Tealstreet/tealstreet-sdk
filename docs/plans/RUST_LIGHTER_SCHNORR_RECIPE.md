@@ -32,22 +32,39 @@ stack after #1926 lands.
 `Algorithm::SchnorrDigest` means ECgFp5 Schnorr with Poseidon2 over
 Goldilocks, Lighter's scheme.
 
-- **Key:** the signing ref holds the 40-byte little-endian scalar.
-  - Setup decodes it as hex, with an optional `0x` (the shared `KeyEncoding::Hex`).
-  - A key whose public point is zero is refused at setup. That check moves out
-    of the venue.
-- **Payload:** the concatenated payload is `entropy(32) || input`, where
-  `input` is a non-empty multiple of 8 bytes. The engine draws `entropy` at
-  preparation (`DispatchContext::signing_bytes`), so the nonce is hedged and
-  reproducible from the same bytes. The provider adds no randomness of its own.
+- **Key:** the signing ref holds a 40-byte little-endian scalar, decoded as hex
+  with an optional `0x` (the shared `KeyEncoding::Hex`). It must be canonical
+  (below the group order) and nonzero.
+  - **Refused, never reduced.** Like `stark_digest`, the arm refuses a
+    non-canonical key, a zero key or a key whose public point is zero
+    (`InvalidRequest`, never a signature). Legacy reduces non-canonical limbs
+    Go-style; this stricter rule is a recorded behaviour change.
+  - **Who checks when.** In part 1 the provider arm refuses at sign time.
+    Part 3 adds the same refusal at setup for a ref declared
+    `signingAlgorithm: schnorrDigest` (#1963). Generic setup has no algorithm
+    for a ref before part 3.
+- **Payload:** the concatenated payload is `entropy(32) || input`.
+  - The provider uses exactly the first 32 bytes as nonce entropy, through
+    `lighter::hedged_nonce`, and the rest as the message.
+  - `input` is a non-empty multiple of 8 bytes. Each little-endian u64 word is
+    reduced mod p exactly as legacy and Go do, so a word at or above p is
+    neither refused nor treated differently from legacy. Pinned with
+    `go-wasm-noncanonical.json`.
+  - The engine draws fresh entropy (`DispatchContext::signing_bytes`) on every
+    preparation, including a re-preparation that keeps the #1866 transaction
+    nonce.
+  - No provider, local, host or remote, may substitute its own randomness.
 - **Result:** exactly **80 bytes**, `s || e`. `expected_result_lengths` moves
-  SchnorrDigest from the 64-byte group to its own 80-byte entry. This is a
-  contract change for a reserved variant with no callers, recorded in
+  SchnorrDigest from the 64-byte group to its own 80-byte entry. The width
+  change ships in part 1 together with the arm, so no build exists where a
+  provider answers 80 bytes while the engine expects 64. It is a contract
+  change for a reserved variant with no callers, recorded in
   RUST_CUTOVER_CALLERS.
 - **Provider arm:** `primitives::schnorr_digest(key, payload)` behind a new
-  crypto feature, `lighter-schnorr`. Disabled, it refuses as `Unsupported`,
-  like the other arms. It reuses `lighter::hedged_nonce` and `schnorr_sign`;
-  there is no second implementation.
+  crypto feature, `schnorr`, matching `ed25519`/`es256`/`secp256k1`/`stark`.
+  Disabled, it refuses as `Unsupported`, like the other arms. It reuses
+  `lighter::hedged_nonce` and `schnorr_sign`; there is no second
+  implementation.
 
 ## Parts
 
@@ -83,10 +100,14 @@ Goldilocks, Lighter's scheme.
 - `LocalSigner` gets a `PublicKey` arm (`lighter::public_key`), and
   `valid_public_value` a canonical, on-curve ECgFp5 check.
 
-**Part 4: remote recipe ids** (after #1926 lands)
-- `lighter.tx.1` and `lighter.auth.1` in `REMOTE_RECIPES`. Lighter has no
-  verification key, so P8 relies on venue rejection
-  (`signing_remote.rs:55`).
+**Part 4: remote recipe ids** (after #1926 and part 3 land)
+- `lighter.tx.1` and `lighter.auth.1` in `REMOTE_RECIPES`.
+- Per #1963's contract, a family that can verify before release must do so.
+  Part 3 gives Lighter a public key, so part 4 adds a shared
+  `lighter::verify(public, input, signature)` (Schnorr verify, same hash). It
+  is the P8 and host pre-release gate against the bound public key. Venue
+  rejection is not the gate.
+- If verify falls out of scope, part 4 stays held for claude-ddi2il.
 
 Venue admission (registry identity and custody, the Aster/Backpack pattern) is
 a separate later PR. RUST_SIGNER_NON_HMAC_MIGRATIONS row 11 (Lighter, owner
@@ -96,8 +117,12 @@ codex-zs5e83) is updated to point here once claude-ddi2il confirms ownership.
 
 - R1 (part 1): `LocalSigner` `SchnorrDigest` sign returns `Unsupported`. The
   test expects the legacy `hedged_sign_with_entropy` signature for the same
-  key, input and entropy, using the existing `go-wasm*.json` and
-  `venue-signing-preimages.json` vectors.
+  key, input and entropy, with the payload split as entropy (first 32 bytes)
+  then input, using the `go-wasm*.json` and `venue-signing-preimages.json`
+  vectors. It also covers:
+  - non-canonical input words reduced exactly as legacy
+    (`go-wasm-noncanonical.json`);
+  - non-canonical, zero and zero-point keys refused (`InvalidRequest`).
 - R2 (part 1): an 80-byte provider result is refused (`InvalidResult`) by the
   64-byte contract.
 - R3 (part 1): dispatch byte-equality. A Create, Cancel or Leverage
@@ -112,8 +137,8 @@ codex-zs5e83) is updated to point here once claude-ddi2il confirms ownership.
 - R5 (part 2): the auth token via `AuthRecipe` equals legacy `auth_token`
   bytes, for both HTTP and WS.
 - R6 (part 3): `PublicKey { SchnorrDigest }` returns `InvalidRequest` today.
-  The test expects an independent public-key vector, plus malformed-provider
-  refusals through `fetch_public`.
+  The test expects an independent public-key vector, malformed-provider
+  refusals through `fetch_public`, and the setup-time key refusal.
 
 ## Checker
 
