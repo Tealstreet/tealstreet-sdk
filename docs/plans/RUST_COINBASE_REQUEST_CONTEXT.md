@@ -146,3 +146,18 @@ Source SHA256: `6e2e13fab751a623e3364777378e3342a14bcbe4a5cb7d0b908630f9e6ae1432
 | `e81908cb0fae07346d55748a9e80db822d8af6006cc38fbc4aaaef11041c0283` | 1 | 1367 `trading_next` → WRITE | `self.request(cx, method, path, body, None, Pending::Trading(request))` |
 | `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa` | 1 | 1394 `trading_finish_error` → WRITE | `cx.fail(command, error)` |
 | `c6af5062b90ca20c0fe8e6184bfb2a01dae165494623878deef5314fbced6e8e` | 2 | 1471 `trading_response` → LEXICAL + WRITE; 1487 `trading_response` → LEXICAL + WRITE | `matches!(request.step, Step::Confirm { .. })` |
+
+
+## Catalogue failure containment before managed adoption
+
+Execution-group owner `claude-fe7lgm` reported a production bug (execution-group inventory section B, #1821): `public.deferred` keeps FetchCandles until catalogue success, while `public_failed` retries discovery without settling those callers. Verified against the immutable source: only `public_pending` drains the deferred queue, and it runs on success.
+
+Separate focused fix branch `fix/rust-coinbase-deferred-candles`: retain subscription commands for discovery retry, remove each deferred FetchCandles on catalogue failure and emit one typed Internal dependency-unavailable error with the original failure as native evidence. Use the existing public failure handler/completion site; add no sender, deadline, retry scheduler, status ladder or managed-pacing bypass. The existing frozen completion fingerprint remains unchanged; full managed command custody still requires coherent shared pacing and collision clearance.
+
+First commit regressions for catalogue transport failure, non-2xx and malformed/empty successful catalogue, multiple waiters and no duplicate terminal on later catalogue recovery. Then implement only `src/public.rs`, a dedicated `tests/deferred_candles.rs`, this appendix and caller notes. `lib.rs`/history capability work stays off-limits under #1799. Run Coinbase/Binance native suites, scoped fmt/strict Clippy, bans and unchanged ratchet controls; obtain source/adversarial, caller and full-map reviews. Architecture question: this repairs native deferred-queue failure handling and adopts existing error/completion types; shared custody/pacing remains with its owners.
+
+
+Failure-containment proof: `f1210ee4cd5` contains four original-source controls that compile and fail with zero terminals for queued callers. `fc6ba222247` adds supported Spot failure/empty recovery and a real native `private_ready` generation transition; the empty and stale cases reproduced the incremental gaps before correction. The test-only generation wrapper imports no credentials and exposes no production API. All six integration cases plus the stale-generation control pass after the fix. Source/caller/full-map reviews required empty aggregate validation and current-generation fencing; both corrections are incorporated. Coinbase inventory remains exactly 6 paths / 31 entries / 34 occurrences; no manifest or REST/lib source changes.
+
+
+Final local containment gates pass: full Coinbase/Binance native suites, strict all-target Clippy, formatting, bans and both request-context ratchet checks. Final source/adversarial, caller and full-map reviews are clean, architecture gate **No**. No relevant finding exists in the current audit/quality ledgers to strike; execution-group owner will link this fix from its section B. CI, actual landing integration/revert guard and overseer merge window remain required.
