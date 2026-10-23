@@ -1882,6 +1882,10 @@ fn metadata_read_started_during_any_pending_write_never_publishes() {
     for kind in 0..3 {
         for finish_before_data in [false, true] {
             let mut h = Harness::ready();
+            if kind == 2 {
+                h.engine.store_mut().set_positions(Vec::new());
+                h.engine.store_mut().set_orders(Vec::new());
+            }
             let before = h.engine.store().setting("BTCUSDT").unwrap();
             let (command, path) = match kind {
                 0 => (
