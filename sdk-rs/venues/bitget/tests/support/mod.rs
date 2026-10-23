@@ -84,8 +84,14 @@ impl Harness {
             self.event(Event::WsOpened { socket });
         }
     }
+    /// Releases managed HTTP through the engine's fixture handshake at `now`;
+    /// legacy actions pass through unchanged.
     pub fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now);
+        self.absorb(actions);
+    }
+    pub fn absorb(&mut self, actions: Vec<Action>) {
+        for action in actions {
             match action {
                 Action::ManagedHttp(_) => {
                     panic!("managed HTTP requires the prepared test-driver handshake")
