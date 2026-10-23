@@ -2727,3 +2727,11 @@ original BingX/WEEX copies erase capacity denial fields; those two native
 assertion REDs are retained for separate consumer adoption, not marked fixed by
 engine probes. No venue P0, private signer, Plan history or inventory-zero
 claim is closed by this library seam.
+
+## Selected root and physical page custody
+
+The shared selected-read module now couples one original caller-receipt Read
+root with immutable selected page children. Snapshot mismatch is rejected before
+shared root/leg delivery validation. Child construction cannot select a new key
+or renew the original root, and no per-venue expiry/finalizer is introduced.
+No venue inventory or Plan authority finding is closed by these engine controls.

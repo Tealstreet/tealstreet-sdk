@@ -5,11 +5,11 @@ claude-4yjlw0 and codex-ih35js. Plan baseline: actual
 `15bd7821b52e378a9e32a60ecb897275c52109a4`.
 Branch: `feat/rust-selected-read-root-legs`.
 
-This is a separate plan-first follow-up AFTER standalone #1962. Its reviewed
-source is `f1671230ce8`; its frozen actual-integrated head is
-`74d0fef3ff7255faa3bbb548d4e5c4a3fc13ed23`. Do not grow that head. The standalone is now actual9f405e55403. Local dependency ce54ab9357b is
-explicitly authorized; no mergeable PR until #1976 freezes. No native migration
-or inventory prune is claimed by this engine follow-up.
+This is a separate plan-first follow-up to actual #1962 (`9f405e55403`).
+The implementation composes actual landing `87bf458ba90` with the reviewed
+local #1976 pin `0a35dc34dee` (same runtime as cleared `ce54ab9357b`). Its
+registry re-integration is owned by fe7lgm; the final PR/CI waits for that pin.
+No venue issuer, Plan history or inventory prune is claimed here.
 
 ## Need and native boundary
 
@@ -44,20 +44,19 @@ public read through command_root(Err(CredentialUnavailable)) or LocalRefusal. Pu
 
 ## Dependencies and collision map
 
-- #1962 must land first; integrate its ACTUAL source before implementation.
-  Current open-PR map has 57 PRs and claims engine selected_read.rs and
-  engine/tests/selected_read.rs exclusively through frozen #1962. Both are held.
-  This phase creates only this plan and its shared README index row.
-- #1945 is reviewed/frozen at `15df705c0b5`. command_wait() is a caller observation,
+- #1962 is actual. The refreshed open-PR map has no other claim on
+  selected_read.rs or the isolated selected_read_legs.rs test path.
+  No other source file is changed by this follow-up.
+- #1945 is consumed through frozen #1976 and its reviewed prerequisite stack. command_wait() is a caller observation,
   not admission. Consumers obtain the genuine Fresh-entry wait before root
   creation: Remaining confirms live receipt custody; the shared root constructor captures its exact raw deadline; Expired goes to
   reject_expired_command(Read) with no admission; None grants no new authority.
   Missing/unavailable wait handling must follow the cause-aware core contract,
   not a guessed 120s default or native command-ID fallback.
-- claude-fe7lgm's SEPARATE #1945 follow-up owns shared Context Read-root expiry
-  and cause-aware wait refusal. No reviewed runtime pin is recorded yet. This
-  is an implementation/consumer gate: helper must not implement a deadline
-  ladder, timer, local expiry finalizer or inferred recovery cause to bypass it.
+- claude-fe7lgm owns #1976: engine root expiry and cause-aware refusal.
+  Its exact frozen `0a35dc34dee` is integrated locally. A new reviewed registry
+  composition after combo5a remains required before final integration and CI.
+  No helper deadline ladder, timer or local finalizer substitutes for it.
 - hcmq3f owns G2/G2c trusted subject/configuration snapshot provenance. A private
   immutable selection snapshot here preserves existing Context generation and
   refs; it cannot create missing trusted account-subject/retirement evidence.
@@ -68,10 +67,11 @@ public read through command_root(Err(CredentialUnavailable)) or LocalRefusal. Pu
   shared registry/lifecycle/entry/history sources or any consumer source in this
   slice. Shared docs retain incoming first and own appendix once.
 
-## Proposed types and signatures for review
+## Types and signatures
 
-These are a proposal, not exported/frozen APIs. New contract controls and exact
-signature review precede any runtime edit. Existing aliases refer to #1962.
+Constructor signature composition is CLEAR from uufub4 and 4yjlw0 on the
+reviewed #1976 API. New-contract controls precede the runtime commit. Existing
+aliases refer to actual #1962.
 
 ```rust
 pub struct ReadLegPolicy {
@@ -286,3 +286,29 @@ Runtime gate update: #1976 froze at0a35dc34dee and is genuinely integrated.
 A registry composition refresh after combo5a remains external work owned by
 fe7lgm. Local development is authorized on this pin; a mergeable PR must wait
 for the re-integrated reviewed pin and fresh final CI.
+
+## Executed local implementation evidence
+
+The implementation changes selected_read.rs only: one original root and opaque
+physical child wrapper retain a single Arc<SelectedRead>; both queue paths share
+one internal managed send and both command paths share one checked local refusal.
+No new engine owner map, scheduler, deadline parser, expiry or history finalizer.
+
+The frozen tests precede source in `05661958e9d` and `c87d4783c0f`; fixture
+corrections and exact shared refusal controls are in `f7e1a94fe32`.
+All 16 NEW-CONTRACT controls and all 16 standalone controls pass with and without
+http-plans. Four compile-fail API privacy doctests and scoped strict all-target
+Clippy pass. The test fixtures initially had compile and capability mistakes;
+those are corrected fixture failures, never claimed as original consumer REDs.
+The wire timeout may ceil milliseconds while the Context raw root cap stays exact.
+
+Coverage includes genuine initial and borrowed callbacks, native placement-ack
+release at a fractional expired receipt, capacity before missing-key diagnostics,
+tracked timer cleanup, root-relative page bounds, changed configured roles with
+retained selection, cross-engine equal numeric identities, discarded-page fresh
+requeue, stale attempt validation, pending refusal custody, provider failure,
+root done/fail during preparation, successful streamed row order and account
+evidence, staged-stream expiry, and accepted-prefix recovery after a live-root
+physical child timeout. These are engine fixtures; no native consumer migration
+or performance result is inferred. Unsigned walks and Plan/Slot history remain
+outside this selected wrapper. G2/G2c provenance remains separately gated.

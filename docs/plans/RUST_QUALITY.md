@@ -1337,3 +1337,12 @@ terminal under genuine local authority. Provider/prepare metadata and ordered
 recipe headers remain unchanged. Genuine engine controls cover capacity,
 duplicate entry, phase custody, expiry, retry, streaming and account evidence;
 native compatibility controls do not substitute for later venue adoption.
+
+## Selected multi-page Read contract controls
+
+New-contract Engine controls cover exact receipt bounds, distinct page legs,
+immutable selection, wrong-root/foreign-engine delivery, queue/provider refusal,
+discard/requeue, streamed order, stale staged rows, typed root retirement and
+physical-timeout recovery. Existing single-leg controls remain unchanged. API
+privacy doctests distinguish original roots from children without claiming that
+borrowed Contexts lose generic core authority. Native consumers remain separate.
