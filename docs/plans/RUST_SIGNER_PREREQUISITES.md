@@ -227,8 +227,9 @@ given identity:
   never sign to probe.
   - Local provider (`LocalSigner`, which role-binds only extra refs):
     - an ordinary installed ref is `Supported` for `HmacSha256`,
-      `HmacSha512` and `Sha256SecretSuffix`, and for each compiled #1844
-      arm (ed25519, ES256, secp256k1, Stark), which accept ordinary refs;
+      `HmacSha512` and `Sha256SecretSuffix`, and, once #1844 lands, for
+      its arms (ed25519, ES256, secp256k1, Stark), which accept ordinary
+      refs (before that they are `Unsupported`);
     - an extra ref is `Supported` only for its role's algorithm, when that
       crypto feature is compiled in (`ZkLinkContract` needs `zklink`);
     - every other combination, and any ref not installed, is `Unsupported`.
@@ -236,8 +237,9 @@ given identity:
     function gain a declared algorithm list at installation
     (`useExternalSigner(signer, { algorithms })`), validated with the rest of
     the host contract. Undeclared means `Unknown`. The list is per
-    algorithm, not per ref. The SDK's own WASM and native local setups
-    declare their compiled list, so local Amend keeps working on every host.
+    algorithm, not per ref. WASM and native local setups install the Rust
+    `LocalSigner` directly, so they need no list and local Amend keeps
+    working on every host.
   - `remoteSignerProvider` declares `hmacSha256` only, until P8 adds recipe
     ids. It also refuses secondary-slot HMAC at sign time, which a
     per-algorithm list cannot express. That is acceptable because the answer
@@ -246,7 +248,7 @@ given identity:
     an engine `Signer`, so it is out of scope here.
 - **Engine-held identities.** Trusted construction registers the slot to
   `Identity` map with the engine, next to `set_signer`
-  (`set_identities(Slots<Identity>)`, before startup, refs only). The venue
+  (`set_identities(signing::Identities)`, before startup, refs only). The venue
   keeps its own copy for signing; the registry passes the same values.
 - `Cx::can_sign(slot: CredentialSlot, needs: &[Need]) -> Result<(), SignError>`,
   where `Need` is `(KeyUse, Algorithm)` and `KeyUse` is `Signing` or
