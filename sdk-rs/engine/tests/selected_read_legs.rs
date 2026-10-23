@@ -99,6 +99,7 @@ struct Controls {
     stream: bool,
     delay: f64,
     from_start: bool,
+    terminal: Option<bool>,
     foreign_leg: Option<ReadLeg>,
 }
 struct Walk {
@@ -182,6 +183,9 @@ impl Probe {
         );
         if !hold {
             self.queue(cx, command);
+            if self.controls.lock().unwrap().terminal.is_some() {
+                self.park(cx, command);
+            }
         }
     }
     fn queue(&mut self, cx: &mut Cx<'_, Pending>, command: u32) {
@@ -376,7 +380,19 @@ impl Venue for Probe {
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(id) = self.wake.remove(&timer) {
-            self.queue(cx, id);
+            let terminal = self.controls.lock().unwrap().terminal;
+            if let Some(success) = terminal {
+                let walk = self.walks.remove(&id).unwrap();
+                if success {
+                    cx.done_context(walk.root.context(), "native local done".into())
+                        .unwrap();
+                } else {
+                    cx.fail_context(walk.root.context(), VenueError::new("native local fail"))
+                        .unwrap();
+                }
+            } else {
+                self.queue(cx, id);
+            }
         }
     }
     fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
@@ -832,4 +848,94 @@ fn new_contract_provider_refusal_keeps_original_error_and_root_only_terminal() {
         )
     );
     assert_eq!(o.lock().unwrap().finalizers, 0);
+}
+
+#[test]
+fn new_contract_root_done_or_fail_revokes_preparing_child_and_late_work() {
+    for success in [true, false] {
+        let (mut e, _, _) = engine(Controls {
+            terminal: Some(success),
+            delay: 1.,
+            ..Controls::default()
+        });
+        let actions = ask(&mut e, 7, 120_000);
+        let root_timer = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1. => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        let (prep, request, _) = preparation(actions);
+        e.handle(NOW + 1., Event::TimerFired { timer: root_timer });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(failed(&actions).len(), usize::from(!success));
+        e.http_prepared(
+            NOW + 2.,
+            prep,
+            Prepared {
+                id: 1,
+                expires_at: None,
+            },
+        );
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::Sign { .. } | Action::ManagedHttp(_)))
+        );
+        assert!(response(&mut e, request.id, NOW + 3., "late rows").is_empty());
+    }
+}
+
+#[test]
+fn new_contract_streamed_page_preserves_raw_order_and_selected_evidence_on_root_completion() {
+    let (mut e, o, _) = engine(Controls {
+        stream: true,
+        ..Controls::default()
+    });
+    let a = ask(&mut e, 7, 120_000);
+    let (request, _) = release(&mut e, a, NOW + 1.);
+    e.handle(
+        NOW + 2.,
+        Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        NOW + 2.,
+        Event::HttpChunk {
+            request: request.id,
+            data: br#"{"rows":[{"id":2},{"id":1}]}"#,
+        },
+    );
+    e.handle(
+        NOW + 2.,
+        Event::HttpEnd {
+            request: request.id,
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let rows = vec!["{\"id\":2}".to_string(), "{\"id\":1}".to_string()];
+    assert_eq!(o.lock().unwrap().staged, rows);
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{result,..}) if result==&encode(&rows).unwrap())));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::AccountAuth {
+            credential: CredentialSlot::Secondary,
+            scope: AccountReadScope::Balance,
+            outcome: AuthOutcome::Accepted
+        })
+    )));
+    assert_eq!(o.lock().unwrap().finalizers, 1);
 }
