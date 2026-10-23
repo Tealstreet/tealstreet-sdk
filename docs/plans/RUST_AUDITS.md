@@ -2284,6 +2284,35 @@ remain. This closure does not migrate signing, request ownership or classificati
 Architecture gate: No; existing native facts and shared startup publication are
 reused. Account/history ownership remains separate from #1793.
 
+## Phemex unsigned candle lifecycle authority
+
+~~An unsigned candle command bypasses prepared request ownership and can publish
+an expired result through numeric completion.~~ When both constructed credential
+containers are absent, the native adapter now consumes genuine engine command
+entry, managed HTTP and a Context-bearing continuation. Shared lifecycle fences
+route waiting, release and response delivery before result or pause effects;
+setup/network/deadline failures retain typed causes. Existing native codec and
+error handling remain shared with the signed branch. Optional primary/secondary
+signing stays on its existing path pending the signer/selection migration.
+No legacy-site removal is claimed: every old site still serves credentialed
+candles or another family, and incoming inventory remains exact. Architecture
+No: shared engine custody and lifecycle are consumed without another executor,
+classifier, retry timer or credential-selection policy. Claimed history files
+from #1790/#1795/#1796/#1797 remain excluded.
+
+## MEXC standalone book lifecycle adoption
+
+~~An unsigned book command bypasses prepared custody, so an expired response can
+publish success or apply a depth/account pause through numeric completion.~~
+The native adapter now borrows genuine command entry and carries its Context
+with captured scaling/limit through managed HTTP and typed completion. Shared
+lifecycle fences prevent stale decode/pause effects before native callbacks.
+The native snapshot decoder, totals-before-truncation, status/code510 codec and
+live cooldown remain unchanged. Exact pruning removes8 occurrences/7 entries;
+there is no signer migration, local timer/classifier, retry executor or numeric
+Context lookup. Architecture No: existing shared custody and lifecycle are
+consumed. The separate reviewed startup fix is retained as a stack dependency.
+
 ### Lighter cached reads: remove legacy numeric completion
 
 The cached FetchLeverage and FetchAccountTier branches consume shared initial
