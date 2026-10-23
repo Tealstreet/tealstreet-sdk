@@ -277,3 +277,114 @@ fn released_late_reply_cannot_complete_a_reused_numeric_command() {
     )));
     assert!(reply(&mut e, 21_004., &second).is_empty());
 }
+
+fn initial_refusal(actions: &[Action], owner: u32, kind: ErrorKind) {
+    let errors: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                assert_eq!(*command, owner);
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, Some(kind));
+    assert_eq!(
+        errors[0].outcome, None,
+        "an unissued read has no write outcome"
+    );
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Http(_)
+            | Action::ManagedHttp(_)
+            | Action::Sign { .. }
+            | Action::Notice(Notice::CommandDone { .. } | Notice::AccountAuth { .. })
+    )));
+}
+
+#[test]
+fn initial_invalid_clock_is_owned_by_engine_once_and_id_can_be_reused() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut e = engine();
+        command(&mut e, now, 20);
+        initial_refusal(
+            &e.drain_actions().collect::<Vec<_>>(),
+            20,
+            ErrorKind::InvalidInput,
+        );
+        command(&mut e, 1_000., 20);
+        let packet = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(packet) => Some(packet),
+                _ => None,
+            })
+            .unwrap();
+        let actions = reply(&mut e, 1_001., &packet);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 20, .. })))
+                .count(),
+            1
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        );
+    }
+}
+
+#[test]
+fn initial_owner_capacity_refusal_does_not_send_or_steal_an_existing_read() {
+    let mut e = engine();
+    let (first_token, first, _, _) = parked(&mut e, 1_000., 100);
+    for owner in 101..356 {
+        let _ = parked(&mut e, 1_000., owner);
+    }
+    command(&mut e, 1_000., 356);
+    initial_refusal(
+        &e.drain_actions().collect::<Vec<_>>(),
+        356,
+        ErrorKind::Internal,
+    );
+    assert!(e.http_preparation_pending(first_token));
+    e.http_prepared(
+        1_001.,
+        first_token,
+        Prepared {
+            id: first.id.0,
+            expires_at: None,
+        },
+    );
+    let permit = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        e.claim_http(1_002., permit),
+        Ok(Claim::Released(_))
+    ));
+    let actions = reply(&mut e, 1_003., &first);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 100, .. })))
+            .count(),
+        1
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+    );
+}
