@@ -580,3 +580,31 @@ unknown timers, manufacture completion or alter runtime order/deadlines to keep
 an old total. Public/public-review direct depth drains use prepared_actions at
 the actual event clock; shared support only where required. Ticker-only drivers,
 held candle/trading tests and production ticker logic remain unchanged.
+
+### Depth original RED and native implementation receipt
+
+Plan8b700d2ffc8 narrowed at caf6e4cf1b3, driver correction c7a1d352046; all three
+independent plan reviews CLEAN/architectureNo. Original RED362e8edb77f runs seven
+compiled assertion failures on actualdb32 legacy dispatch. Test correction
+6311e52cfe0 pins the existing native testnet REST host (testnet-api.lighter.xyz);
+the original managed-preparation/capacity RED assertions are unchanged. This is
+a fixture correction, not a new endpoint change. All seven controls now pass.
+
+Production changes only Pending::Depth, its single sender and its terminal
+cleanup. Issuance before the in-flight latch uses Background Read20s/Never/noauth;
+queue failure retires the exact returned handle. Success captures liveness and
+retires before native generation/revision early returns or unchanged RestDepth
+mapping; global failures retire before existing matching-generation cooldown.
+No command result, retry loop, row framework, signing or native ticker change.
+Scanner removes only18cd… once:43→42/lib3→2; catalog/ticker sites stay exact.
+
+Only public.rs and public-review.rs need driver adaptation: shared prepared_actions
+at each existing event clock exposes released depth HTTP while preserving every
+native assertion, including the old-failure no-new-request check. The actual
+six supervision tests pass unchanged for depth-only, so no timer assertion edit,
+shared support change or held fixture edit is needed. All33 focused tests across
+public/public-review/public_supervision/new depth controls pass. Dedicated tests
+cover exact four-deployment wire, preclaim fencing, parked/released original
+expiry and recovery, route/transport/malformed cleanup, resubscribed generation,
+WS revision precedence, capacity peer isolation and300 successful retirements.
+Full native/strict/ratchet/CI and independent source reviews remain final gates.

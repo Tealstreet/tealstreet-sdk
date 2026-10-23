@@ -2355,3 +2355,13 @@ revoked entries return without numeric fallback; cache data and native errors
 remain unchanged after admission. Exactly three lexical sites are removed:
 Lighter46→43, lib5→3, limits6→5. SetAccountTier's separate identical numeric fail
 fingerprint remains counted. No held trading or engine source is changed.
+
+### Lighter depth snapshot Context ownership
+
+The independent public REST depth sender consumes an engine Background Read
+Context and retires it on every success/failure, including stale subscription or
+WS-revision returns. Original deadline/release authority fences publication;
+matching-generation native cleanup cannot release a replacement's latch.
+Exactly one sender is removed (Lighter43→42, lib3→2). Ticker adoption is deferred
+because #1877 holds its interfering candle timer fixture; no timing/order or
+source-ownership workaround is introduced. No held signing/trading/test edits.

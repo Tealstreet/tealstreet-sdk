@@ -897,3 +897,16 @@ strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both request
 checks/14 controls. Actual e233cb05dfb is genuinely integrated; its incoming
 KuCoin/MEXC source and prunes are preserved. CI owns WASM/replay/size/timing;
 native success alone does not claim these broad gates or whole-venue closure.
+
+### Lighter depth Background Read controls
+
+Plan8b700d2ffc8/caf6e4cf1b3/c7a1d352046 precedes RED362e8edb77f (seven compiled
+assertion failures on native dispatch). Fixture correction6311e52cfe0 preserves
+the existing testnet REST host; all original admission assertions remain. All
+seven pass after managed adoption: exact aliases/networks, no preclaim publish,
+original deadline, strict transport/malformed cleanup, stale generation/revision,
+capacity isolation/recovery and300 retirements. All33 focused public/depth tests
+pass, with six original supervision tests and held candle fixtures unchanged.
+Unheld public drivers use shared prepared_actions at their existing event clocks,
+retaining every old data/error/continuity assertion. No local transport helper,
+retry policy or outcome mechanism is added; broad CI remains a separate gate.
