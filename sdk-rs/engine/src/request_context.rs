@@ -206,6 +206,15 @@ pub enum Error {
     RetryForbidden,
 }
 
+/// A first-command admission failure, distinct from an issued Context failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandEntryError {
+    /// The engine already published the exact unissued command's failure.
+    Rejected(Error),
+    /// No fresh genuine-command loan; this grants no terminal authority.
+    Revoked,
+}
+
 impl Context {
     pub fn new(
         owner: Owner,

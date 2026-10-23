@@ -818,6 +818,13 @@ impl std::fmt::Debug for Event<'_> {
     }
 }
 
+#[path = "request_context_entry.rs"]
+mod command_entry;
+
+#[cfg(test)]
+#[path = "request_context_entry_tests.rs"]
+mod command_entry_tests;
+
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
     pub now: f64,
@@ -1403,6 +1410,7 @@ struct Io<P> {
     // Typed cause of the HttpFailed being delivered: Network from the host,
     // Timeout when the engine expires a released request at its deadline.
     http_failure_kind: ErrorKind,
+    command_entry: Option<command_entry::Entry>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
@@ -1455,6 +1463,7 @@ impl<P> Default for Io<P> {
             request_contexts: Default::default(),
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
+            command_entry: None,
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: HashMap::new(),
@@ -1640,6 +1649,7 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
+        self.io.opaque_entry_activity();
         let action = Action::WsSend {
             socket,
             text: text.into(),
@@ -1659,6 +1669,7 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
+        self.io.opaque_entry_activity();
         for timer in self.io.signing.close_socket(socket) {
             if timer.0 != 0 {
                 self.io.actions.push(Action::ClearTimer { timer });
@@ -1730,6 +1741,7 @@ impl<P> Cx<'_, P> {
         payload: PayloadSignRequest,
         target: SignatureTarget,
     ) -> Result<(), P> {
+        self.io.opaque_entry_activity();
         let Some(index) = self
             .io
             .actions
@@ -1807,6 +1819,7 @@ impl<P> Cx<'_, P> {
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
         let attempt = self.io.signing.next_id();
         // Exhaustion is handled through the same asynchronous failure event.
@@ -2121,6 +2134,9 @@ impl<P> Cx<'_, P> {
         result: Result<String, VenueError>,
         authority: Option<&crate::request_context::Context>,
     ) -> Result<(), crate::request_context::Error> {
+        if authority.is_none() && !self.io.numeric_entry_completion_allowed(command) {
+            return Err(crate::request_context::Error::Revoked);
+        }
         let (success, error) = match result {
             Ok(result) => (Some(result), None),
             Err(error) => (None, Some(error)),
@@ -2173,6 +2189,7 @@ impl<P> Cx<'_, P> {
                 Notice::CommandFailed { command, error }
             }
         };
+        self.io.entry_completed(command);
         self.io.actions.push(Action::Notice(notice));
         Ok(())
     }
@@ -2794,6 +2811,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.assert_command_entry_safe();
         if self.public_feed_policy() == PublicFeedPolicy::Shared {
             Box::new(
                 self.shared_books
@@ -2814,6 +2832,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn venue(&self) -> &V {
+        self.assert_command_entry_safe();
         &self.venue
     }
 
@@ -2821,6 +2840,7 @@ impl<V: Venue> Engine<V> {
     /// books by default. Switching modes starts a fresh full-book baseline.
     #[cfg(feature = "book-deltas")]
     pub fn set_book_deltas(&mut self, enabled: bool) {
+        self.assert_command_entry_safe();
         if self.book_deltas != enabled {
             self.book_deltas = enabled;
             self.book_baselines.clear();
@@ -2853,6 +2873,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn capabilities(&self) -> Capabilities {
+        self.assert_command_entry_safe();
         self.venue.capabilities()
     }
 
@@ -3207,7 +3228,9 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Event::Command(Command::Venue { command, action }) => {
+                cx.io.begin_command_entry(Some(command));
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.end_command_entry();
             }
             Event::Command(Command::FetchAccount { command })
                 if self.venue.capabilities().account == AccountLookup::Unsupported =>
@@ -3285,7 +3308,9 @@ impl<V: Venue> Engine<V> {
                         return;
                     }
                 }
+                cx.io.begin_command_entry(command.completion_id());
                 self.venue.on_command(&mut cx, command);
+                cx.io.end_command_entry();
             }
         }
         self.finish_event_scope(now);
@@ -3590,10 +3615,18 @@ impl<V: Venue> Engine<V> {
     /// Hosts check this before starting any delayed primitive operation.
     /// A fatal allocator failure permanently retires this engine.
     pub fn failed(&self) -> bool {
-        self.io.next_id.failed() || self.io.signing.failed()
+        self.io.command_entry.is_some() || self.io.next_id.failed() || self.io.signing.failed()
+    }
+
+    fn assert_command_entry_safe(&self) {
+        assert!(
+            self.io.command_entry.is_none(),
+            "engine command callback did not return"
+        );
     }
 
     fn assert_live(&self) {
+        self.assert_command_entry_safe();
         assert!(!self.failed(), "engine resource identities exhausted");
     }
 
@@ -3797,6 +3830,7 @@ impl<V: Venue> Engine<V> {
 
     /// The venue's synchronized book for `symbol`, if any.
     pub fn book(&self, symbol: &str) -> Option<&Book> {
+        self.assert_command_entry_safe();
         if self.public_feed_policy() == PublicFeedPolicy::Shared {
             self.shared_books.get(symbol)
         } else {
