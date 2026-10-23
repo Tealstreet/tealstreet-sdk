@@ -4406,3 +4406,39 @@ adapters must finalize them through their existing native terminal callbacks.
 A `FetchCandles` command waiting for Coinbase public catalogue startup now fails once if its current catalogue fails. Its error has kind `internal`, message `Coinbase public catalogue unavailable`, the original discovery failure in `venueMessage`, and no financial outcome. Initial empty catalogues follow the existing discovery failure/backoff path; empty individual Products pages/families remain allowed until the complete aggregate is known. A stale Products generation cannot settle a current waiting command.
 
 Subscriptions remain queued in their original order and resume on catalogue recovery. Discovery retries and the shared native 334-ms REST pacing remain in place. Recovery does not replay rejected candle commands; callers may submit a fresh query. This containment uses the existing failure/completion path; managed request adoption remains a separate change.
+
+
+### ApeX Omni managed public candle reads
+
+`FetchCandles` uses one engine-owned public Read context. Route preparation,
+final claim, response processing and all retries share the original 20-second
+raw deadline from command admission. A response at or after that deadline cannot
+publish candle results or row warnings. Custom transports must implement managed
+prepare/bind/ready/dispatch; a request-only adapter fails explicitly rather than
+servicing the read through a fallback.
+
+The native retry budgets remain independent: up to three actual transport read
+retries and one signature-refusal resend, at most five physical attempts in
+combination. Every attempt passes managed preparation and final release admission.
+A route/preparation refusal retains its supplied typed error and does not enter
+the network retry loop. Transport exhaustion carries kind `network`; undecodable
+HTTP reply exhaustion retains the engine's `internal` kind. Original deadline
+expiry carries kind `timeout`. Context admission/retry failures use the
+shared engine classification. Initial pre-context refusal can still complete
+through the existing numeric error path; an issued owner always finalizes with
+its Context, without numeric fallback.
+
+Arguments, unsigned URL/body/headers, daily-end omission, sorted candle JSON,
+row-skipped messages, wholly invalid rejection and valid-empty success retain
+their native contract. Native API/row/envelope failures preserve the existing
+message-only public-read errors; they do not borrow mutation Unknown/Rejected
+outcomes from the private error codec. Worker/hosted callers must preserve typed
+preparation/network/internal/timeout failures and treat the rejected read as unavailable.
+Private reads/writes, history alternatives, discovery, local cached commands and
+capability defaults are separate from this candle migration. This behavior does
+not establish downstream deployment or live venue connectivity.
+
+The shared context-error converter's `notSent` describes the refused local
+operation only. It does not establish that earlier read attempts never reached
+the venue or that a whole multi-step command was unsent. Mutation journals
+retain their separate authoritative release/outcome aggregation.
