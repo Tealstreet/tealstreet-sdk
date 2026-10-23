@@ -37,14 +37,18 @@ the current hosted and remote shape.
    - Keyless V3/Code keeps today's TS venue until P8 ships recipe ids
      `asterdex.v3.1` (EIP-191) and `asterdex.code.1`. `runsOnRustEngine`
      excludes it, so nothing is refused and there is no regression.
-2. **Local material wins over remote (shared rule).** `selectDelegatedSigningMode`
-   chooses delegated mode only when no local signing material exists. This is
-   one rule for every family, not an Aster branch: Hyperliquid and Paradex
-   need the same.
-   - An asterdex account with `auth.privateKey` keeps `LocalSignerSetup` and
-     signs V3 locally at dispatch.
+2. **Remote policy is version-scoped; the shared selector is unchanged.**
+   RemoteSigner precedence (`RUST_SELECTED_SIGNER_MODE.md`,
+   `delegatedSignerSetup.ts:29-31`) stays exactly as it is for every family.
+   - The rules-derived remote policy for asterdex is enabled only when the
+     resolved version is V1.
+   - An asterdex account with V3 material (`auth.privateKey`) gets no
+     delegated policy. It takes `LocalSignerSetup` and signs V3 locally at
+     dispatch, mirroring today's exemption at `hostedSigningVenues.ts:15`.
    - `rust.keyless-remote-signing.test.ts:45` stays green and gains a
      dispatch-signed V3 assertion.
+   - Binance, Bybit, OKX and BingX selection is untouched. Their existing
+     selected-signer-mode tests stay the pin, and no family flips.
 3. **Setup: KeyEncoding::Hex accepts an optional `0x`/`0X` prefix** (agreed
    with claude-19pt8s). P6b `l1Wallet` and ApeX `zklinkSeed` rely on it. The
    `sign.rs:430-431` "strip 0x first" comment is updated.
@@ -58,7 +62,13 @@ the current hosted and remote shape.
      32-byte check move into setup validation (hex decoding enforces the
      length).
    - The venue never calls `Credentials::validate()` on material again.
-   - Keyless accounts state V3 with an explicit `apiVersion`.
+   - A keyless account is V3 when it has an explicit `apiVersion: 3`, or when
+     its public `userAddress` and `signerAddress` are both address-shaped
+     (today's `asterLocalAuth` inference). Otherwise it is V1.
+   - RUST_CUTOVER_CALLERS records that keyless V3 callers should set
+     `apiVersion`.
+   - The venue refuses a missing or contradictory version (typed, not sent)
+     instead of guessing.
 5. **Identity mapping** (setup, both TS and native):
    - V1: `credential` = API key (required), `signing` = HMAC secret (UTF-8).
    - V3: `credential` = `key` (required), `signing` = the wallet key
@@ -73,9 +83,18 @@ the current hosted and remote shape.
        never falls back to `secret`);
      - signer = `auth.signerAddress`, else the read key;
      - user = the primary user.
-   - The alias is a shared setup policy, `signing: requiredWithPrimaryFallback`
-     in `IdentitySetupPolicy` and TS setup, extending the passphrase
-     mechanism. It means one copy of the material and one zeroize point.
+   - The alias is set by the Aster setup mapping (TS and native), not by a
+     generic fallback rule. The passphrase fallback inherits only when the
+     secondary is absent, whereas Aster prefers the primary even when a read
+     secret is supplied. The provider supports it as a shared capability, a
+     secondary `signing` ref that names the primary's ref, so there is one
+     copy of the material and one zeroize point.
+     - Setup admits the alias only when both slots declare the same
+       algorithm role and encoding; otherwise it refuses. The alias stays
+       role-bound, like #1839 extras.
+     - Revoking either slot revokes the shared ref once.
+     - A read secret used instead is declared hex too.
+     - TS and native setup must agree; a golden test runs across both.
    - No `stable_id` is required.
    - `public_data_only` with a read key keeps signing GETs with the read
      identity (`lib.rs:193` is ungated today), stated in the family's
@@ -154,11 +173,13 @@ the current hosted and remote shape.
    families and `legacySigning.ts`, mirroring `registry/tests/hosted_signing.rs`
    and `rust.hosted-provider.wasm.test.ts` (R4).
 5. **Remote half (V1):**
-   - rules `remoteSigning {enabled, payloadSupported, payloadRestOnly,
-     protectedHeaders: []}`, matching Binance, since the API key header is
-     presented the same way;
+   - rules `remoteSigning {enabled, payloadSupported: false,
+     protectedHeaders: []}`, matching Binance's header handling. The
+     PayloadSigner lifecycle stays off until a PayloadSigner-only asterdex
+     test exists;
    - `remoteSignerProvider` hex;
-   - keyless V3/Code excluded per decision 1;
+   - the remote policy applies to V1 only, and keyless V3/Code is excluded per
+     decisions 1 and 2;
    - delegated V1 has no secondary (`withoutDelegatedSigning` strips it), so
      GETs use the primary; a test covers remote V1 with a read key supplied;
    - mirror `rust.delegated-provider.wasm.test.ts` and
