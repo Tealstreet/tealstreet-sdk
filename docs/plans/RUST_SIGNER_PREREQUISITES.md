@@ -296,9 +296,10 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
 
   The expected value is never replaced by the actual one. GRVT warns on a
   stale `signer_address` and continues, signing `Signature.s` with the
-  actual address (`trading.rs:784/987`). HL compares `key.or(user)` for the
-  perps notice, and spot requires `key` with case-insensitive equality,
-  deactivating before I/O on a mismatch.
+  actual address (`trading.rs:784/987`). HL `account_start` compares `key.or(user)`
+  and emits Warn/`CONFIG_INVALID`, then continues. Standalone private spot
+  requires `key` and emits Error/`AUTH_REJECTED`, then deactivates and
+  returns before discovery. Both comparisons are case-insensitive.
 - **Host and remote providers.** The value must be declared. Where the
   family's signature is recoverable (EIP-712/191 for Hyperliquid, TxFlow,
   GRVT and Polymarket), dispatch recovers the signer and compares it with
