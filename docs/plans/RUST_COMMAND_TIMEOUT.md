@@ -54,9 +54,16 @@ Revised after uufub4's API-fit review (2026-10-24).
      with a typed error and no dispatch. The public `handle` applies the same
      deadline check to its default stamp; on failure it dispatches unstamped,
      so the getter answers `None`.
-   - Internal re-dispatch (`handle_event` for held commands) stamps nothing.
-     It reuses the live stamp, so a deferred entry sees the remaining time
-     from the original receipt, default included.
+   - Internal re-dispatch stamps nothing. A held cancellation or deferred
+     cancel-all stores the exact receipt it arrived with and dispatches under
+     it. A deferred entry therefore sees the remaining time from its own
+     original receipt, default included, and never infers a receipt from the
+     command id.
+   - An engine refusal before the venue's entry (unsupported action, options,
+     order-lock refusal) runs inside that command's own entry. A duplicate
+     id's refusal therefore cannot clear the live command's stamp. An
+     asynchronous terminal outside any entry ends that id's live wait,
+     because host replies are keyed by id.
    - The stamp is keyed by command id with a receipt sequence, its exact
      receipt identity. A receipt whose id already has a live stamp (a
      duplicate live command) does not replace it. That entry has no stamp of
