@@ -21,6 +21,9 @@ mod replacement_tests;
 #[path = "request_context_read_delivery_tests.rs"]
 mod read_delivery_tests;
 
+#[path = "execution_registry.rs"]
+mod execution;
+
 struct CommandOwner {
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
@@ -64,6 +67,7 @@ pub(super) struct ContextRegistry {
     sessions: session::Sessions,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
+    executions: execution::Executions,
 }
 
 impl ContextRegistry {
@@ -147,6 +151,15 @@ impl ContextRegistry {
         if scope == Scope::Background && policy.operation == Operation::Mutation {
             return Err(Error::Invalid);
         }
+        // A member's only physical work is its execution's.
+        if matches!(scope, Scope::Command(id) if self.is_observer(id)) {
+            return Err(Error::Revoked);
+        }
+        if (scope == Scope::Execution)
+            != parent.is_some_and(|parent| matches!(parent.owner(), Owner::Execution { .. }))
+        {
+            return Err(Error::Invalid);
+        }
         if !now.is_finite() || policy.timeout_ms == 0 {
             return Err(Error::Invalid);
         }
@@ -181,6 +194,7 @@ impl ContextRegistry {
                 Scope::Background => Owner::Background {
                     generation: identity,
                 },
+                Scope::Execution => return Err(Error::Invalid),
             },
         };
         self.commit(owner, identity, policy, now, parent)
@@ -410,6 +424,7 @@ impl ContextRegistry {
                 if self.commands.get(&id).is_none_or(|owner| owner.generation != generation))
             || matches!(context.owner(), Owner::Session { generation }
                 if !self.sessions.live(generation))
+            || (matches!(context.owner(), Owner::Execution { .. }) && !self.execution_live(context))
         {
             return Err(Error::Revoked);
         }
@@ -444,6 +459,9 @@ impl ContextRegistry {
         if matches!(context.owner(), Owner::Session { .. }) {
             return self.sessions.register(context, request);
         }
+        if matches!(context.owner(), Owner::Execution { .. }) {
+            return self.execution_leg_issued(context);
+        }
         let owner = self.command_mut(context)?;
         let pending = owner.pending.checked_add(1).ok_or(Error::Capacity)?;
         if context.operation() == Operation::Mutation {
@@ -467,6 +485,10 @@ impl ContextRegistry {
     pub(super) fn retire_attempt(&mut self, context: &Context, request: RequestId) {
         if matches!(context.owner(), Owner::Session { .. }) {
             self.sessions.retire_attempt(context, request);
+            return;
+        }
+        if matches!(context.owner(), Owner::Execution { .. }) {
+            self.execution_leg_retired(context);
             return;
         }
         if let Ok(owner) = self.command_mut(context) {
@@ -644,6 +666,20 @@ impl ContextRegistry {
         delivery: Option<&Delivery>,
         authority: Option<&Context>,
     ) -> Result<(), Error> {
+        self.validate_completion_as(command, delivery, authority, false)
+    }
+
+    fn validate_completion_as(
+        &self,
+        command: CommandId,
+        delivery: Option<&Delivery>,
+        authority: Option<&Context>,
+        observer: bool,
+    ) -> Result<(), Error> {
+        // An execution observer is sealed only by its execution, never directly.
+        if observer != self.is_observer(command) || (observer && delivery.is_some()) {
+            return Err(Error::Revoked);
+        }
         // Managed completion always has explicit generation-bearing authority.
         // Numeric calls remain legacy-only; a live journal/managed delivery
         // cannot be finalized by that bridge.
@@ -697,6 +733,7 @@ impl ContextRegistry {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn seal(
         &mut self,
         command: CommandId,
@@ -704,8 +741,21 @@ impl ContextRegistry {
         authority: Option<&Context>,
         error: Option<VenueError>,
     ) -> Seal {
+        self.seal_as(command, delivery, authority, error, false)
+    }
+
+    /// `observer` seals an execution member through its own root, never
+    /// through a physical delivery.
+    pub(super) fn seal_as(
+        &mut self,
+        command: CommandId,
+        delivery: Option<&Delivery>,
+        authority: Option<&Context>,
+        error: Option<VenueError>,
+        observer: bool,
+    ) -> Seal {
         if self
-            .validate_completion(command, delivery, authority)
+            .validate_completion_as(command, delivery, authority, observer)
             .is_err()
         {
             return Seal::Stale;
@@ -737,6 +787,7 @@ impl ContextRegistry {
     }
 
     pub(super) fn finish(&mut self, command: CommandId) {
+        self.forget_observer(command);
         if let Some(owner) = self.commands.remove(&command) {
             self.contexts.retain(|_, context| {
                 context.owner()
@@ -799,6 +850,7 @@ impl<P> Cx<'_, P> {
                     Some(parent),
                 );
             }
+            Owner::Execution { .. } => Scope::Execution,
         };
         self.make_http_context(scope, policy, Some(parent))
     }
