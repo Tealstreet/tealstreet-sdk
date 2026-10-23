@@ -122,6 +122,7 @@ fn invalid_secondary_identity_is_rejected_even_without_a_primary_private_account
                 signing: KeyRef(String::new()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             }),
             ..Options::default()
         };
