@@ -37,11 +37,23 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
 1. **Request shape.** A new request type keeps `t` as the first JSON key, so
    the browser's `{"t":"sign-req"` fast path still sees it:
    `{t:'sign-req', d:{id, type:'op', v:2, exchangeName, accountName, op}}`.
-   - `op` = `{algorithm, slot: 'primary', key: 'signing' | ExtraKey, payload: base64, receipt}`.
-   - `payload` is the fully resolved exact message or digest. The server
-     resolves `bytes` and `credential` parts before sending. A `result` part
-     means a multi-operation batch, which the server sends as an ordered
-     `ops` array; each later operation names its `result` index and encoding.
+   - `op` = `{algorithm, slot: 'primary', key: 'signing' | ExtraKey, receipt, …}`.
+     What the op carries depends on the algorithm (see Security below):
+     - exact messages (`ed25519`, `es256`) carry the resolved message bytes;
+     - wallet and L2 algorithms (`secp256k1Digest`, `starkDigest`,
+       `zkLinkContract`) never carry a bare digest. They carry the
+       structured preimage: a family recipe id plus its canonical inputs,
+       such as the EIP-712 domain, type and message, or the action and nonce.
+   - **Credential interpolation.** The server interpolates only the
+     `publicCredential` of the same identity as the signing key, which it
+     already holds from init, as `remoteSignerProvider` enforces today. A
+     credential part naming a secret or extra ref is refused. Keyless
+     `Sha256` steps run server-side, and `Present` ops use init values.
+   - A `result` part means a multi-operation batch, which the server sends as
+     an ordered `ops` array; each later operation names its `result` index
+     and encoding.
+   - `accountName` is required for `op`, and the browser refuses to broadcast
+     an `op` to all accounts.
    - It never reuses `http` or `ws-auth`. An old browser would HMAC a reused
      type with `secret` and return a wrong signature.
 2. **Response shape.**
@@ -55,19 +67,32 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
      algorithm. Otherwise the Rust provider refuses before sending
      (`unsupported` / `notSent`). That refusal never reaches the wire, so it
      cannot feed the fatal streak.
-   - An old server drops the unknown field. An old browser never advertises,
-     so it never receives v2.
-4. **Browser executor.** The answer comes from the same owned local provider
-   that dispatch uses, never from TS venue classes.
+   - An old server forwards `signOps` into its `getInitFingerprint`
+     (stringified), so a change rebuilds the account. It does not act on it.
+     An old browser never advertises, so it never receives v2.
+   - Capability is captured per account at construction, never latched per
+     session.
+   - If init lacks the family's required algorithms, keyless construction is
+     refused, extending today's `rust.exchange.ts:826` refusal. The account
+     never runs half-broken with per-request refusals.
+   - Mobile WebView, CLI and custom-script sandbox clients never advertise,
+     so they are safe by construction.
+4. **Browser executor.** The answer comes from a local provider built from
+   the same trusted setup as the account's dispatch provider, never from TS
+   venue classes.
    - `RustEngineExchange.signOperation(op)` → WASM `hostedSigning({kind: 'op', …})`.
    - That extends `registry/src/hosted_signing.rs` `Input` with
      `Op {algorithm, key, payload}`. It is admitted only for the account's
      declared family recipes and slot.
    - It reuses `LocalSigner::sign_now`, including role binding of extra refs.
-   - The deadline cap is raised from the current 5 s to sit inside the
-     server's 15 s.
+   - **Deadlines.** Raise the browser cap from the current 5 s, keeping:
+     browser cap + round trip < the server engine's sign deadline < the 15 s
+     `SIGN_TIMEOUT_MS`. An abandoned wait must never reach the server-side
+     fatal timeout.
 5. **Algorithms.** `ed25519`, `es256`, `secp256k1Digest`, `starkDigest`,
-   `zkLinkContract`, and Lighter Schnorr after P3. Each family's adoption
+   `zkLinkContract` (after #1839/#1844 land), and Lighter Schnorr after P3.
+   - `Sha256SecretSuffix` (Bitunix) and `HmacSha512` (Kraken) have no remote
+     mapping yet, so keyless Rust Bitunix and Kraken stay unsupported. Each family's adoption
    enables only its own algorithms in `construction-rules.json`
    `remoteSigning`.
    - Coinbase's existing `coinbase-jwt` path stays for TS-hosted accounts
@@ -78,14 +103,36 @@ Sam decided both on 2026-10-23. This document is a plan; it changes no code.
      `ws-auth`.
    - No HMAC format, `extraData` or payloadSigner scheme changes.
 
+### Security: no blind wallet signing
+
+The browser today sees each HTTP request and its venue interceptor's rules,
+including Hyperliquid's refusal of fund-moving actions. HMAC API keys also
+carry venue permission scopes. Wallet and L2 keys do not:
+- a Hyperliquid main wallet can sign withdrawals and transfers;
+- Polymarket's L1 wallet holds USDC (permits and approvals);
+- Stark and zkLink keys can sign L2 transfers.
+
+A compromised server must not be able to obtain arbitrary digests:
+- For `secp256k1Digest`, `starkDigest` and `zkLinkContract` ops, the browser's
+  Rust family code recomputes the digest or contract bytes from the
+  structured preimage. It then applies a per-family content allowlist:
+  orders, cancels, leverage and margin, auth logins and ClobAuth only. It
+  refuses withdraw, transfer, approveAgent, permit, approval and vault moves.
+- Hyperliquid refuses remote ops unless the key is an approved agent.
+- Only exact-message algorithms (`ed25519`, `es256`) may stay opaque. They
+  carry the same API-key-scope trust as HMAC `ws-auth` today, and the browser
+  still checks the host and path in their preimage against the family's
+  venue.
+- Refusals are typed and never sign.
+
 ### tealstreet-next changes (for its owners; not made here)
 
 | Area | Change |
 | --- | --- |
 | `packages/safe-cex/src/types.ts` (copy) | `type: 'op'`, `v`, `op`/`ops`, `values` fields; consume the SDK release that adds them. |
-| `services/exchange-server/src/server.ts` | Accept and forward `signOps` in `InitPayload` and `getInitFingerprint`. Pass it to the Rust account construction as the session capability. |
+| `services/exchange-server/src/server.ts` | Accept `signOps` in `InitPayload` (already in the stringified `getInitFingerprint`). Pass it to Rust account construction as that account's capability. |
 | `services/exchange-server/src/remote-signer.ts` | No protocol change. Confirm v2 errors are counted like any `error`, and that refusals before sending never reach the wire. |
-| `apps/web/.../ExchangeServerWorker.ts` | Advertise `signOps` from the loaded SDK. Route `type: 'op'` to the signing exchange (`signingHost`), not to `handleSigningRequest`. |
+| `apps/web/.../ExchangeServerWorker.ts` | Advertise `signOps` from the loaded SDK. Route `type: 'op'` to the signing exchange (`signingHost`), not to `handleSigningRequest`. Refuse an `op` without `accountName`. |
 | `signingHost.ts` | Register accounts whose signing material lives in `key`, `auth` or `omniKeySeed` too. Answer `op` through `exchange.signOperation`. |
 | `exchangeAccountController.ts` | Add a third arm for `type: 'op'` on the main-thread path. |
 | Custom-script sandbox (`PostMessageRemoteSigner.ts`) | Unchanged. It may opt in later. |
@@ -130,9 +177,19 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      `apiKey → credential`, `secret → signing` (base64url, declared),
      `passphrase → passphrase`. It also names the non-secret fields to echo.
 3. **Response routing.**
-   - On a 2xx response the engine passes the body bytes straight to
-     `Signer::import(ImportRequest {slot, generation, spec, body})`. It never
-     calls `on_response` with the body.
+   - The managed entry and generation-liveness check runs first. A response
+     for a retired generation is zeroized and never imported.
+   - Otherwise, on a 2xx response the engine passes the body bytes straight
+     to `Signer::import(ImportRequest {slot, generation, spec, body})`.
+   - For import attempts only, `on_import` replaces `on_response`; transport
+     loss still goes to `on_request_failed`. The session plan
+     (RUST_BACKGROUND_SESSION.md, "no new callback") must be amended to say
+     so; this is coordinated with claude-55ao7t.
+   - Import responses skip unproven-HTTP evidence, reconciliation and
+     streaming. `request_streamed` is forbidden for imports.
+   - The import body buffer is zeroized after handoff and redacted from
+     Debug, request logs and verbose response streaming. The WASM path hands
+     over bytes, never a JS string, because JS strings cannot be wiped.
    - The provider parses, validates, decodes and installs refs bound to
      `(slot, session generation)`, and returns the ref names plus echoed
      non-secret fields. The engine then calls the venue's
@@ -141,16 +198,23 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      code are kept, and secret-shaped fields are never echoed.
 4. **Retirement hook.**
    - `Signer::drop_imported(slot, generation)` is called by
-     `retire_session` (claude-55ao7t) and on engine disposal.
+     `retire_session` (claude-55ao7t) and on engine disposal. It is
+     idempotent and fire-and-forget, and it runs again on re-open.
+   - Provider-issued ref names embed the generation. The engine checks it at
+     sign time, as does the provider.
    - Recipes that reference a retired ref fail with `Unavailable`, and the
      session core re-derives.
 5. **Provider surface.**
    - The local provider implements `import`.
    - Injected JS and Workers providers get an optional `import` callback; if
      it is absent, the import refuses `unsupported`.
-   - Keyless remote import is out of scope: hosted Polymarket stays
-     unsupported until P8 adds a remote L1 op. Its derived key would then live
-     on the device.
+   - **Hosted custody.** In hosted mode the server engine performs all HTTP,
+     so a server-executed derive would put the L2 secret in the server's
+     response body. That is forbidden. Hosted import needs device-side
+     execution of the derive request (a later P8 extension), or it is refused.
+     Until then hosted Polymarket stays unsupported.
+   - Injected JS and Workers providers implement `import` and `drop_imported`
+     together or not at all.
 6. **Credential conditions (claude-m26ps4, 2026-10-23).**
    - **Slot.** Import installs refs only for the slot whose L1 identity
      derived them (primary today). The derived refs form a session identity
@@ -194,6 +258,10 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      for signing/dispatch and m26ps4 sign-off for credential semantics.
    - claude-55ao7t calls the retirement hook from the session core.
    - codex-hcmq3f wires the Polymarket continuation.
+
+**Out of scope:** when no API key exists yet, Polymarket needs a create-api-key
+POST. That is a Mutation with different retry rules. Today's venue has no
+create fallback, and this plan adds none.
 
 **Proof:**
 - the venue never observes body, secret or passphrase bytes (a canary
