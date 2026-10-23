@@ -1290,8 +1290,17 @@ mod tests {
                 "12".repeat(32)
             ),
         );
-        // A V3 wallet key must never be offered to the hosted HMAC capture.
+        // A V3 wallet key must never be offered to the hosted HMAC capture,
+        // including when no apiVersion accompanies setup-held V3 material.
         assert!(v3.hosted_identity.is_none());
+        let unversioned = engine(
+            r#"{"applicationId":"0x2222222222222222222222222222222222222222","asterdex":{"signerAddress":"0x1111111111111111111111111111111111111111"}}"#,
+            &format!(
+                r#"{{"primary":{{"key":"0x1111111111111111111111111111111111111111","secret":"{}","secretEncoding":"hex"}}}}"#,
+                "12".repeat(32)
+            ),
+        );
+        assert!(unversioned.hosted_identity.is_none());
     }
 
     #[cfg(feature = "bybit")]

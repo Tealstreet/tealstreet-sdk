@@ -170,9 +170,19 @@ the current hosted and remote shape.
 ## As built: phase 4 (browser half, V1)
 
 - `registry/src/hosted_signing.rs` admits asterdex. The wasm host installs a
-  hosted identity only when `hosted_signing::admitted` holds, which for Aster
-  means the resolved version is V1, so a V3 wallet key never reaches the hosted
-  HMAC capture.
+  hosted identity only when `hosted_signing::admitted` holds. For Aster that
+  needs an explicit, setup-resolved `apiVersion: v1`, never one inferred from
+  options, because material held by setup is invisible there (claude-19pt8s's
+  blocker). So a V3 wallet key never reaches the hosted HMAC capture. Hosted
+  WsAuth is refused for Aster, which uses a listen key.
+- Follow-up, not in this PR: the gate lives at the wasm constructor, which is
+  the only `prepare` caller. The generic fix is key-usage tagging at setup (HMAC
+  versus wallet key, already known from the encoding), with the provider
+  refusing HMAC work on a wallet key. That would also cover future mixed-scheme
+  families.
+- The hosted stamp comes from the host's shared clock, not Aster's dedicated
+  virtual clock. The capture receipt is fenced to under 5 s, and a -1021 still
+  goes through the server's existing resync and retry.
 - `exchanges/asterdex/asterdex.signing.ts` now owns the V1 request primitives
   (public prefixes, query builder, signing-field stripping), which the TS venue
   imports. `createAsterDEXV1RequestInterceptor` reproduces the venue's V1

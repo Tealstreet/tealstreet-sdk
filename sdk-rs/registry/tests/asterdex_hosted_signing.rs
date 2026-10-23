@@ -70,11 +70,23 @@ fn only_resolved_v1_accounts_are_admitted_to_hosted_signing() {
     };
     assert!(admitted(r#"{"asterdex":{"apiVersion":"v1"}}"#));
     assert!(!admitted(r#"{"asterdex":{"apiVersion":"v3"}}"#));
-    // Without an explicit version, the material's shape decides, as at setup.
-    let v3 = format!(
-        r#"{{"key":"0x1111111111111111111111111111111111111111","secret":"{}","applicationId":"0x2222222222222222222222222222222222222222"}}"#,
-        "12".repeat(32)
-    );
-    assert!(!admitted(&v3));
-    assert!(admitted(r#"{"key":"api-key","secret":"api-secret"}"#));
+    // Only an explicit, setup-resolved V1 qualifies; inference cannot see
+    // material held by the provider setup.
+    assert!(!admitted(r#"{"key":"api-key","secret":"api-secret"}"#));
+    assert!(!admitted(
+        r#"{"applicationId":"0x2222222222222222222222222222222222222222","asterdex":{"signerAddress":"0x1111111111111111111111111111111111111111"}}"#
+    ));
+}
+
+#[test]
+fn ws_auth_is_refused_because_aster_uses_a_listen_key() {
+    let (_, ids) = fixture();
+    let input = Input::WsAuth {
+        to_sign: "GET/realtime1709209800000".into(),
+        output_format: hosted_signing::OutputFormat::Hex,
+    };
+    assert!(matches!(
+        hosted_signing::prepare("asterdex", &ids, input),
+        Err(safe_cex_engine::signing::SignError::InvalidRequest)
+    ));
 }

@@ -94,12 +94,15 @@ fn http_work(
 }
 
 /// Families with a hosted request codec. AsterDEX V3 signs with a wallet key,
-/// which must never become an HMAC key, so only resolved V1 accounts qualify.
+/// which must never become an HMAC key. Only an explicit setup-resolved V1
+/// qualifies: inference from options cannot see material held by the setup.
 pub fn admitted(venue: &str, options: &crate::EngineOptions) -> bool {
     let _ = options;
     match venue {
         #[cfg(feature = "asterdex")]
-        "asterdex" => options.aster_api_version() == safe_cex_venue_asterdex::sign::Version::V1,
+        "asterdex" => {
+            options.asterdex.api_version == Some(safe_cex_venue_asterdex::sign::Version::V1)
+        }
         _ => family(venue),
     }
 }
@@ -165,7 +168,8 @@ pub fn prepare(
             to_sign,
             output_format,
         } => {
-            if to_sign.is_empty() {
+            // AsterDEX authenticates its private socket with a listen key.
+            if to_sign.is_empty() || venue == "asterdex" {
                 return Err(SignError::InvalidRequest);
             }
             Ok((
