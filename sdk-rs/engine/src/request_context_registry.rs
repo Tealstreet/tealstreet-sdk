@@ -50,6 +50,9 @@ struct CommandOwner {
     intent: Option<crate::classify::Intent>,
     /// Engine-validated narrowing for individual legs (see `http_write_leg_intent`).
     leg_intents: Vec<(u64, crate::classify::Intent)>,
+    /// Some Context or declared policy of this owner named a credential; only
+    /// then can its auth-kind failure be credential-health evidence.
+    credentialed: bool,
 }
 
 enum CommandPhase {
@@ -254,6 +257,15 @@ impl ContextRegistry {
         *entry_owned = true;
     }
 
+    /// Whether this command's auth-kind failure is credential-health evidence:
+    /// a tracked owner only when a Context or declared policy named a
+    /// credential; an untracked (legacy) command keeps counting.
+    pub(in super::super) fn owner_credentialed(&self, command: CommandId) -> bool {
+        self.commands
+            .get(&command)
+            .is_none_or(|owner| owner.credentialed)
+    }
+
     fn issue(
         &mut self,
         identity: u64,
@@ -374,6 +386,7 @@ impl ContextRegistry {
                 .and_modify(|owner| {
                     owner.last_deadline = last_deadline;
                     owner.mutation_declared |= context.operation() == Operation::Mutation;
+                    owner.credentialed |= context.credential().is_some();
                 })
                 .or_insert(CommandOwner {
                     generation,
@@ -391,6 +404,7 @@ impl ContextRegistry {
                         .filter(|(command, _)| *command == id)
                         .map(|(_, intent)| intent),
                     leg_intents: Vec::new(),
+                    credentialed: context.credential().is_some(),
                 });
         }
         self.contexts.insert(identity, context.clone());
@@ -2039,7 +2053,9 @@ mod tests {
                     None => first,
                 };
                 // A credential-free route can still refuse with an auth kind.
-                let error = VenueError::new("route refused").kind(kind).venue_code("route");
+                let error = VenueError::new("route refused")
+                    .kind(kind)
+                    .venue_code("route");
                 cx.fail_context(&failed, error).unwrap();
                 assert_eq!(
                     cx.io.health.auth_failures, counted,

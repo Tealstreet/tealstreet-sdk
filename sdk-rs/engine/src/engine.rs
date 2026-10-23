@@ -2232,6 +2232,8 @@ impl<P> Cx<'_, P> {
                 Err(error)
             }
         };
+        // A credential-free route's auth-kind refusal is no credential evidence.
+        let credential_evidence = self.io.request_contexts.owner_credentialed(command);
         self.io.retire_http_command(command);
         if !self.io.request_contexts.finish(command) {
             self.io.http_owner_poison = true;
@@ -2255,7 +2257,9 @@ impl<P> Cx<'_, P> {
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
-                count_auth_failure(self.io, Some(&error));
+                if credential_evidence {
+                    count_auth_failure(self.io, Some(&error));
+                }
                 Notice::CommandFailed { command, error }
             }
         };
