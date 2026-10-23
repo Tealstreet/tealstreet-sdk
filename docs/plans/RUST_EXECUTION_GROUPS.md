@@ -222,7 +222,7 @@ own request, so there is no shared result. Failure fans out because the
 prerequisite failed. None is an execution group. Owner ruling (2026-10-23):
 Paradex, GRVT and BreakoutProp go to claude-55ao7t's background-session gate
 (#1815; gate API in #1842, stacked on #1832); the credential core (#1805) supplies only key/subject. AsterDex is
-clock-lane (codex-5c57jl) and Coinbase is with codex-hcmq3f (fix #1843). Reported hang risks: Coinbase drains deferred
+clock-lane (codex-5c57jl) and Coinbase is with codex-hcmq3f (fixed by #1843, landed `43c5d6152c3`). Reported hang risks: Coinbase drains deferred
 `FetchCandles` only on catalogue success (`public_pending`), never from
 `public_failed`; GRVT owners wait on a 5 s retry timer with no own deadline;
 Paradex owners are bounded only by the auth transport timeout. AsterDex is not
