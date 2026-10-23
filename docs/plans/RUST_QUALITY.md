@@ -1114,6 +1114,22 @@ managed candle owners. No marker or Store mutation is introduced. Exact inventor
 removes only two local done sites; native/strict checks and independent reviews
 are required on the committed source before merge readiness.
 
+## KuCoin local Read original-source controls
+
+Tests committed before production on frozen661427d10b3 produce ten assertion
+failures and six passing compatibility controls. Standalone failures show
+capacity/invalid-clock leverage mutation and saturated cached publication before
+adoption. Genuine256-owner saturation, fixed-clock recovery/reuse and duplicate
+command protection use real callbacks, not fabricated Context or HTTP authority.
+
+Compatibility controls preserve cache aliases/sentinels, full order results,
+constant leverage fields and unknown-symbol handling, successful setting no-ops
+and capability declarations. Private/pager requests preserve native URLs, headers
+and completion while all256 background roots can coexist without an added owner.
+No steady WS/ticker/book path changes; current post-#1888 CI must pass the
+shared speed gate and report the fresh KCS ratio. The1.20x figure remains a
+headroom target, not a merge gate, per the overseer clarification.
+
 ### Lighter ticker managed-entry controls
 
 Committed plan and six compiled assertion REDs precede managed ticker source.
