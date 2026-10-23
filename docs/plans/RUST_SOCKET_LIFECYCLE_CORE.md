@@ -803,3 +803,13 @@ already-required tree representation. Re-run both independent reviews, focused
 four-crate tests/strict/fmt/bans and fresh CI. All CPU objectives remain real
 failures until that CI passes. The frozen03006 evidence stays historical on any
 new source head; no artifact relabel or automatic retry is authorized here.
+
+The constant-time presence phase passes1,391 four-crate all-target controls,
+strict all-feature/all-target Clippy, fmt, bans and both final independent reviews.
+The two pre-source compatibility controls also pass on the old scan path. The
+ordered map uses a private lossless u64 key, preserving public SocketId traits.
+Exact-count controls independently sum queues across failed transactions,
+barriers, partial release, stale pops, reconnection, group double clear and
+inactive stop_all. Inactive stop_all retains its existing queue behavior rather
+than inventing cleanup; its count remains accurate. No measured CPU result is
+claimed for this checkpoint.

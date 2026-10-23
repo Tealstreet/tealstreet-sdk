@@ -6,7 +6,7 @@
 //! expiry result; this module does not implement a second clock/backoff loop.
 use crate::socket::{Config, Timeout};
 use crate::{ErrorKind, SocketChannel, SocketId, VenueError};
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 pub const MAX_FEEDS: usize = 512;
@@ -256,6 +256,12 @@ struct Interests {
     queue: VecDeque<QueuedBatch>,
 }
 impl Interests {
+    fn clear_queue(&mut self, pending_frames: &mut usize) {
+        *pending_frames = pending_frames
+            .checked_sub(self.queue.len())
+            .expect("owned queued subscription frames");
+        self.queue.clear();
+    }
     fn bytes(&self) -> usize {
         self.desired
             .values()
@@ -329,7 +335,8 @@ pub(crate) struct Lifecycle {
     feeds: Vec<Feed>,
     // Only live physical epochs. Central retirement removes entries before any
     // native invalidation/retry callback; size is bounded by registered feeds.
-    current_sockets: HashMap<SocketId, Epoch>,
+    current_sockets: BTreeMap<u64, Epoch>,
+    pending_frames: usize,
     external_queue_bytes: usize,
 }
 impl Lifecycle {
@@ -362,14 +369,12 @@ impl Lifecycle {
     }
     pub(crate) fn socket_epoch(&self, socket: SocketId) -> Option<Epoch> {
         self.current_sockets
-            .get(&socket)
+            .get(&socket.0)
             .copied()
             .filter(|epoch| self.current(*epoch))
     }
     pub(crate) fn has_pending_frames(&self) -> bool {
-        self.feeds
-            .iter()
-            .any(|feed| !feed.interests.queue.is_empty())
+        self.pending_frames != 0
     }
     pub(crate) fn has_batches(&self, feed: FeedId) -> bool {
         self.feeds
@@ -386,7 +391,7 @@ impl Lifecycle {
         f.stopped = true;
         f.phase = Phase::Quarantined;
         f.authenticated = false;
-        f.interests.queue.clear();
+        f.interests.clear_queue(&mut self.pending_frames);
         f.interests.released.clear();
         self.retire(feed)
     }
@@ -435,7 +440,7 @@ impl Lifecycle {
     }
     pub(crate) fn begin(&mut self, feed: FeedId, socket: SocketId) -> Result<Epoch, SocketError> {
         self.can_begin(feed)?;
-        if socket.0 == 0 || self.current_sockets.contains_key(&socket) {
+        if socket.0 == 0 || self.current_sockets.contains_key(&socket.0) {
             return Err(SocketError::NotPermitted);
         }
         let f = self.feeds.get_mut(feed.0).ok_or(SocketError::Stale)?;
@@ -451,8 +456,8 @@ impl Lifecycle {
         f.authenticated = false;
         f.pong_seen = false;
         f.interests.released.clear();
-        f.interests.queue.clear();
-        self.current_sockets.insert(socket, epoch);
+        f.interests.clear_queue(&mut self.pending_frames);
+        self.current_sockets.insert(socket.0, epoch);
         Ok(epoch)
     }
     pub(crate) fn can_begin(&self, feed: FeedId) -> Result<(), SocketError> {
@@ -598,12 +603,12 @@ impl Lifecycle {
     pub(crate) fn retire(&mut self, feed: FeedId) -> Option<Retirement> {
         let f = self.feeds.get_mut(feed.0)?;
         let epoch = f.epoch.take()?;
-        let removed = self.current_sockets.remove(&epoch.socket);
+        let removed = self.current_sockets.remove(&epoch.socket.0);
         debug_assert_eq!(removed, Some(epoch));
         f.retiring = Some(epoch);
         f.phase = Phase::Quarantined;
         f.authenticated = false;
-        f.interests.queue.clear();
+        f.interests.clear_queue(&mut self.pending_frames);
         f.interests.released.clear();
         Some(Retirement {
             epoch,
@@ -626,7 +631,7 @@ impl Lifecycle {
             f.stopped = true;
             f.phase = Phase::Quarantined;
             f.authenticated = false;
-            f.interests.queue.clear();
+            f.interests.clear_queue(&mut self.pending_frames);
             f.interests.released.clear();
         }
         feeds
@@ -908,6 +913,11 @@ impl Lifecycle {
                 return Err(SocketError::InvalidCoverage);
             }
         }
+        let pending_frames = self
+            .pending_frames
+            .checked_sub(f.interests.queue.len())
+            .and_then(|n| n.checked_add(queue.len()))
+            .ok_or(SocketError::Capacity)?;
         // No fallible work remains. Move prior release evidence instead of
         // cloning its map while old/new desired state and frames are live.
         let state = &mut self.feeds[feed.0].interests;
@@ -918,6 +928,7 @@ impl Lifecycle {
             revision,
             queue,
         };
+        self.pending_frames = pending_frames;
         Ok(revision)
     }
     /// Only the engine's final action handoff calls this, after all expiry and
@@ -928,6 +939,10 @@ impl Lifecycle {
             return None;
         }
         let queued = f.interests.queue.pop_front()?;
+        self.pending_frames = self
+            .pending_frames
+            .checked_sub(1)
+            .expect("owned queued subscription frame");
         if queued.revision != f.interests.revision {
             return None;
         }
@@ -1340,6 +1355,103 @@ mod tests {
                 Admission::Denied
             );
         }
+    }
+
+    fn assert_pending_frames(l: &Lifecycle, expected: usize) {
+        let actual: usize = l.feeds.iter().map(|f| f.interests.queue.len()).sum();
+        assert_eq!(actual, expected);
+        assert_eq!(l.pending_frames, actual);
+        assert_eq!(l.has_pending_frames(), expected != 0);
+    }
+
+    #[test]
+    fn pending_frame_count_preserves_refusal_and_double_clear_paths() {
+        let mut l = Lifecycle::default();
+        let mut p = policy(AuthMode::None);
+        p.permanent_refusal_group = Some(7);
+        let a = l.register(p).unwrap();
+        l.replace_interests(a, vec![interest("A")], encode).unwrap();
+        assert_pending_frames(&l, 1);
+        assert_eq!(l.begin(a, SocketId(0)), Err(SocketError::NotPermitted));
+        assert_pending_frames(&l, 1);
+        l.feeds[a.0].generation = u64::MAX;
+        assert_eq!(l.begin(a, SocketId(1)), Err(SocketError::Capacity));
+        assert_pending_frames(&l, 1);
+        l.feeds[a.0].generation = 0;
+        let e = l.begin(a, SocketId(1)).unwrap();
+        assert_pending_frames(&l, 0); // Successful begin clears staged old queue.
+        l.opened(e).unwrap();
+        l.replay_interests(a, encode).unwrap();
+        assert_pending_frames(&l, 1);
+        l.feeds[a.0].interests.queue.front_mut().unwrap().revision = 0;
+        assert_eq!(l.release_batch(e, false), None);
+        assert_pending_frames(&l, 0); // A discarded stale frame was still popped.
+        l.replay_interests(a, encode).unwrap();
+        assert_pending_frames(&l, 1);
+        assert_eq!(l.retire_group(7).len(), 1); // Group clear then retire clear.
+        assert_pending_frames(&l, 0);
+        l.stop_feed(a);
+        assert_pending_frames(&l, 0);
+    }
+
+    #[test]
+    fn pending_frames_follow_partial_release_failed_transaction_and_reconnect() {
+        let (mut l, a, ea) = started(AuthMode::None);
+        let b = l.register(policy(AuthMode::None)).unwrap();
+        let eb = l.begin(b, SocketId(2)).unwrap();
+        l.opened(eb).unwrap();
+        l.replace_interests(a, vec![interest("A"), interest("B")], encode)
+            .unwrap();
+        l.replace_interests(b, vec![interest("C")], encode).unwrap();
+        assert!(l.has_pending_frames());
+        assert_pending_frames(&l, 3);
+        assert_eq!(l.release_batch(ea, true), None);
+        assert_pending_frames(&l, 3);
+        assert!(l.has_pending_frames());
+        assert_eq!(l.release_batch(ea, false).as_deref(), Some("+:A"));
+        assert_pending_frames(&l, 2);
+        assert_eq!(
+            l.replace_interests(a, vec![interest("D")], |op, rows, emit| {
+                encode(op, rows, emit)?;
+                Err(SocketError::InvalidCoverage)
+            }),
+            Err(SocketError::InvalidCoverage)
+        );
+        assert_pending_frames(&l, 2);
+        assert_eq!(l.release_batch(ea, false).as_deref(), Some("+:B"));
+        assert_pending_frames(&l, 1); // Other feed still owns C.
+        l.retire(b).unwrap();
+        assert!(!l.has_pending_frames());
+        assert_pending_frames(&l, 0);
+        l.retired(eb, true).unwrap();
+        l.grant_retry(b).unwrap();
+        let fresh = l.begin(b, SocketId(3)).unwrap();
+        l.opened(fresh).unwrap();
+        l.replay_interests(b, encode).unwrap();
+        assert_pending_frames(&l, 1);
+        assert_eq!(l.release_batch(eb, false), None);
+        assert_pending_frames(&l, 1);
+        assert!(l.has_pending_frames());
+        assert_eq!(l.release_batch(fresh, false).as_deref(), Some("+:C"));
+        assert!(!l.has_pending_frames());
+        assert_pending_frames(&l, 0);
+    }
+
+    #[test]
+    fn inactive_pending_frames_keep_existing_stop_all_cleanup_contract() {
+        let mut l = Lifecycle::default();
+        let feed = l.register(policy(AuthMode::None)).unwrap();
+        l.replace_interests(feed, vec![interest("A")], encode)
+            .unwrap();
+        assert!(l.has_pending_frames());
+        assert_pending_frames(&l, 1);
+        assert!(l.stop_all().is_empty());
+        assert_pending_frames(&l, 1);
+        assert!(l.has_pending_frames()); // No active epoch existed to retire.
+        assert_eq!(l.begin(feed, SocketId(1)), Err(SocketError::NotPermitted));
+        l.stop_feed(feed); // Explicit feed stop also clears an inactive queue.
+        assert!(!l.has_pending_frames());
+        assert_pending_frames(&l, 0);
     }
 
     #[test]
