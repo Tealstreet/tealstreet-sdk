@@ -313,7 +313,8 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
     address (`trading.rs:784/987`), so a stale `signer_address` warns and
     continues.
   - Host/remote: the start checks use bound metadata, so HL spot still
-    deactivates at start on a mismatch or missing metadata. Per-dispatch
+    deactivates at start on a mismatch. Missing metadata never reaches
+    start, because setup refuses it first. Per-dispatch
     recovery is a second gate on the actual signature, not a replacement.
 - **Host and remote providers.** The value must be declared. Where the
   family's signature is recoverable (EIP-712/191 for Hyperliquid, TxFlow,
