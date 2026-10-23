@@ -270,7 +270,7 @@ fn independent_depth_queries_never_emit_auth_evidence_with_private_read_credenti
                     limit: Some(1),
                 }),
             );
-            let actions = drain(&mut e);
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.);
             let query = http(&actions, "contract/depth");
             assert!(auth(&actions).is_empty());
             assert!(query.headers.iter().all(|(name, _)| !matches!(

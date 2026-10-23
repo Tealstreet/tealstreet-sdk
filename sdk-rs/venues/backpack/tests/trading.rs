@@ -914,3 +914,77 @@ fn malformed_repair_replacement_quantity_does_not_remove_original_identity() {
             .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
     );
 }
+
+#[test]
+fn snapshot_accepted_pair_ack_invalidates_an_older_order_read() {
+    snapshot_pair_ack_fence(true, true);
+}
+
+#[test]
+fn snapshot_rejected_pair_identity_does_not_invalidate_an_order_read() {
+    snapshot_pair_ack_fence(false, true);
+}
+
+#[test]
+fn snapshot_accepted_pair_ack_fences_native_only_missing_stored_rows() {
+    snapshot_pair_ack_fence(true, false);
+}
+
+fn snapshot_pair_ack_fence(accepted: bool, stored: bool) {
+    let initial = if stored {
+        format!("[{ORDER}]")
+    } else {
+        "[]".into()
+    };
+    let (mut e, socket) = ready_orders(&initial);
+    e.store_mut()
+        .update_markets(|m| m.limits.amount.max = 1000.0);
+    e.handle(1000.0, Event::WsOpened { socket });
+    let old = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/orders"))
+        .unwrap();
+    place(
+        &mut e,
+        701,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140},{"symbol":"SOL_USDC_PERP","type":"limit","side":"sell","amount":1,"price":150}]"#,
+    );
+    let write = requests(&mut e).pop().unwrap();
+    assert_eq!(write.method, Method::Post);
+    assert!(write.url.ends_with("/orders"));
+    #[derive(serde::Deserialize)]
+    struct PairRow {
+        #[serde(rename = "clientId")]
+        client_id: u32,
+    }
+    let rows: Vec<PairRow> = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 2);
+    let response = format!(
+        r#"[{{"operation":"Ok","id":"new-bid","clientId":{},"symbol":"SOL_USDC_PERP","side":"Bid","orderType":"Limit"}},{{"operation":"Ok","id":"new-ask","clientId":{},"symbol":"SOL_USDC_PERP","side":"{}","orderType":"Limit"}}]"#,
+        rows[0].client_id,
+        rows[1].client_id,
+        if accepted { "Ask" } else { "Bid" }
+    );
+    reply(&mut e, &write, 200, &response);
+    if accepted {
+        assert_eq!(done(&mut e).unwrap(), r#"["new-bid","new-ask"]"#);
+    } else {
+        assert!(
+            done(&mut e)
+                .unwrap_err()
+                .contains("batch response identity")
+        );
+    }
+    assert_eq!(e.store().order("123").is_some(), stored);
+    let late = if stored {
+        "[]".into()
+    } else {
+        format!("[{ORDER}]")
+    };
+    reply(&mut e, &old, 200, &late);
+    assert_eq!(
+        e.store().order("123").is_some(),
+        if accepted { stored } else { !stored },
+        "only a fully accepted pair ACK supersedes the old read"
+    );
+}

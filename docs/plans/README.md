@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| WOO public steady CPU headroom | Implemented; public CI 1.78x | Before optimizing WOO public steady CPU or interpreting its named-WASM profile and local medians. | [RUST_WOO_PUBLIC_CPU.md](RUST_WOO_PUBLIC_CPU.md) |
 | AsterDEX RequestContext adoption | Pinned inventory and single-request-first plan | Before migrating Aster HTTP/completion, pruning its legacy inventory or touching files claimed by concurrent PRs. | [RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md) |
 | Phemex RequestContext adoption | Pinned inventory and adoption plan | Before Phemex HTTP/completion, repair mutations, signer projection or legacy inventory changes. | [RUST_PHEMEX_REQUEST_CONTEXT.md](RUST_PHEMEX_REQUEST_CONTEXT.md) |
 | MEXC RequestContext adoption | Pinned inventory and adoption plan | Before MEXC managed reads/writes, startup refusal repair or legacy inventory changes. | [RUST_MEXC_REQUEST_CONTEXT.md](RUST_MEXC_REQUEST_CONTEXT.md) |
@@ -230,3 +231,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | BloFin candle command entry | Focused adoption plan | Before removing the candle pre-Context numeric refusal or changing initial command ownership. | [RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md](RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md) |
 | WEEX dispatch signing | Planned after BingX/shared headers | Before WEEX private managed builders, provider custody or persisted identity cutover. | [RUST_WEEX_DISPATCH_SIGNER.md](RUST_WEEX_DISPATCH_SIGNER.md) |
 | TypeScript unit transport isolation | Test isolation | Before adding unit fixtures that could reach fetch, XHR or sockets. | [TS_UNIT_TRANSPORT_ISOLATION.md](TS_UNIT_TRANSPORT_ISOLATION.md) |
+| Paradex RequestContext adoption | Inventory and phased plan | Before migrating Paradex HTTP/completions; independent public GET book first, held account/trading and shared JWT/plan prerequisites. | [RUST_PARADEX_REQUEST_CONTEXT.md](RUST_PARADEX_REQUEST_CONTEXT.md) |
+| KuCoin Spot managed candles | Focused adoption plan | Before migrating unsigned candle HTTP and command completion to shared authority. | [RUST_KUCOIN_SPOT_CANDLE_CONTEXT.md](RUST_KUCOIN_SPOT_CANDLE_CONTEXT.md) |
