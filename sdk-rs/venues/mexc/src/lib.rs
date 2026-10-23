@@ -12,7 +12,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, PublicFeedPolicy, Response, SocketId,
@@ -1104,29 +1104,22 @@ impl Venue for MexcFutures {
                 limit,
             } => self.fetch_book(cx, command, &symbol, limit),
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 limit,
                 from_ms,
                 to_ms,
             } => {
-                let context = match cx.http_context(
-                    Scope::Command(command),
-                    Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    },
-                ) {
+                let context = match cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) {
                     Ok(context) => context,
-                    Err(reason) => {
-                        let error = reason.venue_error();
-                        cx.fail(command, error);
-                        return;
-                    }
+                    Err(_) => return,
                 };
                 let Some(i) = wire::interval(interval) else {
                     let _ = cx.fail_context(&context, interval.unsupported("MEXC"));

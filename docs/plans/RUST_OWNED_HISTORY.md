@@ -2126,6 +2126,68 @@ reviews are CLEAN, including the unchanged native bounded upsert and legacy
 signing-provenance seam. No local release WASM/full replay/size/timing run. Draft
 CI and actual queued shared dependencies still require fresh source-bound proof.
 
+## TxFlow indexed shared history owner (2026-10-23)
+
+Plan-first from actual #1784 `ab1ab29ec3d9babb684b4e9b8c35d7abcd538577`.
+The row-reporting owner confirmed history.rs/history tests clear; its #1785
+changes account.rs/account tests only. Scope is those two history files, exact
+legacy-site pruning, and OWNED_HISTORY/AUDITS/QUALITY/CALLERS additions. No lib,
+account, signing, native recipe, engine, host, SDK, workflow or dependency edits.
+
+Adopt one existing CursorHistory<Row> for native identity observations, staged
+rows, admission, accepted output and completion. Replace OffsetWalk with the
+same fixed native offset fact (0,2000,...,200000) expressed as opaque CursorWalk
+tokens and a 101-page cap per native stage. Keep stall-on-empty and no-new-row
+checks; a terminal empty page and terminal offset200000 complete, while a required
+next offset or repeated/no-progress page stays a strict rejection. Do not stop
+native pagination when the caller's output limit is reached: the existing query
+selects the newest sorted result after all native pages. No new pager policy/API.
+
+Keep one owner across fill-derived income, funding and ledger stages; restart
+only a completed stage, retaining native identities and accepted output while
+resetting offset/page history. Stage only normalized eligible output; native
+freshness still counts every new validated native identity before output filters.
+Validate HTTP/native envelope, required page and every row before page admission.
+An actual HTTP/transport/decode/row failure before accepted output rejects with
+Internal; after accepted output it returns only accepted prior pages/stages plus
+one command-scoped Warn incomplete marker. Failed-page prefixes and filtered-only
+pages never authorize recovery. Keep native stalled/offset safety and lost
+account-identity refusals strict. Pre-request unsupported-query/testnet/identity,
+range/limit/ambiguous-symbol and empty selected-ledger admission stay unchanged.
+Numeric Completion is explicit legacy authority, not managed Context fallback.
+
+Preserve exact info request kind/accountType/coin/time/deltaTypes/offset/limit
+encoding, testnet scope, archived/delisted/relisted symbol resolution, raw native
+identity namespaces, financial signs/units and millisecond-to-seconds rules,
+complete income stage selection, time and numeric-fill-ID tie sorts, global final
+truncation, and zero history Store writes. No REST public trades or lookup support
+is invented. Polymarket also has unsupported historical query axes rather than a
+native history implementation; leave its book/account methods outside this slice.
+
+Commit original-RED controls first for typed zero/filtered-only failure, later
+page-prefix rollback and mixed-income stage failure. Compatibility cases pin the
+2000-step offset sequence, no-new/empty strictness, terminal offset200000 versus
+required202000 refusal, stage reset with identities retained, full pagination
+before final top-limit sorting, native mappings and independent owner markers.
+Preserve all existing native contracts. Self-audit native builder/mapping and all map hashes, then run focused
+engine/TxFlow tests, strict Clippy/fmt/bans/checker (four Cargo jobs), independent
+review and a draft with same-PR caller behavior. Corepack Yarn only, never bare/
+Volta yarn, npx or account-policy; no local release WASM/full replay timing sweep.
+Respect #1792 then #1789 priority and integrate actual shared/build inputs before
+final CI/proof and an announced separate guard followed by separate merge.
+
+
+TxFlow local receipt: plan `f05f7057b8c` precedes regression-only `5c4ed45188a`.
+Original ten native controls pass; the four new original-source controls produce
+three assertion RED groups and one cap compatibility pass. Corrected seventeen
+history controls and 710 focused engine/TxFlow native tests pass. Strict
+Clippy/fmt/bans and thirteen request-context checker controls pass. Separate
+source/full-map and adversarial/test/caller self-audits are CLEAN. Native
+admission and mapping are unchanged apart from owner dedupe, and the info recipe
+is unchanged apart from the native offset accessor. Exact pure legacy prune is
+eleven to six, every other map/checker unchanged. Independent exact-head review,
+current CI and final shared-input artifact proof are tracked in the draft PR.
+
 
 ## Orderly shared history owner (2026-10-23)
 
