@@ -1243,6 +1243,7 @@ GTX maker order stays post-only when repriced instead of silently becoming GTC.
 The security live-smoke runner checks both writes on its scripted transport; its
 TS/Rust replay keeps time-in-force in strict write identity. This paired TS fix
 changes no order size, identity, cancellation or retry contract.
+
 ## Options (`binanceoptions`)
 
 Binance's European options on `eapi.binance.com`. They sit in their own options account, so they are a separate connection like `binancespot`. Same API key, same query-string HMAC (`signBinanceRequest`), so `payloadSigner` works. Every market is an option, and the metadata sets `optionsOnly` so exchange-mcp lists the option tools without `EXCHANGE_OPTIONS`.

@@ -220,7 +220,7 @@ test('private tape generator preserves all deployment origins and each mainnet b
     if(!record.requestBody)continue;
     for (const {type,info} of decodeLighterTransactions(record.requestBody)) {
      if(type!==14)continue;
-     assert.deepEqual(info.L2TxAttributes,testnet?undefined:{'1':name==='lighter'?158385:47296,'2':250,'3':0});
+     assert.deepEqual(info.L2TxAttributes,name==='lighter-robinhood'?{'1':47296,'2':250,'3':0}:testnet?undefined:{'1':158385,'2':250,'3':0});
     }
    }
   }
