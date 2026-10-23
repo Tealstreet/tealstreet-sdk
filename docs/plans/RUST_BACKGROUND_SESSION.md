@@ -260,9 +260,15 @@ and retries inherit it. There is no second Context field.
 - **Not included:** no inference from method, URL or body, and no fallback
   to Public when the private route is unavailable (preparation fails typed).
 - **Session callbacks settle waiters.** A session delivery is no command's
-  completion authority. Its callbacks may therefore complete the commands that
-  waited on the session: managed ones through their own Context, legacy ones
-  numerically (the GRVT login fails its `account.waiting` reads).
+  completion authority, so its callbacks settle like a delivery-less (socket
+  or timer) callback. They do not bind waiters to the session.
+  - They may complete commands through a live Context the venue holds, or
+    legacy commands numerically (the GRVT login fails its `account.waiting`
+    reads).
+  - Unchanged: issuer, generation and journal checks still apply, managed
+    writes are never sealed numerically, and a session Context is never
+    command authority.
+  - Background and execution deliveries keep the exact-owner check.
   - Before this, numeric and Context completion were refused inside any
     managed delivery. A failed managed login left its waiters hanging until
     their own deadlines.

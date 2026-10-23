@@ -1544,8 +1544,8 @@ impl<P> Default for Io<P> {
 }
 
 /// The delivery that may authorize or forbid a command's completion. A
-/// session delivery is no command's authority, so its callbacks can settle
-/// the commands that waited on the session.
+/// session delivery is no command's, so its callbacks settle like a
+/// delivery-less (socket or timer) callback; it does not bind waiters.
 fn completion_delivery(
     delivery: &Option<request_context_registry::Delivery>,
 ) -> Option<&request_context_registry::Delivery> {
