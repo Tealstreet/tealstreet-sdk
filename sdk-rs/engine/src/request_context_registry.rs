@@ -62,7 +62,7 @@ impl ContextRegistry {
 
     fn issue(
         &mut self,
-        identity: u32,
+        identity: u64,
         scope: Scope,
         policy: Policy,
         now: f64,
@@ -72,7 +72,7 @@ impl ContextRegistry {
 
     fn issue_bound(
         &mut self,
-        identity: u32,
+        identity: u64,
         scope: Scope,
         policy: Policy,
         now: f64,
@@ -103,7 +103,6 @@ impl ContextRegistry {
         {
             return Err(Error::State);
         }
-        let identity = u64::from(identity);
         let owner = match parent.map(Context::owner) {
             Some(owner) => owner,
             None => match scope {
@@ -171,7 +170,7 @@ impl ContextRegistry {
         &mut self,
         parent: &Context,
         delivery: &Delivery,
-        first: u32,
+        first: u64,
         policies: &[Policy],
         now: f64,
     ) -> Result<Vec<Context>, Error> {
@@ -188,7 +187,9 @@ impl ContextRegistry {
         }
         if policies.len() > CAPACITY
             || first == 0
-            || first.checked_add(policies.len() as u32).is_none()
+            || first
+                .checked_add(policies.len() as u64)
+                .is_none_or(|end| end > crate::resource_ids::MAX_RESOURCE_ID + 1)
             || self
                 .contexts
                 .values()
@@ -221,7 +222,7 @@ impl ContextRegistry {
             {
                 return Err(Error::Invalid);
             }
-            let leg = u64::from(first + index as u32);
+            let leg = first + index as u64;
             if self.contexts.contains_key(&leg) {
                 return Err(Error::Duplicate);
             }
@@ -559,15 +560,13 @@ impl<P> Cx<'_, P> {
             return Err(Error::Capacity);
         }
         let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?.clone();
-        let first = self.io.next_id;
-        let next = first
-            .checked_add(policies.len() as u32)
-            .ok_or(Error::Capacity)?;
-        if first == 0 {
-            return Err(Error::Capacity);
-        }
+        // Reserve the complete child range before registry/journal mutation.
         // Failed admission may leave monotonic gaps, never reused identities.
-        self.io.next_id = next;
+        let first = self
+            .io
+            .reserve_ids(policies.len() as u64)
+            .ok_or(Error::Capacity)?
+            .start;
         self.io
             .request_contexts
             .replace(parent, &delivery, first, policies, self.now)
@@ -596,7 +595,7 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         parent: Option<&Context>,
     ) -> Result<Context, Error> {
-        let identity = self.io.next();
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = if let Some(parent) = parent {
             self.io
                 .request_contexts
@@ -1101,7 +1100,9 @@ mod tests {
         assert!(registry.contexts.is_empty());
         assert!(registry.commands.is_empty());
         for id in 1..=CAPACITY as u32 {
-            registry.issue(id, Scope::Background, policy(), 0.).unwrap();
+            registry
+                .issue(u64::from(id), Scope::Background, policy(), 0.)
+                .unwrap();
         }
         assert_eq!(
             registry.issue(300, Scope::Command(7), policy(), 1.),
@@ -1200,7 +1201,7 @@ mod tests {
         let mut registry = ContextRegistry::default();
         for id in 1..=CAPACITY as u32 {
             registry
-                .issue(id, Scope::Command(id), policy(), 0.)
+                .issue(u64::from(id), Scope::Command(id), policy(), 0.)
                 .unwrap();
         }
         assert_eq!(registry.commands.len(), CAPACITY);
@@ -1353,12 +1354,12 @@ mod write_tests {
             retry: crate::request_context::RetryPolicy::DefinitiveRefusal,
         }
     }
-    fn delivery(context: &Context, id: u32) -> Delivery {
+    fn delivery(context: &Context, id: u64) -> Delivery {
         Delivery {
             context: context.clone(),
             attempt: Attempt {
                 request: RequestId(id),
-                generation: u64::from(id),
+                generation: id,
             },
         }
     }
@@ -1897,7 +1898,7 @@ mod write_tests {
         let mut registry = ContextRegistry::default();
         for id in 1..=CAPACITY as u32 {
             registry
-                .issue(id, Scope::Command(id), policy(), 0.)
+                .issue(u64::from(id), Scope::Command(id), policy(), 0.)
                 .unwrap();
         }
         assert_eq!(registry.commands.len(), CAPACITY);
