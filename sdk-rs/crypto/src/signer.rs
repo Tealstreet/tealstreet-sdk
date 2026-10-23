@@ -767,6 +767,8 @@ mod tests {
             ("utf8", secret.to_owned()),
             ("base64", base64.clone()),
             ("hex", crate::hex(secret.as_bytes())),
+            ("hex", format!("0x{}", crate::hex(secret.as_bytes()))),
+            ("hex", format!("0X{}", crate::hex(secret.as_bytes()).to_uppercase())),
             ("pem", pem("PRIVATE KEY", &base64)),
         ] {
             let (signer, identities) = LocalSigner::from_json(
@@ -894,6 +896,9 @@ mod tests {
             ("base64", "not base64!".to_owned()),
             ("hex", "123".to_owned()),
             ("hex", "0g".to_owned()),
+            ("hex", "0x123".to_owned()),
+            ("hex", "0x0x00".to_owned()),
+            ("hex", "x00".to_owned()),
             (
                 "pem",
                 pem("PRIVATE KEY", "AQ==").replace("END PRIVATE KEY", "END EC PRIVATE KEY"),
