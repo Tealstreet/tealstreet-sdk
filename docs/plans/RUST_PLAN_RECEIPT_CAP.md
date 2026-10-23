@@ -35,8 +35,8 @@ An opaque Plan/Slot never becomes an original Read root.
 
 ## Proposed small API and scope
 
-Preferred shape, subject to both API reviewers: an explicit receipt-capped
-Read preflight entry operation (provisional name
+API shape cleared by uufub4 at `a2795215932`, pending fe7's receipt-fit review:
+an explicit receipt-capped Read preflight entry operation (provisional name
 `begin_preflight_with_command_wait(policy)`) returning the existing opaque
 `Preflight`. It shares the existing genuine-entry transaction and issuer. It
 accepts no numeric command id, public deadline, duration, caller bool or
@@ -55,13 +55,14 @@ For command-owned Read Plans it applies the retained cap before any reservation
 or irreversible transition. This first slice excludes execution-owned planned
 groups and mutation Plans: their founder/observer lifetime and write journal
 contracts require separate composition decisions. Reject a capped preflight on
-those unsupported admission routes before consuming it or allocating a group.
+those unsupported admission routes atomically before consuming the preflight,
+changing its phase, reserving credit or allocating a group.
 Existing mutation and uncapped planned-execution contracts remain unchanged.
 
-Scope choice is explicit: these exclusions and the opt-in entry operation need
-uufub4/fe7 approval before source, rather than accidentally changing all existing
-Plan deadlines. If the owners require a universal cap instead, revise this plan
-and its caller inventory before implementation.
+The explicit opt-in mode is preferred over automatic changes to every Read
+Plan. Native-only existing admission remains unchanged, with no uncapped
+fallback on a failed receipt capture. Exact signatures and receipt-fit clearance
+remain gates before source.
 
 ## Capture and retained custody
 
@@ -156,6 +157,17 @@ New-mode controls after implementation:
 
 No tests or runtime adoption are claimed in this plan checkpoint. Exact missing
 receipt/expiry error projection and refusal accounting are API-review gates.
+
+## API-fit receipt
+
+uufub4 cleared the plan at `a2795215932`: one existing issuer and
+`admit_plan_owned`, private receipt cap captured in genuine entry and retained
+by issuer/generation, raw deadline minimized with checked native geometry, and
+atomic refusal of capped mutation/execution routes. Expired or sub-millisecond
+caps yield typed Read Timeout while preserving valid preflight failure custody;
+they add no timer or transport rights. This is API-fit clearance only. Source
+still waits for frozen #1945 and fe7's receipt-fit review; runtime/source review
+remains separate.
 
 ## Files, reviews and gates
 
