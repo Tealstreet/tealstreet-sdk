@@ -5037,3 +5037,40 @@ income, pre-request admission, signing/credential selection and rate-pause
 behavior retain their existing contracts. This owner uses legacy numeric
 completion; it does not establish managed request or NX runtime adoption.
 [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## WOO shared history owner and native continuations
+
+WOO fills (v3 and legacy alternatives), closed orders, income and public trades
+share one engine history owner. A terminal HTTP/transport/decode or malformed-page
+failure rejects with `Internal` if no eligible output was previously admitted.
+A later failure returns only admitted rows, preceded by one Warn
+`history.incomplete` event whose `fields.command` identifies the read. Failed
+response prefixes and rows removed by query filters do not authorize recovery.
+Read failures gain no write outcome. The shared callback combines transport and
+decode failures, so `Internal` is the fallback classification rather than a
+network-only claim.
+
+A validated mixed page keeps its immediate per-page `row.skipped` Warn with the
+existing message and timing. It also records missing coverage in the history
+owner; terminal delivery emits one command-scoped incomplete marker, preserving
+the first gap even if subsequent pages succeed. Entirely malformed pages are
+failures, never accepted empty pages. Public trades remain one response: they
+have no earlier page to recover, although a mixed snapshot can carry coverage.
+Callers must correlate the coverage marker before consuming the result, treat
+its rows as incomplete, and handle typed rejection as unavailable history.
+
+Native census/metadata, no-progress, complete-income row-budget, range truncation
+and global 1000-attempt refusals remain strict, with no result or coverage marker.
+A terminal response at attempt 1000 succeeds; a required attempt 1001 is refused
+before sending. The one budget spans symbol alternatives, failed/empty attempts,
+legacy pages and v3 windows. Ledger continuations keep the shared 6000-ms spacing;
+resuming a timer does not consume another attempt.
+
+Unsupported client-ID lookup, pre-request admission and consuming signed-request
+setup refusal keep their legacy behavior, including unclassified setup errors.
+Native endpoints, query/header/signature bytes, symbol alternatives and fallback
+order, defaults/filters, identity and money precision, row shapes, descending
+time/id sort and final limits are preserved. History never publishes live Store
+rows or returns the live cache as complete history. This adoption retains legacy
+numeric completion and does not establish managed requests or NX runtime
+integration. [Scope and controls](RUST_OWNED_HISTORY.md).
