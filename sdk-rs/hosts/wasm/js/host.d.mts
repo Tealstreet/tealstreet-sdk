@@ -320,7 +320,7 @@ export type EntropyProvider = (length: number) => Uint8Array;
 
 export interface CommandOptions {
   /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
-   * Host metadata: never sent to the native engine or venue. */
+   * The effective wait also enters the engine as receipt metadata; never the venue. */
   timeoutMs?: number;
   /** Command-bound events while this request remains pending, including synchronous
    * dispatch. Internal fields.command is unchanged; routing hosts translate it.
