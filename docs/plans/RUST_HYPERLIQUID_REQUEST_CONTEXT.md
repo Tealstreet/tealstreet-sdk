@@ -614,3 +614,37 @@ errors. Typed History route/transport failures and derived positions are named.
 Frozen #1945 448567a690c is genuinely integrated at57f9e380dd9, with README and
 CALLERS incoming-first keep-both resolutions only; ce54 source remains the locally
 authorized reviewed API, pending its eventual frozen/actual integration.
+
+## Original-control checkpoint
+
+Test-only04e6ee356ad adds sixteen real-engine controls without venue production,
+existing-fixture, checker or manifest edits. On the composed reviewed core with
+frozen #1945, all sixteen compile and execute: eleven intended assertion REDs,
+five working native passes, zero ignored. The REDs expose legacy physical sends,
+missing caller-root timers/refusals, expiry publication and absent root-capped
+children. Positives pin vault subject and exact JSON POST/headers, accepted-only
+owned partial recovery, strict first-page failure, native income gross-PnL/rebate
+split and host invalid-clock refusal. Scoped test-target strict Clippy and crate
+rustfmt pass. The initial formatting diff was corrected before this checkpoint.
+
+An attempted native leg-timer lookup was an invalid setup assumption: native
+legacy HTTP has no engine leg timer. That failed precondition is excluded from
+the qualifying count. Its replacement uses genuine host HttpFailed and the root
+sweep in either order. Full engine leg-timer/root-timer interleavings, forced
+child-capacity refusal, Account FIFO cleanup/progress, and typed public Auth*
+metadata/isolation remain required adoption controls, not completed proof here.
+
+Independent source/adversarial, caller and exact-map reviews are CLEAR for the
+corrected plan and exact new target. Their reviews are read-only; execution is
+this lane's evidence. Architecture gate No. Current actual landing7eed6dc1b009
+is genuinely integrated ate8baa42338c, with only CALLERS incoming-first plus the
+shared seam sections once. Hyperliquid production, the new target and shared core
+remain byte-exact to the qualifying pre-integration composition. Both full
+request-context checks now pass, including all15 checker controls, without a
+Hyperliquid prune. This resolves the earlier stale-base provenance failures.
+
+The branch remains plan plus original REDs; no managed-history, green CI or READY
+claim. Local development may consume reviewed ce54 under the overseer's explicit
+rule. Before a mergeable PR or readiness claim, integrate fe7lgm's frozen
+root-expiry/public-refusal pin, then the actual landings and fresh CI. No landing
+merge without an explicit window.
