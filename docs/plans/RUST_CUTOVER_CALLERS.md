@@ -4602,6 +4602,30 @@ Supported `FetchCandles` now enters through genuine engine Read admission before
 
 This outcome change applies only to initial admission. Issued reads retain their original twenty-second root, up to four total transport attempts, exact query and response validation, typed preparation/HTTP failure handling and native exhausted-read warning. Native pair mapping, interval/since encoding, ignored limit/to_ms and cursor, whole-response rejection, sorted and empty results remain as in the managed OHLC entry above. Unsupported interval remains the separate native preflight. SDK worker/hosted error receivers consume the existing kind/message fields and do not need a financial outcome for a Read; no upstream deployment is claimed.
 
+
+### Orderly candle initial command admission
+
+Both bounded-history and current-candle `FetchCandles` enter genuine engine Read admission before managed preparation. This supersedes the phase-one initial numeric-refusal exception: a rejected initial admission emits one engine-owned typed failure (`invalidInput` for a non-finite event clock, `internal` for capacity), without a financial outcome or new HTTP/preparation/deadline timer. Rejected and revoked entries return without numeric completion; a parked command retains its owner, and a rejected caller may reuse its command ID after admission becomes available.
+
+The outcome change is limited to initial admission. Both issued endpoints keep the original twenty-second root, zero automatic retries, exact delivery and typed contextual errors. Native symbol/interval/range preflight, future-empty result, URL/query encoding, filtering, limit, sorting, row/envelope validation and cached account identity remain unchanged. SDK worker/hosted error receivers use the existing Read kind/message fields without requiring a financial outcome. This slice closes no private error-classification row and claims no upstream deployment.
+
+
+### ApeX Omni engine-owned initial candle admission
+
+Initial managed candle work uses the shared genuine command-entry API. This
+supersedes the initial pre-context numeric-refusal exception in the earlier
+ApeX candle appendix: a refused entry is completed once by the engine, with
+`invalidInput` for an invalid clock or `internal` for capacity, and no financial
+outcome for this Read. Rejection creates no timer, HTTP preparation or owner;
+the command ID can be submitted again, while existing parked owners retain
+their authority. A revoked entry grants no completion rights and emits no new
+terminal. Custom hosts must preserve these typed failures without adding a
+numeric completion or automatic resubmission.
+
+The original 20-second root, independent retry budgets, exact response fence,
+query/result codec and native unsupported-interval preflight remain. Admission
+of a fresh command grants no additional rights to later retries or callbacks.
+
 ## BloFin candle command admission
 
 FetchCandles admits its original Read owner through the shared genuine command
