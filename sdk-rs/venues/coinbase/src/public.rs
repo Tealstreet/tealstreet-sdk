@@ -13,6 +13,10 @@ use std::collections::{BTreeMap, HashMap};
 const INTX: &str = "https://api.international.coinbase.com/api/v1/instruments/";
 const WS: &str = "wss://advanced-trade-ws.coinbase.com";
 
+#[cfg(test)]
+#[path = "../tests/support/deferred_generation.rs"]
+mod deferred_generation_tests;
+
 pub enum Request {
     Instruments {
         markets: Vec<Market>,

@@ -7,10 +7,12 @@ fn fail_catalogue(mode: u8) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: mode >= 4,
             ..Default::default()
         })
         .unwrap(),
     );
+    let symbol = if mode >= 4 { "BTC-USD" } else { "BTC-PERP-INTX" };
     engine.start(0.);
     let catalogue = engine
         .drain_actions()
@@ -24,7 +26,7 @@ fn fail_catalogue(mode: u8) {
             10.,
             Event::Command(Command::FetchCandles {
                 command,
-                symbol: "BTC-PERP-INTX".into(),
+                symbol: symbol.into(),
                 interval: Interval::M1,
                 limit: Some(1),
                 from_ms: None,
@@ -35,7 +37,7 @@ fn fail_catalogue(mode: u8) {
     engine.handle(
         10.,
         Event::Command(Command::SubscribeOrderBook {
-            symbol: "BTC-PERP-INTX".into(),
+            symbol: symbol.into(),
         }),
     );
     assert!(!engine.drain_actions().any(|action| matches!(
@@ -43,7 +45,8 @@ fn fail_catalogue(mode: u8) {
         Action::Http(_) | Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
     )));
     let (status, body) = match mode {
-        1 => (503, "{}"),
+        1 | 4 => (503, "{}"),
+        5 => (200, r#"{"products":[],"pagination":{"has_next":false}}"#),
         2 => (200, "[]"),
         _ => (200, "not-json"),
     };
@@ -122,7 +125,7 @@ fn fail_catalogue(mode: u8) {
             response: Response {
                 status: 200,
                 headers: "",
-                body: support::INSTRUMENTS,
+                body: if mode >= 4 { r#"{"products":[{"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"1","price_percentage_change_24h":"0"}],"pagination":{"has_next":false}}"# } else { support::INSTRUMENTS },
             },
         },
     );
@@ -172,3 +175,8 @@ fn empty_catalogue_settles_deferred_candles_once() {
 fn malformed_catalogue_settles_deferred_candles_once() {
     fail_catalogue(3);
 }
+
+#[test]
+fn spot_product_failure_settles_deferred_candles_once() { fail_catalogue(4); }
+#[test]
+fn empty_spot_catalogue_settles_deferred_candles_once() { fail_catalogue(5); }
