@@ -44,14 +44,13 @@ payloadSigner contract in [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md).
   Pem (`crypto/src/signer/key_material.rs`).
 - **Engine policy:** `RequestContext` already owns `RetryPolicy` and `Pacing`
   (`engine/src/request_context.rs:91-130`).
-- **Remote wire:**
-  - The HTTP half-2 wire carries a generic unsigned config and the signed
-    reply, so it does not depend on the algorithm.
-  - WS `outputFormat` is a fixed TS list (`types.ts:1310`).
-  - payloadSigner schemes cover only `hmac-sha256` and `stark`.
-- **What this plan therefore needs:** most families here need shared provider
-  work before their family PR. That work goes into the one provider choke
-  point, never into a venue.
+- **Remote wire:** half 2 (keyless `remoteSigner`) does not re-run HTTP
+  config signing. Per RUST_HOSTED_SIGNER_BRIDGE.md it carries exact preimages
+  in the existing ws-auth envelope. That envelope signs only the HMAC-family
+  `outputFormat`s: `hex`, `base64`, `hex-base64`, `apexomni-base64` and
+  `bitunix-double-sha256`. `kraken-challenge` and `coinbase-jwt` fail in the
+  base signer (`base.ts:2357-2372`). payloadSigner covers only `hmac-sha256`
+  and `stark`.
 
 ## Inventory
 
@@ -182,18 +181,25 @@ No family source edit depends on an unlanded prerequisite.
   `hosted_signing` adapter (half 1, browser `signHttpRequest`/`signWsAuth`)
   and keyless `remoteSigner` admission (half 2). Each migrated family gets
   one positive test per half; no TS venue classes.
-- **P8. Remote wire formats.** HTTP half 2 is algorithm-agnostic. The fixed
-  lists of WS `outputFormat`s and payloadSigner schemes do not cover:
-  - Ed25519 WS auth (Orderly, Backpack);
-  - EIP-712 / secp256k1;
-  - zkLink;
+- **P8. Remote wire formats.** No half-2 shape exists today for:
+  - Ed25519 (Orderly, Backpack; REST and WS);
+  - ES256/EdDSA JWT (Coinbase REST; `coinbase-jwt` builds a whole WS JWT and
+    the base signer refuses it);
+  - secp256k1 digests (Aster V3/Code, Hyperliquid, TxFlow, GRVT,
+    Polymarket);
+  - zkLink (ApeX orders);
   - Lighter Schnorr.
 
-  Extending them is a cross-repo wire change: it needs owner approval and
-  NX coordination before any family that needs it claims half 2. Per family:
-  - **Half 2 possible on today's wire:** ApeX REST and the `apexomni-base64`
-    WS format, Bitunix, Crypto.com, Coinbase (`coinbase-jwt`) and Aster V1.
-  - **Waiting on P8:** the rest.
+  Adding formats to the envelope or payloadSigner schemes is a cross-repo wire
+  change that needs owner approval and NX coordination. Until it lands, such
+  a family's keyless half 2 stays an explicit typed refusal, never a TS
+  fallback.
+
+  Half 2 possible on today's wire:
+  - Bitunix (`bitunix-double-sha256`);
+  - Crypto.com, Aster V1 (`hex`);
+  - ApeX REST and WS login (`apexomni-base64`);
+  - Paradex (payloadSigner `stark`).
 
 ## Family order (ranked by what blocks RequestContext lanes)
 
@@ -231,16 +237,16 @@ V1-only Aster PR) before its migrated construction path is enabled.
 
 | # | Family | Waiting lane | Needs | Receipt (stamp / expiry) | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 1 | ApeX Omni | codex-hcmq3f | P0, P1, P3 zkLink, P7 | wire or legacy-second stamp; none | Shared PR first: P0 seed slot, P1 base64-text transform and `ZkLinkContract`. The family PR moves REST, WS login and zkLink to release, signing each lot or leg. Keep legacy timestamp/body quirks, the klines exception and native zkLink packing. The hcmq3f `lib.rs` regions (api_response, `Pending::Candles`) are reserved. |
-| 2 | AsterDEX | codex-ih35js | P2 secp256k1, P5 | protocol stamp; none | V1, standard and Code migrate together. Keep the codec distinctions, native query/preimage bytes, the GET secondary, primary writes, shared stamps/nonces, auth inference and builder attribution. Source in `sign.rs`/`request.rs`; `account.rs` belongs to #1785-1788 and `lib.rs`/`tests/trading.rs` to #1799. |
+| 1 | ApeX Omni | codex-hcmq3f | P0, P1, P3 zkLink, P7; P8 for keyless orders | wire or legacy-second stamp; none | Shared PR first: P0 seed slot, P1 base64-text transform and `ZkLinkContract`. The family PR moves REST, WS login and zkLink to release, signing each lot or leg. Keep legacy timestamp/body quirks, the klines exception and native zkLink packing. The hcmq3f `lib.rs` regions (api_response, `Pending::Candles`) are reserved. Until P8, keyless ApeX order placement is refused (typed `unsupported`/`notSent`); keyless REST reads and WS login work. |
+| 2 | AsterDEX | codex-ih35js | P2 secp256k1, P5; P8 for keyless V3 | protocol stamp; none | V1, standard and Code migrate together. Keep the codec distinctions, native query/preimage bytes, the GET secondary, primary writes, shared stamps/nonces, auth inference and builder attribution. Source in `sign.rs`/`request.rs`; `account.rs` belongs to #1785-1788 and `lib.rs`/`tests/trading.rs` to #1799. |
 | 3 | Bitunix | codex-9czdjh | none | wire stamp; none | Fits today as `Sha256(Credential)` → `Sha256SecretSuffix(Result hex)`, tested at `crypto/src/signer.rs:870-905`. WS login is staged with #1771's socket core. Move the unmigrated controls to another family. |
 | 4 | Crypto.com | codex-ih35js | none | ms nonce; none | Fits today as HMAC with credential interpolation, plus `Present` into the body. Keep the ms nonce and `id`. #1788 owns account/trading files. |
-| 5 | Orderly | TBC | P1 base58, P2 Ed25519, P8 (WS) | wire stamp; none | Retire the TS-hosted Orderly kept path only after the Rust positives pass. |
-| 6 | Backpack | TBC | P2 Ed25519, P8 (WS) | wire stamp; none (window is a duration, as with Binance `recvWindow`) | |
-| 7 | Coinbase | TBC | P1 CDP JSON, P2 Es256/Ed25519 | `nbf`; `exp` = +120 s | The JWT is built at release with the entropy nonce. Retire the TS-hosted Coinbase path only after the positives pass. |
+| 5 | Orderly | TBC | P1 base58, P2 Ed25519, P8 | wire stamp; none | Retire the TS-hosted Orderly kept path only after the Rust positives pass. |
+| 6 | Backpack | TBC | P2 Ed25519, P8 | wire stamp; none (window is a duration, as with Binance `recvWindow`) | |
+| 7 | Coinbase | TBC | P1 CDP JSON, P2 Es256/Ed25519, P8 | `nbf`; `exp` = +120 s (local and half-1 provider; today's `coinbase-jwt` remote path picks its own claims) | The JWT is built at release with the entropy nonce. Retire the TS-hosted Coinbase path only after the positives pass. |
 | 8 | Hyperliquid + TxFlow | codex-zs5e83 | P2, P4, P5, P8 | nonce stamp; none | Digest recipes; the nonce is drawn at preparation. |
 | 9 | GRVT | codex-zs5e83 | P2, P4, P6, P8 | none; +1 h | Signs at release, including amend replacements. Re-login re-prepares and never resends the stale signed body. #1785-1788 own `account.rs`. |
-| 10 | Paradex | codex-zs5e83 | P2 Stark, P4, P6 | auth `exp` +300 s; order ms stamp | Map the payloadSigner contract onto the shared provider and hosted adapter. Delete the Paradex-only engine path (`Cx::sign_request`, `PendingSignature`, `SignatureTarget`, `engine.rs:145-155,1715`) in the same PR. #1787 owns account/trading files. |
+| 10 | Paradex | codex-zs5e83 | P2 Stark, P4, P6 | auth `exp` +300 s; order ms stamp (half 2 on the existing `stark` payloadSigner) | Map the payloadSigner contract onto the shared provider and hosted adapter. Delete the Paradex-only engine path (`Cx::sign_request`, `PendingSignature`, `SignatureTarget`, `engine.rs:145-155,1715`) in the same PR. #1787 owns account/trading files. |
 | 11 | Lighter | codex-zs5e83 | P3 Schnorr, P4, P5, P8 | none; auth +60 s, tx +10 min | The auth token is minted per use at release. Nonce reuse follows the P5 rule. |
 | 12 | Polymarket | — | P0, P1, P2, P4, P6b, P8 | L2 seconds; none | Blocked on the P6b owner decision. The raw-credential WS frame becomes `Present` fields. |
 | 13 | BreakoutProp | — | P6 | none | Password `Present` into the login body; the token follows P6. |
