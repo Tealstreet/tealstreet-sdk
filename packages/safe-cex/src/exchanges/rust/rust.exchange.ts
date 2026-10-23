@@ -84,7 +84,7 @@ import type { BaseWebSocket } from '../base.ws';
 import { deriveBridgeConstruction, derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { LocalSignerSetup, withoutSigningCredentials } from './localSignerSetup';
-import { DelegatedSignerSetup, withoutDelegatedSigning } from './delegatedSignerSetup';
+import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
@@ -617,12 +617,13 @@ export class RustEngineExchange extends BaseExchange {
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     const delegatedPolicy = deriveRemoteSigningPolicy(exchangeName);
-    const delegated = delegatedPolicy?.enabled === true && (options.remoteSigner !== undefined || options.payloadSigner !== undefined);
+    const delegatedMode = selectDelegatedSigningMode(options);
+    const delegated = delegatedPolicy?.enabled === true && delegatedMode !== undefined;
     const signerSetup = bridgeConstruction.dispatchSigning
       ? delegated ? new DelegatedSignerSetup(exchangeName, options) : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
       : undefined;
     const signingMode=signerSetup ? derivePublicMode(exchangeName,options,undefined,signerSetup.credentialPresence) : undefined;
-    if (signingMode && !signingMode.publicDataOnly && options.payloadSigner !== undefined
+    if (signingMode && !signingMode.publicDataOnly && delegatedMode === 'payload'
       && delegatedPolicy && !delegatedPolicy.payloadSupported) {
       signerSetup?.dispose();
       const message = 'This Rust account has no REST-only PayloadSigner lifecycle';
@@ -653,7 +654,10 @@ export class RustEngineExchange extends BaseExchange {
     super(exchangeName, options, store);
     this.bridgeConstruction = bridgeConstruction;
     this.signerSetup=signerSetup;
-    if (signerSetup instanceof DelegatedSignerSetup) this.delegatedIntent = signerSetup.intent;
+    if (signerSetup instanceof DelegatedSignerSetup) {
+      this.delegatedIntent = signerSetup.intent;
+      this.delegatedUsesPayloadSigner = signerSetup.usesPayloadSigner;
+    }
     if (signingMode) this.constructionRecord={bridge:bridgeConstruction,...signingMode};
     this.warnIgnoredCoinbaseReadOptions = ignoredCoinbaseReadOptions;
     this.commandTimeoutMs = commandTimeoutMs;
@@ -706,6 +710,7 @@ export class RustEngineExchange extends BaseExchange {
   private constructionRecord?: EngineConstruction;
   private signerSetup?:SignerSetup;
   private delegatedIntent?:Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
+  private delegatedUsesPayloadSigner?: boolean;
 
   private get asterApiVersion() {
     // Construction/getters are synchronous; WASM loads asynchronously on first use.
@@ -921,7 +926,7 @@ export class RustEngineExchange extends BaseExchange {
         polymarket: this.options.polymarket,
         paradexAddress,
         subkeyAddress,
-        payloadSigner: this.delegatedIntent?.payloadSigner ?? Boolean(this.options.payloadSigner),
+        payloadSigner: this.delegatedUsesPayloadSigner ?? Boolean(this.options.payloadSigner),
         asterdex: {
           apiVersion: ['v1', 'v3'].includes(this.options.extra?.asterdexApiVersion ?? '')
             ? this.options.extra?.asterdexApiVersion : undefined,

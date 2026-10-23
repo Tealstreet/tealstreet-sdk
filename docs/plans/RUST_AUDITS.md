@@ -839,6 +839,14 @@ Remaining resilience and completeness findings are independent of request parity
   actual query command before completion. A native 2,000-row regression checks
   retained financial rows, Warn ownership/order and Error-only delivery.
 
+- Owned-history follow-up: ~~later actual page/stage failure discards accepted
+  history, and inclusive stalls/caps reject the entire accumulated read~~.
+  Existing CursorHistory now owns staged admission, completion, page budget,
+  stage restart and rolling-retention gaps. Actual first/zero-eligible failure
+  rejects typed; later loss retains only admitted output with one owned gap.
+  Native inclusive progress, output mapping/limits and lookup/spot behavior
+  remain. Cross-family fan-out, managed completion and B11 runtime proof stay open.
+
 Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
   (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3
@@ -1890,3 +1898,64 @@ unchanged. Grouped collectors (Crypto.com every rejection, WOO unique known IDs
 plus anonymous rows), Bybit deferred reporting, and remaining persistent copies
 remain open in [the reporting plan](RUST_ROW_ADMISSION.md). No all-venue closure
 or new live capture/parity claim is made by this first slice.
+
+
+## Grouped and deferred row-reporting engine path
+
+Phase2 moves duplicate-inclusive counts/first labels and ordered unique-ID plus
+anonymous counts into explicit engine `RowCount`/`RowKeys` collectors. Crypto.com
+keeps its exact summary formatting, including anonymous versus empty first labels;
+WOO keeps unique known IDs, each anonymous row, original retention/page progress
+and ChangedMessage/empty-group re-arm. Bybit keeps deferred unbounded Once memory
+at the accepted joined-order boundary, including admitted partial joins. Failed,
+noncurrent or incomplete whole joins do not consume it; clean/mapped rows do not
+re-arm it, and cached-row restoration remains outside report suppression. Both
+real Bybit constructors select that explicit policy and product swaps preserve it.
+
+Architecture gate YES: these are cross-cutting grouping/repeat policies behind
+engine coverage, with native identity/formatting/admission timing retained. The
+233 selected original native tests pass before migration; these are compatibility
+controls, not defect RED evidence. New core controls cover exact first labels,
+summary health/filtering, empty text versus absent summary and key-only re-arm
+at capacity. Financial reducers, signing, clocks and snapshot fences stay native.
+Seventeen bounded persistent source files remain for subsequent fan-out; no
+all-venue closure, live capture or stronger replay parity claim is made here.
+
+
+### Row reporting: BloFin and Kraken consumer migration (2026-10-23)
+
+Moved BloFin position/order, Kraken futures row/unlisted-symbol and Kraken Spot
+row diagnostic memories onto existing engine RowReports. Architecture gate YES:
+this is consumer fan-out of cross-cutting policy, not another venue policy copy
+or new engine API. The futures real constructor explicitly chooses bounded
+ErrorUpgrade plus separate unbounded Once; BloFin and Spot use bounded Once.
+Native messages, severities, keys, empty identities, 4096 clear-before-lookup,
+re-arm sites and pre-admission reporting remain unchanged. The final 126 original
+native account controls (55 BloFin,39 futures,32 Spot), including eleven new
+compatibility controls, pass against unchanged actual #1775 production. Exact
+source/test/log hashes are bound in
+`/tmp/codex-row-blofin-kraken-original-final-receipt.json` (SHA256
+`aa9137471325c9cb881aaa2cf4bf16f060e482db5ad4943038a5a37521489bc6`).
+An initial Spot test expected REST text for WS execution diagnostics; only that
+fixture expectation was corrected before the final original-GREEN run. No
+production defect/RED, financial repair or all-venue closure claim. Other bounded
+and unbounded reporter consumers remain open; see RUST_ROW_ADMISSION.md.
+
+Migrated engine/BloFin/Kraken/Binance focused suites pass1253 native tests across
+68 groups; strict all-target Clippy, scoped fmt, bans, root44 typecheck/28 lint
+(root tasks cached) pass. Both independent source/caller reviews are CLEAN.
+Actual #1781 `ff6870f921a79cedd108017903b49f86ce924d14` is genuinely integrated
+without conflicts, preserving both incoming files. Full green CI and current-head
+artifact proof remain pending.
+
+## Kraken futures owned-history fan-out
+
+~~Kraken futures histories retain rows, cursor sets, page counters and terminal
+ledger completeness emission in the venue.~~ Fills, closed orders, ledger and
+public trades now adopt the existing engine CursorHistory/Completion owner.
+Actual first/zero-eligible failure rejects typed; later actual failure retains
+only admitted pages with command-owned incompleteness. Native strict cursor/
+continuation-proof/budget refusals remain strict; terminal order folding sees
+only admitted rows. Native request/identity/units/filter/signing and ledger
+coverage facts remain unchanged. Other adapters, managed completion and B11
+coverage/runtime proof stay open. [Scope](RUST_OWNED_HISTORY.md).

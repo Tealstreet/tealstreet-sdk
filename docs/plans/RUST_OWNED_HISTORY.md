@@ -1491,3 +1491,238 @@ unsigned public retry. Final strict all-target Clippy, fmt, banned patterns and
 diff checks pass. Independent source and final tests/docs correctness/adversarial
 reviews are CLEAN. No new core source is added beyond the approved #1760 stack;
 actual predecessor ancestry, final CI/proof and separate guard/merge remain.
+
+## Next cursor fan-out: Hyperliquid inclusive account histories
+
+Plan first on fresh `feat/rust-owned-history-hyperliquid` from actual
+`9bf754a01149d373c522728edbebb46abc5ae5b2` (2026-10-23). Adopt the existing
+boxed CursorHistory/Completion owner for perp fills, closed orders, income and
+public trades. Preserve spot behavior and client-ID lookup as their separate
+paths. No signer, account reducer, dispatch, Context, Store, clock, metadata,
+remote wire or capability changes; keep OKX/Bitget/BingX work untouched.
+
+Replace accepted-output vectors/maps with staged typed native output in the
+shared owner. Fully validate a page before admission; terminal actual
+HTTP/stream/decode/transport failure before eligible accepted output rejects typed,
+while a later failure returns only accepted pages with one command-owned
+history.incomplete Warn before success, including Error-only logging. The shared
+Internal fallback is honest for multiplexed callbacks. Filtered native rows and
+failed-page prefixes must not authorize partial recovery. No history row may
+mutate live Store. Admission and lookup errors retain their separate behavior.
+
+Preserve inclusive userFillsByTime/userFunding request bounds and the additional
+empty/duplicate terminal probe even after a short successful page. Native progress
+counts include validated deduped rows before output filters; retain native ID
+facts separately from accepted output. CursorWalk owns page-budget/repeat policy;
+its internal cursor may bind native timestamp plus identity progress, since a
+same-timestamp page with new native IDs must not be rejected as a repeated physical
+time bound. Keep physical request bytes and existing 200-page per-stage bound,
+with caps 2000 fills and 500 funding used only for full-page missing-coverage
+facts. Short all-duplicate pages end the stage; full pages with no new identity
+carry an owned gap. General cap/stall termination retains admitted output and
+owned incompleteness rather than discarding it. Stage reset and first-gap retention
+must use the existing shared restart_stage API, never a second local Completion.
+For mixed income retain fill-derived PnL/fee rows through the funding stage and
+retain the same owner even if a prior stage ends incomplete.
+
+Orders remain one historicalOrders response: fold native transitions by ID in the
+final admitted-row encoder, preserving latest status timestamp and closed/canceled
+rank tie precedence before creation-time/symbol filtering. Feed rolling-retention
+coverage (raw count at least 2000) through shared admission/completion instead of
+emitting a venue-local marker. Public trades remain one response with native
+dedupe and descending sort. Keep exact timestamp units, large native IDs, gross
+historical PnL, rebate/commission signs, builder revenue metadata, vault/master
+identity, fee assets, native sort/tie order, output limits (fills default/clamp),
+weight accounting, no-I/O admission and endpoint/body shapes. Do not infer a
+new retry or signing policy.
+
+Commit original-source failing-first controls before implementation: typed first
+and zero-eligible failure, later HTTP/malformed/stream failure with prefix exclusion,
+concurrent owners at Error-only logging, mixed-income funding failure retaining
+only accepted fill rows, same-time distinct-ID continuation, full inclusive stall
+and real 200-page/no-next-request cap. Keep all existing native history controls,
+including rolling retention ownership, order transition ties, lookup and spot
+behavior. Add no engine API unless a real native fact cannot use current shared
+CursorHistory; coordinate any lower-core change with other history/RequestContext
+owners first. Independent plan/correctness/adversarial reviews must answer the
+architecture gate: shared owner/pager/marker adoption, with native endpoint facts
+only. Focused engine/Hyperliquid/Binance tests, strict Clippy/fmt/bans with four Cargo
+jobs; no local release-WASM, replay sweep or timing matrix. Update caller/audit/
+quality evidence, publish draft CI and keep all existing watches. Final current
+landing integration, authenticated full raw/package proof, independent reviews,
+announcement, separate guard and separate merge remain required. B11/runtime/
+cutover claims stay open.
+
+Hyperliquid plan review is CLEAN on the existing APIs. Bind progress to newest
+physical timestamp plus cumulative validated native identities, never page ordinal
+or filtered output count; physical inclusive startTime must not gain one ms.
+Admit positive page 200 with an owned gap and no request 201, but allow a terminal
+probe after 199 positive pages. Full zero-new-ID pages pass an explicit coverage
+gap through shared admission; short zero-new-ID pages end normally. Fold order
+transitions in encounter order before filtering, keeping the first equal-time,
+equal-rank update. Preserve successful-page-only history_weight accounting and
+existing queue reservations. Clock/row owners confirm no concrete Hyperliquid
+source overlap. Existing full-overlap test's strict rejection is an explicitly
+superseded general-query contract: retain its assertion of missing coverage and
+add accepted-row/owned-marker assertions rather than silently dropping the test.
+
+Hyperliquid original regression-only `e2255a5140a` records 11 existing tests
+GREEN and six new assertion-RED groups before production edits. Existing shared
+CursorHistory adoption makes all 17 pass. Accepted output is held only by the
+shared owner; native inclusive timestamp/identity facts feed its pager, and order
+transitions fold only in the admitted-output encoder. The prior full-overlap
+strict-failure assertion is explicitly superseded with retained-row/owned-gap
+assertions. No engine API, lib/account reducer, signing or Context edits. Both
+independent source reviews are CLEAN and confirm the architecture gate. Additional
+controls pin zero-income native progress/typed rejection, order-fold-before-filter,
+first cap gap through funding failure, and full-inclusive first-gap retention
+through successful or failed funding. A valid coverage-only cap may return owned
+incomplete empty output; actual failure still requires eligible accepted output
+for recovery. All 873 focused engine/Hyperliquid/Binance tests passed before the
+last two review-requested controls; final history/strict gates and tests/docs
+review precede publication. Actual #1762 integration and fresh post-sort-baseline
+CI/proof remain required before final guard; all prior history CI watches continue.
+
+Hyperliquid final local receipt: all 22 history tests pass, including both final
+review suggestions. Strict all-target Clippy, fmt, bans and diff checks pass.
+Both independent final tests/docs reviews are CLEAN; source remains the reviewed
+shared-owner adoption. No local release-WASM, full replay or timing run. Final
+publication integrates actual #1762; fresh CI and post-sort-baseline proof remain
+required, alongside the existing queued history merge order.
+
+## Next cursor fan-out: Kraken futures histories
+
+Plan first on fresh `feat/rust-owned-history-kraken-futures` from actual
+landing `fe44969d033529c244fc4f33fce5395c0273df04` (2026-10-23), during the
+owner-assigned Orderly #1767 exclusive landing window. This checkpoint is a
+plan only. Existing Hyperliquid #1765 and Backpack #1766 CI watches remain
+active. No landing merge occurs before actual #1767; real-integrate its
+shared-engine input before final CI/proof. Signer, clock and financial lanes
+confirm Kraken futures history and request-builder regions are clear; later
+account reducers remain separate.
+
+Scope: adopt existing boxed `CursorHistory<Row>`/`Completion` in
+`sdk-rs/venues/kraken/src/history.rs`, with original-source controls in the
+existing `tests/history.rs` and nearby CALLERS/AUDITS/QUALITY/this-plan
+updates. Existing `lib.rs` already routes streamed HTTP/transport failure to
+`history_failed`; no routing edit is planned. No engine API, paging primitive,
+account reducer, signing, credentials, Store, Context, capabilities, harness,
+workflow, fixtures, reference output, budget or NX edits. Numeric Completion
+remains the explicit legacy authority, not managed Context completion or a
+journal-policy bypass; coordinate any future exact legacy-inventory refresh
+after actual landing.
+
+One existing engine owner must own accepted/staged rows, command finalization,
+identity/cursor history and the fifty-page budget. Remove the venue accepted
+rows vector, global seen/cursor sets and page counter. Native raw counts,
+fresh/native identity facts, ascending/descending observations, oldest/newest
+native millisecond bounds and endpoint cursor derivation remain adapter facts.
+Use raw native identities for `fresh`, including filtered records; only
+eligible mapped rows are staged. The raw account-ledger identity remains
+booking ID plus asset/contract; derived PnL/funding/fee/liquidation rows keep
+their existing IDs, cash-leg filtering and units. Filtered rows must not
+authorize failure recovery. No new output cap or early stop: fills and orders
+still walk their current native coverage despite a small requested limit;
+trades retain their current limit stop.
+
+Admit a page only after HTTP/native envelope, required-array, all streamed
+rows, order length and cursor-envelope consistency checks succeed. Actual first
+or zero-eligible-output failure rejects typed (Internal fallback); actual
+later-page HTTP/transport/decode/malformed failure returns only earlier
+accepted rows plus one command-owned incomplete Warn before Done, including
+Error-only logging. Discard the failed page's prefix, including order updates
+to already accepted native IDs. Move order terminal-state folding into the
+contextual final encoder across admitted rows only: keep the latest
+strictly-greater updated timestamp, first encounter on equal timestamps,
+existing filters-before-fold, ignored NotFound/EditRejected/nonterminal events,
+and final descending sort/truncation. Do not retain a separate mutable
+accepted-order cache outside the history owner. No historical row may enter the
+live account Store.
+
+Preserve strict endpoint-policy refusals separately from recoverable actual
+page failure: repeated/no-fresh cursor, fifty-page exhaustion, and a saturated
+order page with no continuation proof, or contradictory decoded body/header
+tokens, still reject via owner.reject even after prior rows. Do not change
+their existing INCOMPLETE messages or manufacture a complete order total. Drive
+repeat/empty/no-new-row/budget detection through CursorWalk settings and native
+CursorPage facts; explicitly enable both stall_on_empty_page() and
+stall_on_no_new_rows() so an empty page carrying a token preserves the current
+strict refusal. Reject its Stalled verdict instead of adding another loop.
+Validate missing/conflicting continuation proof before page admission and
+reject it strictly; no request or complete result is authorized by unusable
+proof. Generic whole-envelope/row decode failure and a declared order length
+mismatch remain actual failed-page errors with accepted-only recovery. Preserve
+the existing native parser rather than inventing token authority from a
+malformed envelope. Keep body/header opaque token agreement and exact
+`lastFillTime`/`lastTime` ISO millisecond overlap, ledger `since`/count and
+orders since/before/count/sort/ closed/opened/tradeable request bytes. A
+terminal page at request fifty is still complete; a full continuing page fifty
+rejects without a request fifty-one. Synchronous consuming signed setup refusal
+stays strict through its current error path, never a partial HTTP-page failure
+or a reason to resend.
+
+Replace the ledger's direct HISTORY_INCOMPLETE emitter with
+advance_with_coverage on the validated terminal since-only coverage gap.
+Preserve its message and current suppression when eligible accepted+staged
+output already satisfies the requested limit. Preserve native ledger predicate
+precedence: crossing from can prove descending coverage; crossing to proves
+coverage only in the ascending, distinct-time continuation branch. A descending
+page with newest above to alone still has the existing since-only gap unless
+from or the eligible output limit proves sufficient coverage. A valid
+all-filtered saturated page may explicitly return incomplete empty output; a
+failed page with no eligible accepted output must reject instead. Completion
+owns command fields, severity, exactly-once marker ordering and serialization
+failure suppression. Preserve first coverage cause without a venue marker
+latch.
+
+Before production edits, commit original-source assertion-RED controls for
+typed first/native/streamed failure, accepted-only later-page recovery,
+failed-prefix isolation, zero-eligible recovery refusal, concurrent owners and
+Error-only marker-before-Done delivery. Cover fills, ledger, closed orders and
+unsigned public trades with full-page continuations where applicable. Pin an
+accepted terminal order followed by a newer failed-page update to the same ID,
+proving that the failed update cannot replace the prior accepted state.
+Preserve and extend existing strict repeated-cursor, full same-time fill
+boundary and real fifty-page/no-fifty-first tests; add terminal fiftieth page,
+missing/conflicting order token, an accepted order page followed by an empty
+page with a token (strict rejection, no partial marker/result), declared length
+mismatch, fully filtered
+native progress, requested small-limit behavior, descending-above-to ledger gap
+precedence, native compound ledger identities and existing exact
+large-ID/signing/public-unsigned/request-sequence controls. Retain the explicit
+unsupported client-ID lookup refusal and range admission behavior unchanged.
+
+Independent plan/correctness/adversarial reviews must explicitly answer the
+architecture gate: this is adoption of the existing shared engine history
+owner, not another venue completeness/paging implementation. Focused
+engine/Kraken futures/Binance native tests plus touched all-target strict
+Clippy/fmt/bans/diff checks use four Cargo jobs. Corepack Yarn only; never
+bare/Volta yarn, npx or the account-policy check. No local release WASM/full
+replay/size/timing run. After actual shared predecessors, require exact-head
+green CI and fresh authenticated post-sort raw/package/ordered-gate evidence,
+then announce, run a fresh separate porcelain guard and a separate exact-head
+merge. Caller docs record accepted-only partial recovery and typed telemetry
+without claiming B11 ingestion/coverage, managed completion, remote-signing or
+deployed cutover proof closed.
+
+Independent correctness and adversarial plan reviews are CLEAN after the
+explicit strict token-proof, empty-with-token and native ledger-precedence
+refinements. Existing CursorHistory/Completion APIs suffice; no production
+source or tests are edited in this plan checkpoint. Both reviews confirm the
+shared-engine architecture gate. Original-RED controls precede implementation.
+
+Kraken futures regression-only checkpoint `f2389ff658b` leaves production
+unchanged: nineteen controls pass (including the new strict-proof compatibility
+control), and four new assertion groups fail on untyped first/filtered failures,
+accepted-page loss and failed newer-order-prefix isolation. Existing engine
+owner adoption makes all four groups green. Added compatibility controls pin
+terminal page fifty versus continuing cap fifty/no page fifty-one, strict empty
+or missing/conflicting order continuation after accepted rows, declared length
+mismatch, first native/transport/decode typing, ledger descending-above-to gap
+precedence and filtered-empty coverage, concurrent owners, first order state on
+equal timestamp, and no-I/O strict consuming setup. Terminal helpers inspect
+physical HTTP actions before filtering notices, preventing vacuous no-resend
+assertions. Independent source correctness/adversarial reviews are CLEAN and
+confirm existing-engine choke-point adoption; no engine API or managed completion
+policy is added. Final focused/strict checks and tests/caller review precede
+draft publication; actual shared dependencies and full CI/evidence remain.

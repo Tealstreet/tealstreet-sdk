@@ -1473,3 +1473,201 @@ fn rejected_order_rows_report_error_only_without_a_retained_copy_and_rearm() {
     );
     assert!(send(&mut e, &bad).is_empty());
 }
+
+fn row_reports(e: &mut Engine<Kraken>) -> Vec<(safe_cex_engine::Level, String)> {
+    e.drain_actions()
+        .filter_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+            {
+                Some((event.level, event.message))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn row_report_unlisted_symbols_share_permanent_memory_across_feeds_and_reconnect() {
+    use safe_cex_engine::Level;
+    let (mut e, socket) = ready();
+    row_reports(&mut e);
+    message(
+        &mut e,
+        socket,
+        NOW,
+        r#"{"feed":"open_positions","positions":[{"instrument":"PF_ZEROUSD","balance":0}]}"#,
+    );
+    assert!(
+        row_reports(&mut e).is_empty(),
+        "zero quantity must not consume memory"
+    );
+    for symbol in ["PF_ZEROUSD", "PF_OTHERUSD"] {
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &format!(
+                r#"{{"feed":"open_orders","orders":[{{"instrument":"{symbol}","order_id":"unlisted","qty":2}}]}}"#
+            ),
+        );
+        assert_eq!(
+            row_reports(&mut e),
+            [(
+                Level::Warn,
+                format!("Kraken {symbol} is not a listed market; its rows are skipped")
+            )]
+        );
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &format!(
+                r#"{{"feed":"open_positions","positions":[{{"instrument":"{symbol}","balance":2}}]}}"#
+            ),
+        );
+        assert!(row_reports(&mut e).is_empty());
+    }
+    message(&mut e, socket, NOW, r#"{"feed":"open_orders","orders":[]}"#);
+    assert!(row_reports(&mut e).is_empty());
+    let (next, _) = fresh_private(&mut e, socket);
+    message(
+        &mut e,
+        next,
+        NOW + 1001.0,
+        r#"{"event":"challenge","message":"reconnected"}"#,
+    );
+    row_reports(&mut e);
+    message(
+        &mut e,
+        next,
+        NOW + 1002.0,
+        r#"{"feed":"open_orders_snapshot","orders":[{"instrument":"PF_ZEROUSD","order_id":"again","qty":2}]}"#,
+    );
+    assert!(
+        row_reports(&mut e).is_empty(),
+        "clean reads and reconnect never rearm unlisted symbols"
+    );
+    message(
+        &mut e,
+        next,
+        NOW + 1003.0,
+        r#"{"feed":"open_orders_snapshot","orders":[{"instrument":"PF_FRESHUSD","order_id":"new-symbol","qty":2}]}"#,
+    );
+    assert_eq!(
+        row_reports(&mut e),
+        [(
+            Level::Warn,
+            "Kraken PF_FRESHUSD is not a listed market; its rows are skipped".into()
+        )],
+        "new-socket frames are actively processed"
+    );
+}
+
+#[test]
+fn row_report_unlisted_read_is_remembered_before_stale_or_failed_admission() {
+    for failed in [false, true] {
+        let (mut e, socket) = ready();
+        snapshot(&mut e, socket);
+        let reads = poll(&mut e, socket);
+        let read = reads
+            .iter()
+            .find(|read| read.url.contains("openorders"))
+            .unwrap();
+        message(
+            &mut e,
+            socket,
+            NOW,
+            r#"{"feed":"open_orders","is_cancel":true,"order_id":"order-1","reason":"full_fill"}"#,
+        );
+        row_reports(&mut e);
+        let result = if failed { "error" } else { "success" };
+        reply(
+            &mut e,
+            read,
+            200,
+            &format!(
+                r#"{{"result":"{result}","openOrders":[{{"symbol":"PF_UNKNOWNUSD","order_id":"unknown","qty":2}}]}}"#
+            ),
+        );
+        assert_eq!(
+            row_reports(&mut e).len(),
+            1,
+            "mapping reports before admission"
+        );
+        assert!(e.store().order("order-1").is_none());
+        message(
+            &mut e,
+            socket,
+            NOW,
+            r#"{"feed":"open_positions","positions":[{"instrument":"PF_UNKNOWNUSD","balance":2}]}"#,
+        );
+        assert!(
+            row_reports(&mut e).is_empty(),
+            "held read already consumed this symbol"
+        );
+    }
+}
+
+#[test]
+fn row_report_rejected_duplicate_identity_cannot_rearm_from_its_accepted_peer() {
+    let (mut e, socket) = ready();
+    snapshot(&mut e, socket);
+    row_reports(&mut e);
+    let bad = ORDER.replace(r#""type":"stop""#, r#""type":"unsupported""#);
+    let send = |e: &mut Engine<Kraken>| {
+        message(
+            e,
+            socket,
+            NOW,
+            &format!(r#"{{"feed":"open_orders","orders":[{bad}]}}"#),
+        );
+        row_reports(e)
+    };
+    assert_eq!(send(&mut e).len(), 1);
+    let reads = poll(&mut e, socket);
+    let read = reads
+        .iter()
+        .find(|read| read.url.contains("openorders"))
+        .unwrap();
+    reply(
+        &mut e,
+        read,
+        200,
+        &format!(r#"{{"result":"success","openOrders":[{ORDER},{bad}]}}"#),
+    );
+    assert!(row_reports(&mut e).is_empty());
+    assert!(
+        send(&mut e).is_empty(),
+        "the rejected identity remains protected"
+    );
+}
+
+#[test]
+fn row_report_stale_ws_snapshot_does_not_rearm_but_a_current_clean_update_does() {
+    let (mut e, socket) = ready();
+    snapshot(&mut e, socket);
+    row_reports(&mut e);
+    let bad = ORDER.replace(r#""type":"stop""#, r#""type":"unsupported""#);
+    let send = |e: &mut Engine<Kraken>, feed: &str, rows: &str| {
+        message(
+            e,
+            socket,
+            NOW,
+            &format!(r#"{{"feed":"{feed}","orders":[{rows}]}}"#),
+        );
+        row_reports(e)
+    };
+    assert_eq!(send(&mut e, "open_orders", &bad).len(), 1);
+    assert!(send(&mut e, "open_orders_snapshot", ORDER).is_empty());
+    assert!(
+        send(&mut e, "open_orders", &bad).is_empty(),
+        "stale snapshot rows do not rearm"
+    );
+    assert!(send(&mut e, "open_orders", ORDER).is_empty());
+    assert_eq!(
+        send(&mut e, "open_orders", &bad).len(),
+        1,
+        "the current clean read still rearms"
+    );
+}

@@ -190,7 +190,7 @@ class RequestContextBan(unittest.TestCase):
             'venues/cryptocom/src/history.rs': (15, 10, '8c08399ee9544d819511127584929ff3a4d532831d64ffc1886424efb4842b0c', '0716d0d13befbecad3402c21949f8d88fa30f02b9a761b1d3dbeae65570526f6'),
             'venues/grvt/src/history.rs': (13, 11, 'f97e2d042aad67c83cb7b67fd2e18fe2ea1911d39bee4928b4bfcd29a53a9173', '10b79560bfa80b935be2f78f7f6a3fb2e7b44436372c89a588a15d558c07fa3e'),
         }
-        self.assertEqual(set(expected), set(ban.HISTORY_BOOTSTRAPS))
+        self.assertEqual(set(expected) | {'venues/hyperliquid/src/history.rs'}, set(ban.HISTORY_BOOTSTRAPS))
         for path, (before, after, old_hash, landed_hash) in expected.items():
             with self.subTest(path=path):
                 old, landed = ban.HISTORY_BOOTSTRAPS[path]
@@ -300,6 +300,17 @@ class RequestContextBan(unittest.TestCase):
                 # remains an independent trusted shrinking baseline.
                 self.assertTrue(ban.check(expanded, expanded, ban.previous_manifests()))
 
+
+    def test_exact_hyperliquid_history_maps_and_call_kinds(self):
+        path = 'venues/hyperliquid/src/history.rs'
+        old, new = ban.HISTORY_BOOTSTRAPS[path]
+        self.assertEqual((sum(old.values()), sum(new.values())), (21, 15))
+        self.assertEqual(hashlib.sha256(json.dumps(old, sort_keys=True).encode()).hexdigest(), '18415637b13f7300f84e1a1e4164527e006f627946bf5f22ec18089f41351044')
+        self.assertEqual(hashlib.sha256(json.dumps(new, sort_keys=True).encode()).hexdigest(), '750e200bc590f090b632d978cdfd62a47711e028be67618c956c04f08280c8a2')
+        original = ban.git('show', 'b2fe97324763e1e2702c69ac5b839da37102928b' + ':sdk-rs/' + path)
+        reviewed = ban.git('show', '400e12b5e1258c53025990e7826f46cb3e3efdfb' + ':sdk-rs/' + path)
+        self.assertEqual(dict(ban.fingerprints(original)), old)
+        self.assertEqual(dict(ban.fingerprints(reviewed)), new)
 
 if __name__ == '__main__':
     unittest.main()
