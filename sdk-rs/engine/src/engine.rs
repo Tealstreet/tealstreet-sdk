@@ -2536,7 +2536,9 @@ pub trait Venue {
         _headers: &str,
         error: &str,
     ) {
-        self.on_request_failed(cx, pending, error);
+        // The venue answered but the stream broke (or is not UTF-8): a
+        // malformed reply, never transport loss. Defaults reach on_request_failed.
+        self.on_http_failed(cx, pending, malformed_body(error));
     }
     fn on_request_failed(
         &mut self,
