@@ -267,3 +267,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Selection-managed signed reads | Standalone engine implementation; consumers separate | Before coupling selected identity/egress/evidence with managed signed Read admission, queueing or retry. | [RUST_SELECTED_MANAGED_READ.md](RUST_SELECTED_MANAGED_READ.md) |
 
 | Raw signature expiry at final release | Plan-first engine prerequisite | Before publishing engine-projected raw signature expiry to a repair/reconciliation consumer. | [RUST_SIGNING_RELEASE_EXPIRY.md](RUST_SIGNING_RELEASE_EXPIRY.md) |
+| OKX dispatch signer migration | Planned | OKX opaque identities, send-time HTTP/WS and hosted caller adoption | [RUST_OKX_DISPATCH_SIGNER.md](RUST_OKX_DISPATCH_SIGNER.md) |

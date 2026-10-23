@@ -1,20 +1,21 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::{Action, Engine, Event, Level, Notice};
-use safe_cex_venue_okx::{Okx, Options};
-use support::*;
+use safe_cex_venue_okx::Okx;
 
 const POSITION: &str = r#"{"instId":"BTC-USDT-SWAP","pos":"5","posSide":"net","avgPx":"39000","lever":"10","upl":"50","liqPx":"30000","mgnMode":"cross","imr":"200","mmr":"20"}"#;
 const ORDER: &str = r#"{"instId":"BTC-USDT-SWAP","ordId":"123","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"1","px":"38000","lever":"10","reduceOnly":"false","clOrdId":"caller123"}"#;
 
 #[test]
 fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
         ..Default::default()
-    }));
+    });
     e.start(0.);
     let market = actions(&mut e).remove(0);
     reply(&mut e, &market, &envelope(MARKET), 1.);
@@ -77,7 +78,7 @@ fn startup() -> (
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
     };
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(opts));
+    let mut e = crate::support::engine(opts);
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
@@ -829,12 +830,12 @@ fn undecodable_instrument_row_still_reports_its_exposure() {
 }
 
 fn reports_exposure_on_malformed_instrument(bad: &str) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
@@ -898,12 +899,12 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         .replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")
         .replace("\"BTC\"", "\"ETH\"");
     let bad = eth.replace("\"lotSz\":\"0.01\"", "\"lotSz\":\"0\"");
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
@@ -994,12 +995,12 @@ fn undecodable_order_row_on_a_malformed_market_holds_the_order_snapshot() {
         r#"{"instId":"ETH-USDT-SWAP","ordId":"9","sz":4}"#,
         r#"{"instId":"ETH-USDT-SWAP","ordId":9,"state":null}"#,
     ] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             key: Some("test-key".into()),
             secret: Some("test-secret".into()),
             passphrase: Some("test-passphrase".into()),
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let a = actions(&mut e).remove(0);
         reply(

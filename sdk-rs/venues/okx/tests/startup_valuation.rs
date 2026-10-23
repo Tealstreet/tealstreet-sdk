@@ -1,18 +1,19 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::command::{HostInput, decode_host_input};
 use safe_cex_engine::model::Balance;
 use safe_cex_engine::{Action, Engine, Event, PublicFeedPolicy, SocketId};
-use safe_cex_venue_okx::{Okx, Options};
-use support::*;
+use safe_cex_venue_okx::Okx;
 
 fn startup(market: &str, shared: bool) -> (Engine<Okx>, Action, SocketId, Vec<Action>) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut engine = crate::support::engine(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
         ..Options::default()
-    }));
+    });
     if shared {
         engine
             .set_public_feed_policy(PublicFeedPolicy::Shared)

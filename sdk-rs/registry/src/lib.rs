@@ -1466,30 +1466,35 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "okx")]
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
-            if !options.public_data_only
-                && options.key.as_ref().is_some_and(|s| !s.is_empty())
-                && options.secret.as_ref().is_some_and(|s| !s.is_empty())
-                && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+            if options.key.as_ref().is_some_and(|s| !s.is_empty())
+                || options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
             {
-                return Err(invalid("OKX requires a passphrase"));
+                return Err(invalid(
+                    "OKX credentials belong in signer setup, not engine options",
+                ));
             }
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    Okx::new(OkxOptions {
-                        read_credentials: options.read_credentials.take(),
-                        testnet: options.testnet || venue.ends_with("demo"),
-                        eea: venue.starts_with("okxeu"),
-                        public_data_only: options.public_data_only,
-                        key: options.key.take(),
-                        secret: options.secret.take(),
-                        passphrase: options.passphrase.take(),
-                    }),
-                    entropy,
-                )?,
-            )
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(identity) = &identities.secondary {
+                identity.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
+                Okx::new(OkxOptions {
+                    read_credentials: identities.secondary,
+                    testnet: options.testnet || venue.ends_with("demo"),
+                    eea: venue.starts_with("okxeu"),
+                    public_data_only: options.public_data_only,
+                    credentials: identities.primary,
+                }),
+                entropy,
+            )?;
+            engine.set_signer(signer)?;
+            finish(visitor, policy, startup, engine)
         }
         other => Err(invalid(format!("unsupported venue: {other}"))),
     }
