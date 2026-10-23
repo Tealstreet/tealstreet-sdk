@@ -102,14 +102,17 @@ fn candles_on_business_and_all_sockets_watch_silence() {
             limit: Some(10),
         }),
     );
-    let a = actions(&mut e).remove(0);
+    let a = prepared(&mut e, 4.0)
+        .into_iter()
+        .find(|action| matches!(action, Action::Http(_)))
+        .unwrap();
     reply(
         &mut e,
         &a,
         &envelope(r#"["1700000000000","1","3","0.5","2","9","10","20","1"]"#),
         5.0,
     );
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: s, .. }) if s.contains("\"volume\":20.0"))));
+    assert!(prepared(&mut e, 5.0).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: s, .. }) if s.contains("\"volume\":20.0"))));
 }
 
 type Timers = Vec<(safe_cex_engine::TimerId, f64)>;
@@ -344,7 +347,7 @@ fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
         }),
     );
     // The clock jumps far past startup, so an engine startup notice may precede the read.
-    let request = actions(&mut e)
+    let request = prepared(&mut e, 1_800_000_000_000.0)
         .into_iter()
         .find(|action| matches!(action, Action::Http(_)))
         .unwrap();
@@ -352,12 +355,15 @@ fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
         matches!(&request, Action::Http(r) if r.url.ends_with("bar=1m&limit=300&before=1799982000000&after=1800000000000"))
     );
     reply(&mut e, &request, &envelope(""), 1_800_000_000_001.0);
-    let fallback = actions(&mut e).remove(0);
+    let fallback = prepared(&mut e, 1_800_000_000_001.0)
+        .into_iter()
+        .find(|action| matches!(action, Action::Http(_)))
+        .unwrap();
     assert!(
         matches!(&fallback, Action::Http(r) if r.url.contains("/history-candles?") && r.url.contains("&limit=100&"))
     );
     reply(&mut e, &fallback, &envelope(""), 1_800_000_000_002.0);
-    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: s, .. }) if s == "[]")));
+    assert!(prepared(&mut e, 1_800_000_000_002.0).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: s, .. }) if s == "[]")));
 }
 
 #[test]
@@ -374,7 +380,7 @@ fn month_candle_bounds_clamp_day_in_leap_february() {
             to_ms: Some(1_711_886_400_000.0),
         }),
     );
-    let out = actions(&mut e);
+    let out = prepared(&mut e, 1_711_886_400_000.0);
     assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("bar=1Mutc&limit=1&before=1709208000000&after=1711886400000"))));
 }
 

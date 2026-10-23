@@ -296,6 +296,50 @@ fn orderly_rules(options: &EngineOptions) -> Result<(), VenueError> {
 #[cfg(feature = "asterdex")]
 const ASTERDEX_MAIN_WALLET_REQUIRED: &str = "Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.";
 
+/// Backpack's provider copy of the configured key and Ed25519 seed (option B).
+/// A probe signature refuses a malformed or non-32-byte seed before startup.
+#[cfg(feature = "backpack")]
+fn backpack_provider(
+    options: &EngineOptions,
+) -> Result<
+    (
+        Option<safe_cex_engine::signing::Provider>,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{Algorithm, Identities, KeyEncoding, Operation, PayloadPart};
+    let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
+    if options.public_data_only || !present(&options.key) || !present(&options.secret) {
+        return Ok((None, Identities::default()));
+    }
+    let undecodable = || invalid("Invalid Backpack base64 seed");
+    let wrong_width = || invalid("Backpack Ed25519 seed must be 32 bytes");
+    let setup = LocalSetup {
+        primary: Some(LocalIdentity {
+            key: Secret::new(options.key.clone().unwrap_or_default()),
+            secret: Secret::new(options.secret.clone().unwrap_or_default()),
+            secret_encoding: KeyEncoding::Base64,
+            ..Default::default()
+        }),
+        secondary: None,
+    };
+    let (signer, identities) = LocalSigner::from_setup(setup).map_err(|_| undecodable())?;
+    let primary = identities.primary.as_ref().ok_or_else(undecodable)?;
+    let probe = safe_cex_engine::signing::SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![Operation::Sign {
+            algorithm: Algorithm::Ed25519,
+            key: primary.signing.clone(),
+            payload: vec![PayloadPart::Bytes { bytes: Vec::new() }],
+        }],
+    };
+    signer.sign_now(&probe).map_err(|_| wrong_width())?;
+    Ok((Some(std::sync::Arc::new(signer)), identities))
+}
+
 /// Whether this build constructs `venue`.
 pub fn supported(venue: &str) -> bool {
     match venue {
@@ -1069,12 +1113,14 @@ pub fn build_with_signer<T: Visit>(
             )?,
         ),
         #[cfg(feature = "backpack")]
-        "backpack" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "backpack" => {
+            // Transitional dual custody (RUST_BACKPACK_SIGNER_ADMISSION.md, option
+            // B): managed trading signs through this provider, while unadopted
+            // account reads and private WS auth keep the raw fields. Remove before master.
+            let (provider, identities) = backpack_provider(&options)?;
+            let mut engine = Engine::new(
                 Backpack::new(BackpackOptions {
+                    identity: identities.primary.clone(),
                     read_credentials: options.read_credentials.take(),
                     public_data_only: options.public_data_only,
                     key: options.key.take(),
@@ -1082,8 +1128,11 @@ pub fn build_with_signer<T: Visit>(
                     recv_window: options.recv_window.take(),
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(provider)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "blofin")]
         "blofin" => finish(
             visitor,

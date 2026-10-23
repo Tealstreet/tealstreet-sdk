@@ -1,5 +1,5 @@
 //! OKX canonical work uses the shared injected provider.
-pub(crate) use crate::dispatch_signing::{Http, WsLogin};
+pub(crate) use crate::dispatch_signing::{DEMO_HEADERS, Http, WsLogin};
 
 #[cfg(test)]
 mod oracle {

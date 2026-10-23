@@ -5,7 +5,10 @@ use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Fill, Response, TimerId, VenueError, json, num};
+use safe_cex_engine::request_context::{
+    Context, Credential, Operation, Policy, RetryPolicy, Scope,
+};
+use safe_cex_engine::{Cx, ErrorKind, Fill, Response, TimerId, VenueError, json, num};
 use std::collections::{HashMap, HashSet};
 
 pub const PRIVATE: usize = 1;
@@ -87,10 +90,11 @@ fn terminal_state(state: &str) -> bool {
 
 pub enum Request {
     Config {
+        context: Context,
         mode_version: u64,
     },
     Leverage {
-        command: CommandId,
+        context: Context,
         symbol: String,
         inst_id: String,
         version: u64,
@@ -211,28 +215,38 @@ impl Okx {
             return;
         }
         self.account.config_in_flight = true;
-        self.get(
+        // The shared deadline ends an unanswered read; startup backoff resends it.
+        let context = match cx.http_context(Scope::Background, read_policy(self.read_credential()))
+        {
+            Ok(context) => context,
+            Err(error) => {
+                self.config_unanswered();
+                self.config_failed(cx, &error.venue_error().message);
+                return;
+            }
+        };
+        self.managed_get(
             cx,
+            context.clone(),
             "/api/v5/account/config",
-            true,
             Pending::Account(Request::Config {
+                context,
                 mode_version: self.account.mode_version,
             }),
         );
     }
 
-    pub(crate) fn fetch_leverage(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        symbol: String,
-    ) {
+    pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
+        // A rejected admission already published the command's typed failure.
+        let Ok(context) = cx.admit_http_command(read_policy(self.read_credential())) else {
+            return;
+        };
         let Some(m) = cx.store.market(&symbol) else {
-            cx.fail(command, format!("unknown market {symbol}"));
+            let _ = cx.fail_context(&context, format!("unknown market {symbol}"));
             return;
         };
         if self.credentials.is_none() {
-            cx.fail(command, "OKX leverage requires credentials");
+            let _ = cx.fail_context(&context, "OKX leverage requires credentials");
             return;
         }
         let inst_id = m.id.clone();
@@ -242,12 +256,12 @@ impl Okx {
             .get(&symbol)
             .copied()
             .unwrap_or(0);
-        self.get(
+        self.managed_get(
             cx,
+            context.clone(),
             &format!("/api/v5/account/leverage-info?instId={inst_id}&mgnMode=cross"),
-            true,
             Pending::Account(Request::Leverage {
-                command,
+                context,
                 symbol,
                 inst_id,
                 version,
@@ -669,37 +683,32 @@ impl Okx {
         };
         match request {
             Request::Leverage {
-                command,
+                context,
                 symbol,
                 inst_id,
                 version,
             } => {
-                let result = self.leverage_result(cx, data, &symbol, &inst_id, version);
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                // Only the live owner's own delivery may publish the setting.
+                if cx.validate_read_http_delivery(&context, &context).is_err() {
+                    return;
+                }
+                let _ = match self.leverage_result(cx, data, &symbol, &inst_id, version) {
+                    Ok(data) => cx.done_context(&context, data),
+                    Err(error) => cx.fail_context(&context, error),
                 };
             }
-            Request::Config { mode_version } => {
+            Request::Config { mode_version, .. } => {
                 self.account.config_in_flight = false;
                 let configs = serde_json::from_str::<Vec<Config<'_>>>(data);
                 let Ok(configs) = configs else {
-                    self.account_failed(
-                        cx,
-                        Request::Config { mode_version },
-                        "malformed OKX config",
-                    );
+                    self.config_failed(cx, "malformed OKX config");
                     return;
                 };
                 let Some(config) = configs
                     .first()
                     .filter(|c| matches!(c.pos_mode, "net_mode" | "long_short_mode"))
                 else {
-                    self.account_failed(
-                        cx,
-                        Request::Config { mode_version },
-                        "missing OKX position mode",
-                    );
+                    self.config_failed(cx, "missing OKX position mode");
                     return;
                 };
                 self.account.config_read_at = cx.now;
@@ -1007,27 +1016,31 @@ impl Okx {
                 }
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
-            // Clearing the in-flight flag lets the backoff timer re-enter account_start.
             Request::Config { .. } => {
-                self.account.config_in_flight = false;
-                if self.account.configured {
-                    self.account.config_read_at = cx.now;
-                    cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-                } else {
-                    cx.retried_failure("okx.account:841", error);
-                    let pause = std::mem::take(&mut self.account.config_pause_ms);
-                    self.account.startup.failed_after(cx, (), pause);
-                }
+                self.config_failed(cx, error);
                 return;
             }
-            Request::Leverage { command, .. } => {
-                cx.fail(command, error.to_owned());
+            Request::Leverage { context, .. } => {
+                let _ = cx.fail_context(&context, error);
                 return;
             }
         }
         cx.retried_failure("okx.account:852", error);
         if self.account.retry.is_none() {
             self.account.retry = Some(cx.set_timer(5_000.0));
+        }
+    }
+
+    /// Clearing the in-flight flag lets the backoff timer re-enter account_start.
+    fn config_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        self.account.config_in_flight = false;
+        if self.account.configured {
+            self.account.config_read_at = cx.now;
+            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        } else {
+            cx.retried_failure("okx.account:841", error);
+            let pause = std::mem::take(&mut self.account.config_pause_ms);
+            self.account.startup.failed_after(cx, (), pause);
         }
     }
 
@@ -2126,4 +2139,15 @@ pub(crate) fn socket_login_error(code: &str, msg: &str) -> VenueError {
         msg,
         socket_key_rejection(code).unwrap_or(ErrorKind::Internal),
     )
+}
+
+/// Private reads keep one physical attempt inside the shared 20 s deadline.
+fn read_policy(credential: Option<Credential>) -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
 }

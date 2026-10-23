@@ -761,10 +761,13 @@ impl<V: Venue> Engine<V> {
             protocol_ms: self.io.protocol_clock.at(now),
             revision: self.io.protocol_clock.revision(),
         };
+        let mut signing_release = None;
         let result =
             managed
                 .lifecycle
                 .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
+                    signing_release =
+                        Some(crate::SigningRelease::new(release.signature, release.time)?);
                     self.venue.on_http_release(&mut pending.value, release)
                 });
         if let Ok(Claim::Released(release)) = result {
@@ -806,12 +809,12 @@ impl<V: Venue> Engine<V> {
                     self.io.order_read_tokens.insert(request, token);
                 }
             }
-            self.venue.on_signing_receipt(
+            self.venue.on_signing_release(
                 SigningTarget::Http {
                     request,
                     pending: &mut pending.value,
                 },
-                release.signature,
+                signing_release.expect("release metadata checked before admission"),
             );
         }
         if journal && !matches!(result, Ok(Claim::Released(_))) {
