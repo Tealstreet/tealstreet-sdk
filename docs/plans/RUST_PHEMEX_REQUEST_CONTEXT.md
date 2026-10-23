@@ -245,10 +245,10 @@ Architecture No: native codecs consume shared command/lifecycle authority.
 
 Six separately committed lifecycle controls fail on original production while
 credentialed primary/secondary/dual compatibility passes. The managed path
-passes all9 new controls plus14 unchanged public test assertions, including a
+passes all9 new controls plus14 existing public tests, including a
 native error/malformed-row/missing-list comparison against the signed path and
 late429 suppression. Full Phemex+Binance suites pass475 tests across38 targets;
 scoped fmt and strict all-target Clippy pass. Independent source/adversarial,
 caller and full-map reviews are clean, architecture No. The exact scanner and
-manifest remain unchanged; current landing integration/ratchets and CI precede
-merge readiness. Credentialed migration remains explicitly outstanding.
+manifest remain unchanged; integration of paused landing258c880656f and both
+ratchets (14 controls) pass. Exact-head CI precedes merge readiness. Credentialed migration remains explicitly outstanding.
