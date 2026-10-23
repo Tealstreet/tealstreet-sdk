@@ -14,6 +14,15 @@ pub fn requests(e: &mut TestEngine) -> Vec<HttpRequest> {
         })
         .collect()
 }
+pub fn prepared_requests(e: &mut TestEngine, now: f64) -> Vec<HttpRequest> {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
 pub fn response(e: &mut TestEngine, r: &HttpRequest, now: f64, body: &str) {
     e.handle(
         now,
