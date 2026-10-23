@@ -203,7 +203,8 @@ impl LocalSigner {
     }
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
-    /// installed, never later ones.
+    /// installed, never later ones. A role ref keeps its role, which is its
+    /// declaration; trusted callers replace role material only with that kind.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
         self.algorithms.remove(&reference);
         self.keys.insert(reference, Zeroizing::new(bytes));
@@ -1379,7 +1380,7 @@ mod tests {
             &format!(r#""encoding":"hex"}},"zklinkSeed":{{"value":"{seed}"}}}}"#),
         );
         assert!(LocalSigner::from_json_with_policy(duplicate, zklink_policy()).is_err());
-        let unknown = zklink_setup(&seed).replace("zklinkSeed", "l1Wallet");
+        let unknown = zklink_setup(&seed).replace("zklinkSeed", "unknownRole");
         assert!(LocalSigner::from_json_with_policy(unknown, zklink_policy()).is_err());
         let missing = r#"{"primary":{"key":"apex-key","secret":"apex-secret"}}"#.to_owned();
         assert_eq!(
@@ -1888,7 +1889,7 @@ mod tests {
 
     #[cfg(feature = "secp256k1")]
     #[test]
-    fn l1_wallet_material_is_validated_and_required_where_declared() {
+    fn l1_wallet_material_is_refused_at_use_and_required_where_declared() {
         // Zero, the curve order and a short scalar answer nothing.
         for wallet in [
             "0".repeat(64),
