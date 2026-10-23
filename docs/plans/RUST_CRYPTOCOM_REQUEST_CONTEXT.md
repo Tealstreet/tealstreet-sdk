@@ -287,3 +287,11 @@ manifest entry is removed; Crypto totals30 occurrences/27 entries. Independent
 source/adversarial, caller and full-map reviews are clean, architecture No.
 Scoped fmt, strict all-target Clippy and both ratchets (13 controls) pass; full
 native suites and new-head CI remain the final proof for the dependency change.
+
+Final canonical-entry native receipt: Crypto.com+Binance411 tests across38
+suites pass, including the two initial-admission regressions and original five
+lifecycle controls. No failed tests. All three follow-up reviews, strict
+all-target Clippy, scoped fmt and both ratchets are clean. Future venue slices
+keep seam adoption in a fresh follow-up when possible; this already-completed
+slice retains the authorized canonical stack and awaits actual seam landing.
+MEXC phase one does not fold in this new command-entry adoption.
