@@ -166,3 +166,32 @@ Paths relative to sdk-rs. Every unselected entry remains with its current owner.
 | `venues/weex/src/trading.rs` | `a3929c62720c7893d6477453bb8092ee1dc649a8b5024ffd9867b8715c3afc2f` | 1 | Held: uufub4 #1934/#1747 native Plan/Read custody |
 | `venues/weex/src/trading.rs` | `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa` | 1 | Held: uufub4 #1934/#1747 native Plan/Read custody |
 | `venues/weex/src/trading.rs` | `ea183a3f6fb38fae59d7c32102842bce797af23286a824eb9c17fa5cf43b38d5` | 1 | Held: uufub4 #1934/#1747 native Plan/Read custody |
+
+## Original RED and initial GREEN receipt
+
+Plan `af65a1577b2` and original test-only `a55a561b921` received three independent
+CLEAN reviews. Bounded test-only refinement `902335f2b6f` removes a no-op
+map/collect from the header expectation, preserving its exact equality; three
+reviewers cleared it and strict test Clippy passes. The final original run on
+unchanged actual a828 compiles/runs9tests:3native controls PASS,6assertion REDs
+(four local capacity, remote initial fallback and clock). A fixture Prepare-drain
+mistake was corrected before freezing; it is not counted as a RED.
+Command: `CARGO_BUILD_JOBS=2 cargo test -p safe-cex-venue-weex --test request_context_identity --no-fail-fast`.
+
+The same nine tests now PASS unchanged. Only identity.rs uses the existing
+shared initial admission, checked diagnostic/terminal and signed-managed APIs.
+The existing Http recipe, selected credential, exact request/Pending fields and
+remote reducers remain native; managed.rs and every held source/fixture stay
+untouched. Its removed finish helper had only Err callers; valid HTTP success
+already uses managed completion. The raw manifest removes exactly the two
+identity singleton records and preserves every foreign entry/byte. Native,
+strict, ratchet, final independent reviews, actual integration and CI remain
+separate verification gates.
+
+Pre-integration native verification on actual-a828 inputs passes504WEEX/Binance
+tests,0failed/ignored, across40result targets including empty doctests. Strict
+all-target/all-feature WEEX Clippy and scoped rustfmt pass. The full ratchet
+stopped on incoming Aster inventory shrink at newer origin15bd7821b52; no Aster
+entry was changed locally. Genuine landing integration and fresh native/strict/
+ratchet checks are required before PR certification; no full bans PASS claimed
+for this pre-integration checkpoint.

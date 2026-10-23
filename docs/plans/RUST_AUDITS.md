@@ -2596,3 +2596,23 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+### WEEX account identity Read entry (2026-10-24)
+
+Committed plan `af65a1577b2` and original test-only checkpoint `a55a561b921`
+received independent source/adversarial, caller and full-map CLEAN reviews.
+Test-only refinement `902335f2b6f` removes a Clippy identity-map expression while
+retaining exact header equality; all three reviews cleared that bounded change.
+On unchanged actual `a828ede7ebb`, nine tests compile/run:3native controls PASS,
+6intended assertion REDs (four local capacity bypasses, remote numeric admission
+fallback and invalid clock). A fixture initially drained Prepare before the
+shared release helper; this was fixed before freezing and is not a RED.
+The unchanged frozen nine controls now PASS after direct use of genuine initial
+Read entry and existing signed-managed dispatch in identity.rs. Checked native
+companion diagnostics and exact signer/primary namespace survive. The orphan
+legacy success arm and numeric failure helper are removed, pruning exactly the
+two identity singletons; no held helper, dispatch, account or trading code moves.
+
+Pre-integration native504WEEX/Binance tests and strict WEEX Clippy/fmt pass.
+Whole-map provenance is blocked by newer Aster inventory shrink in origin;
+actual integration and fresh gates follow, with no foreign manifest edits.

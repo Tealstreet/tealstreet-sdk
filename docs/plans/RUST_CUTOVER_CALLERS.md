@@ -5709,3 +5709,15 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
+
+### WEEX FetchAccount initial Read authority
+
+WEEX account identity validation now requires genuine engine Read admission for
+both its local refusals and its signed accountConfig GET. Shared capacity or an
+invalid request clock produces one typed correlated Read failure without the
+old numeric CommandError fallback or a financial outcome. Admitted native
+refusals keep their validation order, exact messages, metadata and checked
+CommandError-before-CommandFailed delivery, including the existing missing
+stableId Unsupported/NotSent result. Valid reads keep the selected primary or
+secondary GET signer and exact native wire; the returned userId remains the
+trusted primary stableId. Account state, polling and reconciliation stay intact.

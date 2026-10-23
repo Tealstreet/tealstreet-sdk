@@ -1204,3 +1204,21 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+### WEEX FetchAccount local and remote Read custody
+
+Original identity controls on actual `a828ede7ebb` expose five full-capacity
+entry failures and invalid-clock numeric publication. Three native controls
+PASS beside six intentional assertion REDs; test-only `902335f2b6f` is the
+reviewed strict-Clippy refinement of original `a55a561b921`. The same nine
+controls now PASS, with genuine engine-root capacity/recovery/peer isolation,
+300fixed-clock local completions/refill, exact native diagnostics and metadata,
+independent primary/secondary HMAC wire, primary stableId attribution and Store
+preservation. Plan, original REDs and the refinement each have three independent
+CLEAN reviews. No new provider key, fabricated Context, engine API or venue
+lifecycle/helper was introduced. Broader native/strict/ratchet/final review and
+CI evidence are separate gates.
+
+Pre-integration native504WEEX/Binance tests and strict WEEX Clippy/fmt pass.
+Whole-map provenance is blocked by newer Aster inventory shrink in origin;
+actual integration and fresh gates follow, with no foreign manifest edits.
