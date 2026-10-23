@@ -1269,6 +1269,31 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "asterdex")]
+    #[test]
+    fn hosted_signing_identity_exists_only_for_aster_v1_accounts() {
+        let engine = |options: &str, setup: &str| {
+            let Ok(engine) = crate::WasmEngine::new("asterdex", options, Some(setup.into())) else {
+                panic!("trusted Aster setup must construct");
+            };
+            engine
+        };
+        let v1 = engine(
+            r#"{"asterdex":{"apiVersion":"v1"}}"#,
+            r#"{"primary":{"key":"api-key","secret":"api-secret"}}"#,
+        );
+        assert!(v1.hosted_identity.is_some());
+        let v3 = engine(
+            r#"{"applicationId":"0x2222222222222222222222222222222222222222","asterdex":{"apiVersion":"v3","signerAddress":"0x1111111111111111111111111111111111111111"}}"#,
+            &format!(
+                r#"{{"primary":{{"key":"0x1111111111111111111111111111111111111111","secret":"{}","secretEncoding":"hex"}}}}"#,
+                "12".repeat(32)
+            ),
+        );
+        // A V3 wallet key must never be offered to the hosted HMAC capture.
+        assert!(v3.hosted_identity.is_none());
+    }
+
     #[cfg(feature = "bybit")]
     mod bybit_signer_construction {
         use crate::WasmEngine;
