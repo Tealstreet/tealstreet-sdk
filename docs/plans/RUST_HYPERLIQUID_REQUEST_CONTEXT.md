@@ -530,3 +530,68 @@ codex-5c57jl's socket plan keeps its new `Pending` arm separate and leaves
 
 Architecture gate: No. This only consumes #1848, #1945 and the existing
 managed-header ingress.
+
+## 2026-10-24 handover: codex-ih35js plan and original controls
+
+Ownership transfers from claude-fe7lgm at dd4cf3941a5 to codex-ih35js on
+`feat/rust-hyperliquid-history-context`. The original plan commits remain in
+history. No original REDs or production edits were inherited. The overseer
+reconciled dependency custody: reviewed source ce54ab9357b may be plain-merged
+LOCALLY for development; no mergeable PR or READY claim before the frozen pin.
+That source is genuinely integrated at9943d66bbdc with no conflicts. Later
+frozen/actual dependencies must be plain-merged before fresh CI and landing.
+
+The exact current API is `admit_caller_read_root(None, None)` and
+`read_root_retired(owner, Vec<Pending>)`. Cleanup drops returned pendings and
+queued History continuations only for that exact Owner. It has no Cx and cannot
+publish, send, settle another owner, or install a venue timer. An expired Fresh
+entry is rejected by `reject_expired_command(Read)` after the root admission
+returns Revoked; a missing receipt is refused by root admission itself. There
+is no default-root substitution. Sub-millisecond expiry is an initial-admission
+rule; an admitted fractional absolute root expires at its exact boundary.
+
+The scanner re-dump confirms history.rs has nine fingerprints / eleven lexical
+occurrences, six numeric terminals plus five conservative macro matches:
+
+| Exact fingerprint | Count | Native site and managed destination |
+| --- | ---: | --- |
+| `3df680cd1e2f4c54c571665d0801de18a9503305bd36f985f4e874ddca464ab3` | 1 | Missing identity refusal; original root typed failure. |
+| `ad251e5c58e1d420c73ffe2316dc86c18d35f699fb86b25eba7ff188a9594df4` | 1 | Invalid range refusal; original root typed failure. |
+| `a8154036fb27748faf81b7747c40e8362162b5271d8c5979eba20d6b8d766ef0` | 1 | Unknown public market; original root typed failure. |
+| `e6b5e06ea1d1144f3419909a5caa2040fb5042168a325cc09e7997675f738e62` | 1 | Lookup success; original ReadCompletion. |
+| `180d8a106dd44bf339fbb2be6079affef61e703e71477572a5b804ffa76b1c0b` | 2 | Lookup parse/transport failures; original ReadCompletion. |
+| `b1854c6f5b64c99469571ff9e2f7e1da0c69bf23768ad9537e12567cf7473aa9` | 2 | Ranged-kind macro in builder/response; same native predicate on managed continuation. |
+| `4a595f0e8169456b0ddf61d405d836b0cd131fe7329ad6aadc94049f9a2e37d9` | 1 | Fill aggregateByTime macro; preserve false and native body. |
+| `7658b4ae003384019ae0454fa74a2ca07a7379da26a0c633e0e088ef98db9a4e` | 1 | Inclusive-progress cursor formatting; preserve timestamp/seen identity. |
+| `70af857378d4296e4191c7baf9894fecedb339396eddbfc5cf6ffc1a492f1acd` | 1 | Combined-income stage switch; same root and native reset geometry. |
+
+The prospective shrink is exactly history.rs 9F/11O to zero, conditional on the
+unchanged scanner after implementation. Five removals are lexical macro matches,
+not physical HTTP calls. The shared account sender still serves Account reads;
+its entries and unrelated lib entries remain. No prune occurs in this phase.
+
+The new request_context_history target uses genuine Engine command receipts,
+transport preparation/release, HTTP/data/timer events and native fixtures. It
+must compile against unchanged venue production on the reviewed core stack.
+Original controls pin managed-only Prepare for fills/public trades/lookup,
+configured/default/fractional root deadlines, strict parked/in-flight/final-page
+expiry, income-stage root retention, missing-receipt refusal, same-boundary
+ordering, late callbacks and same-ID recovery. Working controls retain exact
+JSON POST/header/user/vault bytes, accepted-only live-root recovery, strict first
+failure, native funding split, queue reservation bounds and invalid host-clock
+refusal. Neither a compile error nor a failed setup assertion counts as a RED.
+
+Further adoption controls must cover forced leg-capacity refusal with no weight
+charge and Account/History FIFO progress after exact-owner expiry. They require
+the genuine entry/queue harness; no private engine mutation or substitute issuer
+is introduced to fabricate the condition. Retain all native history owned_*
+assertions and add shared prepared-action glue only when implementation begins.
+
+Open-PR file lists were rechecked before editing: no open PR touches the proposed
+Hyperliquid history/account/lib/test paths. The landed socket implementation's
+wire, continuations and private_subscribe regions are outside this slice.
+Architecture gate: No venue root timer, retry scheduler, issuer, classifier or
+completion algorithm is introduced. All three independent reviews precede any
+production readiness claim. The older-base ratchet currently reports incoming
+foreign prunes; dependency/current-landing integration must resolve provenance
+without editing those maps. Scope here is committed plan plus original REDs.
