@@ -64,6 +64,17 @@ fn private_connecting_before_mode() -> (
     safe_cex_engine::HttpRequest,
     safe_cex_engine::TimerId,
 ) {
+    private_connecting_before_mode_with_meta(support::META)
+}
+
+fn private_connecting_before_mode_with_meta(
+    meta: &str,
+) -> (
+    Engine<Hyperliquid>,
+    SocketId,
+    safe_cex_engine::HttpRequest,
+    safe_cex_engine::TimerId,
+) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
@@ -81,7 +92,7 @@ fn private_connecting_before_mode() -> (
             match action {
                 Action::Http(request) => {
                     let body = match support::kind(&request).as_str() {
-                        "metaAndAssetCtxs" => support::META,
+                        "metaAndAssetCtxs" => meta,
                         "perpDexs" => "[null]",
                         "userAbstraction" => {
                             assert!(mode.replace(request).is_none());
@@ -351,6 +362,43 @@ fn standalone_spot_keeps_all_mids_and_five_native_depth_variants() {
             }})
         );
     }
+    engine.handle(
+        2001.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+    engine.handle(
+        2002.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+    engine.handle(
+        2003.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    let sent: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent,["null","2","3","4","5"].map(|figures|format!(
+        r#"{{"method":"unsubscribe","subscription":{{"type":"l2Book","coin":"PURR/USDC","nSigFigs":{figures}}}}}"#)));
 }
 
 #[test]
@@ -603,4 +651,172 @@ fn retired_mode_handoff_never_starts_its_spot_read() {
     engine.handle(2002.0, Event::TimerFired { timer: wake });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(engine.store().balance().total, 0.0);
+}
+
+#[test]
+fn final_perps_book_unsubscribe_preserves_native_topic_order() {
+    let (mut engine, _) = public_open();
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTC-PERP".into(),
+        }),
+    );
+    let sent: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    let expected = [
+        r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#,
+        r#"{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}"#,
+    ];
+    assert_eq!(sent, expected);
+    engine.handle(
+        2001.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTC-PERP".into(),
+        }),
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+    engine.handle(
+        2002.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTC-PERP".into(),
+        }),
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+    engine.handle(
+        2003.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTC-PERP".into(),
+        }),
+    );
+    let sent: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        expected.map(|text| text.replace("subscribe", "unsubscribe"))
+    );
+}
+
+#[test]
+fn refused_mode_handoff_recovers_its_spot_refresh_after_capacity_is_freed() {
+    use safe_cex_engine::socket_lifecycle::MAX_INTERESTS;
+    let universe: Vec<_> = (0..MAX_INTERESTS)
+        .map(|index| {
+            let name = match index {
+                0 => "BTC".into(),
+                1 => "ETH".into(),
+                _ => format!("ASSET{index}"),
+            };
+            format!(r#"{{"name":"{name}","szDecimals":5,"maxLeverage":50}}"#)
+        })
+        .collect();
+    let contexts = vec![r#"{"midPx":"100","markPx":"100"}"#; MAX_INTERESTS];
+    let meta = format!(
+        r#"[{{"universe":[{}]}},[{}]]"#,
+        universe.join(","),
+        contexts.join(",")
+    );
+    let (mut engine, socket, mode, mode_timer) = private_connecting_before_mode_with_meta(&meta);
+    assert_eq!(engine.store().markets().len(), MAX_INTERESTS);
+    engine.handle(2000.0, Event::WsOpened { socket });
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        2001.0,
+        Event::HttpResponse {
+            request: mode.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "\"portfolioMargin\"",
+            },
+        },
+    );
+    let mut refused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        refused.iter().any(
+            |a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event))
+        if event.message.contains("Capacity"))
+        ),
+        "real interest-count capacity refusal"
+    );
+    assert!(
+        refused
+            .iter()
+            .any(|a| matches!(a,Action::ClearTimer{timer} if *timer==mode_timer))
+    );
+    assert!(!refused.iter().any(
+        |a| matches!(a,Action::Http(request) if support::kind(request)=="spotClearinghouseState")
+    ));
+    let markets = engine.store().markets().iter().take(2).cloned().collect();
+    engine.store_mut().set_markets(markets);
+    engine.handle(2002.0, Event::WsClosed { socket, code: 1006 });
+    refused.extend(engine.drain_actions());
+    let (retry, at) = refused
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > 2001.0 && *at_ms <= 18002.0 => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("shared reconnect after refusal or transport close");
+    engine.handle(at, Event::TimerFired { timer: retry });
+    let replacement = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let mut released: Vec<_> = engine.drain_actions().collect();
+    assert!(!released.iter().any(|a| matches!(a, Action::Http(_))));
+    let wake = released
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(at, Event::TimerFired { timer: wake });
+    released.extend(engine.drain_actions());
+    let read = released
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(request) if support::kind(request) == "spotClearinghouseState" => {
+                Some(request)
+            }
+            _ => None,
+        })
+        .expect("native mode completion survives refusal and fresh shared handoff");
+    engine.handle(at,Event::HttpResponse {
+        request:read.id,
+        response:Response{status:200,headers:"",body:r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#},
+    });
+    assert_eq!(engine.store().balance().total, 1100.0);
+    assert_eq!(engine.store().balance().free, 1050.0);
 }
