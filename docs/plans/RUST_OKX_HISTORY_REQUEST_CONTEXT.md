@@ -1,9 +1,9 @@
 # OKX history RequestContext adoption
 
 Plan first, 2026-10-24. Owner: codex-ih35js, handed over by claude-4yjlw0.
-User-pinned base `aa556d59cd904fe6cd81f489fc7680f80cbe578c`; branch
+Initial planning checkpoint `aa556d59cd904fe6cd81f489fc7680f80cbe578c`; branch
 `feat/rust-okx-history-context`. This phase commits the inventory, plan and
-original assertion REDs only. No production or inventory changes until actual
+original assertion REDs only. No venue implementation or lane-owned inventory pruning until actual
 #1945 lands; no merge without an overseer window. #1856 remains frozen for
 combo-4b at `774a27026888bbfca080f2605e957e631c388bb1`.
 
@@ -16,10 +16,11 @@ currently owns history/lib/sign/closed and existing fixtures. #1943 also owns
 lib/socket regions. These source/test files are not edited in this phase.
 Only this plan, its index row and a new standalone history-control file change.
 
-The user requires bare landing aa556 as the phase base. The handover recommends
-future implementation from caller-chain head `b09e8882187` containing
-#1773/#1938/#1942. Record that dependency without silently changing the base:
-re-integrate the actual signer/caller landings and refresh claims before code.
+The branch began at aa556 for original-source evidence. Current landing may be
+plain-merged as it advances; no rebase is needed. The handover recommends future
+implementation after caller-chain head `b09e8882187` containing #1773/#1938/#1942
+or their actual landings. Re-integrate current landing and the actual signer/
+caller landings and refresh claims before code.
 The history adoption consumes #1773's dispatch recipe through
 `request_signed_managed`, ordinary signed GET selection Secondary else Primary,
 with client-ID lookup explicitly Primary. It adds no signing implementation.
@@ -196,13 +197,23 @@ re-proven with actual #1945 before attributing remaining failures to adoption.
 Secondary-wire/provider behavior is not newly proven by these five controls.
 
 Source/adversarial, caller and full-map reviewers independently verified the
-original-source boundary and test reachability. Production, engine, inventories,
-ratchets and all existing fixture/test files remain byte-exact to aa556. The
+original-source boundary and test reachability. At that original checkpoint,
+production, engine, inventories, ratchets and existing fixtures were byte-exact
+to aa556. The
 phase is intentionally RED and not merge-ready. No legacy site is pruned.
 
-Strict all-target OKX Clippy and fmt pass for this original-control checkpoint.
-The checker tests pass15/15. The current-remote provenance check refuses the
-user-pinned older manifest because incoming Paradex history entries were pruned
-after aa556; the manifest here remains byte-exact to aa556, with no growth from
-this branch. This is not a current-landing ratchet PASS. Re-integrate all incoming
-prunes with actual #1945 before claiming adoption checks or merge readiness.
+Strict all-target OKX Clippy and fmt passed for that original-control
+checkpoint; checker tests passed15/15. Its provenance check refused the older
+manifest because incoming Paradex history entries were pruned after aa556. That
+was not a current-landing ratchet PASS; the branch had introduced no growth.
+
+## Current landing integration
+
+Plain-merge actual `a828ede7ebb54bc9c032ea61365213abac5e3dca` to carry incoming
+source and all inventory prunes. The merge is conflict-free. Only this plan,
+the README index row and the original new control file belong to this lane;
+all production, prior tests and the manifest equal current landing. The
+historical aa556 original-source receipt above remains intact. Recheck both
+ratchets and the unchanged controls at this integration; implementation stays
+held for actual #1945 and source ownership. No inventory prune or managed
+history readiness is claimed.
