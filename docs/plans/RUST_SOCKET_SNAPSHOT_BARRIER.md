@@ -225,3 +225,13 @@ auth-before-immediate-ping using reviewed shared signing-release custody; no
 venue queue/timer and no silent delay-until-ACK substitution. The Phemex signer
 lane is plan/RED-only pending shared raw-signature expiry. This snapshot
 prerequisite does not claim to resolve that separate ordering/expiry contract.
+
+## Independent source review
+
+Uufub4 engine/API/custody source review CLEAR at2238e7c5691, with independent
+exact git-archive execution of15 socket_snapshot_barrier controls PASS/0ignored.
+Committed15d2b3f4cc3 validate-before-capacity delta is source CLEAR; the reviewer
+does not claim separate execution of that added unit control. Its local snapshot
+unit filter is13PASS. The initial changing-worktree syntax error is excluded
+from the immutable review receipt. Actual combo4a2fade3 is genuinely integrated.
+Full feature-mode/strict/replay/CPU/memory/size CI and train readiness are separate.

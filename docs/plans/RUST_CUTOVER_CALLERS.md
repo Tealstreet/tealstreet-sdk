@@ -5827,3 +5827,26 @@ state, so freshness-aware late publication remains explicit follow-up debt.
 The inventory shrinks exactly 51 ->46 occurrences (42 -> 38 entries), with
 trading.rs 5 ->0: two numeric completions plus three conservative macro matches.
 No other venue inventory, shared checker, allowance or signer source changes.
+
+## Socket login and native snapshot completion
+
+`register_socket_feed_with_snapshot` declares a private authenticated feed whose
+configured authentication timeout runs from physical connect until the native
+snapshot is accepted. Login acceptance permits the subscription needed to obtain
+that snapshot; it does not remove or renew the snapshot bound. Pongs retain their
+separate receive-liveness meaning. Existing `register_socket_feed` semantics stay
+the same.
+
+The venue prepares and validates its native snapshot once, then calls
+`complete_socket_snapshot()` before publishing affected Store state. The engine
+requires the exact current managed text callback, physical epoch and receipt
+time; callers supply no feed, socket, generation or clock. Duplicate, retired,
+wrong-scope and borrowed callbacks cannot complete the barrier. Capacity refusal
+retains the pending proof and deadline, so no snapshot commit is authorized by a
+failed completion. A caller-modified timestamp cannot discharge the barrier.
+
+The existing shared Supervisor owns expiry, timers and reconnect. Equality at
+the immutable deadline fences ingress before native decoding/publication, even
+if the host delivers its watchdog late. Hosts use the existing socket actions
+and ordinary timer ingress; no new host message or wire format is required.
+Snapshot completion grants no command, HTTP, signing or new send authority.
