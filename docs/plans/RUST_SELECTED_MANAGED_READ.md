@@ -124,7 +124,9 @@ names below describe the intended ownership, not a currently exported API.
 
 For missing selection in a command, the shared helper admits a genuine local
 Read with credential None using the same explicit native policy, then calls
+command_error_context for an optional caller-supplied native diagnostic, then
 fail_context with the caller-supplied exact native typed credential error.
+Diagnostic precedes the sole terminal; an absent diagnostic emits none.
 Rejected/Revoked return unchanged without a second terminal. This branch issues
 no I/O, Identity or selection and is shared rather than a venue admission copy.
 Background selection refusal remains typed and creates no command.
@@ -154,6 +156,10 @@ pub struct ReadRequest {
 }
 pub struct SelectedRead { /* private Selection + Identity */ }
 pub struct AdmittedRead { /* private SelectedRead + original Context */ }
+pub struct LocalRefusal {
+    pub diagnostic: Option<String>,
+    pub error: VenueError,
+}
 pub enum CommandReadError {
     Entry(CommandEntryError),
     LocalRefusal { error: VenueError, terminal: Result<(), Error> },
@@ -172,7 +178,7 @@ impl SelectedRead {
         -> Result<Self, CredentialUnavailable>;
     pub fn command<P>(cx: &mut Cx<'_, P>,
         selected: Result<Self, CredentialUnavailable>, policy: ReadPolicy,
-        missing: VenueError) -> Result<AdmittedRead, CommandReadError>;
+        missing: LocalRefusal) -> Result<AdmittedRead, CommandReadError>;
     pub fn background<P>(cx: &mut Cx<'_, P>,
         selected: Result<Self, CredentialUnavailable>, policy: ReadPolicy)
         -> Result<AdmittedRead, BackgroundReadError>;
@@ -198,12 +204,28 @@ only the wrapper's immutable Identity. The caller can borrow Context for exact
 delivery/publication/typed terminal but cannot swap a newly selected role into
 this wrapper. LocalRefusal reports the exact typed error and terminal result;
 its caller must return, never numeric-fail or publish an additional terminal.
+The optional LocalRefusal diagnostic preserves Bitget's command-error-before-
+failure order; OKX can supply None. Slots::new(primary, secondary, SlotPolicy)
+cheaply moves/clones already validated opaque Options identities and adds no
+setup logic. Existing http_retry_context takes &self, so retry uses &Cx.
 No helper-owned owner registry, timer or scheduler. No external-Context queueing.
 
 Ordered headers are part of byte equality, not just header sets. Keep keyless
 remote/hosted dispatch working: one positive native control in each first
 adopter must prepare a selected read and receive provider signing without local
 key material. Existing family recipes/provider adapters remain unchanged.
+
+## Provenance boundary for following G1/G2 composition
+
+G2 owner codex-hcmq3f identified a separate OPEN prerequisite at `224810a4c03`:
+trusted issuer/subject/config-generation snapshot provenance and retirement.
+Current Identity refs plus Selection and Credential do not prove that broader
+property. This helper preserves the exact selected snapshot already admitted
+under existing Context/Engine lifetime; its private wrapper is not proof of
+trusted subject or configuration-generation retirement. No G1/G2 readiness or
+new snapshot invalidation API is claimed. Core/owner review must determine the
+separately owned shared prerequisite before those Plan consumers compose it;
+do not add a local generation counter, synthetic credential or runtime swap.
 
 ## Original failing controls before source
 
