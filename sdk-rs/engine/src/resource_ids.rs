@@ -15,7 +15,7 @@ pub fn from_host_number(value: f64) -> Option<u64> {
 
 /// An exhausted allocator never rewinds or emits its exclusive-end sentinel.
 /// Typed admission can reserve a whole range without making exhaustion fatal.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResourceIds {
     next: u64,
     fatal: bool,
@@ -51,14 +51,35 @@ impl ResourceIds {
     /// Compatibility backstop for infallible legacy engine APIs. Hosts must
     /// retire the failed engine; subsequent engine entry/drain is fenced.
     pub fn next_or_fatal(&mut self) -> u64 {
-        if let Some(range) = self.reserve(1) {
-            return range.start;
+        self.reserve_or_fatal(1).start
+    }
+    pub fn reserve_or_fatal(&mut self, count: u64) -> Range<u64> {
+        if let Some(range) = self.reserve(count) {
+            return range;
         }
         self.fatal = true;
         panic!("engine resource identities exhausted");
     }
     pub fn failed(&self) -> bool {
         self.fatal
+    }
+
+    #[cfg(test)]
+    pub(crate) fn starting_at(next: u64) -> Self {
+        assert!((1..=MAX_RESOURCE_ID + 1).contains(&next));
+        Self {
+            next,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_ceiling(ceiling: u64) -> Self {
+        assert!((1..=MAX_RESOURCE_ID).contains(&ceiling));
+        Self {
+            ceiling,
+            ..Self::default()
+        }
     }
 }
 
@@ -102,10 +123,7 @@ mod tests {
     }
     #[test]
     fn legacy_backstop_latches_before_trapping_and_all_future_ranges_refuse() {
-        let mut ids = ResourceIds {
-            ceiling: 2,
-            ..ResourceIds::default()
-        };
+        let mut ids = ResourceIds::with_ceiling(2);
         assert_eq!(ids.next_or_fatal(), 1);
         assert_eq!(ids.next_or_fatal(), 2);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ids.next_or_fatal()));

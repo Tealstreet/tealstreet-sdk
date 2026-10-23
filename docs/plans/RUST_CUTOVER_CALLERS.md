@@ -4112,3 +4112,20 @@ SDK arguments and row shapes are unchanged. Numeric Completion uses legacy
 authority rather than managed Context completion. Callers must ingest command-scoped
 incomplete-query warnings, gate coverage accordingly and handle typed rejection
 as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+## Host-safe physical engine resource IDs
+
+Physical socket, HTTP request, signing-attempt and timer IDs use exact numeric
+identities through `2^53 - 1`, without wrapping at the former u32 boundary.
+Host integrations must preserve the complete integer and must not truncate it to
+32 bits. Command IDs, millisecond durations and lossless decimal managed
+preparation/permit tokens retain their existing contracts. Resource identities
+are opaque correlation values, not permission to send or publish state.
+
+Managed admission reserves complete resource groups atomically and reports typed
+capacity refusal without partial preparation or I/O. A fatal legacy allocation
+exhaustion permanently retires the engine: hosts report a terminal engine failure,
+dispose it and require reconstruction. No partially queued callback actions or
+previously bound HTTP permit can release after that retirement. Prior-sent write
+uncertainty remains subject to the existing reconciliation contract; terminal
+engine failure never proves that a write was not sent.

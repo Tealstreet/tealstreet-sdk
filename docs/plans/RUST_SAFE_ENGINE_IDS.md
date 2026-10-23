@@ -89,3 +89,36 @@ reprepare recipe retention, last safe ID exactly once, and no usable I/O after
 fatal legacy exhaustion. Actual host ingress/serialization must reject invalid
 IDs before touching clocks, health or draining actions; tuple constructors do
 not exempt forged outbound IDs from the safe-number boundary.
+
+## Engine checkpoint on actual history prerequisites
+
+Actual #1768 `848924471635eee7a0c61c64407a861c3aea37f3` is integrated at
+`e19020ee3e4`. The only conflict was independently inserted README rows, resolved
+with the incoming row followed by the unchanged resource-ID row once, retaining
+the complete incoming file when the latter is removed. The hash receipt is kept
+for a comment on the eventual PR.
+
+The concrete implementation retains checked state in `Io.next_id: ResourceIds`
+instead of a mutable scalar. `Io.reserve_ids(count)` returns the reviewed
+`Option<Range<u64>>`; consumers use that seam rather than direct arithmetic.
+Dispatch owns a separate instance of the same allocator policy. Physical ID
+wrappers, dispatch ordering and registry issuer inputs use u64; command IDs and
+timeouts stay u32. Managed HTTP preflights all three Io IDs plus the signing ID
+before committing either namespace. Context issuance returns typed Capacity;
+reprepare preflights before advancing lifecycle or taking its retained recipe.
+Finite poll registration atomically reserves logical and physical IDs; paused
+polls need only their logical ID. Later independent admission refusal leaves
+intentional monotonic gaps.
+
+Legacy exhaustion latches before trapping. Engine event/dispatch/drain/frame and
+managed-release ingress reject further work, and preparation/signing queries
+become inert. Tests retain a real bound permit before fatal exhaustion and prove
+it cannot invoke release afterward. Separate controls start with genuinely live
+route/provider work before checking retirement. The existing decimal managed
+token codec keeps full-u64 generations, but physical request IDs now admit exactly
+the safe-integer bound.
+
+This is an engine checkpoint only. WASM numeric ingress/outbound validation,
+native and WASM typed terminal disposal, all remaining host/type adapters,
+actual-WASM round trips, final caller contract verification, ratchet checks and
+full CI/replay proof remain required before opening a ready PR or merging it.
