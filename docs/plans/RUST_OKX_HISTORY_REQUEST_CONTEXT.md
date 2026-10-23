@@ -304,3 +304,43 @@ included. The composed chain's CI is dependency evidence only, not a green
 claim for this original-RED target. Missing-receipt handling remains held for
 the reviewed public refusal/root-expiry API; no default-root substitution or
 venue-local receipt shim is introduced.
+
+## Tracked caller-root implementation contract
+
+Actual OKX signer/caller landings through0418d0a4599 are genuinely integrated
+at27f687b3c9f; provisional reviewed #1976 0a35dc34dee is plain-merged locally
+at4bd3b9fccb7 with shared documentation keep-both resolutions only. Per the
+overseer's current root-expiry ruling, this supersedes the earlier untracked
+root description: admit_caller_read_root captures the exact raw receipt deadline
+and the engine expires it strictly, discarding all rows, markers and native
+finalizers. This applies both before and after release. No venue release flag
+or root timer is introduced. Root retirement only removes this exact Owner's
+delayed history continuations; leaked native100ms pacing timers become inert.
+
+The two original expiry controls remain available in their original checkpoint.
+At this revised contract they must demand strict Timeout/outcomeNone/no rows
+from the shared funnel, rather than the earlier planned soft-empty expiry.
+A separate original-source assertion RED pins root-timer expiry while parked,
+without firing the native pacing timer. Ordinary live-root released HTTP, parse,
+transport and child-only failures retain their native command_error plus soft[]
+for queries; lookup stays strict. Provider/preparation refusal is always strict
+typed NotSent for both, never definitive absence. Missing receipts are refused
+by shared admission, never substituted with a default.
+
+Each native send/dequeue derives a20s/Never child from the same original root;
+ordinary signed reads keep Secondary else Primary, client-ID lookup Primary,
+public trades no credential. Recipes and opaque identity come from actual#1773.
+ReadCompletion validates DATA and owns finalization; native cursor/dedup/row
+codecs remain unchanged and ordinary failure discards all staged rows. Only
+Pending::History lib hooks are edited; shared list/sign funnel still serves
+discovery and cannot be removed without an exact remaining-consumer audit.
+Implementation is local until the replacement frozen #1976 composition is
+announced; no mergeable PR/READY or source conflict guesses.
+
+The revised test-only checkpoint executes15 real-engine controls on unchanged
+OKX production:9 assertion REDs,6 native compatibility passes,0 ignored. The
+new parked-root assertion deliberately observes the absent engine caller-root
+timer; native request/timer setup is otherwise supplied by the passing page
+pacing controls. The two expiry assertions now demand the current strict engine
+Timeout contract, with their original versions retained in Git history. No venue
+source, manifest or existing financial oracle changes in this checkpoint.

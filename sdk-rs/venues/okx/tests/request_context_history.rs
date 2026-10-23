@@ -196,7 +196,7 @@ fn original_primary_lookup_requires_managed_page_preparation() {
     managed(&engine.drain_actions().collect::<Vec<_>>(), "/trade/order?");
 }
 #[test]
-fn original_short_caller_root_stops_a_page_waiting_at_dequeue() {
+fn revised_short_caller_root_stops_a_page_waiting_at_dequeue() {
     let mut engine = ready();
     deliver(&mut engine, NOW, orders(), Some(250));
     let first = request(actions(&mut engine, NOW));
@@ -204,11 +204,11 @@ fn original_short_caller_root_stops_a_page_waiting_at_dequeue() {
     let output = actions(&mut engine, NOW + 200.);
     let timer = paced(&output, NOW + 300.);
     engine.handle(NOW + 300., Event::TimerFired { timer });
-    soft_failure(&actions(&mut engine, NOW + 300.));
+    root_expired(&actions(&mut engine, NOW + 300.));
     assert!(engine.take_frame(NOW + 300.).is_none());
 }
 #[test]
-fn original_default_caller_root_does_not_renew_across_valid_page_children() {
+fn revised_default_caller_root_does_not_renew_across_valid_page_children() {
     let mut engine = ready();
     deliver(&mut engine, NOW, orders(), None);
     let mut current = request(actions(&mut engine, NOW));
@@ -217,7 +217,7 @@ fn original_default_caller_root_does_not_renew_across_valid_page_children() {
         reply(&mut engine, &current, at, &page(number));
         let output = actions(&mut engine, at);
         if number == 7 {
-            soft_failure(&output);
+            root_expired(&output);
             assert!(engine.take_frame(at).is_none());
             return;
         }
@@ -370,4 +370,35 @@ fn longer_caller_wait_must_not_be_replaced_by_a_fixed_default_root() {
         engine.handle(at + 100., Event::TimerFired { timer });
         current = request(actions(&mut engine, at + 100.));
     }
+}
+
+fn root_expired(output: &[Action]) {
+    assert!(
+        done(output).is_none(),
+        "root expiry never softens into empty success"
+    );
+    assert_eq!(output.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.kind == Some(ErrorKind::Timeout) && error.outcome.is_none())).count(), 1);
+    assert!(!output.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::ManagedHttp(_) | Action::Notice(Notice::CommandError { .. })
+    )));
+}
+#[test]
+fn revised_parked_root_timer_expires_without_pacing_or_prefix_publication() {
+    let mut engine = ready();
+    deliver(&mut engine, NOW, orders(), Some(250));
+    let output = actions(&mut engine, NOW);
+    let timer = output
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 250. => Some(*timer),
+            _ => None,
+        })
+        .expect("engine caller-root timer independent of native pacing");
+    let first = request(output);
+    reply(&mut engine, &first, NOW + 200., &page(0));
+    let waiting = actions(&mut engine, NOW + 200.);
+    paced(&waiting, NOW + 300.);
+    engine.handle(NOW + 250., Event::TimerFired { timer });
+    root_expired(&actions(&mut engine, NOW + 250.));
 }
