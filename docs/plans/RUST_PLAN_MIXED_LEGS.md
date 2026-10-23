@@ -16,10 +16,11 @@ cross/one-way form remains one POST without positionSide. Both nonce/header
 preparations precede the native pair's enqueue; failure of the second native
 preparation sends neither. Independent managed send-time preparation does NOT
 provide that group barrier: one sibling can be accepted before the other's
-provider refusal. G2 declares that difference explicitly, with a Partial-effect
-control and consumer decision required before native cutover. If exact native
-preparation atomicity is required, a separately reviewed shared group prepare/
-release barrier is a prerequisite; #1939 only governs reply independence.
+provider refusal. Consumer ruling requires preserving this preparation barrier. A separately
+reviewed shared parallel-Mutation group prepare/release barrier is an OPEN
+prerequisite to BloFin cutover; #1939 only governs reply independence. G2's
+immutable binding REDs can proceed, but no native parity claim until that barrier
+exists. The owning lane/scope is being confirmed with the overseer.
 No local eager-sign fallback. Reverse, duplicate and stale deliveries must not
 change the aggregate result.
 
@@ -68,7 +69,8 @@ Proposed declaration vocabulary (spelling is pending API fit):
 struct LegDeclaration {
     operation: Operation,
     selected: SelectedIdentity, // opaque shared Selection + Identity + routing
-    // Retry and pacing remain declared call bounds, never callback overrides.
+    retry: RetryPolicy, // resolved per leg, bounded by its CallBound credits
+    // Pacing remains declared; no callback override.
 }
 // Same internal admission used by uniform, conditional and physical Plans.
 cx.admit_plan_with_legs(&preflight, steps, root_policy, legs, terminals)
@@ -111,6 +113,21 @@ that declaration before IDs, and pin both admission refusal and Read terminal
 rights denial. Conditional terminals and future ReconcileBound remain fields of that single
 internal declaration. No alternate constructor bypasses readiness or custody.
 
+Each leg also fixes RetryPolicy. Today's root PlanPolicy.retry is insufficient:
+CallBound attempts/window/fallback do not grant retry authority, and a Mutation
+Context cannot use ReadFailure. A Read leg's bounded ReadFailure permission is
+independent of a Mutation leg's Never/DefinitiveRefusal permission. Retry/fallback
+selection cannot upgrade operation, credential or journal authority.
+
+Journal enrollment and replacement must be operation-aware. Today's
+replace_plan_call enrolls every fallback logical ID through CommandWrites::replace;
+that would incorrectly enroll a Read child as money work. G2 registers only
+Mutation descendants and preserves the original write's evidence/ancestry while
+Read descendants remain transport-only. An unresolved write never disappears
+because its fallback is Read or because a Read completed. Mixed fallback controls
+pin success, refusal and Unknown projection without imaginary Read money facts;
+proof that resolves a prior write still needs the reconciliation contract.
+
 ## Read Verify has no mutation rights
 
 A selected Verify Context carries Operation::Read and the selected credential
@@ -143,13 +160,27 @@ pacing, retries and verification never renew it. No arbitrary 120 s root.
 Read retries consume only their declared credits; they do not reset write or
 resend budgets. A Verify that natively has no retry declares one attempt.
 
+For a parallel all-Mutation step, the required shared barrier prepares and
+provider-signs every leg before releasing any. Failure/refusal/expiry before
+release cancels all prepared work: local NotSent for this step, no partial from
+this step. Earlier released steps still govern the whole command's projection.
+After the barrier opens, failures use ordinary journal Partial/Unknown. Serial
+steps and Read legs retain per-call release. Delayed-provider and prepare-deadline
+REDs must prove zero HTTP before all succeed and zero HTTP if one refuses. This
+is an OPEN shared prerequisite, not a venue-local staging workaround.
+
+BloFin draws a 21-byte nonce from injected signing entropy at prepare. Draws
+must follow declaration order (long then short; cancel, Verify, place), independent
+of provider response order. Reprepare redraws for its exact leg deterministically
+through the signing core. Preserve the existing nonce-order native control; no
+venue random source or new entropy loop.
+
 Two concurrent Primary writes settle independently and order-independently;
 exactly one root terminal follows the barrier. #1939 independent_calls is an
 explicit dependency for faithful continuation after delivered 408/5xx. Until
 its actual integration, core's stop/Unknown behavior is not described as native
 parallel completion; do not add a venue fallback. Controls cover accepted plus
-401/429/unlisted/transport/timeout, both refused, accepted sibling then provider
-refusal, and refusal before any release. Accepted IDs become structured Partial
+401/429/unlisted/transport/timeout, both refused, accepted sibling then a post-release transport failure, and provider refusal before any release. Accepted IDs become structured Partial
 on failure; no accepted sibling permits whole-command NotSent/Rejected.
 
 G1 separately grants finite Read-only background admission and MUST reject any
@@ -183,7 +214,7 @@ edits in this phase and no legacy inventory prune.
    single production custody cutover. Venue inventory only shrinks in that PR.
 
 Controls also cover cardinality/fallback enumeration, rejected admission consumes
-no IDs, Secondary-only write refusal, late credential replacement, exact route
+no IDs, Secondary-only write refusal, Read fallback journal exclusion, late credential replacement, exact route
 and recipe Identity binding, delayed provider before/after accepted sibling,
 reverse/duplicate/stale pair replies, no terminal before both settle, original
 root unchanged, native malformed/multiple/negative/NaN Verify rows, intervening
