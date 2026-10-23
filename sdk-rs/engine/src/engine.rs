@@ -661,6 +661,25 @@ pub enum Command {
 }
 
 impl Command {
+    /// The logical intent a write under this command serves. Venue actions
+    /// classify conservatively as placements.
+    pub(crate) fn write_intent(&self) -> crate::classify::Intent {
+        use crate::classify::Intent;
+        match self {
+            Self::PlaceOrders { .. } => Intent::Place,
+            Self::CancelOrders { .. }
+            | Self::CancelOrdersWithSymbols { .. }
+            | Self::CancelSymbolOrders { .. } => Intent::Cancel,
+            Self::AmendOrder { .. } | Self::AmendOrderWithSymbol { .. } => Intent::Amend,
+            Self::SetLeverage { .. }
+            | Self::SetMarginType { .. }
+            | Self::SetPositionMode { .. }
+            | Self::SetStpMode { .. } => Intent::Setting,
+            Self::Venue { .. } => Intent::Place,
+            _ => Intent::Read,
+        }
+    }
+
     pub(crate) fn completion_id(&self) -> Option<CommandId> {
         match self {
             Self::PlaceOrders { command, .. }
@@ -818,6 +837,13 @@ impl std::fmt::Debug for Event<'_> {
     }
 }
 
+#[path = "request_context_entry.rs"]
+mod command_entry;
+
+#[cfg(test)]
+#[path = "request_context_entry_tests.rs"]
+mod command_entry_tests;
+
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
     pub now: f64,
@@ -862,6 +888,20 @@ mod request_context_registry;
 
 #[path = "http_lifecycle.rs"]
 mod http_lifecycle;
+
+#[path = "execution_cx.rs"]
+mod execution_cx;
+
+#[cfg(test)]
+#[path = "execution_cx_tests.rs"]
+mod execution_cx_tests;
+pub use execution_cx::{ExecutionHandle, Joined, Window};
+
+/// A delivered response whose bytes the engine cannot hand to a codec. The
+/// venue answered, so this is never transport loss.
+fn malformed_body(message: &str) -> VenueError {
+    VenueError::new(message).kind(ErrorKind::Internal)
+}
 
 fn observe_account_auth<V: Venue>(
     venue: &V,
@@ -1394,6 +1434,12 @@ impl Polls {
 struct Io<P> {
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
+    // Typed cause of the HttpFailed being delivered: Network from the host,
+    // Timeout when the engine expires a released request at its deadline.
+    http_failure_kind: ErrorKind,
+    // Status and headers of the managed write reply being delivered.
+    http_write_reply: Option<(u16, String)>,
+    command_entry: Option<command_entry::Entry>,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
@@ -1409,6 +1455,8 @@ struct Io<P> {
     order_response_token: Option<u64>,
     actions: Vec<Action>,
     placement_acks: crate::placement_acks::PlacementAcks,
+    /// One engine timer for the earliest execution-group deadline.
+    execution_timer: Option<(TimerId, f64)>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
@@ -1444,6 +1492,9 @@ impl<P> Default for Io<P> {
         Self {
             request_contexts: Default::default(),
             http_delivery: None,
+            http_failure_kind: ErrorKind::Network,
+            http_write_reply: None,
+            command_entry: None,
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: HashMap::new(),
@@ -1459,6 +1510,7 @@ impl<P> Default for Io<P> {
             order_response_token: None,
             actions: Vec::new(),
             placement_acks: Default::default(),
+            execution_timer: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
@@ -1628,6 +1680,7 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
+        self.io.opaque_entry_activity();
         let action = Action::WsSend {
             socket,
             text: text.into(),
@@ -1647,6 +1700,7 @@ impl<P> Cx<'_, P> {
         if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
+        self.io.opaque_entry_activity();
         for timer in self.io.signing.close_socket(socket) {
             if timer.0 != 0 {
                 self.io.actions.push(Action::ClearTimer { timer });
@@ -1718,6 +1772,7 @@ impl<P> Cx<'_, P> {
         payload: PayloadSignRequest,
         target: SignatureTarget,
     ) -> Result<(), P> {
+        self.io.opaque_entry_activity();
         let Some(index) = self
             .io
             .actions
@@ -1795,6 +1850,7 @@ impl<P> Cx<'_, P> {
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
         let attempt = self.io.signing.next_id();
         // Exhaustion is handled through the same asynchronous failure event.
@@ -2109,17 +2165,34 @@ impl<P> Cx<'_, P> {
         result: Result<String, VenueError>,
         authority: Option<&crate::request_context::Context>,
     ) -> Result<(), crate::request_context::Error> {
+        self.finish_command_as(command, result, authority, false)
+    }
+
+    fn finish_command_as(
+        &mut self,
+        command: CommandId,
+        result: Result<String, VenueError>,
+        authority: Option<&crate::request_context::Context>,
+        observer: bool,
+    ) -> Result<(), crate::request_context::Error> {
+        if authority.is_none() && !self.io.numeric_entry_completion_allowed(command) {
+            return Err(crate::request_context::Error::Revoked);
+        }
         let (success, error) = match result {
             Ok(result) => (Some(result), None),
             Err(error) => (None, Some(error)),
         };
         let mut write_sealed = false;
-        let result = match self.io.request_contexts.seal(
-            command,
-            self.io.http_delivery.as_ref(),
-            authority,
-            error,
-        ) {
+        let delivery = if observer {
+            None
+        } else {
+            self.io.http_delivery.as_ref()
+        };
+        let result = match self
+            .io
+            .request_contexts
+            .seal_as(command, delivery, authority, error, observer)
+        {
             request_context_registry::Seal::Stale => {
                 return Err(crate::request_context::Error::Revoked);
             }
@@ -2161,6 +2234,7 @@ impl<P> Cx<'_, P> {
                 Notice::CommandFailed { command, error }
             }
         };
+        self.io.entry_completed(command);
         self.io.actions.push(Action::Notice(notice));
         Ok(())
     }
@@ -2409,6 +2483,19 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
+    /// A request that may have reached the venue failed without a usable
+    /// response. `error.kind` is `Timeout` for engine deadline expiry,
+    /// `Internal` for a whole delivered body (or managed write reply) the engine
+    /// cannot decode, else `Network`. Streams that break mid-array still use
+    /// `on_stream_malformed`.
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_request_failed(cx, pending, &error.message);
+    }
     fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
@@ -2753,6 +2840,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.assert_command_entry_safe();
         if self.public_feed_policy() == PublicFeedPolicy::Shared {
             Box::new(
                 self.shared_books
@@ -2773,6 +2861,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn venue(&self) -> &V {
+        self.assert_command_entry_safe();
         &self.venue
     }
 
@@ -2780,6 +2869,7 @@ impl<V: Venue> Engine<V> {
     /// books by default. Switching modes starts a fresh full-book baseline.
     #[cfg(feature = "book-deltas")]
     pub fn set_book_deltas(&mut self, enabled: bool) {
+        self.assert_command_entry_safe();
         if self.book_deltas != enabled {
             self.book_deltas = enabled;
             self.book_baselines.clear();
@@ -2812,6 +2902,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn capabilities(&self) -> Capabilities {
+        self.assert_command_entry_safe();
         self.venue.capabilities()
     }
 
@@ -2835,10 +2926,23 @@ impl<V: Venue> Engine<V> {
         self.assert_live();
         self.io.dispatch_now = now;
         self.io.http_responses.prune(now);
+        // Expired observers detach before any delivery can project to them.
+        self.sweep_executions(now);
         if self.expire_http_timer(now, &event) {
+            self.sweep_executions(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            return;
+        }
+        if let Event::TimerFired { timer } = &event
+            && self
+                .io
+                .execution_timer
+                .is_some_and(|(own, _)| own == *timer)
+        {
+            self.io.execution_timer = None;
+            self.sweep_executions(now);
             return;
         }
         let admitted = self.admit_http_event(now, &event);
@@ -2887,7 +2991,17 @@ impl<V: Venue> Engine<V> {
         }
         if let Some(request) = completed_http {
             self.settle_http_event(request);
+            self.sweep_executions(now);
         }
+    }
+
+    fn sweep_executions(&mut self, now: f64) {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.sweep_executions();
     }
 
     /// Dispatch held cancellations whose acknowledged ids are now stored, or
@@ -2939,7 +3053,7 @@ impl<V: Venue> Engine<V> {
             let _ = self.io.request_contexts.result(
                 delivery,
                 crate::request_context::WriteResult::Failed(
-                    VenueError::new(*error).kind(ErrorKind::Network),
+                    VenueError::new(*error).kind(self.io.http_failure_kind),
                 ),
             );
         }
@@ -3155,7 +3269,8 @@ impl<V: Venue> Engine<V> {
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
                     cx.io.health.count(log_code::HTTP_FAILED);
-                    self.venue.on_request_failed(&mut cx, pending.value, error);
+                    let failure = VenueError::new(error).kind(cx.io.http_failure_kind);
+                    self.venue.on_http_failed(&mut cx, pending.value, failure);
                 }
             }
             Event::TimerFired { timer } => {
@@ -3165,7 +3280,11 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Event::Command(Command::Venue { command, action }) => {
+                cx.io.begin_command_entry(Some(command));
+                cx.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.request_contexts.dispatch = None;
+                cx.io.end_command_entry();
             }
             Event::Command(Command::FetchAccount { command })
                 if self.venue.capabilities().account == AccountLookup::Unsupported =>
@@ -3243,7 +3362,15 @@ impl<V: Venue> Engine<V> {
                         return;
                     }
                 }
+                cx.io.begin_command_entry(command.completion_id());
+                // The classifier takes intent from the command, never the venue
+                // (an amend's cancel leg is still an amend).
+                cx.io.request_contexts.dispatch = command
+                    .completion_id()
+                    .map(|id| (id, command.write_intent()));
                 self.venue.on_command(&mut cx, command);
+                cx.io.request_contexts.dispatch = None;
+                cx.io.end_command_entry();
             }
         }
         self.finish_event_scope(now);
@@ -3405,11 +3532,8 @@ impl<V: Venue> Engine<V> {
             let body = match std::str::from_utf8(outside) {
                 Ok(body) => body,
                 Err(_) => {
-                    self.venue.on_request_failed(
-                        &mut cx,
-                        pending.value,
-                        "stream envelope is not UTF-8",
-                    );
+                    let failure = malformed_body("stream envelope is not UTF-8");
+                    self.venue.on_http_failed(&mut cx, pending.value, failure);
                     return;
                 }
             };
@@ -3449,8 +3573,8 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_response(&mut cx, pending.value, response);
             }
             Err(_) => {
-                self.venue
-                    .on_request_failed(&mut cx, pending.value, "response body is not UTF-8")
+                let failure = malformed_body("response body is not UTF-8");
+                self.venue.on_http_failed(&mut cx, pending.value, failure);
             }
         }
     }
@@ -3551,10 +3675,18 @@ impl<V: Venue> Engine<V> {
     /// Hosts check this before starting any delayed primitive operation.
     /// A fatal allocator failure permanently retires this engine.
     pub fn failed(&self) -> bool {
-        self.io.next_id.failed() || self.io.signing.failed()
+        self.io.command_entry.is_some() || self.io.next_id.failed() || self.io.signing.failed()
+    }
+
+    fn assert_command_entry_safe(&self) {
+        assert!(
+            self.io.command_entry.is_none(),
+            "engine command callback did not return"
+        );
     }
 
     fn assert_live(&self) {
+        self.assert_command_entry_safe();
         assert!(!self.failed(), "engine resource identities exhausted");
     }
 
@@ -3758,6 +3890,7 @@ impl<V: Venue> Engine<V> {
 
     /// The venue's synchronized book for `symbol`, if any.
     pub fn book(&self, symbol: &str) -> Option<&Book> {
+        self.assert_command_entry_safe();
         if self.public_feed_policy() == PublicFeedPolicy::Shared {
             self.shared_books.get(symbol)
         } else {

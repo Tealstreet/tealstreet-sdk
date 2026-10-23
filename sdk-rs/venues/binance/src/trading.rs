@@ -6,6 +6,9 @@ use crate::sign::Query;
 use crate::wire::{BatchItem, PlacedOrder};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::Level;
+use safe_cex_engine::classify::{
+    CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
+};
 use safe_cex_engine::json::{ArrayAt, ArraySplitter, ItemCheck};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -13,8 +16,7 @@ use safe_cex_engine::model::{
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::request_context::{
-    Context, Credential, Operation, Owner, Policy, RejectionReports, RetryPolicy, Scope,
-    UnprovenEvidence, WriteResult,
+    Context, Credential, Operation, Owner, Policy, RejectionReports, RetryPolicy, UnprovenEvidence,
 };
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -459,44 +461,44 @@ impl BinanceFutures {
             cx.fail(id, error);
             return;
         }
-        let plan = plan.and_then(|mut job| {
+        let plan = plan.and_then(|job| {
             // Reserve no partial prefix for a predictably oversized plan. The
             // root also occupies one of the engine's bounded context slots.
             let count: usize = job.steps.iter().map(Vec::len).sum();
             if count >= 256 {
                 return Err("Binance command exceeds the HTTP lifecycle capacity".into());
             }
-            let operation = if count == 0 && job.amendment.is_none() {
-                Operation::Read
-            } else {
-                Operation::Mutation
-            };
-            let credential = (operation == Operation::Mutation).then(|| Credential {
-                slot: CredentialSlot::Primary,
-                reference: self
-                    .credentials
-                    .as_ref()
-                    .expect("checked above")
-                    .credential
-                    .clone(),
-            });
-            job.context = Some(
-                cx.http_context(
-                    Scope::Command(id),
-                    Policy {
+            Ok(job)
+        });
+        match plan {
+            Ok(mut job) => {
+                let count: usize = job.steps.iter().map(Vec::len).sum();
+                let operation = if count == 0 && job.amendment.is_none() {
+                    Operation::Read
+                } else {
+                    Operation::Mutation
+                };
+                let credential = (operation == Operation::Mutation).then(|| Credential {
+                    slot: CredentialSlot::Primary,
+                    reference: self
+                        .credentials
+                        .as_ref()
+                        .expect("checked above")
+                        .credential
+                        .clone(),
+                });
+                job.context = Some(
+                    match cx.admit_http_command(Policy {
                         operation,
                         credential,
                         timeout_ms: 120_000,
                         pacing: None,
                         retry: RetryPolicy::Never,
+                    }) {
+                        Ok(context) => context,
+                        Err(_) => return, // Engine owns initial admission rejection.
                     },
-                )
-                .map_err(|_| "Binance command lifecycle is unavailable".to_owned())?,
-            );
-            Ok(job)
-        });
-        match plan {
-            Ok(job) => {
+                );
                 self.trading.jobs.insert(id, job);
                 self.advance(cx, id);
             }
@@ -568,6 +570,9 @@ impl BinanceFutures {
         };
         job.outstanding = step.len();
         let root = job.context.clone().expect("managed job has an authority");
+        // A placement's conflicting-order cancel is a cancel leg; an
+        // amendment's cancel stays part of the amend.
+        let amending = job.amendment.is_some();
         for planned in step {
             let credentials = self
                 .credentials
@@ -587,6 +592,12 @@ impl BinanceFutures {
                     retry: RetryPolicy::Never,
                 },
             );
+            let context = context.and_then(|context| {
+                if matches!(planned.call, Call::Cancel { .. }) && !amending {
+                    cx.http_write_leg_intent(&context, Intent::Cancel)?;
+                }
+                Ok(context)
+            });
             let Ok(context) = context else {
                 self.trading.jobs.remove(&command);
                 let _ = cx.fail_context(
@@ -721,7 +732,7 @@ impl BinanceFutures {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
-        self.on_trade_result(cx, request, response, None);
+        self.on_trade_result(cx, request, response);
     }
     pub(crate) fn on_trade_sign_failed(
         &mut self,
@@ -729,15 +740,13 @@ impl BinanceFutures {
         request: Request,
         error: VenueError,
     ) {
-        let message = error.message.clone();
-        self.on_trade_result(cx, request, Err(&message), Some(error));
+        self.on_trade_result(cx, request, Err(&error.message));
     }
     fn on_trade_result(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         response: Result<Response<'_>, &str>,
-        signing_error: Option<VenueError>,
     ) {
         let Request {
             command,
@@ -834,8 +843,7 @@ impl BinanceFutures {
                                 (Some(id), None) => ids.push(id.to_string()),
                                 (_, code) => {
                                     let code = code.unwrap_or(0);
-                                    unproven |= failure(code, String::new()).outcome
-                                        == Some(Outcome::Unknown);
+                                    unproven |= item_unknown(code);
                                     rejection.get_or_insert((
                                         code,
                                         item.msg
@@ -943,48 +951,54 @@ impl BinanceFutures {
             }
             (_, Err(error)) => Some(error),
         };
-        let mut native_fact_error = None;
+        let mut native_fact = None;
         if let Some((code, message)) = error {
             if !batch_reports && !SILENT_CODES.contains(&code) {
                 reports.push(message.clone());
             }
-            if let Some(job) = self.trading.jobs.get_mut(&command) {
-                let mut failed = signing_error
-                    .clone()
-                    .unwrap_or_else(|| failure(code, message));
-                if unproven {
-                    failed.outcome = Some(Outcome::Unknown);
-                }
-                native_fact_error = Some(failed.clone());
-                if !continue_after_item_refusal {
-                    job.stop = true;
-                }
+            if native_response {
+                // Code 0 is no native code: a non-JSON HTTP error or an
+                // unproven acknowledgement. The engine classifies both.
+                let native = (code != 0).then_some(Native {
+                    code: NativeCode::Int(code),
+                    message: &message,
+                });
+                let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &message)
+                else {
+                    return;
+                };
+                native_fact = Some(if unproven { fact.unproven() } else { fact });
+            }
+            if let Some(job) = self.trading.jobs.get_mut(&command)
+                && !continue_after_item_refusal
+            {
+                job.stop = true;
             }
         }
         if native_response {
-            let fact = match native_fact_error {
-                Some(mut error) => {
-                    if !ids.is_empty() || !evidence_ids.is_empty() {
-                        let partial_ids: Vec<_> =
-                            ids.iter().chain(&evidence_ids).cloned().collect();
-                        error = error.partial_ids(&partial_ids);
-                    }
-                    if unproven || error.outcome == Some(Outcome::Unknown) {
-                        WriteResult::Failed(error)
-                    } else if known_cancel_effects {
-                        WriteResult::KnownPartial(error)
-                    } else {
-                        WriteResult::Rejected(error)
+            let fact = match native_fact {
+                Some(fact) => {
+                    let evidence: Vec<_> = ids.iter().chain(&evidence_ids).cloned().collect();
+                    WriteFact::Failed {
+                        fact: if evidence.is_empty() {
+                            fact
+                        } else {
+                            fact.with_order_ids(&evidence)
+                        },
+                        known_effects: known_cancel_effects,
                     }
                 }
-                None => WriteResult::Accepted {
+                None => WriteFact::Accepted {
                     order_ids: ids.clone(),
                 },
             };
             let metadata = RejectionReports::new(reports).unwrap_or_default();
-            let recorded = cx.http_write_result_with_reports(&context, fact.clone(), metadata);
-            let recorded = if recorded == Err(safe_cex_engine::request_context::Error::Capacity) {
-                cx.http_write_result_with_reports(&context, fact, RejectionReports::default())
+            let recorded = cx.http_write_fact(&context, fact.clone(), Some(metadata));
+            let recorded = if matches!(
+                recorded,
+                Err(safe_cex_engine::request_context::Error::Capacity)
+            ) {
+                cx.http_write_fact(&context, fact, Some(RejectionReports::default()))
             } else {
                 recorded
             };
@@ -1844,26 +1858,111 @@ impl BinanceFutures {
     }
 }
 
-/// A trading failure classified by its Binance code; code 0 is a transport
-/// failure, a non-JSON HTTP error or an unproven acknowledgement.
-fn failure(code: i64, message: String) -> VenueError {
-    let (kind, outcome) = match code {
-        0 | -1000 => (None, Outcome::Unknown),
-        -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
-        -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
-        -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
-        -1003 | -1015 => (Some(ErrorKind::RateLimited), Outcome::Rejected),
-        -1022 | -2008 | -2014 | -2015 => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
-        -1002 => (Some(ErrorKind::AuthPermission), Outcome::Rejected),
-        -1199..=-1100 | -4999..=-4000 => (Some(ErrorKind::InvalidInput), Outcome::Rejected),
-        _ => (Some(ErrorKind::Rejected), Outcome::Rejected),
+/// Binance native codes and documented statuses
+/// (developers.binance.com/docs/derivatives/usds-margined-futures/error-code).
+const BINANCE: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(-1000),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1007),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1001),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1006),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1008),
+            verdict: Verdict::Refused(ErrorKind::VenueUnavailable),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1003),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1015),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1022),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2008),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2014),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2015),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1002),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-1199, -1100),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-4999, -4000),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    // Non-negative codes are success envelopes, never failure evidence.
+    success: &[Key::Range(0, i64::MAX)],
+    // Every other documented code is a pre-execution refusal.
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    // "4XX return codes are used for malformed requests"; 418 is an IP auto-ban
+    // and 429 a rate limit. 403 is the WAF, but a bare edge 403 may be another
+    // block, so it is a plain refusal. 409 (partial cancel-replace) is not one.
+    status: &[
+        (400, Verdict::Refused(ErrorKind::InvalidInput)),
+        (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+        (403, Verdict::Refused(ErrorKind::Rejected)),
+        (418, Verdict::Refused(ErrorKind::RateLimited)),
+        (429, Verdict::Refused(ErrorKind::RateLimited)),
+    ],
+};
+
+/// Whether a native batch-item code leaves its write unproven. Code 0 is a
+/// missing item code, which proves nothing.
+fn item_unknown(code: i64) -> bool {
+    let native = Native {
+        code: NativeCode::Int(code),
+        message: "",
     };
-    let mut error = VenueError::new(message.clone()).outcome(outcome);
-    error.kind = kind;
-    if code != 0 {
-        error = error.venue_code(code.to_string()).venue_message(message);
-    }
-    error
+    code == 0 || matches!(BINANCE.verdict(&native, Intent::Place), Verdict::Unknown(_))
+}
+
+#[cfg(test)]
+#[test]
+fn binance_code_table_satisfies_the_engine_invariants() {
+    safe_cex_engine::classify::assert_table(&BINANCE);
 }
 
 /// Refused before any request was sent.
@@ -2387,8 +2486,7 @@ impl BinanceFutures {
                             }
                         }
                         CancelRow::Error { code, msg } => {
-                            *unproven |=
-                                failure(code, String::new()).outcome == Some(Outcome::Unknown);
+                            *unproven |= item_unknown(code);
                             error.get_or_insert((code, msg));
                         }
                     }

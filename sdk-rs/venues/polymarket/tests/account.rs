@@ -1118,3 +1118,88 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
 }
+
+/// Completes native sibling reads so only the supplied holdings govern rearming.
+fn reporter_holdings_read(h: &mut H, rows: &str) {
+    h.poll();
+    h.response(
+        "/balance-allowance",
+        200,
+        r#"{"balance":"12345678","allowances":{}}"#,
+    );
+    h.response(
+        "/data/orders",
+        200,
+        &format!(r#"{{"data":[{ORDER}],"next_cursor":"LTE="}}"#),
+    );
+    h.response("/positions", 200, rows);
+}
+
+fn holding_skip_count(h: &H, message: &str) -> usize {
+    h.logs.iter().filter(|m| m.as_str() == message).count()
+}
+
+#[test]
+fn valid_zero_and_priced_holdings_rearm_only_their_asset_before_invalid_response() {
+    for recovery in [
+        r#"{"asset":"2","size":0,"avgPrice":0.4}"#,
+        r#"{"asset":"2","size":4,"avgPrice":0.4,"curPrice":0.5}"#,
+    ] {
+        let mut h = H::new();
+        h.initial();
+        let bad = r#"[{"asset":"2","size":"NaN","avgPrice":0.4},{}]"#;
+        let named = "Polymarket skipped malformed holding 2";
+        let anonymous = "Polymarket skipped malformed holding without an asset";
+        reporter_holdings_read(&mut h, bad);
+        assert_eq!(holding_skip_count(&h, named), 1);
+        assert_eq!(holding_skip_count(&h, anonymous), 1);
+
+        // The later duplicate invalidates the full snapshot. A clean-response
+        // clear therefore cannot explain either native early-forget site.
+        let peer = r#"{"asset":"1","size":20,"avgPrice":0.5}"#;
+        reporter_holdings_read(&mut h, &format!("[{recovery},{peer},{peer}]"));
+        assert_eq!(h.e.store().positions().len(), 1);
+        assert_eq!(h.e.store().positions()[0].contracts, 10.);
+        reporter_holdings_read(&mut h, bad);
+        assert_eq!(holding_skip_count(&h, named), 2, "{recovery}");
+        assert_eq!(holding_skip_count(&h, anonymous), 1, "{recovery}");
+    }
+}
+
+#[test]
+fn invalid_zero_or_duplicate_before_recovery_does_not_forget_a_holding_skip() {
+    for recovery in [
+        // Zero alone is insufficient: native average validation runs first.
+        r#"{"asset":"2","size":0,"avgPrice":-1}"#,
+        // An earlier malformed asset already occupies the duplicate set.
+        r#"{"asset":"2","size":"NaN","avgPrice":0.4},{"asset":"2","size":0,"avgPrice":0.4}"#,
+    ] {
+        let mut h = H::new();
+        h.initial();
+        let bad = r#"[{"asset":"2","size":"NaN","avgPrice":0.4},{}]"#;
+        let named = "Polymarket skipped malformed holding 2";
+        reporter_holdings_read(&mut h, bad);
+        let peer = r#"{"asset":"1","size":20,"avgPrice":0.5}"#;
+        reporter_holdings_read(&mut h, &format!("[{recovery},{peer},{peer}]"));
+        reporter_holdings_read(&mut h, bad);
+        assert_eq!(holding_skip_count(&h, named), 1, "{recovery}");
+        assert_eq!(h.e.store().positions()[0].contracts, 10.);
+    }
+}
+
+#[test]
+fn clean_holdings_response_rearms_named_and_anonymous_skip_memory() {
+    let mut h = H::new();
+    h.initial();
+    let bad = r#"[{"asset":"2","size":"NaN","avgPrice":0.4},{}]"#;
+    reporter_holdings_read(&mut h, bad);
+    reporter_holdings_read(&mut h, bad);
+    reporter_holdings_read(&mut h, POSITIONS);
+    reporter_holdings_read(&mut h, bad);
+    for message in [
+        "Polymarket skipped malformed holding 2",
+        "Polymarket skipped malformed holding without an asset",
+    ] {
+        assert_eq!(holding_skip_count(&h, message), 2);
+    }
+}

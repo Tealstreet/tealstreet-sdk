@@ -2161,6 +2161,7 @@ impl Venue for BybitLinear {
             } else {
                 safe_cex_engine::AccountLookup::Query
             },
+            income_history: !self.variant.is_spot() && !self.variant.is_hyro(),
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
             market_refresh: true,
@@ -2405,9 +2406,6 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.refresh_timer(cx, timer) {
-            return;
-        }
         if self
             .environment_probe
             .as_ref()

@@ -10,9 +10,10 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick, Timeout};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, VenueError,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -75,14 +76,14 @@ pub enum Pending {
         invalid: bool,
     },
     Candles {
-        command: CommandId,
+        context: Context,
         rows: Vec<Candle>,
         invalid: bool,
         from: Option<f64>,
         to: Option<f64>,
     },
     CandleHistory {
-        command: CommandId,
+        context: Context,
         from: Option<f64>,
         to: Option<f64>,
         limit: usize,
@@ -150,6 +151,35 @@ pub struct Orderly {
     funding: funding::FundingState,
 }
 impl Orderly {
+    fn candle_context(pending: &Pending) -> Option<&Context> {
+        match pending {
+            Pending::Candles { context, .. } | Pending::CandleHistory { context, .. } => {
+                Some(context)
+            }
+            _ => None,
+        }
+    }
+    fn candle_request(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        url: String,
+        streamed: bool,
+        pending: Pending,
+    ) {
+        let context = Self::candle_context(&pending)
+            .expect("candle continuation")
+            .clone();
+        match cx.request_managed(context, Method::Get, url, None, pending) {
+            Ok(request) => {
+                if streamed {
+                    cx.stream_response(request, ArrayAt::Path(&["data", "rows"]));
+                }
+            }
+            Err((pending, reason)) => {
+                self.on_http_preparation_failed(cx, pending, reason, reason.venue_error())
+            }
+        }
+    }
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
@@ -716,6 +746,12 @@ impl Venue for Orderly {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Some(context) = Self::candle_context(pending)
+            && let Err(reason) = cx.validate_read_http_delivery(context, context)
+        {
+            let _ = cx.fail_context(context, reason.venue_error());
+            return;
+        }
         if let Pending::Account(request) = pending {
             self.account_item(cx, request, item);
             return;
@@ -849,6 +885,12 @@ impl Venue for Orderly {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Some(context) = Self::candle_context(&pending)
+            && let Err(reason) = cx.validate_read_http_delivery(context, context)
+        {
+            let _ = cx.fail_context(context, reason.venue_error());
+            return;
+        }
         if let Pending::Account(request) = pending {
             self.account_response(cx, request, response);
             self.trade_reconcile(cx);
@@ -863,15 +905,19 @@ impl Venue for Orderly {
             return;
         }
         if let Pending::CandleHistory {
-            command,
+            context,
             from,
             to,
             limit,
         } = pending
         {
             match candle_history(response, from, to, limit) {
-                Ok(data) => cx.done(command, data),
-                Err(error) => cx.fail(command, error),
+                Ok(data) => {
+                    let _ = cx.done_context(&context, data);
+                }
+                Err(error) => {
+                    let _ = cx.fail_context(&context, error);
+                }
             };
             return;
         }
@@ -926,15 +972,35 @@ impl Venue for Orderly {
                 self.funding_start(cx);
             }
             Pending::Candles {
-                command,
+                context,
                 mut rows,
                 invalid: false,
                 ..
             } => {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                cx.done(command, serde_json::to_string(&rows).unwrap());
+                let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
             invalid => self.on_request_failed(cx, invalid, "Orderly invalid response rows"),
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: VenueError,
+    ) {
+        if let Some(context) = Self::candle_context(&pending) {
+            let _ = cx.fail_context(context, error);
+        } else {
+            self.on_sign_error(cx, pending, error);
+        }
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Some(context) = Self::candle_context(&pending) {
+            let _ = cx.fail_context(context, error);
+        } else {
+            self.on_request_failed(cx, pending, &error.message);
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -956,8 +1022,8 @@ impl Venue for Orderly {
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
-            Pending::Candles { command, .. } | Pending::CandleHistory { command, .. } => {
-                cx.fail(command, error)
+            Pending::Candles { context, .. } | Pending::CandleHistory { context, .. } => {
+                let _ = cx.fail_context(&context, error);
             }
         }
     }
@@ -1154,13 +1220,21 @@ impl Venue for Orderly {
                         (from / 1000.0).floor(),
                         (to / 1000.0).floor()
                     ));
-                    cx.request(
-                        Method::Get,
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return;
+                    };
+                    self.candle_request(
+                        cx,
                         format!("{}{path}", self.rest()),
-                        vec![],
-                        None,
+                        false,
                         Pending::CandleHistory {
-                            command,
+                            context,
                             from: from_ms,
                             to: to_ms,
                             limit,
@@ -1172,13 +1246,21 @@ impl Venue for Orderly {
                     "/v1/kline?symbol={native}&type={interval}&limit={}",
                     limit.unwrap_or(500).min(1000)
                 );
-                cx.request_streamed(
-                    Method::Get,
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                self.candle_request(
+                    cx,
                     format!("{}{path}", self.rest()),
-                    vec![],
-                    ArrayAt::Path(&["data", "rows"]),
+                    true,
                     Pending::Candles {
-                        command,
+                        context,
                         rows: vec![],
                         invalid: false,
                         from: from_ms,

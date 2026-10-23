@@ -2,6 +2,7 @@
 pub mod backoff;
 pub mod book;
 pub mod capabilities;
+pub mod classify;
 pub mod command;
 pub mod coverage;
 pub mod credentials;
@@ -10,6 +11,7 @@ pub mod engine;
 pub mod entropy;
 pub mod error;
 pub mod execution;
+pub mod execution_group;
 pub mod fence;
 pub mod history;
 pub mod json;
