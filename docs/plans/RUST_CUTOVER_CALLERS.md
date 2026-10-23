@@ -5201,3 +5201,24 @@ remain. Numeric overflow in rows beyond the requested output limit still rejects
 whole snapshot. Native status/code510 classification, code/message and bounded retry
 hint remain; live rate limits pause depth and account reads without resending.
 Results never change subscribed books, account state or credential health.
+
+## Backpack and Paradex order snapshot freshness
+
+Backpack and Paradex publish order snapshots through the engine's shared
+freshness token. Reads invalidated by native writes cannot replace Store orders
+or their native signing, terminal or trigger metadata. Existing per-order venue
+timestamps, terminal retention and Paradex amend-evidence checks still protect
+against lagging server data. Backpack keeps its newer-read-wins behavior; repair
+requests start only after an accepted snapshot.
+
+Backpack retains pending trigger relabeling when a stale or failed read is
+discarded, so a retained take-profit receives its correct kind when the ticker
+seed arrives. Fully validated native Pair acknowledgements also fence older
+reads, including when no row is stored locally; malformed response identities
+keep their existing rejection behavior. Command IDs, receipts, completion shapes,
+fill quantities and signing payloads retain their native contracts.
+
+If snapshot authority is permanently exhausted, these families emit an Error
+snapshot-discard notice and issue no order read. Account cycles continue through
+their ordinary next stage and poll schedule; accepted native writes and stream
+updates remain usable. Existing SDK callers need no new option or state migration.
