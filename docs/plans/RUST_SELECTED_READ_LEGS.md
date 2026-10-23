@@ -252,14 +252,14 @@ authorized local ce54ab9357b root-expiry source by plain merges. Source merged
 without conflicts; docs retain current landing plus dependency additions.
 #1976 is not frozen, so this is local implementation evidence only.
 
-The exact command_root signature above now omits ReadRootPolicy. It calls
+The exact command_root signature above takes no timeout argument. It calls
 Cx::admit_caller_read_root(selected credential, None), which captures the genuine
 raw receipt deadline itself without rounding or caller override. The caller
 observes command_wait before admission and uses shared reject_expired_command
 or reject_unstamped_command when appropriate. Rejected is already terminal;
 Revoked grants no fallback. Missing selection uses the same None-credential
 tracked root, optional checked diagnostic and single typed fail as the standalone.
-ReadRootPolicy and a guessed remaining-wait conversion are not exported.
+No guessed remaining-wait conversion is exported.
 
 Only selected_read.rs, isolated selected_read_legs.rs controls and owned docs
 change in this slice. Root and children share one immutable Arc<SelectedRead>:
@@ -281,3 +281,8 @@ Core constructor fit review: CLEAR after composing ce54. A local missing-selecti
 refusal may arm and clear the engine timer; only HTTP/provider work is absent.
 Capacity precedes native credential diagnostics. No draft timeout argument
 remains. Unsigned caller-wait roots use the plain shared tracked issuer.
+
+Runtime gate update: #1976 froze at0a35dc34dee and is genuinely integrated.
+A registry composition refresh after combo5a remains external work owned by
+fe7lgm. Local development is authorized on this pin; a mergeable PR must wait
+for the re-integrated reviewed pin and fresh final CI.
