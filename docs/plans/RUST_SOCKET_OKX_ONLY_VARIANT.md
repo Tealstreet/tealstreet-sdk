@@ -79,3 +79,16 @@ Verification: engine/OKX/Binance plus unchanged Bitunix all-target/all-feature t
 strict Clippy, feature-off Clippy, formatting and all bans/request/socket ratchets;
 review the incoming event/HTTP/fatal ordering; then fresh normal PR CI and replay
 gates. Request an engine window only when these checks and reviews are clear.
+
+### Existing WEEX bootstrap entry after landed signing
+
+Overseer authorized the existing WEEX private socket reference refresh after
+#1855 landed at `6741c1c6609437e32090c76745a56ca6c2262445`. Its native
+`cx.connect` became `cx.connect_signed` under the same socket owner, while
+remaining on the legacy socket lifecycle. In `venues/weex/src/account.rs`,
+replace only the single-count fingerprint
+`3aee64a1b26b8bb71902dbf435c1e8d963ba8378d797896a1348ae6f6de2cad5` with
+`f9aa006cf88eec01bc93cf70d941c3b65c5fb1ed55dedd3cc56e871f8c516fde`.
+All other manifest maps and the family inventory remain exact; no checker,
+venue source, site count, budget or build profile changes. This is the
+current landed reference in the initial socket bootstrap, not a new caller.
