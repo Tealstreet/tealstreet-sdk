@@ -4820,6 +4820,24 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn a_commands_read_legs_count_from_its_earliest_leg() {
+        let (mut engine, tokens) = start(Probe {
+            count: 2,
+            command: Some(7),
+            legs: true,
+            reconcile_reads: true,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        fenced(&mut engine);
+        release(&mut engine, tokens[1], 500.);
+        response(&mut engine, tokens[1], 501.);
+        assert_eq!(engine.venue.responses, 1);
+        assert!(engine.io.order_locks.uncertain("BTCUSDT"));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn a_logical_read_released_wholly_after_the_fence_clears_it() {
         let (mut engine, tokens) = start(Probe {
             count: 2,
@@ -4882,7 +4900,7 @@ mod tests {
         });
         release(&mut engine, tokens[0], 1.);
         response(&mut engine, tokens[0], 2.);
-        assert_eq!(engine.io.request_contexts.read_marks.len(), 1);
+        assert_eq!(engine.io.request_contexts.read_mark_count(), 1);
         Cx {
             now: 5_000.,
             store: &mut engine.store,
@@ -4899,6 +4917,6 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(engine.io.request_contexts.read_marks.is_empty());
+        assert_eq!(engine.io.request_contexts.read_mark_count(), 0);
     }
 }

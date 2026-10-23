@@ -191,27 +191,33 @@ pub(super) struct ContextRegistry {
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
-    pub(super) read_marks: HashMap<Owner, u64>,
+    read_marks: HashMap<Owner, u64>,
 }
 
 impl ContextRegistry {
-    /// The order-read token for a Read released now under `owner`: its earliest
-    /// release's epoch. Execution reads keep their attempt token; their contexts
-    /// live in the execution registry, outside this owner's lifetime.
+    /// The order-read token for a Read released now under `owner`: the epoch of
+    /// its earliest released Read. A mark only ever keeps a fence longer.
     #[cfg(feature = "order-locks")]
     pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
-        if matches!(owner, Owner::Execution { .. }) {
-            return epoch;
-        }
         *self.read_marks.entry(owner).or_insert(epoch)
     }
+    #[cfg(all(test, feature = "order-locks"))]
+    pub(super) fn read_mark_count(&self) -> usize {
+        self.read_marks.len()
+    }
+    /// A mark lives while its owner does: a live context, or a command owner in
+    /// any phase (a serial Plan between steps has no current context).
     #[cfg(feature = "order-locks")]
     fn forget_dead_read_marks(&mut self) {
         if self.read_marks.is_empty() {
             return;
         }
-        let live: std::collections::HashSet<Owner> =
+        let mut live: std::collections::HashSet<Owner> =
             self.contexts.values().map(Context::owner).collect();
+        live.extend(self.commands.iter().map(|(id, owner)| Owner::Command {
+            id: *id,
+            generation: owner.generation,
+        }));
         self.read_marks.retain(|owner, _| live.contains(owner));
     }
     fn forget_read_mark(&mut self, _owner: Owner) {

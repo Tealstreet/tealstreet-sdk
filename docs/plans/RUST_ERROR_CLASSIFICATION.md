@@ -432,6 +432,9 @@ Each PR lists its exact deltas under [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALL
   managed Command or Background owner now keeps the epoch of its first released
   Read, and every later leg's delivery reconciles from that mark. A venue whose
   logical read spans pages, coins or products issues them as legs of one owner.
-  The mark is dropped with the owner's last context, or when the command or Plan
-  retires. Execution reads keep their attempt token.
+  The mark lives while its owner does (a live context, or a command owner in
+  any phase, so a serial Plan keeps it between steps) and is dropped when the
+  command or Plan retires. A mark only keeps a fence longer, so a reconcile
+  read that must clear one uses a fresh owner, never a leg of a read already
+  in flight.
 
