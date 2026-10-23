@@ -264,3 +264,31 @@ their full counted multiplicity. Macro lines are listed by their native predicat
 | `5f02ce1e69bf29b2fd757ec1080b380c2ceb6dbac585e1f2e62426aeafe8085f` | 565 | 1 | `request` | TRADE |
 | `06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3` | 1041 | 1 | `fail` | TRADE |
 | `0bc3151ddc1e8889eb3a752d5431f3ab5643750a38409c18c5e239d38dcfc4b2` | 667 | 1 | `macro` | MACRO / TRADE |
+
+
+## Phase 1 implementation checkpoint
+
+Plan commit `239631e2523`; regression commit `61fa794a815`. The unchanged
+venue passed both existing candle ordering tests, then all seven new regression
+functions failed at the explicit legacy-HTTP/no-final-claim assertion. After
+migration all seven pass without relaxing that assertion. The existing two
+ordering tests adopt only the shared prepared-actions fixture; their original
+assertions, clocks and payloads remain intact.
+
+Source/adversarial plan review corrected the initial five-removal estimate:
+Context issuance can refuse before authority exists, so exactly one old numeric
+failure remains; expected and actual prune are four occurrences,51->47. The
+shared-engine owner acknowledges this dependency. Caller review added explicit
+background failure/poll recovery, and full-map review recomputed every appendix
+fingerprint and multiplicity. History and nonce owners acknowledged their
+separate prerequisites. No later-area implementation or merge is implied.
+
+Final local phase-1 checks pass: all Lighter and Binance unit/integration tests,
+strict all-target Lighter Clippy, scoped formatting, full bans, the exact source
+inventory check,13 ratchet controls and `git diff --check`. Independent
+source/adversarial, caller and full-map implementation reviews report no blocking
+findings; the caller review's validator wording is corrected to distinguish
+command authority from background engine/native admission. Full-map review
+verified every original candle-review assertion/clock/payload is retained.
+Architecture gate: No. CI replay/size/complete-package proof and the overseer's
+merge window remain separate gates; this checkpoint is not a merge approval.

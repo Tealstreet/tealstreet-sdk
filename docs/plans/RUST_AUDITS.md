@@ -1998,3 +1998,20 @@ nonempty paths retain native/cache selection; bounded native upsert remains an
 endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+
+## Lighter candle request ownership
+
+Command candle reads and subscription REST fallbacks use the existing managed
+HTTP lifecycle. Commands use Context finalizers and the exact read-delivery
+validator; background reads use engine delivery admission plus native
+subscription generation/revision fences against stale candle publication.
+Typed preparation failures retain engine-provided metadata; terminal background
+paths retire their handle before freshness exits and release only their own
+in-flight generation. No venue admission, retry or outcome algorithm is added.
+
+The four removed lexical occurrences shrink Lighter51->47 and its lib10->6.
+One existing numeric failure remains solely when Context issuance itself refuses
+before returning authority; its removal belongs to the shared pre-authority
+failure seam. All other venue maps remain exact. This closes this candle area
+only, not the remaining public/private/history/signing inventory or master gate.
