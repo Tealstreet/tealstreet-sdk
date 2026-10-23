@@ -36836,7 +36836,7 @@
     },
     {
       "venue": "lighter-robinhood",
-      "tapeSha256": "6bda85d2bb31c4b899cff877834f3ad5a9d5d58b21cab850d02ac4a4145bbad6",
+      "tapeSha256": "173e43cc71f0c6b317a6001ababf920307df3e46da9e6f5e412e3fa7505fb9e0",
       "tape": "sdk-rs/harness/tapes/lighter-robinhood-private.jsonl",
       "diagnostics": [
         {
@@ -36869,7 +36869,7 @@
     },
     {
       "venue": "lighter-robinhood",
-      "tapeSha256": "a46f3576890beb74b76e96c98126ec1675dfb84072af911efba14e7b157a81bd",
+      "tapeSha256": "4850485f3abcc1e1bb126a9c7d6c36bea528be3c42115dab187d3f98f0eeee10",
       "tape": "sdk-rs/harness/tapes/lighter-testnet-private.jsonl",
       "diagnostics": [
         {
