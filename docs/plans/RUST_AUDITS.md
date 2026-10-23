@@ -2478,3 +2478,16 @@ lack InvalidInput typing. Finite native payloads, refusal order and outstanding
 requests are preserved. Exactly eleven Phemex occurrences/entries are removed;
 managed network/history and signer adoption remain deferred. Architecture gate:
 No lifecycle copy; the adapter consumes shared admission and finalization.
+
+## MEXC local read refusal custody
+
+Eight immediate native refusal sites now consume shared genuine command entry
+and settle through fail_context: five history admission sites and three leverage
+admission sites. They can no longer bypass the shared command-owner bound or
+nonfinite-clock rejection. Native validation precedence, full finite VenueError
+fields and all successful transport/paging/reducer paths are preserved. This
+closes exactly eight request-legacy fingerprints/occurrences, 29/29 to 21/21;
+private signing, account callbacks, discovery and valid history transport remain
+separately inventoried. The architecture gate is No: only native local error
+projection changes, with no venue-owned lifecycle, timer, credential selection,
+retry, classifier or owner registry. CI/replay/size proof remains a separate gate.

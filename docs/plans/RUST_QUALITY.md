@@ -1061,3 +1061,24 @@ Both request-context ratchets verify only the exact eleven-entry Phemex prune.
 Local Phemex and Binance verification passes 491 tests across 39 targets with
 zero failed or ignored, strict all-target Clippy, scoped formatting, and both
 request-context checks (fifteen ratchet controls). CI supplies replay/size gates.
+
+## MEXC local read refusal controls
+
+The committed original tests plus fixture correction compile against untouched
+c4e02c production with 9 assertion REDs and 6 passing native controls in an
+isolated target. Eight independent capacity REDs cover every selected site;
+nonfinite command-clock rejection is the ninth. Duplicate-ID protection is a
+native control, preserving the shared COMMAND_DUPLICATE diagnostic and pending
+original owner. The from-only bound stays invalid through recovery. Excluded
+evidence: an initial duplicate-diagnostic expectation mismatch and an anomalous
+archive replay sharing the edited tree's build target. No compilation failure
+counts as a RED, no old assertion changed, and no test is ignored.
+
+All 15 controls pass after adoption, including real 256-book-peer capacity and
+physical peer settlement/recovery, a real account 429 pause established after
+book peers park, invalid clocks/finite reuse, repeated local settlement, full
+native error fields/precedence and valid signed/public continuations. Scoped
+MEXC/Binance tests pass 487 across 42 targets with zero failed/ignored; strict
+all-target Clippy and formatting pass. Both request-context checks pass, with
+15 ratchet controls and exact unowned-map equality; 8 entries/8 occurrences are
+removed only from MEXC. Full CI owns WASM/replay/size and performance evidence.
