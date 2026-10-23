@@ -535,9 +535,11 @@ dispositions are in [the architecture and gate ledger](RUST_ARCHITECTURE_GATE_AU
   private/write boundaries, passphrase inheritance and Bitget's degraded-balance
   primary-key exception when sharing it. ~~Copied per-venue test probes~~ were
   replaced by `engine::test_support::ProbeVenue` in #1427 (`1435005aea3`);
-  13 secondary-test files retain venue-specific assertions. **Owner decision:**
-  park selection deduplication until after cutover; this re-audit established no
-  wrong-key or missing-read-key production defect.
+  13 secondary-test files retain venue-specific assertions. This re-audit
+  established no wrong-key or missing-read-key production defect. ~~Owner
+  decision: park selection deduplication until after cutover.~~ Superseded by
+  the 2026-10-22 owner choke-point decision: selection moves to the engine per
+  [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md).
 - ~~`docs/plans` has 47 files; collapse the evidence documents; roster stale.~~
   **Owner decision:** retain the documents and use the single
   [topic/status/read-trigger/file index](README.md). The old in-progress port
@@ -1998,3 +2000,81 @@ nonempty paths retain native/cache selection; bounded native upsert remains an
 endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+
+### Row reporting: AsterDEX, GRVT and TxFlow consumers (2026-10-23)
+
+Replaced three account-owned bounded suppression sets with existing engine
+RowReports Once, including GRVT's shared coin/order/position namespaces.
+Architecture gate YES: consumer fan-out through the existing cross-cutting
+reporting path; no new venue policy or engine API. Exact native notice text,
+severity, empty/composite identities, clear-before-lookup capacity and re-arm
+ordering are preserved. Aster/TxFlow mapping still forgets a mapped ID before
+full-read admission, zero quantity does not gain forgetting, and TxFlow WS has
+no REST-only per-key effect. GRVT duplicate coins rearm from unfiltered totals;
+position/order identities keep native rejection filters, including unknown
+identity preventing absence proof. Per-row timestamp rejection still follows
+current-response rearming.
+
+Final original125 account tests, including nine new compatibility controls,
+pass on unchanged actual1782 production. The source/test/log receipt is
+`/tmp/codex-row-aster-grvt-txflow-original-final125-receipt.json`, SHA256
+`0fa028da226ab076553c0d607657ba113482547141490dd1550817ac38fb8602`.
+This is standardization without a product defect RED or financial repair.
+Other persistent reporter consumers remain open; no all-venue closure or new
+private parity/provenance claim. See RUST_ROW_ADMISSION.md.
+
+Migrated focused engine/AsterDEX/GRVT/TxFlow/Binance suites pass1294 native tests
+across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
+and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
+are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
+required; no all-venue reporter-completion claim.
+
+## BloFin public request-context adoption
+
+BloFin instruments, ticker seeds and candle queries now declare unsigned Read
+semantics through the existing managed transport lifecycle. Context-bearing
+pending reads replace opaque public HTTP and numeric candle terminal callbacks;
+discovery retires its logical handle on terminal success/failure before native
+startup callbacks can enqueue another read. Native catalogue, ticker and candle
+mapping remain intact. No private signing, financial admission, history owner or
+trading-outcome policy is copied into the venue.
+
+One original numeric candle failure site remains for refusal before Context
+issuance; it is a shared command-entry blocker, assigned to `codex-uufub4`, not
+an exemption. The exact BloFin inventory shrinks 28 to 24; every other path map
+remains unchanged. Context-bearing history completion and multi-request admission
+remain separate shared dependencies. [Inventory and scope](RUST_BLOFIN_REQUEST_CONTEXT.md).
+
+## Bitrue FIFO read authority adoption
+
+Public candle/trade completion uses the canonical shared command-entry/retention
+seam and generation-bearing Context terminals. The native adapter checks current
+Context authority before send and response decoding, while timeout/disconnect
+cleanup retains its typed completion authority after expiry. It creates no venue
+registry, synthetic HTTP attempt, retry policy or group authority.
+
+The exact Bitrue inventory shrinks 53 to 42 occurrences, with lib.rs 22 to 11:
+ten numeric WS terminal calls and one conservative timer-correlation macro retire
+with the owned-read representation. The HTTP dispatcher and ten pending.request
+fields remain; account, private history, signing and coalesced FetchLeverage are
+outside this area. No other venue inventory entries change.
+
+## MEXC public candle lifecycle adoption
+
+The single `FetchCandles` path now consumes shared Context admission, managed
+public HTTP release and Context completion. Original-source RED controls cover
+unprepared dispatch, parked/released expiry, stale owner delivery and HTTP429
+side-effect authority. Native mapping/decoding/status/pause policy is retained.
+This closes only this command's lifecycle sites; startup, history, account,
+signing and background subscription repair remain separately inventoried.
+
+## KuCoin Spot discovery authority proof
+
+The unsigned catalogue/ticker seeds retain their original read Context through
+stream staging and publication, retire it on every terminal callback, and use the
+shared static-header preparation seam. No private credential, retry, row codec or
+error-classification policy is duplicated. Exact source inventory remains 84
+occurrences: the original shared streamed helper still serves unmigrated candles,
+so this area justifies no ratchet prune or zero-legacy claim. The complete venue
+inventory and remaining prerequisites are committed in PR #1819.

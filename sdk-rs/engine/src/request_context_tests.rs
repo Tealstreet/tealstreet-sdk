@@ -18,7 +18,7 @@ fn context(operation: Operation, pacing: Option<Pacing>) -> Context {
     )
     .unwrap()
 }
-fn lifecycle(id: u32, pacing: Option<Pacing>) -> Lifecycle {
+fn lifecycle(id: u64, pacing: Option<Pacing>) -> Lifecycle {
     Lifecycle::new(
         context(Operation::Mutation, pacing),
         Attempt {
@@ -489,6 +489,7 @@ fn earlier_released_retryable_refusal_then_failed_retry_is_unknown_for_every_fai
                         WriteResult::Rejected(failure("clock refusal").venue_code(code)),
                     )
                     .unwrap();
+                let _ = writes.grant_resend(RequestId(1));
                 writes.retry(RequestId(1), RequestId(2)).unwrap();
                 if released_retry {
                     writes.released(RequestId(2)).unwrap();
@@ -514,7 +515,7 @@ fn aggregate_retains_effects_and_unknowns_independent_of_callback_order() {
     ] {
         let mut writes = CommandWrites::new(3).unwrap();
         for id in [1, 2, 3] {
-            writes.register(RequestId(id), id as u64).unwrap();
+            writes.register(RequestId(id), id).unwrap();
             writes.released(RequestId(id)).unwrap();
         }
         for id in order {
@@ -576,6 +577,7 @@ fn unknown_write_cannot_enter_a_generic_retry_and_native_facts_require_release()
     writes
         .result(RequestId(1), failed("network failure"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     assert_eq!(
         writes.retry(RequestId(1), RequestId(2)),
         Err(Error::RetryForbidden)
@@ -864,6 +866,7 @@ fn partial_native_rejection_forbids_replaying_the_effective_logical_write() {
             WriteResult::Rejected(failure("partial refusal").partial_ids(&["accepted".into()])),
         )
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     assert_eq!(
         writes.retry(RequestId(1), RequestId(2)),
         Err(Error::RetryForbidden)
@@ -878,7 +881,7 @@ fn fully_known_partial_execution_preserves_ids_and_each_native_refusal_without_u
     for order in [[1, 2, 3], [3, 2, 1]] {
         let mut writes = CommandWrites::new(3).unwrap();
         for id in [1, 2, 3] {
-            writes.register(RequestId(id), u64::from(id)).unwrap();
+            writes.register(RequestId(id), id).unwrap();
             writes.released(RequestId(id)).unwrap();
         }
         for id in order {
@@ -916,6 +919,7 @@ fn staged_retry_timeout_does_not_erase_prior_attempt_evidence() {
     writes
         .result(RequestId(1), rejected("retryable refusal"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     assert_eq!(seal(&mut writes).outcome, Some(Outcome::Unknown));
 }
@@ -928,6 +932,7 @@ fn recovered_retry_is_not_reported_as_a_rejected_logical_leg() {
     writes
         .result(RequestId(1), rejected("recoverable clock refusal"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     writes.released(RequestId(2)).unwrap();
     writes
@@ -1016,7 +1021,7 @@ fn per_request_longer_gap_is_anchored_to_its_own_handoff_and_survives_next_reque
 #[test]
 fn host_tokens_round_trip_wide_generations_without_js_number_conversion() {
     let attempt = Attempt {
-        request: RequestId(u32::MAX),
+        request: RequestId(crate::resource_ids::MAX_RESOURCE_ID),
         generation: u64::MAX,
     };
     let preparation = Preparation {
@@ -1056,7 +1061,7 @@ fn host_tokens_reject_noncanonical_aliases_overflow_and_truncation() {
         "p1:1:1",
         "p1:1::0",
         "p2:1:1:0",
-        "p1:4294967296:1:0",
+        "p1:9007199254740992:1:0",
         "p1:1:18446744073709551616:0",
     ] {
         assert_eq!(
@@ -1148,6 +1153,7 @@ fn write_success_seals_once_including_a_recovered_native_refusal() {
     writes
         .result(RequestId(1), rejected("native clock refusal"))
         .unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     writes.retry(RequestId(1), RequestId(2)).unwrap();
     assert_eq!(writes.succeed(), Err(Error::State));
     writes.released(RequestId(2)).unwrap();
@@ -1170,7 +1176,7 @@ fn write_success_seals_once_including_a_recovered_native_refusal() {
 fn known_partial_writes_cannot_be_sealed_as_success_or_lose_their_partial_projection() {
     let mut writes = CommandWrites::new(2).unwrap();
     for id in [1, 2] {
-        writes.register(RequestId(id), u64::from(id)).unwrap();
+        writes.register(RequestId(id), id).unwrap();
         writes.released(RequestId(id)).unwrap();
     }
     writes
@@ -1206,6 +1212,7 @@ fn known_partial_effects_without_ids_forbid_retry_and_whole_success_or_rejection
     assert_eq!(writes.result(RequestId(1), fact.clone()), Err(Error::State));
     writes.released(RequestId(1)).unwrap();
     writes.result(RequestId(1), fact).unwrap();
+    let _ = writes.grant_resend(RequestId(1));
     assert_eq!(
         writes.retry(RequestId(1), RequestId(2)),
         Err(Error::RetryForbidden)
@@ -1233,7 +1240,7 @@ fn known_partial_effects_without_ids_forbid_retry_and_whole_success_or_rejection
 fn known_partial_effects_do_not_hide_an_unresolved_sent_sibling() {
     let mut writes = CommandWrites::new(2).unwrap();
     for id in [1, 2] {
-        writes.register(RequestId(id), u64::from(id)).unwrap();
+        writes.register(RequestId(id), id).unwrap();
         writes.released(RequestId(id)).unwrap();
     }
     writes
@@ -1246,4 +1253,31 @@ fn known_partial_effects_do_not_hide_an_unresolved_sent_sibling() {
         writes.fail(VenueError::new("unresolved")).unwrap().outcome,
         Some(Outcome::Unknown)
     );
+}
+
+#[test]
+fn a_write_resend_needs_an_engine_grant_and_each_grant_is_used_once() {
+    let mut writes = CommandWrites::new(8).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    writes.released(RequestId(1)).unwrap();
+    writes.result(RequestId(1), rejected("clock")).unwrap();
+    assert_eq!(
+        writes.retry(RequestId(1), RequestId(2)),
+        Err(Error::RetryForbidden)
+    );
+    writes.grant_resend(RequestId(1)).unwrap();
+    writes.retry(RequestId(1), RequestId(2)).unwrap();
+    writes.released(RequestId(2)).unwrap();
+    writes
+        .result(RequestId(2), rejected("clock again"))
+        .unwrap();
+    assert_eq!(
+        writes.retry(RequestId(2), RequestId(3)),
+        Err(Error::RetryForbidden)
+    );
+    let mut failed = CommandWrites::new(8).unwrap();
+    failed.register(RequestId(1), 1).unwrap();
+    failed.released(RequestId(1)).unwrap();
+    failed.result(RequestId(1), self::failed("lost")).unwrap();
+    assert_eq!(failed.grant_resend(RequestId(1)), Err(Error::State));
 }

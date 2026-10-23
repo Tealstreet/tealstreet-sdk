@@ -654,3 +654,62 @@ fn spot_market_take_profit_still_amends_while_spot_take_profit_limit_refuses() {
         assert_eq!(h.requests.is_empty(), refused, "{native}");
     }
 }
+
+#[test]
+fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
+    let mut observations = Vec::new();
+    for (variant, body, expected) in [
+        (
+            Variant::Spot,
+            r#"{"orderId":12,"clientOrderId":"caller_1"}"#,
+            vec!["caller_1"],
+        ),
+        (Variant::Spot, r#"{"orderId":12}"#, vec![]),
+        (
+            Variant::Spot,
+            r#"{"orderId":12,"clientOrderId":"other"}"#,
+            vec![],
+        ),
+        (Variant::Spot, r#"{"clientOrderId":"caller_1"}"#, vec![]),
+        (Variant::Spot, r#"{"orderId":12,"clientOrderId":7}"#, vec![]),
+        (
+            Variant::Spot,
+            r#"{"orderId":12,"clientOrderId":"caller_1","clientOrderId":"other"}"#,
+            vec![],
+        ),
+        (
+            Variant::Spot,
+            r#"{"orderId":12,"clientOrderId":"caller_1","code":"0"}"#,
+            vec![],
+        ),
+        (Variant::CoinM, r#"{"orderId":12}"#, vec!["12"]),
+        (Variant::CoinM, r#"{"algoId":13}"#, vec![]),
+    ] {
+        let mut h = ready(variant);
+        let mut input = order(variant, r#""clientOrderId":"caller_1""#);
+        if variant == Variant::CoinM {
+            input.kind = safe_cex_engine::model::OrderType::StopLoss;
+            input.client_order_id = None;
+        }
+        let before = h.engine.store().orders().to_vec();
+        place(&mut h, vec![input]);
+        let request = h.take(if variant == Variant::Spot {
+            "/api/v3/order"
+        } else {
+            "/dapi/v1/order"
+        });
+        h.reply(request.id, 503, "", body);
+        let failure = &h.failures.iter().find(|(id, _)| *id == 77).unwrap().1;
+        assert_eq!(failure.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let ids = failure
+            .partial
+            .as_ref()
+            .map(|p| p.order_ids.clone())
+            .unwrap_or_default();
+        assert_eq!(h.engine.store().orders(), before);
+        observations.push((variant, body, ids, expected));
+    }
+    for (variant, body, ids, expected) in observations {
+        assert_eq!(ids, expected, "variant={variant:?} body={body}");
+    }
+}

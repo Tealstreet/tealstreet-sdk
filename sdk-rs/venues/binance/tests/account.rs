@@ -429,6 +429,31 @@ fn an_unhonorable_client_order_id_refuses_the_whole_batch() {
 }
 
 #[test]
+fn a_close_order_replacement_completes_the_placement_successfully() {
+    // The conflicting-order cancel is a cancel leg: its ID-less answer must
+    // not turn the whole placement into an unknown failure.
+    let mut h = ready();
+    let mut stop = limit(OrderSide::Sell, 0.0, 86000.0);
+    stop.kind = OrderType::StopLoss;
+    stop.close = Some(true);
+    place(&mut h, 5, vec![stop]);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        400,
+        "",
+        r#"{"code":-2011,"msg":"Unknown order sent."}"#,
+    );
+    let placed = h.take("/fapi/v1/algoOrder");
+    h.reply(placed.id, 200, "", r#"{"algoId":2146761}"#);
+    assert!(
+        matches!(h.result(5), Some(Ok(_))),
+        "replacement placement result: {:?}",
+        h.result(5)
+    );
+}
+
+#[test]
 fn full_position_stops_replace_the_existing_close_order() {
     let mut h = ready();
     let mut stop = limit(OrderSide::Sell, 0.0, 86000.0);
@@ -479,7 +504,21 @@ fn cancel_all_reports_a_partial_failure_and_only_marks_what_succeeded() {
         OrderStatus::Canceled
     );
     assert_eq!(store.order("2146760").unwrap().status, OrderStatus::Open);
-    assert!(matches!(h.result(11), Some(Err(message)) if message.starts_with("Internal error")));
+    assert_eq!(
+        h.result(11),
+        Some(&Err("HTTP response does not prove the write outcome".into()))
+    );
+    let failure = &h.failures.iter().find(|(id, _)| *id == 11).unwrap().1;
+    assert_eq!(
+        failure.kind,
+        Some(safe_cex_engine::ErrorKind::VenueUnavailable)
+    );
+    assert_eq!(failure.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(failure.venue_code.as_deref(), Some("-1001"));
+    assert_eq!(
+        failure.venue_message.as_deref(),
+        Some("Internal error; unable to process your request. Please try again.")
+    );
 }
 
 #[test]
@@ -1090,21 +1129,21 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         (
             503,
             r#"{"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}"#,
-            Some(ErrorKind::Timeout),
+            Some(ErrorKind::VenueUnavailable),
             Outcome::Unknown,
             Some("-1007"),
         ),
         (
             502,
             "<html>Bad Gateway</html>",
-            None,
+            Some(ErrorKind::VenueUnavailable),
             Outcome::Unknown,
             None,
         ),
         (
             503,
             r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
-            Some(ErrorKind::Rejected),
+            Some(ErrorKind::VenueUnavailable),
             Outcome::Unknown,
             Some("-2019"),
         ),
@@ -1134,6 +1173,20 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
             Some(&Err(error.message.clone())),
             "text is unchanged"
         );
+        if status >= 500 {
+            assert_eq!(
+                error.message,
+                "HTTP response does not prove the write outcome"
+            );
+            let native: Option<serde_json::Value> = serde_json::from_str(body).ok();
+            assert_eq!(
+                error.venue_message.as_deref(),
+                native
+                    .as_ref()
+                    .and_then(|row| row.get("msg"))
+                    .and_then(serde_json::Value::as_str)
+            );
+        }
     }
 
     let mut h = ready();
