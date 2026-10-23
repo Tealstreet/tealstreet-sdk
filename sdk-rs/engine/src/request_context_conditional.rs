@@ -15,6 +15,9 @@ pub(super) struct PreparedPlanSeal {
     pub journal: Option<PreparedWriteSeal>,
     pub legacy: Option<VenueError>,
     pub reports: Vec<String>,
+    /// One prepared terminal and report set per surviving execution observer,
+    /// cloned before commit so the no-fail commit only moves them.
+    pub fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
 }
 
 pub(super) fn terminal_ordinals(
@@ -108,7 +111,7 @@ impl<P> Cx<'_, P> {
             .validate_housekeeping(call.admission.attempt.request)?;
         // No journal or structural mutation before all fallible projection and
         // report storage preparation succeeds. No callback may intervene.
-        let prepared = self.prepare_plan_terminal(plan, None)?;
+        let prepared = self.prepare_plan_terminal(plan, None, Some(&result))?;
         self.finish_plan_call(plan, slot, context)
             .expect("validated conditional DATA settlement");
         self.commit_plan_terminal(plan, Some(result), prepared)

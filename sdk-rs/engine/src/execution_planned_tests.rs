@@ -82,6 +82,8 @@ mod planned_execution {
         two_steps: bool,
         /// The first write is definitively refused; the second is due later.
         reject_first: bool,
+        /// The only write is definitively refused and the Plan completes.
+        reject_only: bool,
     }
 
     impl Shared {
@@ -264,6 +266,18 @@ mod planned_execution {
             if self.read {
                 cx.finish_plan_call(&plan, &slot, &context).unwrap();
                 cx.done_plan(&plan, "candles".into()).unwrap();
+                return;
+            }
+            if self.reject_only {
+                cx.http_write_result(
+                    &context,
+                    crate::request_context::WriteResult::Rejected(
+                        VenueError::new("insufficient margin").outcome(crate::Outcome::Rejected),
+                    ),
+                )
+                .unwrap();
+                cx.finish_plan_call(&plan, &slot, &context).unwrap();
+                cx.done_plan(&plan, "placed".into()).unwrap();
                 return;
             }
             if self.reject_first && self.delivered == 1 {
@@ -912,5 +926,38 @@ mod planned_execution {
         let expired = short[0].clone().unwrap_err();
         assert_eq!(expired.kind, Some(ErrorKind::Timeout));
         assert_eq!(ids(&expired), native, "{expired:?}");
+    }
+
+    #[test]
+    fn every_observer_gets_the_rejection_reports_once_with_the_terminal() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            reject_only: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let token = prepared(&e.drain_actions().collect::<Vec<_>>())[0];
+        release(&mut e, token, 0.);
+        respond(&mut e, token, 10.);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        for owner in [FOUNDER, FOLLOWER] {
+            let reports = actions
+                .iter()
+                .filter(|a| {
+                    matches!(a, Action::Notice(Notice::CommandError { command, message })
+                    if *command == owner && message.contains("insufficient margin"))
+                })
+                .count();
+            assert_eq!(reports, 1, "owner {owner}");
+            let terminal = terminals(&actions, owner);
+            assert_eq!(terminal.len(), 1);
+            let error = terminal[0].clone().unwrap_err();
+            assert_eq!(
+                error.outcome,
+                Some(crate::Outcome::Rejected),
+                "owner {owner}"
+            );
+        }
     }
 }

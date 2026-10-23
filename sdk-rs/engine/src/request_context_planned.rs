@@ -178,6 +178,7 @@ impl ContextRegistry {
             journal,
             legacy,
             reports,
+            fanout: Vec::new(),
         })
     }
 
@@ -882,7 +883,7 @@ impl<P> Cx<'_, P> {
         result: Option<String>,
         error: Option<VenueError>,
     ) -> Result<(), Error> {
-        let prepared = self.prepare_plan_terminal(plan, error)?;
+        let prepared = self.prepare_plan_terminal(plan, error, result.as_deref())?;
         self.commit_plan_terminal(plan, result, prepared)
     }
 
@@ -890,18 +891,47 @@ impl<P> Cx<'_, P> {
         &mut self,
         plan: &Plan,
         error: Option<VenueError>,
+        result: Option<&str>,
     ) -> Result<conditional::PreparedPlanSeal, Error> {
+        let physical = matches!(plan.owner(), Owner::Execution { .. });
         // Observers already past their own bound expire against the live
         // journal before any terminal preparation (host callbacks seal first).
-        if matches!(plan.owner(), Owner::Execution { .. }) {
+        if physical {
             self.sweep_executions();
         }
-        self.io.request_contexts.prepare_plan_seal(
+        let mut prepared = self.io.request_contexts.prepare_plan_seal(
             plan,
             self.now,
             self.io.http_delivery.as_ref(),
             error,
-        )
+        )?;
+        if physical {
+            // Every observer's terminal and reports, cloned before the seal.
+            let projection = match (&prepared.journal, &prepared.legacy) {
+                (Some(journal), _) => journal
+                    .failure()
+                    .cloned()
+                    .map_or_else(|| Ok(result.unwrap_or_default().to_owned()), Err),
+                (None, Some(error)) => Err(error.clone()),
+                (None, None) => Ok(result.unwrap_or_default().to_owned()),
+            };
+            let observers = self.io.request_contexts.planned_observer_count(plan);
+            prepared
+                .fanout
+                .try_reserve_exact(observers)
+                .map_err(|_| Error::Capacity)?;
+            for _ in 0..observers {
+                let mut reports = Vec::new();
+                if projection.is_err() {
+                    reports
+                        .try_reserve_exact(prepared.reports.len())
+                        .map_err(|_| Error::Capacity)?;
+                    reports.extend(prepared.reports.iter().cloned());
+                }
+                prepared.fanout.push((projection.clone(), reports));
+            }
+        }
+        Ok(prepared)
     }
 
     // One Cx-level terminal funnel, including conditional completion. Shared
@@ -910,23 +940,18 @@ impl<P> Cx<'_, P> {
         &mut self,
         plan: &Plan,
         result: Option<String>,
-        prepared: conditional::PreparedPlanSeal,
+        mut prepared: conditional::PreparedPlanSeal,
     ) -> Result<(), Error> {
+        let fanout = std::mem::take(&mut prepared.fanout);
         let (owner, seal) = self.io.request_contexts.commit_plan_seal(plan, prepared);
-        let (projection, reports) = match &seal {
-            Seal::Success | Seal::Legacy(None) => (Ok(result.clone().unwrap_or_default()), &[][..]),
-            Seal::Failure(error, reports) => (Err(error.clone()), reports.as_slice()),
-            Seal::Legacy(Some(error)) => (Err(error.clone()), &[][..]),
-            Seal::Stale => return Err(Error::Revoked),
+        let Owner::Command { id, .. } = owner else {
+            // The physical owner has no command: its observers take the
+            // terminals prepared above, with no allocation after the seal.
+            self.finish_physical_plan(owner);
+            self.seal_planned_execution(plan, fanout);
+            return Ok(());
         };
-        let reports = reports.to_vec();
-        match owner {
-            Owner::Command { id, .. } => self.finish_sealed_command(id, result, seal)?,
-            _ => self.finish_physical_plan(owner),
-        }
-        // The one execution hook: every observer gets this exact projection.
-        self.seal_planned_execution(plan, projection, &reports);
-        Ok(())
+        self.finish_sealed_command(id, result, seal)
     }
 
     fn rearm_plan(&mut self, plan: &Plan) {

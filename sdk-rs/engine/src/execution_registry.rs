@@ -403,7 +403,7 @@ impl ContextRegistry {
     pub(in crate::engine) fn seal_planned_execution(
         &mut self,
         plan: &crate::request_context::Plan,
-        projection: &Result<String, VenueError>,
+        projections: Vec<Result<String, VenueError>>,
     ) -> Vec<Sealed> {
         let Owner::Execution {
             generation: identity,
@@ -415,10 +415,32 @@ impl ContextRegistry {
         let Some(execution) = self.executions.roots.get(&identity).copied() else {
             return Vec::new();
         };
+        let mut projections = projections.into_iter();
         self.executions
             .groups
-            .complete(execution, |_| projection.clone())
+            .complete(execution, |_| {
+                projections
+                    .next()
+                    .expect("one prepared terminal per surviving observer")
+            })
             .unwrap_or_default()
+    }
+
+    /// Surviving observers of a physical Plan's execution, for preparation.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn planned_observer_count(
+        &self,
+        plan: &crate::request_context::Plan,
+    ) -> usize {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
+            return 0;
+        };
+        self.executions.roots.get(&identity).map_or(0, |execution| {
+            self.executions.groups.observer_count(*execution)
+        })
     }
 
     /// A live physical Plan whose execution has no observer left; the engine

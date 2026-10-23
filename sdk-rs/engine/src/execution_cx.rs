@@ -259,27 +259,21 @@ impl<P> Cx<'_, P> {
     }
 
     /// Called once from the Plan seal: every surviving observer receives the
-    /// Plan's projection and rejection reports. Observers past their own
-    /// bound time out first.
+    /// terminal and reports prepared for it before the seal (observers past
+    /// their own bound already timed out then).
     pub(super) fn seal_planned_execution(
         &mut self,
         plan: &crate::request_context::Plan,
-        projection: Result<String, VenueError>,
-        reports: &[String],
+        fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
     ) {
-        if !matches!(plan.owner(), Owner::Execution { .. }) {
-            return;
-        }
-        self.sweep_executions();
+        let (projections, reports): (Vec<_>, Vec<_>) = fanout.into_iter().unzip();
         let sealed = self
             .io
             .request_contexts
-            .seal_planned_execution(plan, &projection);
-        if projection.is_err() {
-            for seal in &sealed {
-                for report in reports {
-                    self.command_error(seal.command, report.clone());
-                }
+            .seal_planned_execution(plan, projections);
+        for (seal, reports) in sealed.iter().zip(reports) {
+            for report in reports {
+                self.command_error(seal.command, report);
             }
         }
         self.finish_sealed(sealed);

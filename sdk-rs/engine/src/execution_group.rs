@@ -456,6 +456,15 @@ impl Groups {
         Ok(())
     }
 
+    /// Live observers of one execution; none once it is terminal.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    pub(crate) fn observer_count(&self, execution: Execution) -> usize {
+        self.groups
+            .get(&execution.0)
+            .filter(|group| !group.terminal)
+            .map_or(0, |group| group.observers.len())
+    }
+
     /// Live observer commands of one execution, in join order.
     #[cfg_attr(
         not(all(feature = "http-plans", feature = "order-locks")),
