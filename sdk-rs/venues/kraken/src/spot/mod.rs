@@ -6,9 +6,7 @@ mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
-use safe_cex_engine::request_context::{
-    Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
-};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryEvidence, RetryPolicy};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
     VenueError,
@@ -922,29 +920,23 @@ impl Venue for KrakenSpot {
                     if let Some(s) = from_ms {
                         p.push_str(&format!("&since={}", (s / 1000.).floor()));
                     }
-                    match cx.http_context(
-                        Scope::Command(command),
-                        Policy {
-                            operation: Operation::Read,
-                            credential: None,
-                            timeout_ms: 20_000,
-                            pacing: None,
-                            retry: RetryPolicy::ReadFailure,
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::ReadFailure,
+                    }) else {
+                        return;
+                    };
+                    self.candle_request(
+                        cx,
+                        Pending::Candles {
+                            context,
+                            params: p,
+                            retries: 0,
                         },
-                    ) {
-                        Ok(context) => self.candle_request(
-                            cx,
-                            Pending::Candles {
-                                context,
-                                params: p,
-                                retries: 0,
-                            },
-                        ),
-                        Err(error) => {
-                            let error = error.venue_error();
-                            cx.fail(command, error);
-                        }
-                    }
+                    );
                 } else {
                     cx.fail(command, tf.unsupported("Kraken Spot"))
                 }
