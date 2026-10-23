@@ -350,3 +350,180 @@ fn known_partial_effects_share_text_and_exact_identity_overflow_bounds() {
     assert!(error.message.contains("truncated"));
     assert_eq!(error.partial.unwrap().order_ids, ["next", "prior"]);
 }
+
+#[test]
+fn unproven_envelopes_fix_classification_and_keep_only_bounded_native_details() {
+    for status in [408, 500, 503, 600, u16::MAX] {
+        let mut writes = CommandWrites::new(1).unwrap();
+        released(&mut writes, 1);
+        writes
+            .unproven_result(RequestId(1), status, |evidence| {
+                evidence.venue_code("10004");
+                evidence.venue_code("must-not-replace-first-code");
+                evidence.venue_message("native auth-looking diagnostic");
+                assert!(evidence.order_id("validated-native-id"));
+            })
+            .unwrap();
+        let error = writes.fail(VenueError::new("fallback")).unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(
+            error.kind,
+            Some(if status == 408 {
+                crate::ErrorKind::Timeout
+            } else {
+                crate::ErrorKind::VenueUnavailable
+            })
+        );
+        assert_eq!(error.venue_code.as_deref(), Some("10004"));
+        assert_eq!(
+            error.venue_message.as_deref(),
+            Some("native auth-looking diagnostic")
+        );
+        let partial = error.partial.unwrap();
+        assert_eq!(partial.order_ids, ["validated-native-id"]);
+        assert_eq!(partial.total, None);
+        assert_eq!(partial.failed_index, None);
+    }
+}
+
+#[test]
+fn unproven_capture_refuses_proven_unreleased_duplicate_and_sealed_attempts_first() {
+    let mut writes = CommandWrites::new(1).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    let budget = writes.evidence;
+    let mut captured = false;
+    assert_eq!(
+        writes.unproven_result(RequestId(1), 500, |_| captured = true),
+        Err(Error::State)
+    );
+    assert!(!captured);
+    writes.released(RequestId(1)).unwrap();
+    for status in [0, 99, 200, 400, 429, 499] {
+        assert_eq!(
+            writes.unproven_result(RequestId(1), status, |_| captured = true),
+            Err(Error::Invalid)
+        );
+    }
+    assert!(!captured);
+    assert_eq!(writes.evidence, budget);
+    assert!(writes.attempts[0].result.is_none());
+    writes.unproven_result(RequestId(1), 500, |_| {}).unwrap();
+    let charged = writes.evidence;
+    assert_eq!(
+        writes.unproven_result(RequestId(1), 503, |_| captured = true),
+        Err(Error::State)
+    );
+    assert!(!captured);
+    assert_eq!(writes.evidence, charged);
+    writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(
+        writes.unproven_result(RequestId(1), 500, |_| captured = true),
+        Err(Error::State)
+    );
+    assert!(!captured);
+}
+
+#[test]
+fn unproven_id_writer_shares_the_last_command_slot_without_charging_twice() {
+    let prior: Vec<_> = (0..4_095).map(|id| format!("prior-{id}")).collect();
+    let mut writes = CommandWrites::new(2).unwrap();
+    let mut reference = CommandWrites::new(2).unwrap();
+    for journal in [&mut writes, &mut reference] {
+        released(journal, 1);
+        journal
+            .result(RequestId(1), accepted(prior.clone()))
+            .unwrap();
+        released(journal, 2);
+    }
+    writes
+        .unproven_result(RequestId(2), 500, |evidence| {
+            assert!(evidence.order_id("last-native"));
+        })
+        .unwrap();
+    reference
+        .result(
+            RequestId(2),
+            WriteResult::Failed(
+                ResponseProof::from_status(500)
+                    .error()
+                    .unwrap()
+                    .partial_ids(&["last-native".into()]),
+            ),
+        )
+        .unwrap();
+    assert_eq!(writes.evidence, reference.evidence);
+    assert!(!writes.attempts[1].id_overflow);
+    let charged = writes.evidence;
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(writes.evidence, charged);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    let ids = error.partial.unwrap().order_ids;
+    assert_eq!(ids.len(), 4_096);
+    assert_eq!(ids[0], "last-native");
+    assert_eq!(&ids[1..], prior);
+    assert!(!error.message.contains("truncated IDs"));
+}
+
+#[test]
+fn unproven_writer_never_truncates_ids_or_erases_prior_partial_effects() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    released(&mut writes, 1);
+    writes
+        .result(
+            RequestId(1),
+            WriteResult::KnownPartial(
+                VenueError::new("known partial").partial_ids(&["known".into()]),
+            ),
+        )
+        .unwrap();
+    released(&mut writes, 2);
+    writes
+        .unproven_result(RequestId(2), 500, |evidence| {
+            assert!(evidence.order_id("exact-prefix"));
+            assert!(!evidence.order_id(&"x".repeat(1_025)));
+            assert!(!evidence.order_id("after-overflow"));
+        })
+        .unwrap();
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(error.message.contains("truncated IDs"));
+    assert_eq!(error.partial.unwrap().order_ids, ["known", "exact-prefix"]);
+}
+
+#[test]
+fn unproven_diagnostics_cannot_reset_the_command_text_quota() {
+    let mut writes = CommandWrites::new(7).unwrap();
+    for id in 1..=6 {
+        released(&mut writes, id);
+        writes
+            .result(
+                RequestId(id),
+                WriteResult::Rejected(
+                    VenueError::new("m".repeat(4_096))
+                        .venue_code("c".repeat(4_096))
+                        .venue_message("v".repeat(4_096)),
+                ),
+            )
+            .unwrap();
+    }
+    released(&mut writes, 7);
+    writes
+        .unproven_result(RequestId(7), 408, |evidence| {
+            evidence.venue_code("10004");
+            evidence.venue_message(&"漢".repeat(5_000));
+            assert!(evidence.order_id("still-retain-money-evidence"));
+        })
+        .unwrap();
+    let Some(WriteResult::Failed(error)) = &writes.attempts[6].result else {
+        panic!("unproven response must retain a Failed fact");
+    };
+    assert_eq!(error.message, "[truncated]");
+    assert_eq!(error.venue_code.as_deref(), Some("[truncated]"));
+    assert_eq!(error.venue_message.as_deref(), Some("[truncated]"));
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error.partial.unwrap().order_ids,
+        ["still-retain-money-evidence"]
+    );
+}

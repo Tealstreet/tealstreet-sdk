@@ -470,3 +470,53 @@ remain required; this slice does not close the remaining reporter inventory.
 Migrated focused suites pass1253 native tests; strict all-target Clippy, scoped
 fmt, bans and root checks pass. Both independent implementation reviews confirm
 that only reporter memory/adapters changed in the three production files.
+
+Kraken futures histories now adopt existing CursorHistory for staged admission,
+identity/cursor progress, fifty-page bounds and query-owned completion/coverage.
+No venue-local HISTORY_INCOMPLETE emitter or accepted-row owner remains. Actual
+first/zero-eligible failure rejects typed; later actual loss returns admitted
+rows only. Missing/conflicting continuation proof, repeated/empty/no-fresh
+continuations and cap exhaustion stay strict; a terminal fiftieth page completes.
+Closed-order folds cannot admit a failed newer prefix. Ledger since-only gap
+precedence, eligible limit suppression, exact native units/IDs/request sequences
+and strict consuming setup are preserved. Other adapters, B11/runtime proof and
+managed Context completion remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+KuCoin owner-adoption regression plan: original-source controls pin
+initial typed rejects, accepted-only later recovery, failed-page/retry identity
+isolation, strict ledger/funding/census proofs, concurrent owner attribution and
+complete-empty reads; spot single-response fills never publishes a malformed
+prefix. Existing unit/request-sequence/funding/spot checks remain compatibility
+coverage. The engine owns completion and marker policy; no new venue pager or
+signing implementation is introduced.
+
+## Bitrue shared single-page owner adoption
+
+Bitrue fills reuse engine HistoryRows/Completion without a fake cursor walk or a
+new engine API. Four original-source assertion-RED groups pin the shared typed
+Internal fallback on terminal native/malformed/exhausted-transport failures and
+strict endpoint coverage refusal. Compatibility controls pin per-attempt row
+rollback, same-ID economics after retries, independent signature/GET budgets,
+strict timestamp increments, 1000/1001 admission, native duplicate/filter order,
+missing-array versus empty success, concurrent owners and Store isolation.
+The adapter retains endpoint facts, not another completion or pager policy.
+
+Backpack fills/orders/funding/public trades now adopt the existing CursorHistory
+owner for staged admission, typed first failure, accepted-only later recovery and
+command-owned repeat/cap/skipped-fill coverage. The existing engine offset helper
+only computes raw displacement after owner More; no second pagination authority
+or venue marker emitter is introduced. Original-source assertion RED controls
+cover the changed contracts; native shape/filter/units/request order, eager
+non-fill diagnostics and strict setup remain. NX coverage/runtime proof stay open.
+
+## ApeX bounded history owner adoption
+
+ApeX bounded execution reads use existing engine HistoryRows/Completion for the
+selected terminal result. Four original-source assertion-RED groups prove that
+all-native, missing-list/malformed and exhausted transport failures must reject
+rather than return background-cache/empty success. Controls preserve successful
+cache selection (including mixed alternatives and filtered nonempty primary),
+bounded duplicate replacement after eviction, two/four candidate requests,
+signature reset, concurrent owners and persistent live cache. Native endpoint
+selection/upsert facts remain local; no new owner/pager/marker policy or shared
+signing-provenance implementation is copied into the venue.

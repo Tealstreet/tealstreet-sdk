@@ -1,11 +1,12 @@
 //! Classic futures queries: numbered pages for fills/orders, exact ledger offsets.
 use crate::{Kucoin, Pending};
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::paging::{self, WindowOrder};
-use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId};
+use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, WindowOrder};
+use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 const DAY: u64 = 86_400_000;
 /// Requests per read, and windows per range, before a read is refused.
@@ -23,7 +24,7 @@ pub struct History {
     pub(crate) next_at: f64,
 }
 pub struct Request {
-    command: CommandId,
+    owner: Box<CursorHistory<Row>>,
     kind: Kind,
     symbol: Option<String>,
     order: Option<String>,
@@ -40,9 +41,7 @@ pub struct Request {
     offset: Option<u64>,
     limit: usize,
     explicit_range: bool,
-    rows: Vec<Row>,
     page_rows: Vec<Row>,
-    seen: HashSet<String>,
     minimum_offset: Option<u64>,
     invalid: bool,
     retries: u8,
@@ -339,7 +338,12 @@ impl Kucoin {
             .collect();
         let (first_start, first_end) = windows.pop_front().unwrap_or((start, end));
         let request = Request {
-            command,
+            owner: Box::new(CursorHistory::new(
+                Completion::new(command),
+                CursorWalk::new(MAX_REQUESTS),
+                |_| "KuCoin query exceeded page safety bound".into(),
+                |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
+            )),
             kind,
             symbol,
             order,
@@ -354,9 +358,7 @@ impl Kucoin {
             limit: limit.unwrap_or(if kind == Kind::Trades { 100 } else { 1000 }) as usize,
             explicit_range,
             clipped,
-            rows: Vec::new(),
             page_rows: Vec::new(),
-            seen: HashSet::new(),
             minimum_offset: None,
             invalid: false,
             retries: 0,
@@ -390,7 +392,10 @@ impl Kucoin {
         r.invalid = false;
         r.requests += 1;
         if r.requests > MAX_REQUESTS {
-            cx.fail(r.command, "KuCoin query exceeded page safety bound");
+            r.owner.reject(
+                cx,
+                VenueError::new("KuCoin query exceeded page safety bound"),
+            );
             return;
         }
         let path = match r.kind {
@@ -617,92 +622,118 @@ impl Kucoin {
                 |_| "Malformed KuCoin query response".into(),
                 |e| format!("KuCoin {}: {}", e.code, e.msg),
             );
-            cx.fail(r.command, message);
+            self.history_finish(cx, r, Err(VenueError::new(message)));
             return;
         }
         let data = envelope.unwrap().data.unwrap();
-        let more = match r.kind {
-            Kind::Trades => Ok(false),
-            Kind::Income => serde_json::from_str::<Ledger>(data.get())
-                .map(|p| p.has_more)
-                .map_err(|e| e.to_string()),
-            _ => serde_json::from_str::<Page>(data.get())
-                .map_err(|e| e.to_string())
-                .and_then(|p| {
-                    if p.current_page != r.page
-                        || p.total_page > 10000
-                        || p.total_num > 0 && p.total_page == 0
-                        || p.current_page < p.total_page && r.page_count == 0
-                        || p.current_page >= p.total_page
-                            && r.window_count + r.page_count < p.total_num
-                    {
-                        Err("Invalid KuCoin page census".into())
-                    } else {
-                        Ok(p.current_page < p.total_page)
-                    }
-                }),
-        };
-        let more = match more {
-            Ok(m) => m,
-            Err(e) => {
-                cx.fail(r.command, e);
+        let more = if r.kind == Kind::Trades {
+            false
+        } else if r.kind == Kind::Income {
+            match serde_json::from_str::<Ledger>(data.get()) {
+                Ok(page) => page.has_more,
+                Err(error) => {
+                    self.history_finish(cx, r, Err(VenueError::new(error.to_string())));
+                    return;
+                }
+            }
+        } else {
+            let page = match serde_json::from_str::<Page>(data.get()) {
+                Ok(page) => page,
+                Err(error) => {
+                    self.history_finish(cx, r, Err(VenueError::new(error.to_string())));
+                    return;
+                }
+            };
+            if page.current_page != r.page
+                || page.total_page > 10000
+                || page.total_num > 0 && page.total_page == 0
+                || page.current_page < page.total_page && r.page_count == 0
+                || page.current_page >= page.total_page
+                    && r.window_count + r.page_count < page.total_num
+            {
+                r.owner
+                    .reject(cx, VenueError::new("Invalid KuCoin page census"));
                 return;
             }
+            page.current_page < page.total_page
         };
         r.window_count += r.page_count;
+        let mut fresh = 0;
         for row in r.page_rows.drain(..) {
-            if r.seen.insert(row.key()) {
-                r.rows.push(row);
+            if r.owner.fresh(row.key()) {
+                r.owner.stage(row);
+                fresh += 1;
             }
         }
-        let capped = !(r.kind == Kind::Income && r.explicit_range) && r.rows.len() >= r.limit;
+        let capped = !(r.kind == Kind::Income && r.explicit_range)
+            && r.owner.accepted_len() + r.owner.staged_len() >= r.limit;
+        let mut next = None;
         if more && !capped {
             if r.kind == Kind::Income {
                 let Some(offset) = r
                     .minimum_offset
                     .filter(|n| r.offset.is_none_or(|old| *n < old))
                 else {
-                    cx.fail(r.command, "KuCoin ledger cursor did not advance");
+                    r.owner
+                        .reject(cx, VenueError::new("KuCoin ledger cursor did not advance"));
                     return;
                 };
                 r.offset = Some(offset);
             } else {
                 r.page += 1;
             }
-            r.retries = 0;
-            self.history_schedule(cx, r);
-            return;
-        }
-        if !capped && let Some((start, end)) = r.windows.pop_front() {
+            next = Some(format!(
+                "{}:{}:{}:{:?}",
+                r.start, r.chunk_end, r.page, r.offset
+            ));
+        } else if !capped && let Some((start, end)) = r.windows.pop_front() {
             r.start = start;
             r.chunk_end = end;
             r.page = 1;
             r.window_count = 0;
             r.offset = None;
-            r.retries = 0;
-            self.history_schedule(cx, r);
+            next = Some(format!("{start}:{end}:1:None"));
+        } else if !capped && r.clipped {
+            r.owner
+                .reject(cx, VenueError::new("KuCoin history range is too large"));
             return;
         }
-        if !capped && r.clipped {
-            cx.fail(r.command, "KuCoin history range is too large");
-            return;
-        }
-        r.rows.sort_by(|a, b| {
-            b.time()
-                .total_cmp(&a.time())
-                .then_with(|| a.key().cmp(&b.key()))
-        });
-        if !(r.kind == Kind::Income && r.explicit_range) {
-            r.rows.truncate(r.limit);
-        }
-        {
-            let result: Result<String, String> =
-                serde_json::to_string(&r.rows).map_err(|e| e.to_string());
-            match result {
-                Ok(data) => cx.done(r.command, data),
-                Err(error) => cx.fail(r.command, error),
+        match r.owner.advance(CursorPage {
+            next,
+            rows: r.page_count as usize,
+            fresh,
+            want_more: true,
+        }) {
+            CursorStep::More(_) => {
+                r.retries = 0;
+                self.history_schedule(cx, r);
             }
-        };
+            CursorStep::Done => self.history_finish(cx, r, Ok(())),
+            CursorStep::Stalled(_) => r.owner.reject(
+                cx,
+                VenueError::new("KuCoin query exceeded page safety bound"),
+            ),
+        }
+    }
+    fn history_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        r: Request,
+        result: Result<(), VenueError>,
+    ) {
+        let limit = r.limit;
+        let uncapped = r.kind == Kind::Income && r.explicit_range;
+        r.owner.finish_with(cx, result, |mut rows| {
+            rows.sort_by(|a, b| {
+                b.time()
+                    .total_cmp(&a.time())
+                    .then_with(|| a.key().cmp(&b.key()))
+            });
+            if !uncapped {
+                rows.truncate(limit);
+            }
+            serde_json::to_string(&rows).map_err(|e| VenueError::new(e.to_string()))
+        });
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if let Some(r) = self.history.waiting.remove(&timer) {
