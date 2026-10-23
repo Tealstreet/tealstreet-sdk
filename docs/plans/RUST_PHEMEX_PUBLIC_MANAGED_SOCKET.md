@@ -101,3 +101,13 @@ only if it matches the actual scanner output at implementation. The private
 account.rs fingerprint remains. Record the exact map/count and preservation
 proof in the PR body; never rehash an unrelated site to force a ratchet pass.
 One venue per PR, fresh independent reviews and train GO before any merge.
+
+## Original-source result
+
+On exact `abc72534026` production, the dedicated real-engine target compiles
+and runs all six controls: three expected assertion REDs and three working
+GREENs, with zero ignored tests. The expired ticker changes last from 20690.2
+to 21000; duplicate/late opens release native frames that the assertions prohibit.
+The positive controls prove exact opening wire order, normal live packed-ticker
+values and retired-socket inertness. This is a correctness checkpoint only,
+not a baseline performance or full private-suite claim.
