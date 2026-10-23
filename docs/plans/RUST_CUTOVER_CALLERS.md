@@ -5045,3 +5045,21 @@ treat successful local fallback as proof that cache or Store state was refreshed
 A satisfied native cancel may prove a subset without creating IDs. That proof
 still leaves any unresolved targets Unknown; a successful subset never cleans up
 the remainder or extends its deadline.
+
+
+## Declared mutation terminal API (#1894)
+
+An opted-in engine Plan may declare a native conditional terminal before any
+release. `done_mutation_plan_after_data` consumes only its exact current
+released DATA anchor and retires unissued remainder; it does not manufacture
+Accepted facts or renew the native root. A valid terminal whose earlier writes
+are uncertain still emits the common journal's failure projection with known
+IDs retained. An undeclared anchor, Read Plan, foreign/old/expired delivery or
+another issued call refuses without consuming current authority.
+
+The shared seal prepares projection/report storage before commit and keeps one
+Cx terminal funnel for the forthcoming execution-observer integration. Native
+codecs still prove when their conditional native work is finished. ApeX #1891
+is a separate consumer obligation; this engine API alone does not migrate its
+writes, provider presentation, remote zkLink, startup or session paths. No TS
+caller shape or native result bytes change until an adapter adopts it.

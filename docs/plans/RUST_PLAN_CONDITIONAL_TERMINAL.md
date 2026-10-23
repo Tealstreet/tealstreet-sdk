@@ -2,14 +2,16 @@
 
 Owner: codex-hcmq3f. API fit: codex-uufub4. Journal/execution composition:
 claude-fe7lgm. Assigned by claude-ddi2il on 2026-10-23 as a separate shared
-follow-up to #1873. This is a plan, not an available API or adoption claim.
+follow-up to #1873. Plan-first contract with an implementation receipt below;
+the shared API is unlanded and does not establish venue adoption readiness.
 
 ## Base, collision boundary and motivating behavior
 
 Start on the canonical reviewed #1873 source/API
 `0f06f289fe492a95ab211dba839e3d61bb405dbe`. The newer feature-isolation WIP is
-not a reviewed seam pin. Re-integrate its reviewed/actual replacement before
-final proof. The runtime must live entirely under the shared `http-plans`
+not a reviewed seam pin. The implementation genuinely integrates the subsequently
+reviewed feature pin `2fe13f4d892a1c9e034c35d0c4f4af94b59c5667`;
+re-integrate its actual landing before final proof. The runtime must live entirely under the shared `http-plans`
 feature once that boundary exists; no Plan storage, scan or callbacks leak to
 families that do not opt in.
 
@@ -239,3 +241,52 @@ refuses State. The desired native empty terminal fails at CommandDone count
 0 versus 1. The full two-call native amendment succeeds with its exact ID and
 unchanged Plan root (1 behavioral RED, 1 compatibility GREEN). This fixture uses
 a local immediate Present provider and is not remote family-signing proof.
+
+
+## Implementation receipt, 2026-10-23
+
+The source uses the reviewed feature core above, integrated by porcelain merge
+`7f925967caac4f5c99bbd425209414b3ebda3da1`. `http-plans` remains default-off;
+only opted-in consumers expose the new type/API/storage. The integration target
+requires BOTH `test-support` and `http-plans`; it enables no feature for an
+unrelated venue. No legacy inventory or feature-closure file was changed.
+
+Implemented: `MutationTerminalBound`, `admit_plan_with_terminals` and
+`done_mutation_plan_after_data`, with one internal admission declaration and
+only root serial single-call anchors. Terminal ordinals are resolved from the
+bounded native declaration at admission, not added later. Exact released DATA,
+slot/owner/generation, raw Plan/physical bounds, housekeeping facts and absence
+of another issued call all precede terminal preparation. Undeclared/fallback
+slots cannot terminalize the root.
+
+Shared sealing now prepares the existing journal projection and fallible report
+storage before structural retirement or sealing. The journal reuses its existing
+pure `failure_projection`; its outcome/native-evidence arithmetic is unchanged.
+Ordinary success/failure, expiry and conditional completion all use one
+`commit_plan_terminal` Cx funnel. That is the agreed single integration point for
+fe7lgm's future observer hook; no execution/imported-ledger continuation is
+claimed available in this child.
+
+Ten native integration controls pass with NO ignored test: the original
+conditional RED; ordinary full amendment with exact replacement ID/root;
+missing fact, absent/foreign/old delivery and physical/root/nonfinite bounds;
+undeclared terminal refusal with usable DATA; duplicate/out-of-range/parallel/
+over-capacity declarations without consuming admission IDs; prior Unknown plus
+accepted prefix IDs projected as one failure; Read-only declaration/terminal
+refusal with normal Read completion; parallel prefix with an unselected fallback;
+a selected fallback that cannot terminalize or shift the root anchor; and
+reused command generation/late replay. Total-terminal checks include both Done
+and Failed independently of success payloads.
+
+Matching-source local evidence: engine all-features 886 passed; feature-off 753
+passed; opted-in ApeX + Binance 461 passed; strict engine all-target/all-feature
+Clippy and fmt passed. Each command used CARGO_BUILD_JOBS=2. Earlier original
+RED evidence remains in history; the new source removes its ignore. No local
+WASM/load/timing sweep or remote family-signing proof was run/claimed. Normal CI
+and genuine current/actual integration remain required before merge.
+
+Independent source/adversarial, caller and full-map reviews found no runtime
+architecture/code blocker. The source review requested real fallback and later
+ordinal coverage; those controls are now included. Full-map requested this
+receipt and a corrected test header; both are present. These are shared engine
+rights, not a venue outcome, clock, queue or completion policy replacement.
