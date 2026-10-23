@@ -303,7 +303,7 @@ fn undecodable_http_replies_keep_typed_internal_after_read_retry_exhaustion() {
     let error = failure(&actions, 7);
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.outcome, None);
-    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(_))));
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(&**action, HttpAction::Prepare { .. }))));
 }
 
 #[test]

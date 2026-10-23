@@ -4359,8 +4359,9 @@ The native retry budgets remain independent: up to three actual transport read
 retries and one signature-refusal resend, at most five physical attempts in
 combination. Every attempt passes managed preparation and final release admission.
 A route/preparation refusal retains its supplied typed error and does not enter
-the network retry loop. Transport exhaustion carries kind `network`; original
-deadline expiry carries kind `timeout`. Context admission/retry failures use the
+the network retry loop. Transport exhaustion carries kind `network`; undecodable
+HTTP reply exhaustion retains the engine's `internal` kind. Original deadline
+expiry carries kind `timeout`. Context admission/retry failures use the
 shared engine classification. Initial pre-context refusal can still complete
 through the existing numeric error path; an issued owner always finalizes with
 its Context, without numeric fallback.
@@ -4370,7 +4371,7 @@ row-skipped messages, wholly invalid rejection and valid-empty success retain
 their native contract. Native API/row/envelope failures preserve the existing
 message-only public-read errors; they do not borrow mutation Unknown/Rejected
 outcomes from the private error codec. Worker/hosted callers must preserve typed
-preparation/network/timeout failures and treat the rejected read as unavailable.
+preparation/network/internal/timeout failures and treat the rejected read as unavailable.
 Private reads/writes, history alternatives, discovery, local cached commands and
 capability defaults are separate from this candle migration. This behavior does
 not establish downstream deployment or live venue connectivity.

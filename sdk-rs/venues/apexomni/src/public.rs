@@ -12,8 +12,8 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, ErrorKind, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
-    TimerId, VenueError,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    VenueError,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -449,7 +449,7 @@ impl ApexOmni {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Candles,
-        error: &str,
+        error: VenueError,
     ) {
         if let Err(error) = cx.validate_http_context(&request.context) {
             Self::candle_failed(cx, request, error.venue_error());
@@ -457,7 +457,7 @@ impl ApexOmni {
             request.retries += 1;
             self.retry_candles(cx, request);
         } else {
-            Self::candle_failed(cx, request, VenueError::new(error).kind(ErrorKind::Network));
+            Self::candle_failed(cx, request, error);
         }
     }
 

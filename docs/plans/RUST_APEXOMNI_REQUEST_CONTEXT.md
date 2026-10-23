@@ -322,3 +322,20 @@ is migrated by this slice.
 ## Actual error-conversion integration
 
 Porcelain merge `781010fff81` integrates actual #1808 landing `73d04380dd9f21d75bdd023353e10a1ba1c5e801`, including actual #1785 and Bitget #1801. The only conflict was appended CALLERS content: all incoming sections precede the unchanged ApeX appendix, retained once verbatim. The integration guard lists exactly the nine lane-owned paths; no engine/Binance/source reversion or unexpected deletion remains. The exact ApeX-only seven-occurrence manifest prune passes the unchanged checker and all 13 controls. Scoped formatting, strict Clippy and bans pass; the full ApeX/Binance suite is rerunning on this actual tree before readiness. Fresh CI and a separately granted overseer merge window remain required.
+
+## Actual typed HTTP failure integration
+
+Porcelain merge `8fd785b4ea5` integrates actual #1816 (`3ac2592c361`)
+and #1838 (`bd52632f2c8`). The candle callback retains the engine's typed
+failure through its existing read retry budget. An undecodable response now
+exhausts as `Internal`, without a write outcome, instead of being reclassified
+as `Network`. Regression `03c9ac76048` compiled and failed on that exact kind
+assertion before the callback change. Its final no-retry assertion allows the
+engine's normal cancellation action and rejects a new Prepare.
+
+The unnecessary generic capability-probe fixture carry is reverted by
+`5e400ed4c20`: that probe exercises FetchOrderBook, so this candle slice does
+not need it. Final intended scope remains nine own paths with no engine or
+registry test delta. Command-entry, signer and session adoption remain separate
+slices. Focused/full native checks and independent incremental reviews are
+recorded on the PR before readiness; fresh CI and an overseer window still apply.

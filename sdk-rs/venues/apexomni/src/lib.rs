@@ -243,7 +243,7 @@ impl ApexOmni {
 
     fn transport_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error),
+            Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error.into()),
             Pending::SignedAuth {
                 request,
                 mut pending,
@@ -352,6 +352,17 @@ impl Venue for ApexOmni {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         self.transport_failed(cx, pending, error);
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error),
+            pending => self.transport_failed(cx, pending, &error.message),
+        }
     }
     fn on_http_preparation_failed(
         &mut self,
