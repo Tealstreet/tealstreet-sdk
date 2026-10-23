@@ -5537,3 +5537,8 @@ compiled JS/WASM and initial loader cache. Runtime or canonical output drift
 fails certification. Private replay workloads and existing diagnostic handling
 keep their strict policy. Build arguments, CPU thresholds and fixtures retain
 their existing contracts. [Policy and controls](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md).
+
+An immutable artifact or completed-log download retries once only when its fetch
+raises a TypeError caused by UND_ERR_SOCKET. Metadata reads, HTTP refusals and
+invalid evidence retain their failure behavior. This retrieval recovery consumes
+no additional physical measurement slot and cannot repeat a failed second run.
