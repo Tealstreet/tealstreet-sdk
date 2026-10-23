@@ -75,10 +75,11 @@ receipt deadline after held entry; Remaining floors whole milliseconds, so a
 fractional hold can make it under1ms earlier, never later. No page or fallback
 renews it. Fresh Expired needs shared typed Timeout rejection before any effect,
 Read outcome None. Missing custody grants no work. Initial entry refusal is
-already published by the engine; never add a numeric fallback. #1945's planned
-Fresh Expired numeric terminal needs a shared no-ID entry refusal path for
-zero-inventory venue consumers; this API-fit request is pending with its owner.
-Do not fake an invalid zero-timeout Context to manufacture the refusal.
+already published by the engine; never add a numeric fallback. The #1945 owner
+proposed `Cx::reject_expired_command(Operation)` at `b0d875eff64`, taking no
+numeric ID and using the shared entry rejection transaction. It grants nothing
+unless the exact Fresh entry is Expired. Source review and actual landing remain
+required; do not fake zero-timeout issuance or implement receipt logic locally.
 
 Each physical page gets a Read child of that root with timeout 20000 ms and
 RetryPolicy::Never, minted only when the native queue dequeues it, before
@@ -94,9 +95,16 @@ timer: in-flight child timers are root-capped, while queued work is cleaned up
 when its existing pacing timer wakes. Do not claim exact-at-root queued cleanup;
 that would require a separate shared seam.
 
-Preserve the native terminal projection after admission: command_error
-`OKX history: {error}`, then soft[] for ordinary queries; lookup rejects and
-never becomes definitive absence on signing/transport/expiry failure. Existing
+Preserve the native post-release terminal projection: command_error
+`OKX history: {error}`, then soft[] for ordinary transport/HTTP/parse query
+failures; lookup rejects and never becomes definitive absence on failure.
+#1773 provider/signing-preparation refusal is a separate strict typed NotSent
+failure for both query and lookup, with no soft[] or command_error. Preserve
+every typed field through root failure. Root expiry follows soft-query behavior
+only after an actual release; issued pre-release expiry remains strict NotSent,
+as in #1942. Fresh Expired before any Context is the distinct shared initial
+Read refusal above (outcome None). Obtain release evidence from shared lifecycle
+contracts; no venue status ladder or fabricated release flag. Existing
 completion-only root validation permits settlement after deadline without send
 or DATA authority; shared API-fit review must confirm the full composition.
 Cap/stall semantics stay separate: plain history marks its own incomplete result
@@ -132,7 +140,8 @@ Consumers: fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory,
 fetchIncomeHistoryRange, fetchPublicTrades and findOrderByClientOrderId. Caller
 root expiry now bounds total work without changing the host's abandonment
 error. Future CALLERS must distinguish fresh typed admission failure from native
-post-admission soft-query/reject-lookup behavior and explicitly record shared
+post-release soft-query/reject-lookup behavior, strict typed provider/pre-release
+refusal, and explicitly record shared
 ReadCompletion's Internal-kind enrichment of otherwise untyped native errors;
 never strip typed provider/native metadata locally to mimic old kind=None.
 
@@ -156,11 +165,35 @@ Primary/Secondary wire, and a20s child born at dequeue (response after enqueue
 +20s but before dequeue+20s remains eligible). Add a longer explicit caller wait
 control to forbid an unrelated fixed120s root. Later integration must add held
 entry (fractional hold and sub-ms expiry included), exact boundary, root-capped
-child, prefix rejection, provider refusal,
-duplicate/late/reused owner and same-command typed expiry controls.
+child, prefix rejection, provider refusal (query and lookup, every typed field preserved, no soft[] or
+command_error), pre-release versus post-release expiry, duplicate/late/reused
+owner and same-command typed expiry controls.
 
 Report assertion failures and passing controls separately; no compile failure or
 ignored test is a RED. Stop after plan+original RED commits until the shared and
 ownership gates clear. Implementation, exact prune, full focused OKX/Binance
 checks, strict Clippy/fmt, both ratchets, three independent reviews and full CI
 follow later. No current inventory reduction or managed-history readiness.
+
+## Original-source receipt
+
+Plan `dc17d83c934` precedes API-fit correction `64150f5746d` and original test
+commit `6569540b7f5`. Fixture-only correction `c4be3f3420d` scopes dead_code
+allowance to the imported shared support module; the first compile failure is
+not an assertion RED. On unchanged aa556 production, the qualifying run gives
+7 assertion REDs, 5 compatibility passes and0 ignored tests.
+
+REDs prove missing managed private/public/primary-lookup preparation, invalid
+entry bypass by a local empty answer, short-root expiry during native pacing,
+default120s expiry across eight individually valid pages, and expired lookup
+returning native51603 absence. Five positives prove finite precedence/sentinels,
+soft failed later query page, strict lookup transport failure/Primary route,
+20s child born at dequeue and a180s override allowing130s work. The explicit
+wait adapter deliberately lacks core propagation; these assertions must be
+re-proven with actual #1945 before attributing remaining failures to adoption.
+Secondary-wire/provider behavior is not newly proven by these five controls.
+
+Source/adversarial, caller and full-map reviewers independently verified the
+original-source boundary and test reachability. Production, engine, inventories,
+ratchets and all existing fixture/test files remain byte-exact to aa556. The
+phase is intentionally RED and not merge-ready. No legacy site is pruned.
