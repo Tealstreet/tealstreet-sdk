@@ -84,6 +84,11 @@ mod tests {
             SigningRelease::new(receipt(f64::MAX), at(f64::MAX, 0.)),
             Err(Error::Invalid)
         );
+        // Valid receipt, finite remaining time, overflow only in raw addition.
+        assert_eq!(
+            SigningRelease::new(receipt(1.), at(f64::MAX, -f64::MAX)),
+            Err(Error::Invalid)
+        );
         assert_eq!(
             SigningRelease::new(receipt(1.), at(f64::MAX, 0.)),
             Err(Error::Invalid)
