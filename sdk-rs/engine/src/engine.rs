@@ -2711,6 +2711,14 @@ pub trait Venue {
         _receipt: crate::signing::SignReceipt,
     ) {
     }
+    /// Observe exact final-release clock metadata; this grants no transport right.
+    fn on_signing_release(
+        &mut self,
+        target: SigningTarget<'_, Self::Pending>,
+        release: crate::SigningRelease,
+    ) {
+        self.on_signing_receipt(target, release.receipt());
+    }
     /// Shared dispatch signing failure, typed before transport. Composite jobs
     /// retain earlier attempt outcomes when projecting this attempted notSent.
     fn on_sign_error(
@@ -4572,24 +4580,54 @@ impl<V: Venue> Engine<V> {
                             now,
                             self.io.protocol_clock.revision(),
                         ) {
-                            Some(Completion::Ready(pending, outbound)) => {
+                            Some(Completion::Ready(mut pending, mut outbound)) => {
+                                let time = crate::request_context::ReleaseTime {
+                                    raw_ms: now,
+                                    protocol_ms: self.io.protocol_clock.at(now),
+                                    revision: self.io.protocol_clock.revision(),
+                                };
+                                let release =
+                                    match crate::SigningRelease::new(pending.receipt, time) {
+                                        Ok(release) => release,
+                                        Err(crate::request_context::Error::Stale) => {
+                                            crate::signing_dispatch::wipe(&mut outbound);
+                                            pending.timer = TimerId(0);
+                                            let next = self.io.signing.next_id();
+                                            self.io.signing.retry(next, pending);
+                                            continue;
+                                        }
+                                        Err(_) => {
+                                            crate::signing_dispatch::wipe(&mut outbound);
+                                            let emitted = self.io.actions.len();
+                                            self.sign_failed(
+                                                now,
+                                                pending.outbound,
+                                                crate::signing::SignError::InvalidRequest,
+                                            );
+                                            self.queue_dispatch_callback_actions(
+                                                &mut queued,
+                                                emitted,
+                                            );
+                                            continue;
+                                        }
+                                    };
                                 match &outbound {
                                     Action::Http(http) => {
                                         if let Some(value) = self.io.pending.get_mut(&http.id) {
-                                            self.venue.on_signing_receipt(
+                                            self.venue.on_signing_release(
                                                 SigningTarget::Http {
                                                     request: http.id,
                                                     pending: &mut value.value,
                                                 },
-                                                pending.receipt,
+                                                release,
                                             );
                                         }
                                     }
                                     Action::WsConnect { socket, .. }
                                     | Action::WsSend { socket, .. } => {
-                                        self.venue.on_signing_receipt(
+                                        self.venue.on_signing_release(
                                             SigningTarget::Socket { socket: *socket },
-                                            pending.receipt,
+                                            release,
                                         );
                                     }
                                     _ => {}
