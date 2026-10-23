@@ -516,10 +516,16 @@ pub fn decode_subscription(json: &str) -> Result<Option<Command>, serde_json::Er
 // Keep the large command variant inlined through the host boundary as well.
 #[inline(always)]
 pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
+    // A present wait must hold an integer; `null` is not absence.
+    fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+        u64::deserialize(deserializer).map(Some)
+    }
     #[derive(Deserialize)]
     struct Header<'a> {
         #[serde(borrow)]
         op: std::borrow::Cow<'a, str>,
+        #[serde(default, rename = "timeoutMs", deserialize_with = "present")]
+        timeout_ms: Option<u64>,
     }
     let header: Header<'_> = serde_json::from_str(json)?;
     if header.op == "publicFeedUpdate" {
@@ -579,37 +585,21 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
             ceiling_ms: control.ceiling,
         });
     }
-    let timeout_ms = decode_wait(json)?;
+    // The envelope's optional caller wait: absent is `None`; a value outside
+    // 1..=MAX_COMMAND_WAIT_MS is an error.
+    let timeout_ms = match header.timeout_ms {
+        None => None,
+        Some(ms) if (1..=u64::from(crate::MAX_COMMAND_WAIT_MS)).contains(&ms) => Some(ms as u32),
+        Some(_) => {
+            return Err(serde::de::Error::custom(
+                "timeoutMs must be a positive integer no greater than 2147483647",
+            ));
+        }
+    };
     decode_command(json).map(|command| HostInput::Command {
         command,
         timeout_ms,
     })
-}
-
-/// The envelope's optional `timeoutMs`: absent is `None`; a present `null`,
-/// non-integer or value outside 1..=MAX_COMMAND_WAIT_MS is an error.
-fn decode_wait(json: &str) -> Result<Option<u32>, serde_json::Error> {
-    fn present<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<serde_json::Value>, D::Error> {
-        serde_json::Value::deserialize(deserializer).map(Some)
-    }
-    #[derive(Deserialize)]
-    struct Wait {
-        #[serde(default, rename = "timeoutMs", deserialize_with = "present")]
-        timeout: Option<serde_json::Value>,
-    }
-    let Some(value) = serde_json::from_str::<Wait>(json)?.timeout else {
-        return Ok(None);
-    };
-    match value.as_u64() {
-        Some(ms) if (1..=u64::from(crate::MAX_COMMAND_WAIT_MS)).contains(&ms) => {
-            Ok(Some(ms as u32))
-        }
-        _ => Err(serde::de::Error::custom(
-            "timeoutMs must be a positive integer no greater than 2147483647",
-        )),
-    }
 }
 
 #[cfg(test)]
