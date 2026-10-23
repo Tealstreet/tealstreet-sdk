@@ -131,7 +131,7 @@ ratios. The execution sweep is small in this sample and is not the primary fix.
 
 489 WOO/Binance native tests across 38 targets pass, as do scoped strict Clippy,
 fmt, bash syntax and diff checks. The 14 request-context checker controls pass.
-Actual landing 732cf8b0a6e5f5dbe783c62af9f14e7c32ee8fe0 is genuinely integrated.
+Actual landing 7b6b4a2d029052c08fc3801a763a613b6a7ab9d4 is genuinely integrated.
 The initial stale incoming Paradex/Lighter ratchet failures were resolved by
 preserving landing's source and inventory. Both request-context checks now pass;
 the inventory has zero delta against that integrated landing.
