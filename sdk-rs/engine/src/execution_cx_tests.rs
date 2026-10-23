@@ -486,8 +486,9 @@ fn begin_and_join_need_the_observer_commands_own_genuine_callback() {
     );
 }
 
-/// Begin a background-rooted read (or the successor of `previous`) with one leg.
-fn background_read(run: &mut Run, at: f64, previous: Option<ExecutionHandle>) {
+/// Begin a background-rooted read (or the successor of `previous`) with one
+/// leg; returns the background root.
+fn background_read(run: &mut Run, at: f64, previous: Option<ExecutionHandle>) -> Context {
     let mut cx = Cx {
         now: at,
         store: &mut run.engine.store,
@@ -517,6 +518,15 @@ fn background_read(run: &mut Run, at: f64, previous: Option<ExecutionHandle>) {
     .unwrap();
     run.engine.venue.execution = Some(execution);
     run.actions.extend(run.engine.drain_actions());
+    background
+}
+
+fn cx_at(run: &mut Run, now: f64) -> Cx<'_, Context> {
+    Cx {
+        now,
+        store: &mut run.engine.store,
+        io: &mut run.engine.io,
+    }
 }
 
 #[test]
@@ -620,4 +630,104 @@ fn background_roots_refuse_command_roots_and_writes() {
             Err(crate::request_context::Error::Invalid)
         );
     }
+}
+
+#[test]
+fn a_finished_background_root_publishes_only_while_a_command_observer_survives() {
+    for observed in [false, true] {
+        let mut run = Run::new(GroupProbe {
+            complete: true,
+            ..Default::default()
+        });
+        let background = background_read(&mut run, 1., None);
+        if observed {
+            run.handle(2., fetch(1));
+        }
+        let request = run.release(3.);
+        cx_at(&mut run, 4.)
+            .finish_http_context(&background)
+            .unwrap();
+        run.respond(5., request);
+        assert_eq!(run.engine.venue().publications, usize::from(observed));
+        assert_eq!(run.done().len(), usize::from(observed));
+    }
+}
+
+#[test]
+fn a_successor_needs_the_same_background_credential() {
+    let mut run = Run::new(GroupProbe::default());
+    background_read(&mut run, 1., None);
+    run.release(2.);
+    let previous = run.engine.venue().execution.clone().unwrap();
+    let mut cx = cx_at(&mut run, 3.);
+    let mut other = read_policy(1_000);
+    other.credential = Some(crate::request_context::Credential {
+        slot: CredentialSlot::Primary,
+        reference: crate::signing::KeyRef("other-account".into()),
+    });
+    let foreign = cx.http_context(Scope::Background, other).unwrap();
+    assert_eq!(
+        cx.begin_successor_execution(&previous, &foreign, read_policy(1_000))
+            .map(|_| ()),
+        Err(crate::request_context::Error::Invalid)
+    );
+}
+
+#[test]
+fn one_background_context_roots_at_most_one_live_execution() {
+    let mut run = Run::new(GroupProbe::default());
+    let background = background_read(&mut run, 1., None);
+    assert_eq!(
+        cx_at(&mut run, 2.)
+            .begin_background_execution(&background, read_policy(1_000), Window::BeforeRelease)
+            .map(|_| ()),
+        Err(crate::request_context::Error::State)
+    );
+}
+
+#[test]
+fn a_succeeded_execution_refuses_joins_and_a_second_successor() {
+    let mut run = Run::new(GroupProbe::default());
+    background_read(&mut run, 1., None);
+    run.release(2.);
+    run.handle(3., fetch(1));
+    let previous = run.engine.venue().execution.clone().unwrap();
+    background_read(&mut run, 4., Some(previous.clone()));
+    // A caller still holding the old handle cannot strand an owner on it.
+    run.engine.venue.execution = Some(previous.clone());
+    run.handle(5., fetch(2));
+    assert_eq!(
+        run.engine.venue().join_errors,
+        [crate::request_context::Error::State]
+    );
+    let mut cx = cx_at(&mut run, 6.);
+    let background = cx
+        .http_context(Scope::Background, read_policy(1_000))
+        .unwrap();
+    assert_eq!(
+        cx.begin_successor_execution(&previous, &background, read_policy(1_000))
+            .map(|_| ()),
+        Err(crate::request_context::Error::State)
+    );
+}
+
+#[test]
+fn a_retired_previous_execution_has_no_successor() {
+    let mut run = Run::new(GroupProbe {
+        complete: true,
+        ..Default::default()
+    });
+    background_read(&mut run, 1., None);
+    let request = run.release(2.);
+    run.respond(3., request);
+    let previous = run.engine.venue().execution.clone().unwrap();
+    let mut cx = cx_at(&mut run, 4.);
+    let background = cx
+        .http_context(Scope::Background, read_policy(1_000))
+        .unwrap();
+    assert_eq!(
+        cx.begin_successor_execution(&previous, &background, read_policy(1_000))
+            .map(|_| ()),
+        Err(crate::request_context::Error::Revoked)
+    );
 }

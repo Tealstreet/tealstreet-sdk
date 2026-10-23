@@ -9,6 +9,15 @@ pub(super) struct Executions {
     /// Execution root identity (its `Owner::Execution` generation) to group.
     roots: HashMap<u64, Execution>,
     observers: HashMap<CommandId, Observer>,
+    /// Background read Context rooting each background execution.
+    backgrounds: HashMap<u64, Context>,
+}
+
+fn root_identity(context: &Context) -> Option<u64> {
+    match context.owner() {
+        Owner::Execution { generation } => Some(generation),
+        _ => None,
+    }
 }
 
 impl ContextRegistry {
@@ -23,10 +32,46 @@ impl ContextRegistry {
         self.executions.roots.get(&generation).copied()
     }
 
-    /// Live send/publication authority for an execution-owned handle.
+    /// Live send/publication authority for an execution-owned handle. A
+    /// background root publishes only while its own Context is still issued;
+    /// after that only surviving command observers keep the execution live.
     pub(in crate::engine) fn execution_live(&self, context: &Context) -> bool {
-        self.execution_of(context)
-            .is_some_and(|execution| self.executions.groups.may_publish(execution))
+        let Some(execution) = self.execution_of(context) else {
+            return false;
+        };
+        let groups = &self.executions.groups;
+        groups.may_publish(execution)
+            && root_identity(context)
+                .and_then(|identity| self.executions.backgrounds.get(&identity))
+                .is_none_or(|background| {
+                    self.validate_handle(background).is_ok() || groups.has_observers(execution)
+                })
+    }
+
+    /// One live execution per background Context.
+    fn background_in_use(&self, background: &Context) -> bool {
+        self.executions
+            .backgrounds
+            .iter()
+            .any(|(identity, rooted)| {
+                rooted == background
+                    && self
+                        .executions
+                        .roots
+                        .get(identity)
+                        .is_some_and(|execution| self.executions.groups.may_publish(*execution))
+            })
+    }
+
+    fn prune_roots(&mut self) {
+        let groups = &self.executions.groups;
+        self.executions
+            .roots
+            .retain(|_, execution| groups.deadline(*execution).is_some());
+        let roots = &self.executions.roots;
+        self.executions
+            .backgrounds
+            .retain(|identity, _| roots.contains_key(identity));
     }
 
     /// Exclusive whole-command composition: an entry-owned root with no other
@@ -115,6 +160,9 @@ impl ContextRegistry {
             return Err(Error::Invalid);
         }
         self.validate(background, now)?;
+        if self.background_in_use(background) {
+            return Err(Error::State);
+        }
         let deadline = background
             .deadline()
             .min(now + f64::from(policy.timeout_ms));
@@ -129,6 +177,9 @@ impl ContextRegistry {
             now,
         )?;
         debug_assert_eq!(self.executions.groups.deadline(execution), Some(deadline));
+        self.executions
+            .backgrounds
+            .insert(identity, background.clone());
         Ok(self.commit_root(root, execution))
     }
 
@@ -153,21 +204,23 @@ impl ContextRegistry {
         if !previous.issued_by(&self.issuer) {
             return Err(Error::Revoked);
         }
-        let Some(old) = self
+        let old = self
             .execution_of(previous)
             .filter(|old| self.executions.groups.deadline(*old).is_some())
-        else {
-            // Nothing queued survives a retired read: begin afresh.
-            let root = self.begin_background_execution(
-                identity,
-                background,
-                policy,
-                Window::BeforeRelease,
-                now,
-            )?;
-            return Ok((root, Vec::new()));
-        };
+            .ok_or(Error::Revoked)?;
+        // Queued owners need the same account's next snapshot.
+        let rooted = self
+            .executions
+            .backgrounds
+            .get(&root_identity(previous).expect("execution handle"))
+            .ok_or(Error::Invalid)?;
+        if rooted.credential() != background.credential() {
+            return Err(Error::Invalid);
+        }
         self.validate(background, now)?;
+        if self.background_in_use(background) {
+            return Err(Error::State);
+        }
         let deadline = background
             .deadline()
             .min(now + f64::from(policy.timeout_ms));
@@ -178,11 +231,11 @@ impl ContextRegistry {
             policy.timeout_ms,
             now,
         )?;
-        let root = self.commit_root(root, execution);
-        let groups = &self.executions.groups;
         self.executions
-            .roots
-            .retain(|_, execution| groups.deadline(*execution).is_some());
+            .backgrounds
+            .insert(identity, background.clone());
+        let root = self.commit_root(root, execution);
+        self.prune_roots();
         Ok((root, sealed))
     }
 
@@ -297,10 +350,7 @@ impl ContextRegistry {
         for (_, execution) in roots {
             sealed.extend(self.executions.groups.expire(*execution, now));
         }
-        let groups = &self.executions.groups;
-        self.executions
-            .roots
-            .retain(|_, execution| groups.deadline(*execution).is_some());
+        self.prune_roots();
         sealed
     }
 

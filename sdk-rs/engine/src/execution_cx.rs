@@ -82,8 +82,9 @@ impl<P> Cx<'_, P> {
         Ok(ExecutionHandle(root))
     }
 
-    /// The next background read adopts owners that joined after `previous`
-    /// was released; owners already past their deadline time out once.
+    /// The next read of the same account adopts owners that joined after
+    /// `previous` was released; owners already past their deadline time out
+    /// once. A retired `previous` (nothing queued) is `Revoked`: begin afresh.
     pub fn begin_successor_execution(
         &mut self,
         previous: &ExecutionHandle,
@@ -92,6 +93,9 @@ impl<P> Cx<'_, P> {
     ) -> Result<ExecutionHandle, Error> {
         if self.io.http_delivery.is_some() {
             return Err(Error::Revoked);
+        }
+        if !self.io.next_id.available(1) {
+            return Err(Error::Capacity);
         }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let (root, sealed) = self.io.request_contexts.begin_successor_execution(
