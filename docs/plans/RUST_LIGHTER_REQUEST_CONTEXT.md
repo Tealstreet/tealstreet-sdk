@@ -349,3 +349,10 @@ or invalid computed deadline. The shared denial is `Invalid request context`,
 one-terminal/no-I/O control for NaN and both infinities on a genuine command
 callback, plus a later finite-clock admission to prove no retained owner.
 This is shared policy validation; native candle parameter validation is unchanged.
+
+Implementation receipt: original production source at `6741c1c6609` with corrected
+controls in `d1e6ab36d6c` produces two assertion failures (capacity message and
+invalid-clock kind), with all eight compatibility controls passing. The first
+RED commit `3c99a9d2957` also rejected the engine's existing duplicate diagnostic;
+`d1e6ab36d6c` explicitly preserves that diagnostic rather than treating it as an
+admission bug. No production source was committed before these controls.

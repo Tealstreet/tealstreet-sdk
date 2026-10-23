@@ -661,3 +661,17 @@ completion. Another fixed-clock control runs270 market refusals,270 interval
 refusals and270 successes with stale previous-response probes. Existing native
 candle mapping, validation precedence and preparation/expiry assertions remain.
 This closes the earlier pre-Context numeric refusal gap using the shared seam.
+
+## Lighter command-entry regression proof
+
+The separately committed candle controls reproduce two native admission errors:
+capacity returned a generic adapter message, and invalid clock admission reported
+Internal instead of the engine's InvalidInput. Both are assertion-RED on the
+original implementation. The live-duplicate control allows the pre-existing
+COMMAND_DUPLICATE diagnostic and proves no request/terminal replacement; it is a
+compatibility control, not an original failure. All seven earlier candle controls
+remain. New controls exercise both aliases/networks, denial before invalid market
+validation, one terminal/no resource allocation, peer completion, freed-slot
+reuse and NaN/positive-infinity/negative-infinity admission followed by a finite
+command. The adapter uses shared command entry only for its genuine command
+caller; background generation cleanup and native query/stream behavior remain.

@@ -2155,3 +2155,13 @@ Context. The remaining discovery error fallback accepts only Markets/Tickers.
 No venue admission policy or finalizer is introduced. The exact own inventory
 shrinks 24 to23 occurrences (20 to19 hash rows, five to four files); account,
 closed/private history and trading remain tracked with their original owners.
+
+## Lighter candle pre-authority refusal closed
+
+~~The candle issuance-refusal site requires a shared pre-authority failure seam.~~
+Actual shared command-entry authority now owns the genuine initial FetchCandles
+callback and its unissued Read denial. Lighter consumes it directly and returns
+on rejected/revoked admission without a numeric terminal. The one removed legacy
+fingerprint shrinks Lighter47→46 and lib6→5; all other inventory entries remain.
+This closes only the candle refusal and introduces no venue capacity, retry or
+outcome rule. Native background polling continues using its independent Context.
