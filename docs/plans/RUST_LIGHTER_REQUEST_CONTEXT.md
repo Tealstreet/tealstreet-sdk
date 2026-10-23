@@ -461,3 +461,91 @@ No Rust runtime dependency of the tested Lighter/Binance closure changed during
 integration. Only the same8 own paths differ from the new landing. Fresh CI and
 independent implementation reviews are separate final gates; no WASM/replay or
 whole-venue closure is claimed by native evidence.
+
+## Public ticker/depth seed Context slice on actual db32 (2026-10-23)
+
+Fresh branch `feat/rust-lighter-public-seed-context` starts at actual #1900
+`db32da5314cce685e3ff2e17d51e26bfb94c8093`. Full current inventory43:
+account5/history10/identity3/lib3/limits5/trading17. The public ticker and order-book
+seed pair removes the next two independent physical send sites; catalog fallback
+retains the one remaining lib site. Public identity/catalog retain native multiple
+attempts; private reads have signer/join prerequisites. Hyperliquid spot's six
+sites remain blocked by the #1877 legacy-spot fixture. GRVT login belongs to #1905.
+
+Before source, recheck every open PR file list. #1866 holds Lighter trading.rs;
+#1877 now also holds tests/request_context_candles.rs. Neither may be edited.
+If either held fixture necessarily needs adaptation, stop this slice and report
+that collision rather than weakening it or cloning its assertions elsewhere.
+Intended own files: lib.rs, new tests/request_context_public_seeds.rs, existing
+public.rs/public-review.rs/support only where prepared drains are needed, this
+plan and CALLERS/AUDITS/QUALITY appendices, exact shared inventory prune. Other
+native fixtures may be listed by the independent driver audit before source;
+no assertion changes or unrelated production edits are authorized by this list.
+
+### Native facts and managed design
+
+`exchangeStats` is unsigned GET with empty headers/body and the exact six native
+ArrayAt envelope alternatives. It snapshots ticker_revision, stages native Stats
+rows (retaining skipped-row diagnostics/partial valid peers), then updates only
+markets whose WebSocket source revision is no newer. Preserve ticker_in_flight,
+existing startup Backoff, stream subscriptions and native field mapping.
+
+`orderBookOrders?market_id={id}&limit=100` is unsigned GET with empty headers/body,
+a complete response (no array selector). Existing depth generation/revision,
+in_flight, rest_retry_at and per-book silence/gap rules remain native. Preserve
+strict RestDepth/Depth validation and last_received/nonce/book_changed behavior;
+failed or stale reads cannot reset another subscription's latch or publish a book.
+
+Add mandatory Context ownership to the two existing Pending variants. Before
+setting a new in-flight latch, issue a separate shared Background Read Context:
+no credential,20s,Never,no pacing. Use request_managed, then attach the original
+stream selector only for tickers. This is a single logical read per seed; no
+command completion owner, fake mutation fact, joined execution, local Plan or
+copied retry policy is introduced. Admission/queue failure uses existing native
+failure cleanup; never emit a command terminal or touch another Context.
+
+On ticker item admission use the existing shared live-Context validation before
+native staging; engine managed delivery already fences physical release. Before
+publication validate the current Context, retire through finish_http_context,
+then preserve native ticker source or depth generation/revision checks. Every
+terminal path retires its Context, including malformed envelopes/prefixes,
+preparation/queue/transport/expiry failures and stale-generation early returns.
+Depth cleanup mutates only its matching generation. Ticker cleanup releases its
+single in-flight latch and existing startup Backoff; Context refusal must not
+strand either seed. Expired handles may retire without acquiring send rights.
+No new retry timer, budget, outcome classifier or metadata policy is added.
+
+### Original REDs, exact map and gates
+
+Commit assertion-failing tests first: both aliases/networks emit public Prepare
+with exact native GET/header/body bytes; neither early response nor streamed rows
+before final claim publish. Successful release preserves native ticker partial
+rows/source dominance and depth mapping. Preparation denial, original deadline
+while parked/claimed, and failed prefixes publish nothing, allocate no command
+terminal and release only the matching seed latch for native retry. Prove late
+old depth response/failure cannot release a resubscribed replacement; stale
+revision cannot replace fresh WS depth/ticker data. Test Context capacity refusal
+against unrelated parked command owners, then free a slot and recover through
+native timer/backoff. Keep existing native assertions through prepared_actions.
+
+Expected exact removals: lib fingerprint
+2bbebb7465e83aac90aeda0b54e32b996272c805baa3f70ed2fafc69a8e73268 once
+(ticker request_streamed), and
+18cd2d97de7df286e747348057b54c6924eb3e65bc7df288229e919c4a447f11 once
+(depth request). Inventory43→41, lib3→1; all other Lighter/foreign maps unchanged.
+Never prune the remaining catalog sender or rehash unrelated legacy sites.
+
+Run full Lighter+Binance native tests CARGO_BUILD_JOBS=2, strict touched-crate
+Clippy/scoped fmt, bans and both current request checks. Obtain three independent
+plan reviews before source and source/adversarial/caller/full-map reviews after
+implementation. CI supplies WASM/replay/timing/size evidence with a background
+watch. Request a train slot only when green; fresh separate full-map guard before
+head-matched merge. No whole-venue zero, private/signing or transport-package proof
+is claimed by this public pair.
+
+Caller-visible: custom worker/hosted transports must support prepare/bind/claim
+for these background GETs. Preparation shares the original20s bound with response
+processing. Successful data/cadence and SDK call signatures stay native; parked
+or expired work cannot mutate Store. Failure remains background recovery, never
+a correlated user's command result. Architecture gate No: existing Context and
+HTTP lifecycle APIs carry policy; the venue retains only protocol/cache facts.
