@@ -13,8 +13,14 @@ hedged isolated leverage: one mutation command, two concurrent Primary POSTs
 (long and short), one journal/barrier and exactly one terminal. Native leverage,
 position leverage and revisions commit only after BOTH replies succeed. The
 cross/one-way form remains one POST without positionSide. Both nonce/header
-preparations precede the native pair's enqueue; a delayed provider must not cause
-a local eager-sign fallback. Reverse, duplicate and stale deliveries must not
+preparations precede the native pair's enqueue; failure of the second native
+preparation sends neither. Independent managed send-time preparation does NOT
+provide that group barrier: one sibling can be accepted before the other's
+provider refusal. G2 declares that difference explicitly, with a Partial-effect
+control and consumer decision required before native cutover. If exact native
+preparation atomicity is required, a separately reviewed shared group prepare/
+release barrier is a prerequisite; #1939 only governs reply independence.
+No local eager-sign fallback. Reverse, duplicate and stale deliveries must not
 change the aggregate result.
 
 The mixed proof is Primary cancel -> Secondary Read Verify -> Primary place,
@@ -99,7 +105,10 @@ including every fallback occurrence. API review chooses one before source.
 Reject duplicate/missing/extra/wrong bindings before reservation; failure leaves
 Preflight, activation custody and IDs unchanged. All fallible validation and
 storage preparation precede the same admission commit as uniform declarations.
-Conditional terminals and future ReconcileBound remain fields of that single
+Conditional terminal anchors must resolve to Mutation calls: a mixed root's
+Operation::Mutation cannot authorize a terminal anchored on Read Verify. Reject
+that declaration before IDs, and pin both admission refusal and Read terminal
+rights denial. Conditional terminals and future ReconcileBound remain fields of that single
 internal declaration. No alternate constructor bypasses readiness or custody.
 
 ## Read Verify has no mutation rights
