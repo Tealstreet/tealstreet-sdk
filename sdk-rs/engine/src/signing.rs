@@ -252,7 +252,8 @@ pub enum Algorithm {
     HmacSha512,
     /// SHA256(message || key), raw 32-byte digest. No implicit hex or prehash.
     Sha256SecretSuffix,
-    /// Ed25519 exact message, without a prehash; raw 64-byte signature.
+    /// Ed25519 exact message, without a prehash; raw 64-byte signature. The key is
+    /// a 32-byte seed or the `seed || public` keypair whose public half must match.
     Ed25519,
     /// ECDSA P-256 with one SHA256 of message; fixed-width r || s, 64 bytes.
     Es256,
