@@ -274,7 +274,7 @@ V1-only Aster PR) before its migrated construction path is enabled.
 | 5 | Orderly | TBC | P1 base58, P2 Ed25519, P8 | wire stamp; none | Retire the TS-hosted Orderly kept path only after the Rust positives pass. |
 | 6 | Backpack | TBC | P2 Ed25519, P8 | wire stamp; none (window is a duration, as with Binance `recvWindow`) | |
 | 7 | Coinbase | TBC | P1 CDP JSON, P2 Es256/Ed25519, P8 | `nbf`; `exp` = +120 s (local and half-1 provider; today's `coinbase-jwt` remote path picks its own claims) | The JWT is built at release with the entropy nonce. Retire the TS-hosted Coinbase path only after the positives pass. |
-| 8 | Hyperliquid + TxFlow | codex-zs5e83 | P2, P4, P5, P8 | nonce stamp; none | Digest recipes; the nonce is drawn at preparation. |
+| 8 | Hyperliquid + TxFlow | codex-zs5e83 (HL only); TxFlow venue lane TBC, coordinated for the joint nonce/action-hash proof | P2, P4, P5, P8 | nonce stamp; none | Digest recipes; the nonce is drawn at preparation. |
 | 9 | GRVT | codex-zs5e83 | P2, P4, P6, P8 | none; +1 h | Signs at release, including amend replacements. Re-login re-prepares and never resends the stale signed body. #1785-1788 own `account.rs`. |
 | 10 | Paradex | codex-zs5e83 | P2 Stark, P4, P6 | auth `exp` +300 s; order ms stamp (half 2 on the existing `stark` payloadSigner) | Map the payloadSigner contract onto the shared provider and hosted adapter. Delete the Paradex-only engine path (`Cx::sign_request`, `PendingSignature`, `SignatureTarget`, `engine.rs:145-155,1715`) in the same PR. #1787 owns account/trading files. |
 | 11 | Lighter | codex-zs5e83 | P3 Schnorr, P4, P5, P8 | none; auth +60 s, tx +10 min | The auth token is minted per use at release. Nonce reuse follows the P5 rule. |
