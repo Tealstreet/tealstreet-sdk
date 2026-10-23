@@ -615,6 +615,16 @@ impl<V: Venue> Engine<V> {
         self.assert_live();
         self.io.dispatch_now = now;
         let request = token.attempt().request;
+        #[cfg(feature = "http-plans")]
+        if self
+            .io
+            .managed_http
+            .get(&request)
+            .is_some_and(|managed| managed.lifecycle.preparation() == token)
+            && self.expire_plan_before_http_failure(now, request)
+        {
+            return;
+        }
         let Some(managed) = self.io.managed_http.get(&request) else {
             return;
         };
@@ -890,6 +900,11 @@ impl<V: Venue> Engine<V> {
             });
             return true;
         }
+        #[cfg(feature = "http-plans")]
+        if self.expire_plan_before_http_failure(now, request) {
+            return true;
+        }
+        let managed = &self.io.managed_http[&request];
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
             self.handle_event(
@@ -1153,6 +1168,8 @@ mod tests {
     include!("request_context_preflight_call_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_planned_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_plan_expiry_tests.rs");
 
     #[derive(Debug)]
     struct Pending(Context);
@@ -3156,8 +3173,10 @@ mod tests {
             ..Probe::default()
         });
         for (command, status) in [(7, 429), (8, 503)] {
-            let (_, token, _) = mutation(&mut engine, command, 0.);
-            let permit = bind(&mut engine, token, 1.);
+            // A native auth refusal is credential evidence only on a signed write.
+            let (_, token, _) = queue_mutation(&mut engine, command, 0., true);
+            let (attempt, input) = work(&route(&mut engine, token, 1.));
+            let permit = bound(&signed(&mut engine, 1., attempt, input));
             engine.claim_http(2., permit).unwrap();
             engine.io.auth_failure_counted = true;
             #[cfg(feature = "order-locks")]
