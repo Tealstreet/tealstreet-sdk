@@ -259,3 +259,34 @@ restored historical WOO arguments execute on the current candidate source.
 This PR also removes only the owner-flagged stale test/proof-status tail of its
 existing #1782 CALLERS section; behavior text is preserved. #1776 wording stays
 with its owner. This housekeeping adds no runtime scope.
+
+## Option A: Bitget speed-profile decision draft
+
+Owner instruction, 2026-10-23: prepare a DRAFT PR from actual landing
+`7641650e7b1fc54c55593880ac16299171f60a90`, pending Sam's decision, do not
+merge. Reuse the preserved measurement patch from
+`c2f62b6fc3531ff414f8ea239235f44a0c399efa` for `harness/build.sh` only:
+exclude family `bitget` from the shared size argument array alongside AsterDEX,
+KuCoin Spot and WOO. Bitget USDC resolves to the same family. Keep the global
+serde_json throughput selection, combined/native settings, explicit overrides,
+Binaryen flags, budgets, thresholds, fixtures and all venue source unchanged.
+
+Commit this plan before implementation; independent correctness and adversarial
+reviews check the exact patch and architecture gate. Capture Cargo arguments
+without invoking Cargo/bindgen for all 39 aliases plus combined/families routing;
+only Bitget and Bitget USDC may differ. Run shell syntax, focused harness tests,
+root typecheck/lint/test checks. No local release build or performance replay.
+Push the reviewed source once, open a draft titled/body marked
+"pending Sam's decision, do not merge", and run ordinary PR CI once with no
+rerun. Authenticate exact job/head/attempt/artifacts and package digests. Retain
+nine paired samples per public workload. Private CPU/process figures are single
+correctness-run diagnostics, not a performance objective or margin claim; keep
+strict known-failure status explicit. Report Bitget and USDC CPU ratios, process CPU,
+WASM bytes and fixed-budget headroom, including known private correctness
+failures rather than interpreting CPU as parity. Preserve failures and report
+any missing evidence. No guard/merge and no edits to #1785-#1788. If Sam chooses
+B or C, close the draft; preparation does not approve adopting option A.
+
+Architecture gate: YES, this is a family-specific selection in the existing
+shared build-policy choke point, explicitly prepared for an owner policy
+decision. It introduces no per-venue implementation, gate or threshold rule.
