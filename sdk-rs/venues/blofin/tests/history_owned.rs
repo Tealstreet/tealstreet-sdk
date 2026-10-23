@@ -4,7 +4,7 @@ use support::*;
 fn query(h: &mut Harness, command: u32, query: Query) {
     h.ws("pong");
     h.e.handle(1.0, Event::Command(Command::Query { command, query }));
-    h.collect();
+    h.collect_at(1.0);
 }
 fn income() -> Query {
     Query::Income {
@@ -190,7 +190,16 @@ fn general_history_first_failures_are_typed_and_never_accept_streamed_prefixes()
             query(&mut h, 7, q);
             let r = h.take(path);
             fail(&mut h, r, kind);
-            typed_failure(&h, 7);
+            if operation == 3 && kind == 2 {
+                let error = outcome(&h, 7)
+                    .expect("command settled")
+                    .expect_err("must reject");
+                assert_eq!(error.kind, Some(ErrorKind::Network));
+                assert!(markers(&h, 7).is_empty());
+                assert_eq!(timeline(&h, 7), ["failed"]);
+            } else {
+                typed_failure(&h, 7);
+            }
         }
     }
 }
