@@ -759,3 +759,97 @@ fn managed_candle_retry_drops_rows_and_decode_failure_from_the_refused_response(
         );
     }
 }
+
+// Paired metadata production wiring waits for the shared root/child read-delivery
+// validator. These original-RED builders pin the transport seam it must adopt.
+fn metadata_preparation(secondary: bool) {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+        credentials: Some(identity("primary")),
+        read_credentials: secondary.then(|| identity("secondary")),
+        public_data_only: false,
+    }));
+    engine.store_mut().set_markets(vec![candle_market()]);
+    engine.handle(
+        1_000.,
+        Event::Command(Command::FetchLeverage {
+            command: 42,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let prepares = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => Some((*preparation, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        prepares.len(),
+        1,
+        "actual metadata builder must prepare managed transport before signing"
+    );
+    let (preparation, request) = prepares[0];
+    assert_eq!(
+        request.url,
+        "https://open-api.bingx.com/openApi/swap/v2/trade/leverage?symbol=BTC-USDT"
+    );
+    assert_eq!(
+        request.headers,
+        vec![
+            ("X-SOURCE-KEY", "Tealstreet".into()),
+            ("Content-Type", "application/json, charset=utf-8".into()),
+        ]
+    );
+    assert!(request.signer_headers.is_empty());
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::Sign { .. }))
+    );
+    engine.http_prepared(
+        1_001.,
+        preparation,
+        Prepared {
+            id: 1,
+            expires_at: None,
+        },
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let work = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Sign { work, .. } => Some(work),
+            _ => None,
+        })
+        .expect("metadata signs only after route preparation");
+    let expected = if secondary {
+        "ref:secondary-credential"
+    } else {
+        "ref:primary-credential"
+    };
+    assert!(
+        matches!(&work.operations[0], safe_cex_engine::signing::Operation::Present { key } if key.0 == expected)
+    );
+    assert_eq!(work.receipt.stamp_ms, Some(1_001.));
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+}
+#[test]
+fn paired_metadata_primary_builder_requires_managed_route_preparation() {
+    metadata_preparation(false);
+}
+#[test]
+fn paired_metadata_secondary_builder_requires_managed_route_preparation() {
+    metadata_preparation(true);
+}
