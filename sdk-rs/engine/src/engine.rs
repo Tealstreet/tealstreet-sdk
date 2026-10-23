@@ -889,6 +889,14 @@ mod request_context_registry;
 #[path = "http_lifecycle.rs"]
 mod http_lifecycle;
 
+#[path = "execution_cx.rs"]
+mod execution_cx;
+
+#[cfg(test)]
+#[path = "execution_cx_tests.rs"]
+mod execution_cx_tests;
+pub use execution_cx::{ExecutionHandle, Joined, Window};
+
 /// A delivered response whose bytes the engine cannot hand to a codec. The
 /// venue answered, so this is never transport loss.
 fn malformed_body(message: &str) -> VenueError {
@@ -1450,6 +1458,8 @@ struct Io<P> {
     order_response_token: Option<u64>,
     actions: Vec<Action>,
     placement_acks: crate::placement_acks::PlacementAcks,
+    /// One engine timer for the earliest execution-group deadline.
+    execution_timer: Option<(TimerId, f64)>,
     public_feed_policy: PublicFeedPolicy,
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
@@ -1506,6 +1516,7 @@ impl<P> Default for Io<P> {
             order_response_token: None,
             actions: Vec::new(),
             placement_acks: Default::default(),
+            execution_timer: None,
             public_feed_policy: PublicFeedPolicy::Direct,
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
@@ -2160,6 +2171,16 @@ impl<P> Cx<'_, P> {
         result: Result<String, VenueError>,
         authority: Option<&crate::request_context::Context>,
     ) -> Result<(), crate::request_context::Error> {
+        self.finish_command_as(command, result, authority, false)
+    }
+
+    fn finish_command_as(
+        &mut self,
+        command: CommandId,
+        result: Result<String, VenueError>,
+        authority: Option<&crate::request_context::Context>,
+        observer: bool,
+    ) -> Result<(), crate::request_context::Error> {
         if authority.is_none() && !self.io.numeric_entry_completion_allowed(command) {
             return Err(crate::request_context::Error::Revoked);
         }
@@ -2167,17 +2188,20 @@ impl<P> Cx<'_, P> {
             Ok(result) => (Some(result), None),
             Err(error) => (None, Some(error)),
         };
-        let seal = self.io.request_contexts.seal(
-            command,
-            self.io.http_delivery.as_ref(),
-            authority,
-            error,
-        );
+        let delivery = if observer {
+            None
+        } else {
+            self.io.http_delivery.as_ref()
+        };
+        let seal = self
+            .io
+            .request_contexts
+            .seal_as(command, delivery, authority, error, observer);
         self.finish_sealed_command(command, success, seal)
     }
 
-    // Only validated journal seals reach shared cleanup and publication. Group
-    // fan-out still needs its own allocation transaction before using this seam.
+    // Validated Context, Plan and execution-observer seals share one terminal
+    // cleanup/publication path without lending physical delivery authority.
     fn finish_sealed_command(
         &mut self,
         command: CommandId,
@@ -2943,13 +2967,26 @@ impl<V: Venue> Engine<V> {
         self.assert_live();
         self.io.dispatch_now = now;
         self.io.http_responses.prune(now);
+        // Expired observers detach before any delivery can project to them.
+        self.sweep_executions(now);
         if self.expire_plan_timer(now, &event) {
             return;
         }
         if self.expire_http_timer(now, &event) {
+            self.sweep_executions(now);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
             }
+            return;
+        }
+        if let Event::TimerFired { timer } = &event
+            && self
+                .io
+                .execution_timer
+                .is_some_and(|(own, _)| own == *timer)
+        {
+            self.io.execution_timer = None;
+            self.sweep_executions(now);
             return;
         }
         let admitted = self.admit_http_event(now, &event);
@@ -2998,7 +3035,17 @@ impl<V: Venue> Engine<V> {
         }
         if let Some(request) = completed_http {
             self.settle_http_event(request);
+            self.sweep_executions(now);
         }
+    }
+
+    fn sweep_executions(&mut self, now: f64) {
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.sweep_executions();
     }
 
     /// Dispatch held cancellations whose acknowledged ids are now stored, or

@@ -17,7 +17,7 @@ enum ManagedRecipe {
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
-    timer: TimerId,
+    pub(super) timer: TimerId,
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
@@ -295,6 +295,8 @@ impl<P> Cx<'_, P> {
             timer,
             at_ms: deadline,
         });
+        // A leg in flight owns the execution deadline through its own timer.
+        self.io.rearm_execution_timer();
         self.io
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
@@ -354,10 +356,32 @@ impl<P> Io<P> {
         }
     }
 
+    /// Unsent legs of an execution with no live owner get no send right.
+    pub(super) fn revoke_unsent_execution_legs(&mut self) {
+        let revoked = self
+            .managed_http
+            .iter()
+            .filter(|(_, managed)| {
+                matches!(
+                    managed.lifecycle.context().owner(),
+                    crate::request_context::Owner::Execution { .. }
+                ) && managed.lifecycle.release().is_none()
+                    && !self
+                        .request_contexts
+                        .execution_live(managed.lifecycle.context())
+            })
+            .map(|(request, _)| *request)
+            .collect::<Vec<_>>();
+        for request in revoked {
+            self.discard_managed(request);
+        }
+    }
+
     fn take_managed(&mut self, request: RequestId) -> Option<Managed> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
             .retire_attempt(managed.lifecycle.context());
+        self.rearm_execution_timer();
         self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
         self.actions.push(Action::ClearTimer {
@@ -615,6 +639,7 @@ impl<V: Venue> Engine<V> {
         }
         self.io.request_contexts.exit_delivery(&delivery);
         self.finish_event_scope(now);
+        self.sweep_executions(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }
@@ -693,6 +718,9 @@ impl<V: Venue> Engine<V> {
             if let Some(released) = release_flag {
                 *released = true;
             }
+            self.io
+                .request_contexts
+                .execution_leg_released(managed.lifecycle.context());
             managed.recipe = None;
             managed.signing_attempt = None;
             if mutation {
