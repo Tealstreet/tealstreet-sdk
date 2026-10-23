@@ -1259,3 +1259,15 @@ all samples retained. Report paired controls, remaining cost and exact gate
 math. No build-policy/threshold change, open-ended iteration or WASM/full CI
 claim. The temporary measurement branch never merges. After at most one more
 measured iteration following this, report feasibility/options to the owner.
+
+Phase K source verification: both independent plan and full source/transaction
+reviews are CLEAR. New controls cover full-width nonmonotonic socket IDs,
+shifted neighbors after retirement/reconnect, reverse native coverage order,
+the same keys in both unsubscribe and subscribe, and sticky unknown/cross-batch
+duplicate errors after valid output with complete rollback. All 1,461 native
+four-crate all-target/all-feature tests pass, as do strict Clippy in both engine
+feature modes, formatting, bans and shrink-only ratchets. The original
+feature-off unused-getter failure is retained as a RED control. HTTP, dispatch,
+driver, engine ingress and supervision behavior remain unchanged. These checks
+establish preservation only; the fresh isolated measurement is still required
+before any CPU improvement or gate-feasibility conclusion.

@@ -141,6 +141,7 @@ impl Supervisor {
         }
     }
 
+    #[cfg(feature = "managed-sockets")]
     pub(crate) fn idle_enabled(&self) -> bool {
         self.idle_enabled
     }
