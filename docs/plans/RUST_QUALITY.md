@@ -610,3 +610,17 @@ Architecture gate: YES, cross-cutting consumer fan-out through the existing engi
 choke point. No signing, transport, history, snapshot authority or financial
 arithmetic change. Current-head CI/raw proof and queue ordering still apply;
 this entry does not close the remaining reporter inventory.
+
+## SDK master venue parity controls
+
+Separate original-RED commit637fe5832d6 pins seven assertion failures: three
+Hyperliquid fee-subject/startup controls, Lighter timestamp candidate and48-bit
+exhaustion, Robinhood approval preflight and signed attribution. The zero-candidate
+compatibility control remains positive1,2. Native private master/vault fee rates,
+empty-vault fallback, missing/empty applicationId agent discovery, public/default
+fee retention, both Robinhood networks and explicit builder overrides are covered.
+Existing Lighter split/bracket/batch, receipt and failed-send controls remain.
+Shared ProbeVenue tests seed boundary state privately without a production test
+hook. Master TS sources, prepared tape/harness and all incoming inventories remain
+unchanged. Native local checks and independent reviews precede the #1869 handoff;
+its owner supplies the full CI replay evidence.

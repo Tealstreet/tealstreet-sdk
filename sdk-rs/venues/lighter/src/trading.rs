@@ -348,7 +348,9 @@ impl Lighter {
     fn builder(&self) -> Option<sign::Builder> {
         self.options
             .integrator_account_index
-            .or(if self.options.testnet || self.options.robinhood {
+            .or(if self.options.robinhood {
+                Some(47_296)
+            } else if self.options.testnet {
                 None
             } else {
                 Some(158_385)
@@ -1067,14 +1069,17 @@ impl Lighter {
     }
 
     fn mint_id(&mut self, cx: &Cx<'_, Pending>) -> Result<u64, String> {
-        if self.trading.next_id == 0 {
-            let mut random = [0; 2];
-            cx.fill_entropy(&mut random)?;
-            self.trading.next_id = ((cx.now as u64).saturating_mul(100)
-                + u64::from(u16::from_le_bytes(random)) % 100)
-                % MAX_CLIENT_INDEX;
+        if self.trading.next_id >= MAX_CLIENT_INDEX {
+            return Err("Lighter client order index namespace exhausted.".into());
         }
-        self.trading.next_id = self.trading.next_id % MAX_CLIENT_INDEX + 1;
+        let mut random = [0; 2];
+        cx.fill_entropy(&mut random)?;
+        let candidate = ((u128::from(cx.now as u64) * 100
+            + u128::from(u16::from_le_bytes(random) % 100))
+            % u128::from(MAX_CLIENT_INDEX)) as u64;
+        // Every lot, bracket leg and batch shares this instance reservation.
+        // Failed or uncertain sends never release an already prepared index.
+        self.trading.next_id = candidate.max(self.trading.next_id + 1);
         Ok(self.trading.next_id)
     }
 

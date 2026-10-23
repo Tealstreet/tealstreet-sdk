@@ -74,3 +74,12 @@ identity before private bootstrap. Since other account reads share user(), they
 also use the nonempty trading identity rather than an empty vault. Add explicit
 empty-vault fallback and empty-applicationId/no-premature-fees controls. This is
 necessary for the requested master fee-subject parity and is included in CALLERS.
+
+Existing native compatibility update: fees.rs's anonymous control previously
+expected one empty-subject userFees request. Change only that assertion to no
+fee request, retaining its loaded-markets/no-role/no-private-mode assertions and
+all five private identity/failure/timer controls. This is the same intentional
+master contract change reproduced by the new no-I/O RED test. Also retain the
+zero-candidate control after correcting its public entropy-module import in
+0f0e92e553c; the corrected original unit run is2 assertion-RED +1 compatibility
+GREEN, not a compiler failure counted as RED.
