@@ -5478,6 +5478,37 @@ not establish complete history. Existing native row shapes and result shaping
 remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
 and [owned history](RUST_OWNED_HISTORY.md).
 
+### Lighter public order-book seed uses managed Background Read
+
+The independent `orderBookOrders?market_id={id}&limit=100` snapshot now waits for
+prepare/bind/final claim in custom worker/hosted transports. It remains unsigned
+GET with empty headers/body. SDK subscriptions, snapshot decoding, level units,
+book/nonce validation, WS revision/generation precedence and native2s recovery
+remain unchanged. This does not establish WS nonce continuity from REST.
+
+Preparation shares the original20s bound with response handling. Expired or
+unreleased work cannot publish; failures release only the matching subscription's
+in-flight latch and use existing background recovery, never a user's command
+terminal. Ticker/catalog/private/trading paths stay native. No caller signature
+or financial-outcome contract changes; transports need managed preparation for
+this additional background read.
+
+## KuCoin futures local history/funding terminals
+
+Synchronous history/funding preflight errors and zero-limit empty results now
+borrow the engine's genuine initial Read authority and complete it in the same
+callback. Native validation order, error messages, empty arrays and companion-free
+timelines remain. Unsupported client lookup gains Unsupported/NotSent metadata;
+local input/absent credential failures gain InvalidInput/NotSent. There is no
+transport or private remote read on these branches, so their policy declares no
+credential. Valid signed paging continues through its existing separate path.
+
+Initial shared admission refusal emits exactly one engine-owned failure and no
+adapter fallback or result. Capacity refusal uses the shared Internal error;
+invalid raw clock admission uses InvalidInput, both without a Read financial
+outcome. Repeated commands can recover when unrelated roots retire. Callers need
+no new endpoint, retry or history marker handling for this local-only slice.
+
 ## OKX dispatch signer adoption (draft; CI evidence pending)
 
 This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
