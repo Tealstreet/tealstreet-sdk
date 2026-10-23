@@ -244,3 +244,32 @@ by the intended behavior assertions; normal venue suites pass
 Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
 pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
 controls expose defects; they are not GREEN adoption or P0 closure evidence.
+
+
+### Separate deferred-identity settlement prerequisite
+
+Independent review and both shared owners (codex-uufub4 / claude-dazzy3)
+confirmed that even Plan #1873 does not supply TxFlow identity settlement.
+At the exact write ACK, the native codec can prove execution but has no native
+IDs. Actual #1837 rejects `WriteFact::Accepted { order_ids: [] }` for Place,
+and the later authoritative Read callback cannot call `http_write_fact` with
+the old write Context: exact current-delivery provenance correctly refuses it.
+Never fabricate an ID, cast the root, weaken validation or publish against an
+old callback to bypass this gap.
+
+The owners will review a separate opaque identity-continuation token minted at
+the exact validated ACK. It must bind owner/generation/write leg/attempt,
+native correlation and expected-ID scope, designated authoritative read
+root/leg and the immutable original bound. Settlement validates the exact
+current read delivery plus that token. Proven execution awaiting identity is
+an effect, never resendable and never success-sealable. Failed/expired lookup
+must seal Unknown while retaining individually resolved IDs. This is a future
+contract, not an available `AwaitingIdentity` or settlement API; classifier
+source is held until its journal contract is reviewed after #1873 CPU/size work.
+
+The existing partial-50-ID RED remains the public oracle. Adoption must also
+prove multi-chunk isolation, deduplication, wrong-generation and wrong-read
+rejection, original-bound expiry, duplicate/late receipts and retention of the
+50 resolved IDs when subsequent work fails. List membership alone cannot clear
+an unresolved write. Keep TxFlow production adoption blocked on this separate
+shared prerequisite even after general Plan and signer seams land.
