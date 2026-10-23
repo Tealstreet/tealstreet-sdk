@@ -34,9 +34,11 @@ fn venue(keyed: bool) -> KucoinSpot {
     })
 }
 fn seeded<V: Venue>(venue: V) -> Engine<V> {
+    seeded_policy(venue, PublicFeedPolicy::Disabled)
+}
+fn seeded_policy<V: Venue>(venue: V, policy: PublicFeedPolicy) -> Engine<V> {
     let mut e = safe_cex_engine::test_support::seeded_engine(venue);
-    e.set_public_feed_policy(PublicFeedPolicy::Disabled)
-        .unwrap();
+    e.set_public_feed_policy(policy).unwrap();
     e.start(0.);
     for (suffix, body) in [("/symbols", MARKETS), ("/allTickers", TICKERS)] {
         let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
@@ -47,6 +49,22 @@ fn seeded<V: Venue>(venue: V) -> Engine<V> {
             })
             .expect("native discovery request");
         response(&mut e, 0., r.id, 200, body);
+    }
+    if policy == PublicFeedPolicy::Direct {
+        let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+            .into_iter()
+            .find_map(|action| match action {
+                Action::Http(request) if request.url.ends_with("/bullet-public") => Some(request),
+                _ => None,
+            })
+            .expect("native public bullet is settled before saturation");
+        response(
+            &mut e,
+            0.,
+            request.id,
+            200,
+            r#"{"code":"200000","data":{"token":"fixture-token","instanceServers":[{"endpoint":"wss://fixture.invalid/public","pingInterval":18000,"pingTimeout":10000}]}}"#,
+        );
     }
     e.drain_actions().for_each(drop);
     e
@@ -683,10 +701,13 @@ impl Venue for Capacity {
     }
 }
 fn capacity_refusal(roots: bool) {
-    let mut e = seeded(Capacity {
-        venue: venue(false),
-        held: vec![],
-    });
+    let mut e = seeded_policy(
+        Capacity {
+            venue: venue(false),
+            held: vec![],
+        },
+        PublicFeedPolicy::Direct,
+    );
     e.handle(
         100.,
         Event::Command(Command::SetTickerSymbols {
@@ -694,7 +715,17 @@ fn capacity_refusal(roots: bool) {
         }),
     );
     let parked = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(e.venue().held.len(), if roots { 256 } else { 1 });
     assert!(!parked.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(
+        parked
+            .iter()
+            .filter(|action| matches!(action,
+                Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. })
+            ))
+            .count(),
+        if roots { 0 } else { 256 }
+    );
     for _ in 0..270 {
         candles(&mut e, 100., 71);
         let a = e.drain_actions().collect::<Vec<_>>();
@@ -723,6 +754,7 @@ fn capacity_refusal(roots: bool) {
         Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
     );
     e.drain_actions().for_each(drop);
+    assert!(e.venue().held.is_empty());
     candles(&mut e, 100., 71);
     let r = released(&mut e, 100.);
     response(&mut e, 100., r.id, 200, EMPTY);

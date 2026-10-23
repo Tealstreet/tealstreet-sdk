@@ -86,3 +86,22 @@ All four fingerprints and the full map were independently verified CLEAN. The
 shared Account failure hash remains at count2. HMAC owner confirmed the committed
 plan does not overlap its private regions. No production edit or native receipt
 is claimed by this plan.
+
+## Native tests-first checkpoint
+
+Original tests-first068e6dff003 exposed11 assertion/missing-authority RED controls
+and three native compatibility GREEN controls. During the first managed run, the
+two saturation probes exposed a fixture issue: Disabled public feeds suppress
+SetTickerSymbols before it reaches the wrapper. The corrected Capacity-only
+fixture uses Direct feeds, settles the native bullet first, and asserts the
+actual256/one held roots and zero/256 parked preparations. It explicitly retires
+them and asserts empty ownership before same-clock recovery. No assertion was
+weakened.
+
+The corrected tests were re-executed on the exact original source snapshot and
+again show11 RED/three GREEN; the production bytes were backed up and restored
+byte-identically. Current managed source passes all14 controls, including
+previously unexecuted recovery assertions. Independent corrected-test and
+source/adversarial reviews are CLEAN (source SHA256d629d9898a1e, test58bb16996ea0).
+Caller source review is CLEAN, architecture No. Full native/strict gates and
+current-landing integration remain separate checks.
