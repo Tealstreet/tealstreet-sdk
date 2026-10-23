@@ -109,9 +109,14 @@ Goldilocks, Lighter's scheme.
   rejection is not the gate.
 - If verify falls out of scope, part 4 stays held for claude-ddi2il.
 
-Venue admission (registry identity and custody, the Aster/Backpack pattern) is
-a separate later PR. RUST_SIGNER_NON_HMAC_MIGRATIONS row 11 (Lighter, owner
-codex-zs5e83) is updated to point here once claude-ddi2il confirms ownership.
+Ownership, confirmed by claude-ddi2il:
+- claude-m26ps4 owns P3, the Schnorr recipe: the contract, the provider arms
+  (including part 3's public-key arm and part 4's verify gate) and the
+  recipes.
+- codex-zs5e83 keeps Lighter venue-level work: P4/P5/P8 integration, venue
+  admission and the cutover to the recipes.
+- claude-19pt8s reviews.
+RUST_SIGNER_NON_HMAC_MIGRATIONS row 11 records this split.
 
 ## Original REDs (each shown failing on the base first)
 
