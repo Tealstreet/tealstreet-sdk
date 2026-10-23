@@ -4056,9 +4056,7 @@ retains bounded Once, coin/order namespaces (including empty order identity),
 admitted-versus-rejected stale balance behavior and the different REST/WS mapped
 identity filters. No SDK call/result, order/position/FILLS shape, health policy,
 financial or snapshot authority, signing, HTTP/WS lifecycle or caller migration
-changes. The 126 final native account compatibility tests pass on unchanged
-pre-migration production, including eleven new controls; this is no defect-RED
-claim. Full CI and a fresh current-head raw proof remain the merge gates.
+changes.
 ## Static public headers during managed HTTP preparation
 
 Trusted Rust `SignStep` implementations can declare static noncredential HTTP
@@ -4170,6 +4168,129 @@ final descending sort/limit and no live Store writes are preserved. No SDK
 argument/result shape or new NX handler is added. Numeric completion uses legacy
 authority rather than managed Context completion. Callers must handle typed query
 rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+### Backpack histories: shared owner with native offset requests
+
+Fills, closed orders, funding income and single-page public trades now use the
+engine CursorHistory/Completion owner. An actual HTTP/stream/decode failure
+before eligible rows were accepted rejects typed with the shared `internal`
+fallback where legacy failures previously had no kind; resulting error-kind
+telemetry changes accordingly. The shared callback multiplexes transport and
+decode origins, so this does not classify all failures as Network. A later
+actual failure returns only earlier validated pages with one command-owned Warn
+`history.incomplete` before success, also at Error-only logging. Failed-page
+prefixes and pages containing only filtered output cannot authorize recovery.
+
+A repeated raw page or the existing fifty-page limit now resolves admitted rows
+with owned incompleteness instead of rejecting the whole query. Valid coverage
+may therefore return incomplete [] when no rows passed local filters; this never
+proves coverage complete. Malformed fills still skip without hiding healthy
+peers, but admitted skips now also supply an owned coverage gap. The existing
+row.skipped summary includes only admitted pages, once per successful result;
+failed-page skips cannot replace an earlier gap or enter the summary. Non-fill
+invalid rows still invalidate the entire page and retain their existing eager
+CommandError diagnostic, even when earlier valid pages subsequently resolve.
+
+Native request offsets still count all raw rows, including filtered/skipped
+neighbors. Query limits, page sizes, native row order, ID/quantity/fee/time units,
+fractional bounds, filtering and unsigned public trades stay unchanged. Setup
+refusal in the existing consuming signed helper stays strict and separate;
+client-ID lookup and unsupported-ledger/time/market admission are unchanged.
+There is no history Store publication or new SDK argument/row shape. Callers must
+ingest command-scoped incomplete-query warnings, gate coverage accordingly and
+handle typed rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+### ApeX Omni bounded fills: typed rejection after every REST alternative fails
+
+Execution history now uses the engine HistoryRows/Completion owner. If every
+native/display-symbol attempt on both fills and historical-order routes actually
+fails, the query rejects with kind `internal` and the final terminal message.
+It no longer returns background WS-cache rows or complete `[]` after those
+failures. The cache was not fetched by this command; callers can continue to
+consume their live cache separately. No write outcome or partial marker is
+invented. Error handling must accept this rejection instead of treating the
+unavailable history as a complete response.
+
+Validated successful selection is preserved. A nonempty native primary response
+stops further REST alternatives, including when every row filters out; that case
+may still select matching cached rows. Any validated empty alternative likewise
+retains the existing cache path if later alternatives fail. Eligible nonempty
+REST output stays authoritative and never merges cache rows. Successful empty
+history remains distinct from all-actual-failure exhaustion.
+
+The original owner survives candidate moves and signature/transport resets.
+Native bounded upsert/top-limit eviction, exact IDs/raw times, output shape,
+filters, signing bytes, query bounds, two-versus-four alternative count and
+retry policy remain unchanged. Initial consuming signing refusal and existing
+wrapper-to-history error-message flattening retain their separate legacy paths;
+this slice does not claim new typed signing provenance. Unsupported axes and
+public-only/missing-market empty admission remain unchanged. No live Store
+publication, SDK argument or managed Context migration is added. Callers must
+handle rejected history as unavailable and consume live cache separately when
+needed. [Scope](RUST_OWNED_HISTORY.md).
+
+
+## Shared unproven write-response guard (Binance reference)
+
+The managed send path treats HTTP 408 and statuses >=500 as unproven before a
+native codec can update Store, ownership or command effects. The unproven
+attempt is recorded with `kind=Timeout` for HTTP 408 or `kind=VenueUnavailable`
+for statuses >=500, including 502 HTML and 503 carrying native -1007/-2019.
+The logical write outcome is Unknown; existing journal rules still select the
+terminal diagnostic in logical planning order. Validated native code and message
+remain bounded diagnostic fields (`venue_code` and
+`venue_message`); they do not turn a gateway response into a retry-safe refusal
+or authentication evidence. This attempt's diagnostic uses the shared uncertainty
+summary; terminal selection still follows logical planning order. Definitively accepted earlier effects
+and exact IDs remain in the command journal.
+
+NX order-error handling must use the typed outcome rather than parsing the
+primary text or treating a rejection-looking native code as proof of no effects.
+Show the bounded native diagnostic as detail, reconcile through reads before any
+new write decision, and do not automatically replay the uncertain write. A
+PartialIDs list from an unproven body is evidence only: it cannot bind IDs to
+caller legs or publish accepted orders. Spot and portfolio margin retain only
+native-echoed client identities in their public cancellable namespace; futures
+use the endpoint's numeric order/algo identity. Never substitute an intended
+client ID when the reply has no matching echo.
+
+Required caller controls cover 503 with native timeout and rejection codes,
+502 HTML, 408, an earlier accepted leg followed by an unproven sibling, and
+malformed/mismatched identity evidence. Retain Store/ownership and physical-send
+assertions. This reference does not migrate Hyro, history/session work or any
+legacy-provenance request and does not establish NX integration or cutover.
+
+
+### WOO measured CPU-margin build policy
+
+Standalone WOO WASM family builds use the throughput defaults for the shared
+host, engine and inherited dependencies, alongside the AsterDEX and KuCoin Spot
+exceptions. The common serde_json level-3 policy and WOO's existing explicit
+venue profile continue to apply. This is a build-profile selection: callers use
+the same loader, API, request/signing contracts and public/private row shapes.
+Other family selections, the combined engine and native build profiles retain
+their existing policy.
+
+## Managed paired-read publication and companion authority
+
+Rust adapters can use `Cx.validate_read_http_delivery(root, leg)` before
+synchronously publishing a paired-read response. It binds the exact original
+command root and delivered live read leg, including issuer, generation and the
+original raw deadline. A live sibling Context or an unrelated socket callback
+cannot lend this authority. Native status/body validation and Store/native-cache
+freshness checks remain required before applying any response data; a failure
+callback proves ownership only. The check allocates no request or retry rights.
+
+`validate_read_completion_context` lets the shared completion owner validate
+read-only companion events before publishing them and calling `done_context`
+synchronously. A command that has declared a mutation or a write journal cannot
+use that read completion path. Existing generic completion APIs retain their
+contract. `validate_http_context` checks live issuance without borrowing the
+completion path's existing expiry tolerance. No SDK signature, result shape or
+transport contract changes. NX adapters that adopt these helpers keep the exact
+root/leg handles, publish and complete without yielding, and discard invalid
+or stale callback data rather than falling back to numeric command completion.
+Joined-read execution/observer ownership remains a separate shared capability.
 
 ## WOO and Crypto.com joined order-snapshot freshness
 

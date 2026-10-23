@@ -501,6 +501,26 @@ strict timestamp increments, 1000/1001 admission, native duplicate/filter order,
 missing-array versus empty success, concurrent owners and Store isolation.
 The adapter retains endpoint facts, not another completion or pager policy.
 
+Backpack fills/orders/funding/public trades now adopt the existing CursorHistory
+owner for staged admission, typed first failure, accepted-only later recovery and
+command-owned repeat/cap/skipped-fill coverage. The existing engine offset helper
+only computes raw displacement after owner More; no second pagination authority
+or venue marker emitter is introduced. Original-source assertion RED controls
+cover the changed contracts; native shape/filter/units/request order, eager
+non-fill diagnostics and strict setup remain. NX coverage/runtime proof stay open.
+
+## ApeX bounded history owner adoption
+
+ApeX bounded execution reads use existing engine HistoryRows/Completion for the
+selected terminal result. Four original-source assertion-RED groups prove that
+all-native, missing-list/malformed and exhausted transport failures must reject
+rather than return background-cache/empty success. Controls preserve successful
+cache selection (including mixed alternatives and filtered nonempty primary),
+bounded duplicate replacement after eviction, two/four candidate requests,
+signature reset, concurrent owners and persistent live cache. Native endpoint
+selection/upsert facts remain local; no new owner/pager/marker policy or shared
+signing-provenance implementation is copied into the venue.
+
 ## Joined order-read authority: WOO and Crypto.com
 
 WOO's regular/algo pages and Crypto.com's regular/advanced reads carry one owned

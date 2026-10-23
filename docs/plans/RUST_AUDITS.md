@@ -1977,6 +1977,28 @@ refusal. No fictitious pagination, partial-success case or new venue marker is
 introduced. Public trades, unsupported histories and client-ID lookup stay
 separate; B11 caller/runtime coverage remains open. [Scope](RUST_OWNED_HISTORY.md).
 
+## Backpack owned-history fan-out
+
+~~Backpack retains accepted history rows and terminal paging decisions in its
+venue continuation, discarding earlier pages on later failure/repeat/cap.~~
+CursorHistory now owns page admission, repeat/cap coverage and completion, with
+the existing offset helper subordinate to owner-authorized continuation. Failed
+page prefixes remain staged; admitted malformed-fill skips supply owned coverage
+without changing native row isolation. Raw request displacement, native mapping,
+eager non-fill diagnostics and strict setup/admission behavior remain. This is
+shared-owner adoption, not universal history or NX B11 coverage closure.
+
+## ApeX bounded execution completion
+
+~~ApeX fills exhaust all native/display REST alternatives into apparent complete
+WS-cache or empty success, even when every REST attempt actually failed.~~
+Existing engine HistoryRows/Completion now owns terminal admission and delivery;
+all-actual-failure exhaustion rejects typed Internal. Validated successful empty/
+nonempty paths retain native/cache selection; bounded native upsert remains an
+endpoint normalization fact. No invented pager, partial recovery or cache-backed
+coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
+separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
 ## WOO and Crypto.com shared snapshot-token fan-out
 
 ~~Their joined order censuses publish native cache state and Store rows without

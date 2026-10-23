@@ -1861,6 +1861,20 @@ pub enum SigningTarget<'a, P> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    /// Read-only native evidence from an unproven managed mutation envelope.
+    /// Exact SDK identity namespaces must be validated by the native codec.
+    fn unproven_http_evidence(
+        &self,
+        _pending: &Self::Pending,
+        _response: Response<'_>,
+        _evidence: &mut crate::request_context::UnprovenEvidence,
+    ) {
+    }
+
+    /// Drop only this generation's native command planning after the engine
+    /// has sealed and retired it. No Store, response or completion authority.
+    fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}
+
     /// Bounded native correlation metadata only. No credential, outbound packet
     /// or recipe may be retained here. Managed mutations require this codec.
     fn capture_http_reconciliation(
