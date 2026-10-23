@@ -36,8 +36,9 @@ helper for its other callers; no shared engine API changes.
 
 Before any account streamed-row decode, require the exact Background delivery,
 the current seed generation and the existing cycle fence. At response ingress,
-check those gates before rate/auth/native reducers, then release the Context
-with finish_http_context before the native reducer. Failure and sign-error
+check those gates before rate/auth/native reducers, then run the native reducer and publication before finish_http_context on a
+retained clone. Continuations retire their previous Context before next-page
+admission. Failure and sign-error
 paths release it before their existing native failure reducer, even when stale;
 stale seed/cycle deliveries have no native effects. Continuations finish the
 previous physical Context before admitting a fresh page. Admission/preparation
@@ -88,3 +89,10 @@ Both primary and secondary variants observe `(legacy, prepared, claimed) =
 positions and orders, prove GET identity/passphrase fallback, and check sorted
 normal/algo queries. No harness or compilation failure is counted as RED.
 Log: `/tmp/codex-weex-account-background-original.log`.
+
+Native review by claude-4yjlw0 clears the plan with the response ordering above
+and zero inventory delta. Credentials are immutable for an Engine lifetime;
+the only seed bump is ticker discovery. Still suppress stale-seed account auth
+evidence before the grouped auth reducer and pin accepted/401 stale evidence
+as inert, with current-seed acceptance positive. The original unit control is
+an assertion RED: a stale accepted balance reports Accepted before the cutover.

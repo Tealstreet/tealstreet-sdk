@@ -1148,6 +1148,39 @@ mod auth_envelopes {
     }
 
     #[test]
+    fn stale_seed_account_auth_evidence_is_inert() {
+        let mut venue = WeexFutures::new(crate::Options::default());
+        let old = pending(&venue, Kind::Balance);
+        venue.seed_generation += 1;
+        let mut current = pending(&venue, Kind::Balance);
+        current.seed_generation = venue.seed_generation;
+        assert_eq!(
+            venue.account_auth(&current, &response("[]")),
+            Some(Accepted)
+        );
+        let outcomes: Vec<_> = [
+            (
+                200,
+                r#"[{"asset":"USDT","balance":"100","availableBalance":"90"}]"#,
+            ),
+            (401, r#"{"code":40014}"#),
+        ]
+        .into_iter()
+        .map(|(status, body)| {
+            venue.account_auth(
+                &old,
+                &Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            )
+        })
+        .collect();
+        assert_eq!(outcomes, [None, None]);
+    }
+
+    #[test]
     fn malformed_success_cannot_clear_grouped_orders_or_settings_evidence() {
         for (kind, sibling, success, sibling_success) in [
             (Kind::Algo, Kind::Normal, "[]", "[]"),
