@@ -685,3 +685,23 @@ return-only supersession, token change during re-sign, exact slot/Attempt
 custody, stale-index retirement, native 20/40/80-second bounds and all three
 original REDs turning GREEN. Retire the BingX inventory rehash through this
 managed conversion only; no new exemption or STAGING edit is permitted.
+
+
+### Native Plan handoff checkpoint
+
+The native #1884 `d01191625e5` handoff removes legacy Request::Metadata and
+numeric metadata_done, keeps the incoming Pending::Metadata/Plan adapter, and
+retains both Store observations/write fences and native settings/positions
+fences. The native settings revision/generation fields remain until the next
+Store-token eligibility cutover. The BingX map is regenerated from the source
+with the checker, taking every non-BingX map from the incoming manifest. No
+checker/STAGING policy changes or inventory exemption are introduced.
+
+The two own manual metadata signer fixtures are replaced by real managed-owner
+controls in dispatch_failures: typed provider refusal retains the exact error,
+auth health remains unchanged, Deactivate/AUTH_REJECTED are forbidden, and a
+margin preparation refusal preserves newer Store settings. Existing native ACK
+and position-fence controls remain. All 13 dispatch-failure tests pass and the
+BingX all-target check passes; the scanner passes. The four original entry
+blocks remain verbatim. This checkpoint supplies the native managed Plan path,
+not the full-key execution coalescing/source conversion, which remains required.
