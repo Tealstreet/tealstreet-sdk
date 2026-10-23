@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::*;
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{Action, Command, Event, Notice};
-use support::*;
 fn order(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
@@ -885,13 +885,13 @@ fn ready_with_held_reconciliation() -> (
     safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     Vec<Action>,
 ) {
-    use safe_cex_venue_okx::{Okx, Options};
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    use crate::support::FixtureOptions as Options;
+    let mut e = crate::support::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),
         ..Default::default()
-    }));
+    });
     e.start(0.);
     let request = http(&actions(&mut e)).clone();
     reply(&mut e, &request, &envelope(MARKET), 1.);
@@ -1296,14 +1296,12 @@ fn ready_engine() -> (
     safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     Vec<Action>,
 ) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_okx::Okx::new(
-        safe_cex_venue_okx::Options {
-            key: Some("test-key".into()),
-            secret: Some("test-secret".into()),
-            passphrase: Some("test-passphrase".into()),
-            ..Default::default()
-        },
-    ));
+    let mut e = crate::support::engine(crate::support::FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Default::default()
+    });
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);

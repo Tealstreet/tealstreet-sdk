@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::*;
 use safe_cex_engine::{Action, Command, Engine, Event};
-use safe_cex_venue_okx::{Okx, Options};
-use support::*;
+use safe_cex_venue_okx::Okx;
 
 #[test]
 fn seeds_contract_markets_and_tickers() {
@@ -66,7 +67,7 @@ fn envelope_failure_never_marks_empty_markets_loaded() {
         r#"{"code":"0","data":[,]}"#,
         r#"{"code":"0","data":[{},]}"#,
     ] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+        let mut e = crate::support::engine(Options::default());
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, body, 1.0);
@@ -142,7 +143,7 @@ fn fire_until(e: &mut Engine<Okx>, timers: &mut Timers, until: f64) -> Vec<Actio
 
 #[test]
 fn every_open_socket_pings_times_out_and_reconnects() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -227,7 +228,7 @@ fn malformed_levels_force_resnapshot_and_valid_depth_ignores_stale_trade() {
 
 #[test]
 fn malformed_supported_instrument_is_not_committed() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(
@@ -247,11 +248,11 @@ fn variants_use_entity_hosts_and_demo_header() {
         (false, true, "openapi.okx.com", "wspap.okx.com"),
         (true, true, "eea.okx.com", "wseeapap.okx.com"),
     ] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+        let mut e = crate::support::engine(Options {
             eea,
             testnet,
             ..Options::default()
-        }));
+        });
         e.start(0.0);
         let request = actions(&mut e).remove(0);
         let Action::Http(r) = &request else { panic!() };
@@ -281,7 +282,7 @@ fn variants_use_entity_hosts_and_demo_header() {
 
 #[test]
 fn blank_known_ticker_seeds_zero_and_startup_continues() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -304,7 +305,7 @@ fn blank_known_ticker_seeds_zero_and_startup_continues() {
 
 #[test]
 fn failed_ticker_read_retries_with_backoff_keeping_the_committed_catalog() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -400,7 +401,7 @@ fn business_candle_stream_emits_a_candle_frame() {
 
 #[test]
 fn public_topics_keep_their_order_and_cap_across_market_boundaries() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.start(0.0);
     let market_rows = (0..101)
         .map(|i| MARKET.replace("BTC", &format!("COIN{i}")))
@@ -463,10 +464,10 @@ fn public_topics_keep_their_order_and_cap_across_market_boundaries() {
 
 #[test]
 fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     let eth = MARKET
@@ -539,7 +540,7 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
 
 #[test]
 fn null_ticker_quote_seeds_zero_like_a_blank() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(MARKET), 1.0);
@@ -562,7 +563,7 @@ fn null_ticker_quote_seeds_zero_like_a_blank() {
 
 #[test]
 fn all_undecodable_ticker_rows_retry_startup() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.start(0.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(MARKET), 1.0);

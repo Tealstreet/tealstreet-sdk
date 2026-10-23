@@ -5,9 +5,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    CommandId, Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError, json, num,
-};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Fill, Response, TimerId, VenueError, json, num};
 use std::collections::{HashMap, HashSet};
 
 pub const PRIVATE: usize = 1;
@@ -257,22 +255,6 @@ impl Okx {
         );
     }
 
-    pub(crate) fn get(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        path: &str,
-        private: bool,
-        pending: Pending,
-    ) {
-        cx.request(
-            Method::Get,
-            format!("{}{path}", self.rest()),
-            self.headers(cx.now, Method::Get, path, "", private),
-            None,
-            pending,
-        );
-    }
-
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         self.reconcile(cx, true);
     }
@@ -362,38 +344,21 @@ impl Okx {
     }
 
     pub(crate) fn login(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Login<'a> {
-            api_key: &'a str,
-            passphrase: &'a str,
-            timestamp: String,
-            sign: String,
-        }
-        #[derive(serde::Serialize)]
-        struct Payload<'a> {
-            op: &'static str,
-            args: [Login<'a>; 1],
-        }
-        if let (Some(c), Some(socket)) = (
+        if let (Some(identity), Some(socket)) = (
             &self.credentials,
             self.connections[channel]
                 .feed
                 .and_then(|f| cx.socket_epoch(f))
                 .map(|e| e.socket()),
         ) {
-            let timestamp = num::format((cx.now / 1000.0).floor());
-            let sign = c.signature(&timestamp, "GET", "/users/self/verify", "");
-            let payload = Payload {
-                op: "login",
-                args: [Login {
-                    api_key: &c.key,
-                    passphrase: &c.passphrase,
-                    timestamp,
-                    sign,
-                }],
-            };
-            cx.send(socket, serde_json::to_string(&payload).expect("login"));
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(crate::sign::WsLogin::new(
+                    identity.clone(),
+                    self.socket_url(channel),
+                )),
+            );
         }
     }
 

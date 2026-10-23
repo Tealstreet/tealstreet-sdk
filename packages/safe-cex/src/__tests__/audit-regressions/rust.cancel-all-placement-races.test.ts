@@ -20,7 +20,7 @@ const running: RustEngineExchange[] = [];
 const setup = (name: ExchangeName) => {
   const store = new DefaultStore();
   store.update({ markets: [market] });
-  const exchange = new RustEngineExchange(name, { key: 'fixture', secret: 'fixture' }, store);
+  const exchange = new RustEngineExchange(name, { key: 'fixture', secret: 'fixture', passphrase: 'fixture-presentation' }, store);
   const command = vi.fn<(command: Record<string, unknown>) => Promise<unknown>>().mockResolvedValue(['native-order']);
   Object.assign(exchange, { host: { command, dispose: vi.fn() } });
   adoptEngineCapabilities(exchange);
