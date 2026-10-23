@@ -148,3 +148,22 @@ Command-entry adoption is deferred until actual #1830 in a fresh follow-up, per 
 
 
 Phase-one verification: all eight managed controls and the complete Orderly/Binance native suites pass (470 tests, zero failed/ignored). Strict all-target Clippy, scoped formatting, bans, exact inventory checker and all 13 checker controls pass. Independent source/adversarial, caller and full-map reviews are clean, architecture gate **No**. Source scope remains the candle area plus dedicated/native fixture updates; actual dependencies only. Fresh CI and a parallel window with separate current-landing revert guard remain required.
+
+
+## Phase two plan: genuine command entry for both candle endpoints
+
+Base: actual `e0322577e35`, including landed command entry #1830, typed HTTP failures #1816/#1838, static headers #1820 and classifier #1837. Fresh open-PR inspection leaves lib.rs and tests/request_context_candles.rs clear; occupied history source/tests #1791 remain untouched.
+
+Replace each mutually exclusive initial candle `http_context(Scope::Command(command), policy)` and numeric failure with `admit_http_command(policy)`. Preserve Read, no credential, 20-second deadline, no pacing and Never retry policy. Rejected entry already emits one engine terminal with no financial outcome; rejected or revoked entry returns without numeric completion. Native symbol/interval/range validation and future-empty preflight stay before admission. Native URLs, both envelope/stream codecs, filtering, limits, ordering, exact delivery and contextual completion stay unchanged.
+
+Commit four regression controls before source edits: invalid-clock and 256-owner capacity rejection separately exercise bounded history and current candles. Each must compile and fail the original financial outcome assertion, then pass unchanged after adoption. Check one typed Read terminal, no new HTTP/preparation/timer, command-ID reuse, and existing parked owner survival followed by freed-capacity reuse; retain the eight original controls, native fixture clocks and business assertions. Use explicit from/to bounds for bounded non-finite-clock controls so the separate future-empty path is not selected.
+
+Only five paths: this plan appendix, CALLERS appendix, manifest, lib.rs, tests/request_context_candles.rs. Reduce only lib.rs fingerprint c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa from count three to one; the cached-account failure remains. lib.rs nine to seven occurrences and family 35 to 33 occurrences, with every other inventory entry unchanged. No new error classification, write/signer/session/background/cache/local-tail closure is claimed.
+
+Run all twelve lifecycle controls, full Orderly/Binance suites, strict all-target Clippy, scoped fmt, bans and both inventory checks. Three independent plan and implementation audits must verify architecture gate No (engine admission and generation ownership), caller precision and exact prune. Fresh exact-head CI, current-landing guard and overseer parallel window are required before merging.
+
+
+Phase-two execution receipt: plan `8c6a924b170` precedes separate original-source RED commit `dcd263e2226`. All four new controls compiled and failed specifically at `Some(NotSent)` versus `None`, independently covering bounded/current invalid-clock and capacity refusal. Production changes only initial admission for each endpoint, preserving identical policy and native/issued paths. The exact count reduction is lib.rs c873 three to one; the family becomes four paths, 32 entries and 33 occurrences. Full verification and three independent implementation audits remain required before readiness.
+
+
+Pre-integration verification: all twelve candle controls, full Orderly/Binance native suites, strict all-target Clippy and scoped formatting pass. The bans wrapper passed its thirteen scanner controls but correctly stopped at newer incoming Bybit inventory prunes; current actual landing must be genuinely integrated and the incoming prunes retained before both inventory gates can pass. All three independent implementation audits are clean, architecture gate No. Fresh integrated native/static gates and exact-head CI remain required.
