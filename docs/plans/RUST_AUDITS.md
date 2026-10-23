@@ -2087,6 +2087,27 @@ initial rejection once and denies numeric fallback. Original-source RED controls
 cover nonfinite time, capacity, valid ID reuse and preservation of an existing
 parked owner. Other MEXC command families remain separately inventoried.
 
+### MEXC/Phemex/Polymarket bounded reporter ownership (2026-10-23)
+
+These three account consumers use existing engine `RowReports<String>` bounded
+Once instead of local 4096-entry sets. This is a compatibility migration, not a
+new financial defect finding: native messages, severity, labels and rearm sites
+remain authoritative. MEXC keeps its rejection-filtered mapped IDs and shared
+coin/position/order memory. Phemex keeps currency-specific clean rearm and
+leg-ID filtering before symbol-key rearm inside admitted reads. Polymarket keeps
+validated zero/priced holding forgetting before complete-response admission;
+its separate permanent unlisted-asset memory remains unchanged.
+
+Nine new original-GREEN native controls pass with all116 account tests on
+unchanged actual #1780 production (40 MEXC,40 Phemex,36 Polymarket). The sealed
+source/test/log receipt is
+`60396c532d8eb3d220bd3ba74d73578a67d92ba7fd2ef0ae6ee67a2864abba1c`.
+The controls pin namespace/currency isolation, rejected duplicate versus named
+partial recovery, stale-slice no-rearm, and early valid holding recovery despite
+later duplicate invalidation. No product-RED, all-venue closure or private parity
+claim. Remaining queued integrations, current-head CI and authenticated complete
+raw/ordered-gate proof remain required before merge.
+
 
 ## Lighter candle request ownership
 

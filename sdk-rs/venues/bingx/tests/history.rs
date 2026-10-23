@@ -3,8 +3,10 @@
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, Query, Response, TimerId,
 };
-use safe_cex_venue_bingx::{Bingx, Options};
+use safe_cex_venue_bingx::Bingx;
+mod support;
 use serde::Deserialize;
+use support::Options;
 
 struct Harness {
     engine: Engine<Bingx>,
@@ -17,12 +19,12 @@ struct Harness {
 impl Harness {
     fn new(private: bool) -> Self {
         Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+            engine: support::engine(Options {
                 read_credentials: None,
                 public_data_only: !private,
                 key: private.then(|| "key".into()),
                 secret: private.then(|| "secret".into()),
-            })),
+            }),
             requests: Vec::new(),
             timers: Vec::new(),
             results: Vec::new(),

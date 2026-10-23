@@ -405,6 +405,26 @@ SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e1
                                 '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
                                 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1})}
 
+# Owner-approved temporary BingX staging site (6cf35cca, sign_http) for legacy-owned
+# history and listen-key work. Delete once cxxyqr's history bridge (#1848) and the
+# session Context (#1832/#1842) own them. No other BingX additions.
+STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
+ '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 2,
+ 'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
+ 'ca1a695870588abe078efa57b2d1e6f789b219044369ce2f8d1119a9c10664b7': 1,
+ 'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 2},
+    {'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
+ '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 1,
+ '6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219': 1,
+ 'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
+ 'ca1a695870588abe078efa57b2d1e6f789b219044369ce2f8d1119a9c10664b7': 1,
+ 'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1})}
+
+
 def subset(counts, baseline):
     return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
 
@@ -422,6 +442,8 @@ def check(current, allowed, previous):
                 bound = HISTORY_BOOTSTRAPS[path][1]
             if path in SIGNER_POLICY_BOOTSTRAPS and bound == SIGNER_POLICY_BOOTSTRAPS[path][0]:
                 bound = SIGNER_POLICY_BOOTSTRAPS[path][1]
+            if path in STAGING_BOOTSTRAPS and bound == STAGING_BOOTSTRAPS[path][0]:
+                bound = STAGING_BOOTSTRAPS[path][1]
             if not subset(counts, bound):
                 failures.append(f'{path}: inventory grew against {label}')
     return failures
