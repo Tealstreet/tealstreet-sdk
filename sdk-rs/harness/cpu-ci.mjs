@@ -7,7 +7,7 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { expectedGateCases, gateCaseKey } from './ci-gate-suites.mjs';
-import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateMeasurementWindow } from './cpu-cohort.mjs';
+import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateArtifactMetadata, authenticateMeasurementWindow } from './cpu-cohort.mjs';
 import { readArtifactZip } from './cpu-artifacts.mjs';
 import { captureCache, verifyCache } from './cpu-cache.mjs';
 import { assessGateReport } from './known-failure-policy.mjs';
@@ -70,13 +70,22 @@ function makeContext(env = process.env) {
   return { checkoutSha: checkout.stdout.trim(), root: realpathSync(process.cwd()), runId: Number(env.GITHUB_RUN_ID), reader: createGithubReader({ repository: env.GITHUB_REPOSITORY, token: env.GITHUB_TOKEN }), env };
 }
 
-async function artifact(context, runId, name) {
-  const run = await context.reader.getRun(runId);
-  const all = await context.reader.listArtifacts(runId), selected = all.filter((item) => item.name === name);
+export async function evidenceInventory(context, refresh = false) {
+  if (!context.inventory || refresh) {
+    context.inventory = Promise.all([context.reader.getRun(context.runId), context.reader.listJobs(context.runId),
+      context.reader.listArtifacts(context.runId)]).then(([run, jobs, artifacts]) => ({ run, jobs, artifacts }));
+  }
+  return context.inventory;
+}
+
+async function artifact(context, runId, name, metadataOnly = false) {
+  insist(runId === context.runId, 'artifact from another workflow');
+  const { run, artifacts } = await evidenceInventory(context), selected = artifacts.filter(item => item.name === name);
   insist(selected.length === 1, `missing/duplicate exact artifact ${name}`);
-  const meta = await context.reader.getArtifact(selected[0].id);
-  insist(same(meta, selected[0]) && meta.expired === false && meta.workflow_run?.id === runId && meta.workflow_run.head_sha === run.head_sha &&
+  const meta = selected[0];
+  insist(meta.expired === false && meta.workflow_run?.id === runId && meta.workflow_run.head_sha === run.head_sha &&
     meta.workflow_run.head_branch === run.head_branch && /^sha256:[a-f0-9]{64}$/.test(meta.digest), 'artifact/source metadata differs');
+  if (metadataOnly) return { meta };
   const bytes = await context.reader.getArtifactBytes(meta.id);
   insist(bytes.length === meta.size_in_bytes && `sha256:${sha256(bytes)}` === meta.digest, 'artifact ZIP bytes differ');
   return { meta, bytes, entries: readArtifactZip(bytes, { maxBytes: 4 * 1024 * 1024 * 1024 }) };
@@ -139,21 +148,27 @@ async function authenticateCase(context, evidence, producer, suite, role = 'firs
 }
 
 async function currentPhysical(context, name) {
-  const run = await context.reader.getRun(context.runId), jobs = await context.reader.listJobs(context.runId);
+  const { run, jobs } = context.inventory ? await evidenceInventory(context) :
+    { run: await context.reader.getRun(context.runId), jobs: await context.reader.listJobs(context.runId) };
   const selected = jobs.filter((job) => job.name === name);
   insist(run.run_attempt === 1 && selected.length === 1 && selected[0].run_attempt === 1 && selected[0].runner_id > 0, 'missing unique original physical job');
   return { run, job: selected[0] };
 }
 
-async function authenticatedBundle(context, runId, name, jobName, stepName, expectedCheckoutSha) {
-  const bundle = await artifact(context, runId, name), run = await context.reader.getRun(runId);
-  const jobs = (await context.reader.listJobs(runId)).filter((job) => job.name === jobName);
+export async function authenticatedBundle(context, runId, name, jobName, stepName, expectedCheckoutSha, metadataOnly = false) {
+  context.bundles ??= new Map();
+  const key = JSON.stringify([runId, name, jobName, stepName, expectedCheckoutSha, metadataOnly]);
+  if (context.bundles.has(key)) return context.bundles.get(key);
+  const bundle = await artifact(context, runId, name, metadataOnly), { run, jobs: allJobs } = await evidenceInventory(context);
+  const jobs = allJobs.filter(job => job.name === jobName);
   insist(jobs.length === 1, 'missing unique artifact physical producer');
   const logBytes = await context.reader.getLog(jobs[0].id);
-  const receipt = authenticateArtifactExecution({ artifact: bundle.meta, artifactBytes: bundle.bytes,
+  const receipt = (metadataOnly ? authenticateArtifactMetadata : authenticateArtifactExecution)({ artifact: bundle.meta, artifactBytes: bundle.bytes,
     run, job: jobs[0], logBytes, stepName, jobName, expectedCheckoutSha });
   context.bindings?.push({ artifact: bundle.meta, job: jobs[0] });
-  return { ...bundle, receipt, job: jobs[0], logBytes };
+  const result = { ...bundle, receipt, job: jobs[0], logBytes };
+  context.bundles.set(key, result);
+  return result;
 }
 
 async function prepareMeasurement(context, suite, destination, mode) {
@@ -428,7 +443,7 @@ async function certifySuite(context, suite, destination) {
   const { plan, bundle: planBundle } = await loadPlan(context), recomputed = await gatherSuite(context, suite);
   const row = plan.suites.find(value => value.suite === suite);
   insist(same(row, recomputed), 'authenticated plan differs from full current first-evidence revalidation');
-  const allJobs = await context.reader.listJobs(context.runId);
+  const { jobs: allJobs } = await evidenceInventory(context);
   const hasSecond = requireSecondState(row.cases, allJobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
@@ -438,10 +453,10 @@ async function certifySuite(context, suite, destination) {
   const second = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-second-${suite}`,
     `Rust / CPU remeasurement (${suite})`, 'Retain CPU remeasurement results', context.checkoutSha) : null;
   const capsule = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
-    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha) : null;
+    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha, true) : null;
   if (capsule) {
     insist(capsule.job.id === strict.job.id, 'runtime has different physical first producer');
-    insist(same(jsonMember(capsule.entries, 'manifest.json'), jsonMember(tiny.entries, 'manifest.json')), 'runtime manifest differs from premeasurement authority');
+    insist(same(jsonMember(second.entries, 'manifest.json'), jsonMember(tiny.entries, 'manifest.json')), 'restored runtime manifest differs from premeasurement authority');
   }
   const secondRoster = second && jsonMember(second.entries, 'second.json');
   if (second) insist(secondRoster.schema === 1 && secondRoster.suite === suite &&
@@ -469,32 +484,58 @@ async function certifySuite(context, suite, destination) {
   }
   const certificate = { schema: 1, suite, runId: context.runId, checkoutSha: context.checkoutSha,
     plan: artifactRef(planBundle), first: artifactRef(strict), runtime: capsule ? artifactRef(capsule) : null, second: second ? artifactRef(second) : null, cases };
-  await evidenceEndCheck(context);
   write(resolve(destination, 'certificate.json'), certificate);
   return certificate;
 }
 
-async function evidenceEndCheck(context) {
-  const run = await context.reader.getRun(context.runId);
+export async function evidenceEndCheck(context) {
+  const { run, jobs, artifacts } = await evidenceInventory(context, true);
   insist(run.run_attempt === 1, 'workflow attempt changed during certification');
   for (const binding of context.bindings ?? []) {
-    insist(same(await context.reader.getArtifact(binding.artifact.id), binding.artifact), 'artifact identity drift');
-    const inventory = (await context.reader.listArtifacts(context.runId)).filter(value => value.name === binding.artifact.name);
-    insist(inventory.length === 1 && same(inventory[0], binding.artifact), 'artifact name became duplicate/changed');
-    insist(same(await context.reader.getJob(binding.job.id), binding.job), 'physical producer drift');
+    const inventory = artifacts.filter(value => value.name === binding.artifact.name);
+    insist(inventory.length === 1 && same(inventory[0], binding.artifact), 'artifact identity became duplicate/changed');
+    const producers = jobs.filter(job => job.name === binding.job.name);
+    insist(producers.length === 1 && same(producers[0], binding.job), 'physical producer became duplicate/changed');
   }
+}
+
+async function certifyAll(context, destination) {
+  const certificates = {};
+  for (const suite of CPU_REMEASURE_SUITES) certificates[suite] = await certifySuite(context, suite, resolve(destination, suite));
+  await evidenceEndCheck(context);
+  const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha,
+    suites: Object.fromEntries(CPU_REMEASURE_SUITES.map(suite => [suite, true])) };
+  write(resolve(destination, 'results.json'), results);
+  if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `results=${JSON.stringify(results)}\n`, { flag: 'a' });
+  return certificates;
+}
+
+export function requireCertifiedSuite({ suite, results, result, runId, checkoutSha }) {
+  requireCpuRemeasureSuite(suite);
+  insist(result === 'success' && results?.schema === 1 && results.runId === runId && results.checkoutSha === checkoutSha &&
+    results.suites && same(Object.keys(results.suites).sort(), [...CPU_REMEASURE_SUITES].sort()) &&
+    Object.values(results.suites).every(value => value === true), 'missing/failed/incomplete shared CPU certification');
+  return results.suites[suite];
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { values } = parseArgs({ options: { command: { type: 'string' }, suite: { type: 'string' }, out: { type: 'string' }, mode: { type: 'string', default: 'family' } } });
-  if (values.command !== 'plan') requireCpuRemeasureSuite(values.suite);
+  if (!['plan', 'certify'].includes(values.command)) requireCpuRemeasureSuite(values.suite);
+  if (values.command === 'status') {
+    const checkout = spawnSync('git', ['rev-parse', '--verify', 'HEAD'], { encoding: 'utf8' });
+    insist(checkout.status === 0, 'missing wrapper checkout');
+    requireCertifiedSuite({ suite: values.suite, results: parseCohortJson(process.env.CPU_CERT_RESULTS ?? 'null'),
+      result: process.env.CPU_CERT_RESULT, runId: Number(process.env.GITHUB_RUN_ID), checkoutSha: checkout.stdout.trim() });
+    console.log(`CPU certification accepted for ${values.suite}`);
+    process.exit(0);
+  }
   const context = { ...makeContext(), suite: values.suite, bindings: [] };
   try {
     if (values.command === 'prepare') await prepareMeasurement(context, values.suite, resolve(values.out), values.mode);
     else if (values.command === 'collect') collectMeasurement(context, values.suite);
     else if (values.command === 'plan') { await planMeasurements(context, resolve(values.out)); await evidenceEndCheck(context); }
     else if (values.command === 'second') { await secondMeasurement(context, values.suite, resolve(values.out)); await evidenceEndCheck(context); }
-    else if (values.command === 'certify') await certifySuite(context, values.suite, resolve(values.out));
+    else if (values.command === 'certify') await certifyAll(context, resolve(values.out));
     else throw new Error('unknown bounded CPU command');
   } finally {
     if (['plan', 'certify'].includes(values.command)) retainApiEvidence(context.reader, resolve(values.out));

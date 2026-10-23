@@ -2219,3 +2219,17 @@ Native current-page facts remain local until complete validation; failed prefixe
 do not enter shared dedupe or output. Existing mixed-row diagnostics keep their
 timing and also supply the owner's missing-coverage fact. All-native strict
 refusals and consuming legacy signing setup remain separate.
+
+
+## Shared CPU certification owner
+
+CPU remeasurement and aggregation belong to one harness policy, parameterized
+by the existing exact suite registry. Every CPU-gated suite adopts the same
+planner, eligible-only second-run matrix and unconditional final checker; venue
+code owns no bypass or local copy. Existing strict gate validators rederive both
+retained reports before arithmetic. Original report bytes and declared results
+stay immutable. A sealed runtime capsule transports the original measured
+inputs to a separate physical job without rebuilding or installing dependencies.
+Current run, source, physical producer, upload, case and cache identities bind
+the evidence; missing or ambiguous authority rejects before certification.
+No fixture/tape/profile/threshold change forms part of this policy.

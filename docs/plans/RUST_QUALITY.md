@@ -750,3 +750,19 @@ combined alternative/legacy budget and streamed failed-prefix identity reuse.
 Native builder/codec precision, symbol aliases, row isolation, ledger pacing and
 zero Store publication remain pinned. Caller controls distinguish the unchanged
 immediate row warning from the owned terminal coverage marker.
+
+
+## Shared CPU remeasurement controls
+
+Policy controls cover mean passing and failing, missing/failed second samples,
+5% boundaries, all three objectives, category changes, output/report tampering
+and unchanged strict failures. Runtime controls cover archive/path/type/link
+validation, prevalidated restoration, exact Node/dependency/module identities
+and initial/final loader cache snapshots. Coordinator controls reject foreign
+same-source run/job payloads, substituted physical runners and missing runtime
+authority, duplicate/retried second jobs and incomplete suite/case rosters.
+Workflow controls pin all 32 final required names and 110 original workloads,
+allow only an eligible projection to schedule a second runner, and require final
+certification even after missing or failed upstream work. Declared public FAILs
+remain declared results without CPU rescue. Measurements in CI report first and
+second samples separately; this methodology makes no runtime speedup claim.

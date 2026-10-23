@@ -10,7 +10,7 @@ const job = (text, name) => {
   return match[1];
 };
 function verifyWorkflow(text) {
-  const first = job(text, 'gate'), plan = job(text, 'cpu-plan'), second = job(text, 'cpu-second'), final = job(text, 'cpu-final');
+  const first = job(text, 'gate'), plan = job(text, 'cpu-plan'), second = job(text, 'cpu-second'), certify = job(text, 'cpu-certify'), final = job(text, 'cpu-final');
   assert.match(first, /^    name: Rust \/ replay measurement \(\$\{\{ matrix\.venue \}\}\)$/m);
   const prepare = first.slice(first.indexOf('      - name: Seal approved CPU measurement inputs'), first.indexOf('      - name: Public data'));
   assert.match(prepare, /--command prepare --suite '\$\{\{ matrix\.venue \}\}'/);
@@ -30,12 +30,17 @@ function verifyWorkflow(text) {
   assert.match(second, /--command second --suite '\$\{\{ matrix\.suite \}\}'/);
   assert.match(second, /name: cpu-second-\$\{\{ matrix\.suite \}\}/);
   assert.match(final, /name: Rust \/ replay gate \(\$\{\{ matrix\.suite \}\}\)/);
-  assert.match(final, /needs: \[gate, cpu-plan, cpu-second\]\n    if: always\(\)/);
+  assert.match(certify, /needs: \[gate, cpu-plan, cpu-second\]\n    if: always\(\)/);
+  assert.match(final, /needs: cpu-certify\n    if: always\(\)/);
   const suites = /suite: \[([^\]]+)\]/.exec(final);
   assert(suites);
   assert.deepEqual(suites[1].split(',').map(suite => suite.trim()).sort(), [...GATE_SUITES].sort());
-  assert.match(final, /--command certify --suite '\$\{\{ matrix\.suite \}\}'/);
-  for (const supplemental of [plan, second, final]) {
+  assert.match(certify, /--command certify --out/);
+  assert.match(final, /--command status --suite '\$\{\{ matrix\.suite \}\}'/);
+  assert.match(final, /CPU_CERT_RESULT: \$\{\{ needs\.cpu-certify\.result \}\}/);
+  assert.match(final, /CPU_CERT_RESULTS: \$\{\{ needs\.cpu-certify\.outputs\.results \}\}/);
+  assert.doesNotMatch(final, /GITHUB_TOKEN|--command certify|upload-artifact/);
+  for (const supplemental of [plan, second, certify, final]) {
     assert.doesNotMatch(supplemental, /(?:yarn|npm|cargo|rustup) (?:install|build|add)|rust:build|--command prepare/);
     assert.doesNotMatch(supplemental, /continue-on-error|gh run rerun|retries|retry:/);
   }
@@ -48,6 +53,7 @@ test('workflow controls reject skipped final checks, unconditional second jobs a
   const changes = [
     text => text.replace("needs: cpu-plan\n    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'", 'needs: cpu-plan\n    if: always()'),
     text => text.replace('needs: [gate, cpu-plan, cpu-second]\n    if: always()', 'needs: [gate, cpu-plan, cpu-second]\n    if: success()'),
+    text => text.replace('needs: cpu-certify\n    if: always()', 'needs: cpu-certify\n    if: success()'),
     text => text.replace('suite: [breakoutprop,', 'suite: ['),
     text => text.replace('--command plan --out', '--command plan --suite bitget --out'),
     text => text.replace("--command collect --suite '${{ matrix.venue }}'", "rust:gate:verify --suite '${{ matrix.venue }}'"),

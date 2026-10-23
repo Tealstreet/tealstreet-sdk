@@ -134,10 +134,9 @@ function validateJob(job, run, name, requireSuccess = false) {
   if (requireSuccess) check(job.conclusion === 'success' && job.run_attempt === 1, 'measurement not successful attempt1');
 }
 
-function artifactIdentity(artifact, run, name, raw) {
+function artifactIdentity(artifact, run, name) {
   check(artifact && integer(artifact.id) && artifact.name === name && artifact.expired === false && Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && /^sha256:[a-f0-9]{64}$/.test(artifact.digest), 'invalid exact artifact');
   check(artifact.workflow_run?.id === run.id && artifact.workflow_run.head_sha === run.head_sha && artifact.workflow_run.head_branch === run.head_branch, 'artifact belongs to another run/head');
-  check(bytes(raw).length === artifact.size_in_bytes && `sha256:${sha(bytes(raw))}` === artifact.digest, 'artifact ZIP digest/length mismatch');
 }
 
 function uploaded(artifact, job, raw, stepName) {
@@ -156,7 +155,7 @@ function uploaded(artifact, job, raw, stepName) {
 }
 
 /** Shared exact upload/physical-execution binding for planner/certifier ZIPs. */
-export function authenticateArtifactExecution({ artifact, artifactBytes, run, job, logBytes, stepName, jobName, expectedCheckoutSha }) {
+export function authenticateArtifactMetadata({ artifact, run, job, logBytes, stepName, jobName, expectedCheckoutSha }) {
   validateRun(run, CPU_WORKFLOW_ID);
   check(run.run_attempt === 1 && jobName === job?.name, 'artifact authority requires exact attempt1 job');
   let expectedArtifact, expectedStep;
@@ -177,12 +176,20 @@ export function authenticateArtifactExecution({ artifact, artifactBytes, run, jo
     }
   }
   check(stepName === expectedStep, 'unknown artifact authority upload step');
-  validateJob(job, run, jobName, true); artifactIdentity(artifact, run, expectedArtifact, artifactBytes);
+  validateJob(job, run, jobName, true); artifactIdentity(artifact, run, expectedArtifact);
   uploaded(artifact, job, logBytes, expectedStep);
   const measuredCheckoutSha = loggedCheckout(job, logBytes);
   check(gitId(expectedCheckoutSha) && measuredCheckoutSha === expectedCheckoutSha, 'artifact checkout differs from authenticated expected source');
   if (run.event !== 'pull_request') check(measuredCheckoutSha === run.head_sha, 'artifact non-PR checkout differs from source');
   return { schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id, attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha, logSha256: sha(bytes(logBytes)) };
+}
+
+/** Downloaded bundles additionally require the exact archive bytes. Metadata-only
+ * runtime refs are useful after a successful second producer verified restoration. */
+export function authenticateArtifactExecution(input) {
+  const receipt = authenticateArtifactMetadata(input), raw = bytes(input.artifactBytes);
+  check(raw.length === input.artifact.size_in_bytes && `sha256:${sha(raw)}` === input.artifact.digest, 'artifact ZIP digest/length mismatch');
+  return receipt;
 }
 
 /** Bind a case's payload clock window to literal markers in its physical log. */

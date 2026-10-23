@@ -5074,3 +5074,31 @@ time/id sort and final limits are preserved. History never publishes live Store
 rows or returns the live cache as complete history. This adoption retains legacy
 numeric completion and does not establish managed requests or NX runtime
 integration. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+
+## Shared two-run CPU certification
+
+Every registered replay suite uses the same CPU certification policy. A complete
+public first measurement with only CPU misses below 5% of its existing limits
+requests one separate physical runner. All three CPU objectives must pass the
+arithmetic mean of the two runner-relative normalized ratios. The policy never
+selects the better run or averages memory, correctness or size failures.
+A strict first pass and an existing declared diagnostic result keep their
+ordinary manifest verdict and request no second measurement. Original strict
+reports, diagnostic lists and raw outputs remain unchanged, including FAILs.
+
+The existing `Rust / replay gate (<suite>)` checks certify the decision after
+initial `Rust / replay measurement (<suite>)` jobs. The global planner and final
+checks run even after upstream failure. The second-run matrix is skipped when
+there is no eligible miss; otherwise it contains exactly the selected suites.
+Consumers of check-rollup metadata must allow that conditional job to be
+skipped, while requiring every final replay check to succeed. Missing, failed,
+retried or ambiguous second evidence fails certification; there is no third
+measurement. A workflow retry cannot add another candidate to the same cohort.
+A separately requested fresh workflow owns independent evidence.
+
+Both measurements use the original sealed source, Node, dependencies, tape,
+compiled JS/WASM and initial loader cache. Runtime or canonical output drift
+fails certification. Private replay workloads and existing diagnostic handling
+keep their strict policy. Build arguments, CPU thresholds and fixtures retain
+their existing contracts. [Policy and controls](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md).

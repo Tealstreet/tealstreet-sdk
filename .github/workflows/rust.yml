@@ -667,16 +667,14 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  cpu-final:
-    name: Rust / replay gate (${{ matrix.suite }})
+  cpu-certify:
+    name: Rust / shared CPU certification
     needs: [gate, cpu-plan, cpu-second]
     if: always()
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [breakoutprop, apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    outputs:
+      results: ${{ steps.certify.outputs.results }}
     defaults:
       run:
         working-directory: .
@@ -685,15 +683,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Verify strict first pass or complete two-run mean
+      - name: Verify strict first results or complete two-run means
+        id: certify
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/cpu-ci.mjs --command certify --suite '${{ matrix.suite }}' --out '${{ runner.temp }}/cpu-certificate'
-      - name: Retain CPU certificate
+        run: node sdk-rs/harness/cpu-ci.mjs --command certify --out '${{ runner.temp }}/cpu-certificates'
+      - name: Retain CPU certificates
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cpu-cert-${{ matrix.suite }}
-          path: ${{ runner.temp }}/cpu-certificate/
+          name: cpu-certificates
+          path: ${{ runner.temp }}/cpu-certificates/
           retention-days: 14
           if-no-files-found: error
+
+  cpu-final:
+    name: Rust / replay gate (${{ matrix.suite }})
+    needs: cpu-certify
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [breakoutprop, apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require complete same-run shared certification
+        env:
+          CPU_CERT_RESULT: ${{ needs.cpu-certify.result }}
+          CPU_CERT_RESULTS: ${{ needs.cpu-certify.outputs.results }}
+        run: node sdk-rs/harness/cpu-ci.mjs --command status --suite '${{ matrix.suite }}'
