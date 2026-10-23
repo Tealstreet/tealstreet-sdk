@@ -189,8 +189,9 @@ impl<P> Cx<'_, P> {
 
     /// Finish an expired Fresh entry through the shared entry rejection: one
     /// typed Timeout terminal (outcome NotSent for a mutation, none for a
-    /// read) with no admission, Context, request or timer. `Revoked` and no
-    /// effect unless the caller's wait is `Expired` and the entry is Fresh.
+    /// read) with no admission, Context, request or timer. `Ok` means that
+    /// terminal was emitted and the command is finished (unlike admission's
+    /// `Ok`). `Revoked` and no effect unless the wait is `Expired` and Fresh.
     pub fn reject_expired_command(
         &mut self,
         operation: Operation,

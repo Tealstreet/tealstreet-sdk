@@ -67,7 +67,11 @@ Revised after uufub4's API-fit review (2026-10-24).
      receipt sequence, so a duplicate entry's terminal can never delete the
      first command's live stamp. A reused id after a genuine terminal starts
      fresh.
-   - Storage is bounded by the commands awaiting a reply.
+   - Storage is bounded by the commands awaiting a reply. Nothing prunes a
+     stamp by capacity or expiry, so a live or deferred command past its
+     deadline still reads `Expired`.
+   - The receipt sequence never wraps: once exhausted, a receipt goes
+     unstamped and the getter answers `None`.
 4. **API.** `Cx::command_wait() -> Option<CommandWait>`, with `enum
    CommandWait { Remaining(u32), Expired }`. It is observation only: it
    grants no send, completion or retry right and never renews anything.
@@ -85,7 +89,8 @@ Revised after uufub4's API-fit review (2026-10-24).
      adds no legacy site. That emits one typed `Timeout` terminal through
      the same `with_command_entry` rejection as `admit_http_command`, with
      zero HTTP, timer or Store effects. The outcome is `NotSent` for a
-     mutation and none (`None`) for a read. It returns `Revoked`, with no
+     mutation and none (`None`) for a read. `Ok` means that terminal was
+     emitted and the command is finished, unlike an admission's `Ok`. It returns `Revoked`, with no
      effect, unless the wait is `Expired` and the entry is Fresh.
    - A **Bound** or **Legacy** entry may already own a Context, Preflight or
      Plan that has sent writes. There, `Expired` only informs the venue. It
