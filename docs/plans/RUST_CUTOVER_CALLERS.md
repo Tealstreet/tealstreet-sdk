@@ -5307,6 +5307,69 @@ master/harness integrator change; their eleven existing diagnostics each and all
 public declarations are unchanged. Raw replay reports remain FAIL with known
 failures; this content-hash refresh does not establish complete venue parity.
 
+## Managed native-plan admission and preflight
+
+Rust embedders enable the engine's `http-plans` Cargo feature to use Preflight
+and Plan APIs. Bybit and BingX enable it through their venue dependencies. Other
+standalone families omit Plan state, scheduling and callbacks until their own
+adoption enables the feature; ordinary managed Context behavior is unchanged.
+A venue overriding `on_http_plan_ready` or `on_http_owner_retired` must enable
+`http-plans` in its own engine dependency; workspace feature unification does
+not establish that its standalone family configuration has opted in.
+
+Managed commands using Preflight retain one command generation while prerequisite
+reads run. Each read keeps its declared deadline and retry policy. Whole-plan
+admission starts only after the final native steps are known; it reserves the
+complete declared work, including pacing, retry attempts and replacement branches,
+before the first write. The checked native envelope can exceed 120 seconds; there
+is no fixed product command cap. Repeated external mode changes may restart
+preflight reads without a new whole-preflight limit.
+
+Initial admission belongs to the genuine command callback. An unissued read
+refusal emits one typed failure without a write outcome; an unissued write
+refusal reports NotSent. NX must consume that failure once. A cached terminal,
+issued owner or rejected entry cannot be reminted in the same callback.
+
+Resource refusal before a write Plan is admitted leaves the preflight owner able
+to report its typed failure and proves no Plan write was sent. Once work is
+released, a timeout or later queue/preparation refusal retains all prior accepted
+facts and unresolved effects in the command journal. NX must retain the structured
+kind/outcome, reconcile Unknown effects through reads, and avoid optimistic
+success or automatic write resend. A classified, effects-free resend uses the
+engine's exact-attempt grant within the original declared call and Plan bounds.
+
+Native codecs validate the exact current Plan delivery before changing cache or
+Store state. Structural slot completion proves no financial effect by itself;
+only validated write facts grant those effects. Delayed route preparation,
+binding, signing and dispatch keep the captured physical deadline. Readiness
+callbacks expose only their own declared eligible work and never borrow another
+HTTP response or command's entry authority.
+
+A cancel deferred behind a Plan is processed when the placement owner seals,
+including root expiry and readiness preparation refusal. It does not require an
+unrelated later event to resume or receive its typed terminal result. Existing
+uncertainty fences still decide whether that cancel can run.
+
+A Read Plan may return its native current-settings fallback after the first
+validated response without issuing a remaining declared read. The engine checks
+the current DATA call and retires only unissued work; this cannot complete a
+write or abandon another selected call. The original deadline and native cache
+publication rules stay in force. NX receives the native result once and must not
+treat successful local fallback as proof that cache or Store state was refreshed.
+
+
+### Proven subset with unresolved write remainder
+
+| Native proof | Command outcome | NX handling |
+| --- | --- | --- |
+| A validated subset took effect; other targets remain unresolved (`PartialUnknown`) | `Unknown`, with bounded proven IDs and batch position metadata when available | Keep the proven subset, reconcile the remainder through reads, and never resend the whole write. |
+| A complete mixed acceptance/refusal is proven (`KnownPartial`) | Partial failure with the resolved facts | Keep accepted results and report refused targets. |
+| Count-mismatched, empty-ID or wholly unproven ACK (`Failed`) | `Unknown`; retained IDs are evidence only | Reconcile through reads; infer no Store effect or optimistic success from those IDs. |
+
+A satisfied native cancel may prove a subset without creating IDs. That proof
+still leaves any unresolved targets Unknown; a successful subset never cleans up
+the remainder or extends its deadline.
+
 ## WOO and Crypto.com joined order-snapshot freshness
 
 Rust WOO and Crypto.com retain the last accepted order rows when a regular/algo
