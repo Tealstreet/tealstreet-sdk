@@ -16,7 +16,8 @@ wasm_profile_args=(--config 'profile.release.opt-level="z"'
   --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
   --config 'profile.release.package.safe-cex-engine.opt-level="z"'
   --config 'profile.release.package.safe-cex-venue-kucoin.opt-level=3')
-# One JSON throughput policy for every WASM family and the combined engine.
+# One JSON throughput policy for every WASM family and the combined engine,
+# except standalone Bybit, whose size budget wins; CI gates its public decode CPU.
 # Native Cargo profiles are unchanged; CI gates family CPU and size budgets.
 wasm_throughput_args=(--config 'profile.release.package.serde_json.opt-level=3')
 # The Cargo arguments building the family that contains a venue.
@@ -35,13 +36,15 @@ family_args() {
   # Use size defaults unless measured CPU margin requires speed defaults.
   # KuCoin Spot and WOO retain speed defaults after measured margin misses. Aster
   # takes size defaults since dispatch signing, with its venue crate at speed below.
-  # CI-only Bitget throughput measurement; adoption requires separate evidence review.
-  if [[ $family != kucoinspot && $family != woo && $family != bitget ]]; then
+  if [[ $family != kucoinspot && $family != woo ]]; then
     build_args+=("${wasm_profile_args[@]}")
   fi
   if [[ $family == asterdex ]]; then
     # Restore pre-#1656 venue throughput only for this family, not combined/native.
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level=3')
+  elif [[ $family == bitget ]]; then
+    # Size defaults fit dispatch signing; the engine stays at speed for the CPU gate.
+    build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level=3')
   elif [[ $family == woo ]]; then
     # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
     build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
@@ -53,7 +56,9 @@ family_args() {
     # Derivatives pass z; Spot and combined builds keep the crate's throughput profile.
     build_args+=(--config 'profile.release.package.safe-cex-venue-kucoin.opt-level="z"')
   fi
-  build_args+=("${wasm_throughput_args[@]}")
+  if [[ $family != bybit ]]; then
+    build_args+=("${wasm_throughput_args[@]}")
+  fi
 }
 # Optimize a bound module with binaryen (behaviour-neutral; shrinks every
 # family). CI installs the pinned release (install-binaryen.sh) and sets
