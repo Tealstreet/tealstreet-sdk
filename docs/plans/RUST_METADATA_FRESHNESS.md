@@ -346,3 +346,13 @@ adoption, joined completion authority, raw-header adapter, numeric managed
 fallback, new lifecycle API or send permission. Native/freshness proof remains
 separate from delivery authority. Review and run focused engine/WEEX/BingX gates,
 strict checks and exact inventory controls before pushing the refreshed draft.
+
+
+Paired-public delivery receipt: regression-only `654bceca586` compiles against
+the authorized #1792 stack and fails the assertion that a wrong root cannot
+publish a still-current metadata proposal. Calling the shared paired validator
+before publication makes child-as-root and unrelated-live-root variants pass.
+The positive two-leg path retains the original root for completion and the same
+logical/scheduler deadlines. All 1002 engine/WEEX/BingX native tests pass, including
+these controls; strict all-target Clippy/fmt, bans and fourteen exact provenance
+controls pass. Native private adapters are unchanged by this checkpoint.

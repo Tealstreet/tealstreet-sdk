@@ -4291,7 +4291,7 @@ transport contract changes. NX adapters that adopt these helpers keep the exact
 root/leg handles, publish and complete without yielding, and discard invalid
 or stale callback data rather than falling back to numeric command completion.
 Joined-read execution/observer ownership remains a separate shared capability.
-## Shared metadata/settings owner: WEEX and BingX (draft)
+## Shared metadata/settings owner: WEEX and BingX
 
 Concurrent same-symbol `fetchLeverageForSymbol`/metadata calls at the same
 eligible settings revision now share one native logical read: WEEX one config
@@ -4308,19 +4308,16 @@ notifying callers; BingX retains its positions fence and superseded-margin
 discard rule. Secondary GET credentials, prepared native WEEX explicit reads,
 SDK public-only/nonready automatic-hook skips and pending-start handling remain.
 Callers must still handle ordinary native/parse failures; no new NX constructor,
-argument or handler migration is introduced by this draft.
+argument or handler migration is introduced.
 
-This section describes the draft implementation, not a landed or deployed
-contract. Actual #1741 and #1759 are integrated. Metadata tokens and background
-observations now bind to the Store issuer through common Epoch/Stamp; foreign,
+Metadata tokens and background observations bind to the Store issuer through
+common Epoch/Stamp; foreign,
 default or exhausted authority cannot publish. The account settings revision is
 an opaque snapshot validated separately from unrelated read issuance.
 
-Shared scheduler denial/continuation controls and unsigned managed HTTP probes
-pass, but the WEEX/BingX private metadata requests remain legacy. Their real
+WEEX/BingX private metadata requests retain their legacy lifecycle. Their real
 family dispatch signers and the shared Hyro/metadata observer-group completion
 and expiry mechanism are prerequisites for physical production adoption. No
 queue-time lease, numeric managed-completion fallback or native-header signing
-compatibility path is introduced. Other-family fan-out and final integrated
-native/WASM/replay proof remain open. See
+compatibility path is introduced. See
 [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).

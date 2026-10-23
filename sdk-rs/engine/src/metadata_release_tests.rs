@@ -321,9 +321,18 @@ impl Venue for PublicMetadata {
             .finish_metadata(&pending.token, Err(error.clone()))
             .unwrap();
         assert_eq!(done.commands(), [7]);
-        cx.fail_context(&pending.context, error).unwrap();
+        cx.fail_context(&pending.root, error).unwrap();
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
+        // Read authority is distinct from a still-current metadata token. Gate
+        // before either another leg or the synchronous publication/completion.
+        if cx
+            .validate_read_http_delivery(&pending.root, &pending.context)
+            .is_err()
+        {
+            self.rejected_deliveries += 1;
+            return;
+        }
         self.responses += 1;
         if pending.second_leg {
             let context = cx
@@ -385,7 +394,7 @@ impl Venue for PublicMetadata {
             .unwrap();
         assert_eq!(done.commands(), [7]);
         assert!(done.published);
-        cx.done_context(&pending.context, "{}".into()).unwrap();
+        cx.done_context(&pending.root, "{}".into()).unwrap();
     }
     fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {
         panic!("denial must stay typed preparation failure")
