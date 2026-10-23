@@ -176,3 +176,10 @@ Source SHA256: `2172a730070eb08548b01eb0fd476fad94c643c5a8870a0c6e4ec18208cbbe06
 | `9584979d6cce6bf6576093402c85d6195493ed09a64ba6f72927c8f53bf61847` | 2 | 718 `trading_http` → LEXICAL + WRITE; 1003 `trading_failed` → LEXICAL + WRITE | `matches!(request.step, Step::Leverage { .. })` |
 | `ca37246cf8052b21b57e7f1400b1026f755a6bdaadfe661eb481c929ddcc2d68` | 1 | 969 `trading_finish` → WRITE | `cx.done(job.command, result)` |
 | `06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3` | 1 | 988 `trading_finish` → WRITE | `cx.fail(job.command, error)` |
+
+
+## Spot OHLC implementation checkpoint
+
+The separate implementation branch `feat/rust-kraken-spot-candles` starts with assertion-RED commit `57250988349`: all eight controls compile on original source and fail because opaque OHLC bypasses managed preparation. The adoption keeps native codecs, replaces the timer-only zero-delay retry queue with immediate managed retries, and removes exactly two lexical occurrences from `spot/mod.rs` (5 to 3). Remaining sites are the discovery/ticker sender, unsupported-interval preflight, and context-issuance failure before authority exists; the existing `cx.fail(command, error)` fingerprint is retained once, never rehashed. Full family inventory is 53 to 51.
+
+The root spans all preparation and three transport retries without renewal. Existing fixture preparation uses shared `test_support::prepared_actions`; the four-attempt native regression retains query/result assertions while release moves into the shared managed queue. No signer, session, futures, book or trading source is changed. Shared #1808 integration and new code review/verification evidence are required before readiness.

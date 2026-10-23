@@ -4331,3 +4331,10 @@ size budget still applies. SDK construction, commands, transports, payloads and
 row shapes keep their existing contracts. CPU objectives and all strict
 correctness checks retain their existing thresholds and known-failure policies.
 Combined and native release builds keep their existing profile selection.
+
+
+### Kraken Spot managed command OHLC (RequestContext)
+
+`KrakenSpot::FetchCandles` requires managed HTTP preparation, binding and final release. Custom request-only transports must implement that path; unsupported preparation fails once with its typed error and never spends a network retry. The unsigned public GET retains native pair aliases, interval and floor-seconds `since`; `limit`/`to_ms` remain ignored, the native `last` cursor is not paged, malformed rows reject the whole response, and successful rows stay sorted. Native envelope/row errors keep their message-only read contract.
+
+One raw 20-second root starts before preparation and spans all four possible transport attempts. Three read retries now re-enter the managed engine immediately, replacing the old zero-delay native timer queue so the engine continues to own expiry while routing is parked. Exhausted transport failures are typed `network`; shared context failures preserve their kind and local-operation semantics. An expired or retired delivery cannot publish results or row diagnostics, and a stale callback cannot complete a reused command. The unchanged generic legacy sender remains only for discovery/tickers; signed account/trading/session and futures paths are outside this slice.
