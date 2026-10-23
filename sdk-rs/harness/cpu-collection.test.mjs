@@ -228,3 +228,39 @@ test('workspace CLI bin links seal their tracked app target and refuse later mut
   assert.throws(() => readSourceTree(options.root), /inputs are dirty/);
   assert.throws(() => beforeCpuCase({ state, args: args(state.claims[0]) }), /collision/);
 });
+
+function shallowPullRequest(t, { testedParent = 'second', parentCount = 2 } = {}) {
+  const options = fixture(t, 'bitgetusdc'), { root } = options;
+  const tree = git(root, 'rev-parse', 'HEAD^{tree}'), tested = options.run.head_sha;
+  const commit = (parents, message) => git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit-tree', tree, ...parents.flatMap(parent => ['-p', parent]), '-m', message);
+  const base = commit([tested], 'base'), other = commit([base], 'other');
+  const parents = parentCount === 1 ? [tested] : testedParent === 'first' ? [tested, other] :
+    testedParent === 'absent' ? [base, other] : [base, tested];
+  const merge = commit(parents, 'synthetic PR checkout');
+  git(root, 'update-ref', 'HEAD', merge);
+  fs.writeFileSync(path.join(root, '.git/shallow'), `${merge}\n`);
+  options.run.event = 'pull_request';
+  assert.equal(git(root, 'rev-list', '--parents', '-n', '1', 'HEAD'), merge);
+  return { options, merge };
+}
+
+test('shallow synthetic PR checkout binds the exact tested second parent from its commit object', t => {
+  const { options, merge } = shallowPullRequest(t);
+  const state = prepareCollection(options);
+  assert.equal(state.claims[0].measuredCheckoutSha, merge);
+  assert.equal(state.run.head_sha, options.run.head_sha);
+  assert.notEqual(merge, options.run.head_sha);
+});
+
+test('shallow PR checkout refuses a tested head present only as the base parent', t => {
+  const { options } = shallowPullRequest(t, { testedParent: 'first' });
+  assert.throws(() => prepareCollection(options), /measured PR checkout not bound to tested head/);
+});
+
+test('shallow PR checkout refuses absent tested parents and single-parent commits', t => {
+  for (const value of [{ testedParent: 'absent' }, { parentCount: 1 }]) {
+    const { options } = shallowPullRequest(t, value);
+    assert.throws(() => prepareCollection(options), /measured PR checkout not bound to tested head/);
+  }
+});
