@@ -26,6 +26,8 @@ mod planned_calls {
         timeout: u32,
         fallback: bool,
         idle: bool,
+        early_read: bool,
+        early_result: Option<Result<(), Error>>,
         responses: usize,
         timers: usize,
         retired: usize,
@@ -297,6 +299,10 @@ mod planned_calls {
                 return;
             }
             self.responses += 1;
+            if self.early_read {
+                self.early_result = Some(complete_native_early_read(cx, &plan, &slot, &context));
+                return;
+            }
             if self.write {
                 cx.http_write_result(
                     &context,
@@ -373,6 +379,37 @@ mod planned_calls {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+    // Baseline adapter: the native current-settings branch does not issue the
+    // remaining read. Its unchanged success assertions expose the missing seam.
+    fn complete_native_early_read(cx: &mut Cx<'_, Context>, plan: &Plan, slot: &Slot,
+        context: &Context) -> Result<(), Error> {
+        cx.finish_plan_call(plan, slot, context)?;
+        cx.done_plan(plan, "current-settings".into())
+    }
+    #[test]
+    fn validated_first_read_can_return_current_settings_without_issuing_second_read() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            early_read: true, ..Default::default()
+        });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        let reserved = e.io.next_id;
+        release(&mut e, first, 0.);
+        response(&mut e, first, 19_000., "current-settings");
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(e.venue.early_result, Some(Ok(())), "native early Read success must retire unissued work");
+        assert_eq!(e.venue.responses, 1);
+        assert_eq!(e.venue.retired, 1);
+        assert_eq!(e.io.next_id, reserved);
+        assert_eq!(e.io.request_contexts.plan_context_storage().0, 0);
+        assert_eq!(e.io.request_contexts.plan_context_storage().2, 0);
+        assert!(e.io.request_contexts.plan_timer(7).is_none());
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "current-settings")).count(), 1);
+        assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))));
+        response(&mut e, first, 19_001., "late");
+        assert!(e.drain_actions().next().is_none());
+        assert_eq!(e.venue.responses, 1);
     }
     fn start(engine: &mut Engine<Plans>, now: f64) {
         engine.start(now);
