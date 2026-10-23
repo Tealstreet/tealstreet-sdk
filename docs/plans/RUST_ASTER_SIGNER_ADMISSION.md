@@ -175,8 +175,8 @@ the current hosted and remote shape.
   options, because material held by setup is invisible there (claude-19pt8s's
   blocker). So a V3 wallet key never reaches the hosted HMAC capture. Hosted
   WsAuth is refused for Aster, which uses a listen key.
-- Follow-up, not in this PR: the gate lives at the wasm constructor, which is
-  the only `prepare` caller. The generic fix is key-usage tagging at setup (HMAC
+- Follow-up, not in this PR (owned by claude-19pt8s, after P8): the gate lives
+  at the wasm constructor, which is the only `prepare` caller. The generic fix is key-usage tagging at setup (HMAC
   versus wallet key, already known from the encoding), with the provider
   refusing HMAC work on a wallet key. That would also cover future mixed-scheme
   families.
