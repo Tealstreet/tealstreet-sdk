@@ -254,3 +254,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Paradex public-trades Read history | Consumer plan | Before migrating the native unsigned single-page public trade command through the reviewed history bridge. | [RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md](RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md) |
 | KuCoin local Read terminals | Frozen-base adoption plan | Before converting Spot cached/empty/refusal reads and futures unsupported leverage to genuine initial Read authority. | [RUST_KUCOIN_LOCAL_READ_CONTEXT.md](RUST_KUCOIN_LOCAL_READ_CONTEXT.md) |
 | BloFin PublicTrades Context | Committed native consumer plan | Before moving the single unsigned trade-history response onto the shared Read completion bridge. | [RUST_BLOFIN_PUBLIC_TRADES_CONTEXT.md](RUST_BLOFIN_PUBLIC_TRADES_CONTEXT.md) |
+
+| Whole Phemex managed sockets | Whole-family adoption plan | Before changing public/private transport, auth or accepted snapshot expiry; preserves the parked public controls and REST-owner boundaries. | [RUST_PHEMEX_MANAGED_SOCKETS.md](RUST_PHEMEX_MANAGED_SOCKETS.md) |
