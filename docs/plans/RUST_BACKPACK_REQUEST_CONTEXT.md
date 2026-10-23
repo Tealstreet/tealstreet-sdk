@@ -318,3 +318,58 @@ by the intended behavior assertions; normal venue suites pass
 Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
 pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
 controls expose defects; they are not GREEN adoption or P0 closure evidence.
+
+## Foreground write adoption implementation plan (2026-10-24)
+
+Selected from #1880 on actual landing `43775f60d0f`: independent foreground
+jobs have no FIFO activation dependency on #1896. Merge the reviewed plan/tests
+first; retain all three original behavioral assertions. Source reservations:
+`trading.rs`, the Options/sign-module and trade callback regions of `lib.rs`,
+`Cargo.toml`, native trading fixtures and dedicated write controls. Our #1870
+candle regions remain separate and unchanged. The signer owner supplies or
+reviews the dispatch recipe in `sign.rs`; provider Ed25519 is #1844. No venue
+or shared source belonging to another open PR is replaced.
+
+1. Begin genuine mutation Preflight before native preflight terminals. Admit
+   one immutable serial Plan from the final native steps, Primary credentials,
+   no retry and the existing engine HTTP timeout. Empty work uses the engine's
+   explicit empty-plan completion. Every pending foreground call retains its
+   exact Plan/Slot/Context; Plan-ready drives only that job. No queued owner is
+   activated through another job's delivery.
+2. Replace eager credential headers for foreground writes with the shared
+   Backpack dispatch recipe, preserving instruction, caller-ordered batch rows,
+   canonical parameters, exact JSON body, X-Broker-Id and receive window. Pass
+   only an opaque identity through Options. Never populate it from raw secrets
+   inside the venue. Test setup supplies the provider and identity explicitly;
+   registry/SDK admission and account/WS migration remain separate obligations.
+3. Use one conservative CodeTable (existing codes only, unlisted Unknown,
+   no inferred status refusal). Validate exact Plan delivery before native
+   effects. Record accepted/failure/batch facts through the shared classifier
+   and journal before call settlement. A paired ACK correlates clientId,
+   symbol, side, type and unique native IDs; individually validated rows retain
+   their native IDs even if another row fails or is absent. Only a complete
+   proof publishes the existing paired success reducer.
+4. Every requested explicit cancellation contributes to the command verdict.
+   Continue native optional child work where it already continues, while its
+   failure remains in the journal: a final Done cannot erase it. Native optional
+   child failures can therefore produce a failed command with prior effects,
+   rather than a misleading successful empty result. Remove local effective
+   demotion for foreground jobs; the journal owns partial IDs and uncertainty.
+5. Amend fill exhaustion uses the landed immutable conditional-terminal seam.
+   Keep cancellation/fill revision fences and receipt order. Cleanup retires
+   only the exact foreground generation and releases its cancellation latches;
+   no stale callback completes a reused ID. Internal automatic trigger repair
+   remains explicitly legacy background work, with no fabricated command or
+   Context; background Plan issuance is a separately assigned shared follow-up.
+   Its legacy transport sites remain inventoried, with no manifest exemption.
+6. Add managed-release, asynchronous delegated Ed25519, malformed/short/reversed
+   batch, failed-cancel, accepted-ID/later-failure and generation controls. Turn
+   #1880's original REDs green without weakening assertions. Prune only vanished
+   foreground fingerprints after scanning actual source; preserve incoming and
+   background entries. Run Backpack/Binance, scoped strict Clippy/fmt, bans,
+   both request-context checks, three independent audits and exact-head CI.
+
+Architecture gate: native request/ACK correlation and Store freshness stay here;
+command ownership, clock, preparation, signing, retry, classification, aggregate
+outcome and cleanup authority remain engine/provider choke points. This is a
+foreground trading slice, not whole-family signer or background readiness.
