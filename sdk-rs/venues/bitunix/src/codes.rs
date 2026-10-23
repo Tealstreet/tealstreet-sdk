@@ -67,15 +67,16 @@ pub(crate) fn read_failure(response: &Response<'_>, fallback: &str) -> ReadFailu
     let native = parsed.as_ref().and_then(|e| {
         e.code
             .and_then(|c| classify::decode_int(c.get()))
+            .filter(|code| *code != 0)
             .map(|c| Native {
                 code: NativeCode::Int(c),
                 message: &e.msg,
             })
     });
-    let message = parsed
+    let message = native
         .as_ref()
-        .filter(|e| !e.msg.is_empty())
-        .map(|e| e.msg.to_string())
+        .filter(|native| !native.message.is_empty())
+        .map(|native| native.message.to_owned())
         .unwrap_or_else(|| {
             if (200..300).contains(&response.status) {
                 fallback.into()

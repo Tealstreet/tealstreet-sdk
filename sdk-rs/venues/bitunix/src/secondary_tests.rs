@@ -135,7 +135,24 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
                 base: "BTC".into(),
                 quote: "USDT".into(),
                 active: true,
-                ..Market::default()
+                precision: Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: Limits {
+                    amount: MinMax { min: 0., max: 100. },
+                    leverage: MinMax { min: 1., max: 100. },
+                    price: None,
+                },
+                pretty_symbol: None,
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: None,
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
             }]);
             assert!(cx.store.market("BTCUSDT").is_some());
             for axis in [

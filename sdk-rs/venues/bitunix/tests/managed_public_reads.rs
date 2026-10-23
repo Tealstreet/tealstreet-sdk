@@ -631,6 +631,9 @@ fn background_seed_owners_retire_at_one_clock_across_success_and_failure() {
         let ticker = released(&mut e, 100., "/tickers");
         response(&mut e, 100., ticker.id, 200, "", TICKERS);
         assert!(e.store().loaded().markets && e.store().loaded().tickers);
+        e.drain_actions().for_each(drop);
+        probe_command(&mut e, "hold");
+        probe_command(&mut e, "release");
     }
 }
 
@@ -853,4 +856,27 @@ fn a_fresh_native_initialization_recovers_after_each_public_auth_refusal() {
     e.drain_actions().for_each(drop);
     probe_command(&mut e, "hold");
     probe_command(&mut e, "release");
+}
+
+#[test]
+fn invalid_prepared_binding_refuses_before_release_without_losing_typed_failure() {
+    let mut e = seeded(venue(false));
+    candles(&mut e, 100., 7, Interval::M1, None, None, None);
+    let (token, request) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/kline?");
+    e.http_prepared(
+        100.,
+        token,
+        Prepared {
+            id: request.id.0,
+            expires_at: Some(f64::NAN),
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))
+        || matches!(a,Action::ManagedHttp(a) if matches!(a.as_ref(),HttpAction::Bind{..}))));
+    let error = failed(&actions, 7);
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    response(&mut e, 100., request.id, 200, "", CANDLES);
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7).is_empty());
 }

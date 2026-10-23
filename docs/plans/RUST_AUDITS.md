@@ -2511,3 +2511,13 @@ owner isolation, synchronous retirement and unchanged fallthrough controls.
 Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
 history13->11). Private history/signing and spot REST capabilities stay native.
 Architecture gate: No; existing engine admission and completion choke points.
+
+
+### Bitunix public REST Read authority
+
+- [x] Public markets/tickers/candles dispatch and their selected terminals use
+  genuine shared Read authority and managed static-header HTTP; exact8occ7row
+  prune18->10. No early/unclaimed/expired publication or numeric fallback.
+- [x] Shared BITUNIX table/read classifier preserves typed engine failures,
+  safe diagnostics and native rate floors. Native successful candle codec and
+  wire behavior remain compatible. Private P0#33 and signer conversion remain.

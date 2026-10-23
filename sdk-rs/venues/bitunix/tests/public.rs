@@ -854,7 +854,7 @@ fn discovery_stream_errors_never_echo_raw_envelopes_into_failure_or_degradation(
                     })
                     .unwrap();
                 e.handle(at, Event::TimerFired { timer });
-                request = pending_http(&mut e, 0., path);
+                request = pending_http(&mut e, at, path);
             }
             assert_eq!(degraded, 1);
             assert!(

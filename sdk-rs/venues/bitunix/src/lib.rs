@@ -918,11 +918,20 @@ impl Venue for BitunixFutures {
             }
             pending => pending,
         };
-        self.on_http_failed(
-            cx,
-            pending,
-            VenueError::new(error).kind(ErrorKind::Internal),
-        );
+        if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
+            if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &pending
+                && cx.validate_http_context(context).is_err()
+            {
+                return;
+            }
+            self.public_response_failed(cx, pending, &response);
+        } else {
+            self.on_http_failed(
+                cx,
+                pending,
+                VenueError::new(error).kind(ErrorKind::Internal),
+            );
+        }
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         self.public_typed_failed(cx, pending, error);

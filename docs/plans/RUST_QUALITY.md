@@ -1113,3 +1113,15 @@ finite ID reuse and 900 synchronous retirements followed by 256 real parked
 managed candle owners. No marker or Store mutation is introduced. Exact inventory
 removes only two local done sites; native/strict checks and independent reviews
 are required on the committed source before merge readiness.
+
+
+### Bitunix public REST managed Read proof
+
+Plan756a precedes original tests fda4818/c2aa (10 then14 assertion REDs, five
+compatibility controls GREEN); public source follows. Native authority tests
+cover Prepare/Bind/Claim, stale/duplicate/reused command IDs, invalid clock,
+entry capacity, typed provider refusal, expiry, parser versus transport failure,
+public auth isolation and both seeds' repeated fixed-clock retirement. Existing
+private/socket native assertions are preserved through genuine preparation
+fixtures. Immediate managed queue-capacity is reviewed defense/shared-engine
+coverage, explicitly not a native execution receipt (owner ruling in plan).

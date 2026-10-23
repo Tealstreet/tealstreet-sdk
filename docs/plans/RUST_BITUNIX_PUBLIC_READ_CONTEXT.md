@@ -1,7 +1,7 @@
 # Bitunix public REST Read authority
 
 Owner: codex-9czdjh. Frozen inventory/source: `749a5677d0e9067e3ee58ae76893446f37dfd39c`.
-Status: refreshed plan on actual `9447ee542cb7af2a62d30794d4ffc093a66720d5`; no runtime change, inventory prune or executed RED claimed.
+Status: managed public REST adoption; native verification and independent review, before CI/merge.
 
 ## Selection and collision audit
 
@@ -266,3 +266,42 @@ including its existing Supervisor; no managed-socket migration or test-only
 engine shortcut is included. Original assertion REDs are next, on this pinned
 production, before any runtime change; historical plan review receipts do not
 claim execution on the new pin. #1865 and #1922 heads remain frozen.
+
+
+## Executed adoption and reviewed coverage
+
+Original production on `9447ee542cb` compiled the separately committed tests:
+`fda4818c41f` produced10 semantic failures and five compatibility passes;
+`c2aaedb5431` expanded this to14 semantic failures and five compatibility passes.
+The production cutover follows those commits. Two previously unreached expectations
+were corrected against the shared contract: invalid clock is InvalidInput, and
+unsent preparation expiry carries NotSent. The auth no-send assertion permits
+resource cancellation while still forbidding Prepare, Bind or HTTP. None changes
+the original failing preparation/delivery assertions or native wire expectations.
+
+Markets and tickers now hold genuine Background Reads through validated staging
+and Store publication, retire before follow-up/retry, and use managed unsigned
+GETs with static native headers. FetchCandles admits its original Read before
+interval validation and completes only through that root. Typed engine failure
+hooks preserve supplied fields; failed/unproven responses use one BITUNIX table
+and shared classifier retry evidence. Code-zero success messages cannot replace
+decoder failures; malformed streams retain safe status/header evidence without
+raw body previews. Existing native fixtures drive actual Prepare/Bind/Claim at
+their event times; private signing probes seed Store directly.
+
+The scanner confirms the exact selected eight-occurrence/seven-row removal:
+18 occurrences /16 rows /three files become10 /nine /two. Signed dispatch and
+private trading remain legacy debt. The socket implementation, signing helpers,
+credential setup and conservative macro matches remain unchanged.
+
+The overseer explicitly resolved the queue-capacity coverage question: record
+that return branch as reviewed defense backed by shared-engine coverage, not an
+executed native receipt. The native context registry and managed queue both cap
+at256; genuine next-root admission dominates a full queue here. No fabricated
+Context, engine injection seam or new local registry is added. Native entry
+capacity, preparation refusal, transport failure, expiry and fixed-clock seed
+retirement are executed, including filling all256 root slots after recovery.
+The proposed overlapping retry-timer case is not a native issuer: markets starts
+once then only from consumed retry timers; tickers starts once after markets,
+then only from consumed retry timers. The overseer accepted this analysis and
+required no local stop state. Future fresh initialization remains caller-owned.
