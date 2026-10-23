@@ -126,3 +126,14 @@ the family sourceRoot can be removed only when no legacy socket site remains.
 All other family maps stay exact. The planned reduction is2F/3O, not a claim
 that the current77F/90O burn-down has already decreased. Add landed-behavior
 CALLERS text with the implementation, keeping proof/status in the PR body.
+
+## Original-source checkpoint
+
+On unchanged `abc72534026` production, the dedicated managed_socket target
+compiles and runs8 tests:5 genuine assertion REDs and3 working GREENs,
+zero ignored. Duplicate public and private opens replay work; late open
+releases frames; idle-expired allMids changes100 to123; the identical expired
+private state changes contracts2 to3. Live private state and retired private
+state controls distinguish accepted publication from inert old ingress.
+Exact native opening public JSON also passes. No adapter or feature opt-in
+was present for this run; this is not a CPU/memory or full-suite result.
