@@ -433,8 +433,8 @@ pub fn interim_nonce() -> NonceSource {
 }
 
 /// Selected signing contract for one recipe. V3 addresses are public config.
-/// The V3 identity's signing key is the 32-byte API-wallet private key; trusted
-/// setup decodes it as hex and must strip any `0x` prefix first.
+/// The V3 identity's signing key is the 32-byte API-wallet private key, which
+/// trusted setup decodes as hex with an optional `0x` prefix.
 pub enum Auth {
     V1,
     V3 {

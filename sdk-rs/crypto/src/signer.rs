@@ -268,10 +268,16 @@ impl LocalSigner {
             primary: primary.as_ref().map(|id| id.references("primary")),
             secondary: secondary.as_ref().map(|id| id.references("secondary")),
         };
-        if alias
-            && let (Some(primary), Some(secondary)) =
+        if alias {
+            // A prefix-only hex key decodes to nothing; it cannot be aliased.
+            let (Some(primary), Some(secondary)) =
                 (identities.primary.as_ref(), identities.secondary.as_mut())
-        {
+            else {
+                return Err(SignError::InvalidRequest);
+            };
+            if primary.signing.0.is_empty() {
+                return Err(SignError::InvalidRequest);
+            }
             secondary.signing = primary.signing.clone();
         }
         // The same policy validates bytes and opaque refs. Empty decoded material
@@ -813,6 +819,8 @@ mod tests {
             r#"{"primary":{"key":"k","secret":"00","signingFromPrimary":true}}"#,
             r#"{"primary":{"key":"k"},"secondary":{"key":"r","signingFromPrimary":true}}"#,
             r#"{"secondary":{"key":"r","signingFromPrimary":true}}"#,
+            // A prefix-only hex key decodes to nothing.
+            r#"{"primary":{"key":"k","secret":"0x"},"secondary":{"key":"r","signingFromPrimary":true}}"#,
         ] {
             assert!(matches!(
                 LocalSigner::from_json_with_policy(input.into(), hex_policy(KeyEncoding::Hex)),

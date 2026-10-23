@@ -99,6 +99,26 @@
         "apiVersion": "v1",
         "setup": {"primary": {"key": "api-key", "secretEncoding": "utf8"}}
       }
+    },
+    {
+      "name": "v3 prefix-only wallet key is blank",
+      "input": {
+        "key": "0x1111111111111111111111111111111111111111", "secret": "0x",
+        "applicationId": "0x2222222222222222222222222222222222222222", "apiVersion": "v3"
+      },
+      "expected": {
+        "apiVersion": "v3",
+        "signerAddress": "0x1111111111111111111111111111111111111111",
+        "setup": {"primary": {"key": "0x1111111111111111111111111111111111111111", "secretEncoding": "hex"}}
+      }
+    },
+    {
+      "name": "half-supplied read agent installs nothing",
+      "input": {"key": "api-key", "secret": "api-secret", "secondary_key": "read-key"},
+      "expected": {
+        "apiVersion": "v1",
+        "setup": {"primary": {"key": "api-key", "secret": "api-secret", "secretEncoding": "utf8"}}
+      }
     }
   ]
 }

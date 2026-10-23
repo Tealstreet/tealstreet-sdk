@@ -62,7 +62,10 @@ pub(crate) fn local_setup(
     };
     // Blank is absent. V3 wallet keys are trimmed hex, as the legacy venue
     // read them; V1 HMAC secrets stay byte-exact.
-    let blank = wallet.as_deref().is_none_or(|text| text.trim().is_empty());
+    let blank = wallet.as_deref().is_none_or(|text| {
+        let text = text.trim();
+        text.is_empty() || (version == Version::V3 && text.eq_ignore_ascii_case("0x"))
+    });
     if version == Version::V3
         && let Some(text) = wallet.as_mut()
     {
@@ -88,18 +91,19 @@ pub(crate) fn local_setup(
     if let Some(mut inert) = options.read_credentials.take() {
         inert.erase_secrets();
     }
-    let read_key = options.asterdex.read_key.take();
-    let read_secret = options.asterdex.read_secret.take();
-    // Today's read agent prefers the primary wallet even when a read secret is set.
+    let read_key = options.asterdex.read_key.take().map(Secret::new);
+    let read_secret = options.asterdex.read_secret.take().map(Secret::new);
+    // A half-supplied read agent installs nothing, as before. Today's read
+    // agent prefers the primary wallet even when a read secret is set.
     let secondary = read_key
         .zip(read_secret)
         .map(|(key, secret)| LocalIdentity {
-            key: Secret::new(key),
+            key,
             secret: if aliased {
-                drop(Secret::new(secret));
+                drop(secret);
                 Secret::default()
             } else {
-                Secret::new(secret)
+                secret
             },
             secret_encoding: encoding,
             signing_from_primary: aliased,

@@ -118,6 +118,40 @@ fn native_setup_matches_the_ts_mapping_golden() {
         } else {
             Algorithm::HmacSha256
         };
+        // Field for field: refs (incl. alias) above; key bytes, secret presence
+        // and signing bytes (secret and encoding) per slot below.
+        for (slot, identity) in [
+            ("primary", native_ids.primary.as_ref()),
+            ("secondary", native_ids.secondary.as_ref()),
+        ] {
+            let golden = &expected["setup"][slot];
+            let Some(identity) = identity else {
+                assert!(golden.is_null(), "{name}: {slot}");
+                continue;
+            };
+            let presented = Operation::Present {
+                key: identity.credential.clone(),
+            };
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![presented],
+            };
+            assert_eq!(
+                native
+                    .sign_ready(&request)
+                    .unwrap()
+                    .map(|r| r.values.clone()),
+                Ok(vec![golden["key"].as_str().unwrap().as_bytes().to_vec()]),
+                "{name}: {slot} key"
+            );
+            let signs = golden["secret"].is_string() || golden["signingFromPrimary"] == true;
+            assert_eq!(
+                !identity.signing.0.is_empty(),
+                signs,
+                "{name}: {slot} secret"
+            );
+        }
         for identity in [native_ids.primary.as_ref(), native_ids.secondary.as_ref()]
             .into_iter()
             .flatten()

@@ -39,10 +39,13 @@ export const mapAsterDEXSignerSetup = (options: ExchangeOptions): Readonly<{
   const wallet = aliased ? options.auth?.privateKey : options.secret;
   const secretEncoding = v3 ? 'hex' : 'utf8';
   const metadata = options.localSigner ?? {};
+  // A half-supplied read agent installs nothing, as before.
   const secondary = options.secondary_key !== undefined && options.secondary_secret !== undefined;
   // Blank is absent. V3 wallet keys are trimmed hex, as the legacy venue read
   // them; V1 HMAC secrets stay byte-exact.
-  const secret = trimmed(wallet) === undefined ? undefined : v3 ? trimmed(wallet) : wallet;
+  const exact = trimmed(wallet);
+  const blank = exact === undefined || (v3 && exact.toLowerCase() === '0x');
+  const secret = blank ? undefined : v3 ? exact : wallet;
   const primary = options.key !== undefined || secret !== undefined;
   return {
     setupOptions: {

@@ -713,28 +713,27 @@ fn rest_nonzero_collateral_flags_multiasset_but_zero_buckets_do_not() {
 }
 
 #[test]
-fn account_identity_read_preserves_alias_and_primary_key_fallback() {
+fn account_identity_read_preserves_alias_and_never_falls_back_to_the_key() {
     let mut h = H::new();
-    for (command, body, expected) in [
-        (20, r#"{"accountAlias":"owner-alias"}"#, "owner-alias"),
-        (21, "{}", "documented-key"),
-    ] {
+    let result = |h: &mut H, command, body| {
         h.event(Event::Command(safe_cex_engine::Command::FetchAccount {
             command,
         }));
         h.reply("/account", body);
-        let output: Value = serde_json::from_str(
-            h.done
-                .iter()
-                .find(|(id, _)| *id == command)
-                .unwrap()
-                .1
-                .as_ref()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(output, json!({"userId":expected}));
-    }
+        h.done
+            .iter()
+            .find(|(id, _)| *id == command)
+            .unwrap()
+            .1
+            .clone()
+    };
+    let output: Value =
+        serde_json::from_str(&result(&mut h, 20, r#"{"accountAlias":"owner-alias"}"#).unwrap())
+            .unwrap();
+    assert_eq!(output, json!({"userId":"owner-alias"}));
+    // V1 without an alias or stableId fails typed; tests/admission.rs covers the fallbacks.
+    let error = result(&mut h, 21, "{}").unwrap_err();
+    assert!(!error.contains("documented-key"), "{error}");
 }
 #[test]
 fn leverage_metadata_command_completes_from_native_settings() {
