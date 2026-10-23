@@ -54,6 +54,8 @@ struct Probe {
     timer: Option<TimerId>,
     /// Finish an expired entry as a read (no outcome) instead of a mutation.
     expire_as_read: bool,
+    /// Leave cancels numbered 1000 and up awaiting a reply forever.
+    ignore_high: bool,
 }
 
 impl Venue for Probe {
@@ -129,6 +131,7 @@ impl Venue for Probe {
                     retry: RetryPolicy::Never,
                 });
             }
+            Command::CancelOrders { command, .. } if self.ignore_high && command >= 1000 => {}
             Command::CancelOrders { command: 21, .. } if self.hold_live => {
                 let _ = cx.admit_http_command(Policy {
                     operation: Operation::Read,
@@ -384,4 +387,40 @@ fn a_default_stamp_that_cannot_advance_dispatches_unstamped() {
         }),
     );
     assert_eq!(observed(&e, 5), [None]);
+}
+
+#[test]
+fn an_expired_deferred_wait_survives_many_live_waits() {
+    let mut e = engine(Probe {
+        ignore_high: true,
+        ..Default::default()
+    });
+    deliver(
+        &mut e,
+        0.,
+        r#"{"op":"placeOrders","command":1,"orders":[]}"#,
+    );
+    deliver(&mut e, 0., &cancel(2, "7", Some(1_000)));
+    for command in 1_000..5_200 {
+        deliver(&mut e, 0., &cancel(command, "x", Some(1_000)));
+    }
+    deliver(&mut e, 2_000., &cancel(6_000, "x", Some(1_000)));
+    assert_eq!(deadline(&e, 2), Some(1_000.), "only a terminal removes it");
+    e.handle(
+        3_000.,
+        Event::WsMessage {
+            socket: SocketId(1),
+            text: "7",
+        },
+    );
+    assert_eq!(observed(&e, 2), [Some(Wait::Expired)]);
+}
+
+#[test]
+fn an_exhausted_receipt_sequence_never_wraps() {
+    let mut e = engine(Probe::default());
+    e.io.command_waits.exhaust_receipts();
+    deliver(&mut e, 0., &cancel(5, "x", Some(1_000)));
+    assert_eq!(observed(&e, 5), [None], "no receipt left: unstamped");
+    assert_eq!(deadline(&e, 5), None);
 }

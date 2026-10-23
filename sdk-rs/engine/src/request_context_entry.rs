@@ -25,10 +25,9 @@ pub enum CommandWait {
 pub const DEFAULT_COMMAND_WAIT_MS: u32 = 120_000;
 /// The host's own bound on a caller wait.
 pub const MAX_COMMAND_WAIT_MS: u32 = 2_147_483_647;
-/// Expired stamps are dropped on insert beyond this many live waits.
-const WAIT_STAMPS: usize = 4096;
-
 /// Absolute caller deadlines by command, each tied to the receipt that set it.
+/// Only a command's terminal removes its stamp, so an expired live or deferred
+/// command still reads `Expired`; storage is bounded by commands awaiting a reply.
 #[derive(Default)]
 pub(super) struct Waits {
     stamps: HashMap<CommandId, (u64, f64)>,
@@ -42,16 +41,14 @@ pub(super) struct Waits {
 impl Waits {
     /// Stamp one external receipt unless its command already has a live one;
     /// a duplicate never replaces it and gets no stamp of its own.
-    pub(super) fn receive(&mut self, command: CommandId, deadline: Option<f64>, now: f64) {
+    /// An exhausted receipt sequence never wraps: the receipt goes unstamped.
+    pub(super) fn receive(&mut self, command: CommandId, deadline: Option<f64>) {
         let own = if self.stamps.contains_key(&command) {
             None
-        } else if let Some(deadline) = deadline {
-            if self.stamps.len() >= WAIT_STAMPS {
-                self.stamps.retain(|_, (_, at)| *at > now);
-            }
-            self.receipts += 1;
-            self.stamps.insert(command, (self.receipts, deadline));
-            Some(self.receipts)
+        } else if let Some((deadline, receipt)) = deadline.zip(self.receipts.checked_add(1)) {
+            self.receipts = receipt;
+            self.stamps.insert(command, (receipt, deadline));
+            Some(receipt)
         } else {
             None
         };
@@ -81,6 +78,11 @@ impl Waits {
         if matches {
             self.stamps.remove(&command);
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn exhaust_receipts(&mut self) {
+        self.receipts = u64::MAX;
     }
 
     #[cfg(test)]

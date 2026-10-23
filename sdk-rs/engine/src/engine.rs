@@ -3179,7 +3179,7 @@ impl<V: Venue> Engine<V> {
         {
             let deadline =
                 command_entry::wait_deadline(now, command_entry::DEFAULT_COMMAND_WAIT_MS);
-            self.io.command_waits.receive(id, deadline, now);
+            self.io.command_waits.receive(id, deadline);
         }
         self.handle_received(now, event);
         self.io.command_waits.end_receipt();
@@ -3201,7 +3201,7 @@ impl<V: Venue> Engine<V> {
         let deadline = command_entry::wait_deadline(now, wait_ms)
             .ok_or(crate::request_context::Error::Invalid)?;
         if let Some(id) = command.completion_id() {
-            self.io.command_waits.receive(id, Some(deadline), now);
+            self.io.command_waits.receive(id, Some(deadline));
         }
         self.handle_received(now, Event::Command(command));
         self.io.command_waits.end_receipt();
