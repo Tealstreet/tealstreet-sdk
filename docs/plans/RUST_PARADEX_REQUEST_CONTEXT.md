@@ -260,3 +260,31 @@ multiplicity to source and manifest, including all conservative matches. Both
 request-context checks pass, including13 adversarial controls; whitespace checks
 pass. Architecture gate: No for the proposed adapter adoption. This is planning
 proof; implementation, CI and merge authorization remain separate gates.
+
+
+## Independent book implementation checkpoint
+
+Plan commit `f4301a83317`; regression commit `c3b433e5677`. All eight original
+depth-query tests passed unchanged before source work. All five new regression
+functions then failed at the explicit no-legacy-HTTP/no-send-before-claim
+assertion; the migration passes them without changing that assertion. The
+ordinary depth fixture adopts shared prepared-actions, verifies its new single
+original20s timer, then retains every existing outbound/codec/error assertion.
+The exact source/inventory prune matches the plan:62->57, lib3->0, depth3->1;
+all other path maps remain identical. No held source/test path is edited.
+
+Full-suite verification exposed two further existing legacy-draining book
+fixtures: public live-SBE isolation and private JWT preservation. Their only
+command-dispatch adaptation uses shared prepared-actions at the identical clock,
+retaining every original request/body/state/error/sequence assertion and receipt
+trace. The public fixture explicitly verifies exactly one new20s timer before
+its original no-extra-actions assertion; the JWT fixture retains that timer.
+This extends fixture scope to `tests/public.rs` and `tests/trading.rs`; neither
+is held by an open PR, and held account/trading source remains untouched.
+
+Final focused verification passes486 tests across38 Paradex/Binance suites,
+strict all-target Paradex Clippy, scoped formatting, bans, both request-context
+checks (13 adversarial controls) and whitespace checks. Source/adversarial and
+caller follow-up reviews find the added fixture changes clean. Native codec,
+protocol bodies, public routing and all existing classifier behavior stay intact.
+CI and the overseer's merge window remain separate gates.

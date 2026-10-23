@@ -1052,8 +1052,7 @@
     "e473c92d9c3a15cbdf8752a673c64963c9ef531ee4a7e47ae60d1abe5e32659e": 1
   },
   "venues/paradex/src/depth_query.rs": {
-    "7277348e8c2d96d515028483928e715a3e9c014072f494e18fd2e527dc2f360b": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 2
+    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
   "venues/paradex/src/history.rs": {
     "156d12f0af1aa73d997695a9ee5ae2f0b10efdaf05fbf3c5a44b49c0b8c67eb3": 4,
@@ -1071,10 +1070,6 @@
     "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
     "d04c9c210338abd029de862338a9937ff19e38f96097cbfba0efb4bbf2728caf": 1
-  },
-  "venues/paradex/src/lib.rs": {
-    "47a71c977b3aa01bebe78866d791cab178725822d90756258925d00d0b297eaa": 1,
-    "56d848e442eb914c45e3641ce58f354c9b36dd108d1f0bd57c97c4a58794d4a5": 2
   },
   "venues/paradex/src/public.rs": {
     "03068ad7442b394da421e7d1e0e04829b66c8bf11ddefd0dfdf69862ab1fa97f": 1,
