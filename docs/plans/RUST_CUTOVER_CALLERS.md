@@ -4056,9 +4056,7 @@ retains bounded Once, coin/order namespaces (including empty order identity),
 admitted-versus-rejected stale balance behavior and the different REST/WS mapped
 identity filters. No SDK call/result, order/position/FILLS shape, health policy,
 financial or snapshot authority, signing, HTTP/WS lifecycle or caller migration
-changes. The 126 final native account compatibility tests pass on unchanged
-pre-migration production, including eleven new controls; this is no defect-RED
-claim. Full CI and a fresh current-head raw proof remain the merge gates.
+changes.
 ## Static public headers during managed HTTP preparation
 
 Trusted Rust `SignStep` implementations can declare static noncredential HTTP
@@ -4261,6 +4259,17 @@ Required caller controls cover 503 with native timeout and rejection codes,
 malformed/mismatched identity evidence. Retain Store/ownership and physical-send
 assertions. This reference does not migrate Hyro, history/session work or any
 legacy-provenance request and does not establish NX integration or cutover.
+
+
+### WOO measured CPU-margin build policy
+
+Standalone WOO WASM family builds use the throughput defaults for the shared
+host, engine and inherited dependencies, alongside the AsterDEX and KuCoin Spot
+exceptions. The common serde_json level-3 policy and WOO's existing explicit
+venue profile continue to apply. This is a build-profile selection: callers use
+the same loader, API, request/signing contracts and public/private row shapes.
+Other family selections, the combined engine and native build profiles retain
+their existing policy.
 
 ## Managed paired-read publication and companion authority
 
