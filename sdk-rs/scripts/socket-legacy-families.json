@@ -25,7 +25,6 @@
     "phemex": "venues/phemex/src/",
     "polymarket": "venues/polymarket/src/",
     "txflow": "venues/txflow/src/",
-    "weex": "venues/weex/src/",
-    "woo": "venues/woo/src/"
+    "weex": "venues/weex/src/"
   }
 }

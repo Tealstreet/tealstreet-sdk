@@ -3,6 +3,7 @@ mod account;
 mod history;
 mod identity;
 mod sign;
+mod socket_codec;
 mod trading;
 mod wire;
 
@@ -11,7 +12,6 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
     Venue, num,
@@ -69,6 +69,7 @@ pub enum Pending {
 }
 #[derive(Default)]
 struct Connection {
+    feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     socket: Option<SocketId>,
     open: bool,
     ping_at: f64,
@@ -100,7 +101,6 @@ pub struct Woo {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
     rest: &'static str,
     public: Connection,
-    public_supervisor: Supervisor,
     depth: HashMap<String, Depth>,
     candles: HashMap<(String, Interval), CandleState>,
     generation: u64,
@@ -202,12 +202,6 @@ impl Woo {
             },
             options,
             public: Connection::default(),
-            public_supervisor: Supervisor::new(Config {
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(6_000.0),
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
             depth: HashMap::new(),
             candles: HashMap::new(),
             generation: 0,
@@ -330,42 +324,8 @@ impl Woo {
         );
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        let host = if self.options.testnet {
-            "wss://wss.staging.woox.io/ws/stream/"
-        } else {
-            "wss://wss.woox.io/ws/stream/"
-        };
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public_supervisor.connecting(cx);
-        }
-        self.public.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(format!(
-                    "{host}{}",
-                    self.options
-                        .application_id
-                        .as_deref()
-                        .unwrap_or("undefined")
-                ))
-                .channel(SocketChannel::Public),
-            ),
-        );
-    }
-    fn topic(&self, cx: &mut Cx<'_, Pending>, topic: &str, subscribe: bool) {
-        if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
-            cx.send(
-                socket,
-                format!(
-                    r#"{{"event":"{}","topic":{}}}"#,
-                    if subscribe {
-                        "subscribe"
-                    } else {
-                        "unsubscribe"
-                    },
-                    serde_json::to_string(topic).unwrap()
-                ),
-            );
+        if let Err(error) = self.managed_connect(cx, false) {
+            self.socket_error(cx, false, error);
         }
     }
     fn book_request(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -453,10 +413,8 @@ impl Woo {
                 sync: Sync::Buffer(Vec::new()),
             },
         );
-        if self.public.open
-            && let Some(m) = cx.store.market(&symbol)
-        {
-            self.topic(cx, &format!("{}@orderbookupdate", native(m)), true);
+        self.sync_public_interests(cx);
+        if self.public.open && cx.store.market(&symbol).is_some() {
             self.book_request(cx, &symbol);
         }
     }
@@ -644,43 +602,35 @@ impl Venue for Woo {
         }
         self.seed(cx, false);
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account_open(cx, socket) {
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public.ping_at = cx.now;
-        self.public_supervisor.opened(cx);
-        cx.send(socket, r#"{"event":"ping"}"#);
-        for topic in ["tickers", "bbos", "markprices"] {
-            self.topic(cx, topic, true);
-        }
-        let symbols: Vec<_> = self.depth.keys().cloned().collect();
-        for symbol in symbols {
-            if let Some(m) = cx.store.market(&symbol) {
-                self.topic(cx, &format!("{}@orderbookupdate", native(m)), true);
-            }
-            self.book_request(cx, &symbol);
-        }
-        for (symbol, interval) in self.candles.keys() {
-            if let Some(m) = cx.store.market(symbol) {
-                self.topic(cx, &format!("{}@kline_{interval}", native(m)), true);
-            }
-        }
-        if !self.options.public_data_only {
-            let mut seen = std::collections::HashSet::new();
-            for (symbol, _) in self.candles.keys() {
-                if seen.insert(symbol)
-                    && let Some(m) = cx.store.market(symbol)
-                {
-                    self.topic(cx, &format!("{}@trades", native(m)), true);
-                }
-            }
-        }
+    fn socket_control(
+        &self,
+        _: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        _: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        self.managed_control(feed, text)
     }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_event(cx, event)
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_encode(store, feed, subscribe, items, emit)
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account_message(cx, socket, text) {
             return;
@@ -688,7 +638,6 @@ impl Venue for Woo {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public_supervisor.received(cx.now);
         if let Ok(msg) = serde_json::from_str::<TickerMessage<'_>>(text)
             && msg.event.is_empty()
             && matches!(msg.topic.as_ref(), "tickers" | "bbos" | "markprices")
@@ -739,24 +688,7 @@ impl Venue for Woo {
             }
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.account_close(cx, socket) {
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.socket = None;
-        self.public.open = false;
-        self.public_supervisor.retry(cx);
-        for (symbol, state) in &mut self.depth {
-            cx.book_changed(symbol);
-            self.generation += 1;
-            state.generation = self.generation;
-            state.book.clear();
-            state.sync = Sync::Buffer(Vec::new());
-        }
-    }
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Identity(_) => {}
@@ -1161,25 +1093,6 @@ impl Venue for Woo {
             self.funding = Some(cx.set_timer(60_000.0));
             return;
         }
-        match self.public_supervisor.on_timer(cx, timer) {
-            SocketTick::Unhandled => (),
-            SocketTick::Reconnect => return self.connect_public(cx),
-            SocketTick::Ping => {
-                if let Some(s) = self.public.socket {
-                    self.public.ping_at = cx.now;
-                    cx.send(s, r#"{"event":"ping"}"#);
-                }
-                return;
-            }
-            SocketTick::TimedOut(_) => {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-                return;
-            }
-            SocketTick::Handled => return,
-        }
         let retry = self.depth.iter().find_map(|(s, d)| {
             if matches!(d.sync,Sync::Retry(t) if t==timer) {
                 Some(s.clone())
@@ -1215,24 +1128,18 @@ impl Venue for Woo {
                 {
                     cx.clear_timer(t);
                 }
-                if let Some(m) = cx.store.market(&symbol) {
-                    self.topic(cx, &format!("{}@orderbookupdate", native(m)), false);
-                }
+                self.sync_public_interests(cx);
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let Some(m) = cx.store.market(&symbol).map(native) else {
+                if cx.store.market(&symbol).is_none() {
                     return;
-                };
-                let trade = self.candles.keys().any(|(s, _)| s == &symbol);
+                }
                 let state = self.candles.entry((symbol.clone(), interval)).or_default();
                 state.count += 1;
                 if state.count > 1 {
                     return;
                 }
-                self.topic(cx, &format!("{m}@kline_{interval}"), true);
-                if !trade && !self.options.public_data_only {
-                    self.topic(cx, &format!("{m}@trades"), true);
-                }
+                self.sync_public_interests(cx);
             }
             Command::UnsubscribeCandles { symbol, interval } => {
                 let key = (symbol.clone(), interval);
@@ -1244,14 +1151,7 @@ impl Venue for Woo {
                     return;
                 }
                 self.candles.remove(&key);
-                if let Some(m) = cx.store.market(&symbol).map(native) {
-                    self.topic(cx, &format!("{m}@kline_{interval}"), false);
-                    if !self.options.public_data_only
-                        && !self.candles.keys().any(|(s, _)| s == &symbol)
-                    {
-                        self.topic(cx, &format!("{m}@trades"), false);
-                    }
-                }
+                self.sync_public_interests(cx);
             }
             cmd @ Command::FetchCandles { .. } => self.fetch_candles(cx, cmd),
             Command::Query { command, query } => self.history_command(cx, command, query),

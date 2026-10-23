@@ -241,3 +241,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Shared live Plan admission | Implementation plan | Before consuming Preflight, native whole-plan roots, reserved call slots or owned readiness. | [RUST_LIVE_PLAN_ADMISSION.md](RUST_LIVE_PLAN_ADMISSION.md) |
 | KuCoin Spot steady CPU | Profiling plan | Before attributing public steady-state CPU cost or proposing shared-path performance changes. | [RUST_KUCOIN_SPOT_STEADY_PROFILE.md](RUST_KUCOIN_SPOT_STEADY_PROFILE.md) |
+| WOO managed socket adoption | Native codec over shared lifecycle | Before modifying WOO epoch, auth, interest replay, retirement or supervision. | [RUST_WOO_MANAGED_SOCKETS.md](RUST_WOO_MANAGED_SOCKETS.md) |

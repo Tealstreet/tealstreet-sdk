@@ -29,9 +29,35 @@ fn start_with(markets: &str) -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId
     let (e, socket, reads, timer, _) = start_with_retry(markets);
     (e, socket, reads, timer)
 }
+
+fn established_stream() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
+    let (mut engine, socket, reads, timer) = start();
+    engine.handle(20.25, Event::WsOpened { socket });
+    ws(
+        &mut engine,
+        socket,
+        20.5,
+        r#"{"event":"auth","success":true}"#,
+    );
+    engine.drain_actions().for_each(drop);
+    (engine, socket, reads, timer)
+}
 /// Also returns the catalogue re-read timer a partial catalogue schedules.
 fn start_with_retry(
     markets: &str,
+) -> (
+    TestEngine,
+    SocketId,
+    Vec<HttpRequest>,
+    TimerId,
+    Option<TimerId>,
+) {
+    start_with_retry_at(markets, 0.0)
+}
+
+fn start_with_retry_at(
+    markets: &str,
+    at: f64,
 ) -> (
     TestEngine,
     SocketId,
@@ -45,9 +71,9 @@ fn start_with_retry(
         application_id: Some("app".into()),
         ..Default::default()
     }));
-    e.start(0.0);
+    e.start(at);
     let r = requests(&mut e).remove(0);
-    response(&mut e, &r, 10.0, markets);
+    response(&mut e, &r, at + 10.0, markets);
     let mut early = e.drain_actions().collect::<Vec<_>>();
     let ticker = early
         .iter()
@@ -56,7 +82,7 @@ fn start_with_retry(
             _ => None,
         })
         .unwrap();
-    response(&mut e, &ticker, 20.0, TICKERS);
+    response(&mut e, &ticker, at + 20.0, TICKERS);
     early.extend(e.drain_actions());
     let actions = early;
     let socket = actions
@@ -73,14 +99,14 @@ fn start_with_retry(
         .iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (*at_ms == 2010.0).then_some(*timer)
+                (*at_ms == at + 2010.0).then_some(*timer)
             } else {
                 None
             }
         })
         .unwrap();
     let retry = actions.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if jittered(*at_ms - 10.0, 1000.0) => Some(*timer),
+        Action::SetTimer { timer, at_ms } if jittered(*at_ms - (at + 10.0), 1000.0) => Some(*timer),
         _ => None,
     });
     let reads = actions
@@ -231,7 +257,7 @@ fn failed_algo_snapshot_preserves_complete_known_orders() {
 }
 #[test]
 fn stream_terminal_and_max_filled_survive_older_snapshot() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     ws(
         &mut e,
         socket,
@@ -247,7 +273,7 @@ fn stream_terminal_and_max_filled_survive_older_snapshot() {
 }
 #[test]
 fn repeated_execution_deduplicates_and_distinct_partial_fills_adjust_position_once() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIAL_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedQuantity":0.001,"executedPrice":59000,"tradeId":101}}"#;
     ws(&mut e, socket, 70.0, frame);
@@ -264,7 +290,7 @@ fn repeated_execution_deduplicates_and_distinct_partial_fills_adjust_position_on
 }
 #[test]
 fn cumulative_only_reports_emit_deltas_not_repeated_totals() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000}}"#;
     ws(&mut e, socket, 70.0, frame);
@@ -411,7 +437,7 @@ fn regular_pages_join_only_after_both_complete() {
 }
 #[test]
 fn minimal_terminal_event_shields_unknown_order_from_later_snapshot() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     ws(
         &mut e,
         socket,
@@ -426,7 +452,7 @@ fn minimal_terminal_event_shields_unknown_order_from_later_snapshot() {
 }
 #[test]
 fn minimal_parent_cancel_closes_both_existing_bracket_children() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     ws(
         &mut e,
@@ -484,7 +510,7 @@ fn account_equity_always_excludes_current_unrealized_pnl() {
 }
 #[test]
 fn single_object_algo_parent_updates_each_child() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     let data = ALGO.replace("58000", "58500").replace("65000", "65500");
     ws(
@@ -498,7 +524,7 @@ fn single_object_algo_parent_updates_each_child() {
 }
 #[test]
 fn closing_fill_keeps_flat_position_across_multiple_stale_refreshes() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
     ws(
@@ -619,7 +645,7 @@ fn sized_stop_kind_uses_closing_side_and_selected_source_then_preserves_identity
 }
 #[test]
 fn sparse_algo_update_retains_parent_reduce_flag_and_trigger_source() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     ws(
         &mut e,
@@ -638,7 +664,7 @@ fn sparse_algo_update_retains_parent_reduce_flag_and_trigger_source() {
 }
 #[test]
 fn execution_id_only_increment_updates_order_cumulative_once() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     let data = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIAL_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"executedQuantity":0.001,"executedPrice":59000,"tradeId":101}}"#;
     ws(&mut e, socket, 70.0, data);
@@ -698,7 +724,7 @@ fn regular_dual_id_spellings_agree_and_preserve_exact_native_id() {
 }
 #[test]
 fn buy_trailing_display_is_extreme_plus_callback_and_sell_is_minus() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     let regular = take(&mut reads, "/v1/orders?");
     response(&mut e, &regular, 30.0, &page(""));
     let r = take(&mut reads, "/v3/algo/orders?");
@@ -717,7 +743,7 @@ fn buy_trailing_display_is_extreme_plus_callback_and_sell_is_minus() {
 
 #[test]
 fn first_camel_case_order_and_execution_are_not_dropped() {
-    let (mut e, socket, _, _) = start();
+    let (mut e, socket, _, _) = established_stream();
     ws(
         &mut e,
         socket,
@@ -746,7 +772,7 @@ fn first_camel_case_order_and_execution_are_not_dropped() {
 
 #[test]
 fn unseen_execution_already_in_rest_emits_once_without_increasing_position() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIAL_FILLED","side":"BUY","orderType":"LIMIT","orderQuantity":0.02,"totalExecutedQuantity":0.005,"executedQuantity":0.005,"executedPrice":59000,"tradeId":101}}"#;
     ws(&mut e, socket, 70.0, frame);
@@ -758,7 +784,7 @@ fn unseen_execution_already_in_rest_emits_once_without_increasing_position() {
 
 #[test]
 fn partially_reconciled_execution_applies_only_new_cumulative_position_quantity() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     ws(
         &mut e,
@@ -837,14 +863,13 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
     for failed_second_page in [false, true] {
         let (mut e, socket, mut reads, _) = start();
         load(&mut e, &mut reads);
+        e.handle(64.0, Event::WsOpened { socket });
         ws(
             &mut e,
             socket,
             65.0,
             r#"{"topic":"algoexecutionreportv2","data":{"symbol":"PERP_BTC_USDT","algoOrderId":92,"rootAlgoOrderId":92,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":58000,"totalExecutedQuantity":0,"reduceOnly":true}}"#,
         );
-        e.drain_actions().for_each(drop);
-        e.handle(70.0, Event::WsOpened { socket });
         let mut reads = requests(&mut e);
         let regular = take(&mut reads, "/v1/orders?");
         response(&mut e, &regular, 80.0, &page(""));
@@ -904,7 +929,7 @@ fn snapshot_children_inherit_parent_side_status_and_reduce_only() {
 }
 #[test]
 fn stream_child_fill_without_own_side_or_status_is_not_lost() {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     e.take_frame(90.0);
     let data = SPARSE_CHILDREN
@@ -1033,7 +1058,7 @@ fn hedge_skip_keeps_only_the_unreadable_leg_and_drops_a_closed_sibling() {
 }
 #[test]
 fn steady_hedged_fills_cannot_starve_position_snapshots() {
-    let (mut e, socket, mut reads, mut timer) = start();
+    let (mut e, socket, mut reads, mut timer) = established_stream();
     let info = take(&mut reads, "accountinfo");
     response(&mut e, &info, 30.0, &INFO.replace("ONE_WAY", "HEDGE_MODE"));
     reads.extend(requests(&mut e));
@@ -1357,7 +1382,7 @@ fn no_id_execution_after_blind_rest_interval_does_not_reprice_the_gap() {
 }
 
 fn invalid_last_does_not_consume_cumulative_correction(last: f64) {
-    let (mut e, socket, mut reads, _) = start();
+    let (mut e, socket, mut reads, _) = established_stream();
     load(&mut e, &mut reads);
     e.take_frame(60.0);
     let invalid = format!(
@@ -1398,7 +1423,7 @@ fn negative_last_quantity_keeps_cumulative_correction_eligible() {
 #[test]
 fn unpriced_last_without_cumulative_does_not_double_count_the_correction() {
     for price in [0.0, -1.0] {
-        let (mut e, socket, mut reads, _) = start();
+        let (mut e, socket, mut reads, _) = established_stream();
         load(&mut e, &mut reads);
         e.take_frame(60.0);
         let report = |price| {
@@ -1583,7 +1608,7 @@ fn isolated_exposure_stays_visible_and_warns_once_per_symbol() {
 
 #[test]
 fn fractional_socket_open_uses_integer_auth_stamp_and_matching_signature() {
-    let (mut e, socket, _, _) = start();
+    let (mut e, socket, _, _, _) = start_with_retry_at(MARKETS, 1_699_999_999_970.0);
     e.drain_actions().for_each(drop);
     e.handle(1700000000000.875, Event::WsOpened { socket });
     let auth = e

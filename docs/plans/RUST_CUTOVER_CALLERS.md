@@ -5428,3 +5428,24 @@ codecs still prove when their conditional native work is finished. ApeX #1891
 is a separate consumer obligation; this engine API alone does not migrate its
 writes, provider presentation, remote zkLink, startup or session paths. No TS
 caller shape or native result bytes change until an adapter adopts it.
+
+## WOO engine-owned socket lifecycle
+
+WOO public and private feeds use the shared Engine epoch, supervision, auth and
+subscription lifecycle. Duplicate opens, pre-open data and retired or expired
+socket events cannot replay subscriptions, authenticate a replacement, publish
+native data or refresh private health. Private authentication refusal retains
+WOO's reconnect/backoff policy and existing error notice; malformed proof does
+not authenticate. Account snapshots and reconciliation state survive retirement.
+
+Current public book, candle and trade interests retain native reference counts,
+wire bytes and replay order. Retirement clears the retiring public books and
+advances their native seed generation before reconnect; late old HTTP seeds and
+socket updates cannot repopulate the new generation. Shared/None public policies
+suppress the public transport. Private setup, request/signature construction,
+account reducers, polling and financial freshness fences keep their contracts.
+
+Hosts continue using the existing connect/send/close/timer interface. WOO's
+private auth frame and fixed subscriptions keep their native field order, with
+the post-auth ping following subscription release. Other venue families keep
+their current adapters, including Sam's excluded Bitunix boundary.

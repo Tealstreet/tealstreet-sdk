@@ -110,3 +110,20 @@ change accompanies socket ownership.
    a venue window; separate fresh scope/unowned/revert guard then head-matched
    merge only after explicit GO. Report actual parents/tree and remaining socket
    inventory. Continue with one separately coordinated venue per PR.
+
+## Original controls and fixture custody
+
+Checkpoint bc5415d7c09 has four assertion REDs and two positive live-wire controls;
+its compile succeeds and each failure names a lifecycle boundary above. The
+separate baseline compatibility run passes 194 tests. Source adoption makes all
+six controls pass without changing their assertions.
+
+Some financial account fixtures inject private data without any prior open.
+Use an established-stream helper only for those native reducer fixtures; keep
+bare-start startup/auth/watchdog tests. Anchor the fractional signing fixture's
+connection clock to its intended fractional open. Preserve every existing
+financial/wire assertion. One rejected-snapshot case opens before its first
+private data and retains that open's queued refresh reads, preserving causal
+order rather than treating a duplicate open as a reconnect. The #1788 owner
+cleared this bounded fixture repair and requires actual reconnect transitions
+when composing its later token controls.

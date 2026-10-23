@@ -2416,3 +2416,19 @@ proof remain open. No allocator change is included in this socket draft.
 The option-1 variant leaves Bitunix incoming-exact on the legacy path; the
 temporary socket inventory records that deferred family. No source or gate
 claim is inherited from the historical two-family experiment.
+
+## WOO socket authority adoption
+
+WOO's two physical connect sites use the landed managed-socket core. Native
+code retains protocol construction, book/candle facts and account decoding;
+Engine owns epochs, auth evidence, timers, retry and complete interest release.
+The public AnyText/ControlPolicy::None policy preserves cached-index ticker
+processing without a second control JSON parse. Native private refusal continues
+through reconnect without revoking the public sibling or clearing financial state.
+
+Compatibility review found financial fixtures delivering private data before
+an open and a signing fixture opening years after connection creation. They now
+establish valid ingress custody while retaining their original result and wire
+assertions. No account reducer or native snapshot token logic is changed. Socket
+inventory pruning is WOO-only; the request inventory and every other family stay
+exact. Bitunix remains excluded under Sam's explicit option-1 decision.
