@@ -4332,6 +4332,18 @@ row shapes keep their existing contracts. CPU objectives and all strict
 correctness checks retain their existing thresholds and known-failure policies.
 Combined and native release builds keep their existing profile selection.
 
+
+## AsterDEX, GRVT and TxFlow row-reporting adoption (2026-10-23)
+
+AsterDEX position, GRVT coin/order/position and TxFlow position diagnostics use
+the existing bounded engine Once reporter. Native notice text, severity and
+repeat/re-arm ordering remain. AsterDEX and TxFlow keep early REST per-ID
+forgetting before full snapshot admission, and zero-size rows do not gain a
+per-key rearm. TxFlow retains exact composite/asset/anonymous labels and its
+separate WS behavior. GRVT retains namespace isolation, unfiltered duplicate
+coin rearm, filtered order/position rearm and rearming before per-row timestamp
+rejection on a current response. Callers retain the same account data, command
+outcomes, health policy, transports, signing and snapshot/financial authority.
 ## Engine-owned initial command admission
 
 Adapters use `admit_http_command(policy)` at the start of a genuine engine command
@@ -4364,6 +4376,15 @@ before binding completion authority or publishing a no-I/O completion companion.
 A same-owner child, foreign issuer, mutation-bearing owner or sealed generation
 is refused. This check retains completion expiry semantics and grants no new
 send, retry, publication or joined-observer authority.
+
+A successfully admitted initial command retains its completion generation until
+typed terminal cleanup, including native single-owner WebSocket reads with no
+managed HTTP attempt. Unrelated work and deadline expiry cannot erase it or
+reuse its command ID; NX receives the original native timeout once. Only the
+issued Context can complete that generation. An expired root still grants no
+send or publication rights, and unparented siblings cannot extend its bound.
+Outstanding owners count toward the existing 256-owner capacity until cleanup;
+adapters must finalize them through their existing native terminal callbacks.
 
 
 ## Context-owned history completion and admission
