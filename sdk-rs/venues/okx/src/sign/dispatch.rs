@@ -66,7 +66,7 @@ fn context(origin: &str, method: &str, path: &str) -> Context {
 }
 
 /// Demo aliases trade against OKX's simulated account on every request.
-const DEMO_HEADERS: &[(&str, &str)] = &[("x-simulated-trading", "1")];
+pub(crate) const DEMO_HEADERS: &[(&str, &str)] = &[("x-simulated-trading", "1")];
 
 pub struct Http {
     identity: Option<Identity>,
