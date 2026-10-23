@@ -477,12 +477,14 @@ request-context/registry seams with uufub4.
    stay `Unknown` and accepted IDs stay accepted. No reset sent flags, no new
    identities, and the old execution is never reopened (choice 10).
 3. **Same-ID retry authority.** A resend of a released leg with the same
-   orderLinkId needs a typed engine fact: complete two-axis absence observed
-   by this execution's own read legs, delivered after the uncertain release
-   (`RetryEvidence::ReconciledAbsence`). The engine checks the absence
-   delivery came after the leg's last release and within the same execution.
-   Native absence text alone cannot authorize it. At most two physical
-   attempts per leg, bounded across resumed executions.
+   orderLinkId needs an engine-minted, opaque reconciliation grant, not a
+   constructible evidence enum (uufub4). The grant is minted only inside the
+   exact delivery of this execution's own complete two-axis read, after the
+   leg's latest release. It is bound to the execution and generation, the
+   leg, that latest release, the reading delivery and the original bound, and
+   it is consumed by exactly one resend. It never bypasses classifier custody;
+   native absence text alone cannot mint it. At most two physical attempts per
+   leg, bounded across resumed executions.
 4. **Deadline.** Hyro executions use a 110 s bound, below the SDK's 120 s
    command wait, so the engine's typed `Unknown`/`Timeout` reaches callers
    before the host gives up.
@@ -517,9 +519,11 @@ and `complete_execution`, and `waiters` is removed. Identity receipts use
   guarded by owner. Until these exist the arms refuse (`Invalid`) or no-op.
   The Hyro migration PR deletes the legacy branch, `send_hyro` and the
   `Call::Hyro` arms (remove-before-master).
-- `RetryEvidence::ReconciledAbsence` and the execution journal touch
-  `request_context.rs` / `request_context_registry.rs`, so the hook list goes to
-  uufub4 before any edit.
+- The reconciliation grant and the execution journal touch
+  `request_context.rs` / `request_context_registry.rs`. uufub4 (#1873 Plan)
+  requires every execution root and leg to keep the credit-aware 256-Context
+  admission (`reserved_contexts`), and journal imports to keep uncertainty,
+  effects, budgets and dedup without extending any root.
 
 ### Acceptance (beyond the REDs)
 
