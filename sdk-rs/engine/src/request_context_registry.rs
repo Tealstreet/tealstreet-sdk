@@ -73,6 +73,10 @@ enum CommandPhase {
     Context {
         root: Context,
         entry_owned: bool,
+        /// A caller-wait Read root the engine expires at its deadline.
+        tracked: bool,
+        /// Past its deadline: no send, publication or venue completion.
+        expired: bool,
     },
     #[cfg(feature = "http-plans")]
     Preflight(preflight::State),
@@ -306,7 +310,9 @@ impl ContextRegistry {
         let owner = self.commands.get_mut(&id).expect("issued command entry");
         assert_eq!(owner.generation, generation);
         let (root, entry_owned) = match &mut owner.phase {
-            CommandPhase::Context { root, entry_owned } => (root, entry_owned),
+            CommandPhase::Context {
+                root, entry_owned, ..
+            } => (root, entry_owned),
             #[cfg(feature = "http-plans")]
             _ => panic!("command entry must retain a Context root"),
         };
@@ -346,6 +352,22 @@ impl ContextRegistry {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
+        self.issue_until(identity, scope, policy, now, parent, egress, None)
+    }
+
+    /// `until` is an exact absolute deadline that replaces the policy timeout
+    /// (the caller's raw receipt), never rounded through whole milliseconds.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn issue_until(
+        &mut self,
+        identity: u64,
+        scope: Scope,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+        egress: Option<Egress>,
+        until: Option<f64>,
+    ) -> Result<Context, Error> {
         if let Some(parent) = parent {
             self.validate(parent, now)?;
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
@@ -381,6 +403,13 @@ impl ContextRegistry {
         {
             return Err(Error::State);
         }
+        // A tracked caller-wait root stays plain Read: a Timeout seal must
+        // never erase a released write.
+        if policy.operation == Operation::Mutation
+            && matches!(scope, Scope::Command(id) if self.tracked(id))
+        {
+            return Err(Error::Invalid);
+        }
         let owner = match parent.map(Context::owner) {
             Some(owner) => owner,
             None => match scope {
@@ -397,7 +426,7 @@ impl ContextRegistry {
                 Scope::Execution => return Err(Error::Invalid),
             },
         };
-        self.commit(owner, identity, policy, now, parent, egress)
+        self.commit(owner, identity, policy, now, parent, egress, until)
     }
 
     fn issue_session(
@@ -429,9 +458,11 @@ impl ContextRegistry {
             now,
             parent,
             egress,
+            None,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn commit(
         &mut self,
         owner: Owner,
@@ -440,15 +471,16 @@ impl ContextRegistry {
         now: f64,
         parent: Option<&Context>,
         egress: Option<Egress>,
+        until: Option<f64>,
     ) -> Result<Context, Error> {
-        let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
-            parent.deadline().min(now + f64::from(policy.timeout_ms))
-        });
+        let deadline = until.unwrap_or(now + f64::from(policy.timeout_ms));
+        let deadline = parent.map_or(deadline, |parent| parent.deadline().min(deadline));
         if let Owner::Command { id, .. } = owner
             && let Some(root) = self.commands.get(&id).and_then(|owner| match &owner.phase {
                 CommandPhase::Context {
                     root,
                     entry_owned: true,
+                    ..
                 } => Some(root),
                 _ => None,
             })
@@ -504,6 +536,8 @@ impl ContextRegistry {
                     phase: CommandPhase::Context {
                         root: context.clone(),
                         entry_owned: false,
+                        tracked: false,
+                        expired: false,
                     },
                     last_deadline,
                     writes: None,
@@ -649,6 +683,9 @@ impl ContextRegistry {
 
     /// Retirement authority only; expiry cannot create fresh send permission.
     fn validate_handle(&self, context: &Context) -> Result<(), Error> {
+        if matches!(context.owner(), Owner::Command { id, .. } if self.expired(id)) {
+            return Err(Error::Revoked);
+        }
         if !context.issued_by(&self.issuer)
             || self.contexts.get(&context.leg()) != Some(context)
             || matches!(context.owner(), Owner::Command {id, generation}
@@ -959,10 +996,11 @@ impl ContextRegistry {
         if observer != self.is_observer(command) || (observer && delivery.is_some()) {
             return Err(Error::Revoked);
         }
-        if self
-            .commands
-            .get(&command)
-            .is_some_and(|owner| !matches!(owner.phase, CommandPhase::Context { .. }))
+        if self.expired(command)
+            || self
+                .commands
+                .get(&command)
+                .is_some_and(|owner| !matches!(owner.phase, CommandPhase::Context { .. }))
         {
             return Err(Error::Revoked);
         }
@@ -1114,6 +1152,101 @@ impl ContextRegistry {
         Ok(Seal::Failure(error, reports))
     }
 
+    /// Effect-free: a new command root would fit the bounded registry, and
+    /// its storage is reserved, so issuance after the ID spend cannot fail.
+    pub(super) fn reserve_command_root(&mut self, command: CommandId) -> Result<(), Error> {
+        let new_owner = !self.commands.contains_key(&command);
+        if self.contexts.len() + self.reserved_context_count() >= CAPACITY
+            || (new_owner && self.commands.len() >= CAPACITY)
+        {
+            return Err(Error::Capacity);
+        }
+        self.contexts
+            .try_reserve(1 + self.reserved_context_count())
+            .map_err(|_| Error::Capacity)?;
+        if new_owner {
+            self.commands.try_reserve(1).map_err(|_| Error::Capacity)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `root`'s owner is a tracked caller-wait Read root.
+    pub(super) fn tracked_owner(&self, root: &Context) -> bool {
+        matches!(root.owner(), Owner::Command { id, .. } if self.tracked(id))
+    }
+
+    fn tracked(&self, command: CommandId) -> bool {
+        self.commands
+            .get(&command)
+            .is_some_and(|owner| matches!(owner.phase, CommandPhase::Context { tracked: true, .. }))
+    }
+
+    fn expired(&self, command: CommandId) -> bool {
+        self.commands
+            .get(&command)
+            .is_some_and(|owner| matches!(owner.phase, CommandPhase::Context { expired: true, .. }))
+    }
+
+    /// Track this command's just-retained entry root for engine expiry.
+    pub(super) fn track_read_root(&mut self, root: &Context) {
+        let Owner::Command { id, generation } = root.owner() else {
+            panic!("a tracked root is a command root");
+        };
+        let owner = self.commands.get_mut(&id).expect("issued tracked root");
+        assert_eq!(owner.generation, generation);
+        let CommandPhase::Context {
+            root: issued,
+            entry_owned: true,
+            tracked,
+            ..
+        } = &mut owner.phase
+        else {
+            panic!("a tracked root is a retained Context root");
+        };
+        assert!(issued == root && root.operation() == Operation::Read);
+        *tracked = true;
+    }
+
+    /// Mark this exact tracked root expired; `false` when it is already gone.
+    pub(super) fn expire_read_root(&mut self, command: CommandId, generation: u64) -> bool {
+        let Some(owner) = self.commands.get_mut(&command) else {
+            return false;
+        };
+        match &mut owner.phase {
+            CommandPhase::Context {
+                tracked: true,
+                expired,
+                ..
+            } if owner.generation == generation => {
+                *expired = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The engine's own Timeout seal for an expired tracked Read root. No
+    /// venue path reaches it: the expired flag refuses every other seal.
+    pub(super) fn seal_expired_root(&mut self, command: CommandId, generation: u64) -> Seal {
+        let sealable = self.commands.get(&command).is_some_and(|owner| {
+            owner.generation == generation
+                && owner.writes.is_none()
+                && !owner.mutation_declared
+                && matches!(
+                    owner.phase,
+                    CommandPhase::Context {
+                        tracked: true,
+                        expired: true,
+                        ..
+                    }
+                )
+        });
+        if !sealable {
+            return Seal::Stale;
+        }
+        Seal::Legacy(Some(Error::TimedOut.read_venue_error()))
+    }
+
     pub(super) fn finish(&mut self, command: CommandId) -> bool {
         #[cfg(feature = "http-plans")]
         if let Some(owner) = self.commands.get_mut(&command) {
@@ -1259,6 +1392,12 @@ impl<P> Cx<'_, P> {
     ) -> Result<Context, Error> {
         if !self.io.entry_context_allowed(scope) {
             return Err(Error::Revoked);
+        }
+        // A tracked caller-wait root stays plain Read: refused before any spend.
+        if policy.operation == Operation::Mutation
+            && matches!(scope, Scope::Command(id) if self.io.request_contexts.tracked(id))
+        {
+            return Err(Error::Invalid);
         }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = self
