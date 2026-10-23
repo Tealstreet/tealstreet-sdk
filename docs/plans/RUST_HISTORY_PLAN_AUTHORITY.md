@@ -337,3 +337,11 @@ that every NX/Agent caller uses its defaults. Their additional wrappers,
 configured overrides and abandonment behavior still require consumer-owner
 confirmation and the consumer CALLERS entry. None of this work changes those
 waits or makes local promise expiry cancel an engine-owned Plan.
+
+The BloFin consumer CALLERS entry must state the default consequence explicitly:
+a slow paged history query can reject its caller after 120 seconds while its
+engine Plan continues to completion or root expiry. The worker proxy has a
+121-second outer wait with these defaults. A late engine completion does not
+resolve the already-rejected caller promise. The consumer must retain this
+boundary or document and test any deliberate override; the proposed engine
+root alone does not change it.
