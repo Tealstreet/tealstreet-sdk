@@ -48,22 +48,18 @@ pub fn sign(
     })
 }
 
-// The phantom agent has a fixed EIP-712 schema. Encode its ABI words here so
-// the venue does not pull the general JSON typed-data parser into the host.
-/// One nonce domain per agent address, shared by Hyperliquid and TxFlow
-/// (including vaults): raw host milliseconds within the safe-integer range.
+/// Reserve the agent's nonce in the domain Hyperliquid shares with TxFlow.
 pub fn agent_nonce<P>(cx: &safe_cex_engine::Cx<'_, P>, secret: &str) -> Result<u64, String> {
-    use safe_cex_engine::nonce::{NonceFloor, NonceKey};
     let address = ethereum::private_key_address(secret)?;
     cx.reserve_nonce(
-        "hyperliquid-agent",
-        &NonceKey::ethereum_address(&address),
-        NonceFloor::RawMs { scale: 1 },
-        (1 << 53) - 1,
+        &safe_cex_engine::nonce::HYPERLIQUID_AGENT,
+        &safe_cex_engine::nonce::NonceKey::ethereum_address(&address),
     )
     .map_err(|error| error.message().into())
 }
 
+// The phantom agent has a fixed EIP-712 schema. Encode its ABI words here so
+// the venue does not pull the general JSON typed-data parser into the host.
 fn agent_digest(connection_id: [u8; 32], mainnet: bool) -> [u8; 32] {
     let mut domain = [0u8; 160];
     domain[..32].copy_from_slice(&ethereum::keccak256(
@@ -87,14 +83,13 @@ mod tests {
     use super::*;
     #[test]
     fn agent_key_hex_case_does_not_create_a_new_nonce_domain() {
-        use safe_cex_engine::nonce::NonceKey;
         let key = "00000000000000000000000000000000000000000000000000000000000000ab";
         let upper = format!("0x{}", key.to_uppercase());
-        let lower = ethereum::private_key_address(key).unwrap();
-        assert_eq!(lower, ethereum::private_key_address(&upper).unwrap());
+        let checksummed = ethereum::private_key_address(key).unwrap();
+        assert_eq!(checksummed, ethereum::private_key_address(&upper).unwrap());
         assert_eq!(
-            NonceKey::ethereum_address(&lower),
-            NonceKey::ethereum_address(&lower.to_ascii_uppercase().replacen("0X", "0x", 1))
+            safe_cex_engine::nonce::NonceKey::ethereum_address(&checksummed),
+            safe_cex_engine::nonce::NonceKey::ethereum_address(&checksummed.to_ascii_lowercase())
         );
     }
     #[test]

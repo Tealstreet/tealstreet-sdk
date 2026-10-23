@@ -36,6 +36,22 @@ impl NonceKey {
     }
 }
 
+/// One family's nonce policy, declared once here rather than in venue code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonceDomain {
+    name: &'static str,
+    floor: NonceFloor,
+    limit: u64,
+}
+
+/// Hyperliquid and TxFlow agents (including vaults) share one sequence per
+/// agent address: raw host milliseconds within the safe-integer range.
+pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
+    name: "hyperliquid-agent",
+    floor: NonceFloor::RawMs { scale: 1 },
+    limit: (1 << 53) - 1,
+};
+
 /// Clock floor for a reservation, in the family's wire unit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NonceFloor {
@@ -82,41 +98,35 @@ pub(crate) fn reserve(
     Ok(nonce)
 }
 
+/// Integer arithmetic after flooring, so large scaled floors stay exact.
 pub(crate) fn floor(ms: f64, scale: u64, limit: u64) -> Result<u64, NonceError> {
-    let scaled = ms.floor() * scale as f64;
-    if !ms.is_finite() || ms < 0. || !(0.0..=limit as f64).contains(&scaled) {
+    const TWO_POW_64: f64 = 18_446_744_073_709_551_616.0;
+    if !ms.is_finite() || ms < 0. || ms.floor() >= TWO_POW_64 || scale == 0 {
         return Err(NonceError::InvalidTime);
     }
-    Ok(scaled as u64)
+    (ms.floor() as u64)
+        .checked_mul(scale)
+        .filter(|scaled| *scaled <= limit)
+        .ok_or(NonceError::InvalidTime)
 }
 
 impl<P> crate::Cx<'_, P> {
     /// Reserve a signing nonce before signing, in one shared monotonic domain.
-    pub fn reserve_nonce(
-        &self,
-        domain: &'static str,
-        key: &NonceKey,
-        floor: NonceFloor,
-        limit: u64,
-    ) -> Result<u64, NonceError> {
-        let (ms, scale) = match floor {
+    pub fn reserve_nonce(&self, domain: &NonceDomain, key: &NonceKey) -> Result<u64, NonceError> {
+        let (ms, scale) = match domain.floor {
             NonceFloor::RawMs { scale } => (self.now, scale),
             NonceFloor::ProtocolMs { scale } => (self.protocol_now(), scale),
         };
-        reserve(domain, key.0, self::floor(ms, scale, limit)?, limit)
+        let floor = self::floor(ms, scale, domain.limit)?;
+        reserve(domain.name, key.0, floor, domain.limit)
     }
 }
 
-/// Kraken's secret-digest domain until its signer migration moves it to
-/// `NonceKey::stable_id`. Frozen by check-credential-selection.py.
+/// Kraken's secret-digest domain only, until its signer migration moves it to
+/// `NonceKey::stable_id`. No other domain can be reached through this entry.
 #[doc(hidden)]
-pub fn reserve_legacy_digest(
-    domain: &'static str,
-    identity: [u8; 32],
-    floor: u64,
-    limit: u64,
-) -> Result<u64, String> {
-    reserve(domain, identity, floor, limit).map_err(|error| error.message().into())
+pub fn reserve_kraken_legacy(identity: [u8; 32], floor: u64) -> Result<u64, String> {
+    reserve("kraken", identity, floor, u64::MAX).map_err(|error| error.message().into())
 }
 
 #[cfg(test)]
@@ -184,5 +194,19 @@ mod tests {
             assert_eq!(floor(bad, 1, u64::MAX), Err(NonceError::InvalidTime));
         }
         assert_eq!(floor(10., 1, 9), Err(NonceError::InvalidTime));
+        assert_eq!(floor(1., 0, u64::MAX), Err(NonceError::InvalidTime));
+        // Exact above 2^53 and no saturation at the u64 boundary.
+        assert_eq!(
+            floor(1_700_000_000_000.0, 1_000_000, u64::MAX),
+            Ok(1_700_000_000_000_000_000)
+        );
+        assert_eq!(
+            floor(18_446_744_073_709_551_616.0, 1, u64::MAX),
+            Err(NonceError::InvalidTime)
+        );
+        assert_eq!(
+            floor(u32::MAX as f64, 1 << 33, u64::MAX),
+            Err(NonceError::InvalidTime)
+        );
     }
 }

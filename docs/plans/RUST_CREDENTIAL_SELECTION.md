@@ -258,15 +258,21 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 
 ### C3 as built (part 1: store, keys, Hyperliquid/TxFlow)
 
-- `engine/src/nonce.rs` holds the single process-global store.
-  `crypto::nonce::next` is now a thin caller, kept only for Kraken's legacy
-  secret-digest domain (`reserve_legacy_digest`, frozen by the C4 checker).
+- `engine/src/nonce.rs` holds the shared process-global store. AsterDEX V3
+  keeps its own static (`asterdex/src/sign.rs:231`) until its migration, after
+  its open PRs.
+- `crypto::nonce::kraken` is a thin caller of `reserve_kraken_legacy`, which can
+  reach only the `kraken` secret-digest domain. It goes away with Kraken's
+  stable-id signer migration.
 - `NonceKey::{stable_id, ethereum_address}` are the only constructors. The
   `hyperliquid-agent` key stays byte-identical (`sha256` of the lowercase `0x`
   address), so no sequence resets across the upgrade.
-- `Cx::reserve_nonce(domain, &key, NonceFloor, limit)` takes the floor from the
-  raw or protocol clock. Hyperliquid and TxFlow reserve through one
-  `agent_nonce` helper. `crypto::nonce::ethereum_agent` is removed.
+- Family policy is declared once in the engine as a `NonceDomain` constant
+  (name, raw/protocol clock floor and scale, limit); `HYPERLIQUID_AGENT` is the
+  first. `Cx::reserve_nonce(&domain, &key)` computes the floor with exact
+  integer arithmetic.
+- Hyperliquid and TxFlow reserve through one `agent_nonce` helper.
+  `crypto::nonce::ethereum_agent` is removed.
 - Still to come:
   - Lighter `VenueCounter`;
   - Aster V3 (`asterdex-v3`, ProtocolMs x1000), after its open PRs;
