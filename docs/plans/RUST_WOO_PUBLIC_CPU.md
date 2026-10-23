@@ -65,3 +65,37 @@ Obtain independent source/adversarial, caller and full-map/architecture reviews.
 CI, actual dependency integration and a separate revert guard precede the
 head-matched merge in an overseer window. Until evidence exists, no improvement,
 1.10x target achievement or complete replay proof is claimed.
+
+## First unchanged-source findings (9aef)
+
+Build receipt and raw evidence are under /tmp/codex-ih35js-woo-profile-9aef.
+The first names profile has211 samples and58.5ms sampled wall intervals;25.333ms
+of inspector frames are excluded. Named WASM ingress occupies19.252ms, of which
+TickerMessage/Vec<Tick> deserialization occupies11.918ms inclusively. Default
+string hashing occupies3.834ms; shared numeric deserialization1.333ms. These are
+nested sampled wall costs, not additive CPU totals or gate metrics. The empty
+execution timer/sweep path is small in this sample, not a supported primary fix.
+
+Five alternating normal stripped-artifact pairs have medians TS31.517ms and
+Rust25.085ms (TS/Rust1.2564), with all77 frames served and no protocol errors.
+TS ranges16.787-34.770ms; Rust21.229-25.873ms. Local variance and the reported CI
+miss prevent claiming restored headroom from this baseline. The normal WOO
+artifact is1,142,442 bytes against the unchanged1,343,488-byte venue ceiling;
+names-preserved1,403,405 bytes is diagnostic and never a shipped artifact.
+
+### Next bounded compiler experiment, before production code
+
+WOO uses family speed defaults, but its venue crate is explicitly opt-level z
+in Cargo.toml. The dominant generated native Tick visitor therefore remains
+size-optimized even though shared serde_json is already opt-level3. Test ONE
+unchanged-source WOO-only build overriding safe-cex-venue-woo to opt-level3,
+using the existing family-profile mechanism as with Aster. Native/shared/combined
+profiles remain unchanged, and no parser/Store/engine path is bypassed. Reject
+an oversize candidate; only then consider a narrower compiler setting. Compare
+five alternating unprofiled candidate pairs and the same named profile boundary.
+Do not adopt or claim1.10x from names timings or a favorable TS outlier.
+
+Any eventual profile-policy change needs the unchanged fixed size budget,
+correctness/replay gates and exact-head CI. If this experiment fails to improve
+Rust cost materially or exceeds size, return to the named evidence and shared
+owner coordination rather than inventing a WOO-specific shared-path substitute.
