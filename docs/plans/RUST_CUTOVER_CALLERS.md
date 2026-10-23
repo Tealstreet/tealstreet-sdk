@@ -4793,3 +4793,13 @@ one typed failure with no write outcome, replacing the old pre-Context numeric
 NotSent fallback. Existing owners remain intact; a rejected new command ID can
 be reused later. Post-release read Network/Timeout behavior retains its existing
 NotSent declaration. No retry, payload or host transport contract changes.
+
+## BloFin candle command admission
+
+FetchCandles admits its original Read owner through the shared genuine command
+entry before market/interval preflight or managed HTTP. Initial capacity and
+invalid-clock refusals now carry the engine's typed reason and Read outcome
+convention; they emit exactly one failure without a fabricated Context or numeric
+fallback. A duplicate entry leaves the original preparation and completion
+authority intact. Existing market-before-interval validation, native candle
+request bytes, result sorting and preparation/release/expiry behavior remain.
