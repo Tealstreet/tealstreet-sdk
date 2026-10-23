@@ -411,6 +411,35 @@ fn partial_amount_only_replaces_shared_family_but_inverse_keeps_its_distinct_fal
 }
 
 #[test]
+fn missing_mark_fallback_treats_tpsl_not_modified_as_satisfied() {
+    for profile in PROFILES
+        .into_iter()
+        .filter(|profile| !profile.variant.is_hyro())
+    {
+        let mut h = ready(profile);
+        seed(
+            &mut h,
+            profile,
+            "Sell",
+            "StopLoss",
+            "LastPrice",
+            false,
+            true,
+        );
+        h.engine.store_mut().set_tickers(Vec::new());
+        amend(&mut h, Some(100.049), None);
+        assert!(!h.has_request(profile.cancel_path()));
+        h.respond(
+            "/v5/position/trading-stop",
+            200,
+            r#"{"retCode":34040,"retMsg":"not modified","result":{}}"#,
+        );
+        assert_eq!(h.result(91), Some(&Ok("[]".into())), "{profile:?}");
+        assert!(!h.unknown.contains(&91));
+    }
+}
+
+#[test]
 fn missing_mark_fallback_retains_raw_fields_original_kind_and_ordinary_position_index() {
     for profile in PROFILES {
         for mark in [Some(0.0), Some(f64::NAN), None] {

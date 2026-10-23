@@ -5374,8 +5374,8 @@ the remainder or extends its deadline.
 ### Ordinary Bybit trading on the Plan core
 
 Ordinary `bybit`, `bybitinverse`, `bybitspot` and `bybitdemo` writes (not
-`hyrotrader`, not option placements) run as one genuine preflight plus one
-admitted native plan. Caller-visible effects:
+`hyrotrader`, and no command on an option symbol) run as one genuine preflight
+plus one admitted native plan. Caller-visible effects:
 
 | Change | Command outcome | NX handling |
 | --- | --- | --- |
@@ -5388,7 +5388,7 @@ admitted native plan. Caller-visible effects:
 | Strict acknowledgements | A malformed, positional, count-mismatched or echo-mismatched ACK is `Unknown`; any IDs are evidence only and no Demo local row is published | Reconcile through reads. |
 | Margin mode `retCode 0` with any reason row | `Unknown` (was a refusal built from the text); native `3400045` stays a refusal | None. |
 | Position-mode read with positional or malformed rows | `NotSent` failure; nothing is cached | Retry the command. |
-| TP/SL `34040` not-modified | Success on an attached TP/SL amend and a partial-stop replacement (D1); a plain order amend answered `34040` stays a refusal | None. |
+| TP/SL `34040` not-modified | Success on any `/v5/position/trading-stop` write (placements, attached TP/SL amends, trailing and full-position stop moves, partial stops with or without a mark) (D1); a plain `/v5/order/amend` answered `34040` stays a refusal | None. |
 | Timing | Each native call and its one resend has its own 20 s window; the plan deadline is their declared sum, with no 120 s product cap; mode-read redos are unbounded (see AUDITS) | None. |
 
 Cancel-all keeps its narrow housekeeping: after a validated `retCode 0`, only

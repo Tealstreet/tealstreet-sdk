@@ -2533,7 +2533,7 @@ impl Venue for BybitLinear {
         };
         let category = symbol.map_or(self.primary_category, |symbol| self.category_for(symbol));
         // An ordinary trade command fails through its own preflight.
-        if !self.category_enabled(category) && self.ordinary_command(&command) {
+        if !self.category_enabled(category) && self.ordinary_command(cx.store, &command) {
             self.on_trade_command(cx, command);
             return;
         }

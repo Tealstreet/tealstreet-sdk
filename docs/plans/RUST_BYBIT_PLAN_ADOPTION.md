@@ -211,6 +211,12 @@ temporary dual path, which needs owner sign-off under the direct-cutover rule.
   `plan_protection_cancel_leg_context` before registration. It is its own
   engine PR (#1913), merging after #1857 and #1873, and is carried on the child
   as a marked commit until then.
+- D1 extended again: every `Call::TradingStop` leg of an amend (trailing move,
+  full-position stop move, partial stop without a mark) is a Setting, with a
+  `34040` test per shape.
+- D5 scope: every option-symbol command (placement, amend, cancel, cancel-all,
+  settings) stays on the legacy pipeline; the same remove-before-master-merge
+  obligation covers it.
 - C: every Unknown ordinary seal reconciles with exactly one fresh order read;
   tests answer it and assert no write, resend or success refresh.
 - F: `continue_on_error` is a caller contract. A provider refusal or lost

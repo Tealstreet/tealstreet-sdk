@@ -427,7 +427,7 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if self.ordinary_command(&command) {
+        if self.ordinary_command(cx.store, &command) {
             self.start_ordinary(cx, command);
             return;
         }

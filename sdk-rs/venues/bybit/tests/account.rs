@@ -3065,3 +3065,43 @@ fn stale_join_discards_staged_unsupported_diagnostics_without_consuming_memory()
         1
     );
 }
+
+// D1: every amend that writes `/v5/position/trading-stop` is a position TP/SL
+// setting, so `34040` (not modified) is the requested state already holding.
+#[test]
+fn trading_stop_amends_treat_tpsl_not_modified_as_satisfied() {
+    for kind in ["full", "trailing"] {
+        let mut h = ready();
+        h.message(
+            "/v5/private",
+            r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Full","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#,
+        );
+        if kind == "trailing" {
+            let mut trailing = h.engine.store().order("position-stop").unwrap().clone();
+            trailing.kind = safe_cex_engine::model::OrderType::TrailingStopLoss;
+            h.engine.store_mut().upsert_order(trailing);
+        }
+        h.command(Command::AmendOrder {
+            command: 55,
+            id: "position-stop".into(),
+            price: Some(87000.0),
+            amount: None,
+        });
+        let request = h.take("/v5/position/trading-stop");
+        assert!(
+            body(&request).contains(if kind == "trailing" {
+                "trailingStop"
+            } else {
+                r#""tpslMode":"Full""#
+            }),
+            "{kind}"
+        );
+        h.reply(
+            request.id,
+            200,
+            r#"{"retCode":34040,"retMsg":"not modified","result":{}}"#,
+        );
+        assert_eq!(h.result(55), Some(&Ok("[]".to_owned())), "{kind}");
+        assert!(!h.has_request("/v5/position/trading-stop"), "{kind}");
+    }
+}

@@ -21,7 +21,7 @@ use safe_cex_engine::request_context::{
     RetryEvidence, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::{
-    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError,
+    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, Store, VenueError,
 };
 use std::collections::VecDeque;
 
@@ -143,13 +143,24 @@ fn fields(body: &str) -> Fields {
 }
 
 impl BybitLinear {
-    /// Hyro and any option placement stay on the legacy job pipeline.
-    pub(crate) fn ordinary_command(&self, command: &Command) -> bool {
+    /// Hyro and every option-symbol command stay on the legacy job pipeline
+    /// (D5, removed before the master merge).
+    pub(crate) fn ordinary_command(&self, store: &Store, command: &Command) -> bool {
+        let option = |symbol: &str| self.category_for(symbol) == Category::Option;
+        let order_option = |id: &String| store.order(id).is_some_and(|order| option(&order.symbol));
+        let touches_options = match command {
+            Command::PlaceOrders { orders, .. } => orders.iter().any(|o| option(&o.symbol)),
+            Command::AmendOrder { id, .. } => order_option(id),
+            Command::CancelOrders { ids, .. } => ids.iter().any(order_option),
+            Command::CancelSymbolOrders { symbol, .. }
+            | Command::SetLeverage { symbol, .. }
+            | Command::SetMarginType { symbol, .. } => option(symbol),
+            _ => false,
+        };
         !self.variant.is_hyro()
             && trade_command_id(command).is_some()
             && !matches!(command, Command::CancelOrdersWithSymbols { .. })
-            && !matches!(command, Command::PlaceOrders { orders, .. }
-                if orders.iter().any(|o| self.category_for(&o.symbol) == Category::Option))
+            && !touches_options
     }
 
     /// The genuine command entry: one preflight before any check or read.
@@ -351,7 +362,6 @@ impl BybitLinear {
     fn admit_ordinary(&self, cx: &mut Cx<'_, Pending>, entry: &Ordinary, job: Job) -> Option<Run> {
         let amend_virtual =
             matches!(&entry.command, Command::AmendOrder { id, .. } if is_virtual(id));
-        let placing = matches!(entry.command, Command::PlaceOrders { .. });
         let mut legs = VecDeque::new();
         let mut delays = Vec::new();
         for mut step in job.steps {
@@ -361,7 +371,8 @@ impl BybitLinear {
             delays.push(step.delay_ms.max(0.0).min(f64::from(u32::MAX)) as u32);
             let planned = step.requests.pop()?;
             let intent = match planned.call {
-                Call::TradingStop if placing => LegIntent::Setting,
+                // Every trading-stop leg is a position TP/SL setting (D1).
+                Call::TradingStop => LegIntent::Setting,
                 Call::Amend if amend_virtual => LegIntent::Setting,
                 Call::PartialStop => LegIntent::Setting,
                 Call::CancelPartialStop { .. } => LegIntent::ProtectionCancel,
