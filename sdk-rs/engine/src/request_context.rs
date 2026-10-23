@@ -761,6 +761,13 @@ impl SendPacing {
     }
 }
 
+/// Proof that the engine classified this attempt's refusal as `RefusedResend`.
+/// Only `Cx::http_write_failure` creates one.
+#[derive(Debug)]
+pub struct ResendGrant {
+    pub(crate) attempt: RequestId,
+}
+
 /// Native codecs supply definitive facts. HTTP status and exception text are
 /// deliberately absent from this contract.
 #[derive(Clone, Debug, PartialEq)]
@@ -834,6 +841,8 @@ impl std::fmt::Debug for RejectionReports {
 
 struct WriteAttempt {
     id: RequestId,
+    // A classified RefusedResend verdict: the only evidence one resend may use.
+    resend_granted: bool,
     leg: u64,
     released: bool,
     result: Option<WriteResult>,
@@ -903,6 +912,7 @@ impl CommandWrites {
             result: None,
             reports: RejectionReports::default(),
             id_overflow: false,
+            resend_granted: false,
         });
         Ok(())
     }
@@ -926,6 +936,7 @@ impl CommandWrites {
             .ok_or(Error::Invalid)?;
         if !self.active(old.leg)
             || old.id_overflow
+            || !old.resend_granted
             || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
             || self.attempts.iter().rposition(|a| a.leg == old.leg)
                 != self.attempts.iter().position(|a| a.id == previous)
@@ -933,6 +944,10 @@ impl CommandWrites {
             return Err(Error::RetryForbidden);
         }
         let leg = old.leg;
+        // Each grant authorizes exactly one resend.
+        if let Some(old) = self.attempts.iter_mut().find(|a| a.id == previous) {
+            old.resend_granted = false;
+        }
         self.attempts.push(WriteAttempt {
             id,
             leg,
@@ -940,6 +955,7 @@ impl CommandWrites {
             result: None,
             reports: RejectionReports::default(),
             id_overflow: false,
+            resend_granted: false,
         });
         Ok(())
     }
@@ -1091,6 +1107,21 @@ impl CommandWrites {
             return Err(Error::State);
         }
         Ok(&mut attempt.released)
+    }
+
+    /// Mark a recorded effects-free refusal as resendable once. Only the
+    /// engine classifier calls this, for a `RefusedResend` verdict.
+    pub(crate) fn grant_resend(&mut self, id: RequestId) -> Result<(), Error> {
+        let attempt = self
+            .attempts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or(Error::Invalid)?;
+        if !matches!(&attempt.result, Some(WriteResult::Rejected(error)) if effects_free(error)) {
+            return Err(Error::State);
+        }
+        attempt.resend_granted = true;
+        Ok(())
     }
 
     pub fn released(&mut self, id: RequestId) -> Result<(), Error> {

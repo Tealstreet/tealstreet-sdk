@@ -1081,7 +1081,12 @@ mod tests {
         ) {
             self.receipts += 1;
         }
-        fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
+        fn on_response(
+            &mut self,
+            cx: &mut Cx<'_, Pending>,
+            pending: Pending,
+            response: Response<'_>,
+        ) {
             self.responses += 1;
             if self.hostile_response_patch {
                 cx.store
@@ -1094,19 +1099,34 @@ mod tests {
                     "write cannot inherit a prior read fence"
                 );
                 if self.retry_refusal && self.responses == 1 {
-                    cx.http_write_result(
-                        &pending.0,
-                        crate::request_context::WriteResult::Rejected(
-                            VenueError::new("native timestamp refusal").venue_code("10002"),
-                        ),
-                    )
-                    .unwrap();
-                    let context = cx
-                        .http_retry_context(
+                    use crate::classify::{
+                        CodeTable, Intent, Key, Native, NativeCode, Row, Verdict,
+                    };
+                    const TIMESTAMP: CodeTable = CodeTable {
+                        rows: &[Row {
+                            key: Key::Int(10002),
+                            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+                            only: None,
+                        }],
+                        unlisted: Verdict::Unknown(None),
+                        status: &[],
+                    };
+                    let native = Native {
+                        code: NativeCode::Int(10002),
+                        message: "invalid timestamp",
+                    };
+                    let (_, grant) = cx
+                        .http_write_failure(
                             &pending.0,
-                            crate::request_context::RetryEvidence::DefinitiveRefusal,
+                            &TIMESTAMP,
+                            Intent::Place,
+                            &response,
+                            Some(&native),
+                            "native timestamp refusal",
+                            None,
                         )
                         .unwrap();
+                    let context = cx.http_resend_context(&pending.0, grant.unwrap()).unwrap();
                     cx.request_signed_managed(
                         context.clone(),
                         Method::Post,

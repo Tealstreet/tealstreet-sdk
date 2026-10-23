@@ -4,7 +4,7 @@ use super::{CommandId, Cx, RequestId};
 use crate::VenueError;
 use crate::request_context::{
     Attempt, CommandWrites, Context, Error, Operation, Owner, Policy, RejectionReports,
-    RetryEvidence, Scope, WriteResult,
+    ResendGrant, RetryEvidence, Scope, WriteResult,
 };
 use std::collections::HashMap;
 
@@ -397,6 +397,17 @@ impl ContextRegistry {
             .result(delivery.attempt.request, result)
     }
 
+    pub(super) fn grant_resend(&mut self, delivery: &Delivery) -> Result<(), Error> {
+        if delivery.context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.command_mut(&delivery.context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .grant_resend(delivery.attempt.request)
+    }
+
     pub(super) fn unproven_result(
         &mut self,
         delivery: &Delivery,
@@ -622,6 +633,9 @@ impl<P> Cx<'_, P> {
         context: &Context,
         evidence: RetryEvidence,
     ) -> Result<Context, Error> {
+        if evidence == RetryEvidence::DefinitiveRefusal {
+            return Err(Error::RetryForbidden);
+        }
         self.io.request_contexts.validate(context, self.now)?;
         context.retry(evidence, self.now)
     }
@@ -792,6 +806,115 @@ impl<P> Cx<'_, P> {
         self.io
             .request_contexts
             .result_with_reports(delivery, result, reports)
+    }
+
+    /// Record a classified native failure for the delivered write attempt.
+    /// The engine, not the venue, turns the verdict into the journal fact; a
+    /// `RefusedResend` verdict also returns the only grant a resend accepts.
+    /// `reports: None` keeps the default one-message rejection reporting.
+    #[allow(clippy::too_many_arguments)]
+    pub fn http_write_failure(
+        &mut self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        intent: crate::classify::Intent,
+        response: &crate::Response<'_>,
+        native: Option<&crate::classify::Native<'_>>,
+        message: impl Into<String>,
+        reports: Option<RejectionReports>,
+    ) -> Result<(crate::classify::Verdict, Option<ResendGrant>), Error> {
+        use crate::classify::{self, Released, Verdict};
+        let delivery = self.current_write_delivery(context)?;
+        let released = Released::Response(response);
+        let verdict = classify::verdict(table, intent, released, native);
+        let error = classify::error(verdict, intent, released, native, message);
+        let result = match verdict {
+            Verdict::Refused(_) | Verdict::RefusedResend(_) => WriteResult::Rejected(error),
+            Verdict::Unknown(_) => WriteResult::Failed(error),
+            Verdict::Satisfied(_) => WriteResult::Accepted {
+                order_ids: Vec::new(),
+            },
+        };
+        self.record_write(&delivery, result, reports)?;
+        if !matches!(verdict, Verdict::RefusedResend(_)) {
+            return Ok((verdict, None));
+        }
+        self.io.request_contexts.grant_resend(&delivery)?;
+        Ok((
+            verdict,
+            Some(ResendGrant {
+                attempt: delivery.attempt.request,
+            }),
+        ))
+    }
+
+    /// A 2xx whose success envelope or acknowledgement does not prove the write.
+    pub fn http_write_unproven(
+        &mut self,
+        context: &Context,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        let delivery = self.current_write_delivery(context)?;
+        let error = VenueError::new(message)
+            .kind(crate::ErrorKind::Internal)
+            .outcome(crate::Outcome::Unknown);
+        self.record_write(&delivery, WriteResult::Failed(error), None)
+    }
+
+    /// One batch acknowledgement, items in caller order. The engine checks the
+    /// item count, joins accepted IDs and chooses Accepted, Rejected, KnownPartial
+    /// or Failed. `message` is the venue's existing text for a failed batch.
+    #[allow(clippy::too_many_arguments)]
+    pub fn http_write_batch(
+        &mut self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        intent: crate::classify::Intent,
+        response: &crate::Response<'_>,
+        expected: usize,
+        items: &[crate::classify::BatchItem<'_>],
+        message: impl Into<String>,
+        reports: Option<RejectionReports>,
+    ) -> Result<WriteResult, Error> {
+        let delivery = self.current_write_delivery(context)?;
+        let result = crate::classify::batch(table, intent, response, expected, items, message)?;
+        self.record_write(&delivery, result.clone(), reports)?;
+        Ok(result)
+    }
+
+    /// A resend of a write refused with a `RefusedResend` verdict. The journal
+    /// still refuses a second resend of the same logical leg.
+    pub fn http_resend_context(
+        &self,
+        context: &Context,
+        grant: ResendGrant,
+    ) -> Result<Context, Error> {
+        let _ = grant.attempt;
+        self.io.request_contexts.validate(context, self.now)?;
+        context.retry(RetryEvidence::DefinitiveRefusal, self.now)
+    }
+
+    fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.request_contexts.issuer) {
+            return Err(Error::Revoked);
+        }
+        Ok(delivery.clone())
+    }
+
+    fn record_write(
+        &mut self,
+        delivery: &Delivery,
+        result: WriteResult,
+        reports: Option<RejectionReports>,
+    ) -> Result<(), Error> {
+        match reports {
+            Some(reports) => self
+                .io
+                .request_contexts
+                .result_with_reports(delivery, result, reports),
+            None => self.io.request_contexts.result(delivery, result),
+        }
     }
 
     /// Retire a fully completed logical read/page join or write leg. Do not call
@@ -1560,6 +1683,7 @@ mod write_tests {
         registry
             .result(&delivery(&context, 11), rejected())
             .unwrap();
+        registry.grant_resend(&delivery(&context, 11)).unwrap();
         registry
             .register_attempt(&context, RequestId(12), 1.)
             .unwrap();
@@ -1751,6 +1875,9 @@ mod write_tests {
             .unwrap() = true;
         io.request_contexts
             .result(&delivery(&context, 11), rejected())
+            .unwrap();
+        io.request_contexts
+            .grant_resend(&delivery(&context, 11))
             .unwrap();
         io.request_contexts
             .register_attempt(&context, RequestId(12), 1.)
