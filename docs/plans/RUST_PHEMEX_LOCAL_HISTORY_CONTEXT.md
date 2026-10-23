@@ -2,8 +2,8 @@
 
 Lane codex-ih35js, 2026-10-24. Base actual landing
 661427d10b3747927198e52ca239c4a5d4601826. Plan precedes original assertion REDs,
-which precede implementation. No merge during #1869's exclusive freeze; request
-a later train window after clean reviews and CI.
+which precede implementation. After #1869 lands, integrate actual 1e8f600da75 and request
+a train window after clean reviews and CI; no merge without explicit GO.
 
 ## Selection and scope
 
@@ -106,8 +106,9 @@ fingerprint and every incoming unowned inventory entry; add no scanner exception
    compatibility controls; no compiler-error or fake-token RED qualifies.
 3. Add finite native compatibility for all eleven branches, both active-limit and
    duplicate subcases, exact nondefinitive lookup payload and error precedence.
-   No I/O/timer, auth or Store publication may occur. Release one real managed
-   peer to prove capacity recovery and isolation of the remaining owners. Preserve
+   No I/O/timer, auth or Store publication may occur. Terminate one parked managed
+   peer through the actual preparation-failure callback to free its registry slot
+   and prove capacity recovery and isolation of the remaining owners. Preserve
    active native requests, then complete them through their original continuation.
 4. Add the local adapter, replace only the selected terminals, and defer active
    insertion without changing valid native behavior. Keep valid public and signed
@@ -128,3 +129,22 @@ Architecture gate: No per-venue lifecycle implementation; the adapter consumes
 the shared engine admission and terminal APIs. A fresh separate guard and
 head-matched merge require an explicit post-freeze overseer window. No managed
 network/history, complete private parity or full-package provenance claim is made.
+
+## Original-source evidence and plan reviews
+
+All three independent plan reviews are clean at 1f6f234597d: source/adversarial,
+caller and full-map. Architecture gate: No. Capacity fixtures have neither
+credential container constructed, so all 256 candle peers use actual managed
+admission. Merely claiming a physical request would not free a registry slot;
+the recovery control settles a peer through preparation failure.
+
+On unchanged 661427d10b3 production, the new integration target compiles and runs
+nine controls: five pass, four fail assertions. The capacity history/income
+refusals still have kind=None instead of Internal; the unknown-market lookup
+still succeeds despite full registry capacity; invalid-clock local history
+still has kind=None instead of InvalidInput. No compile failure is counted.
+The passing controls cover finite local payloads/precedence, native active
+capacity and duplicate preservation, repeated local reuse, and valid signed
+and public native dispatch/continuations. The engine itself rejects duplicate
+active command IDs before venue entry with COMMAND_DUPLICATE and no terminal;
+tests preserve that actual behavior and complete the original native owner.
