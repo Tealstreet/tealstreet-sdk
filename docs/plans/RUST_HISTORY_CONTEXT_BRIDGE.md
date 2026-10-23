@@ -77,7 +77,7 @@ there are no checked twins of every mutator and no alternate executor.
 An unguarded legacy admission method on a Read history is a compile error. The
 guard cannot move with the owner into the next Pending or outlive the callback.
 Record the page leg on the first page-mutating operation; a different leg cannot
-stage/admit a previous failed prefix or its identity/coverage state. Binding is
+stage/admit a previous failed prefix or its identity/coverage state. Binding records the logical leg and exact physical Attempt
 per staged page, not per row. Clear it on validated admission, safe discard or
 stage restart. Safe discard removes only unvalidated staging and its leg binding.
 Native response validity is still a separate condition before accepting a page;
@@ -238,3 +238,46 @@ LegacyAuthority is opaque with a private zero-sized field rather than a public
 unit constructor, preventing direct calls to the sealed terminal trait as a
 disguised numeric completion. Compile-fail examples name E0599 for unchecked
 Read mutation/numeric construction and E0451 for authority construction.
+
+Core callback controls use a cfg(test)-private authority wrapper only around the
+first genuine command Read root issued immediately at fixture entry. They do not
+certify constructor binding or a production venue migration. Fourteen controls
+exercise real Prepare/Bind/Claim and exact managed callbacks: two-page recovery,
+strict reject/encoder failure, page binding and discarded-prefix identity reuse,
+readmission after mutable diagnostics, mutation-sibling failure/finalizer denial,
+transport failure, physical expiry versus logical timer completion, single-page
+row admission, inclusive range probes and stage retention, filtered-row refusal,
+pre-request typed/empty completion, duplicates and reused command generations.
+The synthetic response rows are core test facts, not native codec proof. The
+public constructor and two real venue receipts remain distinct dependency gates.
+
+The same-leg physical retry control calls the shared http_retry_context with
+ReadFailure evidence, preserves the exact logical Context/deadline, and queues a
+new managed preparation/claim. It proves discarded identities are reusable even
+when Context equality does not distinguish the two physical attempts. Replacing
+only guarded fresh() with direct CursorWalk::fresh reproduces an assertion RED
+in that control (the retry row is incorrectly not fresh); restoring the exact
+source returns GREEN. This is an implementation-regression mutant, separate
+from the original landed numeric-Completion RED evidence.
+
+Constructor binding is a read-only authority check, not an exclusive claim or
+new registry reservation. More than one ReadCompletion may bind the same valid
+original root; only the first accepted context terminal wins. Every later
+terminal revalidates and emits neither a marker nor a result. Pin this explicitly
+using the public constructor once its shared validator is available. The real
+failure-callback matrix also stages an unvalidated prefix and finishes without
+discard; accepted-only recovery must still exclude that staged prefix.
+
+Adversarial retry refinement: Context equality identifies the logical leg, not
+the physical attempt. A fifteenth managed control deliberately omits discard,
+retries the same Context, and requires admission to refuse before fresh/stage;
+it currently reproduces an assertion RED against the local bridge checkpoint.
+The correction binds each staged page to both Context and the current opaque
+Attempt. A crate-private Cx accessor delegates to the existing shared read HTTP
+delivery validator and returns only that validated delivery's Attempt. It grants
+no additional authority and copies no registry policy. Admission captures this
+token under its immutable Cx borrow; a different sibling or physical attempt
+returns State until explicit safe discard clears the binding and pending ids.
+The same-leg no-discard refusal and explicit discard/re-admission positive are
+both required. This accessor is coordinated in uufub4's registry region before
+source edits; the original-root constructor dependency remains separate.

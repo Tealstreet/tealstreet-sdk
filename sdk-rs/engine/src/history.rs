@@ -1323,3 +1323,7 @@ mod read_page_identity_tests {
         assert!(pending.fresh(&walk, "new".into()));
     }
 }
+
+#[cfg(test)]
+#[path = "history_context_tests.rs"]
+mod context_tests;

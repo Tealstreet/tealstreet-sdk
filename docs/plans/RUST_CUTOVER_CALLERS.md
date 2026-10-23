@@ -4335,8 +4335,10 @@ Combined and native release builds keep their existing profile selection.
 
 ## Context-owned history completion and admission
 
-Managed Rust history owners retain the original engine-issued command Read root
-across pages and composite stages. Bind the matching command/root once; a page
+For adapters using `ReadCompletion` and the `Read*History` types, the history
+owner retains the original engine-issued command Read root across pages and
+composite stages. Legacy numeric owners keep their existing lifecycle; each
+venue's adoption carries its own caller contract. Bind the matching command/root once; a page
 leg, foreign issuer, stale generation, background owner or mutation owner cannot
 substitute for that root. Read ownership does not become numeric completion
 authority when a lifecycle check refuses it. Plan and joined-observer ownership
