@@ -2520,7 +2520,10 @@ impl Venue for BybitLinear {
         if self.resend(cx, &mut pending, error) {
             return;
         }
-        let Some(Pending { rest, then, read, .. }) = pending else {
+        let Some(Pending {
+            rest, then, read, ..
+        }) = pending
+        else {
             return;
         };
         // A rejected retry may arrive as a host error containing the signed origin URL.

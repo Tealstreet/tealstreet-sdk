@@ -90,7 +90,13 @@ fn candle_refusals_before_any_request_are_typed_not_sent() {
     // An enabled option product reaches the venue's own option refusal; a
     // disabled product is refused before dispatch.
     for (command, options, symbol, interval, kind) in [
-        (42, true, "BTC-27MAR26-100000-C", Interval::M1, ErrorKind::Unsupported),
+        (
+            42,
+            true,
+            "BTC-27MAR26-100000-C",
+            Interval::M1,
+            ErrorKind::Unsupported,
+        ),
         // A disabled product is the account's configuration, not a missing command.
         (43, false, "BTCUSD", Interval::M1, ErrorKind::InvalidInput),
         (44, false, "BTCUSDT", Interval::S1, ErrorKind::Unsupported),
