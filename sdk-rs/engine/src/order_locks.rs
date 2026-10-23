@@ -15,6 +15,9 @@ struct Scope {
     sent: bool,
     managed: bool,
     unknown_symbol: bool,
+    // An absent-order answer arrived while this placement still held its
+    // lock: its reconcile read waits for finish, when a read can clear it.
+    absent: bool,
     ids: Vec<String>,
     symbols: Vec<String>,
     all_symbol: Option<String>,
@@ -54,6 +57,7 @@ impl OrderLocks {
             sent: false,
             managed: false,
             unknown_symbol: false,
+            absent: false,
         };
         let input = command;
         let command = match command {
@@ -230,6 +234,29 @@ impl OrderLocks {
                 self.uncertain.insert(String::new(), self.epoch);
             }
         }
+    }
+
+    /// Defer the reconcile read of an absent-order answer to this command's
+    /// finish while its placing scope is held (a read now could not clear the
+    /// fence). False when the command holds no placing scope.
+    pub fn defer_absent(&mut self, command: CommandId) -> bool {
+        match self
+            .active
+            .iter_mut()
+            .find(|(id, scope)| *id == command && scope.placing)
+        {
+            Some((_, scope)) => {
+                scope.absent = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn absent_pending(&self, command: CommandId) -> bool {
+        self.active
+            .iter()
+            .any(|(id, scope)| *id == command && scope.absent)
     }
 
     /// What a reconcile read must cover for this held command: `None` is a
