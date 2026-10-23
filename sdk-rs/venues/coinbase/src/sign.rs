@@ -169,41 +169,11 @@ impl Credentials {
         if !now.is_finite() || now < 0.0 || seconds >= (u64::MAX - 120) as f64 {
             return Err("Coinbase invalid clock".into());
         }
-        if uri.is_some_and(|value| {
-            value.is_empty() || value.len() > MAX_URI_BYTES || value.chars().any(char::is_control)
-        }) {
-            return Err("Coinbase invalid JWT URI".into());
-        }
-        if nonce.is_empty() || nonce.len() > 128 || nonce.chars().any(char::is_control) {
-            return Err("Coinbase invalid JWT nonce".into());
-        }
-        let nbf = seconds as u64;
-        // Keep the active TS claim contract; current Coinbase examples disagree.
-        let (alg, iss, aud) = match self.signer {
-            Signer::Es256(_) => ("ES256", "coinbase-cloud", None),
-            Signer::Ed25519(_) => ("EdDSA", "cdp", Some(["cdp_service"])),
+        let algorithm = match self.signer {
+            Signer::Es256(_) => JwtAlgorithm::Es256,
+            Signer::Ed25519(_) => JwtAlgorithm::EdDsa,
         };
-        let header = serde_json::to_vec(&Header {
-            alg,
-            typ: "JWT",
-            kid: &self.key,
-            nonce,
-        })
-        .map_err(|_| "Coinbase JWT header encoding failed")?;
-        let claims = serde_json::to_vec(&Claims {
-            iss,
-            aud,
-            nbf,
-            exp: nbf + 120,
-            sub: &self.key,
-            uri,
-        })
-        .map_err(|_| "Coinbase JWT claims encoding failed")?;
-        let input = format!(
-            "{}.{}",
-            URL_SAFE_NO_PAD.encode(header),
-            URL_SAFE_NO_PAD.encode(claims)
-        );
+        let input = signing_input(algorithm, &self.key, nonce, seconds as u64, uri)?;
         let signature = match &self.signer {
             Signer::Es256(key) => key.sign(input.as_bytes())?,
             Signer::Ed25519(seed) => {
@@ -237,6 +207,59 @@ impl Credentials {
             ("Content-Type", "application/json".into()),
         ])
     }
+}
+
+/// JWT signature algorithm, fixed by the key's type at setup (non-secret).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JwtAlgorithm {
+    Es256,
+    EdDsa,
+}
+
+/// `base64url(header).base64url(claims)`: the exact JWS signing input every
+/// Coinbase signer (legacy, dispatch recipe, remote recipe) signs.
+fn signing_input(
+    algorithm: JwtAlgorithm,
+    kid: &str,
+    nonce: &str,
+    nbf: u64,
+    uri: Option<&str>,
+) -> Result<String, String> {
+    if uri.is_some_and(|value| {
+        value.is_empty() || value.len() > MAX_URI_BYTES || value.chars().any(char::is_control)
+    }) {
+        return Err("Coinbase invalid JWT URI".into());
+    }
+    if nonce.is_empty() || nonce.len() > 128 || nonce.chars().any(char::is_control) {
+        return Err("Coinbase invalid JWT nonce".into());
+    }
+    let exp = nbf.checked_add(120).ok_or("Coinbase invalid clock")?;
+    // Keep the active TS claim contract; current Coinbase examples disagree.
+    let (alg, iss, aud) = match algorithm {
+        JwtAlgorithm::Es256 => ("ES256", "coinbase-cloud", None),
+        JwtAlgorithm::EdDsa => ("EdDSA", "cdp", Some(["cdp_service"])),
+    };
+    let header = serde_json::to_vec(&Header {
+        alg,
+        typ: "JWT",
+        kid,
+        nonce,
+    })
+    .map_err(|_| "Coinbase JWT header encoding failed")?;
+    let claims = serde_json::to_vec(&Claims {
+        iss,
+        aud,
+        nbf,
+        exp,
+        sub: kid,
+        uri,
+    })
+    .map_err(|_| "Coinbase JWT claims encoding failed")?;
+    Ok(format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(header),
+        URL_SAFE_NO_PAD.encode(claims)
+    ))
 }
 
 fn decode_base64(value: &str) -> Result<Zeroizing<Vec<u8>>, String> {
