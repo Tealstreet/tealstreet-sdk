@@ -289,6 +289,12 @@ impl<P> Cx<'_, P> {
             if matches!(owner.owner(), Owner::Session { .. }) {
                 return Err(Error::Invalid);
             }
+            // An execution observer re-dispatches only through its execution.
+            if matches!(owner.owner(), Owner::Command { id, .. }
+                if self.io.request_contexts.is_observer(id))
+            {
+                return Err(Error::Revoked);
+            }
             if self.io.request_contexts.resend_blocked(owner, self.now) {
                 return Err(Error::State);
             }
