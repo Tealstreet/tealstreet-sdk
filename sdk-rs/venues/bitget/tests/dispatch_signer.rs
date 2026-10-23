@@ -439,3 +439,68 @@ fn private_login_blocks_ping_and_late_signature_after_retirement_is_inert() {
             .any(|a| matches!(a,Action::WsSend {socket:s,..} if s==socket))
     );
 }
+#[test]
+fn private_login_work_is_the_declared_three_part_seconds_suffix() {
+    let parked = Arc::new(AtomicBool::new(false));
+    let mut h = configured(parked.clone());
+    h.load_public();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, POSITION);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.orders(OPEN_ORDER);
+    let socket = h
+        .sockets
+        .iter()
+        .find(|(_, url)| url.ends_with("/private"))
+        .unwrap()
+        .0;
+    parked.store(true, Ordering::SeqCst);
+    h.engine.handle(h.now, Event::WsOpened { socket });
+    let work = h
+        .engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Sign { work, .. } if work.context.method == "WS" => Some(work),
+            _ => None,
+        })
+        .unwrap();
+    let seconds = (h.now / 1000.).floor();
+    assert_eq!(work.receipt.stamp_ms, Some(seconds * 1000.));
+    let safe_cex_engine::signing::Operation::Sign { payload, .. } = &work.operations[1] else {
+        panic!("login signs its second operation");
+    };
+    assert!(
+        payload
+            == &[
+                (seconds as u64).to_string(),
+                "GET".into(),
+                "/user/verify".into()
+            ]
+            .map(
+                |part: String| safe_cex_engine::signing::PayloadPart::Bytes {
+                    bytes: part.into_bytes()
+                }
+            ),
+        "typed WS grammar distinguishes login from an opaque HTTP capture"
+    );
+    parked.store(false, Ordering::SeqCst);
+    let result = h
+        .engine
+        .signer()
+        .unwrap()
+        .sign_ready(&work)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        safe_cex_crypto::encode(&result.values[1], safe_cex_crypto::Encoding::Base64),
+        safe_cex_crypto::hmac_sha256(
+            b"material",
+            format!("{}GET/user/verify", seconds as u64).as_bytes(),
+            safe_cex_crypto::Encoding::Base64
+        )
+    );
+}

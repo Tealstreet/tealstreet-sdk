@@ -115,3 +115,22 @@ Next, sequenced after #1773 because both edit hosted registry admission:
    relayUpstream/relayWhenTunnelled, the immediate 40018 auth-refusal walk and
    native prelogin/connect fallback bounds. Replace the routing test that
    requires UTA to stay direct.
+
+## Hosted admission status (2026-10-23, uncommitted slice)
+
+Step 2 of the takeover sequence is implemented on top of merged #1773:
+1. All three aliases are admitted to registry hosted capture and declared
+   keyless RemoteSigner (`payloadSupported: false`). Hosted HTTP uses the new
+   standalone `bitget.signing.ts` codec, also used by the TS interceptor.
+2. The WS-seconds codec is generalised to `secondsTimestamp` plus a declared
+   `secondsSuffix`; OKX moved to it in the same change with unchanged OKX
+   expectations. Bitget native login now emits the shared three-part work.
+3. RED-first tests: 25 TS and 6 Rust assertions failed before the fix and pass
+   after; per-alias actual-WASM HTTP/WS/native-login tests are authored for CI
+   and were not run locally (no local `wasm-bindgen`).
+4. Two stale pre-merge assertions that Bitget was unmigrated were retargeted
+   or removed; four unused OKX dispatch signing allowances were shrunk exactly.
+
+Remaining: CI actual-WASM and replay evidence, #1814 row reverification, the
+request-context inventory decision, then the draft PR. UTA routing parity stays
+a separate follow-up.

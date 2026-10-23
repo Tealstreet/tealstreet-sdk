@@ -1,7 +1,6 @@
 import type { ExchangeOptions } from '../../types';
 import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
-import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
@@ -12,6 +11,7 @@ import { appendHttpFailure } from '../../utils/httpFailure';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitget.types';
+import { finishBitgetRequest, prepareBitgetRequest } from './bitget.signing';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
 import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
 
@@ -79,39 +79,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       return nextConfig;
     }
 
-    const timestamp = virtualClock.getCurrentTimeMs();
-    const method = config.method?.toUpperCase() ?? 'GET';
-
-    // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
-    let signingUrl = config.url;
-    if (config.params) {
-      if (config.params.symbol && !config.url?.includes(ENDPOINTS.KLINE)) {
-        config.params.symbol = config.params.symbol.replace('$', '');
-      }
-      const signingQuery = qs.stringify(config.params, { encode: false });
-      signingUrl = `${signingUrl}?${signingQuery}`;
-    }
-
-    // A replayed config carries the body axios already serialized: sign those bytes.
-    const stringifiedBody =
-      typeof config.data === 'string'
-        ? config.data
-        : config.data
-          ? toJsonString({
-              ...config.data,
-              ...(config.data.symbol ? { symbol: config.data.symbol.replace('$', '') } : {}),
-            })
-          : '';
-    const toSign = [timestamp, method, signingUrl, stringifiedBody].join('');
-    const signature = createHmac('sha256', options.secret).update(toSign).digest().toString('base64');
-
-    const headers = new AxiosHeaders({
-      ...nextConfig.headers,
-      'ACCESS-SIGN': signature,
-      'ACCESS-TIMESTAMP': timestamp,
-    });
-
-    return { ...nextConfig, headers };
+    const prepared = prepareBitgetRequest(nextConfig, virtualClock.getCurrentTimeMs());
+    const signature = createHmac('sha256', options.secret).update(prepared.payload).digest().toString('base64');
+    return finishBitgetRequest(prepared, options.key, signature, options.passphrase);
   });
 
   const seenResponses = new WeakSet<object>();
@@ -142,18 +112,3 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   return xhr;
 };
-
-function toJsonString(obj: object): string | null {
-  if (obj == null) {
-    return null;
-  }
-
-  let json = JSON.stringify(obj);
-  Object.keys(obj)
-    .filter((key) => key[0] === '_')
-    .forEach((key) => {
-      json = json.replace(key, key.substring(1));
-    });
-  const reg = new RegExp('"_', 'g');
-  return json.replace(reg, '"');
-}

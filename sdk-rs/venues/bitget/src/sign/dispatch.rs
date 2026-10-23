@@ -1,4 +1,5 @@
 //! Canonical Bitget work. The injected provider owns all credential material.
+use safe_cex_engine::signing::seconds_suffix_payload;
 use safe_cex_engine::signing::{
     Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
     hmac_sha256_work,
@@ -7,7 +8,7 @@ use safe_cex_engine::{Action, DispatchContext, SignStep, num};
 
 fn work(
     identity: &Identity,
-    payload: String,
+    payload: Vec<PayloadPart>,
     context: Context,
     stamp_ms: f64,
 ) -> Result<SignRequest, SignError> {
@@ -18,9 +19,7 @@ fn work(
         .ok_or(SignError::InvalidRequest)?;
     let mut work = hmac_sha256_work(
         identity,
-        vec![PayloadPart::Bytes {
-            bytes: payload.into_bytes(),
-        }],
+        payload,
         context,
         SignReceipt {
             stamp_ms: Some(stamp_ms),
@@ -102,13 +101,16 @@ impl SignStep for Http {
         self.stamp = num::format(stamp_ms);
         work(
             self.identity.as_ref().ok_or(SignError::Unavailable)?,
-            format!(
-                "{}{}{}{}",
-                self.stamp,
-                http.method.as_str(),
-                self.path,
-                http.body.as_deref().unwrap_or_default()
-            ),
+            vec![PayloadPart::Bytes {
+                bytes: format!(
+                    "{}{}{}{}",
+                    self.stamp,
+                    http.method.as_str(),
+                    self.path,
+                    http.body.as_deref().unwrap_or_default()
+                )
+                .into_bytes(),
+            }],
             context(&http.url, http.method.as_str(), &self.path),
             stamp_ms,
         )
@@ -165,7 +167,8 @@ impl SignStep for WsLogin {
         self.stamp = num::format(seconds);
         work(
             &self.identity,
-            format!("{}GET/user/verify", self.stamp),
+            // Same typed grammar as OKX; the remote wire declares this suffix.
+            seconds_suffix_payload(&self.stamp, "GET", "/user/verify"),
             context(&self.origin, "WS", "/user/verify"),
             seconds * 1000.,
         )

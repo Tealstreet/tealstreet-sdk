@@ -701,39 +701,6 @@ fn passphrase_only_primary_survives_raw_setup_as_alias_and_defaults_remain_optio
     );
 }
 
-#[cfg(feature = "bitget")]
-#[test]
-fn required_field_declarations_do_not_enable_unmigrated_bitget_injection() {
-    struct NeverConstruct;
-    impl safe_cex_venues::Visit for NeverConstruct {
-        type Output = ();
-        fn visit<V: safe_cex_engine::Venue + 'static>(self, _: safe_cex_engine::Engine<V>) {
-            panic!("field policy is not family adoption");
-        }
-    }
-    let (provider, identities) = local_signer_from_json_for(
-        "bitget",
-        r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
-    )
-    .unwrap();
-    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
-    options.signing = Some(identities);
-    let error = safe_cex_venues::build_with_signer(
-        "bitget",
-        options,
-        Some(safe_cex_engine::test_support::seeded_entropy(17)),
-        Some(provider),
-        NeverConstruct,
-    )
-    .expect_err("no adoption by setup policy");
-    assert_eq!(
-        error.message,
-        "Injected signing is not supported for this venue yet"
-    );
-    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
-    assert!(error.outcome.is_none());
-}
-
 #[test]
 fn json_null_keeps_legacy_none_fallback_without_accepting_explicit_empty_material() {
     for venue in REQUIRED_ALIASES {

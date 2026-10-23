@@ -99,7 +99,7 @@ describe('trusted local signer setup', () => {
     expect(received).toMatchObject({ primary: { secretEncoding: 'base64Text' } });
   });
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
-    expect(() => new RustEngineExchange('bitget', { ...options(), localSigner: {} }, new DefaultStore()))
+    expect(() => new RustEngineExchange('kraken', { ...options(), localSigner: {} }, new DefaultStore()))
       .toThrow(/not supported/);
   });
   it('rejects malformed or unknown setup metadata before constructing an engine', () => {

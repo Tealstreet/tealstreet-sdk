@@ -116,7 +116,9 @@ pub fn prepare(
             "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
         );
     let okx = cfg!(feature = "okx") && matches!(venue, "okx" | "okxeu" | "okxdemo" | "okxeudemo");
-    if !binance && !bybit && !okx {
+    let bitget =
+        cfg!(feature = "bitget") && matches!(venue, "bitget" | "bitgetusdc" | "bitgetinverse");
+    if !binance && !bybit && !okx && !bitget {
         return Err(SignError::Unsupported);
     }
     match input {
@@ -285,7 +287,7 @@ mod presentation_tests {
         let (identity, signer) = fixture();
         for (venue, names) in families() {
             let policy = crate::remote_signing_policy(venue);
-            assert_eq!(policy.enabled, venue == "okx");
+            assert!(policy.enabled && !policy.payload_supported);
             assert_eq!(policy.signature_encoding, SignatureEncoding::Base64);
             assert_eq!(policy.passphrase_header, Some(names[0]));
             let (work, kind) = prepared(&identity, policy);
@@ -311,7 +313,9 @@ mod presentation_tests {
                 },
                 Input::Credential {},
             );
-            if venue == "okx" && cfg!(feature = "okx") {
+            if (venue == "okx" && cfg!(feature = "okx"))
+                || (venue == "bitget" && cfg!(feature = "bitget"))
+            {
                 assert!(capture.is_ok());
             } else {
                 assert!(matches!(capture, Err(SignError::Unsupported)));

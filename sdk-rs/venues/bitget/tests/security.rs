@@ -8,6 +8,7 @@ fn production_options_retain_only_opaque_identity_refs() {
             signing: KeyRef("ref:owned-signing".into()),
             passphrase: Some(KeyRef("ref:owned-passphrase".into())),
             stable_id: None,
+            extra: Default::default(),
         }),
         ..Default::default()
     };

@@ -953,7 +953,25 @@ and WS stay primary. Public broker headers remain unchanged.
 Owned identity/history/trade read provider refusal bypasses network read retries.
 Background account failures retain existing recovery/backoff, and provider refusal
 cannot promote an unconfirmed Classic account. Earlier accepted writes, native40009 resend evidence
-and original rollback diagnostics retain existing outcome semantics. This draft
-is not hosted admission: shared encoding/passphrase presentation and all-alias
-actual-WASM HTTP/WS proofs remain merge prerequisites. No secret restoration or
-venue-local signing fallback is permitted.
+and original rollback diagnostics retain existing outcome semantics. Hosted
+admission is described below. No secret restoration or venue-local signing
+fallback is permitted.
+
+
+## Rust hosted and remote signing
+
+Hosted `signHttpRequest`/`signWsAuth` and keyless `remoteSigner` are admitted
+for all three aliases through the shared owned provider; no TS venue is built.
+`bitget.signing.ts` is the standalone HTTP codec shared with the `bitget.api.ts`
+interceptor: same `$` symbol strip (except candles), `encode: false` query,
+underscore-stripped signed body and ms timestamp. Hosted capture uses primary
+custody only and sets `ACCESS-KEY`/`ACCESS-SIGN`/`ACCESS-TIMESTAMP`/
+`ACCESS-PASSPHRASE`; the passphrase comes from the provider's Present result.
+
+Remote WS login keeps the legacy wire (`exchangeName: 'bitget'`, Base64,
+`extraData.timestamp` in seconds over `timestamp + "GET" + "/user/verify"`).
+The decode is declared in `construction-rules.json` as `secondsTimestamp` with
+`secondsSuffix`, shared with OKX; native login work is three typed parts.
+Private `PayloadSigner` is typed unsupported (the TS interceptor never calls
+it), RemoteSigner wins without fallback, and primary-only remote wire refuses
+secondary-identity work before any callback. Actual-WASM proofs are CI-run.
