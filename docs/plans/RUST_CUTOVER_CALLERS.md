@@ -5948,3 +5948,19 @@ This is a remove-before-master obligation owned by codex-hcmq3f. Account/WS and
 legacy account-repair adoption must remove retained raw material, end dual custody
 and complete ref-only admission. The admission implementation is separate work
 owned by claude-m26ps4; this ruling alone claims no SDK availability or merge.
+
+## Binance identity local refusal custody
+
+Binance USD-M and portfolio-margin `fetchAccount` preflight refusals use genuine
+engine Read command admission before publishing a result. Missing, disabled or
+incomplete credentials retain their existing message and one correlated
+diagnostic followed by one terminal when admission succeeds. If the engine
+context registry is full, the engine instead emits one Internal failure,
+`Engine request capacity reached`, with no extra diagnostic or transport.
+These Read failures carry no mutation outcome.
+
+Local identity refusals release their Read ownership immediately, including
+repeated calls with the same command number. They do not issue HTTP/signatures
+or mutate account snapshots. Valid identity reads retain the selected signer,
+request bytes, routes and `userId` shape. Spot and COIN-M identity remain
+capability-refused before venue dispatch.
