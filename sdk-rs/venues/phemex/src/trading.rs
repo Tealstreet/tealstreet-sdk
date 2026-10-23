@@ -1574,7 +1574,8 @@ impl PhemexPerpetuals {
                 .and_then(|job| job.signed_until)
                 .or(request.signed_until);
             let Some(expiry) = expiry else {
-                // An unbounded signature must never authorize an early reconciliation.
+                // Unreachable for released recipes: expiry is mandatory and the engine
+                // projects it before release. Never fabricate a repair bound if violated.
                 cx.notice(
                     Level::Error,
                     code::CHILD_LEG_FAILED,

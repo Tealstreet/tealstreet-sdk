@@ -1164,6 +1164,9 @@ impl Signer for CorruptResult {
                     5 => {
                         result.values[0] = vec![b'k'; 8193];
                     }
+                    6 => {
+                        result.receipt.expiry_ms = None;
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -1180,7 +1183,7 @@ impl Signer for CorruptResult {
 }
 #[test]
 fn malformed_present_mac_or_receipt_never_releases_http() {
-    for variant in 0..6 {
+    for variant in 0..7 {
         let provider = Arc::new(CorruptResult {
             inner: local().0,
             variant,
@@ -1206,7 +1209,7 @@ fn malformed_present_mac_or_receipt_never_releases_http() {
 }
 #[test]
 fn malformed_present_mac_or_receipt_never_releases_private_auth_or_ping() {
-    for variant in 0..6 {
+    for variant in 0..7 {
         let provider = Arc::new(CorruptResult {
             inner: local().0,
             variant,

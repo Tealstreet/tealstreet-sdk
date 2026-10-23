@@ -421,3 +421,19 @@ own PR. codex-5c57jl merges this handoff head, cross-reviews the sole accountOpe
 signing hunk, runs fresh CI and refreezes #1974 for combo-5b after #1970. There is
 one actual17/18 ->16/16 boundary; no separate signer PR/landing, new checker
 predicate or relaxed pruning control. The two whole-map rows remain exact.
+
+Expiry guard review: #1968 engine.rs:4557-4575 projects metadata and rejects
+invalid projection before outbound; :4584-4602 calls the exact Pending hook
+before publication. Both recipes require a finite rounded expiry and attest the
+same receipt on apply; neither permits expiry=None. The defensive unknown-write
+None branch therefore has no reachable released native input. It reports the
+missing invariant and holds automatic repair; it never invents a raw deadline.
+Overseer explicitly rejected a proposed venue-local now+65.5s fallback. Added
+missing-expiry result corruption to both HTTP and WS controls: shared validation
+refuses before any outbound/release, alongside six existing corruptions. No
+runtime behavior changed. Native direct constructors intentionally retain invalid
+Secondary refs until native start/identity validation, preserving the original
+validation-before-public/keyless precedence and preventing Primary fallback;
+trusted registry setup validates earlier. Every native dispatch constructs a new
+Request; no path requeues that Request under another HTTP id. Engine reprepare
+keeps the same request id; released-only MAX across distinct legs is job-owned.
