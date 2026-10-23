@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::model::{OrderIdentityKind, OrderStatus};
 use safe_cex_engine::{Action, Command, Event, Method, Notice};
-use support::*;
+use support::managed::*;
 fn place(e: &mut Driver, id: u32, orders: &str) {
     let orders = serde_json::from_str(orders).unwrap();
     e.handle(
@@ -486,14 +486,15 @@ fn missing_trigger_by_is_repaired_and_does_not_reopen_a_replacement_filled_befor
 fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-    use safe_cex_venue_backpack::{Backpack, Options};
-    let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
+    use safe_cex_venue_backpack::Options;
+    let mut e = Driver::new(Options {
         read_credentials: None,
         public_data_only: false,
         key: Some("public-test-key".into()),
         secret: Some(STANDARD.encode([7u8; 32])),
         recv_window: None,
-    }));
+        identity: None,
+    });
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
     reply(

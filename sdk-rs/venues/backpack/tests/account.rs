@@ -754,6 +754,7 @@ fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     let mut e = safe_cex_engine::test_support::seeded_engine(
         safe_cex_venue_backpack::Backpack::new(safe_cex_venue_backpack::Options {
+            identity: None,
             read_credentials: None,
             public_data_only: false,
             key: Some("test-public-key".into()),
@@ -1051,6 +1052,7 @@ fn snapshot_unpriced_trigger() -> (Driver, SocketId, Vec<safe_cex_engine::HttpRe
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     let mut e = safe_cex_engine::test_support::seeded_engine(
         safe_cex_venue_backpack::Backpack::new(safe_cex_venue_backpack::Options {
+            identity: None,
             read_credentials: None,
             public_data_only: false,
             key: Some("test-public-key".into()),

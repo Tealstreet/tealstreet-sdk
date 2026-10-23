@@ -1074,6 +1074,7 @@ pub fn build_with_signer<T: Visit>(
             startup,
             Engine::new(
                 Backpack::new(BackpackOptions {
+                    identity: None,
                     read_credentials: options.read_credentials.take(),
                     public_data_only: options.public_data_only,
                     key: options.key.take(),

@@ -1,11 +1,10 @@
-//! Original-source contract failures; enable when shared write adoption lands.
+//! Original-source contract regressions for managed foreground write adoption.
 mod support;
 use safe_cex_engine::{Action, Command, Event, Method, Notice, Outcome};
 use serde_json::json;
-use support::*;
+use support::managed::*;
 
 #[test]
-#[ignore = "original RED: backpack adoption owner codex-hcmq3f, tracked in plan #1880"]
 fn p0_write_all_failed_explicit_cancels_are_not_success() {
     let (mut e, _) = ready_orders(&format!("[{ORDER}]"));
     e.handle(
@@ -38,13 +37,11 @@ fn p0_write_all_failed_explicit_cancels_are_not_success() {
 }
 
 #[test]
-#[ignore = "original RED: backpack adoption owner codex-hcmq3f, tracked in plan #1880"]
 fn p0_write_pair_failed_row_preserves_accepted_id() {
     pair(false);
 }
 
 #[test]
-#[ignore = "original RED: backpack adoption owner codex-hcmq3f, tracked in plan #1880"]
 fn p0_write_pair_missing_row_preserves_evidence_without_counts() {
     pair(true);
 }
@@ -114,7 +111,6 @@ fn pair(missing: bool) {
 }
 
 #[test]
-#[ignore = "original RED: Backpack managed write adoption owner codex-hcmq3f; optional child journal #1880"]
 fn p0_write_optional_child_failure_keeps_both_ids_and_fails_once() {
     let (mut e, _) = ready();
     e.handle(2000.0, Event::Command(Command::PlaceOrders {
@@ -130,7 +126,7 @@ fn p0_write_optional_child_failure_keeps_both_ids_and_fails_once() {
     assert!(body.contains("\"triggerPrice\":\"150.00\""));
     assert!(body.contains("\"triggerBy\":\"MarkPrice\""));
     reply(&mut e, &tp, 400, r#"{"message":"rejected"}"#);
-    let after_failure: Vec<_> = e.drain_actions().collect();
+    let after_failure = actions(&mut e);
     assert!(after_failure.iter().any(|action| matches!(action,
         Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
     )));
