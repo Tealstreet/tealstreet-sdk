@@ -430,6 +430,46 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
     Ok(())
 }
 
+/// Public operations one trusted setup may ask for at once.
+#[cfg(feature = "dispatch-signing")]
+const MAX_PUBLIC_OPERATIONS: usize = 4;
+
+/// Trusted setup only: public values of declared refs from a provider that
+/// answers inline. A host/remote provider gets `Unavailable` and nothing is
+/// scheduled; its values arrive as bound account metadata instead (P4).
+#[cfg(feature = "dispatch-signing")]
+pub fn fetch_public(
+    provider: &safe_cex_engine::signing::Provider,
+    operations: Vec<safe_cex_engine::signing::Operation>,
+) -> Result<Vec<Vec<u8>>, safe_cex_engine::signing::SignError> {
+    use safe_cex_engine::signing::{Operation, SignError, SignRequest};
+    if operations.is_empty()
+        || operations.len() > MAX_PUBLIC_OPERATIONS
+        || !operations.iter().all(|operation| {
+            matches!(
+                operation,
+                Operation::PublicAddress { .. } | Operation::PublicKey { .. }
+            )
+        })
+    {
+        return Err(SignError::InvalidRequest);
+    }
+    if !provider.immediate() {
+        return Err(SignError::Unavailable);
+    }
+    let request = SignRequest {
+        receipt: Default::default(),
+        operations,
+        context: Default::default(),
+    };
+    request.validate()?;
+    let mut result = provider
+        .sign_ready(&request)
+        .ok_or(SignError::Unavailable)??;
+    request.validate_result(&result)?;
+    Ok(std::mem::take(&mut result.values))
+}
+
 /// Trusted native/legacy setup. Consume fields once; never pass them to a venue.
 #[cfg(feature = "dispatch-signing")]
 pub fn prepare_local_signer(

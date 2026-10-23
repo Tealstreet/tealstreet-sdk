@@ -193,6 +193,9 @@ pub struct LocalSigner {
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
     roles: HashMap<KeyRef, ExtraKey>,
+    /// Trusted setup policy's asymmetric declarations; only these refs answer
+    /// public operations, so a MAC secret is never fingerprinted.
+    algorithms: HashMap<KeyRef, Algorithm>,
 }
 impl LocalSigner {
     pub fn new() -> Self {
@@ -262,6 +265,21 @@ impl LocalSigner {
         {
             return Err(SignError::InvalidRequest);
         }
+        // Declarations come from trusted policy only, never caller setup, and
+        // an aliased secondary signs with the primary's declared ref.
+        let declared = |rule: Option<safe_cex_engine::signing::IdentitySetupPolicy>| {
+            rule.and_then(|rule| rule.signing_algorithm)
+        };
+        if [declared(policy.primary), declared(policy.secondary)]
+            .into_iter()
+            .flatten()
+            .any(|algorithm| !asymmetric(algorithm))
+            || alias
+                && declared(policy.secondary).is_some()
+                && declared(policy.secondary) != declared(policy.primary)
+        {
+            return Err(SignError::InvalidRequest);
+        }
         let primary = setup.primary.map(DecodedIdentity::decode).transpose()?;
         let secondary = setup.secondary.map(DecodedIdentity::decode).transpose()?;
         let mut identities = Identities {
@@ -313,6 +331,18 @@ impl LocalSigner {
         if let Some(secondary) = secondary {
             secondary.install(&mut signer, "secondary");
         }
+        for (identity, rule) in [
+            (identities.primary.as_ref(), policy.primary),
+            (identities.secondary.as_ref(), policy.secondary),
+        ] {
+            if let (Some(identity), Some(algorithm)) = (identity, declared(rule))
+                && !identity.signing.0.is_empty()
+            {
+                signer
+                    .algorithms
+                    .insert(identity.signing.clone(), algorithm);
+            }
+        }
         Ok((signer, identities))
     }
     /// Own and wipe the setup input on both successful and malformed construction.
@@ -345,6 +375,14 @@ impl LocalSigner {
     pub fn remove(&mut self, reference: &KeyRef) {
         self.keys.remove(reference);
         self.roles.remove(reference);
+        self.algorithms.remove(reference);
+    }
+    /// Ordinary material declared for exactly this asymmetric algorithm.
+    fn declared_key(&self, reference: &KeyRef, algorithm: Algorithm) -> Result<&[u8], SignError> {
+        if self.algorithms.get(reference) != Some(&algorithm) {
+            return Err(SignError::InvalidRequest);
+        }
+        self.key(reference)
     }
     /// Ordinary material only; extra refs require `role_key`.
     fn key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
@@ -458,6 +496,17 @@ impl LocalSigner {
                     }
                     value.to_vec()
                 }
+                Operation::PublicAddress { key } => primitives::secp256k1_address(
+                    self.declared_key(key, Algorithm::Secp256k1Digest)?,
+                )?,
+                Operation::PublicKey { algorithm, key } => {
+                    let key = self.declared_key(key, *algorithm)?;
+                    match algorithm {
+                        Algorithm::Ed25519 => primitives::ed25519_public(key)?,
+                        Algorithm::StarkDigest => primitives::stark_public(key)?,
+                        _ => return Err(SignError::InvalidRequest),
+                    }
+                }
                 Operation::Sign {
                     algorithm,
                     key,
@@ -512,6 +561,13 @@ impl LocalSigner {
         }
         Ok(result)
     }
+}
+/// Algorithms whose keys have a public form; MAC secrets never do.
+fn asymmetric(algorithm: Algorithm) -> bool {
+    matches!(
+        algorithm,
+        Algorithm::Ed25519 | Algorithm::Es256 | Algorithm::Secp256k1Digest | Algorithm::StarkDigest
+    )
 }
 /// Mirrors the `sign_now` arms; keep the two in step.
 fn implemented(algorithm: Algorithm) -> bool {
@@ -1430,15 +1486,118 @@ mod tests {
 
     // P4 REDs: public derivations reach the provider through the existing setup
     // policy and request decode; vectors are the pinned ethers/Node/starknet.js ones.
+    fn try_public_setup(
+        policy: serde_json::Value,
+        setup: serde_json::Value,
+    ) -> Result<(LocalSigner, Identities), SignError> {
+        let policy: CredentialSetupPolicy = serde_json::from_value(policy).unwrap();
+        LocalSigner::from_json_with_policy(setup.to_string(), policy)
+    }
     fn public_setup(algorithm: &str, secret: &str) -> (LocalSigner, KeyRef) {
-        let policy: CredentialSetupPolicy = serde_json::from_value(serde_json::json!({
-            "primary": {"secretEncoding": "hex", "signingAlgorithm": algorithm}
-        }))
+        let (signer, identities) = try_public_setup(
+            serde_json::json!({"primary": {"secretEncoding": "hex", "signingAlgorithm": algorithm}}),
+            serde_json::json!({"primary": {"key": "account", "secret": secret}}),
+        )
         .unwrap();
-        let setup = serde_json::json!({"primary": {"key": "account", "secret": secret}});
-        let (signer, identities) =
-            LocalSigner::from_json_with_policy(setup.to_string(), policy).unwrap();
         (signer, identities.primary.unwrap().signing)
+    }
+    /// Arbitrary in-range scalar for refusal paths; never a vector or real key.
+    const SCALAR: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+
+    #[test]
+    fn public_declarations_are_trusted_policy_only_asymmetric_and_exact() {
+        let setup = serde_json::json!({"primary": {"key": "account", "secret": SCALAR}});
+        // A MAC algorithm can never be declared, so no secret is fingerprinted.
+        let mac = serde_json::json!({"primary": {"secretEncoding": "hex", "signingAlgorithm": "hmacSha256"}});
+        assert!(matches!(
+            try_public_setup(mac, setup.clone()),
+            Err(SignError::InvalidRequest)
+        ));
+        // An aliased secondary signs with the primary's ref and declaration.
+        let alias = serde_json::json!({
+            "primary": {"key": "account", "secret": SCALAR},
+            "secondary": {"key": "read", "signingFromPrimary": true}
+        });
+        let conflicting = serde_json::json!({
+            "primary": {"secretEncoding": "hex", "signingAlgorithm": "secp256k1Digest"},
+            "secondary": {"secretEncoding": "hex", "signingAlgorithm": "ed25519"}
+        });
+        assert!(matches!(
+            try_public_setup(conflicting, alias.clone()),
+            Err(SignError::InvalidRequest)
+        ));
+        let (_, ids) = try_public_setup(
+            serde_json::json!({
+                "primary": {"secretEncoding": "hex", "signingAlgorithm": "secp256k1Digest"},
+                "secondary": {"secretEncoding": "hex"}
+            }),
+            alias,
+        )
+        .unwrap();
+        assert_eq!(ids.secondary.unwrap().signing, ids.primary.unwrap().signing);
+        // Undeclared material answers nothing, whatever its shape.
+        let (undeclared, ids) = try_public_setup(
+            serde_json::json!({"primary": {"secretEncoding": "hex"}}),
+            setup,
+        )
+        .unwrap();
+        let key = ids.primary.unwrap().signing;
+        let request = public_request(serde_json::json!([{"kind": "publicAddress", "key": key}]));
+        assert_eq!(
+            undeclared.sign_now(&request),
+            Err(SignError::InvalidRequest)
+        );
+        // A declared ref answers only its own algorithm; other public forms are
+        // refused by request validation before any provider work.
+        let (signer, key) = public_setup("secp256k1Digest", SCALAR);
+        for operation in [
+            serde_json::json!({"kind": "publicKey", "algorithm": "ed25519", "key": key}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "starkDigest", "key": key}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "secp256k1Digest", "key": key}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "es256", "key": key}),
+            serde_json::json!({"kind": "publicKey", "algorithm": "hmacSha256", "key": key}),
+            serde_json::json!({"kind": "publicAddress", "key": "primary.credential"}),
+            serde_json::json!({"kind": "publicAddress", "key": "secondary.signing"}),
+        ] {
+            let request = public_request(serde_json::json!([operation]));
+            assert!(
+                matches!(
+                    signer.sign_now(&request),
+                    Err(SignError::InvalidRequest | SignError::Unavailable)
+                ),
+                "{operation}"
+            );
+        }
+    }
+
+    #[cfg(not(feature = "secp256k1"))]
+    #[test]
+    fn public_address_without_its_arm_is_unsupported() {
+        let (signer, key) = public_setup("secp256k1Digest", SCALAR);
+        let request = public_request(serde_json::json!([{"kind": "publicAddress", "key": key}]));
+        assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
+    }
+
+    #[cfg(feature = "secp256k1")]
+    #[test]
+    fn public_operations_keep_batch_order_beside_present_and_sign() {
+        let (signer, key) = public_setup("secp256k1Digest", SCALAR);
+        let digest = vec![7u8; 32];
+        let request = public_request(serde_json::json!([
+            {"kind": "present", "key": "primary.credential"},
+            {"kind": "publicAddress", "key": key},
+            {"kind": "sign", "algorithm": "secp256k1Digest", "key": key,
+             "payload": [{"kind": "bytes", "bytes": digest}]},
+        ]));
+        let result = signer.sign_now(&request).unwrap();
+        assert_eq!(result.values[0], b"account");
+        let address = crate::ethereum::private_key_address(SCALAR).unwrap();
+        assert_eq!(
+            format!("0x{}", crate::hex(&result.values[1])),
+            address.to_ascii_lowercase()
+        );
+        assert_eq!(result.values[2].len(), 65);
+        request.validate_result(&result).unwrap();
     }
     fn public_request(operations: serde_json::Value) -> SignRequest {
         serde_json::from_value(serde_json::json!({

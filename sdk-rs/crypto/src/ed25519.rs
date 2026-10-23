@@ -3,8 +3,7 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 
 /// Derive a public key from a 32-byte Ed25519 seed.
-#[cfg(test)]
-fn public_key(seed: &[u8]) -> Result<[u8; 32], String> {
+pub fn public_key(seed: &[u8]) -> Result<[u8; 32], String> {
     let seed: &[u8; 32] = seed
         .try_into()
         .map_err(|_| "Ed25519 seed must be 32 bytes")?;

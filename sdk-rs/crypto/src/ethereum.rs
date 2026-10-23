@@ -90,6 +90,30 @@ pub fn sign_digest(digest: &[u8], private_key: &str) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
+/// Pre-release check for a host/remote signature (P4): true only when the
+/// 65-byte r || s || v (v 0/1 or 27/28) over `digest` recovers to the bound
+/// actual signer. Callers never pass expected venue config here.
+pub fn signed_by(digest: &[u8], signature: &[u8], signer: &str) -> bool {
+    let (Ok(digest), Ok(signer)) = (
+        <[u8; 32]>::try_from(digest),
+        signer.parse::<alloy_primitives::Address>(),
+    ) else {
+        return false;
+    };
+    let [body @ .., v] = signature else {
+        return false;
+    };
+    let parity = match v {
+        0 | 27 => false,
+        1 | 28 => true,
+        _ => return false,
+    };
+    body.len() == 64
+        && alloy_primitives::Signature::from_bytes_and_parity(body, parity)
+            .recover_address_from_prehash(&B256::from(digest))
+            .is_ok_and(|recovered| recovered == signer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +172,23 @@ mod tests {
                 "recoverable signature {}",
                 case["name"]
             );
+            let raw = bytes(&signature);
+            let signer = case["recovered"].as_str().unwrap();
+            assert!(signed_by(&digest, &raw, signer), "{}", case["name"]);
+            assert!(signed_by(&digest, &raw, &signer.to_ascii_lowercase()));
+            let mut parity = raw.clone();
+            parity[64] -= 27;
+            assert!(signed_by(&digest, &parity, signer));
+            let mut changed = digest;
+            changed[0] ^= 1;
+            assert!(!signed_by(&changed, &raw, signer));
+            assert!(!signed_by(&digest, &raw[..64], signer));
+            assert!(!signed_by(
+                &digest,
+                &raw,
+                "0x0000000000000000000000000000000000000001"
+            ));
+            assert!(!signed_by(&digest, &raw, "not an address"));
             let signature: alloy_primitives::Signature = signature.parse().unwrap();
             let recovered = signature
                 .recover_address_from_prehash(&B256::from(digest))

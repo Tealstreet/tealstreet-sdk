@@ -354,8 +354,10 @@ must never receive the key.
   `Secp256k1Digest` have no consumer and are deferred. Any other algorithm
   is `InvalidRequest`.
 - **Key typing.** A public operation is answered only for a ref that setup
-  policy or a role declares as an asymmetric key of exactly that algorithm
-  (#1899 `KeyUse`). An HMAC or untyped ref, a credential, a passphrase or a
+  policy or a role declares as an asymmetric key of exactly that algorithm.
+  The declaration is `IdentitySetupPolicy.signing_algorithm` (trusted family
+  policy in `construction-rules.json`, never caller setup); #1899's `KeyUse`
+  only selects the ref. An HMAC or untyped ref, a credential, a passphrase or a
   cross-slot ref is refused. Otherwise the result would be a stable
   fingerprint of a secret. Role aliases are closed and listed: `l1Wallet`
   and an EIP-191/EIP-712 `signing` ref are `Secp256k1Digest`, and
@@ -435,9 +437,11 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
     recovery is a second gate on the actual signature, not a replacement.
 - **Host and remote providers.** The value must be declared. Where the
   family's signature is recoverable (EIP-712/191 for Hyperliquid, TxFlow,
-  GRVT and Polymarket), dispatch recovers the signer and compares it with
+  GRVT and Polymarket), the family recovers the signer and compares it with
   the declared value *before* physical release, import or any private
-  effect, in `SignStep::apply` or the P8 verifier. It compares only with the
+  effect, in `SignStep::apply` or the P8 verifier, through the one shared
+  `safe_cex_crypto::ethereum::signed_by`. The engine has no crypto
+  dependency, so the check cannot sit in dispatch itself. It compares only with the
   actual signer metadata, never the expected config. An actual-signer
   mismatch refuses with zero HTTP; this is never a post-send startup check. The comparison is
   against the declared *signer* only: the Polymarket SignerType3 contract
@@ -489,6 +493,26 @@ APIs are labelled as such, not REDs):
 - Missing or conflicting host metadata refuses setup.
 - A recovered-signer mismatch refuses before release.
 
+**Delivery split.** The engine PR (this branch) delivers:
+- the operations and their validation;
+- the `signing_algorithm` declaration in policy, the generator and TS types;
+- the local provider arms;
+- `fetch_public`;
+- `signed_by`.
+
+Its REDs are the existing-decode assertions: setup policy and `SignRequest`
+decode refuse the new field and kinds today. The engine-level tests above
+cover the widths, refusals, ordering and `fetch_public`. The per-family items
+come with each family's conversion, which also writes its own venue REDs (the
+R1-R3 shapes above):
+- admission mappings;
+- HL/GRVT/TxFlow outcome tests;
+- pre-release recovery wiring.
+
+The P8 remote-refusal test lands with #1926, where `bind` lives. The Ed25519
+keypair form arrives with #1948.
+
 **Architecture gate.** One shared provider operation and one setup channel
 for every family that needs a public value, with no venue derivation. The
-pre-release recovery check sits once in dispatch, not in each venue.
+pre-release recovery check is one shared helper that every family calls,
+not a check written per venue.
