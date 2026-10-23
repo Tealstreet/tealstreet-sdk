@@ -3,8 +3,9 @@
 Owner codex-ih35js; plan first on actual landing
 `6c7f4fcf292d01b8c056127a070783e3fd72dcd2`, branch
 `feat/rust-aster-local-read-context`. Phemex belongs to the #1974 fold.
-This phase changes planning and original controls only; no runtime or inventory
-prune is claimed until the implementation checkpoint.
+Plan and original controls precede the runtime checkpoint. The plan branch now
+plain-merges actual caller-root landing `6a6845c4491`; the local Read slice uses
+existing entry authority independently of that API.
 
 ## Actual lane remainder
 
@@ -134,3 +135,16 @@ Architecture gate: No per-venue replacement for a cross-cutting concern. This
 slice only consumes existing shared entry/refusal and Context terminal authority.
 Clock, delayed retry, read walks and write-journal composition remain with their
 shared owners. No unresolved remote prerequisite is bypassed by this local work.
+
+## Original assertion checkpoint
+
+On unchanged actual `6a6845c4491` Aster production, the new actual-Engine target
+`request_context_local_reads` compiles and executes26 controls:20 assertion REDs
+(ten selected terminals times invalid clock/full capacity), six native working
+positives, zero ignored. The positives pin V1/V3 local precedence, exact local
+results on mainnet/testnet, cached nonpositive/nonfinite error, more than256
+synchronous retirements with ID reuse, live duplicate-owner isolation and its
+shared diagnostic, and keyless PublicTrades remaining remote. The full-capacity
+fixture retains256 genuine Read roots, checks public root validation around the
+callback, and frees one by its actual timer before retrying the selected command.
+No source or inventory changes are part of this checkpoint.
