@@ -769,3 +769,6 @@ fn unissued_locked_place_releases_only_its_own_scope_without_uncertainty() {
     assert!(e.io.order_locks.contains(42));
     assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, error }) if error.outcome == Some(crate::Outcome::NotSent))));
 }
+
+#[path = "request_context_entry_retention_tests.rs"]
+mod retention_tests;
