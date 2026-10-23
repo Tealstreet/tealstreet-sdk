@@ -1,0 +1,295 @@
+{
+  "protocol": "socket-phaseF-same-runner-v1",
+  "orders": [
+    [
+      "landing",
+      "before",
+      "after"
+    ],
+    [
+      "before",
+      "after",
+      "landing"
+    ],
+    [
+      "after",
+      "landing",
+      "before"
+    ],
+    [
+      "after",
+      "before",
+      "landing"
+    ],
+    [
+      "landing",
+      "after",
+      "before"
+    ],
+    [
+      "before",
+      "landing",
+      "after"
+    ]
+  ],
+  "pairsPerGate": 9,
+  "referenceSha256": "dbdfade265507e42d63ce117c5019dba72eff50060f92fe9373b455d191c2a80",
+  "tapeSha256": "ce90d66d52e9b59a00950e4250f0a5bdfb2916f5d4456f481f8f0bf65b96b812",
+  "cases": {
+    "landing": {
+      "family": "bitunix",
+      "run": 39900806161,
+      "head": "7641650e7b1fc54c55593880ac16299171f60a90",
+      "branch": "feat/rust-rewrite",
+      "event": "push",
+      "attempt": 1,
+      "job": 120241702794,
+      "jobConclusion": "success",
+      "logSha256": "cf85c144735b45d60b1741f8c55af06e237a4488b83d5c2d577ae2c47274d3bb",
+      "artifact": {
+        "id": 12479295671,
+        "node_id": "MDg6QXJ0aWZhY3QxMjQ3OTI5NTY3MQ==",
+        "name": "ci-wasm-bitunix",
+        "size_in_bytes": 342692,
+        "url": "https://api.github.com/repos/Tealstreet/tealstreet-sdk/actions/artifacts/12479295671",
+        "archive_download_url": "https://api.github.com/repos/Tealstreet/tealstreet-sdk/actions/artifacts/12479295671/zip",
+        "expired": false,
+        "digest": "sha256:d12bcc710ab17990123c6710c4684f1183a89fcbb09470899cc61d8975aeefd7",
+        "created_at": "2026-10-23T04:38:19Z",
+        "updated_at": "2026-10-23T04:38:19Z",
+        "expires_at": "2026-10-26T04:38:19Z",
+        "workflow_run": {
+          "id": 39900806161,
+          "repository_id": 1248267564,
+          "head_repository_id": 1248267564,
+          "head_branch": "feat/rust-rewrite",
+          "head_sha": "7641650e7b1fc54c55593880ac16299171f60a90"
+        }
+      },
+      "build": {
+        "schema": 1,
+        "sourceHead": "7641650e7b1fc54c55593880ac16299171f60a90",
+        "runId": "39900806161",
+        "inputsSha256": "c0600d1b7b124508589f832780e422086bf82e29fde2042c213a3b359754f629",
+        "family": "bitunix",
+        "venue": "bitunix",
+        "target": "nodejs",
+        "profile": "release",
+        "buildFlags": {
+          "rustFlagsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "encodedRustFlagsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "wasmOptLevel": "-Oz",
+          "wasmOpt": "required"
+        },
+        "tools": {
+          "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+          "wasm-bindgen": "wasm-bindgen 0.2.129",
+          "wasm-opt": "wasm-opt version 132 (version_132)"
+        },
+        "hashes": {
+          "safe_cex_wasm.js": "b8d4a0dcc84a762370c68a3b79c67dd4e737c9c3ef6cba27ea268c053022eeb3",
+          "safe_cex_wasm_bg.wasm": "ab7995224e9945ae37cef1de76343fcd6a0d36a9d71a31ae215a6a8904cf5397",
+          "package.json": "dbf8353f77358bc12169b7bb7301e1978d5b503e002ee927229a8993672818fc"
+        }
+      },
+      "latestState": {
+        "run_attempt": 2,
+        "status": "completed",
+        "conclusion": "success"
+      },
+      "exactState": {
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      "commits": {
+        "head": {
+          "sha": "7641650e7b1fc54c55593880ac16299171f60a90",
+          "tree": "c83f4bc5feb9a474d1436b9074e677658a203cee",
+          "parents": [
+            "8e53b1bd39e0fd03534ffa4453349390251e4585",
+            "b74a714c186a647b3e9352de22bd67d8bf84ec45"
+          ]
+        },
+        "checkout": {
+          "sha": "7641650e7b1fc54c55593880ac16299171f60a90",
+          "tree": "c83f4bc5feb9a474d1436b9074e677658a203cee",
+          "parents": [
+            "8e53b1bd39e0fd03534ffa4453349390251e4585",
+            "b74a714c186a647b3e9352de22bd67d8bf84ec45"
+          ]
+        }
+      }
+    },
+    "before": {
+      "family": "bitunix",
+      "run": 39901084885,
+      "head": "a31c3ff2a07a527f689901762acd86d5538ca94f",
+      "branch": "feat/rust-socket-lifecycle-core",
+      "event": "pull_request",
+      "attempt": 1,
+      "job": 120242576619,
+      "jobConclusion": "failure",
+      "logSha256": "b0bb4d9bf80e58f86b527380a323fb0bfcfc14564dacc179849d52c1ba03bc10",
+      "artifact": {
+        "id": 12478509644,
+        "node_id": "MDg6QXJ0aWZhY3QxMjQ3ODUwOTY0NA==",
+        "name": "ci-wasm-bitunix",
+        "size_in_bytes": 377431,
+        "url": "https://api.github.com/repos/Tealstreet/tealstreet-sdk/actions/artifacts/12478509644",
+        "archive_download_url": "https://api.github.com/repos/Tealstreet/tealstreet-sdk/actions/artifacts/12478509644/zip",
+        "expired": false,
+        "digest": "sha256:c4428ccaff44604ca87d1e8d291acdc8f1723390d08f175973f7dbe294fa5403",
+        "created_at": "2026-10-23T04:41:12Z",
+        "updated_at": "2026-10-23T04:41:12Z",
+        "expires_at": "2026-10-26T04:41:11Z",
+        "workflow_run": {
+          "id": 39901084885,
+          "repository_id": 1248267564,
+          "head_repository_id": 1248267564,
+          "head_branch": "feat/rust-socket-lifecycle-core",
+          "head_sha": "a31c3ff2a07a527f689901762acd86d5538ca94f"
+        }
+      },
+      "build": {
+        "schema": 1,
+        "sourceHead": "7727fef7af1d77347e3cd0f6e753c4f58f1fcbc0",
+        "runId": "39901084885",
+        "inputsSha256": "e84de494a124b134f0ed24b7e100a90946b7947c18b45d833d5727d64c797316",
+        "family": "bitunix",
+        "venue": "bitunix",
+        "target": "nodejs",
+        "profile": "release",
+        "buildFlags": {
+          "rustFlagsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "encodedRustFlagsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "wasmOptLevel": "-Oz",
+          "wasmOpt": "required"
+        },
+        "tools": {
+          "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+          "wasm-bindgen": "wasm-bindgen 0.2.129",
+          "wasm-opt": "wasm-opt version 132 (version_132)"
+        },
+        "hashes": {
+          "safe_cex_wasm.js": "b8d4a0dcc84a762370c68a3b79c67dd4e737c9c3ef6cba27ea268c053022eeb3",
+          "safe_cex_wasm_bg.wasm": "b87f39e6a19f3e5e1d546efdd8bae9bd39b0c93d7dd52362e6da91389aa789e1",
+          "package.json": "dbf8353f77358bc12169b7bb7301e1978d5b503e002ee927229a8993672818fc"
+        }
+      },
+      "latestState": {
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      "exactState": {
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      "commits": {
+        "head": {
+          "sha": "a31c3ff2a07a527f689901762acd86d5538ca94f",
+          "tree": "294d40ab0721e7e3252a850c2133456be78a55b9",
+          "parents": [
+            "7beda9dd0479e4401df6c9649e704ff914892c28",
+            "7641650e7b1fc54c55593880ac16299171f60a90"
+          ]
+        },
+        "checkout": {
+          "sha": "7727fef7af1d77347e3cd0f6e753c4f58f1fcbc0",
+          "tree": "294d40ab0721e7e3252a850c2133456be78a55b9",
+          "parents": [
+            "7641650e7b1fc54c55593880ac16299171f60a90",
+            "a31c3ff2a07a527f689901762acd86d5538ca94f"
+          ]
+        }
+      }
+    },
+    "after": {
+      "family": "bitunix",
+      "run": 39903938009,
+      "head": "dbde7c702e03bddec255b97449b5927bd0812f09",
+      "branch": "feat/rust-socket-lifecycle-core",
+      "event": "pull_request",
+      "attempt": 1,
+      "job": 120251471807,
+      "jobConclusion": "failure",
+      "logSha256": "0ee7f2050eb98d20219e49a9ef3ff3e103a1103c3d681b0b4a20292edca0d855",
+      "artifact": {
+        "id": 12479614896,
+        "node_id": "MDg6QXJ0aWZhY3QxMjQ3OTYxNDg5Ng==",
+        "name": "ci-wasm-bitunix",
+        "size_in_bytes": 377418,
+        "url": "https://api.github.com/repos/Tealstreet/tealstreet-sdk/actions/artifacts/12479614896",
+        "archive_download_url": "https://api.github.com/repos/Tealstreet/tealstreet-sdk/actions/artifacts/12479614896/zip",
+        "expired": false,
+        "digest": "sha256:52e5d509cc5322da272c01331ce80ba5f0cbbcda412def78ecd041ca433330b9",
+        "created_at": "2026-10-23T05:10:17Z",
+        "updated_at": "2026-10-23T05:10:17Z",
+        "expires_at": "2026-10-26T05:10:16Z",
+        "workflow_run": {
+          "id": 39903938009,
+          "repository_id": 1248267564,
+          "head_repository_id": 1248267564,
+          "head_branch": "feat/rust-socket-lifecycle-core",
+          "head_sha": "dbde7c702e03bddec255b97449b5927bd0812f09"
+        }
+      },
+      "build": {
+        "schema": 1,
+        "sourceHead": "552f04d9325f743364fbebfe4feeb437702f0c8b",
+        "runId": "39903938009",
+        "inputsSha256": "44c9d13396902b38612d954a2da8695d9b1cdd57d544b69aae5bc05360049b9b",
+        "family": "bitunix",
+        "venue": "bitunix",
+        "target": "nodejs",
+        "profile": "release",
+        "buildFlags": {
+          "rustFlagsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "encodedRustFlagsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "wasmOptLevel": "-Oz",
+          "wasmOpt": "required"
+        },
+        "tools": {
+          "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+          "wasm-bindgen": "wasm-bindgen 0.2.129",
+          "wasm-opt": "wasm-opt version 132 (version_132)"
+        },
+        "hashes": {
+          "safe_cex_wasm.js": "b8d4a0dcc84a762370c68a3b79c67dd4e737c9c3ef6cba27ea268c053022eeb3",
+          "safe_cex_wasm_bg.wasm": "6114b49305821be350cbc0b4179f5be6c709ba2c70b1b6b99ff0b95f4bdc9f67",
+          "package.json": "dbf8353f77358bc12169b7bb7301e1978d5b503e002ee927229a8993672818fc"
+        }
+      },
+      "latestState": {
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      "exactState": {
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      "commits": {
+        "head": {
+          "sha": "dbde7c702e03bddec255b97449b5927bd0812f09",
+          "tree": "f4eb142b73b2511b6d4087a64f3c65e50111fd08",
+          "parents": [
+            "ccbd27ccb6498261c7d311f41ccb89df3266f651"
+          ]
+        },
+        "checkout": {
+          "sha": "552f04d9325f743364fbebfe4feeb437702f0c8b",
+          "tree": "f4eb142b73b2511b6d4087a64f3c65e50111fd08",
+          "parents": [
+            "7641650e7b1fc54c55593880ac16299171f60a90",
+            "dbde7c702e03bddec255b97449b5927bd0812f09"
+          ]
+        }
+      }
+    }
+  },
+  "scope": "One runner, sequential fixed18 gates,54 performance pairs per variant; diagnostic only, no source/profile/threshold changes and no selective samples."
+}

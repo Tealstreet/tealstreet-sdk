@@ -12,6 +12,10 @@ on:
         type: choice
         options: [family, combined]
         default: family
+      socket_probe:
+        description: Diagnostic same-runner Bitunix control (temporary branch only)
+        type: boolean
+        default: false
   push:
     branches: [master, feat/rust-rewrite]
     paths:
@@ -50,6 +54,7 @@ defaults:
 
 jobs:
   bans:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_probe == true) }}
     name: Rust / banned patterns
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -63,6 +68,7 @@ jobs:
         run: ./scripts/check-bans.sh
 
   native:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_probe == true) }}
     name: Rust / native ${{ matrix.check }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -92,6 +98,7 @@ jobs:
         run: ${{ matrix.command }}
 
   wasm:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_probe == true) }}
     name: Rust / wasm32
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -113,6 +120,7 @@ jobs:
         run: cargo clippy --locked --workspace --target wasm32-unknown-unknown -- -D warnings
 
   families:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_probe == true) }}
     name: Rust / wasm families
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -174,7 +182,7 @@ jobs:
   # sample uses fresh Chrome/profile + DedicatedWorker, with same-run web bytes.
   browser:
     name: Rust / browser cold start
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
+    if: ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')) && !(github.event_name == 'workflow_dispatch' && inputs.socket_probe == true) }}
     needs: [families, gate]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -214,6 +222,7 @@ jobs:
   # Replays recorded traffic through TS and Rust: output must be identical, and
   # on public data Rust must use less CPU and less memory (see the plan's gates).
   gate:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.socket_probe == true) }}
     name: Rust / replay gate (${{ matrix.venue }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -574,4 +583,46 @@ jobs:
             sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm
             sdk-rs/hosts/wasm/pkg/node/package.json
           retention-days: 3
+          if-no-files-found: error
+
+  socket_probe:
+    name: Diagnostic / same-runner Bitunix control
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.socket_probe == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Fixed interleaved landing / before / after control
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/socket-same-runner-probe.test.py
+          cp .github/scripts/socket-same-runner-probe.py "$RUNNER_TEMP/socket-same-runner-probe.py"
+          cp .github/scripts/socket-same-runner-probe.contract.json "$RUNNER_TEMP/socket-same-runner-probe.contract.json"
+          python3 "$RUNNER_TEMP/socket-same-runner-probe.py" --root "$GITHUB_WORKSPACE" --contract "$RUNNER_TEMP/socket-same-runner-probe.contract.json" --out "$RUNNER_TEMP/socket-phasef-probe"
+      - name: Retain every sample and incomplete-experiment diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: socket-phasef-same-runner-control
+          path: ${{ runner.temp }}/socket-phasef-probe/
+          retention-days: 14
           if-no-files-found: error
