@@ -78,6 +78,8 @@ impl Method {
 pub enum RequestRoute {
     /// A primary-account read must not use the secondary read identity/egress.
     Primary,
+    /// A read signed by the secondary key uses the read identity's egress.
+    Secondary,
     Direct,
     PublicCors,
 }
@@ -85,6 +87,7 @@ impl RequestRoute {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Primary => "primary",
+            Self::Secondary => "secondary",
             Self::Direct => "direct",
             Self::PublicCors => "publicCors",
         }
@@ -2340,6 +2343,8 @@ impl<P> Cx<'_, P> {
                 Err(error)
             }
         };
+        // A credential-free route's auth-kind refusal is no credential evidence.
+        let credential_evidence = self.io.request_contexts.owner_credentialed(command);
         self.io.retire_http_command(command);
         if !self.io.request_contexts.finish(command) {
             self.io.http_owner_poison = true;
@@ -2389,7 +2394,9 @@ impl<P> Cx<'_, P> {
         let notice = match result {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
-                count_auth_failure(self.io, Some(&error));
+                if credential_evidence {
+                    count_auth_failure(self.io, Some(&error));
+                }
                 Notice::CommandFailed { command, error }
             }
         };
