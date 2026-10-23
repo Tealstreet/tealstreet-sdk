@@ -1927,12 +1927,13 @@ const BINANCE: CodeTable = CodeTable {
     success: &[Key::Range(0, i64::MAX)],
     // Every other documented code is a pre-execution refusal.
     unlisted: Verdict::Refused(ErrorKind::Rejected),
-    // "4XX return codes are used for malformed requests"; 403 is the WAF limit,
-    // 418 an IP auto-ban and 429 a rate limit. 409 (partial cancel-replace) is not.
+    // "4XX return codes are used for malformed requests"; 418 is an IP auto-ban
+    // and 429 a rate limit. 403 is the WAF, but a bare edge 403 may be another
+    // block, so it is a plain refusal. 409 (partial cancel-replace) is not one.
     status: &[
         (400, Verdict::Refused(ErrorKind::InvalidInput)),
         (401, Verdict::Refused(ErrorKind::AuthInvalid)),
-        (403, Verdict::Refused(ErrorKind::RateLimited)),
+        (403, Verdict::Refused(ErrorKind::Rejected)),
         (418, Verdict::Refused(ErrorKind::RateLimited)),
         (429, Verdict::Refused(ErrorKind::RateLimited)),
     ],

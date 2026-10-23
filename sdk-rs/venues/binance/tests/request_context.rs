@@ -933,6 +933,13 @@ fn documented_rate_limit_statuses_without_a_code_are_typed_refusals() {
             Some(ErrorKind::RateLimited),
             None,
         ),
+        (
+            403,
+            "",
+            Some(Outcome::Rejected),
+            Some(ErrorKind::Rejected),
+            None,
+        ),
         // 409 can mean a partially successful cancel-replace: never a refusal.
         (409, "", Some(Outcome::Unknown), None, None),
     ] {
