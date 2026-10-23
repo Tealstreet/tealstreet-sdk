@@ -31,6 +31,15 @@ struct Rule {
     signer_setup: CredentialSetupPolicy,
     #[serde(default)]
     remote_signing: RemoteSigningPolicy,
+    /// Family-specific trusted setup mapping, declared rather than name-matched.
+    #[serde(default)]
+    setup_mapping: Option<SetupMapping>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SetupMapping {
+    Asterdex,
 }
 
 #[derive(Default, Deserialize)]
@@ -248,8 +257,12 @@ fn rule(value: &Rule) -> String {
             .as_ref()
             .map_or_else(|| "None".into(), |header| format!("Some({header:?})")),
     );
+    let setup_mapping = value.setup_mapping.as_ref().map_or_else(
+        || "None".into(),
+        |mapping| format!("Some(SetupMapping::{mapping:?})"),
+    );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing} }}",
+        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )

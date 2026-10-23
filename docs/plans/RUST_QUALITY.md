@@ -1113,3 +1113,140 @@ finite ID reuse and 900 synchronous retirements followed by 256 real parked
 managed candle owners. No marker or Store mutation is introduced. Exact inventory
 removes only two local done sites; native/strict checks and independent reviews
 are required on the committed source before merge readiness.
+
+## KuCoin local Read original-source controls
+
+Tests committed before production on frozen661427d10b3 produce ten assertion
+failures and six passing compatibility controls. Standalone failures show
+capacity/invalid-clock leverage mutation and saturated cached publication before
+adoption. Genuine256-owner saturation, fixed-clock recovery/reuse and duplicate
+command protection use real callbacks, not fabricated Context or HTTP authority.
+
+Compatibility controls preserve cache aliases/sentinels, full order results,
+constant leverage fields and unknown-symbol handling, successful setting no-ops
+and capability declarations. Private/pager requests preserve native URLs, headers
+and completion while all256 background roots can coexist without an added owner.
+No steady WS/ticker/book path changes; current post-#1888 CI must pass the
+shared speed gate and report the fresh KCS ratio. The1.20x figure remains a
+headroom target, not a merge gate, per the overseer clarification.
+
+### Lighter ticker managed-entry controls
+
+Committed plan and six compiled assertion REDs precede managed ticker source.
+The previously held candle deadline driver was corrected first: every captured
+same-deadline timer fires at its original raw timestamp; all ten candle controls
+pass on legacy ticker source with every original assertion retained. Ticker
+controls preserve native fields/aliases/partial-row semantics and symbol-specific
+WS precedence through actual prepare/bind/claim, reject preclaim publication,
+discard failed prefixes, and prove failure/capacity recovery and300 Background
+retirements without completing unrelated commands. Existing fixture drains use
+shared preparation at original event times only where the new ticker requires it.
+No runtime timer/retry policy or production ordering workaround is introduced.
+
+
+
+## BloFin PublicTrades managed history regressions
+
+The native test-first controls exercise preparation/binding/claim, unreleased
+responses, original-deadline expiry, typed preparation and released transport
+failures, duplicate commands and stale responses. Fixed-clock repetition beyond
+the 256-owner bound covers preflight, success and immediate managed-queue
+refusal, so elapsed time cannot conceal missing terminal retirement.
+
+Compatibility controls assert every Trade field, native row order, cross-market
+rows, identity consumption before unknown-market skipping, timestamp precedence
+and milliseconds, numeric defaults, signed quantities and the wire-only limit.
+Malformed or refused first pages discard their streamed prefix without an
+incomplete marker. Six original-source assertion failures preceded production;
+five native compatibility controls already passed that original source.
+
+## BloFin PublicTrades actual bridge receipt
+
+The genuine actual-#1848/current-landing integration retains incoming candle
+entry and all six shared history/authority blobs. The capacity message mismatch
+is reproduced on the actual engine, then its expected text is obtained from
+Error::Capacity without weakening kind/outcome, no-I/O or retirement assertions.
+The 32 focused BloFin controls and three shared bridge controls pass; scoped
+strict Clippy/fmt and request-context checks with 15 regressions pass. The historical
+run of 501 native tests is distinct; fresh CI and a venue merge window remain gates.
+
+## WOO local history custody controls
+
+Real Engine<Woo> controls cover each original local refusal at invalid engine
+time, finite native error metadata/precedence, repeated settlement and same-ID
+reuse, zero I/O/Store effects, Fills aliases, unchanged private credential refusal
+and unchanged unsigned public GET dispatch. Three original assertion REDs plus
+four compatibility passes become seven passes without assertion changes. Shared
+capacity and revoked-entry mechanics retain the existing engine-suite coverage.
+
+### Paradex local history admission controls
+
+Original RED checkpoint `45c743903b8` adds one focused fixture without editing
+production, shared support or inventory: four local branches emit their old
+result/error instead of a shared capacity refusal; the clock control likewise
+exposes unowned completion. Three native compatibility controls pass alongside
+those five REDs. After adoption all eight original tests pass unchanged.
+The test uses real Engine callbacks,256 unclaimed managed book peers and exact
+terminal metadata, never a manufactured Context. Recovery reuses the freed slot
+and individually retires every remaining peer. Fixed-clock300-cycle reuse and
+refill exercise owner retirement without deadline expiry hiding a leak.
+The original managed public-trades and private history suite stays unchanged.
+Exact inventory target is Paradex55->51/history13->9; broader native, strict,
+ratchet, independent review and CI evidence will be recorded separately.
+
+Local history verification on reviewed integration `56dacc36562` genuinely
+includes actual landing `23d0d490009` (#1892 background executions and #1817
+credential selection). All513 Paradex/Binance tests pass across42 targets,
+none ignored, including the same eight original local-history controls.
+Strict all-target/all-feature Paradex Clippy, scoped formatting, bans, the
+request-context scanner and all15 ratchet tests pass. Source/adversarial,
+caller and full-map reviews are CLEAN on this actual integration; architecture
+No. The seven-path diff preserves every unowned incoming blob and all foreign
+manifest entries, with only the four planned Paradex history occurrences pruned.
+CI and an authorized train slot remain separate gates.
+
+
+## Subscription handoff ordering controls
+
+The assertion-only real OKX private reconnect test fails on the original
+managed adapter (HTTP index 2 before subscription index 5); the identical native
+pre-#1771 control passes in an isolated source/target. The corrected control
+compares the complete concatenated action batches and fires the actual queued
+wakeup, preserving the subscription-before-refresh assertion.
+
+Seventeen engine controls cover actual managed Prepare/Bind/Claim, final-batch
+fencing, callback retirement/replacement, required-interest removal and wire
+changes, refusal, additive supersession, pacing, repair/no-op, auth and delayed
+signing, bounded atomic admission, last-safe ID/rearm, duplicate/early/expired
+wakeups, HTTP-delivery isolation, command-entry refusal and caught fatal state.
+Existing OKX account, product and reconciliation fixtures drive genuine wakeups
+at their native reconnect times; their financial assertions stay unchanged.
+The focused engine/OKX all-target/all-feature run passes 1,241 tests.
+
+Three actual EngineHost bookkeeping controls fail against the original host
+and pass with inline/cleared/superseded timer ownership repaired. The full scoped
+host-unit command passes 194 tests. These local correctness results do not make
+a CPU, memory, size or replay-parity claim; those measurements belong to CI.
+
+Engine feature modes pass: feature-off 718, managed-sockets 820, http-plans 806,
+and combined 908 tests. Strict focused Clippy is clean. The initial bans run
+fails because the newer remote landing has already pruned unrelated Paradex
+and Phemex history inventory; this branch must integrate those actual changes
+before a current-landing ratchet pass is claimed.
+
+Runtime review added an eighteenth control: an early host one-shot must return
+an explicit rearm at the unchanged handoff time, run no early callback, run
+exactly one later callback and release its credit. This assertion fails on the
+initial implementation. A fourth actual-host control covers inline early
+rearming without losing the subsequent handle. The integrated predecessor run
+passes 1,269 focused tests, strict Clippy, formatting and bans; its initial stale
+inventory failure is resolved by genuine actual-landing integration.
+
+The refreshed complete host-unit command passes 195 tests, including all four
+handoff controls. Uufub4 independently executes the archived handoff file 4/4;
+ih35js's source/control clearance carries no independent build claim.
+
+The nineteenth handoff control covers #1932 composition: both initial arming and
+a previously armed wake remain blocked during the exact expiry barrier, retain
+the pending credit and barrier, and resume once afterward with a fresh timer.
+The unguarded integrated source is assertion RED at aa6613f7677.

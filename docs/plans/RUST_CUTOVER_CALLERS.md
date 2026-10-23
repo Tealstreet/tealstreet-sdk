@@ -5478,6 +5478,19 @@ not establish complete history. Existing native row shapes and result shaping
 remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
 and [owned history](RUST_OWNED_HISTORY.md).
 
+
+## Managed order reads reconcile from their earliest leg
+
+A managed order read clears an uncertain-write fence only if its earliest
+released leg (page, settle coin or product) was released after the fence.
+A read that straddles a fence leaves it set until the next full read, which the
+engine already requests. Caller outcomes and frames are unchanged; an order row
+may stay one extra read cycle after an unknown write.
+
+Legacy `cx.request` order reads still carry the per-attempt overclaim: a paged
+legacy read can clear a fence on rows read before it. This stays true for each
+venue until that venue moves its order reads onto managed contexts.
+
 ### Lighter public order-book seed uses managed Background Read
 
 The independent `orderBookOrders?market_id={id}&limit=100` snapshot now waits for
@@ -5628,6 +5641,192 @@ an active duplicate cannot complete or replace its existing owner. The valid-ID
 uncached spot miss, public-only perps refusal and private perps REST lookup retain
 their native behavior. The exchange-server order reconciliation caller consumes
 the same complete cached result and must retain non-definitive miss handling.
+
+## KuCoin synchronous local Read terminals
+
+Spot query credential refusal still precedes kind, cache and parameter handling.
+Missing credentials retain their message with InvalidInput/NotSent; unsupported
+Spot public trades and futures leverage retain their messages with
+Unsupported/NotSent. Keyed missing-symbol fills, order history and income still
+return[]; cached lookup preserves exact symbol/client/native-ID matching and full
+order JSON. The constant Spot leverage projection retains leverage/buy/sell1 and
+its existing unknown-symbol behavior, preserving unrelated margin settings.
+
+Shared initial Read admission now precedes these local results. Capacity/invalid
+clock refusal emits only the engine terminal; denied leverage reads leave Store
+unchanged and denied cache hits publish nothing. No credentials or route are
+borrowed for these no-I/O branches. Private fills, user-info, cache-miss paging,
+setters and successful margin/position no-ops retain native dispatch and policy.
+
+### Lighter public ticker seed uses managed Background Read
+
+The public `/api/v1/exchangeStats` GET now requires prepare/bind/claim support in
+custom transports, with its original20s bound covering preparation and streamed
+response together. Empty headers/body, all six native list-envelope aliases,
+field conversion, usable partial rows, per-symbol WebSocket precedence and poll/
+startup Backoff behavior remain the same. Invalid envelopes discard staged rows;
+queued, expired or late responses cannot publish ticker changes. Admission failure
+keeps recovery on the existing startup Backoff and completes no user command.
+Successful data and SDK method signatures are unchanged for both Lighter aliases
+and networks; private credentials, trading and catalog fallback stay native.
+
+
+
+## BloFin PublicTrades managed history
+
+PublicTrades uses prepared public HTTP and the original 20-second command Read
+owner. A response must match the released, claimed physical attempt before trade
+rows or identities enter the shared history owner. Expired, unreleased or stale
+responses cannot publish results. Preparation refusals retain their typed kind
+and notSent outcome; released transport failures retain network and expiry
+retains timeout. Failed first pages publish neither a staged prefix nor an
+incompleteness warning.
+
+The native unsigned GET, ordered query parameters, empty headers, default and
+clamped wire limit, millisecond timestamps and trade result fields are preserved.
+The wire limit does not truncate returned rows. Known cross-market rows, native
+row order, unknown-market identity consumption, numeric defaults, contract-size
+quantities and side conversion retain their existing behavior. Private history
+and signing paths keep their existing lifecycle.
+
+## WOO synchronous history refusal custody
+
+WOO local history refusals require genuine initial Read admission before the
+native terminal. Unsupported low-level remote client-ID lookup, invalid symbol/
+explicit range/limit and invalid derived range keep their existing validation
+order and native error messages at finite clocks. Invalid engine entry time now
+returns typed InvalidInput, and shared owner capacity returns Internal, each
+without a financial outcome or new HTTP/signing/timer/Store effects. Rejected
+entry is already completed by the engine; revoked entry cannot complete another
+owner. A settled local command ID remains reusable.
+
+The Rust exchange callers for executions, historical orders, income and public
+trades keep their existing rejection handling. Historical positions through
+`wooJournal` still obtain historical orders through the same API. This low-level
+unsupported lookup is separate from SDK `findOrderByClientOrderId`: with WOO
+clientOrderLookup disabled, that caller retains its existing non-definitive
+open-orders lookup. Valid public/private history keeps native unsigned/signed
+dispatch, credential selection, rows, page recovery, range budgets and pacing.
+No managed HTTP-history or signer adoption is implied.
+
+### Paradex local history results require genuine Read admission
+
+Public-only Fills, OrderHistory and Income still return exact `[]`; public-only
+OrderByClientId still returns `{"found":false,"definitive":false}`, including
+invalid private query inputs. Private-enabled invalid client IDs and explicit
+invalid history bounds retain their exact native messages and unclassified
+Read errors. Fills without a symbol still returns `[]` after bounds validation,
+before authentication. These local results now require genuine engine command
+Read admission: capacity and invalid clock policy produce one correlated typed
+engine refusal without a financial outcome. Successful admission preserves the
+native decision order and introduces no request, signer, timer, Store mutation
+or incomplete marker. PublicTrades retains its existing managed public path;
+other private history, signing, settings and REST fallthrough remain unchanged.
+
+## Exact background read delivery
+
+Adapters publishing a one-leg Background Read use
+`validate_background_read_http_delivery` synchronously in its matching managed
+HTTP callback, before retiring the Context or changing native/cache/Store state.
+Logical liveness alone does not prove that a different live Context belongs to
+that response. Command, Execution and Session owners cannot use this Background-only gate.
+
+Native response validity and publication freshness remain separate checks. A
+failure callback can have valid delivery identity without response data to
+publish. A refused gate publishes no replacement response and grants no command
+completion, retry or send authority. SDK/NX order-error handling and native result
+shapes are unchanged; adopting venue adapters retain their own caller contracts.
+## AsterDEX dispatch signing admission
+
+AsterDEX now signs only through the injected provider at dispatch
+([RUST_ASTER_SIGNER_ADMISSION.md](RUST_ASTER_SIGNER_ADMISSION.md), phases 2-3).
+Caller-visible changes:
+
+- **Setup carries the material.** `key`, `secret`, `auth.privateKey`,
+  `secondary_key` and `secondary_secret` reach the provider through the one-use
+  setup channel (raw WASM constructor argument 3, or native legacy setup). Generic
+  options and `exchange.options` keep only the public `auth.userAddress` /
+  `auth.signerAddress`. Native callers passing `asterdex.privateKey`,
+  `asterdex.readKey`, `asterdex.readSecret` or top-level key/secret beside opaque
+  `signing` refs are refused as invalid input.
+- **Setup resolves `apiVersion`.** TS and native setup resolve V1/V3 from the
+  material's shape and send it explicitly; the venue refuses a missing or
+  contradictory version instead of guessing. Keyless V3 callers should set
+  `extra.asterdexApiVersion`, since nothing inferred admits a keyless account.
+- **Encodings.** V3 wallet keys are trimmed hex, with an optional `0x`/`0X`;
+  V1 HMAC secrets stay byte-exact UTF-8. A whitespace-only key is absent.
+- **Read agent.** With an `auth.privateKey` wallet, the read agent presents its
+  own key and signs with the primary wallet's provider ref (one copy, one
+  revocation point), as before. Otherwise it signs with its own secret.
+- **Main-wallet hint.** The V1 "API Wallet keys require the Main Wallet Address"
+  refusal now happens at setup, with the same message.
+- **Read agent errors fail closed.** An empty read secret, or a V3 read secret
+  that is not hex, refuses setup instead of failing only the signed reads.
+- **`fetchAccount().userId`.** Without an `accountAlias`, V3 falls back to the
+  public signer address, as before. V1 previously fell back to the API key; it
+  now uses the trusted primary `localSigner.primary.stableId` (WEEX precedent)
+  and otherwise fails typed (`unsupported`). It is never the key and never
+  empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
+  Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
+  caller migration.
+
+
+## Managed subscription handoff before native reads
+
+OKX private reconnect account refreshes begin on a subsequent engine ingress
+following the handoff of their required subscription frames. The shared
+`set_socket_interests_then` API binds native Pending work to the current epoch
+and exact required interests. It waits for every paced batch and outstanding
+socket signature before arming an ordinary engine timer after final fencing.
+This establishes host handoff order; it promises neither peer acknowledgement
+nor a later JavaScript event-loop turn. Custom hosts must process the returned
+actions in order and deliver timer events through ordinary engine ingress.
+
+A committed removal or wire change cancels the dependent work. Unrelated
+additions preserve it behind the new revision; a refused replacement preserves
+still-needed work on the unchanged committed revision. Retirement, expiry,
+stale timers and duplicate delivery cannot issue its read. The callback has no
+borrowed HTTP delivery, command-entry, order-response or Plan activation token;
+reads retain their existing admission, signing, timeout and completion rules.
+
+The JS host removes inline-fired timer handles and ignores callbacks belonging
+to a cleared or superseded timer arm. Bitunix keeps its existing legacy socket
+boundary and its remove-before-master obligation.
+
+
+## WEEX ordinary trading: complete managed Plan
+
+The ordinary placement/cancel/amend/leverage/margin/mode pipeline now enters
+through genuine Preflight authority, admits its entire native serial sequence,
+and releases only through the existing primary dispatch recipe and shared
+Prepare/Bind/Claim path. Each native call retains 20s and one attempt; eight
+serial placement lots can complete over 152s inside their 160s Plan. No write
+retries or caller-side key selection were introduced. History/account/public
+callers and their temporary generic sender remain separate migrations.
+
+Accepted native IDs survive subsequent provider, refusal, transport, malformed
+ACK or expiry failures through the engine journal. Native code 40015 is a system
+error and remains Unknown, including when an old fixture's message says
+insufficient balance. Unlisted codes do not prove refusal. HTTP 408/5xx use the
+engine's typed Unknown reason, with native decoding/publication fenced. Two
+existing classification assertions were updated under overseer approval;
+payload fixtures are unchanged.
+
+CancelSymbolOrders still attempts its separate ordinary and algorithm families
+after an ordinary provider refusal or transport failure: exact failed-call
+settlement advances the Plan, and its journal retains the earlier NotSent or
+Unknown fact. It never retries either failed call. HTTP 408/5xx still terminate
+through the core before ordinary callbacks; no local continuation bypass exists.
+
+Late metadata contains bounded native client/cancel identities. Late replies
+remain nonpublishing and cannot produce a second terminal; native Store
+publication stays with authoritative active account/reconciliation reads.
+An immutable late reducer cannot also update WEEX native tombstone/freshness
+state, so freshness-aware late publication remains explicit follow-up debt.
+
+The inventory shrinks exactly 51 ->46 occurrences (42 -> 38 entries), with
+trading.rs 5 ->0: two numeric completions plus three conservative macro matches.
+No other venue inventory, shared checker, allowance or signer source changes.
 
 ## Retained command readiness
 

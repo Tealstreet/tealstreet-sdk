@@ -3,6 +3,7 @@
 use crate::account::venue_error;
 use crate::sign::{Query, Version};
 use crate::{AsterDex, Options, Pending};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::model::{
     CancelOrderRef, MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts,
     PositionSide, StopTriggerType, StpMode, TimeInForce,
@@ -31,6 +32,16 @@ enum Call {
     Mode(bool),
     StpWrite,
     StpRead,
+}
+
+impl Call {
+    /// The STP setting read is the only read in a trading job.
+    fn role(&self) -> CredentialRole {
+        match self {
+            Self::StpRead => CredentialRole::Read { scope: None },
+            _ => CredentialRole::Mutation,
+        }
+    }
 }
 struct Planned {
     method: Method,
@@ -346,14 +357,11 @@ impl AsterDex {
                 // Authentication is shared by every step. Reject it once so
                 // synchronous signer failures cannot recurse through a split job.
                 if let Some(step) = job.steps.front() {
-                    let credentials = if step.method == Method::Get {
-                        self.read_credentials.as_ref().or(self.credentials.as_ref())
-                    } else {
-                        self.credentials.as_ref()
-                    };
-                    let valid = credentials
-                        .ok_or_else(|| "Missing required Aster credentials".to_owned())
-                        .and_then(|credentials| credentials.validate());
+                    let valid = self
+                        .credentials
+                        .select(step.call.role())
+                        .map_err(|_| "Missing required Aster credentials".to_owned())
+                        .and_then(|(_, slot)| self.auth(slot).map(drop));
                     if let Err(error) = valid {
                         cx.command_error(id, error.clone());
                         cx.fail(id, not_sent(error).kind(ErrorKind::AuthInvalid));
@@ -411,6 +419,7 @@ impl AsterDex {
             // failures. Do not complete or advance the same request twice.
             self.signed(
                 cx,
+                step.call.role(),
                 step.method,
                 &path,
                 step.query,
