@@ -298,6 +298,16 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    pub(in super::super::super) fn with_independent_plan_failure(
+        &mut self,
+        _plan: &Plan,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, VenueError),
+    ) -> Result<(), Error> {
+        self.with_owned_read_failure(|| error.clone(), |cx| callback(cx, error.clone()));
+        Ok(())
+    }
+
     #[inline(never)]
     pub(in super::super::super) fn fail_owned_admission(
         &mut self,

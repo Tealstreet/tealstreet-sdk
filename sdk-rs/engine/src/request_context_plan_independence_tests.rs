@@ -393,6 +393,24 @@ mod independent_plan_calls {
         assert_eq!(e.venue.retired, 1);
     }
     #[test]
+    fn unowned_independent_failure_seals_instead_of_lending_a_callback() {
+        let (mut e, actions) = setup(true, true);
+        release(&mut e, &actions, 0.);
+        let plan = e.venue.plan.clone().unwrap();
+        assert!(e.io.http_delivery.is_none());
+        let mut called = false;
+        Cx { now: 1., store: &mut e.store, io: &mut e.io }
+            .with_independent_plan_failure(&plan,
+                VenueError::new("unowned failure").kind(ErrorKind::VenueUnavailable).outcome(crate::Outcome::Unknown),
+                |_, _| called = true).unwrap();
+        assert!(!called, "unowned delivery borrowed the typed callback");
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(failures(&actions).len(), 1);
+        assert_eq!(failures(&actions)[0].outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(e.venue.retired, 1);
+        assert!(e.io.managed_http.is_empty());
+    }
+    #[test]
     fn evidence_overflow_still_runs_cleanup_but_cannot_continue_siblings() {
         let (mut e, actions) = setup(true, true);
         let first = release(&mut e, &actions, 0.);

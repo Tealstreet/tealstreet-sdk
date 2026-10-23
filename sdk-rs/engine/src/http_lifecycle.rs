@@ -1088,14 +1088,12 @@ impl<V: Venue> Engine<V> {
                         .request_contexts
                         .independent_plan_failure(&delivery, error.clone())
                     {
-                        cx.with_owned_read_failure(
-                            || failure.clone(),
-                            |cx| {
-                                self.venue
-                                    .on_http_failed(cx, pending.value, failure.clone())
-                            },
-                        );
-                        Ok(())
+                        cx.with_independent_plan_failure(
+                            plan.as_ref()
+                                .expect("independent failure belongs to a Plan"),
+                            failure,
+                            |cx, failure| self.venue.on_http_failed(cx, pending.value, failure),
+                        )
                     } else if let Some(plan) = &plan {
                         cx.fail_plan(plan, error)
                     } else {
