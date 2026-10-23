@@ -212,3 +212,18 @@ and 27 occurrences (from seven/30/32); all other inventory maps remain intact.
 Full native/static gates and independent implementation reviews are recorded on
 the PR before readiness. Source/caller plan reviews confirmed the initial
 admission outcome exception and architecture gate No.
+
+
+## Phase two plan: unsigned command candle stream
+
+Base: actual `8d57199e884`, including landed public depth #1860 and command-entry follow-ups. Fresh PR file lists leave lib.rs and tests/public.rs clear; private account/trading source/tests remain occupied by #1787. The signer lane owns a future sign.rs recipe; this unsigned /api/v1/klines path does not use it or edit sign.rs.
+
+For supported FetchCandles, admit genuine Read/no credential/20 seconds/no pacing/Never retry. Carry Context in Pending::Candles, declare the same GET /api/v1/klines native sign::query and exact static X-Broker-Id:1200 through request_managed_with_headers, then register ArrayAt::Root through existing stream_response. No engine API, fake identity or streamed-header workaround is needed. Exact read delivery must precede both item parsing/malformed diagnostics and response/status handling. Finish through done_context/fail_context. Typed preparation/HTTP errors keep the engine kind and have no financial outcome; native non-2xx/string/malformed-row messages retain their existing fields. Book-query NotSent compatibility is untouched.
+
+Preserve native symbol/interval encoding and lexical parameter order, floor startTime/endTime to seconds, ignored limit, no local range validation, server row order/duplicates, ISO/numeric timestamps, finite JSON numbers, negative/zero values and empty-list success. Preserve native whole-list failure after a malformed row and its STREAM_MALFORMED diagnostic; no valid prefix may complete after failure. Unsupported interval stays before admission. Do not change public WS candles, startup get(), depth recovery or private/account/history behavior.
+
+Commit original-source regression tests before production edits. Thirteen controls cover exact header/query through prepare/bind/reprepare, typed refusal, parked/released root expiry, zero read retries on network/integrity failure, duplicate/concurrent/reused owners, initial invalid-clock/capacity rejection, unchanged native rows/order/ignored bounds and limit, malformed-row prefix exclusion, late malformed stream exclusion and non-2xx prefix failure. Keep assertions unchanged after RED. Update only the existing public candle fixture to shared prepared_actions at its original 0ms declaration clock; keep response clocks and every business assertion.
+
+Five planned paths: this appendix, CALLERS, manifest, lib.rs and tests/public.rs, plus new tests/request_context_candles.rs (six total). Remove only lib.rs fingerprints 9eb2532ffa305903307527ed26561752ae2716a465c7347f6bb03d38987efb3d, d0f067540be6f5b7aa8c5b2d02f4a4ace669920eb11cabb79b1d5bb8b18db63e and c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa, each count one. Generic get senders and unsupported preflight stay. Family six paths/26 entries/27 occurrences becomes six/23/24; no other map changes.
+
+Run focused lifecycle tests, full Backpack/Binance native suites, strict all-target Clippy, scoped fmt, bans and both request checks. Three independent plan/implementation reviews must verify architecture gate No (shared admission/header/stream/lifecycle APIs, native codec facts only). Fresh CI, separate guard and overseer parallel window are required. This slice claims no write-classification, signer, session, group, background or local-tail closure.
