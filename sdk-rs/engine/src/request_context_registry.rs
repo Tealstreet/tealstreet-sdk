@@ -1105,7 +1105,8 @@ impl<P> Cx<'_, P> {
         // Accepted facts carry no rejection reports.
         let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
         self.record_write(&delivery, result, reports)?;
-        if !resendable {
+        // Session writes get one attempt per operation: no resend grant.
+        if !resendable || !matches!(context.owner(), Owner::Command { .. }) {
             return Ok(None);
         }
         match self.io.request_contexts.grant_resend(&delivery) {
