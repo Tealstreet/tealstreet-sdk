@@ -420,3 +420,84 @@ fn native_errors_and_malformed_rows_reject_without_read_outcomes() {
         assert_eq!(error.kind, None);
     }
 }
+
+#[test]
+fn initial_invalid_clock_is_one_read_failure_without_authority_or_write_outcome() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut engine = engine();
+        let actions = query(&mut engine, 7, now);
+        let error = failure(&actions, 7);
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, None);
+        assert!(
+            actions
+                .iter()
+                .all(|action| matches!(action, Action::Notice(_)))
+        );
+
+        let fresh = query(&mut engine, 7, 100.);
+        let (token, _) = preparation(&fresh);
+        let packet = release(&mut engine, token, 101.);
+        let actions = response(&mut engine, &packet, 102., EMPTY);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    Action::Notice(Notice::CommandDone { command: 7, .. })
+                ))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn initial_capacity_rejection_keeps_parked_owner_and_reuses_only_freed_capacity() {
+    let mut engine = engine();
+    let mut first = None;
+    for command in 1..=256 {
+        let actions = query(&mut engine, command, 100.);
+        let (token, _) = preparation(&actions);
+        if command == 1 {
+            first = Some(token);
+        }
+    }
+    let actions = query(&mut engine, 257, 101.);
+    let error = failure(&actions, 257);
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.outcome, None);
+    assert!(
+        actions
+            .iter()
+            .all(|action| matches!(action, Action::Notice(_)))
+    );
+
+    let first = release(&mut engine, first.unwrap(), 102.);
+    let actions = response(&mut engine, &first, 103., EMPTY);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 1, .. })
+            ))
+            .count(),
+        1
+    );
+    let fresh = query(&mut engine, 257, 104.);
+    let (token, _) = preparation(&fresh);
+    let fresh = release(&mut engine, token, 105.);
+    let actions = response(&mut engine, &fresh, 106., EMPTY);
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 257, .. })
+            ))
+            .count(),
+        1
+    );
+}
+
