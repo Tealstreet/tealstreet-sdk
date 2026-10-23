@@ -265,4 +265,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | WEEX account identity Read custody | Plan; original REDs next | Before changing FetchAccount local refusals or initial managed identity validation. | [RUST_WEEX_IDENTITY_CONTEXT.md](RUST_WEEX_IDENTITY_CONTEXT.md) |
 | Binance identity preflight terminals | Focused adoption plan | Before converting local identity refusals to genuine Read custody; preserve selected signing and session ownership. | [RUST_BINANCE_IDENTITY_TERMINALS.md](RUST_BINANCE_IDENTITY_TERMINALS.md) |
 | Selection-managed signed reads | Standalone engine implementation; consumers separate | Before coupling selected identity/egress/evidence with managed signed Read admission, queueing or retry. | [RUST_SELECTED_MANAGED_READ.md](RUST_SELECTED_MANAGED_READ.md) |
+
+| Raw signature expiry at final release | Plan-first engine prerequisite | Before publishing engine-projected raw signature expiry to a repair/reconciliation consumer. | [RUST_SIGNING_RELEASE_EXPIRY.md](RUST_SIGNING_RELEASE_EXPIRY.md) |
 | OKX dispatch signer migration | Planned | OKX opaque identities, send-time HTTP/WS and hosted caller adoption | [RUST_OKX_DISPATCH_SIGNER.md](RUST_OKX_DISPATCH_SIGNER.md) |

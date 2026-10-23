@@ -440,20 +440,9 @@ impl HttpRelease {
         if time.raw_ms >= deadline {
             return Err(Error::TimedOut);
         }
-        signature.validate().map_err(|_| Error::Invalid)?;
-        let signature_valid_until = if let Some(expiry) = signature.expiry_ms {
-            let remaining = expiry - time.protocol_ms;
-            let projected = time.raw_ms + remaining;
-            if !remaining.is_finite() || !projected.is_finite() {
-                return Err(Error::Invalid);
-            }
-            if remaining <= 0. {
-                return Err(Error::Stale);
-            }
-            Some(deadline.min(projected))
-        } else {
-            None
-        };
+        let signature_valid_until = crate::SigningRelease::new(signature, time)?
+            .raw_expiry_ms()
+            .map(|projected| deadline.min(projected));
         if !deadline.is_finite() || deadline <= time.raw_ms {
             return Err(Error::Invalid);
         }
