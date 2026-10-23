@@ -4,6 +4,7 @@ use safe_cex_venue_bingx::Options;
 fn credential_options_hold_only_opaque_refs() {
     let options = Options {
         credentials: Some(Identity {
+            extra: Default::default(),
             credential: KeyRef("ref:owned-primary".into()),
             signing: KeyRef("ref:owned-signing".into()),
             passphrase: None,
