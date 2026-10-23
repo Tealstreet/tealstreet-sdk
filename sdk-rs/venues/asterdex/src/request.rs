@@ -230,11 +230,14 @@ impl AsterDex {
             }
         };
         // The recipe writes the signed query and API-key header at dispatch.
-        let url = format!("{}{}", self.urls.rest, request.path);
+        let path = &request.path;
+        let url = format!("{}{path}", self.urls.rest);
+        let headers = Vec::new();
         let method = request.method;
-        let id = match request.stream {
-            Some(at) => cx.request_streamed(method, url, Vec::new(), at, Pending::Signed(request)),
-            None => cx.request(method, url, Vec::new(), None, Pending::Signed(request)),
+        let stream = request.stream;
+        let id = match stream {
+            Some(at) => cx.request_streamed(method, url, headers, at, Pending::Signed(request)),
+            None => cx.request(method, url, headers, None, Pending::Signed(request)),
         };
         selection.sign(cx, id, Box::new(recipe));
         true
