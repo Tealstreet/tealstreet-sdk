@@ -431,3 +431,14 @@ map is preserved except the exact8-occurrence/7-entry book prune. Three
 independent reviews are clean, architecture No. The reviewed #1872 source stays
 exact apart from the explicitly authorized BookQuery integration; its actual
 landing and the overseer's window remain required before merge.
+
+### Managed book integration after startup landing
+
+Actual startup #1872 e233cb05dfb63d7575382bed823c7538a5826b98 and subsequent
+Phemex #1878 7b6b4a2d029052c08fc3801a763a613b6a7ab9d4 are genuinely integrated.
+The startup dependency is resolved: only the eleven managed-book paths differ
+from incoming, with account.rs and its account tests incoming-exact. The native
+book source, fixtures and dependency trees retain the reviewed green behavior.
+Incoming inventory stays intact except the proven eight MEXC occurrences/seven
+entries; source-equivalent integration review and fresh-head CI are recorded in
+the PR. No merge without an overseer window.
