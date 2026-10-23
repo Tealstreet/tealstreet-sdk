@@ -2014,6 +2014,77 @@ mod tests {
     }
 
     #[test]
+    fn execution_observers_record_the_execution_credential() {
+        for signed in [false, true] {
+            let mut io = super::super::Io::<()>::default();
+            let founder = io
+                .request_contexts
+                .issue(1, Scope::Command(7), policy(), 0.)
+                .unwrap();
+            io.request_contexts.retain_command_entry(&founder);
+            assert!(!io.request_contexts.owner_credentialed(7));
+            let mut execution = policy();
+            execution.credential = signed.then(|| crate::request_context::Credential {
+                slot: crate::CredentialSlot::Primary,
+                reference: crate::signing::KeyRef("fixture".into()),
+            });
+            io.request_contexts
+                .begin_execution(
+                    100,
+                    &founder,
+                    execution,
+                    crate::execution_group::Window::UntilTerminal,
+                    "k",
+                    0.,
+                )
+                .unwrap();
+            assert_eq!(io.request_contexts.owner_credentialed(7), signed);
+        }
+    }
+
+    #[cfg(feature = "http-plans")]
+    #[test]
+    fn preflight_owners_count_auth_failures_only_with_a_declared_credential() {
+        use crate::request_context::{PreflightPolicy, PreflightPurpose};
+        use crate::{CredentialSlot, ErrorKind, VenueError};
+        let credential = || {
+            Some(crate::request_context::Credential {
+                slot: CredentialSlot::Primary,
+                reference: crate::signing::KeyRef("fixture".into()),
+            })
+        };
+        for (read, write, counted) in [(false, false, 0), (true, false, 1), (true, true, 1)] {
+            let mut io = super::super::Io::<()>::default();
+            let mut store = Store::default();
+            let mut cx = Cx {
+                now: 100.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let preflight = cx
+                .issue_preflight(
+                    7,
+                    PreflightPolicy {
+                        purpose: if write {
+                            PreflightPurpose::WriteAfterReads
+                        } else {
+                            PreflightPurpose::ReadOnly
+                        },
+                        read_credential: if read { credential() } else { None },
+                        write_credential: if write { credential() } else { None },
+                    },
+                )
+                .unwrap();
+            let error = VenueError::new("route refused").kind(ErrorKind::AuthInvalid);
+            cx.fail_preflight(&preflight, error).unwrap();
+            assert_eq!(
+                cx.io.health.auth_failures, counted,
+                "read={read} write={write}"
+            );
+        }
+    }
+
+    #[test]
     fn only_owners_that_carried_a_credential_count_auth_failures() {
         use crate::{CredentialSlot, ErrorKind, Notice, VenueError};
         let credential = || {
