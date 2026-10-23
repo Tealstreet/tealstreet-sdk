@@ -308,6 +308,16 @@ Revised after independent adversarial review (3 blockers, 4 major resolved).
    Unknown with the known partial IDs) and never retires shared physical work
    while a peer survives. There is no per-observer journal and no numeric
    member seal. Progress only notifies; it never completes an owner.
+   Late joins (clarified with uufub4, 2026-10-23): an exact identical-intent
+   join after release (same native work, orderLinkIds, policy, credential and
+   publish shape) inherits the same proven accepted facts and prior-release
+   uncertainty. It never gets a cleaner outcome than the founder, never
+   causes a duplicate physical effect and never extends the execution root.
+   Fully resolved facts may project the same success when native intent and
+   IDs are truly identical; an unresolved prior release stays Unknown. The
+   non-consuming projection keeps every known money fact within the existing
+   ID/text budgets, and detached sent writes keep reconciliation evidence even
+   with zero observers. A different shape must not join.
 6. **Expiry: one terminal path.** The engine arms one execution timer at
    `min(earliest observer deadline strictly earlier than the execution
    deadline, execution deadline while no leg is in flight)`. Observer
