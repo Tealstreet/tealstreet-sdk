@@ -102,3 +102,35 @@ through review before source edits.
 This draft introduces neither runtime nor consumer changes. First review the
 entry-only API and exact generation/seal hook list with cxxyqr and 9czdjh;
 commit original REDs before implementing the shared seam.
+
+## Review pins before source
+
+9czdjh cleared the native mapping at `9191103b598`. Unknown-symbol leverage
+updates must retain `Store::update_setting` behavior: do not create a synthetic
+setting. The combined KuCoin branch uses an empty projection.
+
+cxxyqr cleared the direction at that pin with these required details:
+
+- Check the engine-owned dispatch pair `(entry.command, Intent::Setting)` for
+  this exact Fresh entry. Never accept a venue-selected operation or a prior
+  dispatch. Cover SetStpMode's Setting classification alongside the three
+  consumer command kinds, and deny Read/Place/Cancel/Amend entry substitution.
+- Missing entry, borrowed callback, wrong intent and spent/Bound custody are
+  pure Revoked, without projection or another terminal. For a genuine Fresh
+  Setting entry, use the single `command_receipt` matching rule: no fallback
+  wait or second receipt lookup. Missing/mismatched receipt and exhausted
+  receipt sequence use the existing typed Mutation rejection transaction
+  (NotSent, with its exact cause). Invalid clock is Invalid; an expired or
+  sub-ms receipt is Timeout/NotSent. Duplicate legacy-id controls must preserve
+  the original stamp and lock as well as Store, including feature-off entry.
+- Reserve every terminal and cleanup resource before projection. The common
+  finish path is not assumed infallible: prepare its exact local-owner case,
+  then commit under poison until projection and terminal cleanup both finish.
+  A caught projection/commit panic leaves the engine poisoned; a subsequent
+  command cannot run after partial Store mutation. Add that fail-stop control.
+
+The intended storage hook is a private local phase on the existing command
+owner, with one exact generation and no journal or Context. Only its private
+prepared completion origin can seal it. Review the phase/match-arm and terminal
+reservation diff before changing held shared files; no second registry or
+general empty-journal success is authorized by these plan pins.
