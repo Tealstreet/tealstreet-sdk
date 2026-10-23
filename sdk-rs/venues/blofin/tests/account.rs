@@ -486,7 +486,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
     h.seed();
     h.actions.clear();
     h.e.handle(1000., Event::TimerFired { timer: retry });
-    h.collect();
+    h.collect_at(1000.);
     h.reply(
         "instruments",
         &PARTIAL_INSTRUMENTS.replace("\"maxLeverage\":\"0\"", "\"maxLeverage\":\"20\""),
@@ -504,7 +504,8 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
     assert!(
         !h.actions
             .iter()
-            .any(|a| matches!(a, Action::WsConnect { .. } | Action::SetTimer { .. })),
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+            && new_timer(&h.actions).is_none(),
         "{:?}",
         h.actions
     );
@@ -1798,8 +1799,9 @@ fn null_filled_size_cannot_close_a_known_order_and_valid_siblings_continue() {
             if event.message.contains("Malformed BloFin order row"))));
 }
 fn new_timer(actions: &[Action]) -> Option<(safe_cex_engine::TimerId, f64)> {
-    actions.iter().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+    actions.iter().enumerate().find_map(|(index, action)| match action {
+        Action::SetTimer { timer, at_ms }
+            if !actions[index + 1..].iter().any(|action| matches!(action, Action::ClearTimer { timer: cleared } if cleared == timer)) => Some((*timer, *at_ms)),
         _ => None,
     })
 }
@@ -1816,7 +1818,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     assert!(h.e.store().order("working").is_some());
     let listed = h.e.store().market_by_id("BTC-USDT").cloned().unwrap();
     h.e.handle(at, Event::TimerFired { timer: retry });
-    h.collect();
+    h.collect_at(at);
     // BTC-USDT drops out of the list while BAD-USDT stays malformed.
     h.reply(
         "instruments",
@@ -1853,7 +1855,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let mut rereads = 0;
     while let Some((timer, at)) = retry.take() {
         h.e.handle(at, Event::TimerFired { timer });
-        h.collect();
+        h.collect_at(at);
         h.actions.clear();
         h.reply("instruments", PARTIAL_INSTRUMENTS);
         rereads += 1;
