@@ -5478,6 +5478,72 @@ not establish complete history. Existing native row shapes and result shaping
 remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
 and [owned history](RUST_OWNED_HISTORY.md).
 
+### Lighter public order-book seed uses managed Background Read
+
+The independent `orderBookOrders?market_id={id}&limit=100` snapshot now waits for
+prepare/bind/final claim in custom worker/hosted transports. It remains unsigned
+GET with empty headers/body. SDK subscriptions, snapshot decoding, level units,
+book/nonce validation, WS revision/generation precedence and native2s recovery
+remain unchanged. This does not establish WS nonce continuity from REST.
+
+Preparation shares the original20s bound with response handling. Expired or
+unreleased work cannot publish; failures release only the matching subscription's
+in-flight latch and use existing background recovery, never a user's command
+terminal. Ticker/catalog/private/trading paths stay native. No caller signature
+or financial-outcome contract changes; transports need managed preparation for
+this additional background read.
+
+## KuCoin futures local history/funding terminals
+
+Synchronous history/funding preflight errors and zero-limit empty results now
+borrow the engine's genuine initial Read authority and complete it in the same
+callback. Native validation order, error messages, empty arrays and companion-free
+timelines remain. Unsupported client lookup gains Unsupported/NotSent metadata;
+local input/absent credential failures gain InvalidInput/NotSent. There is no
+transport or private remote read on these branches, so their policy declares no
+credential. Valid signed paging continues through its existing separate path.
+
+Initial shared admission refusal emits exactly one engine-owned failure and no
+adapter fallback or result. Capacity refusal uses the shared Internal error;
+invalid raw clock admission uses InvalidInput, both without a Read financial
+outcome. Repeated commands can recover when unrelated roots retire. Callers need
+no new endpoint, retry or history marker handling for this local-only slice.
+## Bitunix synchronous history Read completion
+
+Local history exits retain their original command Read authority through shared
+entry admission and Context completion. Unsupported client lookup/public trades
+retain their native text and now carry Unsupported/NotSent; nonfinite time keeps
+its text and carries InvalidInput/NotSent. These local refusals still have no
+error companion. Genuine admission refusal uses the engine's typed reason once,
+including invalid clocks and capacity, without issuing opaque work.
+
+Keyless private queries still return `[]` before time validation. Missing or
+unknown fill symbols still return `[]` before finite-time validation. Unsupported
+query checks still precede keyless handling. No range-order guard, timer or
+transport is added. Valid private history dispatch, signatures, paging and
+incompleteness behavior retain their existing contracts and remain legacy-owned.
+
+## Bitrue synchronous history refusal authority
+
+Unsupported complete order/income history and local fill preflight refusals now
+consume genuine initial Read authority and finish in the same callback. Their
+exact native messages, authentication-before-range-before-symbol precedence,
+companion-free timeline and absence of I/O/Store mutation remain. Unsupported
+kinds gain Unsupported/NotSent; local input or missing credential errors gain
+InvalidInput/NotSent. Shared admission refusal emits its one engine-owned typed
+failure, with no adapter fallback or Read financial outcome. Valid private fills,
+lookup and WS FIFO delegates keep their existing separate transport contracts.
+
+## Bitrue local leverage preflight authority
+
+FetchLeverage and FetchMaxLeverage retain unknown-market-before-credential
+validation and their exact native messages. Those four local refusals now use
+shared initial Read authority and Context completion, adding InvalidInput/NotSent
+metadata without a companion, transport or Store mutation. Admission refusal
+emits exactly one shared typed failure with no adapter fallback or Read financial
+outcome. Valid bracket requests and leverage-query joining/refresh/fan-out keep
+their existing separate contracts and remain held for shared signer/group work.
+
 ## Phemex local history admission
 
 Synchronous Phemex history/income results use genuine engine command-entry
