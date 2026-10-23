@@ -29,6 +29,8 @@ struct Rule {
     bridge: BridgeRule,
     signer_setup: CredentialSetupPolicy,
     remote_signing: RemoteSigningPolicy,
+    // Read only by builds that compile a mapped family.
+    #[cfg_attr(not(feature = "asterdex"), allow(dead_code))]
     setup_mapping: Option<SetupMapping>,
 }
 
@@ -102,6 +104,7 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
 include!(concat!(env!("OUT_DIR"), "/construction_rules.rs"));
 
 /// The declared family setup mapping, if any.
+#[cfg_attr(not(feature = "asterdex"), allow(dead_code))]
 pub fn signer_setup_mapping(venue: &str) -> Option<SetupMapping> {
     venue_rule(venue).and_then(|rule| rule.setup_mapping)
 }
