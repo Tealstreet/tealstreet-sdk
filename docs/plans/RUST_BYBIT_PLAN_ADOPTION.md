@@ -82,9 +82,10 @@ and an Unknown outcome. Its Hyro twin stays unchanged (see the carve-out below).
    - success `Key::Int(0)`; documented status rows only where cited.
    The `not_modified` / `already_gone` text rules and the transport-text resend
    are deleted for ordinary writes.
-2. **Genuine Preflight.** `on_trade_command` runs inside command entry:
-   `begin_preflight(WriteAfterReads)` when a mode read is needed, else direct plan
-   admission. The mode read uses `preflight_read_context` with a native 20 s
+2. **Genuine Preflight.** Every write path starts in the genuine command entry
+   with `begin_preflight(WriteAfterReads)` and only then `admit_plan`. This
+   includes paths with no mode read: there is no Context-free or direct Plan
+   issuer. When a mode read is needed it uses `preflight_read_context` with a native 20 s
    `FreshAttempt` window and one native signature retry (`classify::read`
    `NativeResend`, never a write grant). A version change redoes the preflight
    under the same owner with no new whole-preflight cap.
@@ -125,8 +126,16 @@ and an Unknown outcome. Its Hyro twin stays unchanged (see the carve-out below).
    row. The command stays Unknown, and CALLERS says this proves nothing about
    omitted live orders.
 7. **Terminal.** `done_plan` / `fail_plan` (the journal projection) replace the
-   numeric `cx.done` / `cx.fail`. Pre-plan validation refusals use the entry
-   rejection path.
+   numeric `cx.done` / `cx.fail`.
+   - Native pre-plan validation errors keep their own text and kind. The issued
+     Preflight is failed (`fail_preflight`), or, before any I/O, a genuine
+     no-I/O completion authority is issued and failed. A terminal-only Mutation
+     Context with no credential, which grants no private send rights, covers a
+     missing real credential.
+   - Initial-entry rejection is only the engine's automatic typed issuance
+     failure.
+   - There is never a numeric fallback or a dummy Context converted to a
+     Preflight.
 8. **Ratchet.** Prune only the migrated `trading.rs` / `lib.rs` sites from
    `request-legacy-sites.json`, decrementing per-file counts. Record the
    old and new maps and hashes in the PR body.
