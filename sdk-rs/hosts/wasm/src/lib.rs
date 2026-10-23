@@ -59,7 +59,11 @@ trait AnyEngine {
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         (now, 0)
     }
-    fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError>;
+    /// `None` leaves host capability undeclared (unknown), so admission fails closed.
+    fn external_signer(
+        &mut self,
+        algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+    ) -> Result<(), safe_cex_engine::VenueError>;
     fn prepare_dispatch(&mut self, now: f64);
     fn set_entropy(
         &mut self,
@@ -138,8 +142,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
     fn failed(&self) -> bool {
         Engine::failed(self)
     }
-    fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
-        self.set_signer(None)
+    fn external_signer(
+        &mut self,
+        algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.set_signer(None)?;
+        self.set_host_algorithms(algorithms)
     }
     fn prepare_dispatch(&mut self, now: f64) {
         Engine::prepare_dispatch(self, now);
@@ -256,6 +264,17 @@ impl safe_cex_engine::signing::Signer for ExternalSigner {
             safe_cex_engine::signing::SignError::Unavailable,
         )))
     }
+}
+
+/// A JS provider's declared algorithms: a JSON array of SignAlgorithm names.
+fn host_algorithms(
+    json: &str,
+) -> Result<Vec<safe_cex_engine::signing::Algorithm>, safe_cex_engine::VenueError> {
+    serde_json::from_str(json).map_err(|_| {
+        safe_cex_engine::VenueError::new("Invalid signer algorithm declaration")
+            .kind(safe_cex_engine::ErrorKind::InvalidInput)
+            .outcome(safe_cex_engine::Outcome::NotSent)
+    })
 }
 
 /// Owns whichever venue engine the registry builds.
@@ -889,7 +908,12 @@ impl WasmEngine {
 
     /// JS providers execute atomic batches outside the engine. Must be installed before start.
     #[wasm_bindgen(js_name = useExternalSigner)]
-    pub fn use_external_signer(&mut self) -> Result<(), js_sys::Error> {
+    /// `algorithms_json` declares what the JS provider can sign (a JSON array of
+    /// SignAlgorithm); omitted means unknown, so capability admission fails closed.
+    pub fn use_external_signer(
+        &mut self,
+        algorithms_json: Option<String>,
+    ) -> Result<(), js_sys::Error> {
         if !self.dispatch_signing {
             return Err(construction_error(
                 safe_cex_engine::VenueError::new(
@@ -899,7 +923,13 @@ impl WasmEngine {
                 .outcome(safe_cex_engine::Outcome::NotSent),
             ));
         }
-        self.inner.external_signer().map_err(construction_error)?;
+        let algorithms = algorithms_json
+            .map(|json| host_algorithms(&json))
+            .transpose()
+            .map_err(construction_error)?;
+        self.inner
+            .external_signer(algorithms)
+            .map_err(construction_error)?;
         self.external_signer = true;
         Ok(())
     }
@@ -1403,7 +1433,9 @@ mod tests {
                     panic!("{venue}: opaque external provider construction must succeed");
                 };
                 assert!(engine.requires_external_signer(), "{venue}");
-                assert!(engine.use_external_signer().is_ok(), "{venue}");
+                // Declared and undeclared capability both admit ordinary signing.
+                let declared = (venue != ALIASES[0]).then(|| r#"["hmacSha256"]"#.to_owned());
+                assert!(engine.use_external_signer(declared).is_ok(), "{venue}");
                 let actions: Vec<Value> = serde_json::from_str(&engine.start(NOW)).unwrap();
                 assert!(
                     !actions
@@ -1461,6 +1493,18 @@ mod tests {
         use safe_cex_engine::signing::{
             Context, KeyRef, Operation, SignError, SignRequest, Signer,
         };
+
+        #[test]
+        fn host_algorithm_declarations_are_exact_sign_algorithm_names() {
+            use safe_cex_engine::signing::Algorithm;
+            assert_eq!(
+                super::super::host_algorithms(r#"["hmacSha256","zkLinkContract"]"#).unwrap(),
+                [Algorithm::HmacSha256, Algorithm::ZkLinkContract]
+            );
+            for invalid in [r#"["HMAC"]"#, r#""hmacSha256""#, "", r#"[null]"#] {
+                assert!(super::super::host_algorithms(invalid).is_err(), "{invalid}");
+            }
+        }
 
         #[test]
         fn external_marker_never_materializes_credentials_or_signatures() {
@@ -1985,7 +2029,10 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
-            fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+            fn external_signer(
+                &mut self,
+                _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+            ) -> Result<(), safe_cex_engine::VenueError> {
                 Ok(())
             }
             fn prepare_dispatch(&mut self, _: f64) {}
@@ -2208,7 +2255,10 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
-        fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+        fn external_signer(
+            &mut self,
+            _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+        ) -> Result<(), safe_cex_engine::VenueError> {
             Ok(())
         }
         fn prepare_dispatch(&mut self, _: f64) {}
@@ -2271,7 +2321,10 @@ mod tests {
 
         struct Counted;
         impl AnyEngine for Counted {
-            fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+            fn external_signer(
+                &mut self,
+                _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+            ) -> Result<(), safe_cex_engine::VenueError> {
                 Ok(())
             }
             fn prepare_dispatch(&mut self, _: f64) {}

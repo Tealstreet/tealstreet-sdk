@@ -219,3 +219,12 @@ test('provider mutation cannot rewrite the expected receipt snapshot', async () 
   assert.deepEqual(r.events, [['installed'], ['failed', 7, 'invalidResult', 1234]]);
   r.host.dispose();
 });
+
+test('declared signer algorithms reach the engine as exact JSON; undeclared stays unknown', () => {
+  const declared = [];
+  const engine = { useExternalSigner(...args) { declared.push(args); } };
+  new EngineHost(engine, {}, {}, { signer: () => [], signerAlgorithms: ['hmacSha256', 'zkLinkContract'] }).dispose();
+  new EngineHost(engine, {}, {}, { signer: () => [] }).dispose();
+  assert.deepEqual(declared, [['["hmacSha256","zkLinkContract"]'], [undefined]]);
+  assert.throws(() => new EngineHost(engine, {}, {}, { signer: () => [], signerAlgorithms: 'hmacSha256' }), TypeError);
+});
