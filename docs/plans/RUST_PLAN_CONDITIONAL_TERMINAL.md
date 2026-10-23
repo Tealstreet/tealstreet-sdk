@@ -226,3 +226,16 @@ seal hook, one admission declaration including terminals, live reconciliation
 continuations block early retirement, and successful suffix release is not a
 per-slot pre-send denial. These are plan requirements pending source controls,
 not a claim that the composed journal is already available.
+
+Composition refinement: execution per-observer projection storage (at most 64
+observers) belongs to PREPARE. A preparation refusal leaves observers, root and
+journal untouched; no-fail COMMIT seals once and calls finish_command_as for
+each surviving observer without allocating.
+
+Original source controls now exist in engine/tests/plan_conditional_terminal.rs.
+On reviewed parent source plus this test only, the real managed cancel reaches
+exact DATA and records its accepted Cancel/Amend fact; ordinary done_plan still
+refuses State. The desired native empty terminal fails at CommandDone count
+0 versus 1. The full two-call native amendment succeeds with its exact ID and
+unchanged Plan root (1 behavioral RED, 1 compatibility GREEN). This fixture uses
+a local immediate Present provider and is not remote family-signing proof.
