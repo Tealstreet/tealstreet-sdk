@@ -3,8 +3,8 @@ use safe_cex_engine::request_context::{
     Claim, Error, HttpAction, Preparation, Prepared, RoutingIntent,
 };
 use safe_cex_engine::{
-    Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Response, TimerId,
-    VenueError,
+    Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, Response,
+    TimerId, VenueError,
 };
 use safe_cex_venue_backpack::{Backpack, Options};
 
@@ -211,7 +211,7 @@ fn stale_route_reprepares_same_headers_without_extending_the_root() {
 }
 
 #[test]
-fn preparation_refusal_keeps_typed_metadata_without_write_outcome_or_retry() {
+fn preparation_refusal_keeps_typed_metadata_and_local_unsent_fact_without_retry() {
     let mut engine = engine();
     let actions = query(&mut engine, 7, 100.);
     let (token, _) = preparation(&actions);
@@ -228,7 +228,7 @@ fn preparation_refusal_keeps_typed_metadata_without_write_outcome_or_retry() {
     let actions: Vec<_> = engine.drain_actions().collect();
     let error = failure(&actions, 7);
     assert_eq!(error.kind, Some(ErrorKind::Unsupported));
-    assert_eq!(error.outcome, None);
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert_eq!(error.venue_code.as_deref(), Some("route.test"));
     assert_eq!(error.venue_message.as_deref(), Some("route detail"));
     assert_eq!(error.retry_after_ms, Some(1234.));
@@ -258,7 +258,7 @@ fn parked_route_expires_once_and_late_preparation_has_no_rights() {
     let actions: Vec<_> = engine.drain_actions().collect();
     let error = failure(&actions, 7);
     assert_eq!(error.kind, Some(ErrorKind::Timeout));
-    assert_eq!(error.outcome, None);
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
     no_new_work(&actions);
     engine.http_prepared(
         20_101.,
