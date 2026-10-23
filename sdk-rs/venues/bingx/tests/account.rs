@@ -5,7 +5,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Level, Method, Notice, RequestId, Response,
     SocketId, TimerId, wire,
 };
-use safe_cex_venue_bingx::{Bingx, Options};
+use safe_cex_venue_bingx::Bingx;
+mod support;
+use support::Options;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
@@ -46,11 +48,11 @@ impl Harness {
     }
     fn unstarted() -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
+            engine: support::engine(Options {
                 key: Some("key".into()),
                 secret: Some("secret".into()),
                 ..Options::default()
-            })),
+            }),
             now: 1000.0,
             requests: Vec::new(),
             sockets: Vec::new(),
@@ -67,7 +69,7 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
@@ -144,7 +146,10 @@ impl Harness {
         let i = self
             .timers
             .iter()
-            .position(|(_, t)| *t == at)
+            // Drive the freshly rearmed native timer when an older managed
+            // response deadline shares its timestamp. This harness deliberately
+            // leaves unrelated physical deadlines parked; dedicated tests drive them.
+            .rposition(|(_, t)| *t == at)
             .unwrap_or_else(|| panic!("no timer at {at}; have {:?}", self.timers));
         let (timer, _) = self.timers.remove(i);
         self.now = at;
@@ -839,8 +844,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,

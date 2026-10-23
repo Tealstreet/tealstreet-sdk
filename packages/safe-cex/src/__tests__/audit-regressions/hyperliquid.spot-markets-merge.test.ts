@@ -341,6 +341,8 @@ describe('hyperliquid spot markets merged into the perp container', () => {
     // directly is tautological: every `reduce_only:` call site could be
     // reverted to the pre-fix bug and a helper-level test would still pass.
     const exchange = createExchange();
+    // Builder approval is an account fact, unrelated to the spot wire flags.
+    (exchange as any)._builderFeeApproved = false;
 
     exchange.store.update({
       markets: [

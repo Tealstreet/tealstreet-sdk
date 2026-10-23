@@ -1698,3 +1698,189 @@ fn one_malformed_row_keeps_its_stored_leg_while_valid_peers_commit() {
     let (_, logs) = cycle(&mut e, &actions, NOW + 8_000., &rows);
     assert_eq!(skipped(&logs), 2);
 }
+
+fn row_report_skips(actions: &[Action]) -> Vec<(safe_cex_engine::Level, String)> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+            {
+                Some((event.level, event.message.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+fn row_report_cycle(
+    e: &mut Engine<PhemexPerpetuals>,
+    prior: &[Action],
+    at: f64,
+    usdt: &str,
+    usdc: &str,
+) -> Vec<Action> {
+    e.handle(
+        at,
+        Event::TimerFired {
+            timer: timer(prior, at),
+        },
+    );
+    let reads: Vec<_> = e.drain_actions().collect();
+    response(
+        e,
+        at,
+        request(&reads, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 69., usdt),
+    );
+    response(
+        e,
+        at,
+        request(&reads, "currency=USDC").id,
+        200,
+        &envelope("USDC", 200., 25., usdc),
+    );
+    e.drain_actions().collect()
+}
+
+#[test]
+fn row_report_clean_currency_rearms_only_its_own_anonymous_key() {
+    use safe_cex_engine::Level;
+    let (mut e, reads, _) = started();
+    seed(&mut e, &reads);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let warning = (
+        Level::Warn,
+        "Phemex skipped an unreadable position row".to_owned(),
+    );
+
+    let actions = row_report_cycle(&mut e, &actions, NOW + 2_000., "{}", "{}");
+    assert_eq!(
+        row_report_skips(&actions),
+        [warning.clone(), warning.clone()]
+    );
+    assert_eq!(e.store().positions().len(), 2);
+    let actions = row_report_cycle(&mut e, &actions, NOW + 4_000., BTC, "{}");
+    assert!(row_report_skips(&actions).is_empty());
+    let actions = row_report_cycle(&mut e, &actions, NOW + 6_000., "{}", "{}");
+    // The USDT clean read must not forget the identically labelled USDC row.
+    assert_eq!(
+        row_report_skips(&actions).as_slice(),
+        std::slice::from_ref(&warning)
+    );
+    let actions = row_report_cycle(&mut e, &actions, NOW + 8_000., "{}", ETH);
+    assert!(row_report_skips(&actions).is_empty());
+    let actions = row_report_cycle(&mut e, &actions, NOW + 10_000., "{}", "{}");
+    assert_eq!(row_report_skips(&actions), [warning]);
+}
+
+#[test]
+fn row_report_duplicate_symbol_blocks_rearm_but_unrelated_rejection_does_not() {
+    use safe_cex_engine::Level;
+    let (mut e, reads, _) = started();
+    seed(&mut e, &reads);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let bad = ETH.replace("1900", "0");
+    let foreign = ETH.replace("ETHUSDC", "MISSINGUSDC");
+    let rejected = format!("{bad},{foreign}");
+    let warning = (
+        Level::Warn,
+        "Phemex skipped unmappable ETHUSDC position row".to_owned(),
+    );
+    let missing = (
+        Level::Error,
+        "Phemex skipped MISSINGUSDC position on an unavailable market".to_owned(),
+    );
+    let actions = row_report_cycle(&mut e, &actions, NOW + 2_000., BTC, &rejected);
+    assert_eq!(row_report_skips(&actions), [warning.clone(), missing]);
+    let actions = row_report_cycle(
+        &mut e,
+        &actions,
+        NOW + 4_000.,
+        BTC,
+        &format!("{bad},{ETH},{foreign}"),
+    );
+    assert!(row_report_skips(&actions).is_empty());
+    let actions = row_report_cycle(&mut e, &actions, NOW + 6_000., BTC, &rejected);
+    assert!(row_report_skips(&actions).is_empty());
+    assert_eq!(e.store().position("ETHUSDC:long").unwrap().contracts, 1.);
+
+    // A named unrelated rejection keeps the slice partial while allowing the
+    // mapped ETH leg to forget its symbol key. An anonymous row would not.
+    let actions = row_report_cycle(
+        &mut e,
+        &actions,
+        NOW + 8_000.,
+        BTC,
+        &format!("{ETH},{foreign}"),
+    );
+    assert!(row_report_skips(&actions).is_empty());
+    let actions = row_report_cycle(&mut e, &actions, NOW + 10_000., BTC, &rejected);
+    assert_eq!(row_report_skips(&actions), [warning]);
+}
+
+#[test]
+fn row_report_stale_slice_does_not_rearm_but_a_current_clean_slice_does() {
+    use safe_cex_engine::Level;
+    let (mut e, reads, socket) = started();
+    seed(&mut e, &reads);
+    authenticate(&mut e, socket);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let bad = format!("{},{{}}", ETH.replace("1900", "0"));
+    let actions = row_report_cycle(&mut e, &actions, NOW + 2_000., BTC, &bad);
+    let expected = [
+        (
+            Level::Warn,
+            "Phemex skipped unmappable ETHUSDC position row".to_owned(),
+        ),
+        (
+            Level::Warn,
+            "Phemex skipped an unreadable position row".to_owned(),
+        ),
+    ];
+    assert_eq!(row_report_skips(&actions), expected);
+
+    e.handle(
+        NOW + 4_000.,
+        Event::TimerFired {
+            timer: timer(&actions, NOW + 4_000.),
+        },
+    );
+    let reads: Vec<_> = e.drain_actions().collect();
+    // This accepted native push makes only the in-flight USDC slice stale.
+    e.handle(NOW + 4_000., Event::WsMessage { socket, text:
+        r#"{"timestamp":1700000004000000000,"accounts_p":[{"currency":"USDC","accountBalanceRv":"333","totalUsedBalanceRv":"25"}]}"# });
+    response(
+        &mut e,
+        NOW + 4_000.,
+        request(&reads, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 69., BTC),
+    );
+    response(
+        &mut e,
+        NOW + 4_000.,
+        request(&reads, "currency=USDC").id,
+        200,
+        &envelope("USDC", 200., 25., ETH),
+    );
+    assert_eq!(
+        e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|c| c.currency == "USDC")
+            .unwrap()
+            .balance
+            .free,
+        308.
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(row_report_skips(&actions).is_empty());
+    let actions = row_report_cycle(&mut e, &actions, NOW + 6_000., BTC, &bad);
+    assert!(row_report_skips(&actions).is_empty());
+    let actions = row_report_cycle(&mut e, &actions, NOW + 8_000., BTC, ETH);
+    assert!(row_report_skips(&actions).is_empty());
+    let actions = row_report_cycle(&mut e, &actions, NOW + 10_000., BTC, &bad);
+    assert_eq!(row_report_skips(&actions), expected);
+}

@@ -4,7 +4,7 @@ use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side
 use crate::{Pending, PhemexPerpetuals};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
-use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const CURRENCIES: [&str; 2] = ["USDT", "USDC"];
 const RETAINED_EVENTS: usize = 20_000;
 const SNAPSHOT_DEADLINE_MS: f64 = 20_000.;
-const SKIP_LOG_LIMIT: usize = 4_096;
 const SOCKET: Config = Config {
     connect_timeout_ms: 15_000.,
     auth_timeout_ms: Some(SNAPSHOT_DEADLINE_MS),
@@ -50,7 +49,7 @@ impl Request {
     fn reject(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        logged: &mut HashSet<String>,
+        logged: &mut RowReports<String>,
         symbol: &str,
         size: f64,
         message: String,
@@ -75,17 +74,12 @@ impl Request {
 /// Logs a skipped row once per `key` until it maps again; polls would otherwise repeat it.
 fn log_skip(
     cx: &mut Cx<'_, Pending>,
-    logged: &mut HashSet<String>,
+    logged: &mut RowReports<String>,
     key: String,
     level: Level,
     message: impl Into<String>,
 ) {
-    if logged.len() >= SKIP_LOG_LIMIT {
-        logged.clear();
-    }
-    if logged.insert(key) {
-        cx.notice(level, code::ROW_SKIPPED, message);
-    }
+    logged.report(cx, key, level, message);
 }
 /// A per-symbol open-order read issued after a placement outcome went unknown.
 /// Only an HTTP read started after the failure can prove which of its orders exist.
@@ -156,7 +150,7 @@ pub struct State {
     reconcile: HashMap<String, Reconcile>,
     reconcile_timer: Option<TimerId>,
     /// `{currency}:{symbol}` (or `{currency}:` for an unreadable row) of skips already logged.
-    skip_logged: HashSet<String>,
+    skip_logged: RowReports<String>,
 }
 impl State {
     pub fn new() -> Self {
@@ -584,19 +578,16 @@ impl PhemexPerpetuals {
             }
             // A clean slice re-arms its skip logs; otherwise only the symbols it mapped.
             let prefix = format!("{}:", CURRENCIES[currency]);
-            if request.positions.rejected() == 0 {
-                self.account
-                    .skip_logged
-                    .retain(|key| !key.starts_with(&prefix));
-            } else {
-                for p in request.positions.rows() {
-                    if request.positions.allows_absence(&p.id) {
-                        self.account
-                            .skip_logged
-                            .remove(&format!("{prefix}{}", p.symbol));
-                    }
-                }
-            }
+            self.account.skip_logged.rearm_namespace(
+                &prefix,
+                request.positions.rejected() == 0,
+                request
+                    .positions
+                    .rows()
+                    .iter()
+                    .filter(|p| request.positions.allows_absence(&p.id))
+                    .map(|p| p.symbol.as_str()),
+            );
             positions.extend(request.positions.commit(slice, |p| p.id.clone()));
             cx.store.set_positions(positions);
             for (symbol, context) in request.contexts {
