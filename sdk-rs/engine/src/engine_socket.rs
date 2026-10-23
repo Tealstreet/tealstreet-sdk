@@ -926,6 +926,10 @@ impl<V: Venue> Engine<V> {
             return true;
         }
         if now < self.io.socket_continuations[index].armed_at {
+            self.io.actions.push(Action::SetTimer {
+                timer,
+                at_ms: self.io.socket_continuations[index].armed_at,
+            });
             return true;
         }
         self.io.timers.remove(&timer);

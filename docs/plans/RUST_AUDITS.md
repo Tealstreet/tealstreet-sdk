@@ -2528,3 +2528,11 @@ controls. The runtime source review is separate. HTTP lifecycle, signing
 release/gates, Plan flushing, financial reducers and request recipes retain
 their existing ownership. No legacy-inventory or performance-budget changes
 are part of this shared correction; WOO consumes the seam in its own PR.
+
+The independent ih35js runtime review clears the handoff-owned d9fd54ff531 source
+(exact at 3bebb12dc9f), excluding build/CI claims. Uufub4 identified early-fire
+liveness before final clearance: both hosts consume one-shot timers, so retaining
+armed custody without a returned rearm can strand work. The narrow correction
+re-emits the existing TimerId at its immutable armed_at, with no early callback
+or new authority. Original assertion RED and one-use host/engine controls bind
+the correction; final runtime clearance is tracked separately from API review.

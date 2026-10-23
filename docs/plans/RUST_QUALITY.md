@@ -1142,3 +1142,11 @@ and combined 908 tests. Strict focused Clippy is clean. The initial bans run
 fails because the newer remote landing has already pruned unrelated Paradex
 and Phemex history inventory; this branch must integrate those actual changes
 before a current-landing ratchet pass is claimed.
+
+Runtime review added an eighteenth control: an early host one-shot must return
+an explicit rearm at the unchanged handoff time, run no early callback, run
+exactly one later callback and release its credit. This assertion fails on the
+initial implementation. A fourth actual-host control covers inline early
+rearming without losing the subsequent handle. The integrated predecessor run
+passes 1,269 focused tests, strict Clippy, formatting and bans; its initial stale
+inventory failure is resolved by genuine actual-landing integration.

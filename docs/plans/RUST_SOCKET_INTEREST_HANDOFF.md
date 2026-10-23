@@ -150,3 +150,9 @@ and cleared/superseded callbacks cannot delete or invoke the current arm.
 The ordering promise is a subsequent engine ingress after host handoff, even
 when a host's timer implementation calls back inline; it is not an event-loop
 or peer-ACK guarantee. Three controls are assertion RED against the old host.
+
+Early host one-shot delivery must explicitly rearm the retained TimerId at its
+unchanged handoff time; keeping an armed record alone is insufficient because
+the host has consumed its timer. The later matching event invokes once and frees
+credit. A real Engine assertion RED plus actual-host inline rearm/duplicate
+control verifies this boundary without enlarging the deadline.
