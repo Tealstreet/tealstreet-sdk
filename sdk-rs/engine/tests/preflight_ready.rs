@@ -235,6 +235,16 @@ fn terminals(actions: &[Action], id: safe_cex_engine::CommandId) -> usize {
         })
         .count()
 }
+fn total_terminals(actions: &[Action], id: safe_cex_engine::CommandId) -> usize {
+    actions
+        .iter()
+        .filter(|action| {
+            matches!(action,
+        Action::Notice(Notice::CommandDone { command, .. } | Notice::CommandFailed { command, .. })
+            if *command == id)
+        })
+        .count()
+}
 #[test]
 #[ignore = "adoption #1896, owner codex-hcmq3f; runtime waits for reviewed #1873 feature pin"]
 fn original_red_queued_owner_gets_own_activation_after_foreign_delivery() {
@@ -251,6 +261,7 @@ fn original_red_queued_owner_gets_own_activation_after_foreign_delivery() {
     let actions = prepared_actions(&mut e, 3.);
     assert_eq!(e.venue().foreign_refusal, Some(Error::Revoked));
     assert_eq!(terminals(&actions, 1), 1);
+    assert_eq!(total_terminals(&actions, 1), 1);
     let next: Vec<_> = actions
         .into_iter()
         .filter_map(|action| match action {
@@ -266,10 +277,13 @@ fn original_red_queued_owner_gets_own_activation_after_foreign_delivery() {
     assert!(next[0].url.ends_with("/cancel/2"));
     assert_eq!(e.venue().plans[&2].owner(), queued_owner);
     reply(&mut e, &next[0], 4.);
-    assert_eq!(terminals(&prepared_actions(&mut e, 4.), 2), 1);
+    let completed = prepared_actions(&mut e, 4.);
+    assert_eq!(terminals(&completed, 2), 1);
+    assert_eq!(total_terminals(&completed, 2), 1);
     reply(&mut e, &first, 5.);
     let late = prepared_actions(&mut e, 5.);
-    assert_eq!(terminals(&late, 1) + terminals(&late, 2), 0);
+    assert_eq!(total_terminals(&late, 1) + total_terminals(&late, 2), 0);
+    assert!(!late.iter().any(|action| matches!(action, Action::Http(_))));
     assert_eq!(e.venue().retired.len(), 2);
 }
 #[test]
@@ -277,10 +291,14 @@ fn immediate_native_owner_completes_once_before_next_genuine_entry() {
     let mut e = start();
     let first = released(&mut e, 1.).remove(0);
     reply(&mut e, &first, 2.);
-    assert_eq!(terminals(&prepared_actions(&mut e, 2.), 1), 1);
+    let completed = prepared_actions(&mut e, 2.);
+    assert_eq!(terminals(&completed, 1), 1);
+    assert_eq!(total_terminals(&completed, 1), 1);
     command(&mut e, 2, 3.);
     let next = released(&mut e, 3.).remove(0);
     reply(&mut e, &next, 4.);
-    assert_eq!(terminals(&prepared_actions(&mut e, 4.), 2), 1);
+    let completed = prepared_actions(&mut e, 4.);
+    assert_eq!(terminals(&completed, 2), 1);
+    assert_eq!(total_terminals(&completed, 2), 1);
     assert_eq!(e.venue().retired.len(), 2);
 }
