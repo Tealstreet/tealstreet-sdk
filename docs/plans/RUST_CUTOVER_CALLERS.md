@@ -4804,6 +4804,87 @@ fallback. A duplicate entry leaves the original preparation and completion
 authority intact. Existing market-before-interval validation, native candle
 request bytes, result sorting and preparation/release/expiry behavior remain.
 
+## WEEX trusted passphrase setup and managed header declaration
+
+WEEX's trusted signer setup requires a passphrase for a complete private primary
+identity. An absent or JSON-null secondary passphrase inherits the opaque primary
+passphrase reference; an explicit empty secondary passphrase rejects instead of
+inheriting. Public mode bypasses only the primary requirement and still validates
+a supplied secondary identity. Secret and passphrase bytes and caller-assigned
+stable IDs remain literal, without trimming or automatic secret decoding.
+
+The opaque WEEX HTTP recipe declares Content-Type and User-Agent from the same
+static data as its unsigned renderer, so managed transport preparation sees those
+public headers before signing. API-key, signature and passphrase headers remain
+provider-owned. Provider injection is enabled by the dispatch cutover below;
+hosted signing stays disabled.
+
+### WEEX dispatch signing cutover
+
+WEEX signs every private request at dispatch through the shared host-injected
+provider. Venue and engine options hold only opaque primary/secondary identities.
+Raw `key`/`secret`/`passphrase`/`readCredentials` in engine options are refused
+whenever signer identities are supplied. Legacy raw native/WASM input still goes
+through trusted setup. Worker and custom-host callers must provision the provider
+where the engine runs. GET reads select the secondary identity when provisioned;
+POST requests and the private WebSocket upgrade select the primary. Wire bytes are
+unchanged: header order, literal secret bytes, sorted native queries, Base64 MAC.
+
+A missing required passphrase is now refused synchronously by trusted setup with
+the shared `Invalid local signer setup` message, replacing `WEEX requires a
+passphrase`. A provider-supplied primary identity without a usable
+key/signing/passphrase ref still deactivates with CONFIG_INVALID rather than
+publishing an empty account. An unusable secondary identity stops startup before
+any I/O. Read credentials no longer stand in for an unusable primary identity.
+
+**FetchAccount identity changes.** The returned `userId` is the trusted
+`primary.stableId`. It is no longer `weex:` plus the lowercase hex of the first
+12 SHA-256 bytes of the primary public key. Without a stableId the command fails
+typed (`unsupported`, `notSent`) before any I/O. NX already holds the public key,
+so it can compute each account's old ID once at cutover and map stored records
+to the stableId it provisions. The SDK and engine never compute it.
+
+Identity and FetchLeverage run as managed engine-owned Read commands. Provider,
+route and lifecycle refusals are typed and are never venue-auth evidence. The
+joined account cycle, trading and history keep their native owners, signed
+through one temporary staging site until the shared Plan/execution-group API and
+history Completion bridge own them. A provider refusal leaves an unsent write
+`notSent`. Once an earlier step was accepted, the command's outcome is neither
+`notSent` nor `rejected`. History refusals complete strictly. Hosted
+`signHttpRequest`/`signWsAuth` for WEEX refuse until hosted admission passes its
+own gates; only explicit `engine: 'rust'` accounts are affected.
+
+### Bybit RefreshMarkets execution group (#1854; backfill)
+
+`refreshMarkets` on the Bybit engines (`bybit`, `bybitinverse`, `bybitspot`,
+`bybitdemo`, `hyrotrader`) now runs through the engine execution-group
+authority. The call shape and success value (`null`) are unchanged.
+
+- Joined calls: a call made while a walk is running joins it and sends no new
+  requests. Every joined call settles exactly once from that walk. Each
+  caller's deadline is its own 30 s bound, capped by the walk's bound (set by
+  the first caller), so a late joiner still has only the walk's remaining
+  time, as before.
+- Timeout: kind stays `timeout`; the message changes from `Bybit market
+  refresh timed out` to `Execution deadline expired`. The outcome is unset
+  (read). Each joined caller gets this once.
+- Capacity: one walk serves at most 64 callers. A 65th concurrent call fails
+  at once with message `Too many requests in flight`, kind `internal`,
+  outcome `notSent`. The running walk and its 64 callers are unaffected, and a
+  call after the walk ends starts a new one.
+- Founder departure: the walk is not owned by the first caller. If that
+  caller's observer is detached, the walk continues for the remaining callers.
+  Bybit itself has no caller-side cancellation for this call today, so this is
+  an engine guarantee rather than an SDK-visible action.
+- Unchanged: shared-feed refusal, `Bybit market catalogue is not loaded`
+  (`invalidInput`) and the discovery rate-limit refusal (`rateLimited` with
+  `retryAfterMs`); request URLs, query and the `X-Referer` broker header; the
+  atomic catalogue commit.
+
+No tealstreet-next caller matches on the old timeout text (the review grepped
+the tealstreet-sdk TS packages; `rust.market-refresh.test.ts` checks neither
+text nor kind). Callers branching on `kind === 'timeout'` need no change.
+
 ## Phemex unsigned candle command transport
 
 Phemex FetchCandles uses prepared managed HTTP when neither its constructed
