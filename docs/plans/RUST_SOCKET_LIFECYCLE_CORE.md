@@ -1013,3 +1013,52 @@ and the unchanged processing helper inline-never. Preserve the same checks,
 loop bytes and all call sites. Rebuild with the same native driver/flags, verify
 the compiled helper boundary, then repeat the same native ABBA sampling and
 report the remaining gap before fresh CI or further source changes.
+
+Phase G annotation result (`a2d3b8ca389`): the compiled native binary retains
+`process_pending_socket_work` and has no separate wrapper symbol. The full
+fixed ABBA cohort has only two self samples in the heavy helper. This confirms
+the intended code boundary, not zero inclusive work or a speedup. The host was
+heavily contended: each process received only 17.21–22.87 seconds of total CPU
+in about 40 seconds wall time, compared with approximately 38–39 CPU seconds
+in the earlier cohorts. Observed mean CPU/tape is 33.747/38.943 ms at
+landing/candidate, a remaining 5.196 ms gap. All four semantic fact hashes,
+frame counts, send counts and bytes match. Preserve the complete cohort;
+do not select samples or certify quantitative closure from it. A separately
+named complete ABBA repeat records the subsequently quieter host period.
+
+### Phase H — bypass the completely idle shared dispatch queue
+
+The native profiles consistently attribute approximately 0.44–0.50 ms/tape
+to the socket candidate's shared `dispatch_actions`, alongside `Dispatch::head`,
+`next_work`, `VecDeque` and destruction work. The socket drain intentionally
+checks dispatch three times around its existing frame/fence boundaries;
+landing checks it once. Preserve those boundaries and all their call sites.
+
+Add one read-only `Dispatch::is_empty()` query that checks both `pending` and
+`outbound`. Wrap `dispatch_actions` with a fatal-first, inline-always check:
+return only when `io.actions`, `io.signing_admission`, and both dispatch maps
+are empty. Otherwise enter the entire existing processing body unchanged in
+an inline-never private helper. This retains the code-generation boundary
+that Phase G's compiled experiment required. A `next_work().is_none()` shortcut
+is invalid: it would miss plain queued work, parked providers and materialized
+outbound metadata. Resource ID reservations alone confer no work authority.
+
+The query and guard do not allocate, renew deadlines, consume readiness, call a
+provider, touch HTTP delivery, or change any receipt, route, FIFO or socket
+gate. Run the original nonempty body whenever any state could require it.
+Check liveness before the early return, including a latched allocator failure
+with no queued output. No admission result is cached; each socket ingress
+continues its independent current-epoch/expiry check.
+The idle return retains any existing empty action-vector capacity instead of
+taking and dropping it; fresh CI retained-memory objectives remain mandatory.
+
+Coordinate the read-only dispatch query with the execution-plan owner before
+source edits. Independently review the concrete guard and byte preservation of
+the original body. Verify existing mixed signed/plain ordering, parked signer,
+queued materialized outbound, callback retry, socket retirement, caught fatal,
+HTTP delivery isolation and full managed HTTP tests, plus focused engine/OKX/
+Bitunix/Binance tests and strict checks. Repeat native release ABBA with the
+same driver, tape, build settings and landing binary; retain every cohort and
+report remaining gap and next self-time delta before further fixes. A large
+remaining gap still blocks fresh CI. Final performance proof remains the
+same-runner CI-WASM probe followed by fresh full CI.
