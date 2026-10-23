@@ -1201,3 +1201,61 @@ native tests pass, with strict Clippy, formatting, bans and ratchets. These
 checks establish behavior preservation, not a CPU improvement. A new isolated
 measurement will compare immediate pre-change d8dcb8e against this source and
 the same fixed landing7641650 before any performance claim.
+
+### Phase K: bounded active index and transactional coverage scratch
+
+The owner timeboxes further socket work to AT MOST TWO measured iterations
+following J. This is proposed iteration 1/2; iteration 2 must be justified by
+its resulting profile. J's fresh paired gaps are 4.789487 ms (H) and 3.680175 ms
+(J), only 23.16% closed. Both independent DATA readers authenticate all eight
+processes and 159,787 samples. The unchanged exact gate is Rust <=0.90*TS, not
+a literal 1.10 ratio; landing ratio1.14 tolerates only 2.60% extra Rust CPU.
+Native whole-tape and WASM steady CPU remain distinct measurements.
+
+The next measured admission target is Lifecycle::admit_checked (~0.568 ms self).
+Its Linux disassembly is retained at
+/tmp/codex-socket-phaseJ-admit-disassembly.txt. LLVM already removes the apparent
+second epoch comparison after the fresh supervision closure; do NOT propose
+that source-only cleanup as a CPU fix. The BTreeMap socket lookup and its
+pointer traversal remain in the hot instructions. Setup/replay coverage builds
+additional BTreeSets and Arc-key clones whose drop/insert samples are visible.
+
+Changes are shared storage/algorithm substitutions, with no admission cache:
+
+- In socket_lifecycle.rs, replace the bounded active socket BTreeMap<u64,Epoch>
+  with a sorted Vec<Epoch>, ordered by epoch.socket.0. Each query still performs
+  a fresh binary_search_by_key, then the exact current(feed) predicate. No scan
+  of all runtimes, direct-ID array, inferred feed, reused ID or retained permit.
+  The registry remains bounded by MAX_FEEDS=512 and stores only active epochs.
+- begin checks zero/duplicate IDs by binary search before generation/state
+  mutation, retains every can_begin/generation guard, then inserts at the sorted
+  index at the existing commit point. It supports nonmonotonic valid IDs; no
+  allocator-order assumption. retire removes the exact owned index entry and
+  preserves its debug assertion, invalidation, phase, interests and cleanup.
+  Existing socket_lookup_count remains at the actual fresh lookup boundary.
+- In replace_with_repair, both removed and added vectors already follow unique
+  key order from their source BTreeMap values. Replace their temporary expected
+  and covered BTreeSets with items.binary_search_by(key), a Vec<bool> of exact
+  items.len(), and a covered count. Reject missing and repeated keys (within or
+  across batches), latch failures exactly as before and require count==len.
+  All frame/byte budgets, native encoder calls and ordering, batch ownership,
+  revision checks and no-fallible-work commit point stay unchanged. There is
+  no change to desired/released maps, wire frames or retained memory custody.
+- Gate the new private Supervisor::idle_enabled getter with managed-sockets:
+  its only consumer is the gated driver. Verify feature-off strict compilation
+  as well as all-feature gates. No clock or timer behavior changes.
+
+Plan and independent audit precede source. Add semantic controls for arbitrary
+/reversed and >u32 socket IDs, duplicate refusal, exact retirement/reconnect
+lookup, plus unknown/duplicate/incomplete/ignored-error encoder coverage. Reuse
+all existing transaction rollback, over-budget, many-retired-ID, two-fresh-query,
+first-pong/auth/expiry, fatal and HTTP-isolation controls. Run four-crate native
+all-target/all-feature tests, strict Clippy/fmt/bans and feature-off engine
+Clippy. Independently review whole cold transition/coverage transaction paths.
+
+Then ONE fresh isolated fixed ABBA measures frozen J as before, K as current,
+and the same landing7641650, with all source/tree/driver/lock/facts pinned and
+all samples retained. Report paired controls, remaining cost and exact gate
+math. No build-policy/threshold change, open-ended iteration or WASM/full CI
+claim. The temporary measurement branch never merges. After at most one more
+measured iteration following this, report feasibility/options to the owner.
