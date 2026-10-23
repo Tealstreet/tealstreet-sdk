@@ -966,6 +966,26 @@ impl Venue for MexcFutures {
             }
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if let Pending::Account(request) = &pending
+            && self.account_startup_refusal(cx, request, &response)
+        {
+            return;
+        }
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
+    }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Candles { context, .. } => {
