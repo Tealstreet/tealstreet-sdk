@@ -2,14 +2,25 @@
 //! widths follow `safe_cex_engine::signing::Algorithm`; failures never echo input.
 use safe_cex_engine::signing::SignError;
 
-/// 32-byte seed; exact message; raw 64-byte signature.
+/// 32-byte seed, or the 64-byte `seed || public` keypair form whose public half
+/// must match the seed; exact message; raw 64-byte signature.
 pub(super) fn ed25519(key: &[u8], message: &[u8]) -> Result<Vec<u8>, SignError> {
     #[cfg(feature = "ed25519")]
     {
-        if key.len() != 32 {
-            return Err(SignError::InvalidRequest);
-        }
-        crate::ed25519::sign(message, key)
+        let seed = match key.len() {
+            32 => key,
+            64 => {
+                let (seed, public) = key.split_at(32);
+                let derived =
+                    crate::ed25519::public_key(seed).map_err(|_| SignError::InvalidRequest)?;
+                if derived[..] != *public {
+                    return Err(SignError::InvalidRequest);
+                }
+                seed
+            }
+            _ => return Err(SignError::InvalidRequest),
+        };
+        crate::ed25519::sign(message, seed)
             .map(|signature| signature.to_vec())
             .map_err(|_| SignError::InvalidRequest)
     }
@@ -82,23 +93,10 @@ const STARK_ORDER: [u8; 32] = [
 pub(super) fn stark_digest(key: &[u8], digest: &[u8]) -> Result<Vec<u8>, SignError> {
     #[cfg(feature = "stark")]
     {
-        use starknet_crypto::Felt;
-        // The byte copy is wiped; starknet-crypto's Felt type cannot be.
-        let felt = |bytes: &[u8]| -> Result<Felt, SignError> {
-            let bytes = zeroize::Zeroizing::new(
-                <[u8; 32]>::try_from(bytes).map_err(|_| SignError::InvalidRequest)?,
-            );
-            // Reject values at or above the field modulus instead of reducing them.
-            let felt = Felt::from_bytes_be(&bytes);
-            if felt.to_bytes_be() != *bytes {
-                return Err(SignError::InvalidRequest);
-            }
-            Ok(felt)
-        };
         if key >= &STARK_ORDER[..] {
             return Err(SignError::InvalidRequest);
         }
-        let (r, s) = crate::starknet::sign(&felt(digest)?, &felt(key)?)
+        let (r, s) = crate::starknet::sign(&stark_felt(digest)?, &stark_felt(key)?)
             .map_err(|_| SignError::InvalidRequest)?;
         let mut output = Vec::with_capacity(64);
         output.extend_from_slice(&r.to_bytes_be());
@@ -136,6 +134,72 @@ pub(super) fn schnorr_digest(key: &[u8], payload: &[u8]) -> Result<Vec<u8>, Sign
     #[cfg(not(feature = "schnorr"))]
     {
         let _ = (key, payload);
+        Err(SignError::Unsupported)
+    }
+}
+
+/// Exact 32-byte big-endian felt below the field modulus. The byte copy is
+/// wiped; starknet-crypto's Felt type cannot be.
+#[cfg(feature = "stark")]
+fn stark_felt(bytes: &[u8]) -> Result<starknet_crypto::Felt, SignError> {
+    let bytes = zeroize::Zeroizing::new(
+        <[u8; 32]>::try_from(bytes).map_err(|_| SignError::InvalidRequest)?,
+    );
+    // Reject values at or above the field modulus instead of reducing them.
+    let felt = starknet_crypto::Felt::from_bytes_be(&bytes);
+    if felt.to_bytes_be() != *bytes {
+        return Err(SignError::InvalidRequest);
+    }
+    Ok(felt)
+}
+
+/// Same key form as `secp256k1_digest`; the 20-byte Ethereum address.
+pub(super) fn secp256k1_address(key: &[u8]) -> Result<Vec<u8>, SignError> {
+    #[cfg(feature = "secp256k1")]
+    {
+        if key.len() != 32 {
+            return Err(SignError::InvalidRequest);
+        }
+        let signer = alloy_signer_local::PrivateKeySigner::from_slice(key)
+            .map_err(|_| SignError::InvalidRequest)?;
+        Ok(signer.address().to_vec())
+    }
+    #[cfg(not(feature = "secp256k1"))]
+    {
+        let _ = key;
+        Err(SignError::Unsupported)
+    }
+}
+
+/// Same key form as `ed25519`; the 32-byte public key.
+pub(super) fn ed25519_public(key: &[u8]) -> Result<Vec<u8>, SignError> {
+    #[cfg(feature = "ed25519")]
+    {
+        crate::ed25519::public_key(key)
+            .map(|public| public.to_vec())
+            .map_err(|_| SignError::InvalidRequest)
+    }
+    #[cfg(not(feature = "ed25519"))]
+    {
+        let _ = key;
+        Err(SignError::Unsupported)
+    }
+}
+
+/// Same key form as `stark_digest`, in [1, n); the 32-byte big-endian public x.
+pub(super) fn stark_public(key: &[u8]) -> Result<Vec<u8>, SignError> {
+    #[cfg(feature = "stark")]
+    {
+        if key >= &STARK_ORDER[..] || key.iter().all(|byte| *byte == 0) {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(crate::starknet::public_key(&stark_felt(key)?)
+            .to_bytes_be()
+            .to_vec())
+    }
+    #[cfg(not(feature = "stark"))]
+    {
+        let _ = key;
         Err(SignError::Unsupported)
     }
 }
@@ -186,6 +250,29 @@ mod tests {
                 Err(SignError::InvalidRequest)
             );
         }
+    }
+
+    #[cfg(feature = "ed25519")]
+    #[test]
+    fn ed25519_keypair_form_signs_as_its_seed_and_refuses_a_foreign_public_half() {
+        // RFC 8032 test 1 seed and its published public key.
+        let seed = bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+        let public = bytes("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+        let keypair = [seed.clone(), public.clone()].concat();
+        assert_eq!(
+            ed25519(&keypair, b"payload"),
+            Ok(ed25519(&seed, b"payload").unwrap())
+        );
+        let mut foreign = keypair.clone();
+        foreign[63] ^= 1;
+        assert_eq!(
+            ed25519(&foreign, b"payload"),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(
+            ed25519(&keypair[..63], b"payload"),
+            Err(SignError::InvalidRequest)
+        );
     }
 
     #[cfg(feature = "es256")]
