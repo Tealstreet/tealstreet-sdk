@@ -294,7 +294,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       } catch (error) {
         const partial = ScriptBatchOrderError.from(error);
         observe('placeOrders', account, summary, false, {
-          error: partial?.message ?? messageOf(error),
+          error: messageOf(error),
           ...(partial && {
             partialOrderIds: partial.partialOrderIds,
             ...(partial.outcome !== undefined && { outcome: partial.outcome }),

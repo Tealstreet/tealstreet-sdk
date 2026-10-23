@@ -317,6 +317,14 @@ describe('createCoreAdapter', () => {
       expect(writes[0]).not.toHaveProperty('outcome');
     });
 
+    it('keeps the observer text for a plain failure record while preserving its SDK message on the wrapper', async () => {
+      const failure = { message: 'serialized native message', partialOrderIds: ['accepted-1'], outcome: 'rejected' };
+      const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
+      const caught = await createCoreAdapter(host).placeOrders(batch, 'main').catch((error: unknown) => error);
+      expect(caught).toMatchObject({ name: 'ScriptBatchOrderError', message: failure.message, cause: failure });
+      expect(writes[0]).toMatchObject({ ok: false, error: 'Unknown error', partialOrderIds: ['accepted-1'] });
+    });
+
     it('keeps validation failures local and unwrapped', async () => {
       const placeOrders = vi.fn();
       const { host } = fakeHost({ getExchange: () => ({ placeOrders }) });
