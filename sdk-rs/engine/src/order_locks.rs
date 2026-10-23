@@ -228,8 +228,7 @@ impl OrderLocks {
         if scope.unknown_symbol || symbols.is_empty() || symbols.iter().any(String::is_empty) {
             return Some(None);
         }
-        symbols.sort();
-        symbols.dedup();
+        // The engine de-duplicates when it drains; no sort here (wasm size).
         Some(Some(symbols))
     }
 

@@ -3516,25 +3516,25 @@ impl<V: Venue> Engine<V> {
         if self.io.command_entry.is_some() {
             return;
         }
-        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.io.reconcile_due)
-            .into_iter()
-            .partition(|(_, at)| *at <= now || !now.is_finite());
-        self.io.reconcile_due = later;
-        if !due.is_empty() {
-            let mut all = false;
-            let mut symbols: Vec<String> = Vec::new();
-            for scope in due.into_iter().map(|(scope, _)| scope) {
-                match scope {
-                    None => all = true,
-                    Some(scope) => {
-                        for symbol in scope {
-                            if !symbols.contains(&symbol) {
-                                symbols.push(symbol);
-                            }
+        let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
+        self.io.reconcile_due.retain_mut(|(scope, at)| {
+            if *at > now && now.is_finite() {
+                return true;
+            }
+            any = true;
+            match scope.take() {
+                None => all = true,
+                Some(scope) => {
+                    for symbol in scope {
+                        if !symbols.contains(&symbol) {
+                            symbols.push(symbol);
                         }
                     }
                 }
             }
+            false
+        });
+        if any {
             let delivery = self.io.http_delivery.take();
             let token = self.io.order_response_token.take();
             let mut cx = Cx {
