@@ -1770,17 +1770,17 @@ impl Venue for BinanceFutures {
                     cx.fail(command, interval.unsupported("Binance"));
                     return;
                 }
-                let planned = candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now)
-                    .map_err(safe_cex_engine::VenueError::from)
-                    .and_then(|query| {
-                        Self::read_context(cx, command, None).map(|context| (query, context))
-                    });
-                let (query, context) = match planned {
-                    Ok(planned) => planned,
+                let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
+                    Ok(query) => query,
                     Err(error) => {
                         cx.fail(command, error);
                         return;
                     }
+                };
+                // Initial issuance refusal is already correlated and completed
+                // by the engine entry transaction; never fall back numerically.
+                let Ok(context) = Self::read_context(cx, None) else {
+                    return;
                 };
                 let path = format!("{}?{}", self.paths.klines, query.into_string());
                 self.managed_read(
