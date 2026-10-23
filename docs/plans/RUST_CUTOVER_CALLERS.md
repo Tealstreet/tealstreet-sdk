@@ -5261,3 +5261,13 @@ success or permission to retry the entire batch. An `unknown` outcome remains
 uncertain evidence; callers must not upgrade it to confirmed placement. An
 uncaught `runScript` failure still has a string-only `RunScriptResult.error`, so
 Agent/automation hosts must retain the failed write event for these details.
+
+## Bitrue local leverage preflight authority
+
+FetchLeverage and FetchMaxLeverage retain unknown-market-before-credential
+validation and their exact native messages. Those four local refusals now use
+shared initial Read authority and Context completion, adding InvalidInput/NotSent
+metadata without a companion, transport or Store mutation. Admission refusal
+emits exactly one shared typed failure with no adapter fallback or Read financial
+outcome. Valid bracket requests and leverage-query joining/refresh/fan-out keep
+their existing separate contracts and remain held for shared signer/group work.

@@ -2355,3 +2355,12 @@ revoked entries return without numeric fallback; cache data and native errors
 remain unchanged after admission. Exactly three lexical sites are removed:
 Lighter46→43, lib5→3, limits6→5. SetAccountTier's separate identical numeric fail
 fingerprint remains counted. No held trading or engine source is changed.
+
+## Bitrue local leverage terminal provenance
+
+Four synchronous account-command refusals adopt shared Read admission and Context
+failure. This independent slice prunes only two count-two account hashes:
+Bitrue42->38 occurrences,27->25 rows, five files retained. The separate history
+slice's prune composes independently. Native successful leverage joins, refresh,
+projection, account replies and signed bracket requests remain unchanged; no
+managed private-read, execution-group or whole-venue zero claim is introduced.

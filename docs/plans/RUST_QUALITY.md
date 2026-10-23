@@ -897,3 +897,14 @@ strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both request
 checks/14 controls. Actual e233cb05dfb is genuinely integrated; its incoming
 KuCoin/MEXC source and prunes are preserved. CI owns WASM/replay/size/timing;
 native success alone does not claim these broad gates or whole-venue closure.
+
+## Bitrue local leverage admission controls
+
+Tests-first fixtures delegate both native guards and use genuine commands for
+all four local refusals. Original production gives four assertion REDs and three
+compatibility GREENs. The bounded owner probe allocates256 Background roots in
+a separate no-ID callback, repeatedly denies work while preserving peers, then
+explicitly retires roots and recovers at one clock. Fixed-clock reuse and invalid
+raw clocks distinguish shared admission from native messages and Store stability.
+Valid bracket/account requests retain their signed dispatch; existing account
+suite assertions continue to own successful caller completion/group behavior.

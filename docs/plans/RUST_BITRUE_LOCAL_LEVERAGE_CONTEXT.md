@@ -63,3 +63,13 @@ implementation of a cross-cutting concern. Group/signing prerequisites stay held
 
 - `17eccb5b6b6d70935f1f5ba5db37d97212ca0bfad15e0c30b719b58a6bbdab89` count2
 - `b39921dbd50796a60a4e2f21febec858aef747570716300c27d2ec5c5512d0ad` count2
+
+## Executed receipt
+
+Plan `bbead8c09c7`, tests-first `74919ba4677`: original source gives four
+assertion REDs and three compatibility GREENs; the same seven frozen controls
+pass after adoption. All460 Bitrue/Binance native tests across38 targets pass,
+including existing successful account/group completion controls. Strict scoped
+Clippy/fmt, bans and both request-context checks (15 regressions) pass. Source,
+caller and full-map independent reviews are CLEAN; CI/publication and explicit
+train slot remain separate gates. Valid account/group source is unchanged.
