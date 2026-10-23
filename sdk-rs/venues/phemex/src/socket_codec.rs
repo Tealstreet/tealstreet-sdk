@@ -96,10 +96,10 @@ impl PhemexPerpetuals {
     }
 
     pub(super) fn sync_public_interests(&self, cx: &mut Cx<'_, Pending>) {
-        if let Some(feed) = self.public.feed {
-            if let Err(error) = cx.set_socket_interests(feed, self.public_interests()) {
-                self.public_socket_error(cx, error);
-            }
+        if let Some(feed) = self.public.feed
+            && let Err(error) = cx.set_socket_interests(feed, self.public_interests())
+        {
+            self.public_socket_error(cx, error);
         }
     }
 
