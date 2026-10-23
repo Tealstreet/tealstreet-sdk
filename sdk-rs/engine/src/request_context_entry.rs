@@ -68,6 +68,20 @@ impl<P> Cx<'_, P> {
     /// Rejected already emitted one failure; do not finalize it a second time.
     /// This is initial admission only, never authority for siblings or retries.
     pub fn admit_http_command(&mut self, policy: Policy) -> Result<Context, CommandEntryError> {
+        self.with_command_entry(policy.operation, |cx, command| {
+            let context = cx.http_context(Scope::Command(command), policy)?;
+            cx.io.request_contexts.retain_command_entry(&context);
+            Ok(context)
+        })
+    }
+
+    /// One initial command transaction shared by Context and opaque Preflight
+    /// issuers. Only this callback loan can reject an unissued command.
+    pub(in crate::engine) fn with_command_entry<T>(
+        &mut self,
+        operation: Operation,
+        issue: impl FnOnce(&mut Self, CommandId) -> Result<T, crate::request_context::Error>,
+    ) -> Result<T, CommandEntryError> {
         let Some(entry) = &mut self.io.command_entry else {
             return Err(CommandEntryError::Revoked);
         };
@@ -90,12 +104,8 @@ impl<P> Cx<'_, P> {
         // Suspend the fresh loan before ordinary issuance reserves an ID. Only
         // this exact transaction may produce its success or unissued rejection.
         self.io.command_entry.as_mut().unwrap().state = State::Bound;
-        let operation = policy.operation;
-        match self.http_context(Scope::Command(command), policy) {
-            Ok(context) => {
-                self.io.request_contexts.retain_command_entry(&context);
-                Ok(context)
-            }
+        match issue(self, command) {
+            Ok(owner) => Ok(owner),
             Err(reason) => {
                 // Typed issuance errors occur before owner insertion. Never
                 // erase a previous owner or leave opaque work runnable.

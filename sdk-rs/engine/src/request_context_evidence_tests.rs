@@ -530,3 +530,652 @@ fn unproven_diagnostics_cannot_reset_the_command_text_quota() {
         ["still-retain-money-evidence"]
     );
 }
+
+// A detached observer is not the terminal physical execution. The original RED
+// used terminal fail here; all physical facts and assertions remain unchanged.
+fn observer_projection(writes: &CommandWrites, error: VenueError) -> VenueError {
+    writes.project_failure(error).unwrap()
+}
+
+#[test]
+fn observer_projection_before_send_preserves_registration_and_evidence_budget() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    let budget = writes.evidence;
+    for _ in 0..3 {
+        let error = observer_projection(&writes, VenueError::new("x".repeat(100_000)));
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(error.message.len() <= 4_096 && error.message.ends_with("[truncated]"));
+        assert!(
+            !writes.sealed,
+            "one observer cannot seal the physical execution"
+        );
+        assert_eq!(
+            writes.evidence, budget,
+            "projection cannot charge physical facts"
+        );
+    }
+    released(&mut writes, 1);
+    writes
+        .result(RequestId(1), accepted(vec!["peer-order".into()]))
+        .unwrap();
+    assert_eq!(writes.succeed(), Ok(()));
+    assert_eq!(
+        writes.project_failure(VenueError::new("after success")),
+        Err(Error::State)
+    );
+}
+
+#[test]
+fn observer_projection_keeps_accepted_ids_and_unresolved_peer_live() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    released(&mut writes, 1);
+    writes
+        .result(RequestId(1), accepted(vec!["prior-native".into()]))
+        .unwrap();
+    released(&mut writes, 2);
+    let budget = writes.evidence;
+    let error = observer_projection(&writes, VenueError::new("observer expired"));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["prior-native"]);
+    assert!(!writes.sealed);
+    assert_eq!(writes.evidence, budget);
+    writes
+        .result(RequestId(2), accepted(vec!["later-native".into()]))
+        .unwrap();
+    let error = observer_projection(&writes, VenueError::new("another observer detached"));
+    assert_eq!(error.outcome, None);
+    assert_eq!(
+        error.partial.unwrap().order_ids,
+        ["prior-native", "later-native"]
+    );
+    assert!(!writes.sealed);
+    assert_eq!(writes.succeed(), Ok(()));
+}
+
+#[test]
+fn observer_projection_does_not_consume_definitive_refusal_retry() {
+    for fail_retry in [false, true] {
+        let mut writes = CommandWrites::new(2).unwrap();
+        released(&mut writes, 1);
+        writes
+            .result(
+                RequestId(1),
+                WriteResult::Rejected(VenueError::new("native refusal")),
+            )
+            .unwrap();
+        writes.grant_resend(RequestId(1)).unwrap();
+        let budget = writes.evidence;
+        let error = observer_projection(&writes, VenueError::new("observer detached"));
+        assert_eq!(error.outcome, Some(Outcome::Rejected));
+        assert!(!writes.sealed);
+        assert_eq!(writes.evidence, budget);
+        writes.retry(RequestId(1), RequestId(2)).unwrap();
+        if fail_retry {
+            writes
+                .result(
+                    RequestId(2),
+                    WriteResult::Failed(VenueError::new("provider unavailable")),
+                )
+                .unwrap();
+            let error = observer_projection(&writes, VenueError::new("peer expired"));
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert!(!writes.sealed);
+            assert_eq!(
+                writes
+                    .fail(VenueError::new("final execution bound"))
+                    .unwrap()
+                    .outcome,
+                Some(Outcome::Unknown)
+            );
+        } else {
+            writes.released(RequestId(2)).unwrap();
+            writes
+                .result(RequestId(2), accepted(vec!["retry-native".into()]))
+                .unwrap();
+            assert_eq!(writes.succeed(), Ok(()));
+        }
+    }
+}
+
+#[test]
+fn observer_projection_matches_final_failure_without_committing_its_fallback_budget() {
+    let mut writes = CommandWrites::new(1).unwrap();
+    let before = writes.evidence;
+    let fallback = VenueError::new("é".repeat(10_000)).partial_ids(&["bounded-native".into()]);
+    let projected = writes.project_failure(fallback.clone()).unwrap();
+    assert_eq!(writes.evidence, before);
+    assert!(!writes.sealed);
+    assert_eq!(writes.fail(fallback).unwrap(), projected);
+    assert_ne!(writes.evidence, before);
+    assert!(writes.sealed);
+    assert_eq!(
+        writes.project_failure(VenueError::new("duplicate")),
+        Err(Error::State)
+    );
+    assert_eq!(writes.fail(VenueError::new("duplicate")), Err(Error::State));
+}
+
+#[test]
+fn observer_projection_preserves_selected_native_diagnostics_reports_and_overflow() {
+    for overflow in [false, true] {
+        let mut writes = CommandWrites::new(2).unwrap();
+        released(&mut writes, 1);
+        let ids = if overflow {
+            (0..4_100).map(|n| format!("native-{n}")).collect()
+        } else {
+            vec!["prior-native".into()]
+        };
+        writes.result(RequestId(1), accepted(ids)).unwrap();
+        released(&mut writes, 2);
+        writes
+            .result_with_reports(
+                RequestId(2),
+                WriteResult::Rejected(
+                    VenueError::new("native refusal")
+                        .venue_code("native-code")
+                        .venue_message("native message"),
+                ),
+                RejectionReports::new(vec!["native rejected leg".into()]).unwrap(),
+            )
+            .unwrap();
+        let budget = writes.evidence;
+        let report_bytes = writes.report_bytes;
+        let reports: Vec<_> = writes.reports().map(str::to_owned).collect();
+        let fallback = VenueError::new("unselected".repeat(10_000));
+        let projected = writes.project_failure(fallback.clone()).unwrap();
+        assert_eq!(projected.venue_code.as_deref(), Some("native-code"));
+        assert_eq!(projected.venue_message.as_deref(), Some("native message"));
+        assert_eq!(
+            projected.outcome,
+            if overflow {
+                Some(Outcome::Unknown)
+            } else {
+                None
+            }
+        );
+        assert_eq!(
+            projected.partial.as_ref().unwrap().order_ids[0],
+            if overflow { "native-0" } else { "prior-native" }
+        );
+        assert_eq!(writes.evidence, budget);
+        assert_eq!(writes.report_bytes, report_bytes);
+        assert_eq!(writes.reports().collect::<Vec<_>>(), reports);
+        assert_eq!(writes.fail(fallback).unwrap(), projected);
+        assert_eq!(
+            writes.evidence, budget,
+            "selected facts are already charged"
+        );
+        assert_eq!(writes.reports().collect::<Vec<_>>(), reports);
+    }
+}
+
+// The original control used the HTTP-status-only writer with status200.
+fn capture_native_unproven(
+    writes: &mut CommandWrites,
+    id: RequestId,
+    capture: impl FnOnce(&mut UnprovenEvidence),
+) -> Result<(), Error> {
+    writes.unproven_native_result(id, capture)
+}
+
+#[test]
+fn native_unproven_evidence_retains_exact_ids_and_prior_effects_without_http_status() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    released(&mut writes, 1);
+    writes
+        .result(RequestId(1), accepted(vec!["prior".into()]))
+        .unwrap();
+    released(&mut writes, 2);
+    assert_eq!(
+        capture_native_unproven(&mut writes, RequestId(2), |evidence| {
+            evidence.venue_code("0");
+            evidence.venue_message("invalid native batch cardinality");
+            assert!(evidence.order_id("native-uncorrelated"));
+        }),
+        Ok(())
+    );
+    let charged = writes.evidence;
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(writes.evidence, charged);
+    assert_eq!(error.kind, Some(crate::ErrorKind::Internal));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.venue_code.as_deref(), Some("0"));
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("invalid native batch cardinality")
+    );
+    assert_eq!(
+        error.partial.unwrap().order_ids,
+        ["native-uncorrelated", "prior"]
+    );
+}
+
+#[test]
+fn native_unproven_capture_shares_http_quota_and_rejects_before_capture() {
+    let mut writes = CommandWrites::new(3).unwrap();
+    released(&mut writes, 1);
+    let ids: Vec<_> = (0..4094).map(|i| format!("prior-{i}")).collect();
+    writes.result(RequestId(1), accepted(ids)).unwrap();
+    released(&mut writes, 2);
+    writes
+        .unproven_result(RequestId(2), 500, |e| assert!(e.order_id("http-native")))
+        .unwrap();
+    released(&mut writes, 3);
+    writes
+        .unproven_native_result(RequestId(3), |e| {
+            e.venue_code("10004");
+            e.venue_message(&"漢".repeat(5000));
+            assert!(e.order_id("last-native"));
+            assert!(!e.order_id("overflow"));
+        })
+        .unwrap();
+    let charged = writes.evidence;
+    let mut captures = 0;
+    assert_eq!(
+        writes.unproven_native_result(RequestId(3), |_| captures += 1),
+        Err(Error::State)
+    );
+    assert_eq!(captures, 0);
+    assert_eq!(writes.evidence, charged);
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(writes.evidence, charged);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(error.message.contains("truncated IDs"));
+    let ids = error.partial.unwrap().order_ids;
+    assert_eq!(ids.len(), 4096);
+    assert!(ids.iter().any(|id| id == "http-native"));
+    assert!(ids.iter().any(|id| id == "last-native"));
+    assert!(!ids.iter().any(|id| id == "overflow"));
+}
+
+#[test]
+fn native_unproven_writer_never_rewrites_ids_or_native_diagnostics_into_auth() {
+    let mut writes = CommandWrites::new(1).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    let mut captures = 0;
+    assert_eq!(
+        writes.unproven_native_result(RequestId(1), |_| captures += 1),
+        Err(Error::State)
+    );
+    assert_eq!(captures, 0);
+    writes.released(RequestId(1)).unwrap();
+    writes
+        .unproven_native_result(RequestId(1), |e| {
+            e.venue_code("10004");
+            e.venue_message("invalid api key signature");
+            assert!(e.order_id("exact"));
+            assert!(!e.order_id(&"x".repeat(1025)));
+            assert!(!e.order_id("after-overflow"));
+        })
+        .unwrap();
+    let charged = writes.evidence;
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(error.kind, Some(crate::ErrorKind::Internal));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["exact"]);
+    assert_eq!(error.venue_code.as_deref(), Some("10004"));
+    assert_eq!(
+        writes.unproven_native_result(RequestId(1), |_| captures += 1),
+        Err(Error::State)
+    );
+    assert_eq!(captures, 0);
+    assert_eq!(writes.evidence, charged);
+}
+
+#[test]
+fn native_unproven_capture_cannot_borrow_a_prior_attempt_after_retry() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    released(&mut writes, 1);
+    writes
+        .result(
+            RequestId(1),
+            WriteResult::Rejected(VenueError::new("definitively refused")),
+        )
+        .unwrap();
+    writes.grant_resend(RequestId(1)).unwrap();
+    writes.retry(RequestId(1), RequestId(2)).unwrap();
+    let mut captures = 0;
+    assert_eq!(
+        writes.unproven_native_result(RequestId(1), |_| captures += 1),
+        Err(Error::Revoked)
+    );
+    assert_eq!(
+        writes.unproven_native_result(RequestId(2), |_| captures += 1),
+        Err(Error::State)
+    );
+    assert_eq!(captures, 0);
+    writes.released(RequestId(2)).unwrap();
+    writes
+        .unproven_native_result(RequestId(2), |e| {
+            captures += 1;
+            assert!(e.order_id("new-native"));
+        })
+        .unwrap();
+    assert_eq!(captures, 1);
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["new-native"]);
+}
+
+#[test]
+fn effect_authority_uses_normalized_current_facts_and_not_a_siblings_unknown_outcome() {
+    let facts = [
+        None,
+        Some(WriteResult::Accepted { order_ids: vec![] }),
+        Some(WriteResult::KnownPartial(VenueError::new(
+            "known partial without IDs",
+        ))),
+        Some(WriteResult::KnownPartial(VenueError::new("m".repeat(9000)))),
+        Some(WriteResult::Rejected(VenueError::new("refused"))),
+        Some(WriteResult::Failed(VenueError::new("unproven"))),
+        Some(WriteResult::Accepted {
+            order_ids: vec!["n".repeat(1025)],
+        }),
+        Some(WriteResult::KnownPartial(
+            VenueError::new("known").partial_ids(&["n".repeat(1025)]),
+        )),
+    ];
+    for (case, fact) in facts.into_iter().enumerate() {
+        let mut writes = CommandWrites::new(2).unwrap();
+        released(&mut writes, 1);
+        writes
+            .result(
+                RequestId(1),
+                WriteResult::Failed(VenueError::new("other leg uncertain")),
+            )
+            .unwrap();
+        released(&mut writes, 2);
+        if let Some(fact) = fact {
+            writes.result(RequestId(2), fact).unwrap();
+        }
+        let budget = writes.evidence;
+        let counts = (
+            writes.attempts.len(),
+            writes.legs.len(),
+            writes.report_bytes,
+            writes.report_messages,
+            writes.sealed,
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                writes.validate_effects(RequestId(2)).is_ok(),
+                matches!(case, 1..=3),
+                "case {case}"
+            );
+            assert_eq!(
+                writes.validate_housekeeping(RequestId(2)).is_ok(),
+                matches!(case, 1..=5),
+                "housekeeping case {case}"
+            );
+            assert_eq!(writes.evidence, budget);
+            assert_eq!(
+                (
+                    writes.attempts.len(),
+                    writes.legs.len(),
+                    writes.report_bytes,
+                    writes.report_messages,
+                    writes.sealed
+                ),
+                counts
+            );
+        }
+        assert_eq!(
+            writes
+                .project_failure(VenueError::new("preview"))
+                .unwrap()
+                .outcome,
+            Some(Outcome::Unknown)
+        );
+        assert_eq!(
+            writes.validate_effects(RequestId(2)).is_ok(),
+            matches!(case, 1..=3)
+        );
+        writes.fail(VenueError::new("finish")).unwrap();
+        assert_eq!(writes.validate_effects(RequestId(2)), Err(Error::State));
+        assert_eq!(
+            writes.validate_housekeeping(RequestId(2)),
+            Err(Error::State)
+        );
+    }
+}
+
+#[test]
+fn report_capacity_refusal_cannot_create_effect_authority_before_fact_admission() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    released(&mut writes, 1);
+    writes
+        .result_with_reports(
+            RequestId(1),
+            WriteResult::Rejected(VenueError::new("refused")),
+            RejectionReports::new(vec!["r".repeat(4096); 15]).unwrap(),
+        )
+        .unwrap();
+    released(&mut writes, 2);
+    let budget = writes.evidence;
+    let counts = (writes.report_bytes, writes.report_messages);
+    assert_eq!(
+        writes.result_with_reports(
+            RequestId(2),
+            WriteResult::KnownPartial(VenueError::new("known effects")),
+            RejectionReports::new(vec!["r".repeat(4096)]).unwrap()
+        ),
+        Err(Error::Capacity)
+    );
+    assert_eq!(writes.validate_effects(RequestId(2)), Err(Error::State));
+    assert_eq!(writes.evidence, budget);
+    assert_eq!((writes.report_bytes, writes.report_messages), counts);
+    writes
+        .result_with_reports(
+            RequestId(2),
+            WriteResult::KnownPartial(VenueError::new("known effects")),
+            RejectionReports::default(),
+        )
+        .unwrap();
+    assert_eq!(writes.validate_effects(RequestId(2)), Ok(()));
+    assert_eq!(
+        writes.result(RequestId(2), accepted(vec![])),
+        Err(Error::State)
+    );
+    assert_eq!(writes.validate_effects(RequestId(2)), Ok(()));
+}
+
+#[test]
+fn effect_authority_rejects_an_old_retry_and_superseded_parent() {
+    let mut writes = CommandWrites::new(3).unwrap();
+    released(&mut writes, 1);
+    writes
+        .result(
+            RequestId(1),
+            WriteResult::Rejected(VenueError::new("refused")),
+        )
+        .unwrap();
+    writes.grant_resend(RequestId(1)).unwrap();
+    writes.retry(RequestId(1), RequestId(2)).unwrap();
+    assert_eq!(writes.validate_effects(RequestId(1)), Err(Error::Revoked));
+    assert_eq!(
+        writes.validate_housekeeping(RequestId(1)),
+        Err(Error::Revoked)
+    );
+    assert_eq!(writes.validate_effects(RequestId(2)), Err(Error::State));
+    writes.released(RequestId(2)).unwrap();
+    writes
+        .result(
+            RequestId(2),
+            WriteResult::Rejected(VenueError::new("refused again")),
+        )
+        .unwrap();
+    writes.replace(RequestId(2), &[3]).unwrap();
+    assert_eq!(writes.validate_effects(RequestId(2)), Err(Error::Revoked));
+    assert_eq!(
+        writes.validate_housekeeping(RequestId(2)),
+        Err(Error::Revoked)
+    );
+    writes.register(RequestId(3), 3).unwrap();
+    writes.released(RequestId(3)).unwrap();
+    writes.result(RequestId(3), accepted(vec![])).unwrap();
+    assert_eq!(writes.validate_effects(RequestId(3)), Ok(()));
+}
+
+#[test]
+fn proven_subset_does_not_erase_an_unresolved_remainder() {
+    for ids in [vec![], vec!["proven-native".to_owned()]] {
+        let mut writes = CommandWrites::new(4).unwrap();
+        released(&mut writes, 1);
+        let mut error =
+            VenueError::new("validated subset; omitted targets unresolved").partial_ids(&ids);
+        error.outcome = Some(Outcome::Unknown);
+        writes
+            .result(RequestId(1), WriteResult::PartialUnknown(error))
+            .unwrap();
+        released(&mut writes, 2);
+        writes
+            .result(RequestId(2), accepted(vec!["sibling".to_owned()]))
+            .unwrap();
+        let charged = writes.evidence;
+        assert_eq!(writes.validate_effects(RequestId(1)), Ok(()));
+        assert_eq!(
+            writes.retry(RequestId(1), RequestId(3)),
+            Err(Error::RetryForbidden)
+        );
+        assert_eq!(
+            writes.replace(RequestId(1), &[3]),
+            Err(Error::RetryForbidden)
+        );
+        assert_eq!(writes.succeed(), Err(Error::State));
+        for _ in 0..2 {
+            let preview = writes.project_failure(VenueError::new("fallback")).unwrap();
+            assert_eq!(preview.outcome, Some(Outcome::Unknown));
+            assert_eq!(
+                preview.message,
+                "validated subset; omitted targets unresolved"
+            );
+            assert_eq!(writes.evidence, charged);
+        }
+        let final_error = writes.fail(VenueError::new("fallback")).unwrap();
+        assert_eq!(final_error.outcome, Some(Outcome::Unknown));
+        let mut expected = ids;
+        expected.push("sibling".to_owned());
+        assert_eq!(final_error.partial.unwrap().order_ids, expected);
+        assert_eq!(writes.evidence, charged);
+        assert_eq!(writes.validate_effects(RequestId(1)), Err(Error::State));
+    }
+}
+
+#[test]
+fn partial_unknown_survives_earlier_error_selection_and_keeps_explicit_reports() {
+    let mut writes = CommandWrites::new(4).unwrap();
+    // Logical order, not callback order, chooses the diagnostic.
+    for id in 1..=3 {
+        released(&mut writes, id);
+    }
+    writes
+        .result(RequestId(3), accepted(vec!["later".into()]))
+        .unwrap();
+    writes
+        .result_with_reports(
+            RequestId(2),
+            WriteResult::PartialUnknown(
+                VenueError::new("subset uncertain").partial_ids(&["subset".into()]),
+            ),
+            RejectionReports::new(vec!["one row rejected; another unresolved".into()]).unwrap(),
+        )
+        .unwrap();
+    writes
+        .result(
+            RequestId(1),
+            WriteResult::Rejected(VenueError::new("first refusal")),
+        )
+        .unwrap();
+    assert_eq!(
+        writes.rejections().map(|(id, _)| id).collect::<Vec<_>>(),
+        [RequestId(1)]
+    );
+    assert_eq!(
+        writes.reports().collect::<Vec<_>>(),
+        ["first refusal", "one row rejected; another unresolved"]
+    );
+    let budget = writes.evidence;
+    let error = writes.project_failure(VenueError::new("fallback")).unwrap();
+    assert_eq!(error.message, "first refusal");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["subset", "later"]);
+    assert_eq!(writes.validate_effects(RequestId(2)), Ok(()));
+    assert_eq!(
+        writes.fail(VenueError::new("fallback")).unwrap().outcome,
+        Some(Outcome::Unknown)
+    );
+    assert_eq!(writes.evidence, budget);
+}
+
+#[test]
+fn partial_unknown_admission_requires_release_and_respects_report_atomicity() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    let fact = || WriteResult::PartialUnknown(VenueError::new("validated subset"));
+    assert_eq!(writes.result(RequestId(1), fact()), Err(Error::State));
+    assert_eq!(writes.evidence, evidence::EvidenceBudget::default());
+    assert_eq!(writes.attempts[0].result, None);
+    writes.released(RequestId(1)).unwrap();
+    writes
+        .result_with_reports(
+            RequestId(1),
+            fact(),
+            RejectionReports::new(vec!["r".repeat(4096); 15]).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(writes.rejections().count(), 0);
+    released(&mut writes, 2);
+    let budget = writes.evidence;
+    let counts = (writes.report_messages, writes.report_bytes);
+    assert_eq!(
+        writes.result_with_reports(
+            RequestId(2),
+            fact(),
+            RejectionReports::new(vec!["r".repeat(4096)]).unwrap(),
+        ),
+        Err(Error::Capacity)
+    );
+    assert_eq!(writes.evidence, budget);
+    assert_eq!((writes.report_messages, writes.report_bytes), counts);
+    assert_eq!(writes.validate_effects(RequestId(2)), Err(Error::State));
+    assert_eq!(writes.attempts[1].result, None);
+    writes
+        .result_with_reports(RequestId(2), fact(), RejectionReports::default())
+        .unwrap();
+    assert_eq!(writes.validate_effects(RequestId(2)), Ok(()));
+}
+
+#[test]
+fn subset_authority_distinguishes_own_overflow_from_sibling_overflow_and_evidence_only_ids() {
+    for (own_ids, sibling_ids, expected) in [
+        (vec!["exact".into()], vec!["x".repeat(1025)], true),
+        (
+            vec!["exact".into(), "x".repeat(1025), "after".into()],
+            vec![],
+            false,
+        ),
+    ] {
+        let mut writes = CommandWrites::new(2).unwrap();
+        released(&mut writes, 1);
+        writes
+            .result(
+                RequestId(1),
+                WriteResult::Failed(VenueError::new("evidence only").partial_ids(&sibling_ids)),
+            )
+            .unwrap();
+        released(&mut writes, 2);
+        writes
+            .result(
+                RequestId(2),
+                WriteResult::PartialUnknown(VenueError::new("native subset").partial_ids(&own_ids)),
+            )
+            .unwrap();
+        assert_eq!(writes.validate_effects(RequestId(1)), Err(Error::State));
+        assert_eq!(writes.validate_effects(RequestId(2)).is_ok(), expected);
+        assert_eq!(writes.reports().count(), 0);
+        let error = writes.fail(VenueError::new("fallback")).unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.partial.unwrap().order_ids, ["exact"]);
+        assert!(error.message.contains("truncated IDs"));
+    }
+}
