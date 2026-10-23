@@ -1011,3 +1011,36 @@ command-origin or opaque request is used to manufacture admission pressure.
 Native precedence, numeric boundaries, both zero-limit results, Store stability,
 signed order/funding wire requests and clipped long-range paging are preserved.
 Three defensive branches remain explicitly outside native witness claims.
+## Bitunix local history admission controls
+
+Tests-first native controls reproduced five assertion RED and three compatibility
+GREEN before all eight passed with the authority adoption. Both credential modes,
+all five local terminal expressions, native branch precedence, typed refusals and
+companion-free timelines are covered. Initial capacity fixtures assert256 genuine
+background roots before270 rounds of command refusals, explicitly retire them,
+and recover at one clock. Invalid-clock denial and more than256 fixed-clock local
+completions cover both empty-result paths as well as refusals. An unchanged valid
+signed private history request and empty response remain a compatibility control.
+
+## Bitrue local history command admission controls
+
+Tests-first genuine Engine callbacks delegate both native mutation guards and
+cover all five local refusals, including missing/unknown symbols. Original source
+produces five assertion REDs and three compatibility GREENs. Capacity setup uses
+a prior no-ID callback with256 asserted Background roots; repeated denials retain
+peers, explicit retirement recovers at one clock and fixed-clock reuse exercises
+terminal cleanup. Invalid raw clocks and typed local metadata are distinguished
+from native text/precedence, Store stability and signed-fill preservation.
+Aliases, fractional-time flooring, default/clamped limits, native headers and
+empty results remain covered; no fake HTTP or command origin supplies authority.
+
+## Bitrue local leverage admission controls
+
+Tests-first fixtures delegate both native guards and use genuine commands for
+all four local refusals. Original production gives four assertion REDs and three
+compatibility GREENs. The bounded owner probe allocates256 Background roots in
+a separate no-ID callback, repeatedly denies work while preserving peers, then
+explicitly retires roots and recovers at one clock. Fixed-clock reuse and invalid
+raw clocks distinguish shared admission from native messages and Store stability.
+Valid bracket/account requests retain their signed dispatch; existing account
+suite assertions continue to own successful caller completion/group behavior.
