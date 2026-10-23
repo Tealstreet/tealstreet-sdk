@@ -709,3 +709,26 @@ fn delayed_signer_blocks_frames_and_wakeup_until_the_real_signing_fifo_releases(
     e.handle(2., Event::TimerFired { timer });
     assert_eq!(e.venue.calls, [1]);
 }
+
+#[test]
+fn early_one_shot_wakeup_rearms_without_early_callback_or_retained_credit() {
+    let (mut e, _) = started(Probe::default());
+    queue(&mut e, &["book"], &["book"], 7).unwrap();
+    let out: Vec<_> = e.drain_actions().collect();
+    let timer = wake(&out, 1.);
+    assert!(e.io.socket_continuation_bytes > 0);
+    e.handle(0.5, Event::TimerFired { timer });
+    let rearmed: Vec<_> = e.drain_actions().collect();
+    assert!(e.venue.calls.is_empty());
+    assert_eq!(wake(&rearmed, 1.), timer);
+    assert_eq!(e.io.socket_continuations.len(), 1);
+    e.handle(1., Event::TimerFired { timer });
+    e.drain_actions().for_each(drop);
+    assert_eq!(e.venue.calls, [7]);
+    assert!(e.io.socket_continuations.is_empty());
+    assert_eq!(e.io.socket_continuation_bytes, 0);
+    assert!(!e.io.timers.contains_key(&timer));
+    e.handle(1., Event::TimerFired { timer });
+    e.drain_actions().for_each(drop);
+    assert_eq!(e.venue.calls, [7]);
+}

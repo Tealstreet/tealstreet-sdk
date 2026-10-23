@@ -83,3 +83,45 @@ test('cleared and superseded timer callbacks cannot consume a new arm', () => {
   assert.deepEqual(cleared, [1, 3]);
   host.dispose();
 });
+
+test('an early inline wakeup can rearm the same timer without losing its later callback', () => {
+  let now = 100;
+  let wake;
+  let arms = 0;
+  let ingress = 0;
+  let continuations = 0;
+  const host = new EngineHost({
+    timer(id, at) {
+      assert.equal(id, 19);
+      ingress++;
+      if (at < 100) return JSON.stringify([{ op: 'setTimer', timer: 19, at: 100 }]);
+      continuations++;
+      return '[]';
+    },
+  }, {
+    now: () => now,
+    setTimeout(callback) {
+      const handle = ++arms;
+      if (handle === 1) {
+        now = 99;
+        callback();
+      } else wake = callback;
+      return handle;
+    },
+    clearTimeout() {},
+  });
+  host.run(JSON.stringify([{ op: 'setTimer', timer: 19, at: 100 }]));
+  assert.equal(continuations, 0);
+  assert.equal(ingress, 1);
+  assert.equal(arms, 2);
+  assert.equal(host.timers.get(19), 2);
+  now = 100;
+  wake();
+  assert.equal(continuations, 1);
+  assert.equal(ingress, 2);
+  assert.equal(host.timers.size, 0);
+  wake();
+  assert.equal(continuations, 1);
+  assert.equal(ingress, 2);
+  host.dispose();
+});
