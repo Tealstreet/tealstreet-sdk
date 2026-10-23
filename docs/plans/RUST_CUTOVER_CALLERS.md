@@ -970,6 +970,20 @@ scalar `event_code` and the event object in extra data; explicit tags still win.
 | CLI `apps/cli/src/oneShotResult.ts:41-56` (`KEY_REJECTION`), `connect-error.ts:13-17`, `log-classify.ts:30-57` | key-rejection, `authentication`/`token`/`401`/`timed out`, critical log keywords | Partial: `code === 'COMMAND_TIMEOUT'` works for command timeouts; #1450 teaches `findKeyRejection` the engine wording | auth: startup `kind` (#1482); a runtime rejection raises `authFailureStreak` (#1450) and counts `auth.rejected` in `getHealth()` (#1388) |
 | exchange-server `alerts.ts:82-89`, SDK `unknownSendOutcome.ts:10-13` | `Invalid API-key`, `Way too many requests`, `banned until`, signer messages | Blocked: process-handler reasons never see the error object | `kind: 'authInvalid'\|'rateLimited'` where the object is reachable; signer messages stay JS |
 
+Typed managed-write failures (#1816, #1838; backfill). For a Binance managed
+write that fails without a usable native answer, the `kind` changes but the
+outcome and message do not:
+- engine deadline expiry of a released write: `kind` was `network`, now
+  `timeout`;
+- a delivered reply that is not UTF-8 or exceeds the response bounds: `kind`
+  was `network`, now `internal`;
+- host transport loss: still `network`.
+
+The `outcome` stays `unknown` and the message text is unchanged. Callers
+branching on `kind === 'network'` for these Binance write failures should also
+accept `timeout` and `internal`. Venues adopting the typed `Venue::on_http_failed` hook see the same
+kinds; others are unchanged.
+
 ### Build and delivery steps
 
 | Host | Today | Needed for the engine |
@@ -4344,6 +4358,47 @@ separate WS behavior. GRVT retains namespace isolation, unfiltered duplicate
 coin rearm, filtered order/position rearm and rearming before per-row timestamp
 rejection on a current response. Callers retain the same account data, command
 outcomes, health policy, transports, signing and snapshot/financial authority.
+## Engine-owned initial command admission
+
+Adapters use `admit_http_command(policy)` at the start of a genuine engine command
+callback, before HTTP, WebSocket, timer or signing work. The engine correlates
+this entry with the command being delivered; adapters do not supply a numeric
+command ID. An initial policy, clock or capacity refusal emits one structured
+command failure without issuing a Context or sending work. Read failures carry
+no write outcome; an unissued mutation is `NotSent`. Binance candle, account
+identity and trade-root admission use this path. Native input/planning failures
+keep their existing behavior.
+
+NX handles an admission rejection once using its typed category and message;
+it must not append a numeric failure, optimistic success or automatic duplicate
+submission. Resource capacity reports `Internal`; invalid initial context policy
+or time reports `InvalidInput`. These local failures prove nothing about an
+already-owned or previously sent command. A revoked entry has no completion
+rights and must not finalize another generation. The returned Context remains
+the authority for successful admission, including cached/no-I/O read completion
+and native single-owner WebSocket callbacks. Child legs and retries keep their
+existing explicit Context APIs and original deadlines.
+
+A caught native command-callback panic permanently fences the engine, including
+held transport permits, pending signer completions and venue-bearing queries.
+Hosts dispose the failed engine through their terminal-failure path; NX retains
+prior-sent uncertainty and reconciles through a new healthy engine. An engine
+panic does not prove `NotSent` for work released earlier.
+
+Shared read owners can validate that a handle is the exact original Read root
+before binding completion authority or publishing a no-I/O completion companion.
+A same-owner child, foreign issuer, mutation-bearing owner or sealed generation
+is refused. This check retains completion expiry semantics and grants no new
+send, retry, publication or joined-observer authority.
+
+A successfully admitted initial command retains its completion generation until
+typed terminal cleanup, including native single-owner WebSocket reads with no
+managed HTTP attempt. Unrelated work and deadline expiry cannot erase it or
+reuse its command ID; NX receives the original native timeout once. Only the
+issued Context can complete that generation. An expired root still grants no
+send or publication rights, and unparented siblings cannot extend its bound.
+Outstanding owners count toward the existing 256-owner capacity until cleanup;
+adapters must finalize them through their existing native terminal callbacks.
 
 
 ### Paradex managed independent book snapshots
