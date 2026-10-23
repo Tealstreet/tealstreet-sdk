@@ -4443,6 +4443,31 @@ operation only. It does not establish that earlier read attempts never reached
 the venue or that a whole multi-step command was unsent. Mutation journals
 retain their separate authoritative release/outcome aggregation.
 
+## BloFin managed public discovery and candle reads
+
+BloFin instruments, ticker seeds and candle queries use the shared prepared HTTP
+lifecycle with explicit public routing and no signing credential. Their original
+20-second bound includes route preparation; preparation alone cannot release
+HTTP or admit a response. Late, duplicate and unreleased responses cannot publish
+the catalogue/ticker seed or complete an old candle command generation. Discovery
+retries retain the existing startup backoff and row recovery behavior.
+
+Candle results retain their existing JSON fields, seconds, ascending order and
+native volume mapping. Unknown markets reject as `invalidInput`/`notSent` before
+unsupported interval validation; unsupported intervals reject as
+`unsupported`/`notSent`. A refused prepared transport retains its typed error,
+including `unsupported` and `notSent`; a parked preparation that reaches its
+original deadline rejects as `timeout`/`notSent`. Custom BloFin transports must
+implement preparation/binding/final synchronous handoff, and cannot service these
+reads through only legacy `request()`.
+
+NX `fetchOHLCV` consumers (`components/dom/Dom.tsx:237` and
+`lightweightCharts/SafeCexKLinesChart.tsx:29`), candle-server and worker/hosted
+error receivers must preserve those structured fields and handle the rejected
+query promise. Custom transport providers must implement the shared managed
+HTTP contract when upgrading. SDK call arguments, result units and subscriptions
+remain the same; this establishes no NX deployment or private-request migration.
+
 
 ### Kraken Spot managed command OHLC
 
