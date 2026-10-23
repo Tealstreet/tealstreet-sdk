@@ -10,7 +10,7 @@ the index row and new original assertion controls. No production or inventory
 changes until plan/RED and owner reviews are complete. #1970 remains frozen;
 #1974 CI and its actual-prerequisite dependency remain separate.
 
-Request owner codex-hcmq3f is contacted before source. The open-PR file audit
+Request owner codex-hcmq3f cleared socket/lib.rs/account.rs ownership before source. The open-PR file audit
 shows only TxFlow trading-test plan #1883, with no production socket claimant.
 Coordinate lib.rs/account.rs boundaries and recheck that inventory before source.
 No edits to engine/host/OKX or any frozen shared seam belong in this adapter.
@@ -63,6 +63,9 @@ No borrowed command, HTTP, Plan or signer activation is introduced.
 
 Native startup account reads are independent and stay at their existing startup
 point. Do not blanket-delay startup, public-only or zero-private-obligation work.
+A private node open still invokes native account refresh when user() yields no
+subscription address; preserve its existing started/inflight guards and immediate
+zero-obligation path, without inventing an epoch or private interest.
 Preserve the native150ms ordering trace as a named original positive before
 changing the intentional HTTP position. The existing opening path can issue
 refresh HTTP while private frames remain paced; a separate original assertion
@@ -141,3 +144,48 @@ all-target/all-feature Clippy, formatting and bans. Full performance/size gates
 belong to CI without changed thresholds, profiles, tapes or harnesses. No native
 benchmark on the daily-driver machine and no performance claim from local tests.
 No deployment, flag flip or SDK-master merge.
+
+## Executed original controls
+
+Plan-first commit:8b36a03daaa. The subsequent new managed_socket.rs controls run
+against byte-identical original0418 production, Cargo, engine/hosts and existing
+TxFlow tests. Request owner codex-hcmq3f cleared the whole socket region and
+confirmed role, pacing, AnyText, node-only account invalidation and zero-address
+refresh boundaries. Its #1883 remains docs/trading-test only.
+
+The original new target has20 executed tests:11 assertion RED,9 GREEN,0ignored.
+No production changes or inventory pruning accompany this checkpoint.
+
+| Assertion RED | Observed original behavior |
+| --- | --- |
+| duplicate_api_open_does_not_replay_tickers | Second ticker subscription is emitted. |
+| duplicate_node_open_does_not_replay_interests | Second public context subscription is emitted. |
+| duplicate_node_open_does_not_clear_published_book | Published bid80 becomes absent. |
+| duplicate_node_open_does_not_restart_account_refresh | Completed native reads are restarted by duplicate open. |
+| api_open_at_connect_deadline_is_inert_without_watchdog | API subscribe is released at connect+10000ms. |
+| node_open_at_connect_deadline_is_inert_without_watchdog | Node subscribe is released at connect+10000ms. |
+| api_ticker_at_idle_deadline_cannot_publish_without_watchdog | Expired frame changes65000 to999. |
+| node_book_at_idle_deadline_cannot_publish_without_watchdog | Expired frame publishes bid80. |
+| private_state_at_idle_deadline_cannot_publish_without_watchdog | Expired financial frame changes contracts2 to3. |
+| opening_refresh_waits_for_all_paced_private_subscriptions | HTTP action4 precedes final required subscription action11. |
+| reconnect_refresh_waits_for_all_paced_private_subscriptions | HTTP action6 precedes final required subscription action14. |
+
+The9 working controls pin the original refresh-before-private-frame trace;
+exact API/node JSON, roles and first-frame/150ms pacing; book/candle wire;
+identical live book/ticker/financial payload publication; Shared/Disabled private
+traffic; node-only book clearing; old API/node/private ingress denial after real
+close/backoff/replacement; and malformed-current-text liveness with exact ping.
+HTTP replies are explicit and preserve every original HTTP action in the returned
+trace. The two handoff REDs inspect the complete unfiltered host-action sequence.
+The original order positive remains named and identifiable for the later approved
+contract change.
+
+Existing account27, private_supervision2 and public_supervision9 controls all
+PASS (38total,0ignored). Scoped new-target all-feature Clippy with -D warnings,
+rustfmt and git diff --check PASS. Initial new-fixture compilation mistakes
+(Option<SocketChannel> matching and an unused wire constant) were corrected before
+any assertion result was counted. This is an original-RED checkpoint, not a green
+PR or CPU/memory/size claim; no full suite or CI dispatch was needed for this
+plan/test-only phase. Local logs stay outside Git:
+/tmp/codex-txflow-socket-original-controls.log and
+/tmp/codex-txflow-socket-native-controls.log.
