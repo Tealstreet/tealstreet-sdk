@@ -561,10 +561,16 @@ fn deferred_private_auth_cannot_be_overtaken_by_the_opening_ping() {
             _ => None,
         })
         .collect();
+    assert_eq!(
+        texts.len(),
+        2,
+        "successful auth release must retain the opening ping"
+    );
     assert!(texts[0].contains("user.auth"));
-    if let Some(ping) = texts.iter().position(|text| text.contains("server.ping")) {
-        assert!(ping > 0);
-    }
+    assert_eq!(
+        texts[1],
+        r#"{"id":1201,"method":"server.ping","params":[]}"#
+    );
 }
 
 fn opts(id: &str) -> PlaceOrderOpts {
