@@ -393,10 +393,9 @@ impl Venue for ScopeProbe {
             self.ready += 1;
             self.assert_session_scope(cx);
             cx.fail_plan(plan, "Plan readiness tested").unwrap();
-            return;
         }
         #[cfg(feature = "managed-sockets")]
-        if self.socket_plan_tail {
+        if !self.session_plan_ready && self.socket_plan_tail {
             self.retire_ready_sockets(cx);
             cx.fail_plan(plan, "tail callback completed").unwrap();
         }
