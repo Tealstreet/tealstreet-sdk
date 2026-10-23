@@ -2313,6 +2313,39 @@ there is no signer migration, local timer/classifier, retry executor or numeric
 Context lookup. Architecture No: existing shared custody and lifecycle are
 consumed. The separate reviewed startup fix is retained as a stack dependency.
 
+### Snapshot-token fan-out: Backpack and Paradex
+
+At actual848924, only Binance and Bitunix used the engine's financial snapshot
+admission token. The complete27-crate inventory (including nested Spot adapters)
+is in RUST_FINANCIAL_SNAPSHOT_FRESHNESS. Backpack and Paradex now use that same
+Store boundary for whole-read admission, native caches and row replacement;
+per-ID timestamps, terminal state, amend evidence and other domain clocks remain.
+This is engine-consumer fan-out, not another per-venue freshness counter.
+
+Two Backpack defects were independently reproduced on unchanged production:
+
+- A stale streamed order read, or a failed current streamed read, could erase an
+  accepted unpriced trigger's pending relabel bookkeeping before final snapshot
+  admission. When the ticker seed arrived, the retained take-profit stayed
+  classified as StopLoss. Mapping-time insert/remove decisions are now staged
+  and applied only after token admission; the two independent controls fail on
+  original code and pass after adoption.
+- A fully accepted native Pair ACK did not advance the order-read fence. An older
+  empty read could remove a retained order, or an older nonempty read could
+  inject a row into an empty Store after that ACK. The accepted, fully validated
+  identity set now invalidates shared snapshot authority. Both original-RED
+  controls pass after adoption; a malformed-identity negative retains its old
+  behavior and command correlation/result shape.
+
+Four native assertion REDs cover these two classes. Exact final fixture/source/
+log bindings are sealed in receipt
+`95ebc65eecbd8e231407715231058a93bd6662737d124f3e2eeae3ead5b2f2af`.
+Paradex's native amend-ACK compatibility control passes original code; its two
+Store-invalidation/exhaustion controls exercise the newly adopted API and are
+not claimed as production defects. Capture exhaustion admits no unfenced read
+and preserves native account-cycle progress. Final current-head CI, actual queued
+integration and full authenticated raw proof remain separate merge gates.
+
 ### Lighter cached reads: remove legacy numeric completion
 
 The cached FetchLeverage and FetchAccountTier branches consume shared initial
