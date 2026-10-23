@@ -265,6 +265,9 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | WEEX local history custody | Committed plan; unimplemented | Before adopting synchronous WEEX history results/refusals or pruning their seven legacy terminals. | [RUST_WEEX_LOCAL_HISTORY_CONTEXT.md](RUST_WEEX_LOCAL_HISTORY_CONTEXT.md) |
 | WEEX account identity Read custody | Plan; original REDs next | Before changing FetchAccount local refusals or initial managed identity validation. | [RUST_WEEX_IDENTITY_CONTEXT.md](RUST_WEEX_IDENTITY_CONTEXT.md) |
 | Binance identity preflight terminals | Focused adoption plan | Before converting local identity refusals to genuine Read custody; preserve selected signing and session ownership. | [RUST_BINANCE_IDENTITY_TERMINALS.md](RUST_BINANCE_IDENTITY_TERMINALS.md) |
+
+
+| Native socket snapshot barrier | Shared prerequisite API plan | Before separating login acceptance from a connect-origin native snapshot completion; no venue timer or second reducer. | [RUST_SOCKET_SNAPSHOT_BARRIER.md](RUST_SOCKET_SNAPSHOT_BARRIER.md) |
 | Selection-managed signed reads | Standalone engine implementation; consumers separate | Before coupling selected identity/egress/evidence with managed signed Read admission, queueing or retry. | [RUST_SELECTED_MANAGED_READ.md](RUST_SELECTED_MANAGED_READ.md) |
 
 | Raw signature expiry at final release | Plan-first engine prerequisite | Before publishing engine-projected raw signature expiry to a repair/reconciliation consumer. | [RUST_SIGNING_RELEASE_EXPIRY.md](RUST_SIGNING_RELEASE_EXPIRY.md) |

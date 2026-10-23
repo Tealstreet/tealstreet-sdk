@@ -1511,6 +1511,8 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_driver: crate::socket_driver::Driver,
     #[cfg(feature = "managed-sockets")]
+    socket_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
+    #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
     #[cfg(feature = "managed-sockets")]
     socket_failed: bool,
@@ -1593,6 +1595,8 @@ impl<P> Default for Io<P> {
             retried_failures: HashMap::new(),
             #[cfg(feature = "managed-sockets")]
             socket_driver: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_message: None,
             #[cfg(feature = "managed-sockets")]
             managed_sockets: false,
             #[cfg(feature = "managed-sockets")]
@@ -3457,8 +3461,14 @@ impl<V: Venue> Engine<V> {
             self.io.request_contexts.enter_delivery(delivery);
         }
         let previous = std::mem::replace(&mut self.io.http_delivery, delivery.clone());
+        #[cfg(feature = "managed-sockets")]
+        let socket_message = self.io.socket_message.take();
         self.handle_event_scoped(now, event);
         self.io.http_delivery = previous;
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.io.socket_message = socket_message;
+        }
         if let Some(delivery) = delivery.as_ref() {
             self.io.request_contexts.exit_delivery(delivery);
         }
