@@ -264,14 +264,13 @@ impl<P> Cx<'_, P> {
     pub(super) fn seal_planned_execution(
         &mut self,
         plan: &crate::request_context::Plan,
-        fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
+        mut fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
+        mut sealed: Vec<Sealed>,
     ) {
-        let (projections, reports): (Vec<_>, Vec<_>) = fanout.into_iter().unzip();
-        let sealed = self
-            .io
+        self.io
             .request_contexts
-            .seal_planned_execution(plan, projections);
-        for (seal, reports) in sealed.iter().zip(reports) {
+            .seal_planned_execution(plan, &mut fanout, &mut sealed);
+        for (seal, (_, reports)) in sealed.iter().zip(fanout) {
             for report in reports {
                 self.command_error(seal.command, report);
             }

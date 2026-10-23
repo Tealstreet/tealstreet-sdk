@@ -18,6 +18,8 @@ pub(super) struct PreparedPlanSeal {
     /// One prepared terminal and report set per surviving execution observer,
     /// cloned before commit so the no-fail commit only moves them.
     pub fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
+    /// Reserved for exactly those observers' seals.
+    pub sealed: Vec<crate::execution_group::Sealed>,
 }
 
 pub(super) fn terminal_ordinals(

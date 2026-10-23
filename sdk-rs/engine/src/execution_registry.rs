@@ -403,27 +403,30 @@ impl ContextRegistry {
     pub(in crate::engine) fn seal_planned_execution(
         &mut self,
         plan: &crate::request_context::Plan,
-        projections: Vec<Result<String, VenueError>>,
-    ) -> Vec<Sealed> {
+        fanout: &mut [(Result<String, VenueError>, Vec<String>)],
+        sealed: &mut Vec<Sealed>,
+    ) {
         let Owner::Execution {
             generation: identity,
         } = plan.owner()
         else {
-            return Vec::new();
+            return;
         };
         self.contexts.remove(&identity);
         let Some(execution) = self.executions.roots.get(&identity).copied() else {
-            return Vec::new();
+            return;
         };
-        let mut projections = projections.into_iter();
-        self.executions
-            .groups
-            .complete(execution, |_| {
-                projections
+        let mut prepared = fanout.iter_mut();
+        let _ = self.executions.groups.complete_into(
+            execution,
+            |_| {
+                let (terminal, _) = prepared
                     .next()
-                    .expect("one prepared terminal per surviving observer")
-            })
-            .unwrap_or_default()
+                    .expect("one prepared terminal per surviving observer");
+                std::mem::replace(terminal, Ok(String::new()))
+            },
+            sealed,
+        );
     }
 
     /// Surviving observers of a physical Plan's execution, for preparation.

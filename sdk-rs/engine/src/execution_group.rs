@@ -579,33 +579,43 @@ impl Groups {
     pub(crate) fn complete(
         &mut self,
         execution: Execution,
-        mut project: impl FnMut(&str) -> Result<String, VenueError>,
+        project: impl FnMut(&str) -> Result<String, VenueError>,
     ) -> Result<Vec<Sealed>, Error> {
+        let mut sealed = Vec::new();
+        self.complete_into(execution, project, &mut sealed)?;
+        Ok(sealed)
+    }
+
+    /// `complete` into caller-reserved storage: with capacity for every live
+    /// observer, sealing moves values and allocates nothing.
+    pub(crate) fn complete_into(
+        &mut self,
+        execution: Execution,
+        mut project: impl FnMut(&str) -> Result<String, VenueError>,
+        sealed: &mut Vec<Sealed>,
+    ) -> Result<(), Error> {
         let group = self.open(execution).map_err(|_| Error::Stale)?;
         group.terminal = true;
-        let entries = std::mem::take(&mut group.observers);
-        let sealed: Vec<_> = entries
-            .into_iter()
-            .map(|entry| {
-                let result = project(&entry.key);
-                if group.planned {
-                    // The Plan journal's own projection, verbatim.
-                    Sealed {
-                        command: entry.command,
-                        generation: entry.generation,
-                        result,
-                        journal: group.operation == Operation::Mutation,
-                        projected: true,
-                        early: None,
-                    }
-                } else {
-                    group.seal(entry, result, true)
+        let start = sealed.len();
+        for entry in std::mem::take(&mut group.observers) {
+            let result = project(&entry.key);
+            sealed.push(if group.planned {
+                // The Plan journal's own projection, verbatim.
+                Sealed {
+                    command: entry.command,
+                    generation: entry.generation,
+                    result,
+                    journal: group.operation == Operation::Mutation,
+                    projected: true,
+                    early: None,
                 }
-            })
-            .collect();
-        self.release_members(&sealed);
+            } else {
+                group.seal(entry, result, true)
+            });
+        }
+        self.release_members(&sealed[start..]);
         self.retire(execution.0);
-        Ok(sealed)
+        Ok(())
     }
 
     #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.

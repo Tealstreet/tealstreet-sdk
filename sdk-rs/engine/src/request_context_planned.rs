@@ -179,6 +179,7 @@ impl ContextRegistry {
             legacy,
             reports,
             fanout: Vec::new(),
+            sealed: Vec::new(),
         })
     }
 
@@ -920,6 +921,20 @@ impl<P> Cx<'_, P> {
                 .fanout
                 .try_reserve_exact(observers)
                 .map_err(|_| Error::Capacity)?;
+            prepared
+                .sealed
+                .try_reserve_exact(observers)
+                .map_err(|_| Error::Capacity)?;
+            // Each observer's reports and terminal notice, plus the
+            // execution timer rearm (clear and set).
+            let notices = observers
+                .checked_mul(prepared.reports.len() + 1)
+                .and_then(|n| n.checked_add(2))
+                .ok_or(Error::Capacity)?;
+            self.io
+                .actions
+                .try_reserve(notices)
+                .map_err(|_| Error::Capacity)?;
             for _ in 0..observers {
                 let mut reports = Vec::new();
                 if projection.is_err() {
@@ -943,12 +958,13 @@ impl<P> Cx<'_, P> {
         mut prepared: conditional::PreparedPlanSeal,
     ) -> Result<(), Error> {
         let fanout = std::mem::take(&mut prepared.fanout);
+        let sealed = std::mem::take(&mut prepared.sealed);
         let (owner, seal) = self.io.request_contexts.commit_plan_seal(plan, prepared);
         let Owner::Command { id, .. } = owner else {
             // The physical owner has no command: its observers take the
-            // terminals prepared above, with no allocation after the seal.
+            // terminals and storage prepared above, moved without allocation.
             self.finish_physical_plan(owner);
-            self.seal_planned_execution(plan, fanout);
+            self.seal_planned_execution(plan, fanout, sealed);
             return Ok(());
         };
         self.finish_sealed_command(id, result, seal)
