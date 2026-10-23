@@ -1,0 +1,62 @@
+# Exact background read delivery
+
+Plan first, 2026-10-23. Base actual #1830
+`0001c78eeb2d37d65c1f494ee53f303d66cd7c96`. This is the small shared
+prerequisite for one-leg background instruments/ticker reads identified by the
+Kraken Futures lane. It is separate from whole-plan admission and joined work.
+
+## Contract
+
+Add `Cx::validate_background_read_http_delivery(&Context) -> Result<(), Error>`.
+It first delegates to `validate_http_context`, preserving the existing issuer,
+registered-handle and immutable deadline checks. It then requires exactly
+`Owner::Background` and `Operation::Read`, and compares the supplied Context with
+the active `io.http_delivery.context`. Wrong owner/operation returns Invalid;
+absent or mismatched delivery returns Revoked. The function is read-only and
+allocates no IDs, contexts, timers, actions, command owners or retry authority.
+
+The existing command root/leg validator and completion rules remain unchanged.
+Session is a distinct owner and must not pass this Background-only check. The
+session owner cleared this additive method/test-module region; session issuance,
+generation validation and retry policy remain in its own shared core. Matching
+Background explicitly also rejects future other owner variants by construction.
+
+This proves current delivery ownership, not native response validity, snapshot
+freshness, symbol selection, startup generation or successful HTTP status. A
+failure callback has a delivery identity but no response data. An adapter must
+validate its native response and publication freshness separately, and publish
+synchronously after the gate. No command terminal event is produced.
+
+## Missing-proof regression and verification
+
+The baseline probe uses the suggested existing `validate_http_context` call in
+real engine-managed Background callbacks. Assertions require a wrong live
+Background peer and an unrelated socket callback to produce zero native/Store
+publication. They must fail before the new gate exists. This demonstrates the
+missing shared contract, not a regression in an existing venue adoption.
+
+Commit the baseline probe before production changes. After implementation, only
+its authority call changes to the new public method; assertions remain exact.
+Use managed prepare/bind/claim and HTTP response/failure delivery, with a positive
+matching-leg control. Additional controls cover exact expiry, foreign issuer,
+retired handle, Command Read/Mutation rejection, duplicate/late response and
+unchanged resources/actions. Keep current command read-delivery tests intact.
+
+Engine fixtures represent single-request background reads; they are not claims
+of native Kraken or other venue adoption. Native consumers own their later
+serializer/cache/caller proofs. Run the focused controls, complete engine suite,
+strict all-target/all-feature Clippy, feature-off controls, fmt and bans/ratchet;
+normal CI and current artifact proof follow publication. Actual #1820 must be
+integrated before the final shared-engine window if it lands first.
+
+## Scope and gates
+
+Only one additive Cx method and a cfg(test) module hook in
+`sdk-rs/engine/src/request_context_registry.rs`, a new focused test module, this
+plan/index and a CALLERS section. No lifecycle dispatch, queue, signing, Session,
+history, venue runtime, workflow, harness, package or inventory change.
+
+Before commit/publication, independently review source and all incoming
+preservation. No per-venue policy copy or generic logical-validation fallback.
+The helper is an opt-in authority check; it changes no native wire/result shape
+and requires no new SDK/NX order-error handling.
