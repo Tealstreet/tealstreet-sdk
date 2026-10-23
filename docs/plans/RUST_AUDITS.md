@@ -2439,6 +2439,78 @@ No venue owner registry, finalizer wrapper or credential/routing substitute is
 introduced. Three defensive guards are migrated without an unreachable native
 original-RED claim; thirteen dispatcher-reachable exits supply the production
 acceptance coverage.
+## Bitunix local history authority adoption
+
+Five synchronous history terminal expressions now consume genuine command-entry
+Read authority and complete through the shared Context APIs. The exact four
+history.rs scanner rows retire: Bitunix23 to18 occurrences,20 to16 hash rows,
+four tothree files. Account3, lib7 and trading8 occurrences remain, including
+four conservative trading macro matches. This does not close private history's
+legacy Completion/pager or the blocked physical dispatchers; #1771 source claims,
+signer and shared multi-request prerequisites remain separate.
+
+## Bitrue local history terminal provenance
+
+Five synchronous numeric refusals consume shared initial Read admission and
+Context completion directly. Bitrue inventory shrinks42->37 occurrences,
+27->22 rows and five->four files; every other incoming hash/count stays exact.
+The still-legacy signed fill/HistoryRows/Completion path and account lookup stay
+held for their shared prerequisites, even where the scanner no longer lists the
+history source. No private read, group or whole-venue zero claim is introduced.
+
+## Bitrue local leverage terminal provenance
+
+Four synchronous account-command refusals adopt shared Read admission and Context
+failure. This independent slice prunes only two count-two account hashes:
+Bitrue42->38 occurrences,27->25 rows, five files retained. The separate history
+slice's prune composes independently. Native successful leverage joins, refresh,
+projection, account replies and signed bracket requests remain unchanged; no
+managed private-read, execution-group or whole-venue zero claim is introduced.
+
+## Phemex synchronous history/income Context ownership
+
+~~Eleven synchronous local history/income exits publish numeric terminals without
+command-entry Context admission.~~ Local branches now borrow genuine shared
+admission and immediately use its Context terminal, before active-set mutation.
+Original-source controls show full-capacity local errors lack Internal typing,
+unknown-market lookup succeeds despite full capacity, and invalid-clock errors
+lack InvalidInput typing. Finite native payloads, refusal order and outstanding
+requests are preserved. Exactly eleven Phemex occurrences/entries are removed;
+managed network/history and signer adoption remain deferred. Architecture gate:
+No lifecycle copy; the adapter consumes shared admission and finalization.
+
+## MEXC local read refusal custody
+
+Eight immediate native refusal sites now consume shared genuine command entry
+and settle through fail_context: five history admission sites and three leverage
+admission sites. They can no longer bypass the shared command-owner bound or
+nonfinite-clock rejection. Native validation precedence, full finite VenueError
+fields and all successful transport/paging/reducer paths are preserved. This
+closes exactly eight request-legacy fingerprints/occurrences, 29/29 to 21/21;
+private signing, account callbacks, discovery and valid history transport remain
+separately inventoried. The architecture gate is No: only native local error
+projection changes, with no venue-owned lifecycle, timer, credential selection,
+retry, classifier or owner registry. CI/replay/size proof remains a separate gate.
+
+### Paradex public-trades Read history bridge adoption
+
+Unsigned single-page public trades now use a dedicated Context-bearing history
+owner, separate from legacy private history. Shared exact root/leg/Attempt
+admission gates staging, identities, page advancement and terminal publication.
+Strict failures discard prefixes; stale/reused owners produce no result/marker.
+Only the obsolete public sender is removed (Paradex56→55, history14→13); all
+private history counts remain. No signing, session, Plan or engine source edit.
+
+## Hyperliquid local lookup custody
+
+The cached-order match and invalid-client-ID/missing-identity returns now consume
+shared genuine Read entry and exact Context terminal authority. The original
+numeric returns passed through invalid clocks and exhausted Context capacity;
+six original admission REDs cover those branches, with native payload/precedence,
+owner isolation, synchronous retirement and unchanged fallthrough controls.
+Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
+history13->11). Private history/signing and spot REST capabilities stay native.
+Architecture gate: No; existing engine admission and completion choke points.
 ## Metadata/settings freshness core
 
 The engine/Store owner supplies BingX query coalescing, settings-write fences
