@@ -542,3 +542,14 @@ across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
 and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
 are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
 required; no all-venue reporter-completion claim.
+
+## Bitrue FIFO read lifecycle regressions
+
+Native controls reject late and exact-deadline trade/candle success, prevent an
+expired FIFO head from dispatching queued work, and preserve delayed timeout
+completion across unrelated admissions and duplicate numeric IDs. They retain
+live-peer socket-wide failure, explicit/empty correlation compatibility, capacity,
+malformed/rejected-head continuation and command-ID reuse. Repeated native
+preflight refusal at one clock proves bounded entry ownership is released without
+opaque I/O or loss of the original diagnostic. The original three assertion RED
+controls precede the production move in a separate test commit.

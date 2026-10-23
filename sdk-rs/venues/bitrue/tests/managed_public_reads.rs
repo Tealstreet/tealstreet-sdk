@@ -317,3 +317,30 @@ fn rejected_or_malformed_candle_head_fails_once_then_dispatches_next_owner() {
         );
     }
 }
+
+#[test]
+fn repeated_preflight_refusals_release_the_original_entry_without_io() {
+    let (mut e, _) = boot();
+    for _ in 0..270 {
+        e.handle(
+            3.,
+            Event::Command(Command::Query {
+                command: 200,
+                query: Query::PublicTrades {
+                    symbol: "unknown".into(),
+                    limit: Some(1),
+                },
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(terminal(&actions), vec![(200, false)]);
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text() == "Unknown Bitrue market")));
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::SetTimer { .. }
+                | Action::WsSend { .. }
+                | Action::Http(_)
+                | Action::ManagedHttp(_)
+        )));
+    }
+}

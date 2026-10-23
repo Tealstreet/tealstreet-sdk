@@ -190,3 +190,16 @@ conversion does not close them or authorize a new venue status ladder.
 The shared owner confirmed the WS-only pruning gap and holds async WS adoption.
 Classifier #1837 is not frozen; consume only the owner’s eventual reviewed pin,
 including its expected-count/intent leg facts and Accepted-only write result seam.
+
+## Canonical shared retention consumption for FIFO reads
+
+The reviewed canonical #1830 pin `66cb32e89588e60bd736d3ff121f5ce52bfc4f3b`
+closes the historical WS-only owner gap above in the shared 256-owner registry.
+This area retains that genuine entry Context in SocketRead, uses typed terminals,
+and preserves the native FIFO/timer behavior. Validation precedes send or response
+consumption; expiry never grants publication or queue-advance rights. Ten WS
+numeric terminals and the associated conservative correlation macro retire:
+53 original occurrences become 42, lib.rs 22 becomes 11. The exact original table
+remains the full-map baseline, and every remaining HTTP/private/group site stays
+tracked. The public-trades dispatch no longer passes an unused numeric ID to the
+native helper; private history algorithms are unchanged.
