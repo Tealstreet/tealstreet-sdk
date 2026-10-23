@@ -326,3 +326,104 @@ fn invalid_book_requests_reject_before_network() {
         ));
     }
 }
+
+// The profile bit must agree with the real handler, even with valid credentials.
+fn history_capability_matches_refusal(public_data_only: bool, axis: &str) {
+    let mut advertised = vec![];
+    for signer_type in 0..=2 {
+        let mut e = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options {
+            public_data_only,
+            // Existing synthetic scalar-one fixture; no exchange account.
+            key: Some(format!("{:064x}", 1)),
+            polymarket: Some(safe_cex_venue_polymarket::PolymarketOptions {
+                api_key: Some("fixture".into()),
+                api_secret: Some("c2VjcmV0".into()),
+                api_passphrase: Some("fixture".into()),
+                signer_type,
+                funder_address: (signer_type != 0)
+                    .then(|| "0x1111111111111111111111111111111111111111".into()),
+                market_slugs: None,
+            }),
+        }));
+        let capabilities = e.capabilities();
+        let (bit, query, error) = match axis {
+            "fills" => (
+                capabilities.fill_history,
+                Query::Fills {
+                    symbol: None,
+                    order_id: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+                "Polymarket historical fills are unsupported",
+            ),
+            "orders" => (
+                capabilities.order_history,
+                Query::OrderHistory {
+                    symbol: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+                "Polymarket historical orders are unsupported",
+            ),
+            "income" => (
+                capabilities.income_history,
+                Query::Income {
+                    symbol: None,
+                    kind: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+                "Polymarket income history is unsupported",
+            ),
+            _ => panic!("unknown fixture axis"),
+        };
+        assert_eq!(capabilities.account, safe_cex_engine::AccountLookup::Query);
+        assert!(capabilities.order_book_query);
+        assert_eq!(capabilities.cancel_all, safe_cex_engine::CancelAll::Native);
+        e.handle(
+            0.,
+            Event::Command(Command::Query {
+                command: 971,
+                query,
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            matches!(&actions[..], [Action::Notice(Notice::CommandFailed { command: 971, error: actual })] if actual.legacy_text() == error),
+            "{axis} public={public_data_only} signer={signer_type}: {actions:?}"
+        );
+        advertised.push(bit);
+    }
+    assert!(
+        advertised.iter().all(|bit| !bit),
+        "{axis} public={public_data_only} must not advertise unconditional native refusal: {advertised:?}"
+    );
+}
+#[test]
+fn capability_public_fills_matches_native_refusal() {
+    history_capability_matches_refusal(true, "fills");
+}
+#[test]
+fn capability_private_fills_matches_native_refusal() {
+    history_capability_matches_refusal(false, "fills");
+}
+#[test]
+fn capability_public_orders_matches_native_refusal() {
+    history_capability_matches_refusal(true, "orders");
+}
+#[test]
+fn capability_private_orders_matches_native_refusal() {
+    history_capability_matches_refusal(false, "orders");
+}
+#[test]
+fn capability_public_income_matches_native_refusal() {
+    history_capability_matches_refusal(true, "income");
+}
+#[test]
+fn capability_private_income_matches_native_refusal() {
+    history_capability_matches_refusal(false, "income");
+}
