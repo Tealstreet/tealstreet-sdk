@@ -210,10 +210,9 @@ impl Context {
         })
     }
 
-    /// Capture explicit egress before issuer binding. A credentialed context
-    /// may only confirm a primary slot; only unsigned reads declare any egress.
-    /// Once declared it is kept, so every descendant stays on the same egress.
-    /// Egress never creates credential, nonce or identity authority.
+    /// Capture egress before issuer binding: unsigned reads declare it, a
+    /// credentialed context may only confirm a primary slot. Descendants keep it;
+    /// it never grants credential, nonce or identity authority.
     pub(crate) fn with_egress(mut self, egress: Option<Egress>) -> Result<Self, Error> {
         let Some(egress) = egress else {
             return Ok(self);
