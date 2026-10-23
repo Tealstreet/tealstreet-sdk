@@ -499,3 +499,100 @@ fn owned_terminal_offset_cap_completes_but_required_next_offset_is_strict() {
         }
     }
 }
+
+#[test]
+fn owned_same_time_fills_keep_numeric_id_tie_sort() {
+    let mut e = ready();
+    let r = query(&mut e, fills(None, Some(1)));
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[execution(9,NOW)],"hasMore":true}})
+            .to_string(),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[execution(10,NOW)],"hasMore":false}})
+            .to_string(),
+    );
+    assert_eq!(owned_terminal(&mut e, 91, false).unwrap()[0]["id"], "10");
+}
+#[test]
+fn owned_empty_or_repeated_continuation_remains_strict_after_accepted_page() {
+    for repeated in [false, true] {
+        let mut e = ready();
+        let r = query(&mut e, fills(None, None));
+        let row = execution(1, NOW);
+        reply(
+            &mut e,
+            &r,
+            &json!({"success":true,"code":0,"data":{"data":[row.clone()],"hasMore":true}})
+                .to_string(),
+        );
+        let r = requests(&mut e).pop().unwrap();
+        let rows = if repeated { vec![row] } else { vec![] };
+        reply(
+            &mut e,
+            &r,
+            &json!({"success":true,"code":0,"data":{"data":rows,"hasMore":true}}).to_string(),
+        );
+        assert!(
+            owned_terminal(&mut e, 91, false)
+                .unwrap_err()
+                .message
+                .contains("Incomplete")
+        );
+    }
+}
+#[test]
+fn owned_native_stage_offset_budget_restarts_after_terminal_cap() {
+    let mut e = ready();
+    let mut r = query(
+        &mut e,
+        Query::Income {
+            symbol: Some("BTC-USDC".into()),
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    );
+    for n in 0..100 {
+        reply(&mut e,&r,&json!({"success":true,"code":0,"data":{"data":[execution(n+1,NOW+n as f64)],"hasMore":true}}).to_string());
+        r = requests(&mut e).pop().unwrap();
+    }
+    assert_eq!(
+        serde_json::from_str::<Value>(r.body.as_ref().unwrap()).unwrap()["offset"],
+        200000
+    );
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[],"hasMore":false}}).to_string(),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    let body = serde_json::from_str::<Value>(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["type"], "userFundings");
+    assert_eq!(body["offset"], 0);
+    let funding = json!({"time":(NOW+1000.0) as u64,"coin":"BTC","amount":"-0.12","szi":"2","fundingRate":"0.01","usdc":"-0.12"});
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[funding],"hasMore":true}}).to_string(),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(r.body.as_ref().unwrap()).unwrap()["offset"],
+        2000
+    );
+    reply(
+        &mut e,
+        &r,
+        &json!({"success":true,"code":0,"data":{"data":[],"hasMore":false}}).to_string(),
+    );
+    let rows = owned_terminal(&mut e, 91, false).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["income"], -0.12);
+}

@@ -2175,3 +2175,15 @@ review and a draft with same-PR caller behavior. Corepack Yarn only, never bare/
 Volta yarn, npx or account-policy; no local release WASM/full replay timing sweep.
 Respect #1792 then #1789 priority and integrate actual shared/build inputs before
 final CI/proof and an announced separate guard followed by separate merge.
+
+
+TxFlow local receipt: plan `f05f7057b8c` precedes regression-only `5c4ed45188a`.
+Original ten native controls pass; the four new original-source controls produce
+three assertion RED groups and one cap compatibility pass. Corrected seventeen
+history controls and 710 focused engine/TxFlow native tests pass. Strict
+Clippy/fmt/bans and thirteen request-context checker controls pass. Separate
+source/full-map and adversarial/test/caller self-audits are CLEAN. Native
+admission and mapping are unchanged apart from owner dedupe, and the info recipe
+is unchanged apart from the native offset accessor. Exact pure legacy prune is
+eleven to six, every other map/checker unchanged. Independent exact-head review,
+current CI and final shared-input artifact proof are tracked in the draft PR.

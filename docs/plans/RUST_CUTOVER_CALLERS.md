@@ -4270,3 +4270,34 @@ venue profile continue to apply. This is a build-profile selection: callers use
 the same loader, API, request/signing contracts and public/private row shapes.
 Other family selections, the combined engine and native build profiles retain
 their existing policy.
+
+
+### TxFlow indexed history shares accepted-page completion
+
+Fills, historical orders and indexed income stages now use the engine
+CursorHistory/Completion owner. HTTP/native, transport, decode and malformed-row
+failures reject with kind `internal` when no eligible output was accepted. A
+later actual failure returns only validated prior pages/stages with one command-
+scoped Warn `history.incomplete`. The failed page's streamed prefix is excluded;
+a filtered-only page cannot authorize recovery. Earlier fill-derived income and
+funding remain available if the later ledger stage fails. This replaces the
+previous whole-read rejection after later page/stage failures. No write outcome
+is added; transport and decode retain the shared Internal fallback.
+
+Empty/repeated no-progress continuation and the native offset cap remain strict
+refusals even after accepted output. Terminal offset 200000 can complete; a
+required offset 202000 rejects. The budget resets per native income stage while
+accepted output and identities persist. Losing account identity before a native
+leg also remains strict, now with Internal classification. Initial testnet/
+identity, range/limit, symbol, unsupported public-trade/lookup and selected-empty
+ledger admission contracts retain their existing behavior.
+
+Native offset steps remain 2000, and pagination continues before applying the
+caller's final output limit. Original time sorting, numeric fill-ID tie sorting,
+generic income/order tie order, exact IDs, delisted/archived symbol mapping,
+financial signs, timestamp units and result shapes are preserved. A validated
+empty result remains complete `[]`. No history Store publication, SDK argument,
+signing change or managed Context migration is added. Callers must ingest
+command-scoped incomplete warnings, gate coverage accordingly and treat typed
+rejection as unavailable history. This SDK contract does not establish NX
+runtime adoption. [Scope](RUST_OWNED_HISTORY.md).
