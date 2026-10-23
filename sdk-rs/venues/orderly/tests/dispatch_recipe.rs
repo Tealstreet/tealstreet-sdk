@@ -186,6 +186,7 @@ fn a_recipe_for_a_different_request_is_refused_before_any_http() {
         ("https://evil.example", "/v1/order"),
         (REST, "/order"),
         ("https://api.orderly.org/v1", "/order"),
+        ("https://api.orderly.org@evil.example", "/v1/order"),
     ] {
         let released = run(vec![(
             Method::Post,

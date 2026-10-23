@@ -148,10 +148,9 @@ impl safe_cex_engine::SignStep for Http {
         // The outbound must be exactly the request this recipe canonicalises.
         // The origin is scheme://host only, so the signed path is the real
         // URL path from its root and the split cannot be shifted.
-        let bare_origin = self
-            .origin
-            .split_once("://")
-            .is_some_and(|(_, host)| !host.is_empty() && !host.contains(['/', '?', '#']));
+        let bare_origin = self.origin.split_once("://").is_some_and(|(_, host)| {
+            !host.is_empty() && !host.contains(['/', '?', '#', '@', '\\'])
+        });
         if http.method != self.method
             || !bare_origin
             || !self.path.starts_with('/')
