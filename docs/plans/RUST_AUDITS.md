@@ -2247,3 +2247,13 @@ every other map unchanged. The remaining numeric refusal in depth_query exists
 only if initial authority issuance fails before returning a Context; its shared
 command-entry prerequisite remains explicit. This closes one independent read
 area, not the remaining private/history/candle/JWT or whole-venue inventory.
+
+## Lighter candle pre-authority refusal closed
+
+~~The candle issuance-refusal site requires a shared pre-authority failure seam.~~
+Actual shared command-entry authority now owns the genuine initial FetchCandles
+callback and its unissued Read denial. Lighter consumes it directly and returns
+on rejected/revoked admission without a numeric terminal. The one removed legacy
+fingerprint shrinks Lighter47→46 and lib6→5; all other inventory entries remain.
+This closes only the candle refusal and introduces no venue capacity, retry or
+outcome rule. Native background polling continues using its independent Context.

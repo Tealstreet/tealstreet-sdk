@@ -5120,6 +5120,21 @@ The previously audited caller scope remains: no default direct NX/CLI/MCP
 snapshot producer was established. This transport migration does not claim
 listener/chart migration, NX deployment or live private connectivity.
 
+## Lighter candle command-entry refusal
+
+Lighter and Robinhood command candle reads borrow their genuine engine callback's
+initial Read owner through shared `admit_http_command`, before validation or
+outbound work. When capacity is exhausted, callers receive exactly one correlated
+`CommandFailed` with `Too many requests in flight`, Internal kind and no financial
+outcome. Invalid clock/deadline admission instead returns `Invalid request
+context`, InvalidInput kind and no outcome. These replace the adapter's generic
+lifecycle-unavailable/Internal refusal. No caller retry or special transport path
+is required. Existing successful candle results and native parameter errors keep
+their shape; custom transports still perform managed Prepare/Bind/final claim.
+Repeated live command IDs retain the engine duplicate diagnostic without a
+second result or replacement request. The original candle owner can still finish.
+Subscription fallback polling retains its background owner and generation cleanup.
+
 ## OKX dispatch signer adoption (draft; CI evidence pending)
 
 This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
