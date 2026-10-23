@@ -2596,3 +2596,14 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+## Phemex unsigned public-trades Context ownership
+
+The unsigned /md/v2/trade query now owns one genuine public Read root and
+managed delivery, including its existing native pause queue. Row admission and
+terminal ownership use ReadCompletion/ReadHistoryRows; stale429 cannot extend a
+pause, and typed preparation/network/expiry errors survive to the correct owner.
+Native signed public/private, income, identity, trading and socket paths remain
+held consumers. Their shared legacy fingerprints are retained. Only the public
+tuple codec's conservative f913fd4f macro occurrence is removed (1F/1O); this is
+not a claim that the shared physical request funnel has migrated.

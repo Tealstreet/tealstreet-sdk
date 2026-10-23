@@ -373,6 +373,12 @@ fn pause_wake_cannot_renew_a_history_root_past_twenty_seconds() {
         "pause wake must validate the original root before issuing I/O"
     );
     assert_eq!(failure(&output, OWNER + 1).kind, Some(ErrorKind::Timeout));
+    let fresh = released(&mut e, NOW + 60_002., OWNER + 1, public());
+    let output = reply(&mut e, NOW + 60_003., &fresh, 200, TRADE);
+    assert!(
+        done(&output, OWNER + 1).is_some(),
+        "expired pause owner released its native slot"
+    );
 }
 
 #[test]
@@ -557,5 +563,65 @@ fn expired_public_read_cannot_finish_a_reused_owner() {
     assert_ne!(first.id, second.id);
     assert!(reply(&mut e, NOW + 20_002., &first, 200, TRADE).is_empty());
     let output = reply(&mut e, NOW + 20_003., &second, 200, TRADE);
+    assert!(done(&output, OWNER).is_some());
+}
+
+#[test]
+fn unsigned_route_refusals_preserve_metadata_without_auth_evidence() {
+    let mut e = engine(false, false);
+    for (index, kind) in [
+        ErrorKind::AuthInvalid,
+        ErrorKind::AuthExpired,
+        ErrorKind::AuthPermission,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let at = NOW + index as f64 * 2.;
+        ask(&mut e, at, OWNER, public());
+        let preparation = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("unsigned route preparation");
+        e.http_preparation_failed(
+            at + 1.,
+            preparation,
+            Error::State,
+            VenueError::new("route refusal")
+                .kind(kind)
+                .venue_code("route-code")
+                .venue_message("native route detail"),
+        );
+        let output: Vec<_> = e.drain_actions().collect();
+        let error = failure(&output, OWNER);
+        assert_eq!(error.kind, Some(kind));
+        assert_eq!(error.message, "route refusal");
+        assert_eq!(error.venue_code.as_deref(), Some("route-code"));
+        assert_eq!(error.venue_message.as_deref(), Some("native route detail"));
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert!(!output.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::AccountAuth { .. }) | Action::Http(_)
+        )));
+    }
+}
+
+#[test]
+fn invalid_public_entry_time_refuses_before_native_or_transport_effects() {
+    let mut e = engine(false, false);
+    ask(&mut e, f64::NAN, OWNER, public());
+    let output: Vec<_> = e.drain_actions().collect();
+    assert_eq!(output.len(), 1);
+    let error = failure(&output, OWNER);
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    assert!(error.outcome.is_none());
+    let fresh = released(&mut e, NOW, OWNER, public());
+    let output = reply(&mut e, NOW + 1., &fresh, 200, TRADE);
     assert!(done(&output, OWNER).is_some());
 }
