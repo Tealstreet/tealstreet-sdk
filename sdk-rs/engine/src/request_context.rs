@@ -138,6 +138,8 @@ pub struct Context {
     leg: u64,
     operation: Operation,
     credential: Option<Credential>,
+    /// Egress declared at issuance; it may only confirm a credential's intent.
+    egress: Option<RoutingIntent>,
     deadline: f64,
     pacing: Option<Pacing>,
     retry: RetryPolicy,
@@ -181,10 +183,42 @@ impl Context {
             leg,
             operation,
             credential,
+            egress: None,
             deadline,
             pacing,
             retry: RetryPolicy::Never,
         })
+    }
+
+    /// Capture explicit egress before issuer binding. A credentialed context
+    /// may only confirm its slot's intent; an unsigned one may declare only
+    /// Primary (keyless primary-egress reads). Public is the default.
+    pub(crate) fn with_egress(mut self, egress: Option<RoutingIntent>) -> Result<Self, Error> {
+        let Some(intent) = egress else {
+            return Ok(self);
+        };
+        let derived = self.credential_intent();
+        let valid = match self.credential {
+            Some(_) => intent == derived,
+            None => matches!(intent, RoutingIntent::Primary | RoutingIntent::Public),
+        };
+        if !valid {
+            return Err(Error::Invalid);
+        }
+        self.egress = (intent != derived).then_some(intent);
+        Ok(self)
+    }
+
+    pub(crate) fn egress(&self) -> Option<RoutingIntent> {
+        self.egress
+    }
+
+    fn credential_intent(&self) -> RoutingIntent {
+        match self.credential.as_ref().map(|credential| credential.slot) {
+            None => RoutingIntent::Public,
+            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
+            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        }
     }
 
     pub fn owner(&self) -> Owner {
@@ -208,11 +242,7 @@ impl Context {
         self.credential.as_ref()
     }
     pub fn routing_intent(&self) -> RoutingIntent {
-        match self.credential.as_ref().map(|credential| credential.slot) {
-            None => RoutingIntent::Public,
-            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
-            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
-        }
+        self.egress.unwrap_or_else(|| self.credential_intent())
     }
     pub fn deadline(&self) -> f64 {
         self.deadline
