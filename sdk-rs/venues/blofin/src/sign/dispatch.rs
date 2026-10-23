@@ -34,6 +34,16 @@ fn nonce(dispatch: &DispatchContext<'_>) -> Result<String, SignError> {
 
 /// Typed preimage parts in native order: path+query, METHOD, stamp, nonce, body.
 /// The provider concatenates exact bytes; a remote codec splits on these parts.
+/// Refuse unusable identities before drawing nonce entropy, as legacy did.
+fn ready(identity: &Identity) -> Result<(), SignError> {
+    identity.validate().map_err(|_| SignError::InvalidRequest)?;
+    identity
+        .passphrase
+        .as_ref()
+        .map(|_| ())
+        .ok_or(SignError::InvalidRequest)
+}
+
 fn work(
     identity: &Identity,
     parts: [&str; 5],
@@ -174,6 +184,7 @@ impl SignStep for Http {
             return Err(SignError::InvalidRequest);
         };
         let stamp_ms = dispatch.stamp_ms();
+        ready(&self.identity)?;
         let nonce = nonce(dispatch)?;
         let request = work(
             &self.identity,
@@ -247,6 +258,7 @@ impl SignStep for Login {
             return Err(SignError::InvalidRequest);
         }
         let stamp_ms = dispatch.stamp_ms();
+        ready(&self.identity)?;
         let nonce = nonce(dispatch)?;
         let request = work(
             &self.identity,

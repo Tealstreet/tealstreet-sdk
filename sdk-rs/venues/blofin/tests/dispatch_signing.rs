@@ -21,9 +21,22 @@ struct Recorder {
 }
 impl Recorder {
     fn record(&self, request: &SignRequest) {
-        let slot = match request.operations.first() {
-            Some(Operation::Present { key }) => key.0.clone(),
-            _ => String::new(),
+        // Every presented and signing key must come from one slot.
+        let keys: Vec<&str> = request
+            .operations
+            .iter()
+            .filter_map(|operation| match operation {
+                Operation::Present { key } | Operation::Sign { key, .. } => Some(key.0.as_str()),
+                _ => None,
+            })
+            .collect();
+        let prefix = |key: &str| key.split('.').next().unwrap_or_default().to_owned();
+        let slot = match keys.first() {
+            Some(first) if keys.iter().all(|key| prefix(key) == prefix(first)) => {
+                format!("{}.credential", prefix(first))
+            }
+            Some(_) => "MIXED".into(),
+            None => String::new(),
         };
         self.seen
             .lock()

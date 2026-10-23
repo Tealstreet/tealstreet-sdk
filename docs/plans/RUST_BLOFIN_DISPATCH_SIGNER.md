@@ -301,6 +301,21 @@ Shared prerequisites with no reviewed pin at 632da7717e2 (confirmed by core):
 
 S1/S2 (test-only recipes and REDs) stay independent of G1-G3.
 
+S2 review follow-ups (bd89ee0b6f5):
+
+- **#35 flips an existing pin.** `tests/trading.rs`
+  `trading_failures_are_classified_without_changing_their_text` currently pins
+  native 102002 to `(kind None, outcome None)`. Making #35 green must update
+  that pin in the same commit, to the shared CodeTable verdict. Tighten the #35
+  assertion from `is_some()` to that exact verdict once the table row is
+  reviewed.
+- **Deferred to the cutover commit,** because they need the registry and
+  `lib.rs` construction path:
+  - REDs (a), building from `localSigner` and refusing raw key/secret/passphrase options;
+  - REDs (c), FetchLeverage completing through its command Context;
+  - the "unsigned intent carries no ACCESS-SIGN" half of (b);
+  - the registry tests.
+
 **Custody cutover is one commit.** Removing raw credentials from `lib.rs`
 leaves every still-legacy private header unusable. So the production custody
 cutover is gated on ALL of G1-G3 and lands as ONE coherent source commit
