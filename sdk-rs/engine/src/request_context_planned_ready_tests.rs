@@ -15,6 +15,8 @@ const READY: CommandId = 20;
 struct Probe {
     /// A live physical Plan founded by another command, and its founder owner.
     foreign: Option<(Plan, Owner)>,
+    capped: bool,
+    cap_ids_unchanged: bool,
     results: Vec<(&'static str, Result<(), Error>)>,
 }
 
@@ -60,7 +62,25 @@ impl Venue for Probe {
     fn start(&mut self, _: &mut Cx<'_, Context>) {}
     fn on_command(&mut self, cx: &mut Cx<'_, Context>, command: Command) {
         let id = command.completion_id().unwrap();
-        let preflight = cx.begin_preflight(preflight_policy()).unwrap();
+        let preflight = if self.capped {
+            cx.begin_preflight_with_command_wait(preflight_policy())
+                .unwrap()
+        } else {
+            cx.begin_preflight(preflight_policy()).unwrap()
+        };
+        if self.capped {
+            let ids = cx.io.next_id;
+            let result = cx.begin_planned_execution(
+                &preflight,
+                &steps(),
+                plan_policy(),
+                Window::UntilTerminal,
+                "capped",
+            );
+            self.cap_ids_unchanged = cx.io.next_id == ids;
+            self.record("capped execution", result.map(|_| ()));
+            return;
+        }
         if id == FOREIGN {
             let (plan, ..) = cx
                 .begin_planned_execution(
@@ -206,5 +226,19 @@ fn only_the_exact_founder_generation_owns_a_physical_plan() {
     assert!(
         !registry.founded_by(founder, founder),
         "not a physical owner"
+    );
+}
+
+#[test]
+fn a_receipt_capped_preflight_cannot_found_a_planned_execution() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        capped: true,
+        ..Default::default()
+    });
+    e.start(0.);
+    command(&mut e, FOREIGN, 0.);
+    assert_eq!(
+        (&e.venue.results[..], e.venue.cap_ids_unchanged),
+        (&[("capped execution", Err(Error::Invalid))][..], true)
     );
 }
