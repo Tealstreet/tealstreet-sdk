@@ -6178,6 +6178,113 @@ example for WOO or TxFlow entry. The additive seam (explicit egress on
 Plan/preflight issuance) is owned by claude-m26ps4, plan first after #1833
 lands, with codex-uufub4 reviewing API fit.
 
+## Caller command wait in the engine (#1945)
+
+The WASM host now adds the effective caller wait to every reply command's
+native envelope as `timeoutMs`. The effective wait is the per-call
+`options.timeoutMs` if given, else the configured `rustCommandTimeoutMs`, and
+it is the same validated number that arms the host's own timer. No-reply
+controls send no field.
+
+- **Receipt stamp.** The engine stamps one absolute deadline per external
+  receipt. Native hosts and envelopes without the field get the SDK default of
+  120000 ms, stamped at receipt. Held and deferred commands keep the receipt
+  they arrived with.
+- **Refusals.** A present but invalid `timeoutMs` (null, non-integer, zero,
+  negative or over 2147483647) is refused at decode. A non-finite clock is
+  refused by `handle_command`, with a `JsError` and no dispatch.
+- **Venue behaviour.** Nothing changes until a venue adopts
+  `Cx::command_wait`.
+
+Two separate events, which callers must not conflate:
+
+- **Caller abandonment.** The host timer rejects the promise with
+  `COMMAND_TIMEOUT`. The engine keeps any in-flight transport, and a late
+  native reply is dropped by the host.
+- **Engine-root expiry.** An adopting venue uses the `Remaining` wait as its
+  original Read root and stops issuing work at that same absolute deadline. A
+  Fresh entry that is already expired ends through
+  `reject_expired_command`: one typed Timeout terminal with zero HTTP, timer or
+  Store effects, `NotSent` for a mutation and no outcome for a Read. After
+  admission, expiry ends through the existing Context or Plan authority and
+  never claims `NotSent`.
+
+Raising a caller's timeout lengthens an adopting venue's root but never
+renews it. Plan consumers are not capped by the caller wait until the
+separate receipt-cap seam (#1949) lands.
+
+## Caller command wait in the engine (#1945)
+
+The WASM host now adds the effective caller wait to every reply command's
+native envelope as `timeoutMs`. The effective wait is the per-call
+`options.timeoutMs` if given, else the configured `rustCommandTimeoutMs`, and
+it is the same validated number that arms the host's own timer. No-reply
+controls send no field.
+
+- **Receipt stamp.** The engine stamps one absolute deadline per external
+  receipt. Native hosts and envelopes without the field get the SDK default of
+  120000 ms, stamped at receipt. Held and deferred commands keep the receipt
+  they arrived with.
+- **Refusals.** A present but invalid `timeoutMs` (null, non-integer, zero,
+  negative or over 2147483647) is refused at decode. A non-finite clock is
+  refused by `handle_command`, with a `JsError` and no dispatch.
+- **Venue behaviour.** Nothing changes until a venue adopts
+  `Cx::command_wait`.
+
+Two separate events, which callers must not conflate:
+
+- **Caller abandonment.** The host timer rejects the promise with
+  `COMMAND_TIMEOUT`. The engine keeps any in-flight transport, and a late
+  native reply is dropped by the host.
+- **Engine-root expiry.** An adopting venue uses the `Remaining` wait as its
+  original Read root and stops issuing work at that same absolute deadline. A
+  Fresh entry that is already expired ends through
+  `reject_expired_command`: one typed Timeout terminal with zero HTTP, timer or
+  Store effects, `NotSent` for a mutation and no outcome for a Read. After
+  admission, expiry ends through the existing Context or Plan authority and
+  never claims `NotSent`.
+
+Raising a caller's timeout lengthens an adopting venue's root but never
+renews it. Plan consumers are not capped by the caller wait until the
+separate receipt-cap seam (#1949) lands.
+
+## Opt-in Read Plans retain the caller receipt deadline
+
+`begin_preflight_with_command_wait` opts a Read command into the original caller
+receipt cap before JWT/preflight work. The eventual Plan ends no later than
+that absolute deadline, and still ends earlier when its declared native work
+has a shorter bound. Native page, retry, fallback and per-call geometry are
+unchanged. Later callbacks, stages and retries cannot renew the receipt cap.
+Existing native-only preflight/Plan callers keep their current lifetime.
+
+An absent host timeout receives the SDK default once at external receipt. A
+missing or failed receipt never manufactures another default: genuine Fresh
+admission uses one typed engine Read refusal with no financial outcome. Borrowed
+or spent custody emits nothing. An already-expired own receipt leaves Fresh
+custody for `reject_expired_command(Read)`, the sole initial Timeout emitter.
+Expiry at Plan admission leaves valid preflight failure authority and returns
+TimedOut; adapters use the canonical Read error projection when settling it.
+
+Host listener abandonment and engine Plan expiry remain distinct. Raising the
+configured/per-call wait can lengthen the caller cap, but cannot enlarge a
+shorter native declaration. No transport cancellation, original Read-root cast
+or accepted-prefix recovery permission follows from observing this cap.
+Mutation and execution-owned capped Plans are outside this first slice; native
+mutation/provider errors and their outcome projections remain unchanged.
+
+## BingX FetchAccount selected Read custody
+
+FetchAccount admits its original Read before native eligibility diagnostics or
+signed HTTP. Shared capacity/invalid-clock denial emits one typed failure without
+a native diagnostic or financial outcome. Eligible requests retain the selected
+opaque identity and original 20s/Never Context through managed preparation and
+release; Secondary serves reads only with an eligible Primary, and a saved
+invalid Secondary keeps its native refusal even in public-only configurations.
+The exact GET/query/header bytes and userId codec are preserved. Rare identity
+reads leave live account state unchanged. Network/Timeout metadata now survives
+with the native correlated diagnostic before the single terminal. No history,
+account-poll, trading or socket caller is migrated by this slice.
+
 ## L1 wallet role (P6b part 1)
 
 `ExtraKey::L1Wallet` (`l1Wallet`) is the Polymarket L1 wallet: the raw 32-byte
