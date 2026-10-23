@@ -529,7 +529,7 @@ fn capacity_denial_precedes_invalid_input_and_does_not_retire_a_peer() {
     let error = done[0].as_ref().unwrap_err();
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.outcome, None);
-    assert_eq!(error.message, "Too many requests in flight");
+    assert_eq!(error.message, "Engine request capacity reached");
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::Http(_)
