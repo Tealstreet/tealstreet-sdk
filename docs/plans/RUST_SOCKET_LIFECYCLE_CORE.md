@@ -1025,6 +1025,14 @@ landing/candidate, a remaining 5.196 ms gap. All four semantic fact hashes,
 frame counts, send counts and bytes match. Preserve the complete cohort;
 do not select samples or certify quantitative closure from it. A separately
 named complete ABBA repeat records the subsequently quieter host period.
+That separate repeat observes landing 30.192/30.793 ms and candidate
+34.564/34.633 ms CPU/tape, with 34.80–37.88 CPU seconds per 40 wall seconds.
+The residual is 4.106 ms; the gap remains substantial. All four native facts
+match again. The prior contended cohort remains retained in full. These are
+separate native observations, not selected WASM gate results or a causal
+cross-cohort estimate. The quieter repeat still attributes approximately
+0.497 ms to shared dispatch, 0.142 ms additional dispatch-head inspection,
+and 0.136 ms additional action-queue destruction.
 
 ### Phase H — bypass the completely idle shared dispatch queue
 

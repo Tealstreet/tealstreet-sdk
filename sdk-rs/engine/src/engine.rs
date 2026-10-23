@@ -3719,7 +3719,20 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
+        self.assert_live();
+        if self.io.actions.is_empty()
+            && self.io.signing_admission.is_empty()
+            && self.io.signing.is_empty()
+        {
+            return;
+        }
+        self.dispatch_queued_actions(now);
+    }
+
+    #[inline(never)]
+    fn dispatch_queued_actions(&mut self, now: f64) {
         use crate::signing_dispatch::Completion;
         for (outbound, error) in std::mem::take(&mut self.io.signing_admission) {
             self.sign_failed(now, outbound, error);

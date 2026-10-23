@@ -114,6 +114,11 @@ pub(crate) enum Completion {
     Failed(Pending, SignError),
 }
 impl Dispatch {
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty() && self.outbound.is_empty()
+    }
+
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
     }
