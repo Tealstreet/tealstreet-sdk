@@ -160,7 +160,7 @@ fn raw_response(e: &mut Engine<WeexFutures>, r: &HttpRequest, text: &str) -> Vec
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 1001.0)
 }
 fn done(actions: &[Action]) -> Result<String, String> {
     actions
@@ -578,7 +578,7 @@ fn cancel_symbol_always_attempts_both_families_and_only_cancels_acknowledged_row
             error: "timeout",
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1001.0);
     let r = writes(&actions).pop().unwrap();
     assert!(r.url.ends_with("algoOpenOrders?symbol=BTCUSDT"));
     let actions = response(&mut e, &r, json!([{"orderId":2,"success":true}]));
@@ -1786,16 +1786,21 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             400,
             r#"{"code":"40015","msg":"Insufficient balance"}"#,
-            Some(ErrorKind::Rejected),
-            Outcome::Rejected,
+            None,
+            Outcome::Unknown,
         ),
         (
             429,
             r#"{"code":"429","msg":"Too many requests"}"#,
             Some(ErrorKind::RateLimited),
-            Outcome::Rejected,
+            Outcome::Unknown,
         ),
-        (502, "Bad Gateway", None, Outcome::Unknown),
+        (
+            502,
+            "Bad Gateway",
+            Some(ErrorKind::VenueUnavailable),
+            Outcome::Unknown,
+        ),
     ] {
         let mut e = engine();
         let actions = command(
@@ -1819,7 +1824,14 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
         let actions = e.drain_actions().collect::<Vec<_>>();
         let error = failure(&actions);
-        assert_eq!(error.message, format!("HTTP {status}: {body}"));
+        if status == 502 {
+            assert_eq!(
+                error.message,
+                "HTTP response does not prove the write outcome"
+            );
+        } else {
+            assert_eq!(error.message, format!("HTTP {status}: {body}"));
+        }
         assert_eq!(
             (error.kind, error.outcome),
             (kind, Some(outcome)),
@@ -1850,7 +1862,18 @@ fn a_rejection_after_an_accepted_step_is_not_reported_as_rejected() {
     );
     let actions = e.drain_actions().collect::<Vec<_>>();
     let error = failure(&actions);
-    assert_eq!(error.outcome, None, "the first lot was accepted: {error:?}");
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "40015 does not prove refusal: {error:?}"
+    );
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map(|partial| partial.order_ids.clone()),
+        Some((100..105).map(|id| id.to_string()).collect())
+    );
 }
 
 fn leverage_read(e: &mut Engine<WeexFutures>, command_id: u32) -> HttpRequest {

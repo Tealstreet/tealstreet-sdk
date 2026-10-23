@@ -2597,6 +2597,101 @@ No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
 
+
+## Subscription handoff custody boundary
+
+The shared correction adds bounded native Pending custody and a read-only
+arming tail after the existing final drain dispatch/fence/retirement checks.
+Native callbacks run only at later timer ingress; they cannot retroactively
+remove prerequisite frames from an already returned batch. Required canonical
+interests bind work to committed revisions, and only committed changes cancel
+or rebase existing work. Refused replacements do not revoke old committed work.
+
+The uufub4 API/drain review of 4583d233556 plus 8739ef44fcf cleared this timer-boundary
+design with explicit committed-change, subsequent-ingress and timer-bookkeeping
+controls. The runtime source review is separate. HTTP lifecycle, signing
+release/gates, Plan flushing, financial reducers and request recipes retain
+their existing ownership. No legacy-inventory or performance-budget changes
+are part of this shared correction; WOO consumes the seam in its own PR.
+
+The independent ih35js runtime review clears the handoff-owned d9fd54ff531 source
+(exact at 3bebb12dc9f), excluding build/CI claims. Uufub4 identified early-fire
+liveness before final clearance: both hosts consume one-shot timers, so retaining
+armed custody without a returned rearm can strand work. The narrow correction
+re-emits the existing TimerId at its immutable armed_at, with no early callback
+or new authority. Original assertion RED and one-use host/engine controls bind
+the correction; final runtime clearance is tracked separately from API review.
+
+Final bounded runtime/drain clearance is recorded at 08fca8e6ec4 from uufub4,
+including independent archived host 4/4 execution and inspection of the early
+rearm correction. Ih35js independently clears that correction and its RED/control
+coverage at the same source pin without a build-execution claim. Actual #1932
+expiry cleanup is genuinely merged without conflicts at 856daa0a1c2; its incoming
+production bodies are retained verbatim.
+
+The #1932 owner confirms `http_plan_expiring` is an expiry cleanup/seal barrier,
+not a callback loan. Socket continuation readiness gates on its absence. A
+synthetic matching wake during cleanup consumes only its timer, unarms retained
+work and leaves the barrier intact; a fresh handoff arm resumes after cleanup.
+No expiry flush, lifecycle, seal or poison invariant is rewritten. Two cases in
+the original-RED composition control cover both initial arming and prior wakeup.
+
+
+### Bitunix public REST Read authority
+
+- [x] Public markets/tickers/candles dispatch and their selected terminals use
+  genuine shared Read authority and managed static-header HTTP; exact8occ7row
+  prune18->10. No early/unclaimed/expired publication or numeric fallback.
+- [x] Shared BITUNIX table/read classifier preserves typed engine failures,
+  safe diagnostics and native rate floors. Native successful candle codec and
+  wire behavior remain compatible. Private P0#33 and signer conversion remain.
+
+### WEEX local history admission custody (2026-10-24)
+
+Original test-only checkpoint `d5746d2d490` on actual `a828ede7ebb` compiles and
+runs eleven dedicated controls: three native controls pass; seven independent
+capacity assertions and the invalid-clock assertion fail at native legacy
+publication. The forwarding fixture retains256 genuine engine Read command
+roots and delegates WEEX Query unchanged; it creates no HTTP or fake Context.
+Source/adversarial, caller and full-map reviews cleared the plan and REDs.
+The seven inline terminals now use shared initial Read admission and checked
+Context completion. The unchanged eleven controls pass, including native
+credential-presence/validation order, exact error metadata, equal/one-sided/
+safe-integer bounds, budget boundaries, remote signed/public wire controls at
+full capacity, peer isolation, recovery and300 fixed-clock completions/refill.
+Exact own inventory prune is WEEX51->44/history10->3 occurrences; all remote
+macro records, foreign maps and held trading/dispatch regions are preserved.
+
+Scoped WEEX/Binance native verification passes506tests,0failed/ignored;
+strict WEEX all-target/all-feature Clippy, scoped formatting, source scan and
+all15request-context checker tests pass. Implementation review/CI remain separate.
+
+### WEEX account identity Read entry (2026-10-24)
+
+Committed plan `af65a1577b2` and original test-only checkpoint `a55a561b921`
+received independent source/adversarial, caller and full-map CLEAN reviews.
+Test-only refinement `902335f2b6f` removes a Clippy identity-map expression while
+retaining exact header equality; all three reviews cleared that bounded change.
+On unchanged actual `a828ede7ebb`, nine tests compile/run:3native controls PASS,
+6intended assertion REDs (four local capacity bypasses, remote numeric admission
+fallback and invalid clock). A fixture initially drained Prepare before the
+shared release helper; this was fixed before freezing and is not a RED.
+The unchanged frozen nine controls now PASS after direct use of genuine initial
+Read entry and existing signed-managed dispatch in identity.rs. Checked native
+companion diagnostics and exact signer/primary namespace survive. The orphan
+legacy success arm and numeric failure helper are removed, pruning exactly the
+two identity singletons; no held helper, dispatch, account or trading code moves.
+
+Pre-integration native504WEEX/Binance tests and strict WEEX Clippy/fmt pass.
+Whole-map provenance is blocked by newer Aster inventory shrink in origin;
+actual integration and fresh gates follow, with no foreign manifest edits.
+
+Actual integration e336f67b7de genuinely includes15bd7821b52; all unowned incoming
+blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
+full bans and both request-context checks (15tests) PASS. Three independent
+implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
+prune is verified; the parallel #1951 history prune is not credited here.
+
 ### Binance identity terminal provenance
 
 The local identity error helper reuses existing Read entry and typed identity
