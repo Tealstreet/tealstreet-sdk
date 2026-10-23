@@ -2759,6 +2759,42 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn an_overflowing_reconcile_queue_never_cuts_a_wait_short() {
+        let btc = || Some(vec!["BTCUSDT".to_owned()]);
+        // 64 deferred entries with unequal waits, then one immediate entry.
+        for immediate in [true, false] {
+            let (mut engine, _) = start(Probe::default());
+            for n in 0..64 {
+                engine.io.queue_reconcile(btc(), 10_000. + f64::from(n));
+            }
+            engine
+                .io
+                .queue_reconcile(btc(), if immediate { 0. } else { 5_000. });
+            engine.finish_event_scope(1.);
+            assert!(
+                engine.venue.reconciles.is_empty(),
+                "no hook before the bound"
+            );
+            let (timer, at) = engine.reconcile_timer.unwrap();
+            assert_eq!(at, 10_063., "waits for the latest merged deadline");
+            engine.handle(
+                at - 1.,
+                Event::TimerFired {
+                    timer: TimerId(timer.0 + 99),
+                },
+            );
+            assert!(
+                engine.venue.reconciles.is_empty(),
+                "a stale timer is ignored"
+            );
+            engine.handle(at, Event::TimerFired { timer });
+            assert_eq!(engine.venue.reconciles, vec![None], "exactly one full read");
+            assert!(engine.reconcile_timer.is_none());
+        }
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn an_uncertain_write_asks_the_venue_once_per_seal_after_any_rate_wait() {
         let place = |command, symbol: &str| Command::PlaceOrders {
             command,

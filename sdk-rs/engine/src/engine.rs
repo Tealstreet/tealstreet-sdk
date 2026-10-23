@@ -1536,7 +1536,8 @@ impl<P> Default for Io<P> {
 }
 
 impl<P> Io<P> {
-    /// Bounded: past the cap, coalesce into one full read at the earliest time.
+    /// Bounded: past the cap, coalesce into one full read that waits for the
+    /// latest merged deadline, so no rate or credential wait is cut short.
     #[cfg(feature = "order-locks")]
     fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
         const RECONCILE_QUEUE: usize = 64;
@@ -1544,12 +1545,12 @@ impl<P> Io<P> {
             self.reconcile_due.push((symbols, at));
             return;
         }
-        let earliest = self
+        let latest = self
             .reconcile_due
             .iter()
             .map(|(_, at)| *at)
-            .fold(at, f64::min);
-        self.reconcile_due = vec![(None, earliest)];
+            .fold(at, f64::max);
+        self.reconcile_due = vec![(None, latest)];
     }
 
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
