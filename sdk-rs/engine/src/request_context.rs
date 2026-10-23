@@ -79,6 +79,10 @@ pub enum Owner {
     Session {
         generation: u64,
     },
+    /// One physical execution serving several command observers.
+    Execution {
+        generation: u64,
+    },
 }
 
 /// Engine-issued session authority. Holds no key, token or credential value.
@@ -159,6 +163,8 @@ pub struct Policy {
 pub enum Scope {
     Command(CommandId),
     Background,
+    /// Legs of an execution; issued only beneath its engine-issued root.
+    Execution,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
