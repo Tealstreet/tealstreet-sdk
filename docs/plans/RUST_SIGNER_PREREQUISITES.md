@@ -225,28 +225,44 @@ given identity:
   where `Capability` is `Supported | Unsupported | Unknown`. The default is
   `Unknown`. Providers answer from what trusted construction installed and
   never sign to probe.
-  - Local provider: `Supported` only when the ref is installed, role-bound
-    to that algorithm (#1839), and the crypto feature is compiled in.
-    Otherwise `Unsupported`.
-  - JS host provider (host.mjs): a declared `algorithms` list, validated at
-    admission like the rest of the host contract. Undeclared means `Unknown`.
-    The SDK's own WASM and native local setups declare their compiled list,
-    so local Amend keeps working on every host.
-  - `remoteSignerProvider`: `hmacSha256` only, until P8 adds recipe ids.
-    Every other algorithm is `Unsupported`.
-  - Browser hosted signing: per family, from `hosted_signing.rs`.
-- `Cx::can_sign(slot: CredentialSlot, identity: &Identity, needs: &[Need])`
-  `-> Result<(), SignError>`, where `Need` is `(KeyUse, Algorithm)` and
-  `KeyUse` is `Signing` or `Extra(ExtraKey)`. It is callable from
-  `on_command` and any command or preflight admission point, before the first
-  release. `DispatchContext::can_sign` gives the same answer at prepare.
-  - The slot must match the identity the venue selected for it (C1
-    `Slots::select` once landed). A mismatch, or a missing ref for a `Need`,
-    is `SignError::Invalid`.
+  - Local provider (`LocalSigner`, which role-binds only extra refs):
+    - an ordinary installed ref is `Supported` for `HmacSha256`,
+      `HmacSha512` and `Sha256SecretSuffix`, and for each compiled #1844
+      arm (ed25519, ES256, secp256k1, Stark), which accept ordinary refs;
+    - an extra ref is `Supported` only for its role's algorithm, when that
+      crypto feature is compiled in (`ZkLinkContract` needs `zklink`);
+    - every other combination, and any ref not installed, is `Unsupported`.
+  - JS host provider: the WASM `ExternalSigner` and the host.mjs `Signer`
+    function gain a declared algorithm list at installation
+    (`useExternalSigner(signer, { algorithms })`), validated with the rest of
+    the host contract. Undeclared means `Unknown`. The list is per
+    algorithm, not per ref. The SDK's own WASM and native local setups
+    declare their compiled list, so local Amend keeps working on every host.
+  - `remoteSignerProvider` declares `hmacSha256` only, until P8 adds recipe
+    ids. It also refuses secondary-slot HMAC at sign time, which a
+    per-algorithm list cannot express. That is acceptable because the answer
+    is advisory and release still refuses before I/O.
+  - Browser `hosted_signing.rs` is a request facade for the TS exchanges, not
+    an engine `Signer`, so it is out of scope here.
+- **Engine-held identities.** Trusted construction registers the slot to
+  `Identity` map with the engine, next to `set_signer`
+  (`set_identities(Slots<Identity>)`, before startup, refs only). The venue
+  keeps its own copy for signing; the registry passes the same values.
+- `Cx::can_sign(slot: CredentialSlot, needs: &[Need]) -> Result<(), SignError>`,
+  where `Need` is `(KeyUse, Algorithm)` and `KeyUse` is `Signing` or
+  `Extra(ExtraKey)`. It is callable from `on_command` and any command or
+  preflight admission point, before the first release.
+  - The engine resolves the identity from its registered map. An
+    unregistered slot, or a `Need` whose ref the identity lacks, is
+    `SignError::InvalidRequest`.
   - Every `Need` must be `Supported`. `Unsupported` or `Unknown` gives
-    `SignError::Unsupported`, which the venue maps to a whole-command typed
+    `SignError::Unsupported`. Both errors map to `NotSent`
+    (`signing.rs:539-549`), so the venue reports a whole-command typed
     `NotSent` before any I/O.
   - No provider: `Unavailable`.
+- `DispatchContext` gains the provider handle where it is built
+  (`engine.rs:3790`) and exposes `can_sign(key, algorithm)` at prepare. The
+  slot check does not apply there, because the step already holds its refs.
 - The answer is advisory for admission only. Signing at release stays the
   choke point, so a provider that answered `Supported` and later refuses
   still fails that release as today.
@@ -261,8 +277,8 @@ multi-algorithm command uses the same query: ApeX now, later Paradex (Stark
 plus JWT) and Polymarket (EIP-712 plus L2 HMAC).
 
 **Tests.**
-- Engine: local `Supported`/`Unsupported` per role and feature; slot and
-  identity mismatch is `Invalid`; `Unknown` default fails closed; no provider
+- Engine: local `Supported`/`Unsupported` per ordinary ref, extra role and
+  feature; an unregistered slot or missing ref is `InvalidRequest`; `Unknown` default fails closed; no provider
   is `Unavailable`.
 - Host: a host.mjs provider with and without a declared list; a
   `remoteSignerProvider` refusing `zkLinkContract` and accepting
