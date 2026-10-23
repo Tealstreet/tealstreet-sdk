@@ -3443,10 +3443,22 @@ impl<V: Venue> Engine<V> {
     fn finish_event_scope(&mut self, now: f64) {
         self.io.request_contexts.end_plan_admission();
         self.flush_http_owner_retirements();
+        self.finish_deferred_commands(now);
+        self.restore_shared_tickers(false, now);
+        self.flush_http_owner_retirements();
+        self.flush_http_plans(now);
+    }
+
+    fn finish_deferred_commands(&mut self, now: f64) {
+        #[cfg(not(feature = "order-locks"))]
+        let _ = now;
         // Deferred commands are engine-owned work, not part of the HTTP codec
         // whose callback just released the lock. Do not lend that codec's
         // attempt authority to an unrelated internal finalization.
         let delivery = self.io.http_delivery.take();
+        let entry = self.io.command_entry.take();
+        #[cfg(feature = "order-locks")]
+        let order_response = self.io.order_response_token.take();
         #[cfg(feature = "order-locks")]
         for (command, failed) in self.io.order_locks.ready() {
             if failed && self.venue.fence_uncertain_cancel_all() {
@@ -3470,9 +3482,11 @@ impl<V: Venue> Engine<V> {
             }
         }
         self.io.http_delivery = delivery;
-        self.restore_shared_tickers(false, now);
-        self.flush_http_owner_retirements();
-        self.flush_http_plans(now);
+        self.io.command_entry = entry;
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.order_response_token = order_response;
+        }
     }
 
     fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {
@@ -3779,7 +3793,9 @@ impl<V: Venue> Engine<V> {
         {
             return;
         }
+        let mut advanced = false;
         while let Some(plan) = self.io.request_contexts.next_plan_ready(now) {
+            advanced = true;
             if now >= plan.deadline() {
                 Cx {
                     now,
@@ -3794,6 +3810,8 @@ impl<V: Venue> Engine<V> {
             } else {
                 self.io.http_plan_ready = Some(plan.clone());
                 self.io.http_plan_poison = true;
+                #[cfg(feature = "order-locks")]
+                let order_response = self.io.order_response_token.take();
                 self.venue.on_http_plan_ready(
                     &mut Cx {
                         now,
@@ -3802,12 +3820,22 @@ impl<V: Venue> Engine<V> {
                     },
                     &plan,
                 );
+                #[cfg(feature = "order-locks")]
+                {
+                    self.io.order_response_token = order_response;
+                }
                 self.io.http_plan_ready = None;
                 self.io.http_plan_poison = false;
                 self.assert_live();
                 request_context_registry::ContextRegistry::rearm_live_plan(&mut self.io, &plan);
             }
             self.flush_http_owner_retirements();
+        }
+        // A root timeout or a readiness queue refusal can release placement
+        // locks. Wake their deferred commands after all readiness callbacks
+        // return, without recursively invoking finish_event_scope here.
+        if advanced {
+            self.finish_deferred_commands(now);
         }
     }
 

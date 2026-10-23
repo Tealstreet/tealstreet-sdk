@@ -92,6 +92,8 @@ impl Venue for Probe {
     }
     fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, ()>, plan: &Plan) {
         self.ready += 1;
+        assert!(cx.io.command_entry.is_none());
+        assert!(cx.io.http_delivery.is_none());
         self.ready_token = cx.io.order_response_token;
         if self.order_read {
             cx.orders_reconciled(Some("BTCUSD"));

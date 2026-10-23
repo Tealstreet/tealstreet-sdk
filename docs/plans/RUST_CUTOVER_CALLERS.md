@@ -4729,3 +4729,38 @@ through their existing worker/hosted round trip. This requires no caller method
 signature or chart data-shape change. Private Lighter requests, other public
 reads and native Schnorr/nonce ownership are separate migrations; this behavior
 does not establish NX adoption, deployment or live private connectivity.
+
+## Managed native-plan admission and preflight
+
+Managed commands using Preflight retain one command generation while prerequisite
+reads run. Each read keeps its declared deadline and retry policy. Whole-plan
+admission starts only after the final native steps are known; it reserves the
+complete declared work, including pacing, retry attempts and replacement branches,
+before the first write. The checked native envelope can exceed 120 seconds; there
+is no fixed product command cap. Repeated external mode changes may restart
+preflight reads without a new whole-preflight limit.
+
+Initial admission belongs to the genuine command callback. An unissued read
+refusal emits one typed failure without a write outcome; an unissued write
+refusal reports NotSent. NX must consume that failure once. A cached terminal,
+issued owner or rejected entry cannot be reminted in the same callback.
+
+Resource refusal before a write Plan is admitted leaves the preflight owner able
+to report its typed failure and proves no Plan write was sent. Once work is
+released, a timeout or later queue/preparation refusal retains all prior accepted
+facts and unresolved effects in the command journal. NX must retain the structured
+kind/outcome, reconcile Unknown effects through reads, and avoid optimistic
+success or automatic write resend. A classified, effects-free resend uses the
+engine's exact-attempt grant within the original declared call and Plan bounds.
+
+Native codecs validate the exact current Plan delivery before changing cache or
+Store state. Structural slot completion proves no financial effect by itself;
+only validated write facts grant those effects. Delayed route preparation,
+binding, signing and dispatch keep the captured physical deadline. Readiness
+callbacks expose only their own declared eligible work and never borrow another
+HTTP response or command's entry authority.
+
+A cancel deferred behind a Plan is processed when the placement owner seals,
+including root expiry and readiness preparation refusal. It does not require an
+unrelated later event to resume or receive its typed terminal result. Existing
+uncertainty fences still decide whether that cancel can run.

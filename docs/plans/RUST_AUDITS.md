@@ -2124,3 +2124,11 @@ One existing numeric failure remains solely when Context issuance itself refuses
 before returning authority; its removal belongs to the shared pre-authority
 failure seam. All other venue maps remain exact. This closes this candle area
 only, not the remaining public/private/history/signing inventory or master gate.
+
+## Native mode-preflight redo liveness
+
+Repeated external mode changes can make an adapter redo its prerequisite mode
+reads indefinitely. Each request remains bounded by its declared read policy,
+but the final write-plan root starts only when the native write steps are fixed.
+No arbitrary whole-preflight or 120-second product cap is added. A finite redo
+limit would change caller-visible liveness policy and needs a separate decision.
