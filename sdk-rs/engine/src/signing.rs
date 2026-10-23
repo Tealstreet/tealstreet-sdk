@@ -588,8 +588,36 @@ pub trait Signer: ProviderBounds {
     fn sign_ready(&self, _request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         None
     }
+    /// Advisory admission answer from installed state only; never signs to probe.
+    /// Release-time signing remains the choke point.
+    fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
+        Capability::Unknown
+    }
 }
 pub type Provider = Arc<dyn Signer>;
+
+/// What a provider declares it can sign for one ref; anything but
+/// `Supported` fails command admission closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Capability {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
+/// Which ref of the selected identity a command will sign with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyUse {
+    Signing,
+    Extra(ExtraKey),
+}
+
+/// One signature a multi-release command will need before its first release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Need {
+    pub key: KeyUse,
+    pub algorithm: Algorithm,
+}
 
 // Authenticated payloads and values are deliberately absent from Debug output.
 macro_rules! redacted_debug {
