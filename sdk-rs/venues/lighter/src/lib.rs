@@ -1491,7 +1491,16 @@ impl Venue for Lighter {
                 from_ms,
                 to_ms,
             } => self.fetch_candles(cx, Some(command), symbol, interval, limit, from_ms, to_ms),
-            Command::FetchLeverage { command, symbol } => {
+            Command::FetchLeverage { symbol, .. } => {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
                 #[derive(serde::Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Leverage {
@@ -1510,8 +1519,12 @@ impl Venue for Lighter {
                         .map_err(|e| e.to_string())
                     });
                 match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                    Ok(data) => {
+                        let _ = cx.done_context(&context, data);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_context(&context, error);
+                    }
                 };
             }
             Command::Query { command, query } => self.history_query(cx, command, query),

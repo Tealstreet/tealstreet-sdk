@@ -1,6 +1,7 @@
 //! One-shot snapshots never alter subscription books or their recovery state.
 use crate::{MexcFutures, Pending, wire};
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Outcome, Response, VenueError};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Response, Venue, VenueError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -102,23 +103,31 @@ fn snapshot(body: &str, size: f64, limit: usize) -> Result<String, VenueError> {
 }
 impl MexcFutures {
     pub(crate) fn fetch_book(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
         symbol: &str,
         limit: Option<u32>,
     ) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
         let limit = limit.unwrap_or(100);
         let Some(market) = cx.store.market(symbol) else {
-            cx.fail(
-                command,
+            let _ = cx.fail_context(
+                &context,
                 error("Unknown MEXC market", ErrorKind::InvalidInput),
             );
             return;
         };
         if !(1..=1000).contains(&limit) {
-            cx.fail(
-                command,
+            let _ = cx.fail_context(
+                &context,
                 error(
                     "MEXC order book limit must be between 1 and 1000",
                     ErrorKind::InvalidInput,
@@ -128,15 +137,15 @@ impl MexcFutures {
         }
         let size = market.contract_size.unwrap_or(1.0);
         if !size.is_finite() || size <= 0.0 {
-            cx.fail(
-                command,
+            let _ = cx.fail_context(
+                &context,
                 error("Invalid MEXC market contract size", ErrorKind::Internal),
             );
             return;
         }
         if cx.now < self.depth_paused_until {
-            cx.fail(
-                command,
+            let _ = cx.fail_context(
+                &context,
                 error(
                     "MEXC depth requests are rate limited",
                     ErrorKind::RateLimited,
@@ -149,20 +158,24 @@ impl MexcFutures {
             "/api/v1/contract/depth/{}?limit={limit}",
             safe_cex_engine::url::encode(&market.id)
         );
-        self.get(
-            cx,
-            &path,
+        if let Err((pending, reason)) = cx.request_managed(
+            context.clone(),
+            Method::Get,
+            format!("{}{path}", crate::REST),
+            None,
             Pending::BookQuery {
-                command,
+                context,
                 size,
                 limit: limit as usize,
             },
-        );
+        ) {
+            self.on_sign_error(cx, pending, reason.venue_error());
+        }
     }
     pub(crate) fn book_query_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        context: Context,
         size: f64,
         limit: usize,
         response: Response<'_>,
@@ -204,12 +217,16 @@ impl MexcFutures {
                 self.account.paused_until = self.account.paused_until.max(self.depth_paused_until);
                 failure = failure.retry_after_ms(self.depth_paused_until - cx.now);
             }
-            cx.fail(command, failure);
+            let _ = cx.fail_context(&context, failure);
             return;
         }
         match snapshot(response.body, size, limit) {
-            Ok(json) => cx.done(command, json),
-            Err(failure) => cx.fail(command, failure),
+            Ok(json) => {
+                let _ = cx.done_context(&context, json);
+            }
+            Err(failure) => {
+                let _ = cx.fail_context(&context, failure);
+            }
         }
     }
 }
