@@ -2078,3 +2078,11 @@ error-classification policy is duplicated. Exact source inventory remains 84
 occurrences: the original shared streamed helper still serves unmigrated candles,
 so this area justifies no ratchet prune or zero-legacy claim. The complete venue
 inventory and remaining prerequisites are committed in PR #1819.
+
+## MEXC candle initial rejection ownership
+
+Closed: the candle adapter's pre-Context numeric refusal no longer assigns
+NotSent to an unissued read. Genuine engine command-entry admission publishes
+initial rejection once and denies numeric fallback. Original-source RED controls
+cover nonfinite time, capacity, valid ID reuse and preservation of an existing
+parked owner. Other MEXC command families remain separately inventoried.
