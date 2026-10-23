@@ -163,3 +163,12 @@ shared Store change for every venue and that all index-coherence contracts hold.
 Run engine, KuCoin and Binance native tests, strict scoped lint/fmt and bans.
 Fresh full CI across all venues is required; no source-equivalent shortcut for a
 shared-crate change. No merge without an exclusive engine window and fresh guard.
+
+Plan review refinements: measure peak replacement memory as well as steady
+retained bytes. Rebuilding can briefly hold old and new copied-key maps together.
+Repeated large-to-small-to-empty replacements must release obsolete capacity
+and keys. Tests-first compatibility controls pin this alongside duplicate-winner
+dirty masks and append-only recovery. Unchanged generic native benchmark on the
+recorded steady symbol corpus: 965 distinct symbols,2,500,000 lookups, checksum
+1,236,723,300,248,721,791ns elapsed wall time (99.489ns/lookup). This is baseline
+evidence, not the paired CI objective.

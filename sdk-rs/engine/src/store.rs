@@ -1729,6 +1729,59 @@ mod tests {
     }
 
     #[test]
+    fn ticker_lookup_replacement_recovery_and_duplicate_deltas_stay_coherent() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("A"), market("B"), market("C")]);
+        for _ in 0..3 {
+            let mut winner = ticker("A");
+            winner.last = 9.;
+            store.set_tickers(vec![ticker("C"), ticker("A"), ticker("B"), winner]);
+            store.take_pending();
+            store.update_ticker("A", |row| row.last = -0.);
+            assert_eq!(store.tickers()[1].last.to_bits(), 0f64.to_bits());
+            assert_eq!(store.tickers()[3].last.to_bits(), (-0f64).to_bits());
+            assert_eq!(store.take_pending().ticker_deltas, [(3, 1 << 2)]);
+            assert_eq!(store.ensure_ticker("A"), Some(3));
+            assert_eq!(store.tickers().len(), 4);
+            store.set_tickers(vec![ticker("B")]);
+            assert!(store.ticker("A").is_none());
+            assert!(store.ticker("C").is_none());
+            assert_eq!(store.ensure_ticker("A"), Some(1));
+            assert_eq!(store.ensure_ticker("A"), Some(1));
+            assert_eq!(
+                store
+                    .tickers()
+                    .iter()
+                    .map(|r| r.symbol.as_str())
+                    .collect::<Vec<_>>(),
+                ["B", "A"]
+            );
+            assert_eq!(store.ensure_ticker("unknown"), None);
+            store.set_tickers(Vec::new());
+            assert!(store.ticker("B").is_none());
+            assert!(store.ticker("A").is_none());
+            assert_eq!(store.ensure_ticker("C"), Some(0));
+            assert_eq!(store.ticker("C").unwrap().symbol, "C");
+        }
+    }
+
+    #[test]
+    fn replacing_a_large_ticker_table_releases_obsolete_index_capacity() {
+        let mut store = Store::default();
+        for _ in 0..3 {
+            store.set_tickers((0..4096).map(|i| ticker(&format!("ROW{i}"))).collect());
+            let large = store.ticker_by_symbol.capacity();
+            assert!(store.ticker("ROW4095").is_some());
+            store.set_tickers(vec![ticker("small")]);
+            assert!(store.ticker("ROW4095").is_none());
+            assert!(store.ticker_by_symbol.capacity() < large);
+            store.set_tickers(Vec::new());
+            assert!(store.ticker("small").is_none());
+            assert_eq!(store.ticker_by_symbol.capacity(), 0);
+        }
+    }
+
+    #[test]
     fn indexed_updates_match_symbol_updates_and_ignore_missing_rows() {
         let mut by_symbol = Store::default();
         let mut by_index = Store::default();
