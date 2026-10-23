@@ -219,8 +219,10 @@ Paradex JWT queue (`paradex/src/account.rs` queue/auth_failed), GRVT login
 (`breakoutprop/src/lib.rs` queue), AsterDex clock sync (`awaiting_clock`) and
 Coinbase startup deferral (`deferred`). Success re-dispatches each owner as its
 own request, so there is no shared result. Failure fans out because the
-prerequisite failed. They belong to the background-session core (claude-55ao7t, #1815; owner ruling 2026-10-23; credential core #1805 supplies only key/subject),
-not to execution groups. Reported hang risks: Coinbase drains deferred
+prerequisite failed. None is an execution group. Owner ruling (2026-10-23):
+Paradex, GRVT and BreakoutProp go to claude-55ao7t's background-session gate
+(#1815); the credential core (#1805) supplies only key/subject. AsterDex is
+clock-lane (codex-5c57jl) and Coinbase is with codex-hcmq3f. Reported hang risks: Coinbase drains deferred
 `FetchCandles` only on catalogue success (`public_pending`), never from
 `public_failed`; GRVT owners wait on a 5 s retry timer with no own deadline;
 Paradex owners are bounded only by the auth transport timeout. AsterDex is not
