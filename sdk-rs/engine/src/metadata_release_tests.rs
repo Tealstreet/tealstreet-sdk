@@ -222,6 +222,7 @@ fn proposal() -> Proposal {
 // path. This grants no cross-owner completion or private-signing capability.
 #[derive(Debug)]
 struct Pending {
+    root: http::Context,
     context: http::Context,
     token: Token,
     attempt: reads::Attempt,
@@ -233,6 +234,8 @@ struct PublicMetadata {
     second_leg: bool,
     failures: Vec<(http::Error, Option<Outcome>)>,
     responses: usize,
+    root_mode: u8,
+    rejected_deliveries: usize,
 }
 impl PublicMetadata {
     fn new(pause_on_release: bool) -> Self {
@@ -242,6 +245,8 @@ impl PublicMetadata {
             second_leg: false,
             failures: vec![],
             responses: 0,
+            root_mode: 0,
+            rejected_deliveries: 0,
         }
     }
 }
@@ -273,6 +278,7 @@ impl Venue for PublicMetadata {
             )
             .unwrap();
         let pending = Pending {
+            root: context.clone(),
             context: context.clone(),
             token,
             attempt,
@@ -333,7 +339,26 @@ impl Venue for PublicMetadata {
                 )
                 .unwrap();
             assert_eq!(context.deadline(), pending.context.deadline());
+            // Test-only root substitutions model an adapter accidentally losing
+            // its original logical root or confusing another live command.
+            let root = match self.root_mode {
+                1 => context.clone(),
+                2 => cx
+                    .http_context(
+                        http::Scope::Command(8),
+                        http::Policy {
+                            operation: http::Operation::Read,
+                            credential: None,
+                            timeout_ms: 1_000,
+                            pacing: None,
+                            retry: http::RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap(),
+                _ => pending.root.clone(),
+            };
             let next = Pending {
+                root,
                 context: context.clone(),
                 second_leg: false,
                 ..pending
@@ -381,8 +406,16 @@ fn public_request(deny: bool) -> (Engine<PublicMetadata>, http::Permit) {
     public_request_with(deny, false)
 }
 fn public_request_with(deny: bool, second_leg: bool) -> (Engine<PublicMetadata>, http::Permit) {
+    public_request_with_root(deny, second_leg, 0)
+}
+fn public_request_with_root(
+    deny: bool,
+    second_leg: bool,
+    root_mode: u8,
+) -> (Engine<PublicMetadata>, http::Permit) {
     let mut venue = PublicMetadata::new(deny);
     venue.second_leg = second_leg;
+    venue.root_mode = root_mode;
     let mut engine = crate::test_support::seeded_engine(venue);
     engine.start(0.);
     let actions = engine.drain_actions().collect::<Vec<_>>();
@@ -588,5 +621,78 @@ fn unsigned_metadata_second_leg_keeps_the_original_context_and_scheduler_bounds(
             let actions = engine.drain_actions().collect::<Vec<_>>();
             assert_delivered_unsent_denial(&actions);
         }
+    }
+}
+
+#[test]
+fn paired_metadata_rejects_child_or_unrelated_root_before_fresh_store_publication() {
+    for root_mode in [1, 2] {
+        let (mut engine, first) = public_request_with_root(false, true, root_mode);
+        let http::Claim::Released(first) = engine.claim_http(20., first).unwrap() else {
+            panic!("first release")
+        };
+        engine.handle(
+            30.,
+            Event::HttpResponse {
+                request: first.attempt.request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        assert!(engine.store().setting("BTC").is_none());
+        let preparation = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    http::HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        engine.http_prepared(
+            70.,
+            preparation,
+            http::Prepared {
+                id: 2,
+                expires_at: None,
+            },
+        );
+        let permit = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    http::HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        let http::Claim::Released(second) = engine.claim_http(80., permit).unwrap() else {
+            panic!("second release")
+        };
+        engine.handle(
+            90.,
+            Event::HttpResponse {
+                request: second.attempt.request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        assert!(
+            engine.store().setting("BTC").is_none(),
+            "invalid root cannot publish even a current metadata proposal"
+        );
+        assert_eq!(engine.venue().rejected_deliveries, 1);
+        assert!(!engine.drain_actions().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+        )));
     }
 }
