@@ -196,3 +196,19 @@ Clippy/fmt, bans and both inventory checks. Obtain source/adversarial, caller an
 full-map reviews, a fresh exact integration CI proof, and a separately granted
 venue merge window. No venue classification, scheduler, signer or authority shim
 is introduced; TxFlow routing remains separately blocked on actual #1833.
+
+
+Phase-one checkpoint: `4bf299b52af` compiles all nine new lifecycle controls and
+all nine assert RED on early opaque HTTP before source adoption. The unchanged
+controls pass after adoption, including header re-preparation, typed refusal,
+parked/released expiry and initial rejection. Existing native query drivers use
+the shared prepared fixture helper at their original command clocks; business
+oracles and response clocks remain. Exact generic registry carry is `e83c805ae02`
+from authorized `d654816753b3`; no other Crypto.com source is imported.
+
+The scanner prune removes three depth_query.rs entries/four occurrences and one
+lib.rs BookQuery failure entry/occurrence. Backpack becomes six paths, 26 entries
+and 27 occurrences (from seven/30/32); all other inventory maps remain intact.
+Full native/static gates and independent implementation reviews are recorded on
+the PR before readiness. Source/caller plan reviews confirmed the initial
+admission outcome exception and architecture gate No.
