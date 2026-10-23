@@ -4897,9 +4897,13 @@ and fallback behavior.
 
 Robinhood Lighter defaults to integrator47296 on both deployments, with maker0 /
 taker250 attribution. An explicit integrator override wins; ordinary Lighter's
-mainnet158385 and testnet no-default behavior is unchanged. Tier and matching,
-unexpired builder approval remain required before nonce allocation or submission.
-Callers must approve the Robinhood partner identity before attributed placements.
+mainnet158385 and testnet no-default behavior is unchanged. Existing tier and
+builder-approval preflights run before nonce allocation/submission. A parsed
+missing, expired or insufficient approval blocks, as do existing405/429 handling;
+malformed responses and other lookup/transport failures retain the adapter's
+existing best-effort continuation. This parity change does not tighten that
+failure policy. Callers must approve the Robinhood partner identity for attributed
+placements to be accepted by the venue.
 Every prepared lot, bracket leg, single and batch reserves a positive48-bit
 client-order index from the existing instance namespace. Current time/entropy is
 reconsidered for every reservation; a backward clock or failed/unknown send never

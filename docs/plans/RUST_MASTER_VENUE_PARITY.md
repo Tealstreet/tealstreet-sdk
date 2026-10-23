@@ -20,7 +20,9 @@ bootstrapping, role discovery and all other REST requests. No new identity helpe
 Master `21644979020` configures Robinhood integrator47296. Match both Robinhood
 deployments; explicit integrator override still wins, ordinary mainnet keeps
 158385, ordinary testnet remains without a default. Existing tier and approval
-preflights remain mandatory before nonce/signing/submission, and signed attributes
+preflights are attempted before nonce/signing/submission; preserve their native
+best-effort lookup-failure continuation and parsed-invalid/405/429 blocking.
+Signed attributes
 must be exactly {1:47296,2:250,3:0}. The #1869 harness already approves that exact
 identity. Update the old Robinhood skip-attribution assertion to this new master
 contract, add accepted native signed-attribute and explicit-override controls.
@@ -83,3 +85,10 @@ master contract change reproduced by the new no-I/O RED test. Also retain the
 zero-candidate control after correcting its public entropy-module import in
 0f0e92e553c; the corrected original unit run is2 assertion-RED +1 compatibility
 GREEN, not a compiler failure counted as RED.
+
+Frozen source receipt e71a0ff95f76 genuinely integrates actual258c and owner2a04
+(Robinhood testnet harness). Source/adversarial review is CLEAN. Caller review
+corrected an overstatement of existing approval policy: lookup failures can
+continue best-effort; this slice does not change it. The final docs-only correction
+preserves all runtime/tests/manifests. Before integration689 native tests in61
+groups and strict checks passed; current integrated gates supply final evidence.
