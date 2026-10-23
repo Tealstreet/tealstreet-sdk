@@ -184,13 +184,16 @@ impl ContextRegistry {
         else {
             return;
         };
-        if let Ok(mut projected) = writes.project_failure(error.clone()) {
-            // A live peer keeps the Plan's declared work open, so no current
-            // answer (nothing sent, all refused) can rule out a later effect.
-            if self.executions.groups.may_publish(execution) {
-                projected.outcome = Some(crate::Outcome::Unknown);
-            }
-            *error = projected;
+        if let Ok(projected) = writes.project_failure(error.clone()) {
+            // The observer keeps its own reason; the journal supplies the
+            // write outcome and known IDs. A live peer keeps declared work
+            // open, so no current answer can rule out a later effect.
+            error.outcome = if self.executions.groups.may_publish(execution) {
+                Some(crate::Outcome::Unknown)
+            } else {
+                projected.outcome
+            };
+            error.partial = projected.partial;
         }
     }
 

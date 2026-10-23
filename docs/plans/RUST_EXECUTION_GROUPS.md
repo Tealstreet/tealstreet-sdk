@@ -480,7 +480,10 @@ policy; its controls were kept and extended.
   every observer present at release as sent. A later joiner is not marked;
   an observer present at release flags the symbol when it fails.
 - **Early observer seals:** an observer that expires or detaches before the
-  Plan seal gets the physical journal's non-consuming projection
+  Plan seal (including observers already past their bound when a host
+  callback seals the Plan: `seal_plan` sweeps them first) keeps its own
+  reason and takes the outcome and IDs from the physical journal's
+  non-consuming projection
   (`project_failure`, computed while the owner and binding are live; nothing
   is sealed, charged or copied): Unknown for a released write, with the
   accepted ID prefix. While a peer remains the outcome is always Unknown:

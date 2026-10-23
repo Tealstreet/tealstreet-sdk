@@ -803,6 +803,11 @@ impl<P> Cx<'_, P> {
         result: Option<String>,
         error: Option<VenueError>,
     ) -> Result<(), Error> {
+        // Observers already past their own bound expire against the live
+        // journal, before this seal consumes it (host callbacks seal first).
+        if matches!(plan.owner(), Owner::Execution { .. }) {
+            self.sweep_executions();
+        }
         let (owner, seal) = self.io.request_contexts.plan_seal(
             plan,
             self.now,
