@@ -3,26 +3,28 @@
 //! trades use the documented websocket history request, not a REST guess.
 use crate::wire::{Number, Text, check};
 use crate::{Bitrue, Job, Pending};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, json, json::ArrayAt, num};
+use safe_cex_engine::history::{Completion, HistoryRows};
+use safe_cex_engine::{
+    CommandId, Cx, Method, Query, Response, VenueError, json, json::ArrayAt, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub struct Request {
-    command: CommandId,
+    owner: Box<HistoryRows<Execution>>,
     symbol: String,
     order_id: Option<String>,
     from_ms: Option<f64>,
     to_ms: Option<f64>,
     limit: usize,
     received: usize,
-    rows: Vec<Execution>,
     seen: HashSet<String>,
     failed: bool,
 }
 
 impl Request {
     pub(crate) fn reset(&mut self) {
-        self.rows.clear();
+        self.owner.discard_staged_page();
         self.seen.clear();
         self.failed = false;
         self.received = 0;
@@ -72,6 +74,10 @@ struct Execution {
     maker: Option<bool>,
     #[serde(skip)]
     time_ms: f64,
+}
+
+fn encode_executions(rows: &[Execution]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
 }
 
 fn side(value: &str) -> Option<&'static str> {
@@ -176,14 +182,16 @@ impl Bitrue {
             None,
             Some(ArrayAt::EnvelopeField("data")),
             Job::History(Request {
-                command,
+                owner: Box::new(HistoryRows::new(
+                    Completion::new(command),
+                    encode_executions,
+                )),
                 symbol,
                 order_id,
                 from_ms,
                 to_ms,
                 limit,
                 received: 0,
-                rows: Vec::new(),
                 seen: HashSet::new(),
                 failed: false,
             }),
@@ -256,7 +264,7 @@ impl Bitrue {
         {
             return;
         }
-        request.rows.push(Execution {
+        request.owner.stage(Execution {
             id: row.trade_id.to_string(),
             timestamp: (time / 1000.0).floor(),
             symbol: request.symbol.clone(),
@@ -279,30 +287,29 @@ impl Bitrue {
         response: Response<'_>,
     ) {
         if let Err(error) = check(&response) {
-            cx.fail(request.command, error);
+            request.owner.finish(cx, Err(VenueError::new(error)));
             return;
         }
         if request.failed {
-            cx.fail(request.command, "Malformed Bitrue execution history");
+            request.owner.finish(
+                cx,
+                Err(VenueError::new("Malformed Bitrue execution history")),
+            );
             return;
         }
         // fromId advances forward from a trade ID; no backward cursor is
         // documented for the default recent page. A full filtered page cannot
         // establish absence of older matches, so never present it as complete.
-        if request.received >= request.limit && request.rows.len() < request.limit {
-            cx.fail(request.command, "INCOMPLETE: Bitrue native fill page is full before local filters reach the requested limit");
+        if request.received >= request.limit && request.owner.staged_len() < request.limit {
+            request.owner.reject(cx, VenueError::new("INCOMPLETE: Bitrue native fill page is full before local filters reach the requested limit"));
             return;
         }
-        request.rows.sort_by(|a, b| b.time_ms.total_cmp(&a.time_ms));
-        request.rows.truncate(request.limit);
-        {
-            let result: Result<String, String> =
-                serde_json::to_string(&request.rows).map_err(|e| e.to_string());
-            match result {
-                Ok(data) => cx.done(request.command, data),
-                Err(error) => cx.fail(request.command, error),
-            }
-        };
+        request.owner.accept_page();
+        request.owner.finish_with(cx, Ok(()), |mut rows| {
+            rows.sort_by(|a, b| b.time_ms.total_cmp(&a.time_ms));
+            rows.truncate(request.limit);
+            encode_executions(&rows)
+        });
     }
 
     pub(crate) fn history_failed(
@@ -311,7 +318,7 @@ impl Bitrue {
         request: Request,
         error: &str,
     ) {
-        cx.fail(request.command, error);
+        request.owner.finish(cx, Err(VenueError::new(error)));
     }
 }
 
