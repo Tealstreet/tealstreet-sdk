@@ -210,7 +210,7 @@ fn parked_route_expires_once_at_the_original_deadline() {
 }
 
 #[test]
-fn exact_deadline_response_cannot_publish_success_or_row_warning() {
+fn exact_deadline_response_cannot_publish_success_or_native_error_warning() {
     let mut engine = engine();
     let initial = query(&mut engine, 7, 100.);
     let (token, _) = preparation(&initial);
@@ -219,7 +219,7 @@ fn exact_deadline_response_cannot_publish_success_or_row_warning() {
         &mut engine,
         &packet,
         20_100.,
-        EMPTY,
+        r#"{"error":["EGeneral:late error"]}"#,
     );
     engine.handle(
         20_100.,
@@ -229,7 +229,7 @@ fn exact_deadline_response_cannot_publish_success_or_row_warning() {
     );
     actions.extend(engine.drain_actions());
     assert_eq!(failure(&actions, 7).kind, Some(ErrorKind::Timeout));
-    assert!(!actions.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED)));
+    assert!(!actions.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::REQUEST_FAILED)));
 }
 
 #[test]
@@ -244,12 +244,84 @@ fn three_transport_retries_keep_exact_query_and_original_deadline() {
         let packet = release(&mut engine, token, now);
         assert_eq!(packet.url, declaration.url);
         packets.push(packet.id);
-        engine.handle(now + 1., Event::HttpFailed { request: packet.id, error: "network lost" });
+        engine.handle(
+            now + 1.,
+            Event::HttpFailed {
+                request: packet.id,
+                error: "network lost",
+            },
+        );
         actions = engine.drain_actions().collect();
     }
-    assert_eq!(packets.iter().collect::<std::collections::HashSet<_>>().len(), 4);
+    assert_eq!(
+        packets
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4
+    );
     assert_eq!(failure(&actions, 7).kind, Some(ErrorKind::Network));
-    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(_))));
+    assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::REQUEST_FAILED && event.message == "network lost")).count(), 1);
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::ManagedHttp(action) if matches!(&**action, HttpAction::Prepare { .. })))
+    );
+}
+
+#[test]
+fn released_deadline_is_typed_timeout_without_another_read_attempt() {
+    let mut engine = engine();
+    let initial = query(&mut engine, 7, 100.);
+    let (token, _) = preparation(&initial);
+    let packet = release(&mut engine, token, 101.);
+    engine.handle(
+        20_100.,
+        Event::TimerFired {
+            timer: deadline(&initial),
+        },
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(failure(&actions, 7).kind, Some(ErrorKind::Timeout));
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(&**action, HttpAction::Prepare { .. }))));
+    assert!(response(&mut engine, &packet, 20_101., EMPTY).is_empty());
+}
+
+#[test]
+fn chunked_invalid_utf8_keeps_the_existing_read_retry_budget() {
+    let mut engine = engine();
+    let initial = query(&mut engine, 7, 100.);
+    let (token, _) = preparation(&initial);
+    let packet = release(&mut engine, token, 101.);
+    engine.handle(
+        102.,
+        Event::HttpStart {
+            request: packet.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    engine.handle(
+        103.,
+        Event::HttpChunk {
+            request: packet.id,
+            data: &[0xff],
+        },
+    );
+    engine.handle(104., Event::HttpEnd { request: packet.id });
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let (token, retry) = preparation(&actions);
+    assert_eq!(retry.url, packet.url);
+    deadline(&actions);
+    let packet = release(&mut engine, token, 105.);
+    assert!(
+        response(&mut engine, &packet, 106., EMPTY)
+            .iter()
+            .any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 7, .. })
+            ))
+    );
 }
 
 #[test]
@@ -328,8 +400,14 @@ fn duplicate_command_cannot_replace_parked_candle_authority() {
 #[test]
 fn native_errors_and_malformed_rows_reject_without_read_outcomes() {
     for (body, expected) in [
-        (r#"{"error":["EGeneral:Invalid arguments"]}"#, "EGeneral:Invalid arguments"),
-        (r#"{"error":[],"result":{"XBT/USD":[[1000,"bad","2","1","2","1","3",1]],"last":1}}"#, "Kraken Spot invalid candles"),
+        (
+            r#"{"error":["EGeneral:Invalid arguments"]}"#,
+            "EGeneral:Invalid arguments",
+        ),
+        (
+            r#"{"error":[],"result":{"XBT/USD":[[1000,"bad","2","1","2","1","3",1]],"last":1}}"#,
+            "Kraken Spot invalid candles",
+        ),
     ] {
         let mut engine = engine();
         let initial = query(&mut engine, 7, 100.);
