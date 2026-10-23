@@ -129,7 +129,6 @@ impl H {
 }
 
 #[test]
-#[ignore = "original RED: listenKey upkeep is unmanaged legacy HTTP until it adopts the session core"]
 fn listen_key_create_carries_its_session_bound() {
     let h = H::started();
     let [create] = h.keys()[..] else {
@@ -144,7 +143,6 @@ fn listen_key_create_carries_its_session_bound() {
 }
 
 #[test]
-#[ignore = "original RED: a hung legacy keepalive has no engine bound"]
 fn a_hung_keepalive_is_retried_at_its_bound() {
     let mut h = H::started();
     let socket = h.open_private();

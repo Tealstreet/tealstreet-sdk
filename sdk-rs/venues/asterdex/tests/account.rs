@@ -1236,7 +1236,13 @@ fn late_listen_key_response_after_connect_deadline_does_not_replace_the_new_sess
     h.now = at;
     h.event(Event::TimerFired { timer });
     let old = h.take("/listenKey");
-    let (timer, _) = *h.timers.last().unwrap();
+    // The connect watchdog, not the create's 20 s engine session bound.
+    let (timer, _) = *h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, at)| *at != h.now + 20_000.0)
+        .unwrap();
     h.now += 10_000.0;
     h.event(Event::TimerFired { timer });
     let count = h.sockets.len();
