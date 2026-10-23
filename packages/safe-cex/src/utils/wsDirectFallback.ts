@@ -1,8 +1,8 @@
 /**
  * Direct-first WebSocket host selection with a sticky fallback CHAIN.
  *
- * Shared by the Bybit and OKX socket classes; the Bitget classes carry the same
- * counters inline (they predate this helper and were left alone). A connection
+ * Shared by the Bybit, OKX and Bitget private socket classes; the Bitget public
+ * classes still carry the same counters inline. A connection
  * that produced ZERO messages is a silent failure. Once `maxSilentConnects`
  * CONSECUTIVE connections have been silent, the socket advances to the next
  * candidate (relay through the private fleet, then the athena passthrough —
@@ -25,6 +25,8 @@ export class WsDirectFallback {
   private silentConnects: number;
   private activeIndex = 0; // 0 = primary, k = candidates[k - 1]
   private preferLast = false;
+  private candidateCount = 0;
+  private advancePending = false;
 
   // Some TS sockets count startup itself as their first silent attempt.
   constructor(
@@ -46,6 +48,16 @@ export class WsDirectFallback {
    */
   resolveUrl(primaryUrl: string, ...fallbackUrls: Array<string | undefined>): string {
     const candidates = fallbackUrls.filter((url): url is string => typeof url === 'string' && url.length > 0);
+    this.candidateCount = candidates.length;
+    if (this.advancePending && this.activeIndex < candidates.length) {
+      this.activeIndex++;
+      this.silentConnects = 0;
+      this.advancePending = false;
+      this.connects++;
+      this.messages = 0;
+      return candidates[this.activeIndex - 1];
+    }
+    this.advancePending = false;
     if (this.connects > 0) {
       this.silentConnects = this.messages === 0 ? this.silentConnects + 1 : 0;
     }
@@ -58,6 +70,17 @@ export class WsDirectFallback {
     }
     return this.activeIndex === 0 ? primaryUrl : (candidates[this.activeIndex - 1] ?? primaryUrl);
   }
+
+  /**
+   * The venue REFUSED this path's egress (bitget 40018: the key is bound to other
+   * IPs) — a reply, so it never reads as silence. Moves to the next candidate on
+   * the following `resolveUrl`; false when none is left to try.
+   */
+  rejectCurrent = (): boolean => {
+    if (this.activeIndex >= this.candidateCount) return false;
+    this.advancePending = true;
+    return true;
+  };
 
   /** Call from the socket's message handler. */
   onMessage = (): void => {
