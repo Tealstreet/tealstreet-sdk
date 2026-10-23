@@ -1882,6 +1882,7 @@ mod sign_failure_owners {
                 signing: safe_cex_engine::signing::KeyRef("ref:owned-signing".into()),
                 passphrase: None,
                 stable_id: None,
+                extra: Default::default(),
             },
         };
         let mut native = crate::Bingx::new(crate::Options {
@@ -2069,6 +2070,7 @@ mod tests {
                         signing: safe_cex_engine::signing::KeyRef("ref:fixture-signing".into()),
                         passphrase: None,
                         stable_id: None,
+                        extra: Default::default(),
                     },
                 },
             );

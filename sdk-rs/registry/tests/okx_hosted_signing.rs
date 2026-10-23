@@ -12,6 +12,7 @@ fn all_okx_aliases_capture_primary_http_and_ws_with_provider_owned_passphrase() 
         signing: KeyRef("ref:owned-primary".into()),
         passphrase: Some(KeyRef("ref:owned-presentation".into())),
         stable_id: None,
+        extra: Default::default(),
     };
     provider.insert(identity.credential.clone(), b"test-key".to_vec());
     provider.insert(identity.signing.clone(), b"test-secret".to_vec());
@@ -26,6 +27,7 @@ fn all_okx_aliases_capture_primary_http_and_ws_with_provider_owned_passphrase() 
             signing: KeyRef("ref:unavailable-secondary".into()),
             passphrase: Some(KeyRef("ref:unavailable-secondary-presentation".into())),
             stable_id: None,
+            extra: Default::default(),
         }),
     };
     for alias in ["okx", "okxeu", "okxdemo", "okxeudemo"] {

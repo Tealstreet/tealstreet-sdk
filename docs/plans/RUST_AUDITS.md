@@ -2257,3 +2257,29 @@ on rejected/revoked admission without a numeric terminal. The one removed legacy
 fingerprint shrinks Lighter47→46 and lib6→5; all other inventory entries remain.
 This closes only the candle refusal and introduces no venue capacity, retry or
 outcome rule. Native background polling continues using its independent Context.
+
+## KuCoin Spot candle lifecycle adoption
+
+Unsigned Spot candles now retain their original command Context through shared
+entry admission, static-header preparation, exact read delivery and Context
+completion. Typed failures and correlated companions use the shared engine
+authority; discovery background retirement remains separate. The sole legacy
+public streamed helper and three numeric candle terminal/preflight expressions
+retire. Exact KuCoin inventory shrinks84 to80 occurrences and74 to70 hash rows;
+Spot mod shrinks20 to16. The shared Account failure hash stays at count2.
+No other venue prune or exemption is introduced. Private/HMAC, account/history,
+trading, bullet sessions and futures retain the committed full-map prerequisites.
+
+## MEXC initial Plan credential refusal audit closure
+
+~~The initial plan-list read retries a parsed terminal credential refusal after
+MODE succeeds.~~ Re-verified on actual #1786: the old general statement that a
+refused key fails startup covered MODE but missed the streamed Plan path. Both
+normal Plan envelopes and complete error envelopes without data now reuse the
+existing native refusal helper and engine StartupFailed authority. Terminal
+cleanup discards the initial staged join and prevents late sibling pagination,
+private-login refresh, account poll and asset refresh from resuming account HTTP.
+The existing transient public/private startup policies and post-startup behavior
+remain. This closure does not migrate signing, request ownership or classification.
+Architecture gate: No; existing native facts and shared startup publication are
+reused. Account/history ownership remains separate from #1793.
