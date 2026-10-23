@@ -134,8 +134,9 @@ It is not a command, a read or a socket epoch.
 - **Delivery.** The venue receives exactly one current delivery, through the
   existing callbacks: `on_response`, `on_http_preparation_failed` for NotSent,
   or `on_request_failed` for transport loss or timeout after release (Unknown).
-  No new callback is added. HTTP status alone never proves refusal; native
-  codecs classify definitive refusals (e.g. BingX expired key).
+  Ordinary session HTTP adds no new callback. HTTP status alone never proves
+  refusal; native codecs classify definitive refusals (e.g. BingX expired
+  key). The one exception is the provider key import (#1850 P6b, below).
 - **Retry and recovery.** There is no new retry policy, and no amendment to
   "Unknown writes never enter generic retry".
   - A session Mutation has one physical attempt per logical operation, with no
@@ -166,6 +167,35 @@ It is not a command, a read or a socket epoch.
 - **Bounds.** At most 64 live sessions per engine. Session contexts share the
   existing 256-context registry and 256 managed-HTTP slots. The session holds
   one bounded unresolved flag per generation. Capacity refusal returns the continuation and opens nothing.
+
+### Provider key import (#1850 P6b, claude-19pt8s)
+
+Agreed with claude-19pt8s for the Polymarket L2 derived key: the session core
+owns *when* to acquire and retire, and the import primitive owns
+*installation* only.
+- **Classification:** the derive GET (and `/time`) is a session Read
+  (deterministic key mint, repeat-safe). `Cx::request_import` accepts only a
+  live session-owned Read context; Command and Background contexts are
+  `Invalid`.
+- **Delivery:** for import attempts only, `on_import` replaces `on_response`.
+  Transport loss still goes to `on_request_failed`. Import responses skip
+  unproven-HTTP evidence, reconciliation and streaming.
+- **Liveness:** the engine checks that the session generation is live before
+  routing a body to `Signer::import`, so a late 2xx for a retired generation
+  is never installed.
+- **Retirement:**
+  - Imported refs are bound to `Owner::Session { generation }`.
+  - `retire_session` calls `Signer::drop_imported` after the HTTP discard and
+    revoke: synchronously for local providers, and as
+    `Action::DropImported { generation }` for host providers.
+  - Engine disposal retires every live session.
+  - The engine refuses (`Unavailable`), before reaching the provider, any
+    context whose credential names an imported ref from a dead generation.
+- **Readiness:** `on_import` success is where the venue calls `session_ready`
+  to release gated owners; failure maps to `session_failed`.
+- **Not built yet:** these engine hooks land with the #1850 seam, after #1832
+  and #1842. The retire-all-on-dispose and `drop_imported` calls are owned
+  here.
 
 ### Cadence and socket linkage (Phase C, after #1771 merges)
 
