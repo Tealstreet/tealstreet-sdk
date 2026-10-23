@@ -108,8 +108,13 @@ checks and safe-ID preflight. No drain callback or host reentrancy is added.
 
 Phemex registers its private policy through the opt-in, projects id999 success
 as login evidence and preserves exact auth/ping/AOP order. Existing account
-snapshot validation remains the only financial proof. At the accepted snapshot
-commit boundary, before the first affected Store mutation where practical,
+snapshot validation remains the only financial proof. The exact existing hook
+is account.rs accepted `orders_p` snapshot branch (original lines1074-1079),
+which currently calls Supervisor::authenticated. Positions/accounts-only
+snapshots do not discharge it. An accepted orders snapshot with
+`safe_snapshot=false` from a newer order_revision DOES discharge it while
+preserving the newer financial state; do not require revision equality. At
+that accepted orders-snapshot commit boundary, before affected Store mutation where practical,
 call complete_socket_snapshot and retain the existing financial outcomes.
 If it refuses, do not publish or grant stream authority. No independent parser
 or inferred success from a snapshot label alone. Existing sequence, revision,
@@ -124,7 +129,9 @@ controls pass; actual prerequisite landing is required before consumer merge.
 Audit the current `Driver::begin`, `finish_ingress`, `finish_control`,
 `observe_ingress`, `handoff_ready`, final frame release and signed-send gates.
 Auth ACK cannot extend idle timing, and delayed open cannot extend snapshot
-expiry. One positive must prove a genuine login permits native AOP frames while
+expiry. Native working controls must prove positions/accounts-only snapshots
+retain expiry and revision-conflicted accepted orders snapshots end the bound
+without erasing newer orders; a raw type=snapshot label is never proof. One positive must prove a genuine login permits native AOP frames while
 the snapshot barrier remains outstanding. Another proves validated snapshot
 ends it without renewing the original deadline first.
 
