@@ -361,7 +361,7 @@ impl WeexFutures {
         command: CommandId,
         read: Query,
     ) {
-        if self.credentials.is_none()
+        if self.credentials.primary.is_none()
             && !matches!(
                 read,
                 Query::PublicTrades { .. } | Query::OrderByClientId { .. }
@@ -1030,11 +1030,29 @@ impl WeexFutures {
         request: Request,
         error: &str,
     ) {
+        self.history_end(cx, request, VenueError::new(error), false);
+    }
+    /// A provider refusal is strict even after accepted pages, never partial success.
+    pub(crate) fn history_refused(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        self.history_end(cx, request, error, true);
+    }
+    fn history_end(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+        strict: bool,
+    ) {
         let command = request.command;
         if matches!(self.history.reads.get(&command), Some(Read::Income { .. })) {
-            self.finish_income(cx, command, Err(VenueError::new(error)), false);
+            self.finish_income(cx, command, Err(error), strict);
         } else if matches!(self.history.reads.get(&command), Some(Read::List { .. })) {
-            self.finish_list(cx, command, Err(VenueError::new(error)), false);
+            self.finish_list(cx, command, Err(error), strict);
         }
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
