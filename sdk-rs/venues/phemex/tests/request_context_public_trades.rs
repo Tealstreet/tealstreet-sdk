@@ -625,3 +625,20 @@ fn invalid_public_entry_time_refuses_before_native_or_transport_effects() {
     let output = reply(&mut e, NOW + 1., &fresh, 200, TRADE);
     assert!(done(&output, OWNER).is_some());
 }
+
+#[test]
+fn non_success_history_status_rejects_valid_rows_and_releases_its_slot() {
+    for status in [100, 199, 300, 302, 399] {
+        let mut e = engine(false, false);
+        let request = released(&mut e, NOW, OWNER, public());
+        let output = reply(&mut e, NOW + 1., &request, status, TRADE);
+        let error = failure(&output, OWNER);
+        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(error.message, format!("Phemex history HTTP {status}"));
+        assert!(!output.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+        let fresh = released(&mut e, NOW + 2., OWNER, public());
+        let output = reply(&mut e, NOW + 3., &fresh, 200, TRADE);
+        assert!(done(&output, OWNER).is_some());
+    }
+}
