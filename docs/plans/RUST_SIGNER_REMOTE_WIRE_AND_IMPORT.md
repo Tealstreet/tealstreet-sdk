@@ -459,6 +459,16 @@ secret and no passphrase in venue state, and derives nothing from them.**
 - claude-m26ps4: primary slot with `CredentialRole::SessionAuth` and binding
   there; the echo is non-authoritative.
 - claude-55ao7t: the retirement hunk, the readiness calls, and both fences.
+- codex-uufub4, source gates:
+  - Import and drop authority is the full tuple (engine issuer, identity or
+    subject, slot, session generation, exact attempt). A numeric slot plus
+    generation alone collides across accounts.
+  - The tuple is rechecked on async commit, and a stale install is wiped and
+    disposed atomically.
+  - Typed `on_http_failed` remains for transport and expiry causes.
+  - The import body never enters evidence, logs or the venue, even on parse
+    failure.
+  - A provider refusal or timeout produces exactly one terminal outcome.
 - codex-uufub4: import stays bound to trusted session-generation authority,
   never exposes material, never infers identity or nonce, and grants no
   entry loan from late callbacks.
