@@ -2736,6 +2736,28 @@ family inventory is 32F/35O at actual 9f405e55403. Original capacity/clock and
 typed Network/Timeout assertions pass alongside native wire/config/codec controls.
 The generic managed helper and all other family callers remain with their owners.
 
+
+## Shared CPU certification owner
+
+CPU remeasurement and aggregation belong to one harness policy, parameterized
+by the existing exact suite registry. Every CPU-gated suite adopts the same
+planner, eligible-only second-run matrix and unconditional final checker; venue
+code owns no bypass or local copy. Existing strict gate validators rederive both
+retained reports before arithmetic. Original report bytes and declared results
+stay immutable. A sealed runtime capsule transports the original measured
+inputs to a separate physical job without rebuilding or installing dependencies.
+Current run, source, physical producer, upload, case and cache identities bind
+the evidence; missing or ambiguous authority rejects before certification.
+No fixture/tape/profile/threshold change forms part of this policy.
+
+Only a validated cpu-runtime suite name selects the 4 GiB artifact response type.
+Metadata, logs and ordinary archives retain 512 MiB; cached bytes are rechecked
+under the requested type. An empty immutable-artifact HTTP 200 shares the existing
+two-attempt retrieval budget with socket recovery. Exact artifact size/digest,
+producer/source, archive and restored-runtime ownership are unchanged. The failed
+Bybit attempt remains failed and supplies no timing or mean; transport recovery
+creates no physical retry or third sample.
+
 ## KuCoin local command refusal ownership
 
 Eight numeric local failure sites now use shared genuine command admission and
