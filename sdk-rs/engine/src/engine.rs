@@ -1411,6 +1411,9 @@ struct Io<P> {
     // Timeout when the engine expires a released request at its deadline.
     http_failure_kind: ErrorKind,
     command_entry: Option<command_entry::Entry>,
+    http_plan_ready: Option<crate::request_context::Plan>,
+    http_owner_poison: bool,
+    http_plan_poison: bool,
     managed_http: HashMap<RequestId, http_lifecycle::Managed>,
     http_pacing: crate::request_context::SendPacing,
     http_responses: crate::request_context::ReconciliationResponses,
@@ -1463,6 +1466,9 @@ impl<P> Default for Io<P> {
             http_delivery: None,
             http_failure_kind: ErrorKind::Network,
             command_entry: None,
+            http_plan_ready: None,
+            http_owner_poison: false,
+            http_plan_poison: false,
             http_responses: Default::default(),
             http_write_revision: 0,
             managed_http: HashMap::new(),
@@ -2139,13 +2145,25 @@ impl<P> Cx<'_, P> {
             Ok(result) => (Some(result), None),
             Err(error) => (None, Some(error)),
         };
-        let mut write_sealed = false;
-        let result = match self.io.request_contexts.seal(
+        let seal = self.io.request_contexts.seal(
             command,
             self.io.http_delivery.as_ref(),
             authority,
             error,
-        ) {
+        );
+        self.finish_sealed_command(command, success, seal)
+    }
+
+    // Only validated journal seals reach shared cleanup and publication. Group
+    // fan-out still needs its own allocation transaction before using this seam.
+    fn finish_sealed_command(
+        &mut self,
+        command: CommandId,
+        success: Option<String>,
+        seal: request_context_registry::Seal,
+    ) -> Result<(), crate::request_context::Error> {
+        let mut write_sealed = false;
+        let result = match seal {
             request_context_registry::Seal::Stale => {
                 return Err(crate::request_context::Error::Revoked);
             }
@@ -2164,7 +2182,10 @@ impl<P> Cx<'_, P> {
             }
         };
         self.io.retire_http_command(command);
-        self.io.request_contexts.finish(command);
+        if !self.io.request_contexts.finish(command) {
+            self.io.http_owner_poison = true;
+            panic!("HTTP owner retirement bookkeeping failed");
+        }
         #[cfg(feature = "order-locks")]
         {
             if write_sealed
@@ -2267,6 +2288,19 @@ pub trait Venue {
     /// Drop only this generation's native command planning after the engine
     /// has sealed and retired it. No Store, response or completion authority.
     fn discard_unproven_http_command(&mut self, _owner: crate::request_context::Owner) {}
+
+    /// Discard only continuation state matching this exact retired generation.
+    /// This cleanup hook has no Store, response, command or I/O authority.
+    fn on_http_owner_retired(&mut self, _owner: &crate::request_context::HttpOwnerRetirement) {}
+
+    /// Typed readiness after actual HTTP scope exit. The engine marks due slots
+    /// once before this callback; no delivery/publication authority is lent.
+    fn on_http_plan_ready(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _plan: &crate::request_context::Plan,
+    ) {
+    }
 
     /// Bounded native correlation metadata only. No credential, outbound packet
     /// or recipe may be retained here. Managed mutations require this codec.
@@ -2765,6 +2799,7 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.on_public_feed(&mut cx);
+        self.flush_http_owner_retirements();
         self.shared_ticker_revision = self.store.ticker_revision();
     }
 
@@ -2793,6 +2828,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.assert_retirement_safe();
         self.assert_command_entry_safe();
         if self.public_feed_policy() == PublicFeedPolicy::Shared {
             Box::new(
@@ -2814,6 +2850,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn venue(&self) -> &V {
+        self.assert_retirement_safe();
         self.assert_command_entry_safe();
         &self.venue
     }
@@ -2822,6 +2859,7 @@ impl<V: Venue> Engine<V> {
     /// books by default. Switching modes starts a fresh full-book baseline.
     #[cfg(feature = "book-deltas")]
     pub fn set_book_deltas(&mut self, enabled: bool) {
+        self.assert_retirement_safe();
         self.assert_command_entry_safe();
         if self.book_deltas != enabled {
             self.book_deltas = enabled;
@@ -2855,6 +2893,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn capabilities(&self) -> Capabilities {
+        self.assert_retirement_safe();
         self.assert_command_entry_safe();
         self.venue.capabilities()
     }
@@ -2871,14 +2910,20 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
+        self.flush_http_owner_retirements();
+        self.flush_http_plans(now);
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
+        self.flush_http_owner_retirements();
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
         self.io.dispatch_now = now;
         self.io.http_responses.prune(now);
+        if self.expire_plan_timer(now, &event) {
+            return;
+        }
         if self.expire_http_timer(now, &event) {
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
@@ -2996,6 +3041,7 @@ impl<V: Venue> Engine<V> {
         if let Some(delivery) = delivery.as_ref() {
             self.io.request_contexts.exit_delivery(delivery);
         }
+        self.flush_http_plans(now);
     }
 
     fn duplicate_command(&mut self) {
@@ -3199,8 +3245,11 @@ impl<V: Venue> Engine<V> {
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
                     cx.io.health.count(log_code::HTTP_FAILED);
-                    let failure = VenueError::new(error).kind(cx.io.http_failure_kind);
-                    self.venue.on_http_failed(&mut cx, pending.value, failure);
+                    let kind = cx.io.http_failure_kind;
+                    let make_failure = || VenueError::new(error).kind(kind);
+                    cx.with_owned_read_failure(make_failure, |cx| {
+                        self.venue.on_http_failed(cx, pending.value, make_failure());
+                    });
                 }
             }
             Event::TimerFired { timer } => {
@@ -3315,6 +3364,8 @@ impl<V: Venue> Engine<V> {
     }
 
     fn finish_event_scope(&mut self, now: f64) {
+        self.io.request_contexts.end_plan_admission();
+        self.flush_http_owner_retirements();
         // Deferred commands are engine-owned work, not part of the HTTP codec
         // whose callback just released the lock. Do not lend that codec's
         // attempt authority to an unrelated internal finalization.
@@ -3343,6 +3394,8 @@ impl<V: Venue> Engine<V> {
         }
         self.io.http_delivery = delivery;
         self.restore_shared_tickers(false, now);
+        self.flush_http_owner_retirements();
+        self.flush_http_plans(now);
     }
 
     fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {
@@ -3435,18 +3488,29 @@ impl<V: Venue> Engine<V> {
                         cx.store,
                         &mut cx.io.actions,
                     );
-                    self.venue.on_stream_error(&mut cx, pending.value, response);
+                    cx.with_owned_read_failure(
+                        || {
+                            VenueError::new("Response did not contain the expected list")
+                                .kind(ErrorKind::Internal)
+                        },
+                        |cx| self.venue.on_stream_error(cx, pending.value, response),
+                    );
                     return;
                 }
                 let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
                 let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");
-                self.venue.on_stream_malformed(
-                    &mut cx,
-                    pending.value,
-                    incoming.status,
-                    &incoming.headers,
-                    &message,
+                cx.with_owned_read_failure(
+                    || VenueError::new(&message).kind(ErrorKind::Internal),
+                    |cx| {
+                        self.venue.on_stream_malformed(
+                            cx,
+                            pending.value,
+                            incoming.status,
+                            &incoming.headers,
+                            &message,
+                        )
+                    },
                 );
                 return;
             }
@@ -3454,8 +3518,10 @@ impl<V: Venue> Engine<V> {
             let body = match std::str::from_utf8(outside) {
                 Ok(body) => body,
                 Err(_) => {
-                    let failure = malformed_body("stream envelope is not UTF-8");
-                    self.venue.on_http_failed(&mut cx, pending.value, failure);
+                    let make_failure = || malformed_body("stream envelope is not UTF-8");
+                    cx.with_owned_read_failure(make_failure, |cx| {
+                        self.venue.on_http_failed(cx, pending.value, make_failure());
+                    });
                     return;
                 }
             };
@@ -3495,8 +3561,10 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_response(&mut cx, pending.value, response);
             }
             Err(_) => {
-                let failure = malformed_body("response body is not UTF-8");
-                self.venue.on_http_failed(&mut cx, pending.value, failure);
+                let make_failure = || malformed_body("response body is not UTF-8");
+                cx.with_owned_read_failure(make_failure, |cx| {
+                    self.venue.on_http_failed(cx, pending.value, make_failure());
+                });
             }
         }
     }
@@ -3523,6 +3591,7 @@ impl<V: Venue> Engine<V> {
             }
             _ => {}
         }
+        self.flush_http_owner_retirements();
     }
 
     fn sign_completed(
@@ -3597,7 +3666,18 @@ impl<V: Venue> Engine<V> {
     /// Hosts check this before starting any delayed primitive operation.
     /// A fatal allocator failure permanently retires this engine.
     pub fn failed(&self) -> bool {
-        self.io.command_entry.is_some() || self.io.next_id.failed() || self.io.signing.failed()
+        self.io.http_owner_poison
+            || self.io.http_plan_poison
+            || self.io.command_entry.is_some()
+            || self.io.next_id.failed()
+            || self.io.signing.failed()
+    }
+
+    fn assert_retirement_safe(&self) {
+        assert!(
+            !self.io.http_owner_poison && !self.io.http_plan_poison,
+            "engine HTTP owner callback or cleanup failed"
+        );
     }
 
     fn assert_command_entry_safe(&self) {
@@ -3608,8 +3688,84 @@ impl<V: Venue> Engine<V> {
     }
 
     fn assert_live(&self) {
+        self.assert_retirement_safe();
         self.assert_command_entry_safe();
         assert!(!self.failed(), "engine resource identities exhausted");
+    }
+
+    fn flush_http_plans(&mut self, now: f64) {
+        self.io.request_contexts.end_plan_admission();
+        if !now.is_finite()
+            || self.io.http_delivery.is_some()
+            || self.io.http_plan_ready.is_some()
+            || !self.io.request_contexts.plan_scope_clear()
+        {
+            return;
+        }
+        while let Some(plan) = self.io.request_contexts.next_plan_ready(now) {
+            if now >= plan.deadline() {
+                Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                }
+                .fail_plan(
+                    &plan,
+                    VenueError::new("HTTP plan timed out").kind(ErrorKind::Timeout),
+                )
+                .expect("current expired plan");
+            } else {
+                self.io.http_plan_ready = Some(plan.clone());
+                self.io.http_plan_poison = true;
+                self.venue.on_http_plan_ready(
+                    &mut Cx {
+                        now,
+                        store: &mut self.store,
+                        io: &mut self.io,
+                    },
+                    &plan,
+                );
+                self.io.http_plan_ready = None;
+                self.io.http_plan_poison = false;
+                self.assert_live();
+                request_context_registry::ContextRegistry::rearm_live_plan(&mut self.io, &plan);
+            }
+            self.flush_http_owner_retirements();
+        }
+    }
+
+    fn expire_plan_timer(&mut self, now: f64, event: &Event<'_>) -> bool {
+        let Event::TimerFired { timer } = event else {
+            return false;
+        };
+        let Some(plan) = self.io.request_contexts.plan_for_timer(*timer) else {
+            return false;
+        };
+        self.flush_http_plans(now);
+        request_context_registry::ContextRegistry::rearm_live_plan(&mut self.io, &plan);
+        true
+    }
+
+    fn flush_http_owner_retirements(&mut self) {
+        self.io.request_contexts.end_plan_admission();
+        self.assert_live();
+        while let Some(token) = self.io.request_contexts.next_retirement() {
+            self.assert_live();
+            if !self.io.request_contexts.retirement_current(&token) {
+                self.io.http_owner_poison = true;
+                panic!("invalid HTTP owner retirement token");
+            }
+            // A caught hook panic permanently fences the engine. No unwind
+            // reset guard or fabricated allocator failure is used.
+            self.io.http_owner_poison = true;
+            self.venue.on_http_owner_retired(&token);
+            assert!(
+                self.io.request_contexts.complete_retirement(&token),
+                "HTTP owner retirement changed during cleanup"
+            );
+            self.io.http_owner_poison = false;
+            self.assert_live();
+        }
     }
 
     pub fn signing_pending(&self, attempt: RequestId) -> bool {
@@ -3618,7 +3774,9 @@ impl<V: Venue> Engine<V> {
 
     pub fn prepare_dispatch(&mut self, now: f64) {
         self.assert_live();
+        self.flush_http_owner_retirements();
         self.io.dispatch_now = now;
+        self.flush_http_plans(now);
     }
 
     /// Callback actions must traverse the same queue as the original event.
@@ -3629,6 +3787,7 @@ impl<V: Venue> Engine<V> {
         emitted: usize,
     ) {
         self.assert_live();
+        self.flush_http_owner_retirements();
         for action in self.io.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
@@ -3784,6 +3943,8 @@ impl<V: Venue> Engine<V> {
     /// Actions produced since the previous drain, in order.
     pub fn drain_actions(&mut self) -> std::vec::Drain<'_, Action> {
         self.assert_live();
+        self.flush_http_plans(self.io.dispatch_now);
+        self.flush_http_owner_retirements();
         self.io.assert_actions_safe();
         self.dispatch_actions(self.io.dispatch_now);
         if self.store.take_rejected_empty_catalogue() {
@@ -3799,6 +3960,8 @@ impl<V: Venue> Engine<V> {
                 },
             );
         }
+        self.flush_http_owner_retirements();
+        self.assert_live();
         self.io.assert_actions_safe();
         self.io.actions.drain(..)
     }
@@ -3812,6 +3975,7 @@ impl<V: Venue> Engine<V> {
 
     /// The venue's synchronized book for `symbol`, if any.
     pub fn book(&self, symbol: &str) -> Option<&Book> {
+        self.assert_retirement_safe();
         self.assert_command_entry_safe();
         if self.public_feed_policy() == PublicFeedPolicy::Shared {
             self.shared_books.get(symbol)
