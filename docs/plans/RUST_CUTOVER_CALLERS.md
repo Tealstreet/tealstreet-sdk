@@ -5629,6 +5629,22 @@ uncached spot miss, public-only perps refusal and private perps REST lookup reta
 their native behavior. The exchange-server order reconciliation caller consumes
 the same complete cached result and must retain non-definitive miss handling.
 
+## KuCoin synchronous local Read terminals
+
+Spot query credential refusal still precedes kind, cache and parameter handling.
+Missing credentials retain their message with InvalidInput/NotSent; unsupported
+Spot public trades and futures leverage retain their messages with
+Unsupported/NotSent. Keyed missing-symbol fills, order history and income still
+return[]; cached lookup preserves exact symbol/client/native-ID matching and full
+order JSON. The constant Spot leverage projection retains leverage/buy/sell1 and
+its existing unknown-symbol behavior, preserving unrelated margin settings.
+
+Shared initial Read admission now precedes these local results. Capacity/invalid
+clock refusal emits only the engine terminal; denied leverage reads leave Store
+unchanged and denied cache hits publish nothing. No credentials or route are
+borrowed for these no-I/O branches. Private fills, user-info, cache-miss paging,
+setters and successful margin/position no-ops retain native dispatch and policy.
+
 
 
 ## BloFin PublicTrades managed history
