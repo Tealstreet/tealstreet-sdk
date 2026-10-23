@@ -344,3 +344,27 @@ the added outer call layer. The empty-queue guard is inline; the cold drain body
 is unchanged. All three independent delta reviews are clean and the engine
 feature-on/off suites and strict Clippy pass again. CI determines performance
 recovery; source inspection does not establish the cause or a speedup.
+
+
+## Actual socket/conditional composition (2026-10-24)
+
+This child genuinely integrates conditional terminal #1894 cf6b2a89db8, socket
+lifecycle #1771 c4e02c38fa4 and execution membership #1886 0768b2c4253. The
+ready-owner denial moved to the common prepare_plan_terminal funnel so ordinary
+and conditional terminals share it. No parent conditional implementation changed.
+
+Independent integration review found a socket output hazard: a queued socket
+lifecycle callback during drain can wake a parked command after the normal socket
+fence. The ready callback can send and retire its epoch in that same invocation.
+An original control reproduced the escaping stale send. A second original RED
+showed that fencing only the direct ready callback misses a trailing Plan-ready
+callback. Both are retained as active controls; a test-only signed recipe must
+never reach provider preparation, and a newly connected then retired epoch must
+not escape either.
+
+The cold readiness loop clears custody, sweeps and retires owners, finishes Plan
+and deferred-command callbacks, then uses the existing socket fence/dispatch/frame
+pipeline. It repeats only if an exact ready handle was queued by those callbacks.
+The O(1) empty-index path is unchanged. Source/adversarial and full-map re-reviews
+are clean after the tail correction. Both direct and Plan-tail controls are green;
+broader native/feature-mode/CI receipts follow on the final integration.

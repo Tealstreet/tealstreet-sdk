@@ -233,50 +233,64 @@ impl<V: Venue> Engine<V> {
         self.io.request_contexts.end_preflight_admission();
         self.sweep_executions(now);
         self.flush_http_owner_retirements();
-        while let Some(handle) = self.io.request_contexts.next_preflight_ready() {
-            self.assert_live();
-            self.io.http_preflight_ready = Some(handle.clone());
-            self.io.http_plan_poison = true;
-            #[cfg(feature = "order-locks")]
-            let response = self.io.order_response_token.take();
-            self.venue.on_http_preflight_ready(
-                &mut Cx {
-                    now,
-                    store: &mut self.store,
-                    io: &mut self.io,
-                },
-                &handle,
-            );
-            if !self
-                .io
-                .request_contexts
-                .consume_preflight_activation(&handle)
-            {
-                Cx {
-                    now,
-                    store: &mut self.store,
-                    io: &mut self.io,
-                }
-                .fail_preflight(
+        loop {
+            while let Some(handle) = self.io.request_contexts.next_preflight_ready() {
+                self.assert_live();
+                self.io.http_preflight_ready = Some(handle.clone());
+                self.io.http_plan_poison = true;
+                #[cfg(feature = "order-locks")]
+                let response = self.io.order_response_token.take();
+                self.venue.on_http_preflight_ready(
+                    &mut Cx {
+                        now,
+                        store: &mut self.store,
+                        io: &mut self.io,
+                    },
                     &handle,
-                    VenueError::new("HTTP preflight readiness made no progress")
-                        .kind(crate::ErrorKind::Internal),
-                )
-                .expect("exact stalled preflight activation");
+                );
+                if !self
+                    .io
+                    .request_contexts
+                    .consume_preflight_activation(&handle)
+                {
+                    Cx {
+                        now,
+                        store: &mut self.store,
+                        io: &mut self.io,
+                    }
+                    .fail_preflight(
+                        &handle,
+                        VenueError::new("HTTP preflight readiness made no progress")
+                            .kind(crate::ErrorKind::Internal),
+                    )
+                    .expect("exact stalled preflight activation");
+                }
+                #[cfg(feature = "order-locks")]
+                {
+                    self.io.order_response_token = response;
+                }
+                self.io.http_preflight_ready = None;
+                self.io.http_plan_poison = false;
+                self.assert_live();
+                self.io.request_contexts.end_plan_admission();
+                self.sweep_executions(now);
+                self.flush_http_owner_retirements();
             }
-            #[cfg(feature = "order-locks")]
-            {
-                self.io.order_response_token = response;
+            self.flush_http_plans(now);
+            self.finish_deferred_commands(now);
+            #[cfg(feature = "managed-sockets")]
+            if self.io.managed_socket_active() {
+                self.fence_socket_actions(now);
+                self.dispatch_actions(now);
+                self.drain_socket_frames(now);
+                self.process_socket_work(now);
+                self.dispatch_actions(now);
+                self.fence_socket_actions(now);
             }
-            self.io.http_preflight_ready = None;
-            self.io.http_plan_poison = false;
-            self.assert_live();
-            self.io.request_contexts.end_plan_admission();
-            self.sweep_executions(now);
-            self.flush_http_owner_retirements();
+            if self.io.request_contexts.preflight_ready.is_empty() {
+                break;
+            }
         }
-        self.flush_http_plans(now);
-        self.finish_deferred_commands(now);
     }
 }
 
