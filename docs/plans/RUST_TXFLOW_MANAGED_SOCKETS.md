@@ -305,3 +305,33 @@ PASS,0ignored; all-target/all-feature Clippy -D warnings and package formatting
 PASS. Bans exposed incoming Aster/BingX provenance pruning after a fresh fetch;
 current landing must be genuinely integrated, with no foreign inventory waiver.
 Fresh post-integration checks and independent source/runtime reviews follow.
+
+
+## Integrated validation and independent reviews
+
+Implementation681e9d4669f is genuinely integrated with actual landing6c7f4fcf292d
+at a06d0893ffb. Own source/tests are byte-identical across that merge; all5560
+incoming unowned entries are preserved. Only README/CALLERS append conflicts
+needed the standing incoming-plus-own-suffix resolution. Incoming engine, hosts,
+crypto and foreign inventories are exact; the earlier provenance drift is closed.
+Post-integration scoped143native tests across12targets PASS,0ignored, including
+all27managed socket controls. All-target/all-feature Clippy -D warnings, package
+formatting, full bans/ratchets and git diff --check PASS. The standalone TxFlow
+WASM engine closure includes managed-sockets and is automatically selected by the
+existing engine-feature-modes job.
+
+codex-hcmq3f independently cleared the bounded financial/wire/REST/policy/fixture
+source at a06 after checking every unowned entry and the six-line account intent
+tail; it made no execution or performance claim. codex-uufub4 independently cleared
+shared API/custody/runtime source at the same immutable head and executed exact
+git-archive targets:managed_socket27,public25,account27,private_supervision2 and
+public_supervision9, total90PASS/0ignored. Its independent preservation check
+confirmed all5560unowned entries and unchanged incoming shared source. Independent
+logs and JSON receipts remain outside Git. These bounded reviews do not claim
+full CI/performance/size or train approval; fresh PR CI supplies those gates.
+
+All11originalRED assertions pass. The other11originalGREEN function bodies remain
+byte-identical to8d; only the separately approved opposite-order positive is
+inverted. The FIFO/backlog/rate-limit fixture updates are the explicit behavior
+ruling above. No build profile, CPU/memory/size threshold, tape, harness or
+workflow changes accompany this adapter.
