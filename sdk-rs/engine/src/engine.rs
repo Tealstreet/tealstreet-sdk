@@ -2548,9 +2548,9 @@ pub trait Venue {
     );
     /// A request that may have reached the venue failed without a usable
     /// response. `error.kind` is `Timeout` for engine deadline expiry,
-    /// `Internal` for a whole delivered body (or managed write reply) the engine
-    /// cannot decode, else `Network`. Streams that break mid-array still use
-    /// `on_stream_malformed`.
+    /// `Internal` for a delivered body (or managed write reply) the engine cannot
+    /// decode, including a stream that breaks mid-array (the default
+    /// `on_stream_malformed` forwards here), else `Network`.
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -3512,7 +3512,7 @@ impl<V: Venue> Engine<V> {
     /// Ask the venue once for each due uncertain-write reconcile read, then
     /// re-arm one wake-up for deferred ones. A fresh read the venue reports
     /// through `orders_reconciled` clears the order-lock fence as before.
-    // Out of line: four callers share one copy (wasm size budget).
+    // Out of line: its callers share one copy (wasm size budget).
     #[cfg(feature = "order-locks")]
     #[inline(never)]
     fn reconcile_uncertain(&mut self, now: f64) {
