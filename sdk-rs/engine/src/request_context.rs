@@ -959,6 +959,10 @@ impl PreparedWriteSeal {
     pub(crate) fn is_failure(&self) -> bool {
         self.failure.is_some()
     }
+
+    pub(crate) fn failure(&self) -> Option<&VenueError> {
+        self.failure.as_ref()
+    }
 }
 impl CommandWrites {
     /// Prepare the full declared journal before plan admission. Logical legs
@@ -1446,6 +1450,14 @@ impl CommandWrites {
     /// authority, including for evidence-only IDs on a failed native reply.
     #[cfg(feature = "http-plans")]
     pub(crate) fn validate_failed_attempt(&self, id: RequestId) -> Result<(), Error> {
+        if self.failed_attempt(id)?.id_overflow {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn failed_attempt(&self, id: RequestId) -> Result<&WriteAttempt, Error> {
         if self.sealed {
             return Err(Error::State);
         }
@@ -1457,10 +1469,23 @@ impl CommandWrites {
         if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
             return Err(Error::Revoked);
         }
-        if attempt.id_overflow || !matches!(attempt.result, Some(WriteResult::Failed(_))) {
+        if !matches!(attempt.result, Some(WriteResult::Failed(_))) {
             return Err(Error::State);
         }
-        Ok(())
+        Ok(attempt)
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn failed_attempt_error(&self, id: RequestId) -> Result<VenueError, Error> {
+        let attempt = self.failed_attempt(id)?;
+        let Some(WriteResult::Failed(error)) = &attempt.result else {
+            return Err(Error::State);
+        };
+        let mut error = error.clone();
+        if attempt.id_overflow {
+            evidence::mark_id_overflow(&mut error);
+        }
+        Ok(error)
     }
 
     /// Seal success only when every terminal logical leg is proven accepted.

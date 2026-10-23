@@ -184,6 +184,7 @@ mod planned_calls {
                     &owner,
                     &steps,
                     PlanPolicy {
+                        independent_calls: false,
                         operation: if self.write {
                             Operation::Mutation
                         } else {
@@ -912,6 +913,7 @@ mod planned_calls {
                 calls: &calls,
             }];
             let policy = PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Mutation,
                 credential: Some(credential()),
                 pacing: None,
@@ -975,6 +977,7 @@ mod planned_calls {
                 &preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Read,
                     credential: None,
                     pacing: None,
@@ -1106,6 +1109,7 @@ mod planned_calls {
                 &owner,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Read,
                     credential: None,
                     pacing: None,

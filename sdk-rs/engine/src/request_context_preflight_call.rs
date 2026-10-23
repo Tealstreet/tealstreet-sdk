@@ -86,12 +86,10 @@ impl ContextRegistry {
         &mut self,
         delivery: &Delivery,
     ) -> bool {
-        if let Owner::Command { id, generation } = delivery.context.owner()
+        if (matches!(delivery.context.owner(), Owner::Command { .. })
+            || self.physical_owner(delivery.context.owner()))
             && delivery.context.issued_by(&self.issuer)
-            && let Some(owner) = self
-                .commands
-                .get_mut(&id)
-                .filter(|owner| owner.generation == generation)
+            && let Some(owner) = self.owner_entry_mut(delivery.context.owner())
             && let CommandPhase::Planned(state) = &mut owner.phase
         {
             return state.record_failure(delivery);
@@ -139,10 +137,16 @@ impl ContextRegistry {
         &self,
         context: &Context,
     ) -> Result<(), Error> {
-        let Owner::Command { id, .. } = context.owner() else {
-            return Ok(());
+        let phase = match context.owner() {
+            Owner::Command { id, .. } => self.commands.get(&id).map(|owner| &owner.phase),
+            // The execution root shares its physical owner but is no Plan call.
+            Owner::Execution { generation } if context.leg() == generation => return Ok(()),
+            owner if self.physical_owner(owner) => {
+                self.owner_entry(owner).map(|owner| &owner.phase)
+            }
+            _ => return Ok(()),
         };
-        match self.commands.get(&id).map(|owner| &owner.phase) {
+        match phase {
             Some(CommandPhase::Preflight(state)) => {
                 if state
                     .call
@@ -190,6 +194,16 @@ impl ContextRegistry {
         context: &Context,
         delivery: Option<&Delivery>,
     ) -> Result<Option<Admission>, Error> {
+        if self.physical_owner(context.owner()) {
+            let owner = self.owner_entry(context.owner()).expect("physical owner");
+            let CommandPhase::Planned(state) = &owner.phase else {
+                return Err(Error::Revoked);
+            };
+            if !context.issued_by(&self.issuer) {
+                return Err(Error::Revoked);
+            }
+            return state.admission(context, delivery);
+        }
         let Owner::Command { id, .. } = context.owner() else {
             return Ok(None);
         };
@@ -235,10 +249,10 @@ impl ContextRegistry {
     }
 
     pub(in super::super::super) fn commit_owned_admission(&mut self, admission: &Admission) {
-        let Owner::Command { id, .. } = admission.context.owner() else {
-            unreachable!()
-        };
-        let phase = &mut self.commands.get_mut(&id).unwrap().phase;
+        let phase = &mut self
+            .owner_entry_mut(admission.context.owner())
+            .expect("validated owned admission")
+            .phase;
         if let CommandPhase::Planned(state) = phase {
             state.commit(admission);
             return;
@@ -281,6 +295,14 @@ impl<P> Cx<'_, P> {
             callback(self);
             return;
         }
+        self.with_recorded_owned_failure(error, callback);
+    }
+
+    fn with_recorded_owned_failure(
+        &mut self,
+        error: impl FnOnce() -> VenueError,
+        callback: impl FnOnce(&mut Self),
+    ) {
         let delivery = self
             .io
             .http_delivery
@@ -296,6 +318,26 @@ impl<P> Cx<'_, P> {
         {
             self.finish_owned_read_failure(&delivery, error());
         }
+    }
+
+    pub(in super::super::super) fn with_independent_plan_failure(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, VenueError),
+    ) -> Result<(), Error> {
+        let owned = self.io.http_delivery.as_ref().is_some_and(|delivery| {
+            self.io
+                .request_contexts
+                .plan_from_context(&delivery.context)
+                .is_some_and(|current| current.same_plan(plan))
+                && self.io.request_contexts.record_owned_read_failure(delivery)
+        });
+        if !owned {
+            return self.fail_plan(plan, error);
+        }
+        self.with_recorded_owned_failure(|| error.clone(), |cx| callback(cx, error.clone()));
+        Ok(())
     }
 
     #[inline(never)]
