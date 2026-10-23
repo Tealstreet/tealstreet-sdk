@@ -221,3 +221,10 @@ closes no P0 row and adds no CALLERS landed claim. Gates for adoption: venue +
 Binance, scoped strict Clippy/fmt, bans, both ratchets, three clean independent
 reviews and exact-head CI. Architecture gate: No. Session, scheduling, signing,
 classification and journal ownership stay at shared choke points.
+
+Local plan/test evidence: 4 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(113 tests, 4 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
