@@ -11,6 +11,8 @@ mod planned_calls {
         slot: Option<Slot>,
         long: bool,
         write: bool,
+        leg_intent: Option<crate::classify::Intent>,
+        expected_intents: std::collections::VecDeque<crate::classify::Intent>,
         continue_failure: bool,
         readiness: usize,
         panic_ready: bool,
@@ -80,12 +82,28 @@ mod planned_calls {
             panic!("bad metadata reached provider result")
         }
     }
+    // Baseline adapter exposes the missing pre-registration seam without
+    // granting a venue any private journal or command-intent access.
+    fn context_with_intent(cx: &mut Cx<'_, Context>, plan: &Plan, slot: &Slot,
+        intent: crate::classify::Intent) -> Result<Context, Error> {
+        let context = cx.plan_leg_context(plan, slot)?;
+        cx.http_write_leg_intent(&context, intent)?;
+        Ok(context)
+    }
     impl Plans {
         fn queue(&mut self, cx: &mut Cx<'_, Context>) {
             let plan = self.plan.as_ref().unwrap();
             let slots = cx.plan_slots(plan).unwrap();
             if let Some(slot) = slots.into_iter().next() {
-                let context = cx.plan_leg_context(plan, &slot).unwrap();
+                let context = if let Some(intent) = self.leg_intent.take() {
+                    let result = context_with_intent(cx, plan, &slot, intent);
+                    assert!(result.is_ok(), "declared Plan intent must precede journal registration: {result:?}");
+                    let context = result.unwrap();
+                    // After selection the existing shared public method still
+                    // refuses any change to an already-registered logical leg.
+                    assert_eq!(cx.http_write_leg_intent(&context, intent), Err(Error::Duplicate));
+                    context
+                } else { cx.plan_leg_context(plan, &slot).unwrap() };
                 queue(cx, context, self.write).unwrap();
                 self.slot = Some(slot);
             }
@@ -177,6 +195,18 @@ mod planned_calls {
             let plan = self.plan.as_ref().unwrap().clone();
             let slot = self.slot.as_ref().unwrap().clone();
             cx.validate_plan_delivery(&plan, &context).unwrap();
+            if let Some(expected) = self.expected_intents.pop_front() {
+                use crate::classify::{CodeTable, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict};
+                const TABLE: CodeTable = CodeTable {
+                    rows: &[Row { key: Key::Int(777), verdict: Verdict::Satisfied(SatisfiedIntent::Cancel), only: None }],
+                    success: &[Key::Int(0)], unlisted: Verdict::Unknown(None), status: &[],
+                };
+                let native = Native { code: NativeCode::Int(777), message: "already absent" };
+                let fact = cx.classify_write(&context, &TABLE, Some(&native), "already absent").unwrap();
+                assert_eq!(fact.verdict(), if expected == crate::classify::Intent::Cancel {
+                    Verdict::Satisfied(SatisfiedIntent::Cancel)
+                } else { Verdict::Unknown(None) });
+            }
             if response.body == "replace" {
                 cx.http_write_result(
                     &context,
@@ -966,6 +996,26 @@ mod planned_calls {
         }
         assert!(!e.signing_pending(RequestId(1)));
         assert_eq!(e.venue.readiness, 1);
+    }
+    #[test]
+    fn plan_narrows_a_cancel_leg_before_registration_and_keeps_parent_place_intent() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            write: true, leg_intent: Some(crate::classify::Intent::Cancel),
+            expected_intents: [crate::classify::Intent::Cancel, crate::classify::Intent::Place].into(),
+            ..Default::default()
+        });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        response(&mut e, first, 1., "ok");
+        let (second, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, second, 1.);
+        response(&mut e, second, 2., "ok");
+        assert!(e.venue.expected_intents.is_empty());
+        assert_eq!(e.venue.responses, 2);
+        assert_eq!(e.venue.retired, 1);
+        assert!(e.drain_actions().any(|action| matches!(action,
+            Action::Notice(Notice::CommandDone { command: 7, .. }))));
     }
     #[test]
     fn generic_plan_retry_refuses_a_real_classified_write_grant() {
