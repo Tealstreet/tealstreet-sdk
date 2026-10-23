@@ -60,7 +60,7 @@ pub(crate) struct Pending {
     pub outbound: Action,
     unsigned: Action,
     step: Box<dyn SignStep>,
-    sequence: u32,
+    sequence: u64,
     plain: bool,
     pub managed: bool,
     route_ready: bool,
@@ -106,7 +106,7 @@ pub(crate) struct Dispatch {
     pending: HashMap<RequestId, Pending>,
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: HashMap<RequestId, Pending>,
-    next: u32,
+    next: crate::resource_ids::ResourceIds,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -115,11 +115,17 @@ pub(crate) enum Completion {
 }
 impl Dispatch {
     pub fn next_id(&mut self) -> RequestId {
-        self.next = self
-            .next
-            .checked_add(1)
-            .expect("signing attempt IDs exhausted");
-        RequestId(self.next)
+        RequestId(self.next.next_or_fatal())
+    }
+    pub fn available_id(&self) -> bool {
+        self.next.available(1)
+    }
+    pub fn failed(&self) -> bool {
+        self.next.failed()
+    }
+    #[cfg(test)]
+    pub(crate) fn set_test_ids(&mut self, ids: crate::resource_ids::ResourceIds) {
+        self.next = ids;
     }
     fn head(&self) -> Option<(RequestId, &Pending)> {
         let entries = || self.pending.iter().chain(self.outbound.iter());

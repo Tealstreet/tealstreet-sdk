@@ -6,7 +6,7 @@ use safe_cex_engine::request_context::{
 
 #[derive(Serialize)]
 pub(super) struct HttpPacket<'a> {
-    request: u32,
+    request: u64,
     method: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     route: Option<&'static str>,
@@ -58,7 +58,7 @@ pub(super) enum HttpPhaseOut<'a> {
     Cancel {
         preparation: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        signing: Option<u32>,
+        signing: Option<u64>,
     },
 }
 
@@ -116,8 +116,9 @@ enum ClaimOut {
 #[wasm_bindgen]
 impl WasmEngine {
     #[wasm_bindgen(js_name = signingPending)]
-    pub fn signing_pending(&self, attempt: u32) -> bool {
-        self.inner.signing_pending(RequestId(attempt))
+    pub fn signing_pending(&self, attempt: f64) -> Result<bool, js_sys::Error> {
+        let attempt = host_resource_id(attempt)?;
+        Ok(self.inner.signing_pending(RequestId(attempt)))
     }
 
     #[wasm_bindgen(js_name = httpPreparationPending)]
@@ -231,5 +232,39 @@ mod tests {
         for invalid in ["0", "01", "+1", " 1", "18446744073709551616"] {
             assert_eq!(resource_id(invalid), None);
         }
+    }
+
+    #[test]
+    fn managed_packets_and_cancel_signing_keep_safe_wide_numeric_ids() {
+        let id = safe_cex_engine::resource_ids::MAX_RESOURCE_ID;
+        let request = safe_cex_engine::HttpRequest {
+            id: RequestId(id),
+            method: safe_cex_engine::Method::Get,
+            route: None,
+            timeout_ms: Some(900),
+            url: "https://venue.test/read".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        };
+        let text = format!("p1:{id}:18446744073709551615:0");
+        let preparation = Preparation::from_wire(&text).unwrap();
+        let actions = [
+            Action::Http(request.clone()),
+            Action::ManagedHttp(Box::new(HttpAction::Prepare {
+                preparation,
+                intent: RoutingIntent::Primary,
+                request,
+            })),
+            Action::ManagedHttp(Box::new(HttpAction::Cancel {
+                preparation,
+                signing: Some(RequestId(id)),
+            })),
+        ];
+        let rows: serde_json::Value = serde_json::from_str(&encode(&actions)).unwrap();
+        assert_eq!(rows[0]["request"].as_u64(), Some(id));
+        assert_eq!(rows[1]["packet"]["request"].as_u64(), Some(id));
+        assert_eq!(rows[1]["preparation"], text);
+        assert_eq!(rows[2]["signing"].as_u64(), Some(id));
     }
 }
