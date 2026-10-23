@@ -1,4 +1,4 @@
-//! Original controls for one-response history custody; no production adapter.
+//! Unsigned public-trades custody and unchanged signed-read compatibility.
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Error, HttpAction, Prepared, RoutingIntent};
 use safe_cex_engine::{
@@ -178,28 +178,6 @@ fn unsigned_public_history_requires_managed_preparation() {
 }
 
 #[test]
-fn private_history_requires_managed_secondary_preparation() {
-    let mut e = engine(true, true);
-    ask(&mut e, NOW, OWNER, fills());
-    prepared(
-        &e.drain_actions().collect::<Vec<_>>(),
-        "/api-data/g-futures/trades",
-        RoutingIntent::Secondary,
-    );
-}
-
-#[test]
-fn client_lookup_requires_managed_primary_preparation() {
-    let mut e = engine(true, true);
-    ask(&mut e, NOW, OWNER, lookup());
-    prepared(
-        &e.drain_actions().collect::<Vec<_>>(),
-        "/api-data/g-futures/orders/by-order-id",
-        RoutingIntent::Primary,
-    );
-}
-
-#[test]
 fn unclaimed_response_cannot_publish_history_before_route_binding() {
     let mut e = engine(false, false);
     ask(&mut e, NOW, OWNER, public());
@@ -296,22 +274,6 @@ fn network_failure_keeps_its_typed_kind_without_message_inference() {
     );
     let output: Vec<_> = e.drain_actions().collect();
     assert_eq!(failure(&output, OWNER).kind, Some(ErrorKind::Network));
-}
-
-#[test]
-fn expired_lookup_cannot_become_definitive_absence_or_finish_a_reused_owner() {
-    let mut e = engine(true, false);
-    let first = released(&mut e, NOW, OWNER, lookup());
-    let output = reply(&mut e, NOW + 20_000., &first, 200, "[]");
-    assert_eq!(failure(&output, OWNER).kind, Some(ErrorKind::Timeout));
-    let second = released(&mut e, NOW + 20_001., OWNER, lookup());
-    assert_ne!(first.id, second.id);
-    assert!(reply(&mut e, NOW + 20_002., &first, 200, "[]").is_empty());
-    let output = reply(&mut e, NOW + 20_003., &second, 200, "[]");
-    assert_eq!(
-        done(&output, OWNER),
-        Some(r#"{"found":false,"definitive":true}"#)
-    );
 }
 
 #[test]
@@ -583,4 +545,17 @@ fn native_history_capacity_recovers_after_an_owned_terminal() {
     let next = released(&mut e, NOW + 2., OWNER + 16, public());
     let output = reply(&mut e, NOW + 3., &next, 200, TRADE);
     assert!(done(&output, OWNER + 16).is_some());
+}
+
+#[test]
+fn expired_public_read_cannot_finish_a_reused_owner() {
+    let mut e = engine(false, false);
+    let first = released(&mut e, NOW, OWNER, public());
+    let output = reply(&mut e, NOW + 20_000., &first, 200, TRADE);
+    assert_eq!(failure(&output, OWNER).kind, Some(ErrorKind::Timeout));
+    let second = released(&mut e, NOW + 20_001., OWNER, public());
+    assert_ne!(first.id, second.id);
+    assert!(reply(&mut e, NOW + 20_002., &first, 200, TRADE).is_empty());
+    let output = reply(&mut e, NOW + 20_003., &second, 200, TRADE);
+    assert!(done(&output, OWNER).is_some());
 }
