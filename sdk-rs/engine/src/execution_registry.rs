@@ -102,7 +102,8 @@ impl ContextRegistry {
             return Err(Error::Invalid);
         };
         let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
-        if !owner.entry_owned || owner.completion_root != *root {
+        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true } if issued == root)
+        {
             return Err(Error::Revoked);
         }
         if owner.pending != 0
@@ -134,12 +135,21 @@ impl ContextRegistry {
         now: f64,
     ) -> Result<Context, Error> {
         self.contexts.retain(|_, old| old.deadline() > now);
-        if self.contexts.len() >= CAPACITY {
+        // Plan-reserved identities are promised; a root may not take them.
+        if self
+            .contexts
+            .len()
+            .checked_add(self.reserved_context_count())
+            .is_none_or(|total| total >= CAPACITY)
+        {
             return Err(Error::Capacity);
         }
         if self.contexts.contains_key(&identity) {
             return Err(Error::Duplicate);
         }
+        self.contexts
+            .try_reserve(1 + self.reserved_context_count())
+            .map_err(|_| Error::Capacity)?;
         Context::new(
             Owner::Execution {
                 generation: identity,
@@ -340,7 +350,7 @@ impl ContextRegistry {
             || self
                 .commands
                 .get(&id)
-                .is_none_or(|owner| owner.completion_root != *root)
+                .is_none_or(|owner| owner.context_root() != Some(root))
         {
             return Err(Error::Revoked);
         }
@@ -382,13 +392,21 @@ impl ContextRegistry {
         self.commands
             .get(&sealed.command)
             .filter(|owner| owner.generation == sealed.generation)
-            .map(|owner| owner.completion_root.clone())
+            .and_then(|owner| owner.context_root().cloned())
     }
 
     pub(super) fn forget_observer(&mut self, command: CommandId) {
         self.executions.observers.remove(&command);
     }
 }
+
+#[cfg(all(test, feature = "http-plans"))]
+#[path = "execution_plan_capacity_tests.rs"]
+mod plan_capacity_tests;
+
+#[cfg(all(test, feature = "http-plans"))]
+#[path = "execution_plan_composition_tests.rs"]
+mod plan_composition_tests;
 
 #[cfg(test)]
 mod tests {
