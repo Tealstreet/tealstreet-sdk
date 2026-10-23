@@ -18,7 +18,11 @@ Read `../CLAUDE.md` first for shared exchange-integration conventions.
 
 ## Authentication
 
-TxFlow is Hyperliquid-shaped: EIP-712 agent-key signing with a main wallet address plus an approved agent key. Future implementation should store the main wallet address in `applicationId` and the agent private key in `secret`, mirroring Hyperliquid's account model.
+TxFlow has no CEX-style API keys. Reads need no auth; writes are signed locally. TxFlow is Hyperliquid-shaped: EIP-712 agent-key signing with a main wallet address plus an approved agent key. Future implementation should store the main wallet address in `applicationId` and the locally generated agent private key in `secret`, mirroring Hyperliquid's account model. The venue-side `key` field is unused.
+
+TxFlow never returns an agent private key. Tealstreet must generate the agent wallet locally, send only the agent address in `approveAgent`, and have the owner wallet sign that approval. TxFlow records the approved agent address for the account; day-to-day trading is signed with the locally stored agent private key.
+
+Private/trading support therefore requires a custom wallet + agent-key onboarding flow, not the generic API-key paste form. Do not expose a generic TxFlow API-key field unless TxFlow later ships a real venue-issued key model.
 
 Direct EIP-712 actions include `approveAgent`, `tokenSend`, `withdraw3`, `approveBuilderFee`, and `revokeBuilderFee`. Agent-signed MessagePack actions include `order`, `cancel`, `cancelByCloid`, `modify2`, `update*`, `outcomeOperate`, and `claimBuilderRewards`. Testnet domain is `TxFlow-Testnet`, chain ID `2511`; mainnet docs list `TxFlow-Mainnet`, chain ID `869`, but keep it unused while mainnet is offline. `signatureChainId` only overrides the EIP-712 domain chain for direct EIP-712 actions; agent-signed actions ignore it.
 
