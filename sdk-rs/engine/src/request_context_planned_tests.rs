@@ -16,6 +16,7 @@ mod planned_calls {
         panic_ready: bool,
         bad_retry: bool,
         check_generic_resend: bool,
+        wrong_resend_slot: Option<Slot>,
         other_plan: Option<Plan>,
         cross_owner_denied: usize,
         wait: u32,
@@ -189,7 +190,7 @@ mod planned_calls {
                 return;
             }
             if response.body == "retry" {
-                let _grant = if self.write {
+                let grant = if self.write {
                     use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
                     const TABLE: CodeTable = CodeTable {
                         rows: &[Row { key: Key::Int(10002), verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid), only: None }],
@@ -209,18 +210,36 @@ mod planned_calls {
                     assert_eq!(cx.io.actions.len(), actions);
                     cx.validate_plan_delivery(&plan, &context).unwrap();
                 }
-                let context = cx
-                    .plan_retry_context(
-                        &plan,
-                        &slot,
-                        &context,
-                        if self.write {
-                            crate::request_context::RetryEvidence::DefinitiveRefusal
-                        } else {
-                            crate::request_context::RetryEvidence::ReadFailure
-                        },
-                    )
-                    .unwrap();
+                let previous_attempt = cx.io.http_delivery.as_ref().unwrap().attempt.request;
+                if self.check_generic_resend {
+                    let ids = cx.io.next_id;
+                    let actions = cx.io.actions.len();
+                    assert_eq!(cx.plan_resend_context(&plan, &slot, &context,
+                        crate::request_context::ResendGrant { attempt: RequestId(u64::MAX) }), Err(Error::Revoked));
+                    if let Some(foreign) = &self.wrong_resend_slot {
+                        assert_eq!(cx.plan_resend_context(&plan, foreign, &context,
+                            crate::request_context::ResendGrant { attempt: previous_attempt }), Err(Error::Revoked));
+                    }
+                    assert_eq!(cx.io.next_id, ids);
+                    assert_eq!(cx.io.actions.len(), actions);
+                    cx.validate_plan_delivery(&plan, &context).unwrap();
+                }
+                let context = if let Some(grant) = grant {
+                    cx.plan_resend_context(&plan, &slot, &context, grant).unwrap()
+                } else {
+                    cx.plan_retry_context(&plan, &slot, &context,
+                        crate::request_context::RetryEvidence::ReadFailure).unwrap()
+                };
+                if self.check_generic_resend {
+                    // Replaying the prior opaque grant cannot select another
+                    // retry or consume additional reserved attempt identities.
+                    let ids = cx.io.next_id;
+                    let actions = cx.io.actions.len();
+                    assert_eq!(cx.plan_resend_context(&plan, &slot, &context,
+                        crate::request_context::ResendGrant { attempt: previous_attempt }), Err(Error::Revoked));
+                    assert_eq!(cx.io.next_id, ids);
+                    assert_eq!(cx.io.actions.len(), actions);
+                }
                 if self.bad_retry {
                     let result = cx.request_signed_managed(
                         context.clone(),
@@ -953,6 +972,9 @@ mod planned_calls {
         let mut e = crate::test_support::seeded_engine(Plans {
             write: true, check_generic_resend: true, ..Default::default()
         });
+        let mut foreign = crate::test_support::seeded_engine(Plans::default());
+        start(&mut foreign, 0.);
+        e.venue.wrong_resend_slot = foreign.venue.slot.clone();
         start(&mut e, 0.);
         let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
         release(&mut e, first, 0.);

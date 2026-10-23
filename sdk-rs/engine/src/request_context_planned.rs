@@ -504,14 +504,40 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
-    /// Select only the current call's declared retry. Native effect-free proof
-    /// is checked by the existing write journal before committing selection.
+    /// Select a declared Read retry without extending its owner or root. A
+    /// write refusal must use the opaque classified resend-grant operation.
     pub fn plan_retry_context(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
         evidence: RetryEvidence,
+    ) -> Result<Context, Error> {
+        if evidence == RetryEvidence::DefinitiveRefusal {
+            return Err(Error::RetryForbidden);
+        }
+        context.retry(evidence, self.now)?;
+        self.select_plan_retry(plan, slot, context)
+    }
+
+    /// Consume the existing classifier's exact-attempt write grant within the
+    /// declared call window. The journal alone owns one-resend consumption.
+    pub fn plan_resend_context(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        grant: ResendGrant,
+    ) -> Result<Context, Error> {
+        self.http_resend_context(context, grant)?;
+        self.select_plan_retry(plan, slot, context)
+    }
+
+    fn select_plan_retry(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
     ) -> Result<Context, Error> {
         let body = self.io.request_contexts.validate_plan(plan, self.now)?;
         self.io.request_contexts.validate(context, self.now)?;
@@ -525,7 +551,6 @@ impl<P> Cx<'_, P> {
         if !call.matches(delivery) || !matches!(call.stage, Stage::Active { .. }) {
             return Err(Error::Revoked);
         }
-        context.retry(evidence, self.now)?;
         if call.selected >= call.terms.attempts {
             return Err(Error::RetryForbidden);
         }
