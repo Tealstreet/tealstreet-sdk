@@ -53,3 +53,13 @@ checks. Append CALLERS/AUDITS/QUALITY and README, prune only the five exact hash
 CI owns WASM/replay/size/timing. Explicit train slot, latest landing integration,
 fresh separate guard and head-matched merge remain mandatory. Architecture gate:
 shared engine admission/completion only; no venue-specific cross-cutting mechanism.
+
+## Exact selected fingerprints
+
+| Hash (count one each) | Original terminal |
+| --- | --- |
+| `c26319aae17ffaa69a204fb71bea1ad4e83a1f01411ca808627909808f6be6ef` | `cx . fail ( command , "Bitrue v2 has only single-order lookup, not complete order history" )` |
+| `3cdc4e2ec5596e8f05582d9ea14e49f5e810d97c769e5189330ab4292ee9b9b4` | `cx . fail ( command , "Bitrue v2 transfer and force-order histories are not a complete PnL/funding ledger" )` |
+| `3222c9dc7146bd368025519801a954c755cb187050b8dcca08eea2163dfb87f8` | `cx . fail ( command , "Bitrue fills require authenticated futures credentials" , )` |
+| `b0723bf50b38aec58f93f9e0c3c86eb7adb6b09590d7255838d094a9bd119c37` | `cx . fail ( command , "Invalid Bitrue fill time window" )` |
+| `1d929e91360e3f2b465b4f60d8024a7aa9f9167e8573e49457119fe4d06f634d` | `cx . fail ( command , "Bitrue fills require a known symbol" )` |
