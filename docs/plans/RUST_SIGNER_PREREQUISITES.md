@@ -212,78 +212,121 @@ engine PR off landing. Reviewers: codex-uufub4 (engine) and codex-hcmq3f
 (Polymarket `l1Wallet`). The Paradex Ethereum-to-Stark derivation stays out
 until Sam's B/C decision.
 
-**Problem.** Venues still derive public values from key material: the
-Hyperliquid and TxFlow agent addresses (`account.rs:315`, `lib.rs:1077`,
-TxFlow `lib.rs:51`), the GRVT signer address in the order body, and the
-Polymarket address. Once a venue holds only refs it cannot do that, and it
-must never receive the key to try.
+**Dependencies.** Key-use tagging (`KeyUse`/`Need`, #1899) and the
+non-HMAC `Sign` arms (#1844). Before those land, `LocalSigner` refuses every
+non-HMAC `Sign`, and P4 stacks on them.
+
+**Problem.** Venues still touch key material for public values:
+- Hyperliquid `account.rs:315` warns when the key does not match the
+  configured API wallet.
+- Hyperliquid `lib.rs:1077` deactivates spot when key and wallet do not pair.
+- TxFlow `lib.rs:51` checks that the key parses.
+- GRVT `lib.rs:725` warns on a mismatch, and `trading.rs:784` deliberately
+  signs with the derived address so stale config cannot block trading.
+- Polymarket needs the `l1Wallet` address.
+
+These are mostly checks, not derivations. P4 moves the derivation behind the
+provider and keeps every check and its outcome. A venue holding only refs
+must never receive the key.
 
 **Operations** (engine `signing.rs`; non-secret results, no payload):
 - `Operation::PublicAddress { key }`: the 20-byte Ethereum address of a
-  secp256k1 key.
-- `Operation::PublicKey { algorithm, key }`: the public key for that
-  algorithm's key form. `Ed25519` gives 32 bytes, `Es256` 65-byte
-  uncompressed SEC1, `StarkDigest` the 32-byte big-endian felt, and
-  `Secp256k1Digest` 33-byte compressed SEC1. Any other algorithm is
-  `InvalidRequest`. Lighter's key is added with its own algorithm.
-- Both obey role binding: an extra ref answers only for its role's algorithm
-  (and `PublicAddress` only for a secp256k1 role, P6b's `l1Wallet`).
-- Validation:
-  - result widths are exact;
-  - a request mixing public operations with `Sign`/`Present`/`Sha256` is
-    allowed, since public values are never secrets;
-  - `remote` (P8) still requires exactly one `Sign`, so a public operation
-    is never sent as a recipe op.
+  `Secp256k1Digest` key.
+- `Operation::PublicKey { algorithm, key }`. Only `Ed25519` (32 bytes) and
+  `StarkDigest` (32-byte big-endian felt) for now. `Es256` and compressed
+  `Secp256k1Digest` have no consumer and are deferred. Any other algorithm
+  is `InvalidRequest`.
+- **Key typing.** A public operation is answered only for a ref that setup
+  policy or a role declares as an asymmetric key of exactly that algorithm
+  (#1899 `KeyUse`). An HMAC or untyped ref, a credential, a passphrase or a
+  cross-slot ref is refused. Otherwise the result would be a stable
+  fingerprint of a secret. Role aliases are closed and listed: `l1Wallet`
+  and an EIP-191/EIP-712 `signing` ref are `Secp256k1Digest`, and
+  `zklinkSeed` answers nothing.
+- **Key forms.** Each algorithm reads the same installed form as its `Sign`
+  arm:
+  - `Secp256k1Digest`: raw 32 bytes;
+  - `Ed25519`: 32-byte seed or the checked 64-byte keypair (#1948);
+  - `StarkDigest`: the felt below the curve order.
+  
+  Results are validated for canonical encoding, field bounds and on-curve
+  points, not only width.
+- **Mixed requests.** Public operations may share a request with
+  `Sign`/`Present`/`Sha256`. Ordering, atomicity and dependencies are
+  unchanged. P8 `remote` still requires exactly one `Sign`: a remote request
+  carrying a public operation is refused before any work. The existing
+  `bind` `_ =>` arm already does this, and a test pins it.
 
-**Local provider.** It implements both from installed material, through the
-existing primitives (`ethereum::private_key_address`, `ed25519::public_key`,
-`starknet::public_key`, `p256` public key), behind the same crypto feature
-arms. Results are public bytes and never echo key material.
+**Local provider.** Answers from installed material through the existing
+primitives, behind the same crypto feature arms. Results never echo key
+material.
 
-**Setup-time fetch.**
-- Local providers answer synchronously (`immediate()`).
-  `safe_cex_venues::fetch_public(provider, ops) -> Result<Vec<Vec<u8>>,
-  SignError>` runs a public-only request through `sign_ready` inside trusted
-  construction. It returns `Unavailable` for a non-immediate provider instead
-  of blocking.
-- The family's admission maps results into non-secret `Options` fields such
-  as `agent_address` or `signer_address`, the same way public config already
-  arrives. The venue reads config; it never derives.
-- Host and remote providers cannot answer synchronously at construction.
-  This needs a reviewer decision:
-  - **A.** Their public values are declared account config, supplied with
-    the account (the browser or remote signer knows its own address). Setup
-    fails closed when a required value is missing, and a startup check
-    verifies it after the first signature where a family can (recovery,
-    P8 verifiers). No engine seam is needed.
-  - **B.** An engine startup seam `Cx::fetch_public(ops, pending)` emits
-    `Action::Sign` with public-only work, and `Venue::on_public` receives
-    the bytes before private startup.
+**One channel: declared, bound account config (option A; both reviewers
+agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
+- **Binding.** A public value is account metadata bound to the trusted
+  identity, slot, exact designated `KeyRef`, algorithm or closed role, and
+  generation.
+- **Missing or conflicting metadata refuses setup.** There is no fallback to
+  another ref or slot.
+- **What a declared value is.** Trusted account configuration. It is not a
+  cryptographically verified derivation, and never a new subject or nonce
+  selector.
+- **Local provider.** Trusted setup calls
+  `safe_cex_venues::fetch_public(provider, ops)`:
+  - public-only, bounded by op count;
+  - runs through `sign_ready`;
+  - returns `Unavailable` without scheduling for a non-immediate provider.
+- **Admission compares, never overwrites.** When a value is declared,
+  admission compares it with the fetched one, and a mismatch keeps today's
+  outcome:
+  - the Hyperliquid and GRVT notices;
+  - Hyperliquid deactivating spot;
+  - TxFlow refusing a key that does not parse.
 
-  A is smaller and matches how keyless accounts already carry public
-  identifiers; B is only needed if a family must start before any
-  configured value exists. I recommend A.
-- JS host contract: `SignOperation` gains `publicAddress` and `publicKey`
-  kinds in `host.d.mts`. `remoteSignerProvider` answers them only from
-  declared public identity metadata and refuses otherwise; it never forwards
-  them to the remote signer.
+  With no declared value, the fetched value fills the field. GRVT keeps
+  signing with the derived (fetched) address.
+- **Host and remote providers.** The value must be declared. Where the
+  family's signature is recoverable (EIP-712/191 for Hyperliquid, TxFlow,
+  GRVT and Polymarket), dispatch recovers the signer and compares it with
+  the declared value *before* physical release, import or any private
+  effect. A mismatch refuses. A family that cannot verify before release
+  stays held for an explicit owner decision rather than trusting the
+  declaration.
+- **P6b consumes this channel.** The `l1Wallet` address comes from
+  `fetch_public` (local) or bound metadata (host/remote). P6b has no
+  separate setup-metadata path and no run-time `PublicAddress` fallback.
 
-**REDs** (each shown failing first):
-- R1: a `PublicAddress` request for a secp256k1 key is refused today (no
-  operation).
-- R2: an extra ref answers a public operation outside its role.
-- R3: `fetch_public` on a local provider returns the address equal to the
-  legacy `private_key_address` for the same key, and Hyperliquid's legacy
-  derivation for a corpus key.
+**JS.** No new `SignOperation` kinds: under A nothing at run time asks a
+host for a public value. Host and remote metadata is keyed by ref in the
+account setup policy (`localSignerSetup.ts`/`construction.ts` types), and
+setup refuses when it is missing.
+
+**REDs** (assertions on existing APIs, shown failing first; tests of new
+APIs are labelled as such, not REDs):
+- R1: Hyperliquid construction from refs only (no key in `Options`) cannot
+  run its agent-wallet check today; it reports a missing key instead of
+  comparing.
+- R2: through the existing dispatch, a host-provider EIP-712 signature
+  recovering to an address other than the declared one is still released.
+- R3: P6b's `l1Wallet` address cannot be produced without the key in the
+  venue.
 
 **Tests.**
-- Widths and refusals per algorithm.
-- The local provider matches independent vectors: ethers addresses, RFC 8032
-  public keys, the starknet.js public key and p256 SEC1.
-- Role binding, a mixed request, and P8 `remote` refusing public operations.
-- `fetch_public` returns `Unavailable` for a non-immediate provider.
-- TS provider: `publicAddress` answered from metadata, refused without it.
+- New API: widths, canonical, on-curve and field-bound refusals per
+  algorithm.
+- Independent vectors: ethers addresses, RFC 8032 public keys, starknet.js
+  public keys.
+- Refusals for an HMAC/untyped ref, credential, passphrase, cross-slot ref,
+  and an out-of-role extra ref.
+- Mixed request ordering. A P8 remote request with a public operation
+  refuses before work.
+- `fetch_public` returns `Unavailable` without scheduling for a
+  non-immediate provider, and over-bound requests are refused.
+- Mismatch notices and the spot deactivate still fire, through the
+  Hyperliquid and GRVT admission.
+- Missing or conflicting host metadata refuses setup.
+- A recovered-signer mismatch refuses before release.
 
-**Architecture gate.** This is the shared choke point: one provider
-operation for every family that needs a public value, with no venue
-derivation.
+**Architecture gate.** One shared provider operation and one setup channel
+for every family that needs a public value, with no venue derivation. The
+pre-release recovery check sits once in dispatch, not in each venue.

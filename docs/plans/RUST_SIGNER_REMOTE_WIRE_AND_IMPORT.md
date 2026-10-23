@@ -221,8 +221,9 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
 1. **Setup.**
    - The wallet key is `ExtraKey::L1Wallet` on the primary identity (declared
      hex, required for private).
-   - A non-secret provider derivation (P4) returns its address. The venue
-     never derives it.
+   - Its address arrives through P4's one channel: `fetch_public` for a
+     local provider, or bound account metadata for host/remote. There is no
+     other path. The venue never derives it.
    - L1 `ClobAuth` EIP-712 is a recipe: `Secp256k1Digest` over the venue
      digest, with the `l1Wallet` role.
 2. **Import request.**
