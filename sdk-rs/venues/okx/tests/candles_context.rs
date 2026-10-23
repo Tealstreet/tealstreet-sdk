@@ -7,7 +7,9 @@ use crate::support::FixtureOptions as Options;
 use crate::support::*;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{HttpAction, RoutingIntent};
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Response, TimerId, VenueError};
+use safe_cex_engine::{
+    Action, Command, Engine, ErrorKind, Event, Notice, Outcome, Response, TimerId, VenueError,
+};
 use safe_cex_venue_okx::Okx;
 
 const NOW: f64 = 1_800_000_000_000.0;
@@ -669,4 +671,91 @@ fn late_reply_after_a_terminal_is_inert() {
     assert!(!sends_io(&stale));
     let out = answer(&mut e, &fallback, &envelope(ROW_OLD), NOW + 3.0);
     assert_eq!(terminals(&out, 51).len(), 1);
+}
+
+#[test]
+fn a_refused_history_fallback_keeps_the_soft_empty_result() {
+    let mut e = ready();
+    let reads: Vec<_> = (1_000..1_256)
+        .map(|command| candle_read(&fetch_ten(&mut e, command, NOW)))
+        .collect();
+    // Every Context slot is held, so the fallback leg cannot be admitted.
+    let out = answer(&mut e, &reads[0], &envelope(""), NOW + 1.0);
+    assert!(!sends_io(&out), "no fallback is sent past capacity");
+    assert_eq!(terminals(&out, 1_000).len(), 1);
+    assert_eq!(terminals(&out, 1_000)[0], Ok("[]".to_owned()));
+    assert_eq!(diagnostics(&out, 1_000).len(), 1);
+}
+
+#[test]
+fn a_deadline_before_route_preparation_is_a_hard_not_sent_failure() {
+    let mut e = ready();
+    e.handle(
+        NOW,
+        Event::Command(Command::FetchCandles {
+            command: 60,
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+            limit: Some(10),
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    e.prepare_dispatch(NOW);
+    let raw: Vec<_> = e.drain_actions().collect();
+    assert!(
+        http(&raw).is_empty(),
+        "no physical HTTP before route preparation"
+    );
+    let seen = fire_armed(&mut e, &raw, NOW + DEADLINE_MS);
+    let terminal = terminals(&seen, 60);
+    assert_eq!(terminal.len(), 1);
+    let error = terminal[0].clone().unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Timeout));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert!(
+        diagnostics(&seen, 60).is_empty(),
+        "pre-send failure is not soft"
+    );
+}
+
+#[test]
+fn a_deadline_mid_stream_is_soft_once_and_late_chunks_are_inert() {
+    let mut e = ready();
+    let out = fetch_ten(&mut e, 61, NOW);
+    let Action::Http(r) = candle_read(&out) else {
+        unreachable!()
+    };
+    e.handle(
+        NOW + 1.0,
+        Event::HttpStart {
+            request: r.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    let body = format!(r#"{{"code":"0","msg":"","data":[{ROW_NEW},"#);
+    e.handle(
+        NOW + 2.0,
+        Event::HttpChunk {
+            request: r.id,
+            data: body.as_bytes(),
+        },
+    );
+    let mut all = out.clone();
+    all.extend(prepared(&mut e, NOW + 2.0));
+    let seen = fire_armed(&mut e, &all, NOW + DEADLINE_MS);
+    assert_eq!(terminals(&seen, 61), vec![Ok("[]".to_owned())]);
+    assert_eq!(diagnostics(&seen, 61).len(), 1);
+    let tail = format!("{ROW_OLD}]}}");
+    e.handle(
+        NOW + DEADLINE_MS + 1.0,
+        Event::HttpChunk {
+            request: r.id,
+            data: tail.as_bytes(),
+        },
+    );
+    e.handle(NOW + DEADLINE_MS + 1.0, Event::HttpEnd { request: r.id });
+    let late = prepared(&mut e, NOW + DEADLINE_MS + 1.0);
+    assert!(terminals(&late, 61).is_empty(), "no second terminal");
 }

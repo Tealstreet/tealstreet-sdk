@@ -418,8 +418,12 @@ impl Okx {
     fn history_candles(&mut self, cx: &mut Cx<'_, Pending>, root: Context, read: CandleRead) {
         match cx.http_leg_context(&root, candle_policy()) {
             Ok(leg) => self.send_candles(cx, root, leg, read),
+            // The recent page already went out: keep the native soft shape.
             Err(reason) => {
-                let _ = cx.fail_context(&root, reason.venue_error());
+                let message = reason.venue_error().message;
+                if cx.command_error_context(&root, message).is_ok() {
+                    let _ = cx.done_context(&root, "[]".into());
+                }
             }
         }
     }
