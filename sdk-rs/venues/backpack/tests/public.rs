@@ -188,7 +188,13 @@ fn candle_seconds_and_empty_stream_candles() {
             to_ms: None,
         }),
     );
-    let r = http(&mut e, "klines");
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("klines") => Some(request),
+            _ => None,
+        })
+        .expect("klines");
     assert!(r.url.contains("startTime=1732182900"));
     reply(
         &mut e,
