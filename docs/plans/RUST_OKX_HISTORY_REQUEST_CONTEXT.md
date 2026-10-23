@@ -75,7 +75,7 @@ that remaining duration. The root is immutable and bounded by the original
 receipt deadline after held entry; Remaining floors whole milliseconds, so a
 fractional hold can make it under1ms earlier, never later. No page or fallback
 renews it. Fresh Expired needs shared typed Timeout rejection before any effect,
-Read outcome None. Missing custody grants no work. Initial entry refusal is
+Read outcome None. Missing entry custody grants no work. Initial entry refusal is
 already published by the engine; never add a numeric fallback. The #1945 owner
 proposed `Cx::reject_expired_command(Operation)` at `b0d875eff64`, taking no
 numeric ID and using the shared entry rejection transaction. It grants nothing
@@ -232,9 +232,9 @@ Refresh the original controls against real `handle_command` propagation before
 attributing caller-root failures to venue adoption. Keep the original RED
 checkpoint intact. Invalid host input is a distinct API boundary:
 `handle_command` returns typed Invalid without dispatch, while plain `handle`
-can enter with no receipt stamp. Do not fabricate a default root or numeric
-terminal when `command_wait` returns None; confirm that boundary with the seam
-owner before changing its regression expectation.
+can enter with no receipt stamp. The getter itself grants no authority; use
+normal genuine entry admission and never fabricate a receipt or numeric
+terminal. The seam owner's clarification below settles the None boundary.
 
 The fresh collision check still lists #1773 history/lib source and #1943 lib
 source. The #1773/#1938/#1942 chain and narrow source handoff are being
@@ -255,3 +255,12 @@ ownership passes to this lane from b09e8882187; its signer edits are final on
 that chain. The only permitted lib.rs edits are Pending::History response,
 failure and typed signing-failure arms. Send/sign funnel pruning and deleting
 the OKX staging entry wait for a later coordinated slice after actual landings.
+
+claude-fe7lgm confirmed the unstamped-entry contract: None does not itself
+terminate, and reject_expired_command is inert/Revoked there. Normal
+admit_http_command owns the outcome; a NaN-clock entry fails typed InvalidInput
+with no Read outcome, preserving the original local-empty assertion. For None,
+the admission policy uses the shared DEFAULT_COMMAND_WAIT_MS rather than a
+venue constant or zero timeout. Actual Remaining always supplies the root's
+caller-bounded duration, while Expired uses reject_expired_command. The explicit
+host-boundary handle_command failure is separately typed Err with no dispatch.

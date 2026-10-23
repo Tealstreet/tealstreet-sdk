@@ -38,7 +38,7 @@ fn public_trades() -> Query {
 }
 
 // Valid receipts use the reviewed #1945 API. The nonfinite-clock control keeps
-// exercising plain handle's unstamped entry until that separate contract settles.
+// exercising plain handle's unstamped entry and normal admission refusal.
 fn deliver(engine: &mut Engine<Okx>, at: f64, query: Query, timeout_ms: Option<u32>) {
     let command = Command::Query {
         command: OWNER,
@@ -122,6 +122,23 @@ fn managed(output: &[Action], endpoint: &str) {
         "no legacy physical dispatch before managed preparation"
     );
     assert_eq!(output.iter().filter(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains(endpoint)))).count(), 1);
+}
+
+#[test]
+fn host_invalid_clock_returns_typed_error_without_dispatch() {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let error = engine
+        .handle_command(
+            f64::NAN,
+            Command::Query {
+                command: OWNER,
+                query: orders(),
+            },
+            None,
+        )
+        .expect_err("invalid host receipt must not dispatch");
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(engine.drain_actions().next().is_none());
 }
 
 #[test]
