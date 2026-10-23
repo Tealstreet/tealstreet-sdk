@@ -4112,3 +4112,36 @@ SDK arguments and row shapes are unchanged. Numeric Completion uses legacy
 authority rather than managed Context completion. Callers must ingest command-scoped
 incomplete-query warnings, gate coverage accordingly and handle typed rejection
 as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+### KuCoin futures and spot owned history
+
+This slice moves the implemented KuCoin query reads to the existing engine
+history owner. Futures fills, orders, transaction ledger and symbol-scoped
+funding retain one owner across native pages and time windows. A terminal
+HTTP/envelope/metadata-decode/row failure before any eligible page rows were accepted rejects
+with kind `internal`; after accepted rows, it resolves those rows plus one
+command-owned Warn `history.incomplete`. A failed page's streamed prefix is
+excluded. Filters do not authorize partial success, and retries do not poison
+accepted identities. Transport and decode failures share callbacks, so they
+retain the shared Internal fallback rather than a blanket Network label.
+
+Well-formed but inconsistent page census, ledger offset and funding same-timestamp continuation
+proofs, clipped ranges and the retry-inclusive request safety bound remain
+strict rejections, even after accepted rows. These refusals now carry the
+shared `internal` kind where legacy string errors had no kind; telemetry tags
+can change. Time/identity sorting, native units, filters and the output-limit
+exception for explicitly ranged income/funding remain unchanged. One owner
+spans every window; no venue emits its own completeness marker.
+
+Futures public trades also gains typed Internal failures through the owner; it
+remains a single-response public read with unchanged header selection.
+
+Spot fills remains a single HF response with the existing schema/defaults and
+no invented continuation. Its whole response is validated before admission;
+malformed/HTTP/transport errors reject `internal` rather than an unclassified
+string failure. The existing command-error diagnostic on request failure stays.
+Spot lookup and disabled order-history/income stubs remain unchanged, and public
+trades remains unsupported. No signing helper, credential selection, constructor
+argument, capability or NX bootstrap changes are included. Callers must ingest
+command-scoped incomplete-query warnings, gate coverage accordingly and handle
+typed query rejection as unavailable history.

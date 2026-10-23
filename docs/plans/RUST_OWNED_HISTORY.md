@@ -1726,3 +1726,84 @@ assertions. Independent source correctness/adversarial reviews are CLEAN and
 confirm existing-engine choke-point adoption; no engine API or managed completion
 policy is added. Final focused/strict checks and tests/caller review precede
 draft publication; actual shared dependencies and full CI/evidence remain.
+
+## KuCoin futures and spot owner adoption (planned 2026-10-23)
+
+Base: actual landing `90dc6637d6e12eafecc283d0dfb9a78e7fc967d6`.
+Scope: `venues/kucoin/src/history.rs`, `funding.rs`, spot query-only regions in
+`spot/mod.rs`, focused existing/new history tests, and appended caller/audit/
+quality notes. No signing helper, credential selection, account reducer,
+capability, HTTP recipe or request-context authority changes. Keep all watches;
+no landing merge during the #1741 exclusive window. Actual shared predecessors
+must be integrated before final CI/proof.
+
+1. Pin numbered-page/ledger and funding request sequences, admission errors,
+   retry delays/counts, 350ms pacing, exact integer offsets/nanosecond fill
+   bounds, newest-first tiled windows, census/cursor proofs and final shaping.
+   Spot fills remains one request, limit/defaults/output schema unchanged;
+   disabled order-history/income stubs and lookup remain unchanged.
+2. Regression-only first: reject Internal with no Done/marker on initial failed
+   HTTP/envelope/row reads; after an accepted futures/funding page resolve only
+   admitted rows with one command-owned Warn on terminal page failure. Prove
+   failed-page prefixes and retries cannot leak rows/poison dedupe, concurrent
+   owners remain isolated, successful empty is complete, and spot malformed/
+   transport failures become typed failures without partial success.
+3. Adopt existing engine `CursorHistory`/`Completion` for futures history and
+   funding, retaining one owner across every native window. Native page/offset/
+   timestamp tokens describe wire continuation; the shared walk owns accepted
+   row identity, continuation lifecycle and missing-coverage reporting. Keep
+   native census, strictly decreasing ledger/funding cursor and bounded-attempt
+   refusals strict via owner.reject; those native completeness proofs are not
+   recoverable page failures. Keep the existing total HTTP-attempt safety guard
+   (counts retries), independent of accepted-page tracking. Stage normalized
+   page rows locally until the whole response validates, then admit atomically.
+   Spot fills uses `HistoryRows` for its single validated response, without
+   inventing pagination or enabling unsupported endpoints.
+4. Preserve final descending time/identity ordering and limit exceptions for
+   explicitly ranged income/funding. Preserve newest-window allocation bounds,
+   cursor inclusivity and padding, output units, filters and successful paths.
+   HTTP/decode callbacks are multiplexed, so the shared Internal default is
+   honest; do not classify all failures as Network. No numeric/managed fallback.
+5. Independent correctness/adversarial reviews must answer the architecture
+   gate: these are two family adapters to the existing engine history choke
+   point, not a second marker emitter/pager. Focused engine/KuCoin (spot feature)/
+   Binance tests, strict touched all-target Clippy/fmt/bans/diff locally with
+   four Cargo jobs; no local release WASM/full replay/size/timing. Update caller
+   impact and open a draft with CI watch, no cutover/B11/runtime closure claim.
+
+KuCoin plan-audit clarification: malformed metadata decoding follows failed-page
+owner policy; well-formed census values and missing/nondecreasing native cursors
+remain strict proof refusals. Funding cursor proof still precedes the output cap,
+while ledger cursor proof is checked only when continuation is actually needed.
+Raw census/cursor facts include filtered/duplicate rows; output admission does not.
+
+KuCoin local adoption checkpoint: exact final 17 controls on original source
+`90dc6637d6e` produce 14 assertion RED / 3 compatibility GREEN; the implementation
+makes all 17 GREEN. Original comparison saves/restores only this slice's three
+source files byte-for-byte, with test/source hashes recorded locally. The full
+focused engine/KuCoin (spot)/Binance native suite passes 957 tests; strict touched
+all-target Clippy/fmt/bans/diff checks pass. Independent plan, correctness,
+adversarial source/delta and final tests/docs reviews are CLEAN. Actual #1741
+must be genuinely integrated before draft/final CI; none of these local receipts
+claims new shared-core compatibility or deployed runtime coverage.
+
+Actual #1741 integration was conflict-free and preserved all four reviewed
+source/test blobs and the entire incoming unowned tree; integrated native suite
+passes 1,100 tests. Its exact lexical inventory needs the owner-authorized
+follow-on: prune KuCoin history 20->13 and funding 15->9 legacy sites, and spot
+22->20 with the same GET call re-expressed only to carry HistoryRows. Record the
+full exact spot old/new maps in existing HISTORY_BOOTSTRAPS and hash-pin the
+transition in checker controls; preserve every other map and all checker logic.
+The funding cursor formatting is factored through a tuple to avoid two false
+macro matches on the local identifier `request`, without changing cursor bytes.
+No new HTTP site, recipe, headers, signing or broad exemption is authorized.
+
+The precise ratchet update passes all 12 checker controls and the full bans
+script. Exact spot map hashes (sorted JSON) are
+`cff9fea5f76ae51654a83c7953df010ef41e3941614a6fdd67b9f1001bd212ff`
+(old) and `fca911a5d114175c7374dfef35111bf3498f871eead93ef398d926ccf6929da8`
+(new); existing negative controls also exercise this transition against modified
+baselines, foreign paths, inflated counts/new digests and newer pruning.
+Final tuple-cursor source passes all 257 KuCoin/spot tests (including the same
+17 owned-history controls), strict all-target Clippy/fmt and diff checks. No
+production request-context adoption or signing changes are implied by pruning.

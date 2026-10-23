@@ -481,3 +481,11 @@ Closed-order folds cannot admit a failed newer prefix. Ledger since-only gap
 precedence, eligible limit suppression, exact native units/IDs/request sequences
 and strict consuming setup are preserved. Other adapters, B11/runtime proof and
 managed Context completion remain open. [Scope](RUST_OWNED_HISTORY.md).
+
+KuCoin owner-adoption regression plan: original-source controls pin
+initial typed rejects, accepted-only later recovery, failed-page/retry identity
+isolation, strict ledger/funding/census proofs, concurrent owner attribution and
+complete-empty reads; spot single-response fills never publishes a malformed
+prefix. Existing unit/request-sequence/funding/spot checks remain compatibility
+coverage. The engine owns completion and marker policy; no new venue pager or
+signing implementation is introduced.

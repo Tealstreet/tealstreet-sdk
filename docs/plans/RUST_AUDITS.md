@@ -1959,3 +1959,10 @@ continuation-proof/budget refusals remain strict; terminal order folding sees
 only admitted rows. Native request/identity/units/filter/signing and ledger
 coverage facts remain unchanged. Other adapters, managed completion and B11
 coverage/runtime proof stay open. [Scope](RUST_OWNED_HISTORY.md).
+
+KuCoin owned-history follow-on: futures history/funding and spot fills
+adopt the existing engine query owner. Initial page failures become typed
+Internal rejects; later futures/funding failures return only validated eligible
+rows with command-owned incompleteness. Native continuation/census/safety proofs
+remain strict. Signing, disabled spot endpoints and B11/NX coverage are outside
+this slice; see RUST_OWNED_HISTORY.md and RUST_CUTOVER_CALLERS.md.
