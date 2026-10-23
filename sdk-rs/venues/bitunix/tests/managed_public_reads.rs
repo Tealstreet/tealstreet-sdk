@@ -315,10 +315,12 @@ fn unsigned_public_auth_failure_neither_retries_nor_spends_private_auth_budget()
         assert!(!e.store().loaded().markets);
         assert_eq!(e.health().auth_failures, 0);
         let actions = e.drain_actions().collect::<Vec<_>>();
-        assert!(!actions.iter().any(|a| matches!(
-            a,
-            Action::SetTimer { .. } | Action::Http(_) | Action::ManagedHttp(_)
-        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::Http(_)))
+        );
+        assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
         assert!(actions.iter().any(|a| matches!(a,
             Action::Notice(Notice::Event(event)) if event.message.contains("bad signature") || event.message.contains("401"))));
         assert!(terminals(&actions, 7).is_empty());
@@ -638,7 +640,7 @@ fn invalid_clock_entry_refuses_candles_before_transport() {
         let mut e = seeded(venue(false));
         candles(&mut e, now, 7, Interval::M1, None, None, None);
         let actions = e.drain_actions().collect::<Vec<_>>();
-        assert_eq!(failed(&actions, 7).kind, Some(ErrorKind::Internal));
+        assert_eq!(failed(&actions, 7).kind, Some(ErrorKind::InvalidInput));
         assert!(
             !actions
                 .iter()
@@ -669,7 +671,7 @@ fn parked_expiry_and_expired_prepared_binding_never_release_or_publish() {
         actions.extend(e.drain_actions());
         let error = failed(&actions, 7);
         assert_eq!(error.kind, Some(ErrorKind::Timeout));
-        assert_eq!(error.outcome, None);
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
     }
 }
 

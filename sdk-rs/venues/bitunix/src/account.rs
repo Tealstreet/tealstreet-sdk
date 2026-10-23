@@ -559,7 +559,9 @@ impl BitunixFutures {
     }
     pub(crate) fn fail_private(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Candles { command } => cx.fail(command, error),
+            Pending::Candles { context } => {
+                let _ = cx.fail_context(&context, crate::error::malformed(error, false));
+            }
             Pending::Trade(request) => {
                 let kind = if self.credentials.is_none() {
                     safe_cex_engine::ErrorKind::AuthInvalid
