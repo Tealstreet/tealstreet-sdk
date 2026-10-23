@@ -222,3 +222,19 @@ owners cannot produce the expected single correct result; a sibling mutation
 case sees an unauthorized history companion before the proper mutation owner
 finishes. The existing four legacy history suites pass 23 controls. These REDs
 are intentional regression evidence, not a ready branch or implementation claim.
+
+Pre-audit found a real Read-only identity leak: delegating guarded fresh()
+directly to CursorWalk::fresh committed identities from an unvalidated failed
+prefix, so a retry dropped those rows as duplicates. Two assertion-RED controls
+pin that leak; a third accepted-stage compatibility control passes. Read
+authority now holds page-local identities, tests freshness against committed
+walk identities without mutating them, commits the set only on validated
+advance, and discards it with the failed staged page. CursorWalk gains only a
+crate-private read-only contains_identity query. Legacy direct fresh/discard
+behavior is unchanged. Full managed delivery/retry integration remains required
+after the exact-root constructor dependency is available.
+
+LegacyAuthority is opaque with a private zero-sized field rather than a public
+unit constructor, preventing direct calls to the sealed terminal trait as a
+disguised numeric completion. Compile-fail examples name E0599 for unchecked
+Read mutation/numeric construction and E0451 for authority construction.
