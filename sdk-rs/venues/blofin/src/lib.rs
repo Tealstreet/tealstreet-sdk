@@ -46,6 +46,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 
 pub enum Pending {
     Managed(Context, Box<Pending>),
+    PublicTrades(history::PublicTradesRequest),
     History(history::Request),
     Closed(closed::Request),
     Trade(trading::Request),
@@ -743,6 +744,7 @@ impl Venue for Blofin {
         match pending {
             Pending::Managed(_, pending) => self.on_item(cx, pending, item),
             Pending::Trade(_) => {}
+            Pending::PublicTrades(request) => self.public_trades_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Account(request) => self.account_item(cx, request, item),
@@ -875,6 +877,7 @@ impl Venue for Blofin {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         match pending {
+            Pending::PublicTrades(request) => self.public_trades_response(cx, request, response),
             Pending::History(request) => {
                 self.history_response(cx, request, response);
             }
@@ -945,12 +948,23 @@ impl Venue for Blofin {
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
+            Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             Pending::Managed(context, pending) => self.public_failure(cx, context, *pending, error),
+            other => self.on_request_failed(cx, other, &error.message),
+        }
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let pending = match pending {
+            Pending::PublicTrades(request) => {
+                self.public_trades_failed(cx, request, VenueError::new(error));
+                return;
+            }
             Pending::Managed(context, pending) => {
                 self.public_failure(
                     cx,
