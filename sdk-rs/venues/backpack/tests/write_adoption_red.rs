@@ -5,7 +5,7 @@ use serde_json::json;
 use support::*;
 
 #[test]
-#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+#[ignore = "original RED: backpack adoption owner codex-hcmq3f, tracked in plan #1880"]
 fn p0_write_all_failed_explicit_cancels_are_not_success() {
     let (mut e, _) = ready_orders(&format!("[{ORDER}]"));
     e.handle(
@@ -38,13 +38,13 @@ fn p0_write_all_failed_explicit_cancels_are_not_success() {
 }
 
 #[test]
-#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+#[ignore = "original RED: backpack adoption owner codex-hcmq3f, tracked in plan #1880"]
 fn p0_write_pair_failed_row_preserves_accepted_id() {
     pair(false);
 }
 
 #[test]
-#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+#[ignore = "original RED: backpack adoption owner codex-hcmq3f, tracked in plan #1880"]
 fn p0_write_pair_missing_row_preserves_evidence_without_counts() {
     pair(true);
 }
