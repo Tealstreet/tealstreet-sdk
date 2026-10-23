@@ -678,12 +678,17 @@ impl Driver {
                 .retire(cx, feed, RetireReason::Timeout(timeout), true)
                 .into_iter()
                 .collect(),
-            Tick::Ping => self
-                .state
-                .epoch(feed)
-                .map(Effect::Ping)
-                .into_iter()
-                .collect(),
+            Tick::Ping
+                if self.runtimes[index].snapshot_timeout.is_none()
+                    || self.state.authenticated(feed) =>
+            {
+                self.state
+                    .epoch(feed)
+                    .map(Effect::Ping)
+                    .into_iter()
+                    .collect()
+            }
+            Tick::Ping => Vec::new(),
             Tick::Unhandled | Tick::Handled => Vec::new(),
         })
     }

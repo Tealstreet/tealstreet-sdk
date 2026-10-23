@@ -5863,8 +5863,11 @@ its credential selection and paging retain their existing paths and wire bytes.
 `register_socket_feed_with_snapshot` declares a private authenticated feed whose
 configured authentication timeout runs from physical connect until the native
 snapshot is accepted. Login acceptance permits the subscription needed to obtain
-that snapshot; it does not remove or renew the snapshot bound. Pongs retain their
-separate receive-liveness meaning. Existing `register_socket_feed` semantics stay
+that snapshot; it does not remove or renew the snapshot bound. Account ping
+callbacks and queued private one-shot frames wait for accepted login; the login
+frame itself remains permitted. Private one-shots use the shared
+`send_after_socket_interests` custody rather than an unconditional opening send.
+Pongs retain their separate receive-liveness meaning. Existing `register_socket_feed` semantics stay
 the same.
 
 The venue prepares and validates its native snapshot once, then calls

@@ -237,3 +237,15 @@ does not claim separate execution of that added unit control. Its local snapshot
 unit filter is13PASS. The initial changing-worktree syntax error is excluded
 from the immutable review receipt. Actual combo4a2fade3 is genuinely integrated.
 Full feature-mode/strict/replay/CPU/memory/size CI and train readiness are separate.
+
+## Accepted-login ping control
+
+The explicit follow-up control at223d72bd819 drives the real opening watch and
+queues private one-shot work before login. On unchanged production it executes
+and fails with login,ping instead of login alone. The fix suppresses the opt-in
+feed's Ping effect before accepted login; Supervisor still consumes/rearms its
+watch with the original deadline. Default registration keeps its existing ping
+behavior. Queued account ping/private sends release after login alongside AOP,
+and a subsequent real watch emits one periodic ping before snapshot completion.
+No signing queue or venue timer is added. Independent review is requested for
+this follow-up delta; the previous15-test CLEAR does not certify this change.

@@ -534,6 +534,23 @@ fn account_ping_and_private_frames_wait_for_accepted_login() {
         })
         .collect();
     assert_eq!(sends, ["login", "aop", "account-ping", "private-send"]);
+    let timer = h
+        .output
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 14_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("retained next ping watch");
+    h.event(14_000., Event::TimerFired { timer });
+    assert_eq!(
+        h.output
+            .iter()
+            .filter(|a| matches!(a, Action::WsSend { text, .. } if text == "ping"))
+            .count(),
+        1
+    );
     assert_eq!(h.snapshots.load(Ordering::SeqCst), 0);
     assert!(
         !h.closed(),
