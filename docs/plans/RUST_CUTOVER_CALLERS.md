@@ -4291,6 +4291,36 @@ transport contract changes. NX adapters that adopt these helpers keep the exact
 root/leg handles, publish and complete without yielding, and discard invalid
 or stale callback data rather than falling back to numeric command completion.
 Joined-read execution/observer ownership remains a separate shared capability.
+## Host-safe physical engine resource IDs
+
+Physical socket, HTTP request, signing-attempt and timer IDs use exact numeric
+identities through `2^53 - 1`, without wrapping at the former u32 boundary.
+Host integrations must preserve the complete integer and must not truncate it to
+32 bits. Command IDs, millisecond durations and lossless decimal managed
+preparation/permit tokens retain their existing contracts. Resource identities
+are opaque correlation values, not permission to send or publish state.
+
+Managed admission reserves complete resource groups atomically and reports typed
+capacity refusal without partial preparation or I/O. Replacement-context child
+identities use the same complete-range reservation and remain exact above the
+former 32-bit boundary; a refused range admits no child or journal supersession.
+A fatal legacy allocation exhaustion permanently retires the engine: hosts report a terminal engine failure,
+dispose it and require reconstruction. No partially queued callback actions or
+previously bound HTTP permit can release after that retirement. Prior-sent write
+uncertainty remains subject to the existing reconciliation contract; terminal
+engine failure never proves that a write was not sent.
+
+
+WASM resource-ID ingress rejects nonfinite, negative, fractional and unsafe
+integers before parsing a response or advancing clocks. Zero remains the shared
+public-socket identity. Custom host adapters preserve numbers above `2^32` without
+bitwise coercion. Workers retire flush intervals and notify connected clients
+through typed `startupFailed` on terminal failure. Already-owned write errors
+retain unknown-outcome/reconciliation text even across host replacement; stale
+successes and diagnostics stay suppressed. Native account streams settle owned
+waiters as Internal/Unknown once and answer later joins with the terminal notice
+without constructing a snapshot from the failed engine. Recreate the engine to
+resume work; neither adapter restarts it automatically.
 
 
 ## AsterDEX, GRVT and TxFlow row-reporting adoption (2026-10-23)

@@ -78,7 +78,7 @@ pub fn prepared_actions<V: Venue>(engine: &mut Engine<V>, now: f64) -> Vec<Actio
                     continue;
                 }
                 assert_eq!(request.id, preparation.attempt().request);
-                let id = u64::from(request.id.0);
+                let id = request.id.0;
                 assert!(
                     resources.insert(request.id, (preparation, id)).is_none(),
                     "fixture route replaced without cancellation"
