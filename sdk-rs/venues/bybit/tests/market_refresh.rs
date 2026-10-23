@@ -265,6 +265,64 @@ fn timeout_and_late_old_generation_cannot_finish_or_pollute_a_new_walk() {
 }
 
 #[test]
+fn joined_owners_time_out_once_each_and_pages_keep_the_broker_header() {
+    let mut h = Harness::new();
+    let before = h.requests.len();
+    refresh(&mut h, 21);
+    let pages = h.requests.len() - before;
+    assert!(pages > 0);
+    for request in &h.requests[before..] {
+        assert_eq!(
+            Harness::header(request, "X-Referer").as_deref(),
+            Some("Tealstreet")
+        );
+    }
+    h.advance(10_000.);
+    refresh(&mut h, 22);
+    assert_eq!(
+        h.requests.len(),
+        before + pages,
+        "late owner joins the walk"
+    );
+    h.advance(20_001.);
+    for command in [21, 22] {
+        let terminals = h.done.iter().filter(|(c, _)| *c == command).count();
+        assert_eq!(terminals, 1, "command {command} terminal count");
+        assert!(h.result(command).unwrap().is_err());
+        let kind = h.notices.iter().find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: c, error } if *c == command => {
+                error.kind
+            }
+            _ => None,
+        });
+        assert_eq!(kind, Some(safe_cex_engine::ErrorKind::Timeout));
+    }
+    // The ended walk does not absorb a new caller.
+    refresh(&mut h, 23);
+    assert!(h.requests.len() > before + pages);
+    assert!(h.result(23).is_none());
+}
+
+#[test]
+fn a_join_refused_while_the_walk_is_live_fails_only_that_command() {
+    let mut h = Harness::new();
+    let before = h.requests.len();
+    for command in 100..164 {
+        refresh(&mut h, command);
+    }
+    let walk = h.requests.len();
+    refresh(&mut h, 164);
+    assert_eq!(h.requests.len(), walk, "no second physical walk");
+    assert!(h.result(164).unwrap().is_err());
+    h.respond("status=PreLaunch", 200, PRELAUNCH);
+    h.respond("instruments-info", 200, &page(&["BTCUSDT"], "", ""));
+    for command in 100..164 {
+        assert!(h.result(command).unwrap().is_ok(), "command {command}");
+    }
+    assert!(walk > before);
+}
+
+#[test]
 fn malformed_rows_and_transport_failures_fail_atomic_and_cooldown_blocks_rediscovery() {
     for failure in ["row", "transport", "rate"] {
         let mut h = Harness::new();
