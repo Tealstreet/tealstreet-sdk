@@ -220,9 +220,12 @@ Paradex JWT queue (`paradex/src/account.rs` queue/auth_failed), GRVT login
 Coinbase startup deferral (`deferred`). Success re-dispatches each owner as its
 own request, so there is no shared result. Failure fans out because the
 prerequisite failed. They belong to the session/credential cores (#1815, #1805),
-not to execution groups. Reported hang risks: AsterDex and Coinbase never fail
-held owners; GRVT owners wait on a 5 s retry timer with no own deadline;
-Paradex owners are bounded only by the auth transport timeout.
+not to execution groups. Reported hang risks: Coinbase drains deferred
+`FetchCandles` only on catalogue success (`public_pending`), never from
+`public_failed`; GRVT owners wait on a 5 s retry timer with no own deadline;
+Paradex owners are bounded only by the auth transport timeout. AsterDex is not
+a hang: every clock outcome re-dispatches `awaiting_clock`, and the clock read
+has a 5 s timeout.
 
 ### C. Single command waiting on background evidence: later adoption
 
