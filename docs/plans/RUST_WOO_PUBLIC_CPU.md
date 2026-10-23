@@ -73,14 +73,20 @@ Evidence roots:
 Artifact hashes authenticate the saved files, not an independently established
 complete rebuild provenance chain. The following reproduction recipe is recorded
 after the experiment, rather than presented as a contemporaneous shell log.
-Final exact-head CI must build and test the actual build.sh change.
+The diagnostic Cargo invocations used the repository root with --manifest-path,
+which does not discover sdk-rs/.cargo/config.toml. Both diagnostic variants
+therefore omit the production 131072-byte stack setting and use the linker's
+larger default stack. This is a material artifact-policy difference: these
+comparisons guide the compiler experiment but cannot prove shipped CPU, size or
+memory behavior. Exact-head CI must use build.sh to build and gate the production
+configuration. The corrected recipe below runs Cargo inside sdk-rs.
 
 ```bash
 export PATH=/Users/sam/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bin:/Users/sam/.cargo/bin:/Users/sam/.nvm/versions/node/v22.23.3/bin:$PATH
 export DYLD_LIBRARY_PATH=/Users/sam/.rustup/toolchains/1.99.0-aarch64-apple-darwin/lib
 export CARGO_BUILD_JOBS=2
 # Candidate; omit the second --config for the frozen-source baseline.
-cargo build --manifest-path sdk-rs/Cargo.toml --locked --release   -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features   --features woo --config profile.release.package.serde_json.opt-level=3   --config profile.release.package.safe-cex-venue-woo.opt-level=3
+(cd sdk-rs && cargo build --locked --release   -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features   --features woo --config profile.release.package.serde_json.opt-level=3   --config profile.release.package.safe-cex-venue-woo.opt-level=3)
 /Users/sam/.cargo/bin/wasm-bindgen --remove-name-section --remove-producers-section   --target nodejs --out-dir /tmp/woo-reproduce-normal   sdk-rs/target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
 /tmp/codex-binaryen132/binaryen-version_132/bin/wasm-opt -Oz   --enable-bulk-memory --enable-bulk-memory-opt --enable-mutable-globals   --enable-sign-ext --enable-nontrapping-float-to-int --enable-reference-types   --enable-multivalue /tmp/woo-reproduce-normal/safe_cex_wasm_bg.wasm   -o /tmp/woo-reproduce-normal/safe_cex_wasm_bg.wasm
 # The node output directory also needs package.json containing {"type":"commonjs"}.
