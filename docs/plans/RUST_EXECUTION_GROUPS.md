@@ -597,10 +597,14 @@ separately, and there is no Plan-to-Context cast.
   and the one journal. Observers hold only their own command generations.
   Followers join with `join_execution` from their own genuine entry callback.
 - **Root:** the physical root deadline is the Plan-minted whole-plan deadline
-  (declared steps, retries and fallbacks; no fixed product cap). The founder's
-  root does not cap it; the founder is just an observer. Each observer's
+  (declared steps, retries and fallbacks; no fixed product cap). A retained
+  Preflight has no deadline, so the founder has no independent bound: its own
+  bound is the physical root minted by `begin_planned_execution`, exactly as
+  `admit_plan` mints it. Followers keep their own entry roots; each follower's
   effective deadline is `min(own root, physical root)`. Nothing renews the
-  physical root: not a join, not a resume, not progress. Hyro declares per lot,
+  physical root: not a park, a wake, a join, a resume or progress. Time parked
+  before admission (#1896) is bounded by the predecessor chain, since each
+  predecessor retires by its own admitted root. Hyro declares per lot,
   up front: create, the two `orderLinkId` reads, one reconciliation resend, its
   two reads, and the position-stop read.
 - **Timer:** the existing single execution timer covers observer deadlines
