@@ -7,25 +7,17 @@ use crate::request_context::{Context, Operation, Policy, RetryPolicy};
 use std::cell::Cell;
 use std::rc::Rc;
 
-// Original adapter: today only a plain untracked root exists. A missing
-// receipt has no engine refusal yet, so the adapter can only take the default.
+// Cutover adapter: the tracked caller-wait root. An expired wait leaves the
+// entry Fresh for the sole expiry helper; a missing receipt refuses itself.
 fn admit_root<P>(cx: &mut Cx<'_, P>) -> Option<Context> {
-    let wait = match cx.command_wait() {
-        Some(CommandWait::Remaining(ms)) => ms,
-        Some(CommandWait::Expired) => {
+    match cx.admit_caller_read_root(None, None) {
+        Ok(root) => Some(root),
+        Err(crate::request_context::CommandEntryError::Revoked) => {
             let _ = cx.reject_expired_command(Operation::Read);
-            return None;
+            None
         }
-        None => crate::DEFAULT_COMMAND_WAIT_MS,
-    };
-    cx.admit_http_command(Policy {
-        operation: Operation::Read,
-        credential: None,
-        timeout_ms: wait,
-        pacing: None,
-        retry: RetryPolicy::Never,
-    })
-    .ok()
+        Err(_) => None,
+    }
 }
 
 fn leg_policy() -> Policy {

@@ -330,6 +330,7 @@ impl ContextRegistry {
             .is_none_or(|owner| owner.credentialed)
     }
 
+    #[cfg(test)]
     fn issue(
         &mut self,
         identity: u64,
@@ -340,6 +341,7 @@ impl ContextRegistry {
         self.issue_bound(identity, scope, policy, now, None)
     }
 
+    #[cfg(test)]
     fn issue_bound(
         &mut self,
         identity: u64,
@@ -347,6 +349,20 @@ impl ContextRegistry {
         policy: Policy,
         now: f64,
         parent: Option<&Context>,
+    ) -> Result<Context, Error> {
+        self.issue_until(identity, scope, policy, now, parent, None)
+    }
+
+    /// `until` is an exact absolute deadline that replaces the policy timeout
+    /// (the caller's raw receipt), never rounded through whole milliseconds.
+    fn issue_until(
+        &mut self,
+        identity: u64,
+        scope: Scope,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+        until: Option<f64>,
     ) -> Result<Context, Error> {
         if let Some(parent) = parent {
             self.validate(parent, now)?;
@@ -402,7 +418,7 @@ impl ContextRegistry {
                 Scope::Execution => return Err(Error::Invalid),
             },
         };
-        self.commit(owner, identity, policy, now, parent)
+        self.commit(owner, identity, policy, now, parent, until)
     }
 
     fn issue_session(
@@ -425,7 +441,14 @@ impl ContextRegistry {
         self.sessions.admit(generation, &policy)?;
         self.contexts.retain(|_, old| old.deadline() > now);
         self.sessions.prune(&self.contexts);
-        self.commit(Owner::Session { generation }, identity, policy, now, parent)
+        self.commit(
+            Owner::Session { generation },
+            identity,
+            policy,
+            now,
+            parent,
+            None,
+        )
     }
 
     fn commit(
@@ -435,10 +458,10 @@ impl ContextRegistry {
         policy: Policy,
         now: f64,
         parent: Option<&Context>,
+        until: Option<f64>,
     ) -> Result<Context, Error> {
-        let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
-            parent.deadline().min(now + f64::from(policy.timeout_ms))
-        });
+        let deadline = until.unwrap_or(now + f64::from(policy.timeout_ms));
+        let deadline = parent.map_or(deadline, |parent| parent.deadline().min(deadline));
         if let Owner::Command { id, .. } = owner
             && let Some(root) = self.commands.get(&id).and_then(|owner| match &owner.phase {
                 CommandPhase::Context {
@@ -1114,16 +1137,34 @@ impl ContextRegistry {
         Ok(Seal::Failure(error, reports))
     }
 
+    /// Effect-free: a new command root would fit the bounded registry, and
+    /// its storage is reserved, so issuance after the ID spend cannot fail.
+    pub(super) fn reserve_command_root(&mut self, command: CommandId) -> Result<(), Error> {
+        let new_owner = !self.commands.contains_key(&command);
+        if self.contexts.len() + self.reserved_context_count() >= CAPACITY
+            || (new_owner && self.commands.len() >= CAPACITY)
+        {
+            return Err(Error::Capacity);
+        }
+        self.contexts
+            .try_reserve(1 + self.reserved_context_count())
+            .map_err(|_| Error::Capacity)?;
+        if new_owner {
+            self.commands.try_reserve(1).map_err(|_| Error::Capacity)?;
+        }
+        Ok(())
+    }
+
     fn tracked(&self, command: CommandId) -> bool {
-        self.commands.get(&command).is_some_and(|owner| {
-            matches!(owner.phase, CommandPhase::Context { tracked: true, .. })
-        })
+        self.commands
+            .get(&command)
+            .is_some_and(|owner| matches!(owner.phase, CommandPhase::Context { tracked: true, .. }))
     }
 
     fn expired(&self, command: CommandId) -> bool {
-        self.commands.get(&command).is_some_and(|owner| {
-            matches!(owner.phase, CommandPhase::Context { expired: true, .. })
-        })
+        self.commands
+            .get(&command)
+            .is_some_and(|owner| matches!(owner.phase, CommandPhase::Context { expired: true, .. }))
     }
 
     /// Track this command's just-retained entry root for engine expiry.
@@ -1285,7 +1326,7 @@ impl<P> Cx<'_, P> {
     /// Capture the logical raw deadline and engine-owned owner/leg generation.
     /// This neither queues HTTP nor reserves admission, a transport or pacing.
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
-        self.make_http_context(scope, policy, None)
+        self.make_http_context(scope, policy, None, None)
     }
 
     /// A new physical leg under the same logical authority. Preserve its exact
@@ -1308,28 +1349,24 @@ impl<P> Cx<'_, P> {
             }
             Owner::Execution { .. } => Scope::Execution,
         };
-        self.make_http_context(scope, policy, Some(parent))
+        self.make_http_context(scope, policy, Some(parent), None)
     }
 
-    fn make_http_context(
+    pub(super) fn make_http_context(
         &mut self,
         scope: Scope,
         policy: Policy,
         parent: Option<&Context>,
+        until: Option<f64>,
     ) -> Result<Context, Error> {
         if !self.io.entry_context_allowed(scope) {
             return Err(Error::Revoked);
         }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        let context = if let Some(parent) = parent {
-            self.io
-                .request_contexts
-                .issue_bound(identity, scope, policy, self.now, Some(parent))?
-        } else {
-            self.io
-                .request_contexts
-                .issue(identity, scope, policy, self.now)?
-        };
+        let context = self
+            .io
+            .request_contexts
+            .issue_until(identity, scope, policy, self.now, parent, until)?;
         #[cfg(feature = "order-locks")]
         if context.operation() == Operation::Mutation
             && let Owner::Command { id, .. } = context.owner()
