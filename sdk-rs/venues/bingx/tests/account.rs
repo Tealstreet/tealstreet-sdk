@@ -2177,3 +2177,83 @@ fn metadata_preflight_emits_one_not_sent_failure_on_the_new_completion_api() {
         matches!(&out[0],Action::Notice(Notice::CommandFailed {command:917,error}) if error.outcome==Some(safe_cex_engine::Outcome::NotSent))
     );
 }
+
+#[test]
+fn metadata_plan_entry_duplicate_unknown_market_cannot_fail_an_active_owner() {
+    let mut h = Harness::ready();
+    let _first = metadata(&mut h, 940);
+    h.engine.handle(
+        h.now,
+        Event::Command(Command::FetchLeverage {
+            command: 940,
+            symbol: "MISSING".into(),
+        }),
+    );
+    let out = h.engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !out.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandFailed { command: 940, .. })
+                | Action::Notice(Notice::CommandDone { command: 940, .. })
+        )),
+        "a duplicate entry cannot numerically terminate the active metadata owner"
+    );
+}
+
+#[test]
+fn metadata_plan_entry_requires_prepare_before_native_http_release() {
+    let mut h = Harness::ready();
+    h.engine.handle(
+        h.now,
+        Event::Command(Command::FetchLeverage {
+            command: 941,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = h.engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !out.iter().any(|action| matches!(action, Action::Http(_))),
+        "metadata cannot release legacy HTTP before managed preparation"
+    );
+    assert!(
+        out.iter().any(|action| matches!(
+            action,
+            Action::ManagedHttp(action)
+                if matches!(action.as_ref(), safe_cex_engine::request_context::HttpAction::Prepare { .. })
+        )),
+        "the metadata owner must issue a real managed preparation"
+    );
+}
+
+#[test]
+fn metadata_plan_entry_distinct_unknown_market_keeps_native_refusal() {
+    let mut h = Harness::ready();
+    h.engine.handle(
+        h.now,
+        Event::Command(Command::FetchLeverage {
+            command: 942,
+            symbol: "MISSING".into(),
+        }),
+    );
+    let out = h.engine.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        out.iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 942, error })
+                    if error.legacy_text() == "Unknown BingX market"
+            ))
+            .count(),
+        1
+    );
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+}
+
+#[test]
+fn metadata_plan_entry_native_pair_keeps_the_rails_result() {
+    let mut h = Harness::ready();
+    let margin = margin_stage(&mut h, 943);
+    h.reply(margin.id, 200, ISOLATED);
+    assert_eq!(metadata_rails(&h, 943), (12.0, 34.0));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 943).count(), 1);
+}

@@ -425,6 +425,12 @@ publication policy and fallback policy. Return-only and publish-if-current,
 independent rails and complete-setting fallback must not accidentally join.
 Uniform terminal projection is sufficient only within one such key. Settings
 freshness storage does not become a second list of numeric completion owners.
+Preserve native read supersession: a newly admitted different-key read of the
+same symbol, including return-only, supersedes an older publish read. The older
+read may answer through the existing current-settings fallback but cannot
+publish; completion or failure of the newer read cannot revive its token.
+Pin the interleaved publish/return-only case and signature re-sign after a Store
+token change. Exercise the actual dispatch recipe with a fake provider.
 
 Only an exact validated Plan-slot delivery may enter a Store-capable native
 codec or publish. Validate before native state changes, check the Store token
@@ -466,6 +472,8 @@ source, fixture and assertion separately from compile/API failures:
    command remains the working refusal control.
 2. A valid private metadata read requires real managed Prepare/Bind/Claim before
    native HTTP, and one complete paired native result; no legacy signed path.
+   This is a RED against the old `7e999` metadata branch, but an existing positive
+   control against #1884 `f833`: do not label it a new defect in that adapter.
 3. Same-key peers share native work, terminate once each and retain independent
    bounds. Different account/key/intent/native-work/publication/fallback keys
    cannot join. Late joining cannot extend the Plan or existing lease.
@@ -504,3 +512,11 @@ freshness versus liveness, incomplete authority boundaries and required caller
 fallback handling. Keep the Plan/composition and family adoption evidence
 separate. Actual shared inputs, fresh green CI, independent review, an explicit
 window, a fresh separate guard and a head-matched merge remain landing gates.
+
+Original run on unchanged production `e5306f26121` compiled four new native
+controls: managed release is one assertion RED (legacy HTTP before Prepare).
+Duplicate-ID refusal, distinct invalid-market refusal and the native paired
+rails result are three GREEN controls; the duplicate-ID case is not claimed as
+a reproduced defect. The earlier missing cargo/rustc shell runs did not compile
+tests and are not RED evidence. Record new entry-authority REDs against the
+integrated Plan/#1884 source separately, without weakening these assertions.
