@@ -6122,7 +6122,7 @@ distinguish the following:
 
 Perps fills, orders, income, public trades and uncached REST client-ID lookup now
 use one Read root at the exact caller receipt deadline (configured/per-call
-rustCommandTimeoutMs; absent input is stamped120000ms by the SDK). Each physical
+rustCommandTimeoutMs; absent input is stamped120000ms at engine receipt). Each physical
 page gets a20s child at eligible dequeue in the native shared Account FIFO,
 capped by that unchanged root. Missing receipts refuse typed with no default,
 I/O or outcome. These unsigned JSON POSTs retain the same user/vault/application

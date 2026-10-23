@@ -690,3 +690,14 @@ unnecessary generic-argument borrow. The scanner exactly matches the local
 manifest. Its full provenance gate currently rejects only foreign Aster/OKX
 entries already pruned on origin; those maps stay untouched pending genuine
 owner-composed dependency integration. No full ratchet PASS is claimed.
+
+Independent source/adversarial, caller/fixture and full-map implementation
+reviews are CLEAR at06d05755752. All16 original control bodies remain exact;
+the four adoption controls are additive. Native financial serializers, filters,
+queue/paging facts and Account/sign/socket functions are retained. Full-map
+review confirms exactly11 intended paths, no foreign changes, and sole
+history.rs9F/11O removal with Account2F/3O unchanged. Architecture No: consumes
+shared roots/expiry/row/terminal APIs, with no venue replacement policy.
+This receipt and caller default-stamp precision are documentation only.
+Replacement1976 integration, full provenance and fresh CI remain required
+before READY; no landing merge has been attempted.
