@@ -1817,3 +1817,77 @@ fn capability_admission_fails_closed_for_missing_refs_and_undeclared_hosts() {
     assert!(started.set_identities(capability_identities()).is_err());
     assert!(started.set_host_algorithms(vec![HmacSha256]).is_err());
 }
+
+/// Admitted everything, then lost capability after its first signature.
+#[derive(Default)]
+struct CapabilityLostAfterFirst(std::sync::atomic::AtomicUsize);
+impl crate::signing::Signer for CapabilityLostAfterFirst {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign(&self, request: SignRequest) -> crate::signing::SignFuture {
+        let result = self.sign_ready(&request).unwrap();
+        Box::pin(std::future::ready(result))
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        let signed = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some(if signed == 0 {
+            result()
+        } else {
+            Err(SignError::Refused)
+        })
+    }
+    fn can_sign(
+        &self,
+        _: &crate::signing::KeyRef,
+        _: crate::signing::Algorithm,
+    ) -> crate::signing::Capability {
+        crate::signing::Capability::Supported
+    }
+}
+
+#[test]
+fn admission_is_evidence_only_release_still_validates_and_earlier_effects_stand() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_signer(Some(std::sync::Arc::new(
+            CapabilityLostAfterFirst::default(),
+        )))
+        .unwrap();
+    engine.set_identities(capability_identities()).unwrap();
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert_eq!(
+        cx.can_sign(crate::CredentialSlot::Primary, &AMEND_NEEDS),
+        Ok(())
+    );
+    let cancel = cx.request(
+        Method::Post,
+        "https://venue.test/cancel".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(cancel, Box::new(Step));
+    let replace = cx.request(
+        Method::Post,
+        "https://venue.test/replace".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(replace, Box::new(Step));
+    let released: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(http) => Some(http.id),
+            _ => None,
+        })
+        .collect();
+    // The first release went out; the later refusal fails only its own request.
+    assert_eq!(released, [cancel]);
+    assert_eq!(engine.venue.failed, 1);
+}
