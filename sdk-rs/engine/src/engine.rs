@@ -1516,13 +1516,17 @@ struct Io<P> {
     #[cfg(feature = "managed-sockets")]
     socket_effects: std::collections::VecDeque<crate::socket_driver::Effect>,
     #[cfg(feature = "managed-sockets")]
-    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal>,
+    socket_proposals: std::collections::VecDeque<managed_sockets::Proposal<P>>,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_bytes: usize,
     #[cfg(feature = "managed-sockets")]
     socket_proposal_next: u64,
     #[cfg(feature = "managed-sockets")]
     socket_after: std::collections::VecDeque<(crate::socket_lifecycle::Epoch, String)>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuations: std::collections::VecDeque<managed_sockets::Continuation<P>>,
+    #[cfg(feature = "managed-sockets")]
+    socket_continuation_bytes: usize,
 }
 
 impl<P> Default for Io<P> {
@@ -1601,6 +1605,10 @@ impl<P> Default for Io<P> {
             socket_proposal_next: 0,
             #[cfg(feature = "managed-sockets")]
             socket_after: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuations: Default::default(),
+            #[cfg(feature = "managed-sockets")]
+            socket_continuation_bytes: 0,
         }
     }
 }
@@ -2688,6 +2696,15 @@ pub trait Venue {
         _event: crate::socket_lifecycle::LifecycleEvent,
     ) -> Result<(), crate::socket_lifecycle::SocketError> {
         Err(crate::socket_lifecycle::SocketError::NotPermitted)
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_socket_interests_released(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _epoch: crate::socket_lifecycle::Epoch,
+        _pending: Self::Pending,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        Ok(())
     }
     #[cfg(feature = "managed-sockets")]
     fn encode_socket_interests(
@@ -4578,6 +4595,11 @@ impl<V: Venue> Engine<V> {
         self.flush_http_owner_retirements();
         self.assert_live();
         self.io.assert_actions_safe();
+        #[cfg(feature = "managed-sockets")]
+        if !self.io.socket_continuations.is_empty() {
+            self.arm_socket_continuations(self.io.dispatch_now);
+            self.io.assert_actions_safe();
+        }
         self.io.actions.drain(..)
     }
 

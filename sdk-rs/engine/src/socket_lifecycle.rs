@@ -406,6 +406,20 @@ impl Lifecycle {
             .get(epoch.feed.0)
             .is_some_and(|f| f.epoch == Some(epoch) && f.phase == Phase::Ready)
     }
+    pub(crate) fn interest_revision(&self, epoch: Epoch, required: &[Interest]) -> Option<u64> {
+        let feed = self.feeds.get(epoch.feed.0)?;
+        if feed.epoch != Some(epoch)
+            || required.iter().any(|i| {
+                feed.interests
+                    .desired
+                    .get(&i.key)
+                    .is_none_or(|current| current.as_ref() != i)
+            })
+        {
+            return None;
+        }
+        Some(feed.interests.revision)
+    }
     pub(crate) fn stop_feed(&mut self, feed: FeedId) -> Option<Retirement> {
         let f = self.feeds.get_mut(feed.0)?;
         f.stopped = true;
