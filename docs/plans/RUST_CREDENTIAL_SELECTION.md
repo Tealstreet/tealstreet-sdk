@@ -311,6 +311,10 @@ transaction.
 
 - WS/session auth credential use: always primary. `SessionAuth` adoption
   follows socket core #1771 (owns socket auth).
+- Session-login prerequisite gates (Paradex JWT, GRVT login, BreakoutProp
+  login/discover and similar token readiness) belong to claude-55ao7t's
+  background-session core. This core supplies only the key and subject a
+  session uses (`SessionAuth` selection).
 - Server-held key lifetime and teardown (audit §D host lifetime): see
   `codex-server-order-path-audit.md`; this core holds no key material.
 
