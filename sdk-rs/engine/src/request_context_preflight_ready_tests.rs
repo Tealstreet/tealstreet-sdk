@@ -28,6 +28,12 @@ struct ScopeProbe {
     retired: usize,
     hold_parked: bool,
     last_refusal: Option<Error>,
+    #[cfg(feature = "managed-sockets")]
+    socket_mode: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_plan_tail: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_feed: Option<crate::socket_lifecycle::FeedId>,
 }
 fn policy() -> Policy {
     Policy {
@@ -47,7 +53,26 @@ fn preflight_policy() -> PreflightPolicy {
 }
 impl Venue for ScopeProbe {
     type Pending = Context;
-    fn start(&mut self, _: &mut Cx<'_, Context>) {}
+    fn start(&mut self, _cx: &mut Cx<'_, Context>) {
+        #[cfg(feature = "managed-sockets")]
+        if self.socket_mode {
+            let feed = _cx.register_socket_feed(readiness_socket_policy()).unwrap();
+            _cx.connect_socket(feed, "wss://ready.test").unwrap();
+            self.socket_feed = Some(feed);
+        }
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Context>,
+        event: crate::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), crate::socket_lifecycle::SocketError> {
+        if self.socket_mode && matches!(event, crate::socket_lifecycle::LifecycleEvent::Ping(_)) {
+            cx.request_preflight_ready(self.parked.as_ref().unwrap())
+                .unwrap();
+        }
+        Ok(())
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Context>, command: Command) {
         let id = command.completion_id().unwrap();
         if id == 20 || self.hold_parked {
@@ -126,6 +151,35 @@ impl Venue for ScopeProbe {
     }
     fn on_http_preflight_ready(&mut self, cx: &mut Cx<'_, Context>, preflight: &Preflight) {
         self.ready += 1;
+        #[cfg(feature = "managed-sockets")]
+        if self.socket_mode {
+            if self.socket_plan_tail {
+                let calls = [CallBound {
+                    timeout_ms: 100,
+                    attempts: 1,
+                    retry_window: RetryWindow::Shared,
+                    after_refusal: &[],
+                }];
+                self.plan = Some(
+                    cx.admit_plan(
+                        preflight,
+                        &[StepBound {
+                            wait_ms: 0,
+                            calls: &calls,
+                        }],
+                        PlanPolicy {
+                            operation: Operation::Read,
+                            credential: None,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap(),
+                );
+                return;
+            }
+            self.retire_ready_sockets(cx);
+        }
         assert!(cx.io.command_entry.is_none());
         assert!(cx.io.http_delivery.is_none());
         #[cfg(feature = "order-locks")]
@@ -184,6 +238,13 @@ impl Venue for ScopeProbe {
             cx.io.request_contexts.validate(leg, cx.now).unwrap();
         }
         cx.done_preflight(preflight, "cached".into()).unwrap();
+    }
+    #[cfg(feature = "managed-sockets")]
+    fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, Context>, plan: &Plan) {
+        if self.socket_plan_tail {
+            self.retire_ready_sockets(cx);
+            cx.fail_plan(plan, "tail callback completed").unwrap();
+        }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: Response<'_>) {
         self.responses += 1;
@@ -437,5 +498,104 @@ fn an_empty_readiness_index_never_visits_live_legacy_or_execution_owners() {
         assert_eq!(e.venue.ready, 0);
         assert!(e.io.request_contexts.preflight_initial.is_empty());
         assert!(e.io.actions.is_empty());
+    }
+}
+
+#[cfg(feature = "managed-sockets")]
+#[test]
+fn socket_callback_wake_cannot_drain_a_send_from_the_epoch_ready_just_retired() {
+    for socket_plan_tail in [false, true] {
+        let mut engine = crate::test_support::seeded_engine(ScopeProbe {
+            socket_mode: true,
+            socket_plan_tail,
+            hold_parked: true,
+            ..Default::default()
+        });
+        engine.start(0.);
+        let socket = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(1., Event::WsOpened { socket });
+        engine.drain_actions().for_each(drop);
+        command(&mut engine, 20, 2.);
+        assert_eq!(engine.venue.ready, 0);
+        let feed = engine.venue.socket_feed.unwrap();
+        let epoch = with_cx(&mut engine, 2., |cx| cx.socket_epoch(feed)).unwrap();
+        // A genuine registered epoch's queued lifecycle effect is processed during drain.
+        engine
+            .io
+            .socket_effects
+            .push_back(crate::socket_driver::Effect::Ping(epoch));
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert_eq!(engine.venue.ready, 1);
+        assert_eq!(terminal(&actions, 20), 1);
+        assert!(
+            !actions.iter().any(|action| matches!(
+                action,
+                Action::WsSend { .. } | Action::WsConnect { .. } | Action::Sign { .. }
+            )),
+            "retired epoch work must cross the final socket fence"
+        );
+    }
+}
+
+#[cfg(feature = "managed-sockets")]
+fn readiness_socket_policy() -> crate::socket_lifecycle::FeedPolicy {
+    use crate::socket_lifecycle::*;
+    FeedPolicy {
+        role: SocketChannel::Private,
+        supervision: crate::socket::Config::default(),
+        auth: AuthMode::None,
+        recovery: AuthRecovery::Reconnect,
+        permanent_refusal_group: None,
+        traffic: TrafficPolicy::AnyText,
+        controls: ControlPolicy::Native,
+        invalidation: Invalidation::Required,
+        subscription_interval_ms: 0.,
+    }
+}
+#[cfg(feature = "managed-sockets")]
+struct RetiredSocketRecipe;
+#[cfg(feature = "managed-sockets")]
+impl crate::SignStep for RetiredSocketRecipe {
+    fn freshness_ms(&self) -> f64 {
+        3_000.
+    }
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        _: &crate::DispatchContext<'_>,
+    ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+        panic!("retired socket must not reach provider preparation")
+    }
+    fn apply(
+        &mut self,
+        _: &mut Action,
+        _: &crate::signing::SignResult,
+    ) -> Result<(), crate::signing::SignError> {
+        panic!("retired socket must not apply a signing result")
+    }
+}
+
+#[cfg(feature = "managed-sockets")]
+impl ScopeProbe {
+    fn retire_ready_sockets(&mut self, cx: &mut Cx<'_, Context>) {
+        let feed = self.socket_feed.unwrap();
+        let epoch = cx.socket_epoch(feed).unwrap();
+        cx.send(epoch.socket(), "stale-ready-frame");
+        cx.send_signed(
+            epoch.socket(),
+            "stale-ready-signed".into(),
+            Box::new(RetiredSocketRecipe),
+        );
+        cx.stop_socket_feed(feed);
+        let fresh = cx.register_socket_feed(readiness_socket_policy()).unwrap();
+        cx.connect_socket(fresh, "wss://ready.test/retired-before-drain")
+            .unwrap();
+        cx.stop_socket_feed(fresh);
     }
 }

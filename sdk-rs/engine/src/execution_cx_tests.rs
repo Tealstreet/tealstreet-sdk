@@ -480,3 +480,30 @@ fn begin_and_join_need_the_observer_commands_own_genuine_callback() {
         Err(crate::request_context::Error::Revoked)
     );
 }
+
+#[test]
+fn a_group_retired_before_its_leg_is_sent_leaves_no_stale_root() {
+    let mut run = Run::new(GroupProbe::default());
+    for round in 0..3 {
+        let command = 10 + round;
+        run.engine.venue.execution = None;
+        run.handle(f64::from(round) * 10. + 1., fetch(command));
+        let root = run.engine.venue().roots[&command].clone();
+        // The sole observer leaves before its leg is released.
+        let mut cx = Cx {
+            now: f64::from(round) * 10. + 2.,
+            store: &mut run.engine.store,
+            io: &mut run.engine.io,
+        };
+        cx.detach_execution_observer(&root, VenueError::new("cancelled"))
+            .unwrap();
+        assert!(run.engine.io.managed_http.is_empty());
+        assert!(!run.engine.io.request_contexts.has_executions());
+        // Any later event retires the stale root.
+        run.handle(
+            f64::from(round) * 10. + 3.,
+            Event::TimerFired { timer: TimerId(1) },
+        );
+        assert_eq!(run.engine.io.request_contexts.root_count(), 0);
+    }
+}

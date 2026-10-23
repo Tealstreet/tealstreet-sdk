@@ -4869,13 +4869,22 @@ authority. The call shape and success value (`null`) are unchanged.
   refresh timed out` to `Execution deadline expired`. The outcome is unset
   (read). Each joined caller gets this once.
 - Capacity: one walk serves at most 64 callers. A 65th concurrent call fails
-  at once with message `Too many requests in flight`, kind `internal`,
+  at once with message `Engine request capacity reached`, kind `internal`,
   outcome `notSent`. The running walk and its 64 callers are unaffected, and a
   call after the walk ends starts a new one.
 - Founder departure: the walk is not owned by the first caller. If that
   caller's observer is detached, the walk continues for the remaining callers.
   Bybit itself has no caller-side cancellation for this call today, so this is
   an engine guarantee rather than an SDK-visible action.
+
+Engine capacity refusal text: every engine request-context capacity refusal
+(execution-group joins above, Binance command entry, Hyperliquid candle reads
+and any other `Capacity` refusal) now reads `Engine request capacity reached`
+instead of `Too many requests in flight`; kind `internal` and outcome
+`notSent` are unchanged. The old text matched the `rate_limit` health
+pattern (`/too.*many.*request/i`), so NX showed a rate-limit toast and a false
+rate-limit health signal for a local engine bound. The new text matches no
+`errorPatterns.ts` category.
 - Unchanged: shared-feed refusal, `Bybit market catalogue is not loaded`
   (`invalidInput`) and the discovery rate-limit refusal (`rateLimited` with
   `retryAfterMs`); request URLs, query and the `X-Referer` broker header; the
@@ -5125,7 +5134,7 @@ listener/chart migration, NX deployment or live private connectivity.
 Lighter and Robinhood command candle reads borrow their genuine engine callback's
 initial Read owner through shared `admit_http_command`, before validation or
 outbound work. When capacity is exhausted, callers receive exactly one correlated
-`CommandFailed` with `Too many requests in flight`, Internal kind and no financial
+`CommandFailed` with `Engine request capacity reached`, Internal kind and no financial
 outcome. Invalid clock/deadline admission instead returns `Invalid request
 context`, InvalidInput kind and no outcome. These replace the adapter's generic
 lifecycle-unavailable/Internal refusal. No caller retry or special transport path
@@ -5412,23 +5421,7 @@ registration, retirement, closure and queued work spend a fresh command-entry
 loan even when no new transport identity is allocated.
 
 
-## Retained command readiness
 
-With the engine's `http-plans` feature, native FIFO commands can park their own
-Preflight during genuine entry and activate it once after a predecessor physically
-retires. They keep their original command generation; waiting creates no request,
-timer or artificial deadline. Final native Plan admission establishes its bound.
-A predecessor's HTTP DATA cannot donate command-entry or response authority to
-the next command. Cleanup returns only an already-parked handle; actual activation
-runs after cleanup, callback exit and the execution sweep.
-
-A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
-An unhandled callback or a selected read with no submitted HTTP fails once with
-Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
-NX consumes that one terminal and keeps any prior uncertain effects for ordinary
-reconciliation. Ready custody cannot submit or retire another command's work.
-Root expiry and preparation refusal wake the successor in the same engine event;
-no unrelated feed event is needed. No host wire or signer capability is added.
 ## Declared mutation terminal API (#1894)
 
 An opted-in engine Plan may declare a native conditional terminal before any
@@ -5447,6 +5440,76 @@ writes, provider presentation, remote zkLink, startup or session paths. No TS
 caller shape or native result bytes change until an adapter adopts it.
 
 
+## Context-owned history completion and admission
+
+For adapters using `ReadCompletion` and the `Read*History` types, the history
+owner retains the original engine-issued command Read root across pages and
+composite stages. Legacy numeric owners keep their existing lifecycle; each
+venue's adoption carries its own caller contract. Bind the matching command/root once; a page
+leg, foreign issuer, stale generation, background owner or mutation owner cannot
+substitute for that root. `ReadCompletion::from_context` validates that binding
+without reserving exclusive completion; only the first valid context terminal
+can complete the owner. Read ownership does not become numeric completion
+authority when a lifecycle check refuses it. Plan and joined-observer ownership
+use their own explicit APIs.
+
+Native adapters use the borrowed admission guard for row staging, identities,
+accepted output and coverage. The guard checks the exact current HTTP leg and
+physical attempt; native response validation and publication freshness are
+separate requirements.
+Scope the guard around admission, drop it before mutable Cx diagnostics or Store
+publication, and re-admit if more staging follows. Native cache/Store effects
+outside the history owner require the same synchronous root/leg check.
+Read cursor identities stay page-local until admission, so a discarded failed
+prefix cannot suppress those rows in a later retry. Discard the failed staged
+page before retry admission; a different physical attempt is refused until that
+binding and its unvalidated rows and identities are cleared.
+
+Migrate a venue's owner to the Read type as a whole. Handle or deliberately
+ignore a Context ownership error; never unwrap it or retry through numeric
+done/fail. Stale or mixed-mutation ownership cannot run a captured finalizer,
+publish a history.incomplete companion, or consume the proper command owner's
+terminal authority. Preparation/policy refusals reject strictly; actual later
+page failures can return previously accepted rows with one command-scoped
+incomplete Warn. Native strict endpoint-policy refusals remain strict.
+
+SDK/NX callers keep the incomplete fact correlated to the command and treat
+its returned rows as partial coverage. An absent or refused managed result does
+not establish complete history. Existing native row shapes and result shaping
+remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
+and [owned history](RUST_OWNED_HISTORY.md).
+
+### Lighter public order-book seed uses managed Background Read
+
+The independent `orderBookOrders?market_id={id}&limit=100` snapshot now waits for
+prepare/bind/final claim in custom worker/hosted transports. It remains unsigned
+GET with empty headers/body. SDK subscriptions, snapshot decoding, level units,
+book/nonce validation, WS revision/generation precedence and native2s recovery
+remain unchanged. This does not establish WS nonce continuity from REST.
+
+Preparation shares the original20s bound with response handling. Expired or
+unreleased work cannot publish; failures release only the matching subscription's
+in-flight latch and use existing background recovery, never a user's command
+terminal. Ticker/catalog/private/trading paths stay native. No caller signature
+or financial-outcome contract changes; transports need managed preparation for
+this additional background read.
+## Retained command readiness
+
+With the engine's `http-plans` feature, native FIFO commands can park their own
+Preflight during genuine entry and activate it once after a predecessor physically
+retires. They keep their original command generation; waiting creates no request,
+timer or artificial deadline. Final native Plan admission establishes its bound.
+A predecessor's HTTP DATA cannot donate command-entry or response authority to
+the next command. Cleanup returns only an already-parked handle; actual activation
+runs after cleanup, callback exit and the execution sweep.
+
+A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
+An unhandled callback or a selected read with no submitted HTTP fails once with
+Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
+NX consumes that one terminal and keeps any prior uncertain effects for ordinary
+reconciliation. Ready custody cannot submit or retire another command's work.
+Root expiry and preparation refusal wake the successor in the same engine event;
+no unrelated feed event is needed. No host wire or signer capability is added.
 ## ApeX managed trade plans (#1891)
 
 Trade commands retain their native successful result bytes, cancellation order,
