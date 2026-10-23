@@ -95,15 +95,22 @@ impl Envelope {
         }
     }
 }
+impl Envelope {
+    /// REST recipes carry params; the WS auth recipe never does.
+    fn transport(&self, outbound: &Action) -> Result<(), SignError> {
+        match (outbound, self.params.is_some()) {
+            (Action::Http(_), true) | (Action::WsSend { .. }, false) => Ok(()),
+            _ => Err(SignError::InvalidRequest),
+        }
+    }
+}
 impl SignStep for Envelope {
     fn prepare(
         &mut self,
         outbound: &mut Action,
         dispatch: &DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
-        if !matches!(outbound, Action::Http(_) | Action::WsSend { .. }) {
-            return Err(SignError::InvalidRequest);
-        }
+        self.transport(outbound)?;
         let stamp = dispatch.stamp_ms();
         self.nonce = stamp as u64;
         let nonce = self.nonce;
@@ -144,6 +151,7 @@ impl SignStep for Envelope {
             .get(1)
             .filter(|mac| mac.len() == 32)
             .ok_or(SignError::InvalidResult)?;
+        self.transport(outbound)?;
         let body = envelope_json(
             &self.method,
             key,
@@ -286,6 +294,18 @@ mod tests {
         assert_eq!(
             step.apply(&mut timer, &result(b"key", 32)),
             Err(SignError::InvalidRequest)
+        );
+        let mut auth = Envelope::ws_auth(
+            serde_json::from_str(
+                r#"{"credential":"primary.credential","signing":"primary.signing"}"#,
+            )
+            .unwrap(),
+            "wss://stream.crypto.com/exchange/v1/user",
+        );
+        assert_eq!(
+            auth.apply(&mut http, &result(b"key", 32)),
+            Err(SignError::InvalidRequest),
+            "the WS auth recipe never writes an HTTP body"
         );
     }
 }
