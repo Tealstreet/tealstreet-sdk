@@ -31,7 +31,7 @@ function rig(options = {}, overrides = {}, handlers = {}) {
 
 const done = (host, id, result = '"done"') => host.run(JSON.stringify([{ op: 'done', command: id, result }]));
 
-test('deadlines validate without sending commands; per-call policy stays outside native JSON', async () => {
+test('deadlines validate without sending commands; only the effective wait enters native JSON', async () => {
   for (const invalid of [0, -1, NaN, Infinity, 1.5, 2_147_483_648, '100', null]) {
     assert.throws(() => rig({ commandTimeoutMs: invalid }), RangeError);
     const r = rig();
@@ -42,7 +42,7 @@ test('deadlines validate without sending commands; per-call policy stays outside
   }
   const r = rig({ commandTimeoutMs: 20 });
   const result = r.host.command({ op: 'getAccount', input: 1 }, { timeoutMs: 7 });
-  assert.deepEqual(r.calls, [{ op: 'getAccount', input: 1, command: 1, now: 0 }]);
+  assert.deepEqual(r.calls, [{ op: 'getAccount', input: 1, command: 1, timeoutMs: 7, now: 0 }]);
   assert.equal([...r.timers.values()][0].at, 7);
   done(r.host, 1);
   assert.equal(await result, 'done');
@@ -509,8 +509,9 @@ test('native WEEX incomplete fixture flags retained income only for its pending 
 test('per-command event observer is installed before synchronous dispatch and sees coverage before done', async () => {
   const events = [];
   const r = rig({}, { command(json) {
-    const { command, ...input } = JSON.parse(json);
+    const { command, timeoutMs, ...input } = JSON.parse(json);
     assert.deepEqual(input, { op: 'fetchFills' }, 'observer stays outside native JSON');
+    assert.equal(timeoutMs, DEFAULT_COMMAND_TIMEOUT_MS);
     return JSON.stringify([coverageEvent(command), { op: 'done', command, result: '[]' }]);
   } });
   const result = await r.host.command({ op: 'fetchFills' }, { onEvent(event) {
