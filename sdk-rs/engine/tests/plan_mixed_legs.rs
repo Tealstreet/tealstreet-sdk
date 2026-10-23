@@ -348,6 +348,18 @@ fn two_primary_mutations_remain_parallel_and_complete_once_in_reverse_order() {
     reply(&mut engine, &pair[0], 3.);
     assert_eq!(engine.venue().plan.as_ref().unwrap().deadline(), root);
     let done = prepared_actions(&mut engine, 3.);
+    assert_eq!(
+        done.iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(
+                    Notice::CommandDone { command: 7, .. }
+                        | Notice::CommandFailed { command: 7, .. }
+                )
+            ))
+            .count(),
+        1
+    );
     assert_eq!(done.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "[]")).count(), 1);
     reply(&mut engine, &pair[0], 4.);
     assert!(prepared_actions(&mut engine, 4.).is_empty());
