@@ -68,6 +68,10 @@ if ! python3 scripts/check-request-context.test.py || ! python3 scripts/check-re
   status=1
 fi
 
+if ! python3 scripts/check-socket-lifecycle.test.py || ! python3 scripts/check-socket-lifecycle.py; then
+  status=1
+fi
+
 if ! python3 scripts/check-credential-selection.test.py || ! python3 scripts/check-credential-selection.py; then
   status=1
 fi

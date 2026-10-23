@@ -93,6 +93,34 @@ fn http_work(
     Ok((work, OutputKind::Http(policy)))
 }
 
+/// Families with a hosted request codec. AsterDEX V3 signs with a wallet key,
+/// which must never become an HMAC key. Only an explicit setup-resolved V1
+/// qualifies: inference from options cannot see material held by the setup.
+pub fn admitted(venue: &str, options: &crate::EngineOptions) -> bool {
+    let _ = options;
+    match venue {
+        #[cfg(feature = "asterdex")]
+        "asterdex" => {
+            options.asterdex.api_version == Some(safe_cex_venue_asterdex::sign::Version::V1)
+        }
+        _ => family(venue),
+    }
+}
+
+fn family(venue: &str) -> bool {
+    let binance = cfg!(feature = "binance")
+        && matches!(
+            venue,
+            "binance" | "binancepm" | "binanceinverse" | "binancespot"
+        );
+    let bybit = cfg!(feature = "bybit")
+        && matches!(
+            venue,
+            "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
+        );
+    binance || bybit || (cfg!(feature = "asterdex") && venue == "asterdex")
+}
+
 pub fn prepare(
     venue: &str,
     identities: &Identities,
@@ -105,17 +133,7 @@ pub fn prepare(
         method: "HOSTED".into(),
         ..Default::default()
     };
-    let binance = cfg!(feature = "binance")
-        && matches!(
-            venue,
-            "binance" | "binancepm" | "binanceinverse" | "binancespot"
-        );
-    let bybit = cfg!(feature = "bybit")
-        && matches!(
-            venue,
-            "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader"
-        );
-    if !binance && !bybit {
+    if !family(venue) {
         return Err(SignError::Unsupported);
     }
     match input {
@@ -150,7 +168,8 @@ pub fn prepare(
             to_sign,
             output_format,
         } => {
-            if to_sign.is_empty() {
+            // AsterDEX authenticates its private socket with a listen key.
+            if to_sign.is_empty() || venue == "asterdex" {
                 return Err(SignError::InvalidRequest);
             }
             Ok((
@@ -249,6 +268,7 @@ mod presentation_tests {
             signing: KeyRef("ref:owned-primary-signing".into()),
             passphrase: Some(KeyRef("ref:owned-primary-presentation".into())),
             stable_id: None,
+            extra: Default::default(),
         };
         let mut signer = LocalSigner::new();
         signer.insert(identity.credential.clone(), b"public-identity".to_vec());
@@ -323,6 +343,7 @@ mod presentation_tests {
             signing: KeyRef("ref:owned-secondary-signing".into()),
             passphrase: None,
             stable_id: None,
+            extra: Default::default(),
         };
         signer.insert(secondary.credential.clone(), b"secondary-public".to_vec());
         signer.insert(
