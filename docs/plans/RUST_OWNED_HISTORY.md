@@ -2234,3 +2234,41 @@ transition/full-map review, no broad exemption. Corepack Yarn only: never
 bare/Volta yarn, npx or the account-policy check. No local release WASM/full replay
 or timing matrix. Keep #1795/#1747 watches and owner queue; actual SafeIDs and
 later shared inputs require real integration/fresh final source-bound proof.
+
+WOO plan review: claude-8x5tm1 independently reviewed `68286b13cab` against the
+native adapter and marked it CLEAN before source edits. Conditions adopted:
+CursorWalk has neither empty nor no-new-row stall flag; shared fresh/stage run
+only after complete HTTP/envelope/row/census validation; CALLERS names both the
+immediate ROW_SKIPPED warning and terminal owned gap. Original history 29/29 PASS;
+regression-only `813b48e98e5` yields 32 PASS/8 expected assertion-RED groups on
+unchanged production (three new compatibility GREEN). Logs and original source
+SHA are sealed in /tmp/codex-woo-owned-history-original-red-proof.json locally.
+
+The previous ledger-pacing test's `result.is_err()` expectation is explicitly
+superseded: its accepted first ledger row now survives page-two HTTP 429 with
+one owned coverage marker. The exact 6000-ms timer assertions remain; the test
+now checks retained nonempty output and owned warning instead of discarded rows.
+Additional source-audit controls cover simultaneous owners with log level Error,
+first-gap retention across mixed pages, valid empty public single-response
+completion, and unchanged consuming signed() setup classification. No timeout,
+production request recipe or account fixture changes.
+
+WOO corrected local checks: all 44 history controls PASS, including the expanded
+first-failure HTTP/transport/all-malformed/truncated-prefix matrix in direct and
+streamed modes. The broader engine/WOO native suite passed 796 tests before that
+last test-only matrix expansion; final history rerun and strict all-target/
+all-feature Clippy/fmt/bans plus checker/13 negative controls PASS. The exact
+legacy map is pure prune 16->5 (11 removed occurrences, zero additions); every
+other map and checker script remains identical. A final-controls rerun against
+the original production source independently records 33 PASS/11 expected REDs
+(the original eight plus the explicit ledger-policy supersession and two added
+coverage/peer assertions). No production source was changed during that run.
+
+Source self-audit confirms matches_entry/history_entry and streamed history_item
+are byte-identical. Native parameter construction and signing/send calls are
+byte-identical except reading command from owner.command() before consuming
+Pending. No engine, lib, account/trading, signing or dependency edits. One owner
+continues across every stage and reports only validated eligible rows; no empty
+transition can set shared dedupe or manufacture recovery authority. No local
+release WASM/full replay/timing run. Independent source/caller/full-map review,
+CI and actual SafeIDs source-bound final proof remain distinct gates.
