@@ -32,7 +32,7 @@ and includes other calls.
 | --- | --- | --- | --- | --- | --- | --- |
 | Binance USD-M/COIN-M/PM | `binance/src/account.rs:365-407` (`cx.request`+`cx.sign_http`) | POST `/{f,d,pa}pi/v1/listenKey` | create | livenet API key header only; testnet HMAC | no epoch; failure backs off 5 s doubling to 60 s; every reconnect POSTs again | account 2, lib 5 |
 | Binance | `account.rs:578-580` timer | PUT same | keepalive every 30 min | same | failure retries every 60 s, no teardown | — |
-| AsterDEX | `asterdex/src/account.rs:413-429` → `request.rs:230` | POST `/fapi/{v1,v3}/listenKey` | create | V1 HMAC / V3 EIP-712 + `X-MBX-APIKEY` | `key_epoch`; `key_pending` single flight; failure → `close_private` + Supervisor retry | account 2, request 33 |
+| AsterDEX | `asterdex/src/account.rs:413-429` → `request.rs:230` | POST `/fapi/{v1,v3}/listenKey` | create | V1 HMAC / V3 standard EIP-191 (EIP-712 is Code-only) + `X-MBX-APIKEY` | `key_epoch`; `key_pending` single flight; failure → `close_private` + Supervisor retry | account 2, request 33 |
 | AsterDEX | `account.rs:978-989` | PUT same | keepalive 30 min | same | `is_read` relabel (`request.rs:77`); network retry ×3; PUT retried on 429/5xx | — |
 | Bitrue | `bitrue/src/account.rs:513-530` → `lib.rs:333` | POST `…/user_stream/api/v1/listenKey` | create | HMAC headers built in venue | `account.generation`; `listen_pending` single flight; malformed key → `restart_private`; any request re-signed once on signature refusal (`lib.rs:910`) | account 12, lib 22 |
 | Bitrue | `account.rs:796-809` | PUT `…/listenKey/{key}` | keepalive 30 min | HMAC | failure → full private restart; POST relabelled safe (`lib.rs:917`) | — |
@@ -84,13 +84,15 @@ Native session timers to delete in Phase C (temporary state, tracked here):
 A session is an engine-issued, generation-bearing **owner** alongside commands.
 It is not a command, a read or a socket epoch.
 
-- `Owner::Session { id, generation }` and `Scope::Session(SessionId)`.
-  `Cx::open_session(SessionPolicy) -> Result<Session, Error>` issues an opaque,
-  issuer-bound handle. `SessionPolicy` holds:
+- `Owner::Session { generation }`. `Cx::open_session(SessionPolicy) ->
+  Result<Session, Error>` issues an opaque, issuer-bound handle. The generation
+  is a monotonic engine identity that is never reused, so a reopened session is
+  a new generation. There is no public `Scope` variant: contexts come only
+  from `Cx::session_context(&Session, …)` or a session parent, so a numeric
+  scope can never forge session authority. `SessionPolicy` holds:
   - an optional non-secret `Credential` (slot + `KeyRef`). This is `Some` for
     keyed KuCoin public bullets, which are signed when keys exist.
   - `repeat_safe: bool`, explained under Outcome and recovery.
-  - a bounded label.
 - **Retention.** The engine keeps no engine-side store of keys, listen keys,
   tokens, cookies or JWTs. The only copy it holds is the attempt's own request
   and unsigned recipe (`http_lifecycle.rs:148-154`), which may carry a listen
