@@ -1998,3 +1998,19 @@ nonempty paths retain native/cache selection; bounded native upsert remains an
 endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## BloFin public request-context adoption
+
+BloFin instruments, ticker seeds and candle queries now declare unsigned Read
+semantics through the existing managed transport lifecycle. Context-bearing
+pending reads replace opaque public HTTP and numeric candle terminal callbacks;
+discovery retires its logical handle on terminal success/failure before native
+startup callbacks can enqueue another read. Native catalogue, ticker and candle
+mapping remain intact. No private signing, financial admission, history owner or
+trading-outcome policy is copied into the venue.
+
+One original numeric candle failure site remains for refusal before Context
+issuance; it is a shared command-entry blocker, assigned to `codex-uufub4`, not
+an exemption. The exact BloFin inventory shrinks 28 to 24; every other path map
+remains unchanged. Context-bearing history completion and multi-request admission
+remain separate shared dependencies. [Inventory and scope](RUST_BLOFIN_REQUEST_CONTEXT.md).

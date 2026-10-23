@@ -520,3 +520,16 @@ bounded duplicate replacement after eviction, two/four candidate requests,
 signature reset, concurrent owners and persistent live cache. Native endpoint
 selection/upsert facts remain local; no new owner/pager/marker policy or shared
 signing-provenance implementation is copied into the venue.
+
+## BloFin public managed-read boundary
+
+Unsigned BloFin discovery/candles adopt engine-owned preparation, release,
+deadline and Context completion. Typed setup errors survive the venue callback;
+public preflight validates market before interval and reports explicit user-error
+kinds. Background retirement covers successful, malformed, missing-list, native,
+transport and preparation-failure terminals. Native row mapping, discovery retry
+policy and private behavior remain independent. Shared test transport helpers
+execute preparation/claim at fixture event time; raw-action regressions retain
+the unreleased-response and parked-preparation boundaries. One pre-Context
+numeric refusal awaits the shared command-entry seam; no new legacy fingerprint
+or checker exemption is introduced.
