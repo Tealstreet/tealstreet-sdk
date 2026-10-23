@@ -100,3 +100,15 @@ test('batching still freshly rejects late duplicate artifacts/jobs and run-attem
     await assert.rejects(evidenceEndCheck(value.certifier), /duplicate\/changed|attempt changed/);
   }
 });
+
+
+test('fresh exit inventory also protects the absence of unissued second runners', async () => {
+  const value = cohort(), ctx = value.context();
+  const secondName = 'Rust / CPU remeasurement (bitget)';
+  const index = value.jobs.findIndex(job => job.name === secondName);
+  const removed = value.jobs.splice(index, 1)[0];
+  ctx.secondDispositions = new Map([['bitget', [{ decision: 'first' }]]]);
+  await evidenceEndCheck(ctx);
+  value.jobs.push(removed);
+  await assert.rejects(evidenceEndCheck(ctx), /without a first miss/);
+});

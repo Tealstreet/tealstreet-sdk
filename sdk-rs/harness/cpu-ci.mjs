@@ -445,6 +445,8 @@ async function certifySuite(context, suite, destination) {
   insist(same(row, recomputed), 'authenticated plan differs from full current first-evidence revalidation');
   const { jobs: allJobs } = await evidenceInventory(context);
   const hasSecond = requireSecondState(row.cases, allJobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
+  context.secondDispositions ??= new Map();
+  context.secondDispositions.set(suite, row.cases);
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
@@ -491,6 +493,8 @@ async function certifySuite(context, suite, destination) {
 export async function evidenceEndCheck(context) {
   const { run, jobs, artifacts } = await evidenceInventory(context, true);
   insist(run.run_attempt === 1, 'workflow attempt changed during certification');
+  for (const [suite, dispositions] of context.secondDispositions ?? [])
+    requireSecondState(dispositions, jobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
   for (const binding of context.bindings ?? []) {
     const inventory = artifacts.filter(value => value.name === binding.artifact.name);
     insist(inventory.length === 1 && same(inventory[0], binding.artifact), 'artifact identity became duplicate/changed');
