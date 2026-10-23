@@ -40,11 +40,12 @@ pub(crate) enum Root {
     Background {
         deadline: f64,
     },
-    /// An admitted Plan is the physical owner: its root bounds the group and
-    /// only its seal completes it.
+    /// An admitted Plan's physical owner: its root bounds the group and only
+    /// its seal completes it. The founder is the first ordinary observer.
     #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
     Planned {
         deadline: f64,
+        founder: Member,
     },
 }
 
@@ -246,14 +247,16 @@ impl Groups {
                 }
                 (deadline.min(bound), None, true)
             }
-            Root::Planned { deadline } => {
-                if window != Window::UntilTerminal || !deadline.is_finite() {
+            Root::Planned { deadline, founder } => {
+                if window != Window::UntilTerminal
+                    || !deadline.is_finite()
+                    || founder.operation != operation
+                {
                     return Err(Error::Invalid);
                 }
-                if deadline <= now {
-                    return Err(Error::TimedOut);
-                }
-                (deadline, None, false)
+                let entry = Entry::new(founder.clone(), Execution(0), deadline, now)?;
+                self.admit(&founder)?;
+                (deadline, Some(entry), false)
             }
         };
         let id = self.issue()?;
@@ -414,10 +417,35 @@ impl Groups {
 
     /// Store/native-cache publication is allowed only for a live owner set.
     pub(crate) fn may_publish(&self, execution: Execution) -> bool {
-        self.group(execution).is_ok_and(|group| {
-            // A Plan founder stays the live owner until the Plan seals.
-            !group.terminal && (group.background || group.planned || !group.observers.is_empty())
-        })
+        self.group(execution)
+            .is_ok_and(|group| !group.terminal && (group.background || !group.observers.is_empty()))
+    }
+
+    /// The checks `begin`/`join` would make for this member, without state.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    pub(crate) fn admissible(&self, command: CommandId, key: &str) -> Result<(), Error> {
+        if key.len() > MAX_KEY {
+            return Err(Error::Invalid);
+        }
+        if self.members.contains_key(&command) {
+            return Err(Error::State);
+        }
+        if self.members.len() >= MAX_MEMBERS {
+            return Err(Error::Capacity);
+        }
+        Ok(())
+    }
+
+    /// Live observer commands of one execution, in join order.
+    #[cfg_attr(
+        not(all(feature = "http-plans", feature = "order-locks")),
+        allow(dead_code)
+    )]
+    pub(crate) fn observer_commands(&self, execution: Execution) -> Vec<CommandId> {
+        self.group(execution).map_or_else(
+            |_| Vec::new(),
+            |group| group.observers.iter().map(|entry| entry.command).collect(),
+        )
     }
 
     pub(crate) fn planned(&self, execution: Execution) -> bool {
@@ -471,7 +499,7 @@ impl Groups {
             .into_iter()
             .partition(|entry| entry.deadline <= now);
         group.pending = kept;
-        if closes || (!group.background && !group.planned && group.observers.is_empty()) {
+        if closes || (!group.background && group.observers.is_empty()) {
             group.terminal = true;
         }
         let settled = group.terminal;
@@ -510,7 +538,7 @@ impl Groups {
             Some(entry) => (entry, false),
             None => (found(&mut group.pending).ok_or(Error::Revoked)?, true),
         };
-        if !queued && !group.background && !group.planned && group.observers.is_empty() {
+        if !queued && !group.background && group.observers.is_empty() {
             group.terminal = true;
         }
         let sealed = group.seal(entry, Err(error), !queued && group.terminal);

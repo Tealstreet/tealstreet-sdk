@@ -437,47 +437,59 @@ existing or spent custody (no fresh first entry), so returning without a new
 terminal is correct (confirmed with uufub4).
 
 
-## Plan-backed executions (claude-fe7lgm, 2026-10-23)
+## Plan-backed executions (claude-fe7lgm, 2026-10-24)
 
 Branch `feat/rust-planned-execution`, stacked on the reviewed #1873 pin
-`2fe13f4d892`, behind `http-plans`. **This first cut does NOT implement the
-composition contract uufub4 cleared** (full text on `feat/rust-hyro-execution`,
-`82c23a39e66`): that contract has one `Owner::Execution` physical Plan and an
-explicit founder Observer whose detach or expiry leaves peers running. Here
-the Plan stays owned by the founder command, so the founder cannot detach.
-uufub4's API-fit review blocks this narrower lifetime policy; it needs either
-the contract ownership or an explicit overseer ruling. The three Plan
-extensions and the intent ledger are separate follow-ups and wait for this.
+`2fe13f4d892`, behind `http-plans`. This implements the composition contract
+uufub4 cleared for API fit (`82c23a39e66` on `feat/rust-hyro-execution`) and
+the revised ownership design uufub4 cleared on 2026-10-24. A first cut kept
+the Plan under the founder command and was rejected as a narrower lifetime
+policy; its controls were kept and extended.
 
 - **Admission:** `Cx::begin_planned_execution(&preflight, steps, policy,
-  Window::UntilTerminal) -> (Plan, ExecutionHandle)`. It checks the
-  identities and one more registry slot than the Plan reserves (for the
-  execution root), then runs `admit_plan` unchanged, then commits the group.
-  A refusal leaves no Plan, group, root, identity or action. `BeforeRelease`
-  is refused: Plan slots do not report release to the group.
-- **Owner:** the founder's Plan is the one physical owner and journal. The
-  founder is not a group member; it completes through the Plan and cannot
-  detach. A retained Preflight has no deadline, so its bound is the Plan
-  root. The group's bound is that root, never renewed.
-- **Followers:** `join_execution` with their own genuine entry root, as for
-  ordinary executions. A Mutation follower may be mutation-declared because
-  it never holds a journal. Each follower's bound is `min(own, Plan root)`
-  and it expires on its own.
-- **Terminal:** `Cx::seal_plan` is the one funnel for `done_plan`,
-  `done_read_plan_after_data` and `fail_plan` (including expiry and failed
-  delivery). After the founder's seal it sweeps expired observers, then
-  seals the group once with the founder's projection. Each follower is
-  finished through `seal_projected`, which takes that projection verbatim:
-  an Unknown write stays Unknown, accepted IDs survive, and no empty
-  follower journal can rewrite the outcome. This hook moves into
-  hcmq3f's `commit_plan_terminal` when #1894 lands (agreed).
-- **Refusals:** `abort_execution` and `complete_execution` are refused on a
-  planned handle; `http_leg_context` under its root is refused, so the only
-  physical work is the Plan's slots. The group's own timer covers only
-  follower deadlines earlier than the root; the Plan's timer owns the root.
+  Window::UntilTerminal, key) -> (Plan, ExecutionHandle, founder_root)`, one
+  transaction. It checks group membership, root and physical-owner storage
+  and one more retirement, then runs the shared `admit_plan_owned` (also
+  behind `admit_plan`). That reserves two more Contexts (execution root,
+  founder root) and two more ids (execution identity, founder root leg)
+  inside the same capacity checks. A refusal leaves no Plan, group, root,
+  identity or action. `BeforeRelease` is refused.
+- **Physical owner:** the Plan, its slots and journal move from the founder's
+  exact retained Preflight to a physical owner keyed by `Owner::Execution`
+  (`ContextRegistry::physical`). `owner_entry`/`command_mut` resolve a
+  command generation or a physical owner; every Plan/journal path uses them.
+  The founder keeps its own pending/delivery accounting and becomes an
+  entry-owned Context root bounded by the Plan root, holding no journal.
+- **Observers:** the founder is the group's first ordinary member; followers
+  join with their own genuine entry root. A member's only physical work is
+  the Plan's: `register_attempt` refuses any member's own root (also #1910 on
+  the landing). Each observer expires or detaches on its own bound.
+- **Terminal:** `Cx::seal_plan` is the one funnel (`done_plan`,
+  `done_read_plan_after_data`, `fail_plan`, expiry, failed delivery). A
+  physical seal retires the physical owner with no notice, then seals the
+  group once: every surviving observer gets the journal's projection
+  verbatim through `seal_projected`, with its rejection reports. This hook
+  moves into hcmq3f's `commit_plan_terminal` when #1894 lands.
+- **Orphans:** when the last observer leaves, unsent slots are revoked
+  (`revoke_unsent_execution_legs`), `validate_plan_delivery` refuses before
+  any codec, and the event-boundary sweep fails the Plan (journal facts kept:
+  a released write projects Unknown). A later reply reaches no venue codec.
+- **Refusals:** `abort_execution`, `complete_execution` and `seal_execution`
+  are refused on a planned handle; `http_leg_context` under it is refused.
+- **Order locks:** a released physical write marks every observer's
+  placement scope as sent.
+- **Group ids:** `Groups::next` cannot overflow: every begin first reserves
+  one engine id (ceiling 2^53-1), so `next` stays below that.
 
-Controls (`execution_planned_tests.rs`, original REDs `cac95ea3531`): one
-write serves founder and followers with one projection; an unresolved
-write projects Unknown to everyone; an early follower expiry leaves the
-write running; the root bounds every observer and is never renewed; no
-direct completion or extra leg; atomic refusal spends nothing.
+Controls (`execution_planned_tests.rs`; original REDs `cac95ea3531`, then
+`fe181da6fec` for the ownership contract): one write serves founder and
+followers with one projection; an unresolved write projects Unknown to all;
+an early follower expiry leaves the write running; the root bounds every
+observer and is never renewed; no direct completion or extra leg; atomic
+refusal; the Plan is execution-owned; a detached founder leaves the write
+to live peers; the last observer leaving withholds a sent reply and never
+binds an unsent write; a follower cannot send on its own root; Read
+followers receive the Plan result.
+
+The reconciliation REDs (`request_context_reconciliation_tests.rs`,
+`33f92d40391`) stay committed and ignored until their runtime clears API fit.

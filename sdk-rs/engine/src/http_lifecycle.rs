@@ -380,6 +380,25 @@ impl<P> Io<P> {
         }
     }
 
+    /// A sealed physical Plan owner: clear its timer and unsent work.
+    #[cfg(feature = "http-plans")]
+    pub(super) fn retire_http_owner(&mut self, owner: Owner) {
+        if let Some(timer) = self.request_contexts.physical_plan_timer(owner) {
+            self.timers.remove(&timer);
+            self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.actions.push(Action::ClearTimer { timer });
+        }
+        let requests = self
+            .managed_http
+            .iter()
+            .filter(|(_, managed)| managed.lifecycle.context().owner() == owner)
+            .map(|(request, _)| *request)
+            .collect::<Vec<_>>();
+        for request in requests {
+            self.discard_managed(request);
+        }
+    }
+
     /// Unsent legs of an execution with no live owner get no send right.
     pub(super) fn revoke_unsent_execution_legs(&mut self) {
         let revoked = self
@@ -760,10 +779,18 @@ impl<V: Venue> Engine<V> {
             }
             #[cfg(feature = "order-locks")]
             {
-                if managed.lifecycle.context().operation() == Operation::Mutation
-                    && let Owner::Command { id, .. } = managed.lifecycle.context().owner()
-                {
-                    self.io.order_locks.note_command_write(id);
+                if managed.lifecycle.context().operation() == Operation::Mutation {
+                    match managed.lifecycle.context().owner() {
+                        Owner::Command { id, .. } => self.io.order_locks.note_command_write(id),
+                        // A physical Plan write is sent for every observer.
+                        #[cfg(feature = "http-plans")]
+                        owner @ Owner::Execution { .. } => {
+                            for id in self.io.request_contexts.physical_observers(owner) {
+                                self.io.order_locks.note_command_write(id);
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 if managed.lifecycle.context().operation() == Operation::Read {
                     self.io

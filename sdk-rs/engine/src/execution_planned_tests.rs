@@ -50,9 +50,8 @@ mod planned_execution {
         } else {
             plan_policy()
         };
-        // Parent: the founder owns the Plan and has no observer root.
-        cx.begin_planned_execution(preflight, steps, policy, Window::UntilTerminal)
-            .map(|(plan, execution)| (plan, execution, None))
+        cx.begin_planned_execution(preflight, steps, policy, Window::UntilTerminal, "same")
+            .map(|(plan, execution, founder)| (plan, execution, Some(founder)))
     }
 
     fn read_plan_policy() -> PlanPolicy {
@@ -77,6 +76,7 @@ mod planned_execution {
         read: bool,
         founder: Option<Context>,
         withheld: Vec<Error>,
+        delivered: usize,
         own_root_send: bool,
     }
 
@@ -215,6 +215,7 @@ mod planned_execution {
             }
         }
         fn on_response(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: Response<'_>) {
+            self.delivered += 1;
             let plan = self.plan.clone().unwrap();
             let slot = self.slot.clone().unwrap();
             if let Err(error) = cx.validate_plan_delivery(&plan, &context) {
@@ -570,11 +571,10 @@ mod planned_execution {
         e.drain_actions().for_each(drop);
         respond(&mut e, token, 1_000.);
         let actions = e.drain_actions().collect::<Vec<_>>();
-        assert_eq!(
-            e.venue.withheld.len(),
-            1,
-            "no codec or Store work for an orphan"
-        );
+        // The orphaned Plan failed at the event boundary, so the late reply
+        // reaches no venue codec or Store at all.
+        assert_eq!(e.venue.delivered, 0, "no codec or Store work for an orphan");
+        assert!(e.venue.withheld.is_empty());
         assert!(terminals(&actions, FOUNDER).is_empty());
     }
 

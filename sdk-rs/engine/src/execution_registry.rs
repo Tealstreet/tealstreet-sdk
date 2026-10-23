@@ -9,9 +9,6 @@ pub(super) struct Executions {
     /// Execution root identity (its `Owner::Execution` generation) to group.
     roots: HashMap<u64, Execution>,
     observers: HashMap<CommandId, Observer>,
-    /// Plan founder (command, generation) to its execution root identity.
-    #[cfg(feature = "http-plans")]
-    planned: HashMap<CommandId, (u64, u64)>,
 }
 
 impl ContextRegistry {
@@ -244,58 +241,55 @@ impl ContextRegistry {
             .and_then(|owner| owner.context_root().cloned())
     }
 
-    /// Reserve the planned execution's group, root and registry storage so
-    /// the commit after Plan admission cannot fail.
+    /// Check and reserve everything the planned execution adds beyond the
+    /// Plan itself (group membership, root and physical-owner storage, one
+    /// more retirement) so the commit after Plan admission cannot fail.
     #[cfg(feature = "http-plans")]
     pub(in crate::engine) fn prepare_planned_execution(
         &mut self,
-        logical_calls: usize,
-        now: f64,
+        founder: CommandId,
+        key: &str,
     ) -> Result<(), Error> {
-        self.prune(now);
-        let slots = self
-            .reserved_context_count()
-            .checked_add(logical_calls)
-            .and_then(|slots| slots.checked_add(1))
-            .ok_or(Error::Capacity)?;
-        if self
-            .contexts
-            .len()
-            .checked_add(slots)
-            .is_none_or(|total| total > CAPACITY)
-        {
-            return Err(Error::Capacity);
-        }
-        self.contexts
-            .try_reserve(slots)
-            .map_err(|_| Error::Capacity)?;
+        self.executions.groups.admissible(founder, key)?;
         self.executions
             .roots
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
-        self.executions
-            .planned
-            .try_reserve(1)
+        self.physical.try_reserve(1).map_err(|_| Error::Capacity)?;
+        let retained = self
+            .commands
+            .values()
+            .chain(self.physical.values())
+            .filter(|owner| owner.retained())
+            .count()
+            + 2;
+        self.retirements
+            .try_reserve_exact(retained.saturating_sub(self.retirements.len()))
             .map_err(|_| Error::Capacity)
     }
 
-    /// Commit a group rooted by an admitted Plan. Its bound is the Plan root.
+    /// Commit the group whose physical owner is this admitted Plan; the
+    /// founder's observer root is its first member. Bound: the Plan root.
     #[cfg(feature = "http-plans")]
     pub(in crate::engine) fn begin_planned_execution(
         &mut self,
-        identity: u64,
         plan: &crate::request_context::Plan,
         policy: &crate::request_context::PlanPolicy,
-        window: Window,
+        founder: &Context,
+        key: &str,
         now: f64,
     ) -> Result<Context, Error> {
-        let Owner::Command { id, generation } = plan.owner() else {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
+            return Err(Error::Invalid);
+        };
+        let Owner::Command { id, generation } = founder.owner() else {
             return Err(Error::Invalid);
         };
         let mut root = Context::new(
-            Owner::Execution {
-                generation: identity,
-            },
+            plan.owner(),
             identity,
             policy.operation,
             policy.credential.clone(),
@@ -303,41 +297,67 @@ impl ContextRegistry {
             plan.deadline(),
             policy.pacing,
         )?;
-        let (execution, _) = self.executions.groups.begin(
+        let member = Member {
+            command: id,
+            generation,
+            operation: founder.operation(),
+            deadline: founder.deadline(),
+            key: key.to_owned(),
+        };
+        let (execution, observer) = self.executions.groups.begin(
             Root::Planned {
                 deadline: plan.deadline(),
+                founder: member,
             },
             policy.operation,
-            window,
+            Window::UntilTerminal,
             1,
             now,
         )?;
         root.bind_issuer(&self.issuer);
         self.contexts.insert(identity, root.clone());
         self.executions.roots.insert(identity, execution);
-        self.executions.planned.insert(id, (generation, identity));
+        self.executions
+            .observers
+            .insert(id, observer.expect("founder observer"));
         Ok(root)
+    }
+
+    /// The commands observing a physical Plan owner's execution.
+    #[cfg(all(feature = "http-plans", feature = "order-locks"))]
+    pub(in crate::engine) fn physical_observers(&self, owner: Owner) -> Vec<CommandId> {
+        let Owner::Execution {
+            generation: identity,
+        } = owner
+        else {
+            return Vec::new();
+        };
+        self.executions
+            .roots
+            .get(&identity)
+            .map_or_else(Vec::new, |execution| {
+                self.executions.groups.observer_commands(*execution)
+            })
     }
 
     #[cfg(feature = "http-plans")]
     pub(in crate::engine) fn has_planned_executions(&self) -> bool {
-        !self.executions.planned.is_empty()
+        !self.physical.is_empty()
     }
 
-    /// Seal the founder Plan's execution once with the Plan's own projection.
+    /// Seal a physical owner's execution once with the Plan's projection.
     #[cfg(feature = "http-plans")]
     pub(in crate::engine) fn seal_planned_execution(
         &mut self,
         plan: &crate::request_context::Plan,
         projection: &Result<String, VenueError>,
     ) -> Vec<Sealed> {
-        let Owner::Command { id, generation } = plan.owner() else {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
             return Vec::new();
         };
-        if self.executions.planned.get(&id).map(|(g, _)| *g) != Some(generation) {
-            return Vec::new();
-        }
-        let (_, identity) = self.executions.planned.remove(&id).expect("checked above");
         self.contexts.remove(&identity);
         let Some(execution) = self.executions.roots.get(&identity).copied() else {
             return Vec::new();
@@ -346,6 +366,23 @@ impl ContextRegistry {
             .groups
             .complete(execution, |_| projection.clone())
             .unwrap_or_default()
+    }
+
+    /// A live physical Plan whose execution has no observer left; the engine
+    /// fails it outside any delivery so nothing more is sent or published.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn orphaned_plan(&self) -> Option<crate::request_context::Plan> {
+        self.physical.iter().find_map(|(identity, owner)| {
+            let orphan = self
+                .executions
+                .roots
+                .get(identity)
+                .is_none_or(|execution| !self.executions.groups.may_publish(*execution));
+            match &owner.phase {
+                CommandPhase::Planned(state) if orphan => Some(state.handle()),
+                _ => None,
+            }
+        })
     }
 
     #[cfg(all(test, feature = "http-plans"))]
