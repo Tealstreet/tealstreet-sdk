@@ -59,7 +59,11 @@ trait AnyEngine {
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         (now, 0)
     }
-    fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError>;
+    /// `None` leaves host capability undeclared (unknown), so admission fails closed.
+    fn external_signer(
+        &mut self,
+        algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+    ) -> Result<(), safe_cex_engine::VenueError>;
     fn prepare_dispatch(&mut self, now: f64);
     fn set_entropy(
         &mut self,
@@ -127,8 +131,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
     fn failed(&self) -> bool {
         Engine::failed(self)
     }
-    fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
-        self.set_signer(None)
+    fn external_signer(
+        &mut self,
+        algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.set_signer(None)?;
+        self.set_host_algorithms(algorithms)
     }
     fn prepare_dispatch(&mut self, now: f64) {
         Engine::prepare_dispatch(self, now);
@@ -236,6 +244,17 @@ impl safe_cex_engine::signing::Signer for ExternalSigner {
             safe_cex_engine::signing::SignError::Unavailable,
         )))
     }
+}
+
+/// A JS provider's declared algorithms: a JSON array of SignAlgorithm names.
+fn host_algorithms(
+    json: &str,
+) -> Result<Vec<safe_cex_engine::signing::Algorithm>, safe_cex_engine::VenueError> {
+    serde_json::from_str(json).map_err(|_| {
+        safe_cex_engine::VenueError::new("Invalid signer algorithm declaration")
+            .kind(safe_cex_engine::ErrorKind::InvalidInput)
+            .outcome(safe_cex_engine::Outcome::NotSent)
+    })
 }
 
 /// Owns whichever venue engine the registry builds.
@@ -824,14 +843,15 @@ impl WasmEngine {
             None
         };
         #[cfg(feature = "dispatch-signing")]
-        let hosted_identity = dispatch_signing
-            .then(|| {
-                options
-                    .signing
-                    .clone()
-                    .map(|identities| (venue.to_owned(), identities))
-            })
-            .flatten();
+        let hosted_identity = (dispatch_signing
+            && safe_cex_venues::hosted_signing::admitted(venue, &options))
+        .then(|| {
+            options
+                .signing
+                .clone()
+                .map(|identities| (venue.to_owned(), identities))
+        })
+        .flatten();
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
         let inner = safe_cex_venues::build_with_signer(
@@ -869,7 +889,12 @@ impl WasmEngine {
 
     /// JS providers execute atomic batches outside the engine. Must be installed before start.
     #[wasm_bindgen(js_name = useExternalSigner)]
-    pub fn use_external_signer(&mut self) -> Result<(), js_sys::Error> {
+    /// `algorithms_json` declares what the JS provider can sign (a JSON array of
+    /// SignAlgorithm); omitted means unknown, so capability admission fails closed.
+    pub fn use_external_signer(
+        &mut self,
+        algorithms_json: Option<String>,
+    ) -> Result<(), js_sys::Error> {
         if !self.dispatch_signing {
             return Err(construction_error(
                 safe_cex_engine::VenueError::new(
@@ -879,7 +904,13 @@ impl WasmEngine {
                 .outcome(safe_cex_engine::Outcome::NotSent),
             ));
         }
-        self.inner.external_signer().map_err(construction_error)?;
+        let algorithms = algorithms_json
+            .map(|json| host_algorithms(&json))
+            .transpose()
+            .map_err(construction_error)?;
+        self.inner
+            .external_signer(algorithms)
+            .map_err(construction_error)?;
         self.external_signer = true;
         Ok(())
     }
@@ -1268,6 +1299,40 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "asterdex")]
+    #[test]
+    fn hosted_signing_identity_exists_only_for_aster_v1_accounts() {
+        let engine = |options: &str, setup: &str| {
+            let Ok(engine) = crate::WasmEngine::new("asterdex", options, Some(setup.into())) else {
+                panic!("trusted Aster setup must construct");
+            };
+            engine
+        };
+        let v1 = engine(
+            r#"{"asterdex":{"apiVersion":"v1"}}"#,
+            r#"{"primary":{"key":"api-key","secret":"api-secret"}}"#,
+        );
+        assert!(v1.hosted_identity.is_some());
+        let v3 = engine(
+            r#"{"applicationId":"0x2222222222222222222222222222222222222222","asterdex":{"apiVersion":"v3","signerAddress":"0x1111111111111111111111111111111111111111"}}"#,
+            &format!(
+                r#"{{"primary":{{"key":"0x1111111111111111111111111111111111111111","secret":"{}","secretEncoding":"hex"}}}}"#,
+                "12".repeat(32)
+            ),
+        );
+        // A V3 wallet key must never be offered to the hosted HMAC capture,
+        // including when no apiVersion accompanies setup-held V3 material.
+        assert!(v3.hosted_identity.is_none());
+        let unversioned = engine(
+            r#"{"applicationId":"0x2222222222222222222222222222222222222222","asterdex":{"signerAddress":"0x1111111111111111111111111111111111111111"}}"#,
+            &format!(
+                r#"{{"primary":{{"key":"0x1111111111111111111111111111111111111111","secret":"{}","secretEncoding":"hex"}}}}"#,
+                "12".repeat(32)
+            ),
+        );
+        assert!(unversioned.hosted_identity.is_none());
+    }
+
     #[cfg(feature = "bybit")]
     mod bybit_signer_construction {
         use crate::WasmEngine;
@@ -1367,7 +1432,9 @@ mod tests {
                     panic!("{venue}: opaque external provider construction must succeed");
                 };
                 assert!(engine.requires_external_signer(), "{venue}");
-                assert!(engine.use_external_signer().is_ok(), "{venue}");
+                // Declared and undeclared capability both admit ordinary signing.
+                let declared = (venue != ALIASES[0]).then(|| r#"["hmacSha256"]"#.to_owned());
+                assert!(engine.use_external_signer(declared).is_ok(), "{venue}");
                 let actions: Vec<Value> = serde_json::from_str(&engine.start(NOW)).unwrap();
                 assert!(
                     !actions
@@ -1427,6 +1494,18 @@ mod tests {
         };
 
         #[test]
+        fn host_algorithm_declarations_are_exact_sign_algorithm_names() {
+            use safe_cex_engine::signing::Algorithm;
+            assert_eq!(
+                super::super::host_algorithms(r#"["hmacSha256","zkLinkContract"]"#).unwrap(),
+                [Algorithm::HmacSha256, Algorithm::ZkLinkContract]
+            );
+            for invalid in [r#"["HMAC"]"#, r#""hmacSha256""#, "", r#"[null]"#] {
+                assert!(super::super::host_algorithms(invalid).is_err(), "{invalid}");
+            }
+        }
+
+        #[test]
         fn external_marker_never_materializes_credentials_or_signatures() {
             let signer = ExternalSigner;
             let request = SignRequest {
@@ -1450,7 +1529,7 @@ mod tests {
 
         #[cfg(feature = "bitunix")]
         #[test]
-        fn shared_provider_feature_does_not_adopt_unmigrated_public_bitunix() {
+        fn shared_provider_feature_keeps_managed_public_bitunix_unsigned() {
             let Ok(mut engine) =
                 super::super::WasmEngine::new("bitunix", r#"{"publicDataOnly":true}"#, None)
             else {
@@ -1459,17 +1538,62 @@ mod tests {
             assert!(!engine.dispatch_signing);
             assert!(!engine.requires_external_signer());
             #[derive(serde::Deserialize)]
+            struct Packet {
+                request: u64,
+                url: String,
+                method: String,
+                headers: Vec<(String, String)>,
+            }
+            #[derive(serde::Deserialize)]
             struct Outbound {
                 op: String,
-                url: Option<String>,
+                phase: Option<String>,
+                intent: Option<String>,
+                preparation: Option<String>,
+                permit: Option<String>,
+                packet: Option<Packet>,
             }
             let actions: Vec<Outbound> = serde_json::from_str(&engine.start(1000.)).unwrap();
-            assert!(actions.iter().any(|action| {
-                action.op == "http"
-                    && action
-                        .url
-                        .as_deref()
-                        .is_some_and(|url| url.contains("/api/v1/futures/market/"))
+            let preparation = actions
+                .iter()
+                .find(|action| {
+                    action.op == "managedHttp"
+                        && action.phase.as_deref() == Some("prepare")
+                        && action
+                            .packet
+                            .as_ref()
+                            .is_some_and(|packet| packet.url.contains("/api/v1/futures/market/"))
+                })
+                .expect("managed public discovery must prepare before release");
+            assert_eq!(preparation.intent.as_deref(), Some("public"));
+            assert!(actions.iter().all(|action| action.op != "http"));
+            let token = preparation.preparation.as_deref().unwrap();
+            assert!(engine.http_preparation_pending(token));
+            let bound: Vec<Outbound> =
+                serde_json::from_str(&engine.http_prepared(token, "1", None, 1000.).unwrap())
+                    .unwrap();
+            let binding = bound
+                .iter()
+                .find(|action| {
+                    action.op == "managedHttp" && action.phase.as_deref() == Some("bind")
+                })
+                .expect("public transport must bind before claim");
+            assert_eq!(binding.preparation.as_deref(), Some(token));
+            let unsigned = preparation.packet.as_ref().unwrap();
+            let released = binding.packet.as_ref().unwrap();
+            assert_eq!(released.request, unsigned.request);
+            assert_eq!(released.url, unsigned.url);
+            assert_eq!(released.method, "GET");
+            assert_eq!(released.headers, unsigned.headers);
+            assert_eq!(
+                engine.http_claim(binding.permit.as_deref().unwrap(), 1000.),
+                r#"{"status":"released"}"#
+            );
+            assert!(bound.iter().all(|action| {
+                !matches!(
+                    action.op.as_str(),
+                    "http" | "sign" | "signPayload" | "signedOutbound"
+                )
             }));
             assert!(actions.iter().all(|action| {
                 !matches!(
@@ -1949,7 +2073,10 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
-            fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+            fn external_signer(
+                &mut self,
+                _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+            ) -> Result<(), safe_cex_engine::VenueError> {
                 Ok(())
             }
             fn prepare_dispatch(&mut self, _: f64) {}
@@ -2169,7 +2296,10 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
-        fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+        fn external_signer(
+            &mut self,
+            _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+        ) -> Result<(), safe_cex_engine::VenueError> {
             Ok(())
         }
         fn prepare_dispatch(&mut self, _: f64) {}
@@ -2232,7 +2362,10 @@ mod tests {
 
         struct Counted;
         impl AnyEngine for Counted {
-            fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
+            fn external_signer(
+                &mut self,
+                _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
+            ) -> Result<(), safe_cex_engine::VenueError> {
                 Ok(())
             }
             fn prepare_dispatch(&mut self, _: f64) {}

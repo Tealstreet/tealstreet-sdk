@@ -366,12 +366,24 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
             "{venue}"
         );
     }
-    // AsterDEX signs with the wallet private key, from auth or the secret.
+    // AsterDEX V3 signs with the auth wallet key; setup resolves V3 from its shape.
+    let wallet = "0x1111111111111111111111111111111111111111";
     construct(
         "asterdex",
-        r#"{"remoteSigning":true,"key":"k","asterdex":{"privateKey":"p"}}"#,
+        &format!(
+            r#"{{"remoteSigning":true,"key":"{wallet}","applicationId":"{wallet}","asterdex":{{"privateKey":"0x{}"}}}}"#,
+            "12".repeat(32)
+        ),
     )
     .unwrap();
+    // A wallet key that is not V3-shaped resolves V1, which has no secret to sign with.
+    assert_eq!(
+        rejected(
+            "asterdex",
+            r#"{"remoteSigning":true,"key":"k","asterdex":{"privateKey":"p"}}"#
+        ),
+        message
+    );
     assert_eq!(
         rejected(
             "asterdex",
@@ -677,7 +689,8 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
             engine.start(1700000000000.0);
             let mut private = Vec::new();
             loop {
-                let actions: Vec<_> = engine.drain_actions().collect();
+                let actions =
+                    safe_cex_engine::test_support::prepared_actions(&mut engine, 1700000000000.0);
                 if actions.is_empty() {
                     break;
                 }

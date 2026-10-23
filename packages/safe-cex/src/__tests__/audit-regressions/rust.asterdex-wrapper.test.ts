@@ -64,7 +64,7 @@ const fixture = (
     httpFailed: noActions,
     timer: noActions,
   };
-  const construct = vi.fn(function (_venue: string, _options: string) {
+  const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) {
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
@@ -87,7 +87,7 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers Aster and bridges API wallet, builder and secondary read credentials', async () => {
+  it('registers Aster and sends wallet and read-agent material only through signer setup', async () => {
     const { exchange, construct } = fixture({
       secondary_key: USER,
       secondary_secret: PRIVATE,
@@ -96,18 +96,26 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     expect(isRustVenue('asterdex')).toBe(true);
     await exchange.start();
     expect(construct.mock.calls[0][0]).toBe('asterdex');
-    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
-      key: SIGNER,
-      secret: PRIVATE,
+    const options = JSON.parse(construct.mock.calls[0][1]);
+    expect(options).toMatchObject({
       applicationId: USER,
       publicDataOnly: false,
       asterdex: {
+        apiVersion: 'v3',
+        signerAddress: SIGNER,
+        readSignerAddress: USER,
         builderAddress: SIGNER,
         builderFeeRateMaker: '0.00002',
         builderFeeRateTaker: '0.00005',
-        readKey: USER,
-        readSecret: PRIVATE,
       },
+    });
+    expect(options).not.toHaveProperty('key');
+    expect(options).not.toHaveProperty('secret');
+    expect(options.asterdex).not.toHaveProperty('readKey');
+    expect(options.asterdex).not.toHaveProperty('readSecret');
+    expect(JSON.parse(construct.mock.calls[0][2] ?? 'null')).toEqual({
+      primary: { key: SIGNER, secret: PRIVATE, secretEncoding: 'hex' },
+      secondary: { key: USER, secret: PRIVATE, secretEncoding: 'hex' },
     });
   });
 
@@ -119,14 +127,16 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
       extra: { asterdexApiVersion: 'v3' },
     });
     await exchange.start();
-    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
-      key: 'legacy-key',
-      secret: 'legacy-secret',
-      asterdex: { apiVersion: 'v3', userAddress: USER, signerAddress: SIGNER, privateKey: PRIVATE },
+    const options = JSON.parse(construct.mock.calls[0][1]);
+    expect(options).toMatchObject({ asterdex: { apiVersion: 'v3', userAddress: USER, signerAddress: SIGNER } });
+    expect(options.asterdex).not.toHaveProperty('privateKey');
+    // The auth wallet key wins over the flat secret, as before.
+    expect(JSON.parse(construct.mock.calls[0][2] ?? 'null')).toEqual({
+      primary: { key: 'legacy-key', secret: PRIVATE, secretEncoding: 'hex' },
     });
   });
 
-  it('sends no inferred version and adopts native resolution for canSign and STP', async () => {
+  it('sends the setup-resolved version and adopts native resolution for canSign and STP', async () => {
     const { exchange, construct } = fixture({ secret: '', extra: { asterdexApiVersion: 'v1' } }, 'asterdex', 'v3');
     // Before async WASM loading, preserve the synchronous v1/no-secret answer.
     expect(exchange.isPublicDataOnly).toBe(true);
@@ -138,7 +148,8 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
 
     const inferred = fixture();
     await inferred.exchange.start();
-    expect(JSON.parse(inferred.construct.mock.calls[0][1]).asterdex).not.toHaveProperty('apiVersion');
+    // Setup resolves the version from the material's shape; the venue never guesses.
+    expect(JSON.parse(inferred.construct.mock.calls[0][1]).asterdex.apiVersion).toBe('v3');
   });
 
   it('uses native version for signing eligibility after host creation', async () => {

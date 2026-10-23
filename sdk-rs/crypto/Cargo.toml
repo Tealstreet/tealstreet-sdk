@@ -31,6 +31,13 @@ getrandom_04.workspace = true
 [features]
 # zkLink pulls franklin-crypto; only ApeX Omni builds enable it.
 zklink = ["dep:franklin-crypto"]
+# Local provider arms. The primitive modules stay available to venues; only a
+# family that signs through the provider enables its arm, keeping other WASM
+# builds free of that code. Disabled arms refuse with Unsupported.
+ed25519 = []
+es256 = []
+secp256k1 = []
+stark = []
 
 [dev-dependencies]
 alloy-signer = { workspace = true, features = ["eip712"] }
