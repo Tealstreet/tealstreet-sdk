@@ -3,7 +3,7 @@ mod account;
 mod depth_query;
 mod history;
 mod identity;
-mod sign;
+pub mod sign;
 mod trading;
 mod wire;
 

@@ -3,6 +3,148 @@ use safe_cex_crypto::ed25519;
 use safe_cex_engine::url;
 use std::collections::BTreeMap;
 
+use safe_cex_engine::signing::{
+    Algorithm, Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
+    SignResult,
+};
+use safe_cex_engine::{Action, DispatchContext, Method, SignStep};
+
+/// Immutable native transport and canonical signing facts, without credentials.
+#[derive(Clone)]
+pub struct Request {
+    pub method: Method,
+    pub path: String,
+    pub rows: Vec<Params>,
+    pub body: Option<String>,
+    pub window: u32,
+}
+
+pub fn instruction(method: Method, path: &str) -> Result<&'static str, SignError> {
+    match (method, path) {
+        (Method::Get, "/api/v1/account") => Ok("accountQuery"),
+        (Method::Patch, "/api/v1/account") => Ok("accountUpdate"),
+        (Method::Get, "/api/v1/position") => Ok("positionQuery"),
+        (Method::Get, "/api/v1/capital/collateral") => Ok("collateralQuery"),
+        (Method::Get, "/api/v1/orders") => Ok("orderQueryAll"),
+        (Method::Post, "/api/v1/order" | "/api/v1/orders") => Ok("orderExecute"),
+        (Method::Delete, "/api/v1/order") => Ok("orderCancel"),
+        (Method::Delete, "/api/v1/orders") => Ok("orderCancelAll"),
+        (Method::Get, "/wapi/v1/history/fills") => Ok("fillHistoryQueryAll"),
+        (Method::Get, "/wapi/v1/history/orders") => Ok("orderHistoryQueryAll"),
+        (Method::Get, "/wapi/v1/history/funding") => Ok("fundingHistoryQueryAll"),
+        _ => Err(SignError::InvalidRequest),
+    }
+}
+
+/// The provider presents the public API key and signs exact Ed25519 bytes.
+pub struct Http {
+    identity: Identity,
+    request: Request,
+    timestamp: String,
+}
+
+impl Http {
+    pub fn new(identity: Identity, request: Request) -> Self {
+        Self {
+            identity,
+            request,
+            timestamp: String::new(),
+        }
+    }
+}
+
+impl SignStep for Http {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let request = &self.request;
+        let instruction = instruction(request.method, &request.path)?;
+        let is_batch = request.method == Method::Post && request.path == "/api/v1/orders";
+        if request.rows.is_empty()
+            || (!is_batch && request.rows.len() != 1)
+            || request.window == 0
+            || http.method != request.method
+            || http.body != request.body
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        let query = if request.method == Method::Get {
+            query(&request.rows[0])
+        } else {
+            String::new()
+        };
+        let path = if query.is_empty() {
+            request.path.clone()
+        } else {
+            format!("{}?{query}", request.path)
+        };
+        if http.url != format!("https://api.backpack.exchange{path}") {
+            return Err(SignError::InvalidRequest);
+        }
+        let stamp = dispatch.stamp_ms();
+        self.timestamp = safe_cex_engine::num::format(stamp);
+        let text = payload(instruction, &request.rows, stamp, request.window);
+        Ok(SignRequest {
+            receipt: SignReceipt {
+                stamp_ms: Some(stamp),
+                expiry_ms: None,
+            },
+            context: Context {
+                venue: "backpack".into(),
+                method: http.method.as_str().into(),
+                host: "api.backpack.exchange".into(),
+                path,
+            },
+            operations: vec![
+                Operation::Present {
+                    key: self.identity.credential.clone(),
+                },
+                Operation::Sign {
+                    algorithm: Algorithm::Ed25519,
+                    key: self.identity.signing.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: text.into_bytes(),
+                    }],
+                },
+            ],
+        })
+    }
+
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        if result.values.len() != 2 {
+            return Err(SignError::InvalidResult);
+        }
+        let key = std::str::from_utf8(&result.values[0])
+            .ok()
+            .filter(|key| !key.is_empty() && !key.contains(['\r', '\n']))
+            .ok_or(SignError::InvalidResult)?;
+        if result.values[1].len() != 64 {
+            return Err(SignError::InvalidResult);
+        }
+        http.headers = vec![
+            ("X-API-Key", key.into()),
+            ("X-Broker-Id", "1200".into()),
+            ("X-Signature", STANDARD.encode(&result.values[1])),
+            ("X-Timestamp", self.timestamp.clone()),
+            ("X-Window", self.request.window.to_string()),
+            ("Content-Type", "application/json".into()),
+        ];
+        Ok(())
+    }
+
+    fn freshness_ms(&self) -> f64 {
+        f64::from(self.request.window.clamp(1, 5000))
+    }
+}
+
 pub type Params = BTreeMap<String, String>;
 
 pub fn query(params: &Params) -> String {
