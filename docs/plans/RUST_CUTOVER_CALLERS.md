@@ -5517,3 +5517,139 @@ in-flight latch and use existing background recovery, never a user's command
 terminal. Ticker/catalog/private/trading paths stay native. No caller signature
 or financial-outcome contract changes; transports need managed preparation for
 this additional background read.
+
+## KuCoin futures local history/funding terminals
+
+Synchronous history/funding preflight errors and zero-limit empty results now
+borrow the engine's genuine initial Read authority and complete it in the same
+callback. Native validation order, error messages, empty arrays and companion-free
+timelines remain. Unsupported client lookup gains Unsupported/NotSent metadata;
+local input/absent credential failures gain InvalidInput/NotSent. There is no
+transport or private remote read on these branches, so their policy declares no
+credential. Valid signed paging continues through its existing separate path.
+
+Initial shared admission refusal emits exactly one engine-owned failure and no
+adapter fallback or result. Capacity refusal uses the shared Internal error;
+invalid raw clock admission uses InvalidInput, both without a Read financial
+outcome. Repeated commands can recover when unrelated roots retire. Callers need
+no new endpoint, retry or history marker handling for this local-only slice.
+## Bitunix synchronous history Read completion
+
+Local history exits retain their original command Read authority through shared
+entry admission and Context completion. Unsupported client lookup/public trades
+retain their native text and now carry Unsupported/NotSent; nonfinite time keeps
+its text and carries InvalidInput/NotSent. These local refusals still have no
+error companion. Genuine admission refusal uses the engine's typed reason once,
+including invalid clocks and capacity, without issuing opaque work.
+
+Keyless private queries still return `[]` before time validation. Missing or
+unknown fill symbols still return `[]` before finite-time validation. Unsupported
+query checks still precede keyless handling. No range-order guard, timer or
+transport is added. Valid private history dispatch, signatures, paging and
+incompleteness behavior retain their existing contracts and remain legacy-owned.
+
+## Bitrue synchronous history refusal authority
+
+Unsupported complete order/income history and local fill preflight refusals now
+consume genuine initial Read authority and finish in the same callback. Their
+exact native messages, authentication-before-range-before-symbol precedence,
+companion-free timeline and absence of I/O/Store mutation remain. Unsupported
+kinds gain Unsupported/NotSent; local input or missing credential errors gain
+InvalidInput/NotSent. Shared admission refusal emits its one engine-owned typed
+failure, with no adapter fallback or Read financial outcome. Valid private fills,
+lookup and WS FIFO delegates keep their existing separate transport contracts.
+
+## Bitrue local leverage preflight authority
+
+FetchLeverage and FetchMaxLeverage retain unknown-market-before-credential
+validation and their exact native messages. Those four local refusals now use
+shared initial Read authority and Context completion, adding InvalidInput/NotSent
+metadata without a companion, transport or Store mutation. Admission refusal
+emits exactly one shared typed failure with no adapter fallback or Read financial
+outcome. Valid bracket requests and leverage-query joining/refresh/fan-out keep
+their existing separate contracts and remain held for shared signer/group work.
+
+## Phemex local history admission
+
+Synchronous Phemex history/income results use genuine engine command-entry
+admission before publishing their local terminal. Invalid engine time and
+exhausted managed-owner capacity produce one typed engine rejection. Finite
+admitted errors retain their native text, kind=None and outcome=None; unknown
+client-ID markets still return {"found":false,"definitive":false}.
+Native validation order, sixteen-query limits and duplicate-ID behavior remain.
+A local refusal preserves outstanding native history/income owners. Successful
+HTTP, signing, pagination and financial history completion retain their existing
+paths. Affected SDK callers are fetchHistoricalFills, fetchHistoricalOrders,
+fetchIncomeHistory/fetchIncomeHistoryRange, fetchPublicTrades and
+findOrderByClientOrderId through the Rust command bridge.
+
+## MEXC synchronous history and leverage command custody
+
+The five local history admission errors and three local leverage errors now use
+one genuine engine Read command-entry Context before publishing their native
+refusal. At the existing 256-owner bound, the engine publishes one typed initial
+failure instead; a nonfinite local command clock fails with InvalidInput.
+Initial Read admission failures carry no write outcome (outcome=None). An
+existing owner sharing the numeric command ID remains protected by the engine's
+duplicate-command fence. Normal finite errors retain their exact message and
+absent kind/outcome/venue metadata, with no HTTP, signer, timer, AccountAuth or
+Store publication. These local errors use no credential or remote transport.
+
+Affected callers are fetchHistoricalFills, fetchHistoricalOrders,
+fetchIncomeHistory/fetchIncomeHistoryRange, client-order-ID lookup,
+fetchPublicTrades, fetchLeverageForSymbol and updateSymbolMetadata. The public
+SDK method fetchLeverageForSymbol retains its existing warning/null catch;
+updateSymbolMetadata continues to await the command directly. SDK arguments,
+result shapes, history validation precedence and leverage pause/market/primary
+credential precedence stay the same. Valid private/public history and leverage
+reads retain their existing signed/unsigned dispatch, secondary GET selection,
+rows, accepted-page recovery, bounds, revisions and callback behavior.
+
+
+## Signer non-HMAC prerequisites (#1839, e4c07bbd615)
+
+Backfilled after landing (auditor). Additive schema for families that sign
+with more than one key, starting with ApeX's zkLink seed. No family's runtime
+behaviour changes until its admission PR declares the new policy.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| Rust `signing::Identity` gains `extra: BTreeMap<ExtraKey, KeyRef>` (serde: omitted when empty) | native hosts or tests that build `Identity` with a struct literal | `Identity { credential, signing, passphrase, stable_id }` | add `extra: Default::default()` to every literal; JSON without `extra` still deserializes | compile only (Rust literals) |
+| `ExtraKey` vocabulary (`zklinkSeed`) and `Algorithm::ZkLinkContract` (36-byte payload, 64-byte result) | none today | n/a | extra refs are role-bound: usable only by their own algorithm, never presented, interpolated or used as an ordinary MAC key | none |
+| TS setup policy: `secretEncoding` gains `base64Text`, plus an `extra { key, field, encoding }` signing-ref policy (`requiredForPrivate`) | `LocalSignerSetup` callers and the construction-rules `signerSetup` entries | `utf8`, `base64`, `hex`, `pem` encodings; no extra refs | `base64Text` installs the ASCII of padded base64 of the secret as the key; extras are declared per family and validated at trusted setup | add (admitted families only) |
+| `host.d.mts` `SignAlgorithm` adds `'zkLinkContract'` | custom JS host signers that switch on algorithm | previous union | handle or refuse the new member; an unhandled algorithm must refuse, never sign | add |
+| Crypto `zklink` feature (enabled by the ApeX venue only) | WASM family builds | n/a | other family builds are unchanged; a provider without it refuses `ZkLinkContract` as `Unsupported` | none
+
+### Paradex unsigned public-trades Context history consumer
+
+`fetchPublicTrades` keeps the native unsigned GET query, limit1..500/default100,
+row schema, encounter order, first-ID dedupe and truncation. The endpoint remains
+one physical page even when a valid continuation cursor is returned. A missing
+market returns admitted []. Private history, JWT and Stark signing are unchanged.
+
+The command now requires managed prepare/bind/claim support in custom transports.
+Preparation and the full response share the original20s Read bound; stale or
+reused owners cannot emit a result or history.incomplete marker. Malformed or
+failed prefixes reject strictly without returning staged rows. Typed route
+failures retain their engine metadata; released transport loss is Network and
+expiry Timeout, while native malformed/status errors retain Internal. Capacity
+admission precedes missing-market completion. Callers treat a rejected read as
+unavailable history, not an authoritative empty snapshot; no SDK signature changes.
+
+## Hyperliquid local order lookup admission
+
+Perps and spot local `OrderByClientId` results require genuine command admission.
+A cached symbol/client-ID match still returns the complete native Order, including
+optional fields, before validating the client ID or account identity. An invalid
+client ID or absent trading identity still returns exactly
+`{"found":false,"definitive":false}`. These synchronous reads emit no request,
+signing, timer, history marker or Store update.
+
+Invalid entry clocks and full shared owner capacity now return one correlated
+Read failure (`InvalidInput` / `Internal`, respectively), with no financial
+outcome. Callers must handle that failure instead of treating a local lookup as
+unconditionally successful. Reusing the command ID after completion remains valid;
+an active duplicate cannot complete or replace its existing owner. The valid-ID
+uncached spot miss, public-only perps refusal and private perps REST lookup retain
+their native behavior. The exchange-server order reconciliation caller consumes
+the same complete cached result and must retain non-definitive miss handling.

@@ -113,6 +113,19 @@ pub struct MexcFutures {
 }
 
 impl MexcFutures {
+    fn fail_local_read(cx: &mut Cx<'_, Pending>, error: &str) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let _ = cx.fail_context(&context, error);
+    }
+
     pub fn new(options: Options) -> Self {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = match (&options.key, &options.secret) {
