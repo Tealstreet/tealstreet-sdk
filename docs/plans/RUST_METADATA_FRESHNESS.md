@@ -834,3 +834,11 @@ before fresh same-key admission. All five pass. These are shared-engine consumer
 composition controls, distinct from the executed signed BingX native adapter
 controls. The pure full-key/index checks and existing metadata release tests
 remain required alongside strict/feature and family CI gates.
+
+
+Strict Clippy for engine/BingX/WEEX with all targets/features passes. The
+feature-off metadata target passes32 controls; the feature-on target previously
+passed34, including the full-key/index checks. The now-unused own metadata
+bootstrap exemption and its historical-only unit control are removed: both
+checker files are byte-identical to actual c473342d483. Incoming staging and
+all other bounds remain intact; the generated BingX account map is removal-only.
