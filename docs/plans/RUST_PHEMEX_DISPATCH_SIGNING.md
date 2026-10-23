@@ -8,7 +8,8 @@ audit and quality ledgers. This checkpoint changes plan/tests only.
 
 ## Scope and owner coordination
 
-The final ruling supersedes the earlier additive-only suggestion: **no recipe-only
+The final ruling keeps dispatchSigning OFF and forbids partial injected arms,
+key copy-back or dual raw providers. It supersedes the additive-only suggestion: **no recipe-only
 ship**. Complete the ordinary native funnel and opaque provider custody together,
 after the engine-minted uncapped raw-expiry seam lands. Commit the plan and
 existing-API original REDs now; native write attachment remains held. ih35js may
@@ -58,8 +59,10 @@ URL, headers and body both before canonical work and before applying results.
 Validate full result count, receipt, UTF8/bounded header presentation and raw MAC
 length before changing outbound bytes. Default callback-header policy is deny.
 
-Ordinary GET selects Secondary else Primary. Active Orders reads and client-ID
-lookup explicitly select Primary even on GET. Other methods select Primary.
+Ordinary GET selects Secondary else Primary. Active Orders reads (account.rs activeList/OrdersRead, lib.rs:208-209) and
+client-ID lookup (history.rs::Request::is_lookup, lib.rs:208-209) explicitly
+select Primary even on GET; identity.rs:75 validates the secondary container
+and otherwise uses ordinary GET selection. Pin a separate control per path. Other methods select Primary.
 Public products/tickers/fullbook/credentialed candles/public-trades requests
 currently sign whenever selected credentials exist; retain that optional auth.
 The existing true unsigned public-candle path stays unsigned. Preserve REST/testnet
@@ -67,19 +70,31 @@ hosts, empty query/body behavior, stream selector, primary route and existing
 native codec/retry behavior. This migration does not create a new REST capability.
 
 WS user.auth signs provider-owned credential bytes followed by rounded expiry.
-Preserve exact JSON field/params order, API label and id999. Use Credential payload
-parts instead of materializing a key in the recipe and send_signed on the live
-socket. Shared engine custody owns async completion, deadlines, epoch revocation,
+The key occurs twice: provider Present is spliced into JSON params[1], and a
+Credential payload part supplies the MAC prefix. Validate exactly two results
+(Present,32-byte MAC), bounded UTF8 JSON credential presentation and the exact
+receipt before apply. Serialize with serde; never hand-concatenate key material.
+Preserve method/params/id field order, params(API,key,lowercase-hex MAC,expiry) and
+id999. Sign and serialize one identical rounded expiry from one protocol-time
+observation. Use send_signed on the live socket. Shared engine custody owns async completion, deadlines, epoch revocation,
 stale reprepare and release; no venue signing timer, retry queue or nonce cache.
 
 ## Intended recipe and provider shape
 
 Export `dispatch_signing::Http` with immutable opaque Identity, network, Method,
 exact path, raw query and optional body. Its unsigned() returns the exact native
-intent for both the ordinary staging funnel and ih35js's managed read helper.
+intent for both the ordinary staging funnel and ih35js's managed read helper after full cutover.
 prepare uses existing shared HMAC-SHA256 work; apply inserts only validated native
-headers. The sign receipt records actual protocol stamp and expiry milliseconds.
+headers. The sign receipt records actual protocol stamp and expiry milliseconds: expiry
+MUST equal the rounded seconds actually signed/sent multiplied by1000, not
+protocol_now+60000. This retains the native half-second boundary exactly.
 A corresponding WsAuth recipe owns only the opaque identity and native request ID.
+Malformed percent escapes (%zz, trailing %, %4) pass through literally in native
+decoded_query; only invalid decoded UTF8 falls back to the entire original query.
+Pin each separately, plus literal+ and percent-encoded multibyte bytes; do not
+replace this with TS decodeURIComponent throwing behavior. Credentialed GET keeps
+all four headers in native order; truly unsigned requests have no auth/Content-Type.
+
 The generic LocalSigner already supports HMAC-SHA256; no algorithm fork, crypto
 Cargo feature or cryptographic dependency is needed. Prove injected Host and local
 providers through the same engine dispatch, including malformed/refused results.
@@ -118,6 +133,23 @@ must prevent a later NotSent from laundering the command. Review the exact nativ
 aggregation integration with 4yjlw0 using #1773/#1915's pattern and the landed error
 classifier; no local HTTP-status classification or new retry ladder is introduced.
 Financial reducers and post-release network failure semantics stay native.
+Fixed review target: Bitget #1915 `86f528aaef8`, trading.rs around2124,
+trade_sign_failed/trade_fail; resolve the precise Phemex adaptation with4yjlw0
+without losing earlier effective legs, native IDs or the original rollback error.
+
+## Additional WS ordering gate
+
+Native account_open sends auth, sets next_id1200, then immediately calls
+account_ping. Merely replacing auth with deferred send_signed can release the
+ordinary ping before provider completion: current dispatch emits Action::Sign
+and continues draining ordinary WsSend actions. The narrow replacement alone
+is not ordering proof. Add an original control that parks the auth provider and
+requires auth-before-ping after successful completion, and no credentialed auth
+or speculative ping before it. Coordinate a reviewed ordering solution with5c57jl
+and the engine owner; no per-venue signing queue/timer or guessed release hook.
+The existing native supervisor/accepted-snapshot deadline must remain bounded.
+This gate is additional to uncapped raw expiry; production stays held until both
+contracts have reviewed consumer-fit controls.
 
 ## Ordered phases and original REDs
 
@@ -164,8 +196,10 @@ map against the approved tooling before claiming a reduction.
 
 Request manifest at15bd:35F/39O, not a signer-only burn-down claim. Account3F/3O;
 history6F/9O (ih35js); identity3F/3O; income2F/2O; lib17F/18O; trading4F/4O.
-The one owner-approved staging attachment may add exactly one audited lib site;
-its exact before/after maps and checker test must be frozen once source exists.
+The overseer approved one temporary provider attachment. Its exact fingerprint
+SET and before/after counts (including any moved request or terminal site) must
+be frozen once the source exists, with the exact approved checker-dict row; do
+not pre-claim one added fingerprint or an inventory shrink before then.
 All unrelated and foreign maps remain incoming-exact. Native RC terminal adoption
 belongs to its venue caller slices; do not relabel those sites as signer prunes.
 
