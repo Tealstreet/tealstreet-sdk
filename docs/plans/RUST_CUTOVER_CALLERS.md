@@ -984,6 +984,20 @@ branching on `kind === 'network'` for these Binance write failures should also
 accept `timeout` and `internal`. Venues adopting the typed `Venue::on_http_failed` hook see the same
 kinds; others are unchanged.
 
+Engine error classification (Binance, [plan](RUST_ERROR_CLASSIFICATION.md)):
+message text is unchanged. A Binance write that fails with a non-JSON HTTP
+error used to carry `outcome: unknown` with no `kind`. It now has these fields:
+- 429 or 418: `rejected` + `rateLimited`, plus `retryAfterMs` when the
+  response carries a Retry-After header;
+- 400: `rejected` + `invalidInput`;
+- 401: `rejected` + `authInvalid`;
+- 403: `rejected` + `rejected`;
+- 409 and other statuses: still `unknown`.
+
+Native `-1003`/`-1015` rate-limit refusals also gain `retryAfterMs` when the
+header is present. Callers branching on `isUnknownOutcome` see fewer unknowns
+for these answers; nothing that matched on text changes.
+
 ### Build and delivery steps
 
 | Host | Today | Needed for the engine |
@@ -4533,6 +4547,23 @@ Credential-bearing contexts still require the signed entry point and trusted
 provider. Static headers grant no additional routing, retry, command, publication
 or financial authority. Original Context deadlines and atomic resource admission
 apply; host, WASM and SDK transport schemas are unchanged.
+
+## KuCoin Spot unsigned discovery Context
+
+KuCoin Spot catalogue and ticker seeds use the shared managed HTTP lifecycle with
+public intent, including when private credentials are configured. The native
+X-CHANNEL-API-CODE=3zexp then Content-Type=application/json headers retain their
+order and bytes. Catalogue rows come from `data`; ticker rows come from
+`data.ticker`. A request identity alone cannot publish discovery rows before the
+prepared transport is bound and the engine releases it. Expired or duplicate
+responses cannot overwrite the catalogue or ticker seed.
+
+The original 20-second read deadline includes preparation. An admitted preparation,
+transport, envelope or list failure retires its read Context before the native
+discovery retry callback. Unusable lists preserve existing quotes. Catalogue success
+still starts private snapshots before ticker readiness; usable tickers still wake
+wallet valuation and public/private bullet acquisition. Candle, private-signing,
+setting no-op and capability behavior retain their existing paths.
 
 
 ### Paradex managed independent book snapshots
