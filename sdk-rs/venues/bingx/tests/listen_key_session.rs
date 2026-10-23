@@ -93,8 +93,8 @@ impl Harness {
         self.collect();
         socket
     }
-    /// Fire every timer due by `until` in chronological order. Traffic just
-    /// before each one keeps the private idle watchdog satisfied.
+    /// Fire every timer due by `until` in chronological order, with private
+    /// traffic before each so an idle watchdog, if armed, stays satisfied.
     fn run_until(&mut self, until: f64, socket: SocketId, stop: impl Fn(&Self) -> bool) {
         while !stop(self) {
             let Some(i) = (0..self.timers.len())
@@ -128,8 +128,9 @@ fn a_hung_listen_key_keepalive_fails_at_its_bound_and_retries() {
         .iter()
         .find(|(_, at)| *at == h.now + 30.0 * 60_000.0)
         .expect("30 min keepalive");
-    // Skip the idle 30 minutes (their polls and reads are out of scope), then
-    // fire the keepalive at its due time.
+    // Skip the idle 30 minutes: drop every other pending timer (polls,
+    // supervisor watch/ping) on purpose, so only the keepalive's own bound and
+    // retry run. A full-order probe gives the same outcome.
     h.timers.retain(|(t, due)| *t != timer && *due >= at);
     h.requests.clear();
     h.now = at;
