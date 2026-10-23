@@ -378,7 +378,7 @@ fn native_cross_market_identity_defaults_order_and_wire_only_limit_are_preserved
         r#"{"code":"0","data":[
         {"instId":"UNKNOWN","tradeId":"same","price":"1","size":"1","ts":"5000"},
         {"instId":"BTC-USDT","tradeId":"same","price":"1","size":"1","ts":"5000"},
-        {"instId":"ETH-USDT","instType":"SPOT","tradeId":"cross","side":"sell","price":"20","size":"2","ts":"3000"},
+        {"instId":"ETH-USDT","instType":"SPOT","tradeId":"cross","side":"sell","price":"20","size":"2","ts":"3000","createTime":"9999"},
         {"instId":"BTC-USDT","tradeId":"non-numeric","side":"SELL","price":"60000","size":"2","createTime":"1000"},
         {"instId":"BTC-USDT","tradeId":"defaults","ts":"2000"},
         {"instId":"BTC-USDT","tradeId":"negative","side":"sell","price":"-5","size":"-2","ts":"4000"}
@@ -512,7 +512,7 @@ impl Venue for FullQueue {
         self.venue.on_stream_error(cx, pending, response);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if !self.filled {
+        if !self.filled && matches!(command, Command::SetTickerSymbols { .. }) {
             let context = cx
                 .http_context(
                     Scope::Background,
@@ -558,6 +558,12 @@ fn immediate_managed_queue_refusal_is_typed_and_retires_each_read_owner() {
         venue: venue(false),
         filled: false,
     });
+    // Park unrelated work in its own event. The subsequent genuine Query must
+    // enter with an untouched resource snapshot before it admits its Read root.
+    e.handle(
+        100.,
+        Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
+    );
     for attempt in 0..270 {
         query(&mut e, 100., 71, "BTCUSDT", None);
         let actions = e.drain_actions().collect::<Vec<_>>();
