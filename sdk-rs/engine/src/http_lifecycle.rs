@@ -9,6 +9,11 @@ use crate::request_context::{
 #[path = "http_unsigned_headers_tests.rs"]
 mod unsigned_headers_tests;
 
+enum ManagedRecipe {
+    Unsigned(&'static [(&'static str, &'static str)]),
+    Signed(Box<dyn crate::SignStep>),
+}
+
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
@@ -39,7 +44,36 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
-        self.queue_managed(context, method, url, body, None, pending)
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Unsigned(&[]),
+            pending,
+        )
+    }
+
+    /// Queue unsigned HTTP with static public codec headers. The existing
+    /// managed boundary validates and snapshots them before allocating IDs.
+    /// Credential-bearing contexts still require the signed entry point.
+    pub fn request_managed_with_headers(
+        &mut self,
+        context: Context,
+        method: Method,
+        url: String,
+        headers: &'static [(&'static str, &'static str)],
+        body: Option<String>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Unsigned(headers),
+            pending,
+        )
     }
 
     /// Retain an unsigned recipe at creation; canonicalisation waits for route
@@ -54,7 +88,14 @@ impl<P> Cx<'_, P> {
         step: Box<dyn crate::SignStep>,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
-        self.queue_managed(context, method, url, body, Some(step), pending)
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Signed(step),
+            pending,
+        )
     }
 
     fn queue_managed(
@@ -63,9 +104,13 @@ impl<P> Cx<'_, P> {
         method: Method,
         url: String,
         body: Option<String>,
-        step: Option<Box<dyn crate::SignStep>>,
+        recipe: ManagedRecipe,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        let (step, public_headers) = match recipe {
+            ManagedRecipe::Unsigned(headers) => (None, headers),
+            ManagedRecipe::Signed(step) => (Some(step), &[][..]),
+        };
         if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
             return Err((pending, error));
         }
@@ -79,7 +124,7 @@ impl<P> Cx<'_, P> {
         // bytes before allocating IDs or publishing any preparation resource.
         let headers = step
             .as_ref()
-            .map_or(&[][..], |step| step.unsigned_http_headers());
+            .map_or(public_headers, |step| step.unsigned_http_headers());
         if crate::signing_headers::validate_unsigned(headers).is_err() {
             return Err((pending, Error::Invalid));
         }
@@ -433,13 +478,7 @@ impl<V: Venue> Engine<V> {
         let delivery = managed.delivery();
         error.outcome = Some(crate::Outcome::NotSent);
         if error.kind.is_none() {
-            error.kind = Some(match reason {
-                Error::TimedOut => ErrorKind::Timeout,
-                Error::Invalid | Error::Revoked | Error::Duplicate | Error::RetryForbidden => {
-                    ErrorKind::InvalidInput
-                }
-                _ => ErrorKind::Internal,
-            });
+            error.kind = Some(reason.kind());
         }
         if delivery.context.operation() == Operation::Mutation {
             let _ = self.io.request_contexts.result(
@@ -689,6 +728,7 @@ impl<V: Venue> Engine<V> {
             return true;
         }
         if managed.lifecycle.release().is_some() {
+            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -696,6 +736,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP request timed out",
                 },
             );
+            self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
         } else {
             self.http_preparation_failed(
@@ -907,6 +948,8 @@ impl<V: Venue> Engine<V> {
     fn fail_write_collection(&mut self, now: f64, request: RequestId, _reason: Error) {
         self.io.http_responses.remove(request);
         if self.io.managed_http.contains_key(&request) {
+            // The venue answered (non-UTF-8 or oversize reply): never transport loss.
+            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Internal);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -914,6 +957,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP mutation response failed integrity bounds",
                 },
             );
+            self.io.http_failure_kind = kind;
             self.io.discard_managed(request);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
@@ -2723,7 +2767,7 @@ mod tests {
             },
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
-        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown) && error.kind == Some(ErrorKind::Internal))).count(), 1);
         assert_eq!(engine.venue.responses, 0);
         assert!(engine.io.pending.is_empty());
         assert!(engine.io.managed_http.is_empty());
