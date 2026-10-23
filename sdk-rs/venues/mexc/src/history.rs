@@ -1,16 +1,17 @@
 //! Bounded paged reads, independent of account reconciliation and store writes.
 use crate::{MexcFutures, Pending, REST, sign, wire::*};
+use safe_cex_engine::history::{Completion, CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
-use safe_cex_engine::paging::{self, WindowOrder};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, num};
+use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, WindowOrder};
+use safe_cex_engine::{CommandId, Cx, Method, Query, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 const WINDOW: f64 = 90.0 * 86_400_000.0 - 1.0;
 const MAX_PAGES: u32 = 1000;
 
 pub struct Request {
-    command: CommandId,
+    owner: Box<CursorHistory<Row>>,
     kind: Kind,
     symbol: Option<String>,
     order_id: Option<String>,
@@ -21,8 +22,6 @@ pub struct Request {
     count: u32,
     limit: usize,
     size: u32,
-    seen: HashSet<String>,
-    rows: Vec<Row>,
     bad: bool,
 }
 #[derive(Clone, Copy)]
@@ -259,7 +258,12 @@ impl MexcFutures {
         self.query_page(
             cx,
             Request {
-                command,
+                owner: Box::new(CursorHistory::new(
+                    Completion::new(command),
+                    CursorWalk::starting_at(MAX_PAGES, "1".into()),
+                    |_| "MEXC history pagination limit exceeded".into(),
+                    |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
+                )),
                 kind,
                 symbol,
                 order_id,
@@ -270,8 +274,6 @@ impl MexcFutures {
                 count: 0,
                 limit,
                 size: limit.min(100) as u32,
-                seen: HashSet::new(),
-                rows: vec![],
                 bad: false,
             },
         );
@@ -465,10 +467,10 @@ impl MexcFutures {
                 if r.from.is_none_or(|a| time >= a)
                     && r.to.is_none_or(|b| time <= b)
                     && r.symbol.as_ref().is_none_or(|s| s == symbol)
-                    && r.seen.insert(id)
-                    && r.rows.len() < r.limit
+                    && r.owner.fresh(id)
+                    && r.owner.accepted_len() + r.owner.staged_len() < r.limit
                 {
-                    r.rows.push(row);
+                    r.owner.stage(row);
                 }
             }
             Err(_) => r.bad = true,
@@ -511,29 +513,51 @@ impl MexcFutures {
         } else {
             r.count >= r.size
         };
-        if r.rows.len() < r.limit && !matches!(r.kind, Kind::Trades) && r.order_id.is_none() {
-            if has_more {
-                if r.page >= MAX_PAGES {
-                    self.query_failed(cx, r, "MEXC history pagination limit exceeded");
+        let read_more = r.owner.accepted_len() + r.owner.staged_len() < r.limit
+            && !matches!(r.kind, Kind::Trades)
+            && r.order_id.is_none();
+        let next = (read_more && has_more).then(|| (r.page + 1).to_string());
+        let fresh = r.owner.staged_len();
+        match r.owner.advance(CursorPage {
+            want_more: next.is_some(),
+            next,
+            rows: r.count as usize,
+            fresh,
+        }) {
+            CursorStep::More(_) => {
+                r.page += 1;
+                r.count = 0;
+                self.query_page(cx, r);
+                return;
+            }
+            CursorStep::Stalled(_) => {
+                r.owner.reject(
+                    cx,
+                    VenueError::new("MEXC history pagination limit exceeded"),
+                );
+                return;
+            }
+            CursorStep::Done => {}
+        }
+        if read_more && !has_more {
+            r.windows.pop_front();
+            if !r.windows.is_empty() {
+                // Native windows each have their own 1000-page budget. Keep the
+                // logical owner, admitted output and output identities intact.
+                if !r.owner.restart_stage() {
+                    r.owner
+                        .reject(cx, VenueError::new("MEXC history window lifecycle failed"));
                     return;
                 }
-                r.page += 1;
-            } else {
-                r.windows.pop_front();
                 r.page = 1;
-            }
-            if !r.windows.is_empty() {
                 r.count = 0;
                 self.query_page(cx, r);
                 return;
             }
         }
-        match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(r.command, data),
-            Err(error) => cx.fail(r.command, error),
-        };
+        r.owner.finish(cx, Ok(()));
     }
     pub fn query_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
-        cx.fail(r.command, error);
+        r.owner.finish(cx, Err(VenueError::new(error)));
     }
 }

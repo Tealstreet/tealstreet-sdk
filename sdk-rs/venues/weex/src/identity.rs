@@ -1,6 +1,7 @@
 //! A rare configuration validation must not change account settings or reconciliation state.
 use crate::{Pending, Task, WeexFutures, account_wire::AccountConfig};
-use safe_cex_engine::{CommandId, Cx, Method, Response};
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -9,22 +10,24 @@ struct Identity {
     #[serde(skip_serializing_if = "Option::is_none")]
     affiliate_id: Option<String>,
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result =
-        result.and_then(|identity| serde_json::to_string(&identity).map_err(|e| e.to_string()));
+fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, VenueError>) {
+    let result = result.and_then(|identity| {
+        serde_json::to_string(&identity).map_err(|e| VenueError::new(e.to_string()))
+    });
     match result {
         Ok(data) => cx.done(command, data),
         Err(error) => {
-            cx.command_error(command, &error);
+            cx.command_error(command, &error.message);
             cx.fail(command, error);
         }
     }
 }
 
-pub(crate) fn fingerprint(key: &str) -> String {
-    let hash = safe_cex_crypto::sha256(key.as_bytes());
-    let prefix: String = hash[..12].iter().map(|b| format!("{b:02x}")).collect();
-    format!("weex:{prefix}")
+/// The account ID is the caller-assigned primary stableId from trusted setup.
+fn unavailable() -> VenueError {
+    VenueError::new("WEEX account identity requires a trusted primary stableId")
+        .kind(ErrorKind::Unsupported)
+        .outcome(Outcome::NotSent)
 }
 #[derive(Deserialize)]
 struct Status {
@@ -47,20 +50,23 @@ impl Code {
 }
 impl WeexFutures {
     pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if let Some(read) = &self.read_credentials
-            && let Err(error) = read.validate().and_then(|()| {
-                read.validate_passphrase(self.credentials.as_ref().map(|c| c.passphrase.as_str()))
-            })
-        {
-            finish(cx, command, Err(error.into()));
+        if self.invalid_read_credentials {
+            finish(cx, command, Err(crate::READ_CREDENTIALS_INVALID.into()));
             return;
         }
-        if self.identity.is_none() {
+        let (Some(_), Some(signer)) = (
+            &self.credentials.primary,
+            self.credentials.select(Method::Get),
+        ) else {
             finish(
                 cx,
                 command,
                 Err("WEEX account identity requires a non-public primary key".into()),
             );
+            return;
+        };
+        if self.identity.is_none() {
+            finish(cx, command, Err(unavailable()));
             return;
         }
         if cx.now < self.paused_until {
@@ -71,29 +77,24 @@ impl WeexFutures {
             );
             return;
         }
-        if !self.signed_request(
+        if let Err(error) = crate::managed::read(
             cx,
-            Method::Get,
-            "/capi/v3/account/accountConfig",
-            "",
-            None,
-            Task::Identity(command),
-            None,
+            signer,
+            command,
+            "/capi/v3/account/accountConfig".into(),
+            self.seed_generation,
+            |context| Task::Identity { context },
         ) {
-            finish(
-                cx,
-                command,
-                Err("WEEX account identity requires credentials".into()),
-            );
+            finish(cx, command, Err(error));
         }
     }
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        context: &Context,
         response: Response<'_>,
     ) {
-        let result = (|| {
+        let validated = (|| {
             if !(200..300).contains(&response.status) {
                 return Err(format!("WEEX account identity HTTP {}", response.status));
             }
@@ -107,23 +108,30 @@ impl WeexFutures {
             if !config.can_trade {
                 return Err("WEEX API key is valid but trading is disabled".into());
             }
-            let user_id = self
-                .identity
-                .clone()
-                .ok_or("WEEX primary identity key is missing")?;
-            Ok(Identity {
-                user_id,
-                affiliate_id: None,
-            })
+            Ok(())
         })();
-        finish(cx, command, result);
+        let result = validated
+            .map_err(VenueError::new)
+            .and_then(|()| self.identity.clone().ok_or_else(unavailable))
+            .and_then(|user_id| {
+                serde_json::to_string(&Identity {
+                    user_id,
+                    affiliate_id: None,
+                })
+                .map_err(|e| VenueError::new(e.to_string()))
+            });
+        match result {
+            Ok(data) => crate::managed::complete(cx, context, data),
+            Err(error) => Self::identity_failed(cx, context, error),
+        }
     }
     pub(crate) fn identity_failed(
-        &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        error: &str,
+        context: &Context,
+        error: impl Into<VenueError>,
     ) {
-        finish(cx, command, Err(error.into()));
+        let error = error.into();
+        let _ = cx.command_error_context(context, error.message.clone());
+        crate::managed::reject(cx, context, error);
     }
 }

@@ -560,7 +560,13 @@ fn rest_query_success_failure_and_stream_resubscription_have_independent_state()
                 limit: Some(1),
             }),
         );
-        http(e, "depth")
+        safe_cex_engine::test_support::prepared_actions(e, 1.0)
+            .into_iter()
+            .find_map(|action| match action {
+                Action::Http(request) if request.url.contains("depth") => Some(request),
+                _ => None,
+            })
+            .expect("depth")
     };
     let request = query(&mut e, 77);
     delta(&mut e, socket, 11, 11);
