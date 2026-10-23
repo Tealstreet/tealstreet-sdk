@@ -80,6 +80,7 @@ struct Observed {
     legs: Vec<Context>,
     identities: Vec<Identity>,
     entries: Vec<CommandEntryError>,
+    expired: Vec<Result<(), CommandEntryError>>,
     local: Vec<Result<(), Error>>,
     queued_refusals: Vec<(Context, u8, Error)>,
     delivery: Vec<Result<(), Error>>,
@@ -95,6 +96,7 @@ struct Controls {
     missing: bool,
     primary: bool,
     hold: bool,
+    hold_cancel: bool,
     invalid: bool,
     stream: bool,
     delay: f64,
@@ -155,6 +157,13 @@ impl Probe {
             Ok(root) => root,
             Err(CommandReadError::Entry(e)) => {
                 self.observed.lock().unwrap().entries.push(e);
+                if e == CommandEntryError::Revoked
+                    && cx.command_wait() == Some(safe_cex_engine::CommandWait::Expired)
+                {
+                    let result = cx
+                        .reject_expired_command(safe_cex_engine::request_context::Operation::Read);
+                    self.observed.lock().unwrap().expired.push(result);
+                }
                 return;
             }
             Err(CommandReadError::LocalRefusal { terminal, .. }) => {
@@ -258,13 +267,29 @@ impl Probe {
 }
 impl Venue for Probe {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account: safe_cex_engine::AccountLookup::Query,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.controls.lock().unwrap().from_start {
             self.admit(cx, 7);
         }
     }
+    fn cancel_needs_stored_order(&self) -> bool {
+        self.controls.lock().unwrap().hold_cancel
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        self.admit(cx, command.completion_id().unwrap());
+        match command {
+            Command::FetchAccount { command } | Command::CancelOrders { command, .. } => {
+                self.admit(cx, command)
+            }
+            // This legacy fixture command only creates a native placement-ack hold.
+            Command::PlaceOrders { command, .. } => cx.done(command, "[\"7\"]".into()),
+            _ => {}
+        }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         let walk = self.walks.get_mut(&pending.command).unwrap();
@@ -310,7 +335,7 @@ impl Venue for Probe {
         let finish = response.body == "done" || p.items > 0;
         let walk = self.walks.get_mut(&p.command).unwrap();
         if discard {
-            walk.history.discard_staged_page();
+            assert!(walk.history.discard_staged_page());
         } else {
             walk.pages += 1;
             let mut page = walk.history.admit(cx, p.leg.context()).unwrap();
@@ -333,7 +358,7 @@ impl Venue for Probe {
             walk.history
                 .finish_with(cx, Ok(()), move |rows| {
                     observed.lock().unwrap().finalizers += 1;
-                    encode(rows)
+                    encode(&rows)
                 })
                 .unwrap();
         } else {
@@ -347,7 +372,7 @@ impl Venue for Probe {
         walk.history
             .finish_with(cx, Err(VenueError::new(error)), move |rows| {
                 observed.lock().unwrap().finalizers += 1;
-                encode(rows)
+                encode(&rows)
             })
             .unwrap();
     }
@@ -938,4 +963,96 @@ fn new_contract_streamed_page_preserves_raw_order_and_selected_evidence_on_root_
         })
     )));
     assert_eq!(o.lock().unwrap().finalizers, 1);
+}
+
+#[test]
+fn new_contract_expired_constructor_preserves_fresh_entry_for_shared_rejection() {
+    let (mut e, o, _) = engine(Controls {
+        hold_cancel: true,
+        ..Controls::default()
+    });
+    e.handle_command(
+        NOW,
+        Command::PlaceOrders {
+            command: 1,
+            orders: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    e.handle_command(
+        NOW,
+        Command::CancelOrders {
+            command: 2,
+            ids: vec!["7".into()],
+        },
+        Some(1_000),
+    )
+    .unwrap();
+    assert!(o.lock().unwrap().entries.is_empty());
+    e.drain_actions().for_each(drop);
+    e.store_mut().upsert_order(safe_cex_engine::model::Order {
+        id: "7".into(),
+        parent_id: None,
+        status: safe_cex_engine::model::OrderStatus::Open,
+        symbol: "BTCUSD".into(),
+        kind: safe_cex_engine::model::OrderType::Limit,
+        side: safe_cex_engine::model::OrderSide::Buy,
+        price: 1.,
+        amount: 1.,
+        filled: 0.,
+        remaining: 1.,
+        reduce_only: false,
+        close: None,
+        client_order_id: None,
+        time_in_force: None,
+        last_update: 0.,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    });
+    e.handle(NOW + 999.5, Event::PollScaleChanged { scale: 1. });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(o.lock().unwrap().entries, vec![CommandEntryError::Revoked]);
+    assert_eq!(o.lock().unwrap().expired, vec![Ok(())]);
+    assert!(o.lock().unwrap().roots.is_empty());
+    assert_eq!(failed(&actions).len(), 1);
+    assert_eq!(failed(&actions)[0].kind, Some(ErrorKind::Timeout));
+    assert_eq!(failed(&actions)[0].outcome, None);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::ManagedHttp(_) | Action::Sign { .. }))
+    );
+}
+#[test]
+fn new_contract_unstamped_genuine_receipt_refuses_once_before_native_credentials() {
+    let (mut e, o, _) = engine(Controls {
+        missing: true,
+        ..Controls::default()
+    });
+    e.handle(
+        f64::MAX,
+        Event::Command(Command::FetchAccount { command: 7 }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        o.lock().unwrap().entries,
+        vec![CommandEntryError::Rejected(Error::Revoked)]
+    );
+    assert!(o.lock().unwrap().local.is_empty());
+    assert!(o.lock().unwrap().roots.is_empty());
+    assert_eq!(failed(&actions).len(), 1);
+    let mut expected = Error::Revoked.venue_error();
+    expected.outcome = None;
+    assert_eq!(failed(&actions)[0], &expected);
+    assert_eq!(failed(&actions)[0].outcome, None);
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::ManagedHttp(_)
+            | Action::Sign { .. }
+            | Action::SetTimer { .. }
+            | Action::Notice(Notice::CommandError { .. })
+    )));
 }
