@@ -1250,3 +1250,67 @@ The nineteenth handoff control covers #1932 composition: both initial arming and
 a previously armed wake remain blocked during the exact expiry barrier, retain
 the pending credit and barrier, and resume once afterward with a fresh timer.
 The unguarded integrated source is assertion RED at aa6613f7677.
+
+
+### Bitunix public REST managed Read proof
+
+Plan756a precedes original tests fda4818/c2aa (10 then14 assertion REDs, five
+compatibility controls GREEN); public source follows. Native authority tests
+cover Prepare/Bind/Claim, stale/duplicate/reused command IDs, invalid clock,
+entry capacity, typed provider refusal, expiry, parser versus transport failure,
+public auth isolation and both seeds' repeated fixed-clock retirement. Existing
+private/socket native assertions are preserved through genuine preparation
+fixtures. Immediate managed queue-capacity is reviewed defense/shared-engine
+coverage, explicitly not a native execution receipt (owner ruling in plan).
+
+### WEEX local history original REDs and typed Read completion
+
+The new dedicated local-history target compiled against unchanged actual
+`a828ede7ebb`:3native controls passed and8intended assertion REDs exposed seven
+capacity bypasses plus invalid-clock publication. Test-only commit
+`d5746d2d490` and the committed plan received three independent CLEAN reviews.
+After the seven scoped terminal replacements, the same11controls pass without
+changing their assertions. A genuine retained-root probe covers the keyless
+case without credential fabrication; duplicate/recovery/300-cycle refill and
+full-capacity native remote wire controls keep custody and fallthrough explicit.
+No new per-venue lifecycle, retry, signer, history finalizer or engine seam.
+
+Scoped WEEX/Binance native verification passes506tests,0failed/ignored;
+strict WEEX all-target/all-feature Clippy, scoped formatting, source scan and
+all15request-context checker tests pass. Implementation review/CI remain separate.
+
+### WEEX FetchAccount local and remote Read custody
+
+Original identity controls on actual `a828ede7ebb` expose five full-capacity
+entry failures and invalid-clock numeric publication. Three native controls
+PASS beside six intentional assertion REDs; test-only `902335f2b6f` is the
+reviewed strict-Clippy refinement of original `a55a561b921`. The same nine
+controls now PASS, with genuine engine-root capacity/recovery/peer isolation,
+300fixed-clock local completions/refill, exact native diagnostics and metadata,
+independent primary/secondary HMAC wire, primary stableId attribution and Store
+preservation. Plan, original REDs and the refinement each have three independent
+CLEAN reviews. No new provider key, fabricated Context, engine API or venue
+lifecycle/helper was introduced. Broader native/strict/ratchet/final review and
+CI evidence are separate gates.
+
+Pre-integration native504WEEX/Binance tests and strict WEEX Clippy/fmt pass.
+Whole-map provenance is blocked by newer Aster inventory shrink in origin;
+actual integration and fresh gates follow, with no foreign manifest edits.
+
+Actual integration e336f67b7de genuinely includes15bd7821b52; all unowned incoming
+blobs and foreign prunes are preserved. Fresh504native tests, strict Clippy/fmt,
+full bans and both request-context checks (15tests) PASS. Three independent
+implementation reviews are CLEAN; architecture No. Exact own identity2F/2O
+prune is verified; the parallel #1951 history prune is not credited here.
+
+### Binance identity preflight Read admission
+
+Plan `3a0598f1892` precedes original-control commit `84e327e2c8f`.
+With unchanged production, four real full-registry controls are assertion RED:
+missing/disabled/incomplete-primary/incomplete-secondary identity preflights
+publish local messages rather than the engine's capacity refusal. The existing
+valid-command capacity control and all six identity compatibility controls are
+GREEN, including 300 same-clock/same-command local refusals and exact selected
+signer request bytes. The same eleven tests pass after conversion, with no
+transport, extra diagnostic or Store mutation on initial admission refusal.
+No manufactured Context or fixture bypass is used.

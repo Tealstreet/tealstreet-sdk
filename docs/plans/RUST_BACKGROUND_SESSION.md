@@ -434,6 +434,59 @@ API (A2), revised after an independent audit:
       hold the command owner until it finishes. It also found the resend
       check was looser than `retry`; it now shares `retry`'s journal
       admission and requires the context's refusal policy.
+  - **BingX checkpoint** (stacked on #1832 and landing; claude-4yjlw0
+    confirmed no overlap with #1884):
+    - **Code:** listenKey POST create and PUT keepalive run as repeat-safe
+      session Mutations through a thin `managed::session_write` over the
+      existing managed `queue()`. BingX listen keys expire 60 minutes after
+      their last keepalive, so an extra create or keepalive is harmless. The
+      writes are created with `resent: true`, because a listen key presents
+      only the API key and legacy never resent it on a signature refusal.
+    - **Session lifecycle:** each create and every `invalidate_private` retire
+      the previous session. Native `epoch`/`key_in_flight` recovery stays as
+      it was.
+    - **Ratchet:** `bingx/src/account.rs` goes 17 → 15 (its two listen-key
+      callers).
+    - **Not removed yet:** `Self::request` stays on landing because
+      `fetch_metadata` still uses it; whichever of this and #1884 lands second
+      deletes it. The `lib.rs` STAGING_BOOTSTRAPS `sign_http` allowance stays
+      until codex-cxxyqr's history Completion bridge removes the history
+      callers.
+    - **Declared caller change:** an explicit 20 s raw bound. It matters for
+      keepalive: a hung create is already dropped by the native 10 s connect
+      watchdog, but a hung keepalive runs with no watchdog and previously
+      relied on the host default. It now fails at 20 s and the native 30 s
+      `RETRY_MS` PUT follows.
+      `a_hung_listen_key_keepalive_fails_at_its_bound_and_retries` fires
+      timers in real order and fails on the legacy code. Request bytes are
+      unchanged: same method, URL, `?listenKey=` query, the per-method
+      unsigned headers plus `X-BX-APIKEY`, and no signature.
+  - **MEXC:** no session HTTP consumer. Rust MEXC authenticates its private
+    socket with a signed WS `login` (confirmed by codex-ih35js), which is
+    #1771/signer work.
+  - **Binance checkpoint** (owner ruling (a): stacked on #1817's reviewed
+    head, listen-key region only; regions confirmed with claude-m26ps4):
+    - **Code:** create and keepalive go through `venues/binance/src/session.rs`
+      as session Mutations. One `SessionAuth` selection is made per request,
+      and its `selection.credential` goes into the Policy (no `route_request`).
+      Livenet uses the key-only recipe; testnet uses the signed recipe, selected
+      inside the adapter.
+    - **Session lifecycle:** each create retires the previous session, so a
+      stale create or keepalive outcome cannot reach the account reducers. The
+      session is repeat-safe: Binance returns the active key and keepalive
+      extends it.
+    - **Native policy kept:** the backoff, the 30 min keepalive and the
+      reconnect behaviour are unchanged.
+    - **Ratchet:** `binance/src/account.rs` goes from 1 legacy site to 0; no
+      other map changes.
+    - **Declared caller change:** listenKey requests now carry an explicit
+      20 s raw bound. Legacy sent `timeout_ms: None`, which fell back to the
+      host default. A hung create now fails at 20 s and backs off, where an
+      unbounded host could hang forever. That regression fails on the legacy
+      code.
+    - **Tests adapted:** two waits answer the reconnect listenKey like their
+      account siblings. The slow-POST test uses 15 s, which is still above the
+      10 s connect timeout it checks.
 - **C. Cadence/feed linkage** as above, after #1771.
 - **D. Hand-off.** The API and adoption notes go to codex-9czdjh, codex-zs5e83,
   codex-ih35js and codex-hcmq3f. BingX adoption and deletion of the #1779
