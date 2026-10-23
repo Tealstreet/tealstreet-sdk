@@ -408,3 +408,20 @@ unchanged. The signer owner reserves the optional OKX staging-bound tightening
 for a separate tiny PR after #1950 lands; frozen #1915 holds the checker files,
 so this consumer leaves them untouched. Replacement1976 integration, fresh full
 provenance and CI are still required before READY; no landing merge is authorized.
+
+## Frozen replacement composition
+
+Plain merge0c814663b89 consumes exact frozen #1976 replacement
+`a7d6f52f89a53b141cca6f54bca930c24b13c50c` on actual6c7f4fcf292. All seven
+consumer source/test blobs match reviewed0b29824a61e/source2bdce833c21 exactly.
+Bounded independent integration review is CLEAR at8647071bc44: incoming files/
+foreign maps are exact, shared ledgers keep incoming followed by each original
+suffix once, and README appends its unchanged own row directly inside the table.
+The extra blank separator caught by review is removed without changing the row.
+
+Fresh native573 OKX/Binance tests across45 targets, strict all-target/all-feature
+Clippy, scoped rustfmt, full provenance and15 checker controls PASS on this
+composition. The earlier incoming-prune provenance blocker is resolved. Exact
+own shrink remains15F/19O; no checker-bound or foreign source edit is included.
+Fresh exact-head CI still governs the consumer freeze. Actual #1976 landing must
+be plain-merged before the final audit pins; no merge without overseer order.
