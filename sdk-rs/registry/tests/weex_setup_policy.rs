@@ -158,16 +158,8 @@ fn setup_policy_does_not_enable_weex_provider_construction() {
     .unwrap();
     let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
     options.signing = Some(identities);
-    let result = build_with_signer(
-        "weex",
-        options,
-        None,
-        Some(provider),
-        NotAdmitted,
-    );
-    let error = result
-        .err()
-        .expect("provider injection remains unsupported");
+    let result = build_with_signer("weex", options, None, Some(provider), NotAdmitted);
+    let error = result.expect_err("provider injection remains unsupported");
     assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
     assert_eq!(
         error.message,

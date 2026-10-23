@@ -220,7 +220,7 @@ describe('shared credential setup policy', () => {
 });
 
 
-const passphraseFamilies = ['okx', 'okxeu', 'okxdemo', 'okxeudemo', 'bitget', 'bitgetinverse', 'bitgetusdc'] as const;
+const passphraseFamilies = ['okx', 'okxeu', 'okxdemo', 'okxeudemo', 'bitget', 'bitgetinverse', 'bitgetusdc', 'weex'] as const;
 const requiredSetup = (input: Partial<ExchangeOptions>, venue: typeof passphraseFamilies[number] = 'okx') =>
   new LocalSignerSetup(input as ExchangeOptions, deriveSignerSetupPolicy(venue));
 const setupFailure = (run: () => unknown): unknown => {

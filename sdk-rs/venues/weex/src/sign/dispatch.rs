@@ -76,6 +76,10 @@ impl Http {
     }
 }
 impl SignStep for Http {
+    fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
+        UNSIGNED_HEADERS
+    }
+
     fn prepare(
         &mut self,
         outbound: &mut Action,

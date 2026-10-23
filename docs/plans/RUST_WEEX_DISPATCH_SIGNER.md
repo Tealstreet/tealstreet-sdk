@@ -209,3 +209,25 @@ available; any required new legacy stage needs an explicit owner disposition.
 No per-venue validator, group journal or timer lifecycle is introduced by this
 checkpoint. The unmerged shared read-delivery validator and execution-group API
 are not consumed or claimed as actual here.
+
+### Trusted-policy and header checkpoint verification
+
+Test-only checkpoint `3afbb29461a` reproduced five trusted-provider setup
+assertion failures with two compatibility controls passing. The managed component
+failed specifically because preparation received no headers instead of the two
+declared public headers; all eight existing recipe controls still passed.
+
+The correction adds only WEEX's shared setup-field declaration and returns the
+existing `UNSIGNED_HEADERS` constant from its HTTP recipe getter. Removing that
+one JSON line recovers the complete incoming construction-rules file byte for
+byte, including every other family's policy and admission flags. Both independent
+source reviews found no correctness or architecture issue. The registry's seven
+WEEX setup tests and ten construction generator tests pass; 476 WEEX/Binance
+native tests, 60 SDK setup tests, SDK typecheck and lint pass. Provider injection
+and hosted construction remain disabled. Production request builders, identity
+cutover and complete managed read/write ownership remain separate adoption work.
+Strict venue/registry Clippy and workspace fmt pass after formatting the new
+registry fixture and using its direct `expect_err` assertion. The full bans check
+detects the newly landed Kraken history inventory reduction absent from this
+older branch; this unrelated integration requirement is retained as a failing
+check until actual #1768 is integrated, without changing or exempting the ratchet.

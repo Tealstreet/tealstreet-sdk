@@ -62,7 +62,8 @@ Trusted signer setup uses shared declarative per-family/per-slot normalization
 from construction-rules.json. Unspecified fields preserve caller trimCredential
 metadata; MEXC forces primary credential trimming and secondary preservation.
 The same field policy declares primary required-for-private passphrases and
-required secondary passphrases with primary fallback for OKX and Bitget aliases.
+required secondary passphrases with primary fallback for OKX and Bitget aliases
+and WEEX.
 Missing/JSON-null secondary passphrases inherit an opaque primary reference;
 explicit empty never inherits. Public mode bypasses only the primary requirement,
 while secondary validation stays active. Shared publicMode intent takes precedence

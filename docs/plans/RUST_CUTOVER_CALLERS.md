@@ -4077,3 +4077,19 @@ and hosted signing still follow the family's separate admission policy. Semantic
 Context ownership is unchanged. Existing SDK callers need no
 new option, credential transfer or persisted identity mapping for this additive
 header seam. [Contract and scope](RUST_UNSIGNED_HTTP_HEADERS.md).
+
+## WEEX trusted passphrase setup and managed header declaration
+
+WEEX's trusted signer setup requires a passphrase for a complete private primary
+identity. An absent or JSON-null secondary passphrase inherits the opaque primary
+passphrase reference; an explicit empty secondary passphrase rejects instead of
+inheriting. Public mode bypasses only the primary requirement and still validates
+a supplied secondary identity. Secret and passphrase bytes and caller-assigned
+stable IDs remain literal, without trimming or automatic secret decoding.
+
+The opaque WEEX HTTP recipe declares Content-Type and User-Agent from the same
+static data as its unsigned renderer, so managed transport preparation sees those
+public headers before signing. API-key, signature and passphrase headers remain
+provider-owned. These setup and recipe declarations do not enable WEEX provider
+injection or hosted signing; family construction retains its existing admission
+boundary. Callers gain no new signing or request authority from the declarations.
