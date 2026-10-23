@@ -9,6 +9,11 @@ use crate::request_context::{
 #[path = "http_unsigned_headers_tests.rs"]
 mod unsigned_headers_tests;
 
+enum ManagedRecipe {
+    Unsigned(&'static [(&'static str, &'static str)]),
+    Signed(Box<dyn crate::SignStep>),
+}
+
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
@@ -39,7 +44,36 @@ impl<P> Cx<'_, P> {
         body: Option<String>,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
-        self.queue_managed(context, method, url, body, None, pending)
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Unsigned(&[]),
+            pending,
+        )
+    }
+
+    /// Queue unsigned HTTP with static public codec headers. The existing
+    /// managed boundary validates and snapshots them before allocating IDs.
+    /// Credential-bearing contexts still require the signed entry point.
+    pub fn request_managed_with_headers(
+        &mut self,
+        context: Context,
+        method: Method,
+        url: String,
+        headers: &'static [(&'static str, &'static str)],
+        body: Option<String>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Unsigned(headers),
+            pending,
+        )
     }
 
     /// Retain an unsigned recipe at creation; canonicalisation waits for route
@@ -54,7 +88,14 @@ impl<P> Cx<'_, P> {
         step: Box<dyn crate::SignStep>,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
-        self.queue_managed(context, method, url, body, Some(step), pending)
+        self.queue_managed(
+            context,
+            method,
+            url,
+            body,
+            ManagedRecipe::Signed(step),
+            pending,
+        )
     }
 
     fn queue_managed(
@@ -63,9 +104,13 @@ impl<P> Cx<'_, P> {
         method: Method,
         url: String,
         body: Option<String>,
-        step: Option<Box<dyn crate::SignStep>>,
+        recipe: ManagedRecipe,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        let (step, public_headers) = match recipe {
+            ManagedRecipe::Unsigned(headers) => (None, headers),
+            ManagedRecipe::Signed(step) => (Some(step), &[][..]),
+        };
         if let Err(error) = self.io.request_contexts.validate(&context, self.now) {
             return Err((pending, error));
         }
@@ -79,7 +124,7 @@ impl<P> Cx<'_, P> {
         // bytes before allocating IDs or publishing any preparation resource.
         let headers = step
             .as_ref()
-            .map_or(&[][..], |step| step.unsigned_http_headers());
+            .map_or(public_headers, |step| step.unsigned_http_headers());
         if crate::signing_headers::validate_unsigned(headers).is_err() {
             return Err((pending, Error::Invalid));
         }
@@ -892,6 +937,7 @@ impl<V: Venue> Engine<V> {
                     &self.store,
                     &mut self.io.actions,
                 );
+                self.io.http_write_reply = Some((response.status, response.headers.to_owned()));
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -901,6 +947,7 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
+                self.io.http_write_reply = None;
             }
             self.io.http_delivery = previous;
             self.io.request_contexts.exit_delivery(&delivery);
@@ -1116,19 +1163,31 @@ mod tests {
                     "write cannot inherit a prior read fence"
                 );
                 if self.retry_refusal && self.responses == 1 {
-                    cx.http_write_result(
-                        &pending.0,
-                        crate::request_context::WriteResult::Rejected(
-                            VenueError::new("native timestamp refusal").venue_code("10002"),
-                        ),
-                    )
-                    .unwrap();
-                    let context = cx
-                        .http_retry_context(
+                    use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+                    const TIMESTAMP: CodeTable = CodeTable {
+                        rows: &[Row {
+                            key: Key::Int(10002),
+                            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+                            only: None,
+                        }],
+                        success: &[],
+                        unlisted: Verdict::Unknown(None),
+                        status: &[],
+                    };
+                    let native = Native {
+                        code: NativeCode::Int(10002),
+                        message: "invalid timestamp",
+                    };
+                    let (_, grant) = cx
+                        .http_write_failure(
                             &pending.0,
-                            crate::request_context::RetryEvidence::DefinitiveRefusal,
+                            &TIMESTAMP,
+                            Some(&native),
+                            "native timestamp refusal",
+                            None,
                         )
                         .unwrap();
+                    let context = cx.http_resend_context(&pending.0, grant.unwrap()).unwrap();
                     cx.request_signed_managed(
                         context.clone(),
                         Method::Post,
@@ -1771,6 +1830,8 @@ mod tests {
         } else {
             RetryPolicy::Never
         };
+        // Issued as if dispatched from a placement command.
+        engine.io.request_contexts.dispatch = Some((command, crate::classify::Intent::Place));
         let mut cx = Cx {
             now: at,
             store: &mut engine.store,
@@ -1791,6 +1852,7 @@ mod tests {
                 },
             )
             .unwrap();
+        cx.io.request_contexts.dispatch = None;
         let request = if signed {
             cx.request_signed_managed(
                 context.clone(),

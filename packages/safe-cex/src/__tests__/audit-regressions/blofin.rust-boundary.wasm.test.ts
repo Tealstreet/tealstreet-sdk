@@ -7,6 +7,7 @@ import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { prepareRecordedHttp } from '../support/managedHttp';
 import { MarginType, OrderSide, OrderType } from '../../types';
 import { directTransport } from '../../transport/direct';
 
@@ -15,6 +16,7 @@ it.each([false, true])('preserves BloFin broker gate, range units, flat leverage
   const requests: Array<{ method: string; url: string; body?: string }> = [];
   const ok = (data: unknown) => ({ status: 200, body: new TextEncoder().encode(JSON.stringify({ code: '0', data })) });
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: Date.now,
     connect: (_url, handlers) => {
       queueMicrotask(() => handlers.onOpen());

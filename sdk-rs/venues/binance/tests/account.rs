@@ -429,6 +429,31 @@ fn an_unhonorable_client_order_id_refuses_the_whole_batch() {
 }
 
 #[test]
+fn a_close_order_replacement_completes_the_placement_successfully() {
+    // The conflicting-order cancel is a cancel leg: its ID-less answer must
+    // not turn the whole placement into an unknown failure.
+    let mut h = ready();
+    let mut stop = limit(OrderSide::Sell, 0.0, 86000.0);
+    stop.kind = OrderType::StopLoss;
+    stop.close = Some(true);
+    place(&mut h, 5, vec![stop]);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        400,
+        "",
+        r#"{"code":-2011,"msg":"Unknown order sent."}"#,
+    );
+    let placed = h.take("/fapi/v1/algoOrder");
+    h.reply(placed.id, 200, "", r#"{"algoId":2146761}"#);
+    assert!(
+        matches!(h.result(5), Some(Ok(_))),
+        "replacement placement result: {:?}",
+        h.result(5)
+    );
+}
+
+#[test]
 fn full_position_stops_replace_the_existing_close_order() {
     let mut h = ready();
     let mut stop = limit(OrderSide::Sell, 0.0, 86000.0);

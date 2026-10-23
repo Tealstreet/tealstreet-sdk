@@ -176,3 +176,12 @@ Source SHA256: `2172a730070eb08548b01eb0fd476fad94c643c5a8870a0c6e4ec18208cbbe06
 | `9584979d6cce6bf6576093402c85d6195493ed09a64ba6f72927c8f53bf61847` | 2 | 718 `trading_http` → LEXICAL + WRITE; 1003 `trading_failed` → LEXICAL + WRITE | `matches!(request.step, Step::Leverage { .. })` |
 | `ca37246cf8052b21b57e7f1400b1026f755a6bdaadfe661eb481c929ddcc2d68` | 1 | 969 `trading_finish` → WRITE | `cx.done(job.command, result)` |
 | `06eea309fa05c237f809ccb4c45df7a36798cfb0bcb6ace2f22b4b3d7d6f0ef3` | 1 | 988 `trading_finish` → WRITE | `cx.fail(job.command, error)` |
+
+
+## Phase one: single command Spot OHLC on actual seams
+
+This slice is based solely on actual landing `bd52632f2c8`, including #1785/#1808/#1816/#1838. Eight original controls are carried as separate assertion-RED commit `da1749d8d1f`: they compile and fail on opaque early HTTP at this actual base. The adoption validates exact delivery, uses contextual completion and typed preparation/transport failures, and preserves native pair/interval/since bytes, ignored limit/to_ms and last cursor, whole-response rejection, sorted/empty output and four total transport attempts.
+
+Three zero-delay native retry timers are replaced with immediate managed retries under the same original 20-second root. This keeps engine expiry armed while routing is parked. The native exhausted-read warning is retained; late native errors cannot emit that diagnostic. Ten controls include the eight original regressions plus released expiry and invalid-UTF8 retry compatibility against actual #1838.
+
+Command-entry adoption is deferred to a fresh follow-up after #1830 lands, per the overseer's throughput guidance. Initial Context issuance can still use its existing numeric failure before authority exists; issued work has no numeric fallback. Only `spot/mod.rs` is pruned (5 to 3 occurrences, family 53 to 51), keeping that issuance refusal, unsupported interval and discovery/ticker sender. No engine/shared source changes or unlanded seams are carried. Existing fixtures use shared preparation without changing native query/result assertions; retry scheduling changes are explicitly reviewed.

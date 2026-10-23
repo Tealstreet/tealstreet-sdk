@@ -135,7 +135,7 @@ impl Bitrue {
         else {
             match query {
                 Query::OrderByClientId { symbol, client_order_id } => self.lookup_order(cx, command, symbol, client_order_id),
-                Query::PublicTrades { symbol, limit } => self.public_trades(cx, command, symbol, limit),
+                Query::PublicTrades { symbol, limit } => self.public_trades(cx, symbol, limit),
                 Query::OrderHistory { .. } => cx.fail(command, "Bitrue v2 has only single-order lookup, not complete order history"),
                 Query::Income { .. } => cx.fail(command, "Bitrue v2 transfer and force-order histories are not a complete PnL/funding ledger"),
                 Query::Fills { .. } => unreachable!(),
