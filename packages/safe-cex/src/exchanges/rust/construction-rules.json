@@ -4,6 +4,7 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "weex": {"bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},
     "okx": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "OK-ACCESS-PASSPHRASE"}},
     "okxeu": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "OK-ACCESS-PASSPHRASE"}},
     "okxdemo": {"signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}, "remoteSigning": {"signatureEncoding": "base64", "passphraseHeader": "OK-ACCESS-PASSPHRASE"}},
