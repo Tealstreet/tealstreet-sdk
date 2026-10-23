@@ -5,6 +5,7 @@ pub mod capabilities;
 pub mod classify;
 pub mod command;
 pub mod coverage;
+pub mod credential_selection;
 pub mod credentials;
 pub mod de;
 pub mod engine;
@@ -17,6 +18,7 @@ pub mod history;
 pub mod json;
 pub mod log;
 pub mod model;
+pub mod nonce;
 pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
@@ -34,6 +36,10 @@ pub mod signing_headers;
 pub mod signing_policy;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub mod socket;
+#[cfg(feature = "managed-sockets")]
+mod socket_driver;
+#[cfg(feature = "managed-sockets")]
+pub mod socket_lifecycle;
 pub mod startup;
 pub mod store;
 #[cfg(any(test, feature = "test-support"))]

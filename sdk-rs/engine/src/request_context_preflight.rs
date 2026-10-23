@@ -44,6 +44,7 @@ impl ContextRegistry {
         now: f64,
     ) -> Preflight {
         let mutation_declared = policy.purpose == PreflightPurpose::WriteAfterReads;
+        let credentialed = policy.read_credential.is_some() || policy.write_credential.is_some();
         self.commands.insert(
             command,
             CommandOwner {
@@ -54,11 +55,13 @@ impl ContextRegistry {
                 mutation_declared,
                 pending: 0,
                 deliveries: 0,
+                waits: 0,
                 intent: self
                     .dispatch
                     .filter(|(id, _)| *id == command)
                     .map(|(_, intent)| intent),
                 leg_intents: Vec::new(),
+                credentialed,
             },
         );
         Preflight::new(&self.issuer, command, generation)

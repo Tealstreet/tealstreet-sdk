@@ -87,7 +87,7 @@ fn native_command_entry_refusal_is_one_typed_result_before_any_transport() {
             .collect::<Vec<_>>();
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
-        assert_eq!(errors[0].message, "Too many requests in flight");
+        assert_eq!(errors[0].message, "Engine request capacity reached");
         assert_eq!(errors[0].outcome, write.then_some(Outcome::NotSent));
         assert!(!actions.iter().any(|a| matches!(
             a,

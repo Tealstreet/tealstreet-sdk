@@ -6,6 +6,7 @@ use crate::{BinanceFutures, Channel, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
@@ -379,12 +380,14 @@ impl BinanceFutures {
         if !cx.private_feed_policy().streaming() {
             return;
         }
-        let Some(credentials) = &self.credentials else {
+        let Ok((selection, credentials)) = self.credentials.select(CredentialRole::SessionAuth)
+        else {
             return;
         };
         if self.options.testnet {
             self.signed(
                 cx,
+                CredentialRole::SessionAuth,
                 method,
                 self.paths.listen_key,
                 Query::new(),
@@ -398,7 +401,8 @@ impl BinanceFutures {
                 None,
                 Pending::Account(request),
             );
-            cx.sign_http(
+            selection.sign(
+                cx,
                 request,
                 Box::new(crate::sign::Http::new(
                     credentials.clone(),
@@ -2541,7 +2545,7 @@ impl BinanceFutures {
             return;
         };
         let id = self.next_spot_request_id("tealstreet-user-data");
-        let Some(credentials) = &self.credentials else {
+        let Ok((_, credentials)) = self.credentials.select(CredentialRole::SessionAuth) else {
             return;
         };
         self.account.spot_subscription = None;

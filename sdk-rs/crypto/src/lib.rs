@@ -46,6 +46,7 @@ pub mod secrets;
 pub mod signer;
 pub mod starknet;
 pub mod uuid;
+#[cfg(feature = "zklink")]
 pub mod zklink;
 
 #[cfg(test)]

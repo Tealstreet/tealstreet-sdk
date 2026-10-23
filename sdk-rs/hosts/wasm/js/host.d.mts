@@ -25,7 +25,7 @@ export interface HttpPacket {
   /** Required for managed requests; absent on older transport callers. */
   request?: number;
   method: string;
-  route?: 'direct' | 'publicCors' | 'primary';
+  route?: 'direct' | 'publicCors' | 'primary' | 'secondary';
   /** Remaining original lifecycle timeout, never renewed by binding. */
   timeoutMs?: number;
   url: string;
@@ -252,18 +252,20 @@ export class EngineDisposedError extends Error {
   readonly actualClientOrderIds?: readonly string[];
 }
 
-export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
+export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest' | 'zkLinkContract';
 export type SignPart = { kind: 'bytes'; bytes: number[] } | { kind: 'credential'; key: string }
   | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' };
 export interface SigningIdentity {
   credential: string; signing: string; passphrase?: string;
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
   stableId?: string;
+  /** Additional provider-owned signing refs; never an identity or nonce scope. */
+  extra?: { zklinkSeed?: string };
 }
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface LocalIdentityMetadata {
   stableId?: string;
-  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem';
+  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
   trimCredential?: boolean;
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
@@ -297,6 +299,9 @@ export interface EngineHostOptions {
   ownsEngine?: boolean;
   /** Overrides local signing before startup. Context is advisory, not an allowlist. */
   signer?: Signer;
+  /** What `signer` can sign. Undeclared is unknown, so multi-release commands
+   * that check capability before their first release refuse as notSent. */
+  signerAlgorithms?: readonly SignAlgorithm[];
   /** Synchronous identity/ID and retry-jitter bytes, also used for host receipt IDs.
    * Defaults to Web Crypto. A seed here never replaces signing entropy. */
   entropy?: EntropyProvider;
@@ -424,7 +429,7 @@ export interface WasmEngineLike {
   httpClaim?(permit: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner?(): boolean;
-  useExternalSigner?(): void;
+  useExternalSigner?(algorithmsJson?: string): void;
   hostedSigningClock?(now: number): string;
   prepareHostedSigning?(inputJson: string, now: number): string;
   localHostedSigning?(id: number, now: number): string;

@@ -673,7 +673,7 @@ fn documented_trailing_market_algo_order_is_read_and_canceled_as_algo() {
             ids: vec!["812345678901234700".into()],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     let requests = requests(&actions);
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, safe_cex_engine::Method::Delete);
@@ -702,7 +702,7 @@ fn failed_cancel_cannot_restore_status_over_newer_authoritative_snapshot() {
             ids: vec!["702345678901234600".into()],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     let cancel = request(&actions, "/batchOrders");
     e.handle(NOW + 2000.0, Event::TimerFired { timer: periodic });
     let fresh: Vec<_> = e.drain_actions().collect();
@@ -1261,6 +1261,7 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
     let mut e =
         safe_cex_engine::test_support::seeded_engine(WeexFutures::new(support::NativeOptions {
             credentials: Some(safe_cex_engine::signing::Identity {
+                extra: Default::default(),
                 credential: safe_cex_engine::signing::KeyRef("primary.credential".into()),
                 signing: safe_cex_engine::signing::KeyRef("primary.signing".into()),
                 passphrase: None,
