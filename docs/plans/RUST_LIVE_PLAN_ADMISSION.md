@@ -445,3 +445,73 @@ Only the validated subset receives effect authority. Add original assertion REDs
 for the public fact and batch mappings, plus all-unknown/count/empty/5xx negatives,
 exact-attempt binding and final Unknown-with-proven-IDs journal projection.
 Classifier ownership reviews this exact mapping before its source pin is shared.
+
+## Remaining shared cold-path containment
+
+The next normal CI measurement at `0f06f289fe4` is 1,362,187 bytes for
+Aster, 18,699 above the unchanged 1,343,488-byte budget. Bybit and Bitunix
+replay jobs both pass. That measurement includes the public partial-unknown
+mapping and actual capability/history integrations; it establishes no saving
+from the preceding outlining.
+
+Try three bounded shared registry boundaries: keep an inline empty Plan-index
+guard in `end_plan_admission`, outline only its nonempty custody-clearing loop,
+and prevent reinlining `record_owned_read_failure` and `ContextRegistry::finish`
+into generic engine failure/finalizer paths. Keep all validation and mutation
+order exact. These bodies are non-generic already; LLVM may already share them,
+so this is a size experiment, not an established duplication diagnosis or byte
+forecast. No new policy, rights, storage, thresholds or callback behavior.
+
+Preserve the native zero-Plan-visit regression and every active Plan/retirement
+control; run feature-on/off engine tests and strict checks, then independently
+review the extraction and measure normal CI again. Do not claim a byte floor
+or savings without the resulting artifact measurement.
+
+## Measured reachability and family feature isolation
+
+The owner stopped further outlining experiments before source was committed.
+Paired name-preserving diagnostic CI at `39955649184` reproduces the exact
+production lengths, but type/generated-adapter ordering prevents byte equality
+after simply stripping names. The owner explicitly accepted this same-pipeline
+comparison for function-size attribution; these are not replay substitutes.
+The temporary diagnostic branch is deleted after downloading both artifacts.
+
+Encoded function-body deltas account for all 25,156 bytes of code growth.
+Examples include `failure_projection` +6,191, `retire_http_command` +4,759,
+`http_end` +2,973, `finish_owned_read_failure` +2,431, `plan_seal` +1,972,
+`record_owned_read_failure` +1,650 and CommandPhase cleanup +1,304 bytes.
+Extraction offsets include `seal_as` -6,666 and `finish_command` -5,832;
+positive rows alone are not additive net savings. Twiggy retention paths show
+Aster linking Plan seals, readiness, failures and cleanup through generic event,
+HTTP and owner-phase boundaries despite never issuing a Plan.
+
+Add a default-off engine `http-plans` Cargo feature. Bybit and BingX opt in
+through their actual family dependencies for the native adoption gates. Other
+families compile without Preflight/Plan constructors, owner phases, schedules,
+slot reservations, readiness/retirement storage or callbacks. Compile those
+bodies out, rather than checking a runtime boolean or retaining dummy APIs.
+Keep genuine Context entry/read validation, execution groups, safe IDs, the
+existing managed Context CommandWrites journal and classified PartialUnknown
+behavior. The common journal is not Plan-only and must remain.
+
+Feature-on preserves the reviewed API and semantics. Feature-off shared hooks
+are empty/zero where a common boundary needs them, with no Plan storage, scan,
+allocation or timer. Save and compare complete Cargo feature closures for all
+28 family builds, allowing the new feature only through Bybit/BingX. Run the
+full engine feature-on and feature-off controls, native Bybit/BingX gates and
+strict checks, independently review the cfg boundaries, then measure normal CI
+Aster size and Bybit/Bitunix replay. No threshold, fixture or reference changes.
+
+Workspace test/clippy commands unify venue dependency features and therefore
+always enable `http-plans` once Bybit/BingX opt in. Add a dedicated native CI
+matrix entry that resolves each standalone family's actual engine feature list,
+deduplicates all combinations and runs engine clippy plus tests for each,
+including standalone Plan-enabled families without order locks. Include the
+explicit `order-locks,test-support`
+configuration and the empty feature set. Resolve enabled features with Cargo's
+`{f}` output, not only rendered feature edges, which omit root-enabled flags.
+Give the mode job a 90-minute timeout and report its measured wall time; other
+native jobs retain their 30-minute timeout. Keep the normal workspace gates.
+Document that venues
+overriding the Plan readiness/retirement hooks must opt in explicitly, even if
+a combined workspace build already enables the feature through another venue.
