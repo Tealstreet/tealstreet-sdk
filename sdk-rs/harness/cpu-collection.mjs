@@ -159,7 +159,10 @@ function metadata({ suite, job, run, source }) {
   check(run && positive(run.id) && positive(run.run_number) && run.run_attempt === 1 && /^[a-f0-9]{40}$/.test(run.head_sha) && ['push', 'pull_request', 'workflow_dispatch'].includes(run.event), 'invalid attempt1 workflow metadata');
   check(job && positive(job.id) && positive(job.runner_id) && job.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha && job.name === `Rust / replay measurement (${suite})`, 'invalid physical first job metadata');
   if (run.event === 'pull_request' && source.head !== run.head_sha) {
-    const parents = git(source.root, 'rev-list', '--parents', '-n', '1', source.head).trim().split(' ').slice(1);
+    // Shallow checkouts hide parents from revision walks, but the immutable
+    // commit object still records the exact synthetic merge's parent order.
+    const header = git(source.root, 'cat-file', '-p', source.head).split('\n\n', 1)[0];
+    const parents = [...header.matchAll(/^parent ([a-f0-9]{40})$/gm)].map(match => match[1]);
     check(parents.length === 2 && parents[1] === run.head_sha, 'measured PR checkout not bound to tested head');
   } else check(source.head === run.head_sha, 'measured checkout differs from workflow head');
   return { run: { id: run.id, run_number: run.run_number, run_attempt: 1, head_sha: run.head_sha, event: run.event }, job: { id: job.id, runner_id: job.runner_id, run_id: job.run_id, run_attempt: 1, head_sha: job.head_sha, name: job.name } };

@@ -165,3 +165,15 @@ ignored app build output. An original-source regression reproduces the exact
 unsealed-link error; corrected controls require the bin's bytes and source
 fingerprint membership, and reject later mutation before timing. The symlink
 validator remains strict; no target exemption or venue-local path is introduced.
+
+### Shallow PR checkout identity
+
+Actions checks out the synthetic PR merge at depth one. Revision walks hide its
+parents at that shallow boundary, so the original parent check rejects valid
+PR jobs before measuring. Bind the tested head using the actual commit object's
+header instead: exactly two parents, tested head exactly the second parent.
+The measured checkout remains its own identity throughout artifact and runtime
+verification. A real Git shallow-checkout regression reproduces the original
+refusal; negative controls reject tested head only as first parent, absent tested
+head and single-parent commits. No fetch, ancestry fallback or identity relaxation
+is used. The rejected PR cohort stays preserved; corrected-source CI is separate.
