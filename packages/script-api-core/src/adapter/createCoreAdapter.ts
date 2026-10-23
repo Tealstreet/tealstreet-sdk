@@ -210,7 +210,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
 
     // ── Store reads ──────────────────────────────────────────────────────
     getMarkets: (account): readonly Market[] =>
-      host.readMarkets?.(account) ?? (host.getStore(account)?.markets as readonly Market[]) ?? EMPTY,
+      host.readMarkets?.(account) ?? ((host.getStore(account)?.markets as readonly Market[]) ?? EMPTY),
     getMarket: (symbol, account): Market | undefined => findMarket(symbol, account),
     getTicker: (symbol, account): Ticker | undefined => findTicker(symbol, account),
     getTickers: (symbols, account): readonly Ticker[] => {
