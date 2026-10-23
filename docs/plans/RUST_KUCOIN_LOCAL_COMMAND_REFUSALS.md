@@ -117,3 +117,11 @@ credential/error precedence; only HTTP and signing-provider work must be absent.
 Pin supplied/generated clientOid and later batch failure separately. The native
 guard policies must be forwarded by the genuine Engine Probe. Three independent
 plan/source/caller/full-map reviews are CLEAR at8fb8e5b0453.
+
+Original-source checkpoint: local_command_refusals compiles and executes on the
+unchanged baseline. Ten capacity assertions (the eight lexical sites, with all
+three unsupported variants) fail because native refusals bypass shared admission;
+four native/wire/entropy compatibility controls pass. The fixture was corrected
+before this checkpoint for Store access and distinct supplied batch client IDs;
+those earlier fixture errors are not regression RED evidence. Production remains
+unchanged at this separate test commit.
