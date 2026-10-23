@@ -355,60 +355,112 @@ canonicalization and an import field declaration only.
 
 ## P6b implementation plan (Sam decision 9, 2026-10-23)
 
-Owner claude-19pt8s. One PR, stacked on #1839 for `ExtraKey` and on the
-reviewed session-core heads #1832 and #1842; it is retargeted as they land.
-Polymarket must not derive anything from the L1 private key in the venue:
-every L1 use goes through provider refs, and the derived L2 key is imported.
+Owner claude-19pt8s. One PR, stacked on #1839 (`ExtraKey`), #1844
+(secp256k1 arm) and the reviewed session-core heads #1832 and #1842. It is
+retargeted as they land. **Polymarket keeps no L1 private key, no L2 API
+secret and no passphrase in venue state, and derives nothing from them.**
 
 **Phases.** Each phase is a commit with focused tests.
 
-1. **Schema** (codex-uufub4; claude-m26ps4 for credential semantics).
-   - `ExtraKey::L1Wallet`: a secp256k1 32-byte key, declared hex, required
-     for private use, role-bound to `Secp256k1Digest` and `PublicAddress`.
-   - `Operation::PublicAddress { key }`: a non-secret output, the checksummed
-     EVM address of a secp256k1 ref (P4). The venue reads the wallet address
-     from it and never derives it.
-2. **Import seam (engine).**
-   - `Cx::request_import(context, method, url, step, ImportSpec)` accepts
-     only a live session-owned Read context; Command and Background contexts
-     are `Invalid`.
-   - `ImportSpec` declares the JSON fields and their roles, and the
-     non-secret fields to echo.
-   - Response routing:
-     - the exact Context, attempt and generation are checked before routing;
-     - a 2xx body goes to `Signer::import` and is zeroized after handoff;
-     - `Venue::on_import(pending, Result<ImportReceipt, VenueError>)` replaces
-       `on_response` for import attempts only;
-     - transport loss still goes to `on_request_failed`;
-     - the body never reaches the venue, logs or evidence.
-3. **Provider.**
-   - `Signer::import` and `drop_imported` (default `Unsupported`).
-   - The local provider parses within bounds and installs atomically, with
-     names that embed the generation. `secret` is decoded as base64url.
-   - Installed refs are bound to (slot, generation) beside the L1 identity.
-   - A duplicate or late receipt is fenced.
-   - `drop_imported` is idempotent. Host providers receive
-     `Action::DropImported { generation }`. claude-55ao7t calls it from
-     `retire_session` and on dispose.
-4. **Polymarket recipes** (`venues/polymarket/src/sign.rs` only).
-   - ClobAuth: an EIP-712 digest with the `l1Wallet` role, using the address
-     from `PublicAddress`.
-   - Order EIP-712 V2 and ERC-7739 signatures with `l1Wallet`.
-   - L2 HMAC over imported refs (base64url output).
-   - The WS frame presents the imported key, secret and passphrase as
-     `Present` fields.
-   - codex-hcmq3f's managed conversion wires these and turns the #1882 REDs
-     green.
-5. **Tests.**
-   - A canary: the venue never sees body, secret or passphrase bytes.
+1. **L1 primitives** (claude-m26ps4 credential semantics; codex-uufub4
+   schema).
+   - `ExtraKey::L1Wallet`: a 32-byte secp256k1 key, hex (an optional `0x` is
+     stripped by trusted setup), required for private use. It is role-bound
+     to `Secp256k1Digest` and `PublicAddress` only. Setup rejects a zero or
+     out-of-range scalar.
+   - Setup returns non-secret public metadata (the 20-byte address)
+     alongside `Identities`. The venue caches and checksums it, so startup
+     needs no extra round trip.
+   - `Operation::PublicAddress { key }` (fixed 20-byte result) stays
+     available for host providers.
+   - The local provider implements `Secp256k1Digest` and `PublicAddress` for
+     this role. Recovery 0/1 maps to v 27/28 in recipe `apply`, and the
+     vectors assert it.
+2. **Supplied-L2 path.** Today `api_key`, `api_secret` and `api_passphrase`
+   can be configured directly. They become primary-identity trusted setup
+   refs: credential = apiKey, signing = secret, passphrase = passphrase.
+3. **Import seam (engine).**
+   - `Cx::request_import(context, method, url, step, ImportSpec)` requires a
+     live session-owned Read context whose credential is the primary slot
+     with `CredentialRole::SessionAuth`. Anything else, including Command
+     and Background contexts, is `Invalid`.
+   - Before routing, the engine checks the exact Context, attempt and
+     generation. A retired session has already discarded the managed entry,
+     so this check is the second fence.
+   - A 2xx body accumulates in a pre-reserved, capped zeroizing buffer
+     (fail closed over the cap) and goes to the provider import. It never
+     reaches `on_response`, `account_auth_outcome`, evidence or logs.
+   - `Venue::on_import(pending, Result<ImportReceipt, VenueError>)` replaces
+     `on_response` for import attempts only; transport loss stays on
+     `on_request_failed`. A 2xx carrying an error envelope is a provider
+     `Refused`, so only non-2xx statuses reach the venue classifier.
+   - The engine records each receipt's refs per (slot, generation) and
+     checks membership before signing. It does not parse ref names. A
+     stale-generation recipe refuses `Unavailable` before sending.
+4. **Provider and host.**
+   - `Signer::import -> ImportFuture` plus `import_ready` for the local
+     provider. Host providers get `Action::Import { attempt, slot, generation, spec, body }`
+     and `Event::Imported` / `Event::ImportFailed`, fenced by attempt id, with
+     a host.mjs `import` callback using the same timeout and cancel as
+     primitive signing. Host providers implement `import` and drop
+     together or not at all.
+   - The local provider installs atomically (all refs or none) from bounded
+     JSON. The secret is kept as the exact received text; HMAC decodes it at
+     sign time through a declared lenient base64url encoding (either
+     alphabet, optional padding, as `l2_signature` does today), so the WS
+     `Present` reproduces the exact string.
+   - Duplicate or late receipts install nothing.
+   - The apiKey is a non-secret identifier. It is installed and echoed
+     because the venue needs it for the `owner` order field and the
+     `POLY_API_KEY` header. It is never a subject, a `stable_id` or a nonce
+     key.
+   - Drop: claude-55ao7t's `retire_session` calls one hunk this PR adds,
+     after the HTTP discard and before the registry revoke. It emits
+     `Action::DropImported { generation }` for host providers and drops
+     synchronously for local ones. Host providers tombstone a dropped
+     generation, so an import promise settling later installs nothing.
+     Disposal retires every session through claude-55ao7t's path.
+5. **Readiness.** On `on_import` success the venue calls `session_ready`; on
+   failure it calls `session_failed` (`NotSent` fan-out), then backs off.
+   The derive GET is a session Read with ReadFailure retry inside its 20 s
+   bound.
+6. **Polymarket recipes and custody** (`venues/polymarket/src/sign.rs`; the
+   venue wiring belongs to codex-hcmq3f's managed conversion).
+   - ClobAuth: EIP-712 with the `l1Wallet` role, using the cached address.
+   - Orders: EIP-712 V2 and ERC-7739. `order_signer` for signature types 0–2
+     uses the cached address.
+   - L2 HMAC over the imported or supplied refs.
+   - The WS frame is built from `Present` values. Those values are transient
+     in `SignStep::apply` (the named exception to the canary). Venue
+     callbacks and state never hold them.
+   - Retired: `Options.key`, `sign::Credentials`, the
+     `private_key_address` / `l2_signature` validation in `trading_auth`, the
+     second `order_signer` check, `signed_headers_valid`, and the
+     `options.key` gates in `start_private` and the `/time` arm. Gates check
+     ref presence instead.
+7. **Tests.**
+   - A canary on every venue callback and venue state, including the auth
+     observation.
    - Atomic install and partial-install refusal.
-   - Duplicate and late-after-retire receipts.
-   - Stale-generation refusal before sending.
-   - `PublicAddress` matches the ethers vector.
-   - ClobAuth, order and L2 vectors match the existing upstream vectors
-     through provider refs.
+   - Duplicate receipts, and late arrival after retirement for both the
+     local provider and a host promise settling after `DropImported`.
+   - Exact Context/attempt/generation checks and read delivery.
+   - Stale-generation refusal.
+   - Address and v-mapping vectors.
+   - Padded (`AAA…=`) and unpadded (`-__-AQ`) secret fixtures.
+   - The supplied-L2 path.
+   - Exact WS frame bytes.
+   - Placement and all-signature-type vectors (trading tests 161 and 441)
+     stay green through refs on a provider-backed harness.
+   - The #1882 REDs depend on the Plan seam; P6b does not claim them.
    - Hosted/keyless import is refused.
 
-**Coordination.** claude-m26ps4's credential conditions and claude-55ao7t's
-session conditions are recorded above. codex-hcmq3f receives the pin for
-#1882. No merge without a window.
+**Owner conditions recorded.**
+- claude-m26ps4: primary slot with `CredentialRole::SessionAuth` and binding
+  there; the echo is non-authoritative.
+- claude-55ao7t: the retirement hunk, the readiness calls, and both fences.
+- codex-uufub4: import stays bound to trusted session-generation authority,
+  never exposes material, never infers identity or nonce, and grants no
+  entry loan from late callbacks.
+
+No merge without a window.
