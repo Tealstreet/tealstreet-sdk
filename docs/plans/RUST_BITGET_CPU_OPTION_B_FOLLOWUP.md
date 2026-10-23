@@ -1,4 +1,4 @@
-# Shared bounded CPU remeasurement, Bitget rollout
+# Shared bounded CPU remeasurement for every CPU-gated suite
 
 ## Authority and scope
 
@@ -10,9 +10,10 @@ are allowed; fixture and tape changes are forbidden. Start from actual landing
 `feat/rust-bitget-cpu-option-b`. No merge without an assigned window.
 
 Architecture: YES, this is a shared certification concern. Implement one shared
-policy/verifier and parameterize it by suite. Enable only the `bitget` suite;
-other suites, including `bitgetusdc`, remain strict. Enabling another suite is
-Sam's decision. No venue-owned parser, runtime shortcut, profile/threshold change
+policy/verifier and parameterize it by suite. Sam subsequently approved enabling
+it for every CPU-gated suite, including `bitgetusdc`. Derive the enabled set from
+the shared exact suite registry; unknown suites and private-only cases remain
+ineligible. No venue-owned parser, runtime shortcut, profile/threshold change
 or private-diagnostic exemption belongs in this PR.
 
 ## Policy
@@ -49,17 +50,20 @@ Reuse the reviewed pure-policy and recorded-evidence design from the parked
 option-B work where it fits current source. Export existing CPU objective bounds
 without changing failure strings or thresholds. Add a shared policy module and
 controls for mean passing, mean failing, second error/missing, first PASS not
-requesting a second, 5% boundary, category flip, raw/report tampering and disabled
+requesting a second, 5% boundary, category flip, raw/report tampering and unknown
 suites. Re-derive retained reports through the existing strict gate, without
 executing another measurement or substituting missing raw slots.
 
 ### Bounded workflow orchestration
 
-Keep ordinary suite collectors and private workload commands unchanged. Only
-the enabled suite has a deferred final required check; other suites retain their
-existing strict jobs. Collect the first result, emit a typed eligible plan,
-conditionally execute a single second-runner job, then verify the final decision
-with `always()` semantics. Retain exact first/second artifacts separately and
+Keep all 32 ordinary suite collectors and all 110 workload commands unchanged.
+Every suite has a deferred final required check with its existing check name;
+initial jobs use measurement names. A single planner authenticates all complete
+first suites and emits an exact dynamic matrix containing only suites with an
+eligible public miss. One second physical job per selected suite replays only
+that suite's eligible cases, once each. No second runner is scheduled if the
+first cohort has no eligible miss. A final 32-suite matrix verifies each decision
+with `always()` semantics, including missing/failed planner or second results. Retain exact first/second artifacts separately and
 bind physical runner IDs and original attempt1 jobs; rerun/duplicate evidence
 cannot authorize a third measurement.
 
@@ -87,8 +91,8 @@ Cancelled/failed/incomplete evidence is retained as such, never called PASS.
 Compare candidate first-run Bitget public nine-pair steady/process medians and
 private correctness-audit steady/process CPU against baseline. Private metrics
 are informational single samples, not public-style throughput medians. Include
-Classic/inverse private diagnostics and USDC control workloads; the USDC suite
-stays disabled for rescue. Record sample counts, all first results and actual
+Classic/inverse private diagnostics and USDC control workloads; private cases
+remain ineligible while the USDC public case uses the same shared policy. Record sample counts, all first results and actual
 second-run execution or its correctly skipped state. This policy does not claim
 a runtime speedup. Compare complete canonical nonmetric outputs after removing
 only top-level metrics, with all ordered diagnostics retained. Report optimized
@@ -103,9 +107,25 @@ without a window.
 
 ## Policy checkpoint
 
-Plan review confirms architecture YES and the Bitget-only same-run design. The
+The initial plan review confirmed architecture YES for the shared same-run design.
+The all-suite rollout is a subsequent explicit Sam decision; obtain a separate
+review of the complete dynamic matrix and all-suite final check coverage. The
 first implementation reuses only reviewed pure policy/offline strict-verifier
 primitives; the parked history scanner, workflow and coordinator are absent.
 Focused controls cover all-three-objective means, missing/failed second runners,
 unchanged strict failures, 5% boundaries and disabled suites. Runtime transport
 and workflow authority remain the next separately reviewed phase.
+
+## All-suite rollout review gate
+
+Before changing rollout or workflow source, independently review the expansion
+above. Plans must contain exactly the shared registry suites, once each; public
+case rosters must match each suite (including multi-public Binance/Bybit/OKX).
+Artifact names include the suite except the single global plan. The second
+matrix must be an exact projection of eligible dispositions, never a caller
+provided list; an empty projection skips the whole second matrix. Certification
+recomputes the authenticated global plan and validates its complete suite roster
+before selecting one row. Every required replay check runs even if the planner
+or a second job fails; no eligible slot may disappear through matrix skips.
+Preserve all strict private/declared public diagnostic handling; no declared
+correctness divergence can be rescued by CPU averaging.
