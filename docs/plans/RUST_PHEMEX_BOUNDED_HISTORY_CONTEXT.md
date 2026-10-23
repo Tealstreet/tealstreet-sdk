@@ -153,3 +153,26 @@ plan and original REDs. No manifest prune, managed-read or CI-green claim yet;
 implementation, focused Phemex/Binance gates, both request checks, independent
 review and exact-head CI follow authorization and dependency clearance. No merge
 without a train window.
+
+## Original-source checkpoint
+
+Plan b3c7d479423 and review corrections 6eadc16132c precede the original test
+commit ef8156dc53d. Test-only review closure c072d117341 adds optional public
+authentication coverage and strengthens peer/early-response custody checks.
+The qualifying unchanged-production run compiles 15 tests: ten expected
+behavioral assertion REDs, five native compatibility passes, zero ignored.
+The initial preparation-method compile typo and unequal snapshot-header clocks
+were fixture corrections before that run; neither is counted as a RED.
+
+The new target's strict Clippy and rustfmt pass. Both request-context checks pass,
+including all 15 checker controls. Independent source/adversarial, caller and
+full-map reviews are CLEAR at c072d117341. Only this plan, the README row and
+the new test target differ from actual15bd; production, existing fixtures,
+engine, scanners and all manifests are byte-exact. This closes the requested
+plan/RED phase only. No source adoption, inventory reduction or CI-green claim.
+
+The overseer assigned the Phemex recipe migration to codex-zs5e83, which is
+planning from actual15bd. It owns sign.rs/provider/setup and coordinated request
+funnel plumbing; history remains this lane's. The exact selected-read and native
+byte requirements above were sent before any implementation. No reviewed recipe
+or landed helper is consumed by this checkpoint.
