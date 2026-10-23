@@ -5168,6 +5168,40 @@ envelopes missing their list and refusals after initial orders loaded retain
 their existing retry behavior. No caller option or credential migration is
 required; callers awaiting startup receive the existing typed rejection.
 
+## Phemex unsigned candle command transport
+
+Phemex FetchCandles uses prepared managed HTTP when neither its constructed
+primary nor secondary credential container exists. Custom transports prepare,
+bind and synchronously claim that public request; no legacy send fallback is
+used in this branch. The original issued20-second Read deadline covers route
+waiting and released HTTP. Initial admission rejection is typed, exactly once
+and has no write outcome; released Network/Timeout failures declare the public
+read NotSent. Late or duplicate callbacks cannot finish a reused command ID,
+change account credentials or pause a later read.
+
+Credentialed public candles retain their existing native signed request path,
+including primary/secondary GET selection even with public_data_only. This
+partial change does not migrate signing or require credential transfer. Native
+host selection, symbol mapping/encoding, interval and limit/from/to rules,
+data.rows mapping, sorted results, errors and current rate-limit pause remain.
+
+## MEXC standalone book command authority
+
+MEXC FetchOrderBook uses one public Read Context through prepared route binding,
+final synchronous release and completion. Custom transports must prepare, bind
+and claim; legacy request dispatch is not a fallback. The issued20-second bound
+includes route waiting and released HTTP. Initial engine rejection publishes
+one typed terminal without a write outcome; issued public failures retain their
+NotSent declaration and typed setup/Network/Timeout causes. Late/duplicate
+replies cannot complete a reused owner or extend the depth/account cooldown.
+
+The unsigned native depth URL, captured contract size and limit1..1000/default100,
+sorted base amounts and totals, zero quantities and exact u64 version string
+remain. Numeric overflow in rows beyond the requested output limit still rejects the
+whole snapshot. Native status/code510 classification, code/message and bounded retry
+hint remain; live rate limits pause depth and account reads without resending.
+Results never change subscribed books, account state or credential health.
+
 ## OKX dispatch signer adoption (draft; CI evidence pending)
 
 This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
