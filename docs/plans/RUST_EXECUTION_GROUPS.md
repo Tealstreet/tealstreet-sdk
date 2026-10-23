@@ -431,6 +431,8 @@ authorization; landing merged at `a7f3494a430`.
 
 Still open: Mutation executions and the shared journal (Hyro), background
 roots and the pending successor (Bitrue), metadata adoption (after #1747 and
-the BingX/WEEX signers), and a second production consumer. `admit_http_command`
-returning `Revoked` emits no terminal; that belongs to the command-entry seam.
+the BingX/WEEX signers), and a second production consumer. Consumers call
+`admit_http_command` before any I/O or opaque work; `Revoked` then means
+existing or spent custody (no fresh first entry), so returning without a new
+terminal is correct (confirmed with uufub4).
 
