@@ -5628,3 +5628,18 @@ an active duplicate cannot complete or replace its existing owner. The valid-ID
 uncached spot miss, public-only perps refusal and private perps REST lookup retain
 their native behavior. The exchange-server order reconciliation caller consumes
 the same complete cached result and must retain non-definitive miss handling.
+
+### Paradex local history results require genuine Read admission
+
+Public-only Fills, OrderHistory and Income still return exact `[]`; public-only
+OrderByClientId still returns `{"found":false,"definitive":false}`, including
+invalid private query inputs. Private-enabled invalid client IDs and explicit
+invalid history bounds retain their exact native messages and unclassified
+Read errors. Fills without a symbol still returns `[]` after bounds validation,
+before authentication. These local results now require genuine engine command
+Read admission: capacity and invalid clock policy produce one correlated typed
+engine refusal without a financial outcome. Successful admission preserves the
+native decision order and introduces no request, signer, timer, Store mutation
+or incomplete marker. PublicTrades retains its existing managed public path;
+other private history, signing, settings and REST fallthrough remain unchanged.
+

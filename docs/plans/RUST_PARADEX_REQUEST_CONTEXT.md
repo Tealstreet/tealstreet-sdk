@@ -447,3 +447,17 @@ outbound HTTP/sign/WS operation or command-specific timer is introduced.
    and terminal APIs. Genuine actual-landing integration, green CI, an authorized
    train slot, fresh separate own-files/own-manifest-keys guard and head-matched
    merge remain mandatory. Combo-4 review duty may interrupt this planning slice.
+
+### Local history original RED and source checkpoint
+
+Original test-only commit `45c743903b8` was executed with production and
+inventory exactly equal to actual `c473342d483`: three native/control tests pass
+and five tests fail at the intended assertions (four capacity branches, one
+clock aggregate). Independent source/adversarial, caller and full-map reviews
+of that checkpoint are CLEAN, architecture gate No. The initial missing Fills
+fixture `order_id` field was corrected before that commit; compilation failure
+was not counted as a RED. The source adoption then passes all eight tests with
+the committed RED assertions unchanged. It changes only the four local history
+Read terminals and their four exact manifest occurrences. Full verification,
+actual-landing integration, implementation reviews and CI remain separate gates.
+

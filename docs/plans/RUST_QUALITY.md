@@ -1113,3 +1113,19 @@ finite ID reuse and 900 synchronous retirements followed by 256 real parked
 managed candle owners. No marker or Store mutation is introduced. Exact inventory
 removes only two local done sites; native/strict checks and independent reviews
 are required on the committed source before merge readiness.
+
+### Paradex local history admission controls
+
+Original RED checkpoint `45c743903b8` adds one focused fixture without editing
+production, shared support or inventory: four local branches emit their old
+result/error instead of a shared capacity refusal; the clock control likewise
+exposes unowned completion. Three native compatibility controls pass alongside
+those five REDs. After adoption all eight original tests pass unchanged.
+The test uses real Engine callbacks,256 unclaimed managed book peers and exact
+terminal metadata, never a manufactured Context. Recovery reuses the freed slot
+and individually retires every remaining peer. Fixed-clock300-cycle reuse and
+refill exercise owner retirement without deadline expiry hiding a leak.
+The original managed public-trades and private history suite stays unchanged.
+Exact inventory target is Paradex55->51/history13->9; broader native, strict,
+ratchet, independent review and CI evidence will be recorded separately.
+

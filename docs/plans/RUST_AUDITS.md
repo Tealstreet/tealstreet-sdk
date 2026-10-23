@@ -2511,3 +2511,23 @@ owner isolation, synchronous retirement and unchanged fallthrough controls.
 Only the two exact local completion fingerprints are pruned (Hyperliquid50->48,
 history13->11). Private history/signing and spot REST capabilities stay native.
 Architecture gate: No; existing engine admission and completion choke points.
+
+### Paradex local history terminal custody
+
+Plan `987e5ea81e2`; original test-only checkpoint `45c743903b8`. With production
+and inventory byte-identical to actual `c473342d483`, the new target compiles
+and has three native/control passes plus five intended assertion REDs: four
+capacity cases and invalid-clock admission. The adapter adopts genuine Read
+command entry plus context done/fail in only those four synchronous branches.
+The same eight tests pass after source adoption, without assertion changes.
+
+Native controls retain public-only precedence, exact JSON and error metadata,
+Unicode client-ID bounds, all three history range validators, pre-auth no-symbol
+Fills, PublicTrades bypass, real256-peer isolation and recovery, duplicate-owner
+protection, and300 fixed-clock completions followed by full capacity refill.
+Inventory removes four single-occurrence hashes only in Paradex `history.rs`:
+55->51 total,13->9 in that file. Other paths and same-hash trading siblings stay
+intact. The rejected settings proposal remains held on genuine keyless Mutation
+no-op terminal authority; no signing, credential or outcome workaround was added.
+Broader native gates, independent implementation review and CI are separate.
+
