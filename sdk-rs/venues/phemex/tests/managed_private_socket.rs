@@ -130,7 +130,7 @@ impl Harness {
 }
 
 #[test]
-fn accepted_open_preserves_auth_then_ping_and_aop_wire() {
+fn accepted_open_preserves_auth_wire_and_defers_ping_until_login() {
     let mut h = Harness::new();
     let socket = h.socket();
     h.open();
@@ -140,17 +140,24 @@ fn accepted_open_preserves_auth_then_ping_and_aop_wire() {
         .filter(|(s, _)| *s == socket)
         .map(|(_, s)| s)
         .collect();
-    assert_eq!(sent.len(), 2);
+    assert_eq!(sent.len(), 1);
     assert_eq!(
         sent[0],
         r#"{"method":"user.auth","params":["API","key","46a48d7b73f809f511182a4807f8301321bf3efe6f397c40f50b393e649a1419",1700000060],"id":999}"#
     );
-    assert_eq!(sent[1], r#"{"id":1201,"method":"server.ping","params":[]}"#);
     h.message(AUTHED);
+    let sent: Vec<_> = h
+        .sent
+        .iter()
+        .filter(|(s, _)| *s == socket)
+        .map(|(_, text)| text.as_str())
+        .collect();
+    assert_eq!(sent.len(), 3);
     assert_eq!(
-        h.sent.last().unwrap().1,
+        sent[1],
         r#"{"id":1202,"method":"aop_p.subscribe","params":[]}"#
     );
+    assert_eq!(sent[2], r#"{"id":1201,"method":"server.ping","params":[]}"#);
 }
 
 #[test]

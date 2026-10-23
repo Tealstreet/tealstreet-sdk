@@ -16,7 +16,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::request_context::Context;
 use safe_cex_engine::socket_lifecycle::{
-    EncodedBatch, FeedId, Interest, LifecycleEvent, SocketError,
+    Control, EncodedBatch, FeedId, Interest, LifecycleEvent, SocketError,
 };
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
@@ -390,7 +390,23 @@ impl Venue for PhemexPerpetuals {
         cx: &mut Cx<'_, Pending>,
         event: LifecycleEvent,
     ) -> Result<(), SocketError> {
-        self.public_socket_event(cx, event)
+        let feed = match &event {
+            LifecycleEvent::Opened(epoch)
+            | LifecycleEvent::Ready { epoch, .. }
+            | LifecycleEvent::Authenticated { epoch, .. }
+            | LifecycleEvent::AuthFailure { epoch, .. }
+            | LifecycleEvent::Retired { epoch, .. }
+            | LifecycleEvent::Ping(epoch)
+            | LifecycleEvent::RetryLogin(epoch) => epoch.feed(),
+            LifecycleEvent::Reconnect(feed)
+            | LifecycleEvent::InterestsCommitted { feed, .. }
+            | LifecycleEvent::InterestsRefused { feed, .. } => *feed,
+        };
+        if self.is_account_feed(feed) {
+            self.account_socket_event(cx, event)
+        } else {
+            self.public_socket_event(cx, event)
+        }
     }
     fn encode_socket_interests(
         &self,
@@ -400,11 +416,26 @@ impl Venue for PhemexPerpetuals {
         interests: &[Interest],
         emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
     ) -> Result<(), SocketError> {
-        self.encode_public_interests(feed, subscribe, interests, emit)
+        if self.is_account_feed(feed) {
+            self.encode_account_interests(subscribe, interests, emit)
+        } else {
+            self.encode_public_interests(feed, subscribe, interests, emit)
+        }
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        self.account_open(cx, socket);
+    fn socket_control(
+        &self,
+        _: &safe_cex_engine::Store,
+        feed: FeedId,
+        _: bool,
+        text: &str,
+    ) -> Control {
+        if self.is_account_feed(feed) {
+            self.account_socket_control(text)
+        } else {
+            Control::Other
+        }
     }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account_message(cx, socket, text) {
             return;
@@ -503,9 +534,7 @@ impl Venue for PhemexPerpetuals {
             }
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
-        self.account_close(cx, socket, code);
-    }
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, p: &mut Pending, item: &str) {
         match p {
             Pending::Markets(rows, _) => {
