@@ -610,3 +610,15 @@ Architecture gate: YES, cross-cutting consumer fan-out through the existing engi
 choke point. No signing, transport, history, snapshot authority or financial
 arithmetic change. Current-head CI/raw proof and queue ordering still apply;
 this entry does not close the remaining reporter inventory.
+
+## MEXC initial Plan refusal regressions
+
+Separate original-source tests reproduce two failures: no typed initial Plan
+startup terminal, and resumed HTTP through late pagination/asset refresh. Two
+negative controls already pass on original production, preserving transient and
+post-startup retries. Coverage includes AuthInvalid/AuthExpired/AuthPermission,
+native code/message, deactivation policy, exactly one startup terminal, stale
+poll delivery, late sibling failure/login, a 100-row late page and asset timers.
+Both normal empty-list error envelopes and errors missing data are covered;
+successful missing/null lists retain retry behavior. Existing account assertions remain
+intact, and the legacy request inventory has no venue delta.

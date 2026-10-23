@@ -1731,10 +1731,11 @@ fn fire_startup_timers(
 
 #[test]
 fn initial_plan_credential_refusal_fails_startup_and_cannot_resume_account_http() {
-    for (code, kind, status) in [
-        (602, ErrorKind::AuthInvalid, 200),
-        (402, ErrorKind::AuthExpired, 401),
-        (701, ErrorKind::AuthPermission, 403),
+    for (code, kind, status, data) in [
+        (602, ErrorKind::AuthInvalid, 200, ""),
+        (602, ErrorKind::AuthInvalid, 200, ",\"data\":[]"),
+        (402, ErrorKind::AuthExpired, 401, ""),
+        (701, ErrorKind::AuthPermission, 403, ""),
     ] {
         let (mut e, socket, reads, poll) = private_started();
         e.drain_actions().for_each(drop);
@@ -1753,8 +1754,9 @@ fn initial_plan_credential_refusal_fails_startup_and_cannot_resume_account_http(
             response(&mut e, read, r#"{"success":true,"code":0,"data":[]}"#);
         }
         e.drain_actions().for_each(drop);
-        let body =
-            format!(r#"{{"success":false,"code":{code},"message":"plan credentials denied"}}"#);
+        let body = format!(
+            r#"{{"success":false,"code":{code},"message":"plan credentials denied"{data}}}"#
+        );
         e.handle(
             101.0,
             Event::HttpResponse {
@@ -1935,6 +1937,8 @@ fn initial_plan_transient_failures_keep_the_existing_retry_policy() {
         ("", 503),
         ("<html>403 Forbidden</html>", 403),
         ("", 401),
+        (r#"{"success":true,"code":0}"#, 200),
+        (r#"{"success":true,"code":0,"data":null}"#, 200),
     ] {
         let (mut e, _, reads, poll) = private_started();
         e.drain_actions().for_each(drop);

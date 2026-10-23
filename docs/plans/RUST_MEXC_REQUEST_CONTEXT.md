@@ -337,6 +337,10 @@ HTTP after sibling callbacks or private login. Keep negative controls for
 transient initial Plan failures and post-startup/scoped refusals. Then run full
 MEXC+Binance native tests, scoped fmt/strict Clippy, both ratchets and independent
 source/adversarial, caller and full-map reviews. Inventory remains unchanged.
-Only account.rs, its account tests and append-only ledgers are needed; history
-#1793 stays excluded. Architecture No: reuse existing native refusal facts and
+The account implementation, its account tests, narrow lib.rs stream-error
+routing and append-only ledgers are needed; history #1793 stays excluded.
+Complete error envelopes without a data list use the same refusal check through
+on_stream_error; a successful envelope without its expected list remains a
+retryable malformed snapshot. Terminal state discards late snapshot pages and
+blocks both existing and newly requested asset refreshes without rearming polls. Architecture No: reuse existing native refusal facts and
 engine startup authority rather than adding another policy implementation.
