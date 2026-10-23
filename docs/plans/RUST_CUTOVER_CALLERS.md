@@ -5101,6 +5101,26 @@ wrapper, managed-request migration or NX runtime adoption is added.
 [Scope and controls](RUST_OWNED_HISTORY.md).
 
 
+### Paradex managed independent book snapshots
+
+Rust `fetchOrderBook` uses the engine managed preparation/binding/final claim
+path for the existing public Paradex GET snapshot. Custom worker/hosted transports
+must implement preparation; legacy `request()` alone cannot service this query.
+Typed preparation refusals retain their engine-provided kind/outcome and reject
+the existing snapshot promise. One original20,000ms raw upper bound covers route
+preparation and response handling; a shorter host timeout may shorten it. Late,
+duplicate or retired replies cannot finish a reused command ID.
+
+Production/testnet URL selection, encoded raw symbol, default20 and explicit
+unclamped depth, side order/duplicates/zero sizes, quote-product totals and the
+current native non-auth/rate error metadata remain unchanged. No query retry is
+added. Snapshot completion never publishes live SBE/JSON depth or changes JWT,
+private account state or trading's separate optional capped-order quote path.
+The previously audited caller scope remains: no default direct NX/CLI/MCP
+snapshot producer was established. This transport migration does not claim
+listener/chart migration, NX deployment or live private connectivity.
+
+
 ## Script adapter batch failures retain SDK-reported IDs
 
 `createCoreAdapter.placeOrders` rejects with the exported `ScriptBatchOrderError`
