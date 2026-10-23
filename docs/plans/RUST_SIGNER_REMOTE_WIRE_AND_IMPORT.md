@@ -151,7 +151,22 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
    - Keyless remote import is out of scope: hosted Polymarket stays
      unsupported until P8 adds a remote L1 op. Its derived key would then live
      on the device.
-6. **Ownership.**
+6. **Credential conditions (claude-m26ps4, 2026-10-23).**
+   - **Slot.** Import installs refs only for the slot whose L1 identity
+     derived them (primary today). The derived refs form a session identity
+     bound to (slot, generation) beside the L1 identity, never overwriting
+     it. Venues reach it only by selecting that slot, with no new selector.
+     Secondary import is refused.
+   - **Subject.** Echoed non-secret fields (address, funder, API-key id)
+     never become the account subject or a `stable_id` by themselves. A
+     subject is used only after it is validated equal to the L1-derived
+     signer or funder.
+   - **Nonce.** The ClobAuth nonce `0` and timestamp stay protocol data.
+     Imported refs never key a nonce domain.
+   - **Generation.** A selection made before retirement never signs with
+     dropped refs. A stale-generation recipe refuses `Unavailable` before
+     sending (`notSent`).
+7. **Ownership.**
    - Engine changes (`Cx::request_import`, response routing, the
      `Signer::import` and `drop_imported` trait methods) need uufub4 sign-off
      for signing/dispatch and m26ps4 sign-off for credential semantics.
