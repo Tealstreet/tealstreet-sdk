@@ -92,3 +92,11 @@ pub fn ws(engine: &mut Driver, socket: SocketId, stream: &str, data: &str) {
         },
     );
 }
+
+pub fn ready_orders_with_signer(
+    orders: &str,
+    signer: std::sync::Arc<dyn safe_cex_engine::signing::Signer>,
+) -> (Driver, SocketId) {
+    let (inner, socket) = super::ready_orders_with_signer(orders, signer);
+    (Driver { inner, now: 1000.0 }, socket)
+}

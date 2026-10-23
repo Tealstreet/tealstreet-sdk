@@ -1535,42 +1535,51 @@ fn native_failure(
         .map(|_| ())
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PairRow {
+    operation: String,
+    id: String,
+    client_id: u32,
+    symbol: String,
+    side: String,
+    order_type: String,
+}
+fn pair_rows(body: &str) -> (Vec<PairRow>, usize) {
+    let raw: Vec<&serde_json::value::RawValue> = serde_json::from_str(body).unwrap_or_default();
+    let rows = raw
+        .iter()
+        .filter_map(|raw| serde_json::from_str(raw.get()).ok())
+        .collect();
+    (rows, raw.len())
+}
+fn correlated_pair_row<'a>(expected: &NativeOrder, rows: &'a [PairRow]) -> Option<&'a PairRow> {
+    let mut matched = rows
+        .iter()
+        .filter(|row| Some(row.client_id) == expected.client_id);
+    let row = matched.next()?;
+    if matched.next().is_some()
+        || row.symbol != expected.symbol
+        || row.side != expected.side
+        || row.order_type != expected.order_type
+    {
+        return None;
+    }
+    Some(row)
+}
+
 fn pair_fact(
     cx: &mut Cx<'_, Pending>,
     managed: &ManagedWrite,
     orders: &[NativeOrder],
     body: &str,
 ) -> Result<WriteResult, safe_cex_engine::request_context::Error> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Row {
-        operation: String,
-        id: String,
-        client_id: u32,
-        symbol: String,
-        side: String,
-        order_type: String,
-    }
-    let raw: Vec<&serde_json::value::RawValue> = serde_json::from_str(body).unwrap_or_default();
-    let rows: Vec<Row> = raw
-        .iter()
-        .filter_map(|raw| serde_json::from_str(raw.get()).ok())
-        .collect();
+    let (rows, count) = pair_rows(body);
     let mut items = vec![];
     for expected in orders {
-        let matched: Vec<_> = rows
-            .iter()
-            .filter(|row| Some(row.client_id) == expected.client_id)
-            .collect();
-        let [row] = matched.as_slice() else {
+        let Some(row) = correlated_pair_row(expected, &rows) else {
             continue;
         };
-        if row.symbol != expected.symbol
-            || row.side != expected.side
-            || row.order_type != expected.order_type
-        {
-            continue;
-        }
         if row.operation == "Ok"
             && !row.id.trim().is_empty()
             && rows.iter().filter(|other| other.id == row.id).count() == 1
@@ -1583,7 +1592,7 @@ fn pair_fact(
             }));
         }
     }
-    if raw.len() > orders.len() && items.len() == orders.len() {
+    if count > orders.len() && items.len() == orders.len() {
         // A real extra native row invalidates the complete-batch proof.
         items.push(BatchItem::Native(Native {
             code: NativeCode::None,
@@ -1601,6 +1610,54 @@ fn pair_fact(
 }
 
 impl Request {
+    pub(crate) fn unproven_evidence(
+        &self,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if self.managed.is_none() {
+            return;
+        }
+        #[derive(Deserialize)]
+        struct Envelope<'a> {
+            #[serde(borrow)]
+            code: Option<&'a serde_json::value::RawValue>,
+            message: Option<&'a str>,
+            id: Option<&'a str>,
+        }
+        if let Ok(row) = serde_json::from_str::<Envelope<'_>>(response.body) {
+            if let Some(raw) = row.code {
+                if let Ok(text) = serde_json::from_str::<String>(raw.get()) {
+                    evidence.venue_code(&text);
+                } else if let Some(code) = safe_cex_engine::classify::decode_int(raw.get()) {
+                    evidence.venue_code(&code.to_string());
+                }
+            }
+            if let Some(message) = row.message {
+                evidence.venue_message(message);
+            }
+            if let Step::Place { .. } = self.step
+                && let Some(id) = row.id.filter(|id| !id.trim().is_empty())
+            {
+                evidence.order_id(id);
+            }
+        }
+        if let Step::Pair(orders) = &self.step {
+            let (rows, _) = pair_rows(response.body);
+            for order in orders {
+                if let Some(row) = correlated_pair_row(order, &rows)
+                    && row.operation == "Ok"
+                    && !row.id.trim().is_empty()
+                    && rows.iter().filter(|other| other.id == row.id).count() == 1
+                {
+                    if !evidence.order_id(&row.id) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn reconciliation(
         &self,
     ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {

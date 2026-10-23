@@ -39,15 +39,15 @@ pub fn instruction(method: Method, path: &str) -> Result<&'static str, SignError
 /// The provider presents the public API key and signs exact Ed25519 bytes.
 pub struct Http {
     identity: Identity,
-    request: Request,
+    declaration: Request,
     timestamp: String,
 }
 
 impl Http {
-    pub fn new(identity: Identity, request: Request) -> Self {
+    pub fn new(identity: Identity, declaration: Request) -> Self {
         Self {
             identity,
-            request,
+            declaration,
             timestamp: String::new(),
         }
     }
@@ -62,40 +62,40 @@ impl SignStep for Http {
         let Action::Http(http) = outbound else {
             return Err(SignError::InvalidRequest);
         };
-        let request = &self.request;
-        let instruction = instruction(request.method, &request.path)?;
-        let is_batch = request.method == Method::Post && request.path == "/api/v1/orders";
-        if request.rows.is_empty()
-            || (!is_batch && request.rows.len() != 1)
-            || request.window == 0
-            || http.method != request.method
-            || http.body != request.body
+        let declaration = &self.declaration;
+        let instruction = instruction(declaration.method, &declaration.path)?;
+        let is_batch = declaration.method == Method::Post && declaration.path == "/api/v1/orders";
+        if declaration.rows.is_empty()
+            || (!is_batch && declaration.rows.len() != 1)
+            || declaration.window == 0
+            || http.method != declaration.method
+            || http.body != declaration.body
         {
             return Err(SignError::InvalidRequest);
         }
-        if request.method == Method::Get {
-            if request.body.is_some() {
+        if declaration.method == Method::Get {
+            if declaration.body.is_some() {
                 return Err(SignError::InvalidRequest);
             }
-        } else if json_rows(request.body.as_deref(), is_batch)? != request.rows {
+        } else if json_rows(declaration.body.as_deref(), is_batch)? != declaration.rows {
             return Err(SignError::InvalidRequest);
         }
-        let query = if request.method == Method::Get {
-            query(&request.rows[0])
+        let query = if declaration.method == Method::Get {
+            query(&declaration.rows[0])
         } else {
             String::new()
         };
         let path = if query.is_empty() {
-            request.path.clone()
+            declaration.path.clone()
         } else {
-            format!("{}?{query}", request.path)
+            format!("{}?{query}", declaration.path)
         };
         if http.url != format!("https://api.backpack.exchange{path}") {
             return Err(SignError::InvalidRequest);
         }
         let stamp = dispatch.stamp_ms();
         self.timestamp = safe_cex_engine::num::format(stamp);
-        let text = payload(instruction, &request.rows, stamp, request.window);
+        let text = payload(instruction, &declaration.rows, stamp, declaration.window);
         Ok(SignRequest {
             receipt: SignReceipt {
                 stamp_ms: Some(stamp),
@@ -141,7 +141,7 @@ impl SignStep for Http {
             ("X-Broker-Id", "1200".into()),
             ("X-Signature", STANDARD.encode(&result.values[1])),
             ("X-Timestamp", self.timestamp.clone()),
-            ("X-Window", self.request.window.to_string()),
+            ("X-Window", self.declaration.window.to_string()),
             ("Content-Type", "application/json".into()),
         ];
         Ok(())
@@ -150,7 +150,7 @@ impl SignStep for Http {
     fn freshness_ms(&self) -> f64 {
         // X-Window is the venue acceptance bound; queued material is refreshed
         // after five seconds even when that native bound is longer.
-        f64::from(self.request.window.clamp(1, 5000))
+        f64::from(self.declaration.window.clamp(1, 5000))
     }
 }
 

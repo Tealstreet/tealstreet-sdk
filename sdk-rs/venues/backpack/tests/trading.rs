@@ -38,7 +38,7 @@ fn caller_or_generated_pair_identities(generated: bool) {
         r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"clientOrderId":"4294967295"}]"#
     };
     place(&mut e, 91, orders);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = actions(&mut e);
     let (progress_at, receipts) = actions
         .iter()
         .enumerate()
@@ -94,7 +94,7 @@ fn a_single_native_order_without_client_id_does_not_invent_a_receipt() {
         92,
         r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140}]"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = actions(&mut e);
     assert!(
         actions
             .iter()
@@ -206,7 +206,8 @@ fn limit_bracket_waits_for_entry_and_keeps_a_successful_leg_if_other_leg_fails()
             .contains("\"triggerPrice\":\"130.00\"")
     );
     reply(&mut e, &sl, 200, r#"{"id":"stop"}"#);
-    assert_eq!(done(&mut e).unwrap(), r#"["entry","stop"]"#);
+    let error = done(&mut e).unwrap_err();
+    assert!(error.contains(r#""partialOrderIds":["entry","stop"]"#));
 }
 #[test]
 fn market_attached_brackets_and_standalone_trigger_payloads() {
@@ -652,7 +653,7 @@ fn concurrent_cancel_is_rejected_until_the_first_command_completes() {
             if status == 200 {
                 OrderStatus::Canceled
             } else {
-                OrderStatus::Open
+                OrderStatus::Canceling
             }
         );
     }
@@ -778,7 +779,7 @@ fn amend_replaces_only_the_unfilled_total_including_fills_during_cancel() {
             200,
             &format!(r#"{{"id":"123","status":"Cancelled","executedQuantity":"{later}"}}"#),
         );
-        let out: Vec<_> = e.drain_actions().collect();
+        let out = actions(&mut e);
         let writes: Vec<_> = out
             .iter()
             .filter_map(|a| match a {
@@ -838,20 +839,30 @@ fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome, Response};
     let market = r#"[{"symbol":"SOL_USDC_PERP","type":"market","side":"buy","amount":1}]"#;
     for (status, body, kind, outcome) in [
-        (503, "unavailable", None, Some(Outcome::Unknown)),
+        (
+            503,
+            "unavailable",
+            Some(ErrorKind::VenueUnavailable),
+            Some(Outcome::Unknown),
+        ),
         (
             400,
             r#"{"code":"INVALID_ORDER","message":"bad"}"#,
-            Some(ErrorKind::Rejected),
-            Some(Outcome::Rejected),
+            None,
+            Some(Outcome::Unknown),
         ),
         (
             200,
             r#"{"code":"INSUFFICIENT_MARGIN","message":"margin"}"#,
             None,
-            None,
+            Some(Outcome::Unknown),
         ),
-        (200, r#"{"id":""}"#, None, Some(Outcome::Unknown)),
+        (
+            200,
+            r#"{"id":""}"#,
+            Some(ErrorKind::Internal),
+            Some(Outcome::Unknown),
+        ),
     ] {
         let (mut e, _) = ready();
         place(&mut e, 1, market);

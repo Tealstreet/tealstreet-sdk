@@ -393,3 +393,57 @@ emits CHILD_LEG_FAILED and sends SL, then one failed terminal with both accepted
 IDs rather than Done. Preserve native wire/sequence oracles. Classified DATA
 settles via finish_plan_call; callback-delivered preparation/transport failures
 use finish_plan_failed_call if continuing, never fabricate current DATA.
+
+### Foreground write implementation checkpoint
+
+PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder and SetLeverage now
+retain a genuine Preflight and admit the final native serial steps as one Plan.
+Each attempt has a new explicit 20,000 ms bound, one attempt and no resend; the
+engine derives the immutable root from those declarations. Independent jobs do
+not borrow FIFO readiness. Empty native work completes through done_empty_plan.
+
+The shared journal owns all verdicts and the terminal. One conservative CodeTable
+has no undocumented refusal rows: unlisted native codes remain Unknown. Partial
+Pair acknowledgements retain only independently correlated native IDs, without
+inventing a total or failed index when the reply is incomplete. Every requested
+cancel contributes its failure, so all-failed cancellation cannot return success.
+An optional child answered with a native 400 can continue to its native sibling,
+but the final failure retains both earlier and later accepted IDs. A racing fill
+that exhausts an amendment uses the declared conditional terminal after the
+exact validated cancellation DATA.
+
+The current shared core stops on delivered 408/5xx, retires unsent suffix slots
+and returns Unknown with prior IDs. Pure native capture preserves code/message
+and exactly correlated IDs without success, Store, retry or authentication
+rights. Reconcile before resending. Adoption of PlanPolicy independent_calls to
+restore native continue_on_error/optional-child continuation is an OPEN follow-up
+when that shared policy lands; there is no venue fallback.
+
+The dispatch recipe owns the canonical instruction/body and headers. Native
+GET, single, batch and cancel proofs are byte-equal to legacy signing; a real
+CancelOrders command also carries a fixed independent Node Ed25519 vector and
+remote-only public-key sentinel through asynchronous Sign/Signed dispatch. No
+HTTP is emitted before Signed, and a duplicate receipt is inert. This proves the
+native delegated-provider path, not the SDK/browser remote adapter or admission.
+The five-second recipe freshness is the queue refresh bound within X-Window.
+
+Only a trusted opaque Options.identity can authorize managed foreground writes.
+The registry's mechanical identity=None literal does not provide admission: raw
+legacy credentials cannot substitute for a managed identity and refusal occurs
+before write I/O. Registry/SDK setup, account/startup/session presentation and
+background repair signing remain OPEN separate work. Internal automatic repair
+retains its legacy sender and response contract. Local unsupported-setting tails
+remain local; no command owner is fabricated for internal repair.
+
+Typed pre-send cancellation refusal restores optimistic state only when its
+native stream stamp is unchanged. Each job releases only its own cancel-latch
+contribution, including retirement and internal preparation failure. Late-response
+capture retains bounded operation correlation; cancelAll records the symbol,
+not an unbounded snapshot of Store IDs. Late delivery does not publish Store
+changes or another command terminal. Original four RED assertions are active;
+new controls cover missing identity, amend refusal versus a newer fill, native
+metadata/prior IDs on 408/5xx, and the real asynchronous cancel.
+
+Exact legacy inventory change: trading.rs ten occurrences become three (the
+internal repair sender and two local unsupported-setting refusals). Other
+Backpack paths remain unchanged. No exemption or inventory addition is used.

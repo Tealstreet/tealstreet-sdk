@@ -5579,3 +5579,31 @@ result shapes, history validation precedence and leverage pause/market/primary
 credential precedence stay the same. Valid private/public history and leverage
 reads retain their existing signed/unsigned dispatch, secondary GET selection,
 rows, accepted-page recovery, bounds, revisions and callback behavior.
+
+## Backpack managed foreground write results
+
+Foreground place/cancel/amend/leverage uses shared Plan custody, send-time
+provider signing and one journal terminal. A failed explicit cancel no longer
+returns success; optional child failure returns a failure with all accepted IDs.
+A malformed or partially failed Pair retains correlated IDs as partial evidence;
+missing acknowledgement rows do not invent total or failed-index counts.
+Unlisted native errors and undocumented HTTP statuses cannot prove refusal.
+
+A delivered 408/5xx currently stops the batch as Unknown, preserves native
+code/message and prior IDs, and retires unsent legs: reconcile before resending.
+Restoring native independent optional-child continuation remains OPEN until the
+shared independent_calls policy is available and adopted. Each attempt now has
+an explicit 20-second managed bound; the root is derived from declared steps.
+
+Callers preserve partial IDs and reconcile uncertainty before retrying. A typed
+pre-send refusal restores only unchanged optimistic cancellation state. Late
+replies have bounded correlation and no Store or new-terminal authority. Native
+cancel/leverage empty-object acknowledgements remain accepted; malformed JSON
+cannot prove a successful managed acknowledgement. Legacy internal repair keeps
+its original response behavior.
+
+The native out-of-band Ed25519 cancel proof uses a fixed independent signature
+and remote-only key sentinel, with no HTTP before Signed. SDK/browser signing,
+registry admission, account/startup/session presentation and internal repair
+signing remain OPEN. Raw legacy credentials alone do not admit a managed write;
+a trusted identity is required and missing admission fails before write I/O.
