@@ -2727,3 +2727,16 @@ original BingX/WEEX copies erase capacity denial fields; those two native
 assertion REDs are retained for separate consumer adoption, not marked fixed by
 engine probes. No venue P0, private signer, Plan history or inventory-zero
 claim is closed by this library seam.
+
+## OKX history managed caller-root custody
+
+History now consumes shared caller-root expiry/refusal and ReadCompletion with
+exact page delivery validation before native DATA/progress mutation. Native
+pacing derives every20s page from the same original root; retirement drops only
+that Owner's delayed history entries. Engine-owned whole-root expiry is strict;
+ordinary live-root released failures retain the native discard-prefix soft[]
+query shape. Provider/preparation and synchronous issuance refusal remain hard
+failures; no release inference, root timer, retry loop or error table is added.
+The exact prune is history.rs14F/18O plus History's lib signing-failure1F/1O.
+Discovery's two list/sign sites and the OKX staging entry remain because actual
+Markets/Tickers consumers still use them, confirmed with the signer owner.

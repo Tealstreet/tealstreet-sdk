@@ -354,3 +354,37 @@ the root and cannot soften accepted rows. No release inference is added. Primary
 managed routing uses explicit Prepare intentPrimary; a physical routeNone means
 the host's normal primary egress, equivalent to native explicit Primary. A new
 adoption control pins that intent before signing.
+
+## Local implementation checkpoint
+
+The15 original/revised controls now pass, with five additional adoption gates
+for20 total: managed Primary intent, unreleased strict versus released soft child
+timeout, typed preparation metadata across query/lookup/public, strict paced
+child-capacity refusal preserving peers, and retired pacing/late response after
+command-ID reuse. The earlier failing immediate provider fixture was unsupported
+for parked signing; the native provider-refusal oracle now explicitly completes
+route preparation before dispatch signing and retains its NotSent/no-absence
+assertions. A new-control Rust pattern compile error was corrected before the
+20-control PASS; it is not counted as an original behavioral RED.
+
+The existing17 history/8 lookup/5 signer tests pass after shared prepared fixture
+glue and monotonic history response clocks. All financial/identity/signature/
+lookup assertions remain; physical routeNone is normal managed Primary routing,
+with explicit preparation intent pinned separately. Native queues/codecs and
+PAGE/cap geometry are unchanged. Full source scan removes only history.rs14F/18O
+and lib.rs History sign-failure1F/1O. The retained2libF/2O and staging exception
+still serve discovery, confirmed by claude-4yjlw0. No engine or signer source is
+edited, and no replacement frozen1976/CI/READY claim is made here.
+
+Complete scoped verification passes573 OKX/Binance tests across45 targets,
+including all20 dedicated custody controls, native closed positions and product
+fixtures. Five product-history fixture paths now drive shared preparation at the
+actual event clock and select the one physical HTTP among timer actions; their
+financial/product assertions are unchanged. Strict all-target/all-feature OKX
+Clippy and rustfmt pass. Clippy's enlarged-variant finding is resolved by boxing
+only Pending::History; no other pending/reducer representation changes.
+The local scanner exactly matches the manifest and the checker suite passes15.
+Full provenance currently rejects only stale incoming Aster/BingX entries on
+origin; genuine replacement1976 integration must bring those foreign prunes.
+No foreign map, scanner or engine source is edited. Independent implementation
+reviews and fresh exact-composition CI remain outstanding.

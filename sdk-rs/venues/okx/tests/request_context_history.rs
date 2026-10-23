@@ -428,3 +428,201 @@ fn managed_primary_lookup_declares_primary_egress_before_signing() {
     let output: Vec<_> = engine.drain_actions().collect();
     assert_eq!(output.iter().filter(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { intent: safe_cex_engine::request_context::RoutingIntent::Primary, request, .. } if request.url.contains("/trade/order?")))).count(), 1);
 }
+
+#[test]
+fn child_timeout_distinguishes_unreleased_and_released_query_work() {
+    for released in [false, true] {
+        let mut engine = ready();
+        deliver(&mut engine, NOW, orders(), Some(60_000));
+        let output = if released {
+            actions(&mut engine, NOW)
+        } else {
+            engine.drain_actions().collect()
+        };
+        let timer = output
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+                _ => None,
+            })
+            .expect("native20s child timer distinct from caller root");
+        engine.handle(NOW + 20_000., Event::TimerFired { timer });
+        let output = actions(&mut engine, NOW + 20_000.);
+        if released {
+            soft_failure(&output);
+            assert!(!output.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+            )));
+        } else {
+            assert!(done(&output).is_none());
+            let failures: Vec<_> = output
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed {
+                        command: OWNER,
+                        error,
+                    }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(failures.len(), 1);
+            assert_eq!(failures[0].kind, Some(ErrorKind::Timeout));
+            assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
+            assert!(
+                !output
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandError { .. })))
+            );
+        }
+    }
+}
+
+#[test]
+fn preparation_refusal_keeps_typed_metadata_for_query_lookup_and_public_read() {
+    for query in [orders(), lookup(), public_trades()] {
+        let mut engine = ready();
+        let public = matches!(query, Query::PublicTrades { .. });
+        deliver(&mut engine, NOW, query, None);
+        let preparation = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("genuine managed preparation");
+        engine.http_preparation_failed(
+            NOW + 1.,
+            preparation,
+            safe_cex_engine::request_context::Error::State,
+            safe_cex_engine::VenueError::new("provider route refused")
+                .kind(ErrorKind::AuthInvalid)
+                .venue_code("native-code")
+                .venue_message("native detail"),
+        );
+        let output: Vec<_> = engine.drain_actions().collect();
+        let failures: Vec<_> = output
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: OWNER,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        let error = failures[0];
+        assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
+        assert_eq!(error.message, "provider route refused");
+        assert_eq!(error.venue_code.as_deref(), Some("native-code"));
+        assert_eq!(error.venue_message.as_deref(), Some("native detail"));
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert!(done(&output).is_none());
+        assert!(!output.iter().any(|a| match a {
+            Action::Notice(Notice::CommandError { .. }) | Action::Http(_) => true,
+            Action::ManagedHttp(action) => matches!(
+                action.as_ref(),
+                HttpAction::Prepare { .. } | HttpAction::Bind { .. }
+            ),
+            _ => false,
+        }));
+        if public {
+            assert!(
+                !output
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::AccountAuth { .. })))
+            );
+        }
+    }
+}
+
+#[test]
+fn dequeued_child_capacity_refusal_discards_rows_without_completing_peers() {
+    let mut engine = ready();
+    deliver(&mut engine, NOW, orders(), Some(60_000));
+    let first = request(actions(&mut engine, NOW));
+    reply(&mut engine, &first, NOW + 10., &page(0));
+    let waiting = actions(&mut engine, NOW + 10.);
+    let timer = paced(&waiting, NOW + 110.);
+    let mut peers = 0;
+    let mut full = false;
+    for command in 1000..1600 {
+        engine.handle(
+            NOW + 20.,
+            Event::Command(Command::FetchCandles {
+                command,
+                symbol: "BTCUSDT".into(),
+                interval: safe_cex_engine::model::Interval::M1,
+                limit: Some(1),
+                from_ms: None,
+                to_ms: None,
+            }),
+        );
+        let output: Vec<_> = engine.drain_actions().collect();
+        assert!(!output.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+        )));
+        if output.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.kind == Some(ErrorKind::Internal))) {
+            full = true;
+            break;
+        }
+        assert!(output.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))));
+        peers += 1;
+    }
+    assert!(full && peers > 0, "genuine peer roots fill shared registry");
+    engine.handle(NOW + 110., Event::TimerFired { timer });
+    let output: Vec<_> = engine.drain_actions().collect();
+    let failures: Vec<_> = output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command, error }) => Some((*command, error)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].0, OWNER);
+    assert_eq!(failures[0].1.kind, Some(ErrorKind::Internal));
+    assert_eq!(failures[0].1.message, "Engine request capacity reached");
+    assert!(failures[0].1.outcome.is_none());
+    assert!(done(&output).is_none());
+    assert!(!output.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandError { .. }) | Action::Http(_)
+    )));
+}
+
+#[test]
+fn retired_native_pacing_timer_cannot_send_for_reused_command_id() {
+    let mut engine = ready();
+    deliver(&mut engine, NOW, orders(), Some(250));
+    let first = request(actions(&mut engine, NOW));
+    reply(&mut engine, &first, NOW + 200., &page(0));
+    let waiting = actions(&mut engine, NOW + 200.);
+    let old_timer = paced(&waiting, NOW + 300.);
+    engine.prepare_dispatch(NOW + 250.);
+    root_expired(&actions(&mut engine, NOW + 250.));
+    deliver(&mut engine, NOW + 260., orders(), Some(60_000));
+    let current = request(actions(&mut engine, NOW + 260.));
+    assert_ne!(first.id, current.id);
+    engine.handle(NOW + 300., Event::TimerFired { timer: old_timer });
+    let output = actions(&mut engine, NOW + 300.);
+    assert!(!output.iter().any(|a| matches!(
+        a,
+        Action::Http(_)
+            | Action::ManagedHttp(_)
+            | Action::Notice(
+                Notice::CommandDone { command: OWNER, .. }
+                    | Notice::CommandFailed { command: OWNER, .. }
+            )
+    )));
+    reply(&mut engine, &first, NOW + 301., &support::envelope(""));
+    assert!(actions(&mut engine, NOW + 301.).is_empty());
+    reply(&mut engine, &current, NOW + 302., &support::envelope(""));
+    let output = actions(&mut engine, NOW + 302.);
+    assert_eq!(done(&output), Some("[]"));
+}
