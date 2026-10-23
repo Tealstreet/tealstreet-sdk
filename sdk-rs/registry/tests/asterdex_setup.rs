@@ -237,3 +237,95 @@ fn registry_admits_refs_with_a_provider_and_refuses_raw_material() {
         );
     }
 }
+
+/// Key typing: V3 wallets are declared Secp256k1Digest by trusted policy from
+/// the resolved version, so only they answer the wallet's own address. V1
+/// declares nothing. One test per case, so every case runs.
+fn golden_case(name: &str) -> Value {
+    let golden: Value = serde_json::from_str(GOLDEN).unwrap();
+    expand(
+        golden["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == name)
+            .unwrap(),
+    )
+}
+fn wallet_address(
+    provider: &Provider,
+    identity: &Identity,
+) -> Result<String, safe_cex_engine::signing::SignError> {
+    let request = SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![Operation::PublicAddress {
+            key: identity.signing.clone(),
+        }],
+    };
+    provider.sign_ready(&request).unwrap().map(|result| {
+        let hex: String = result.values[0]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        format!("0x{hex}")
+    })
+}
+fn assert_v3_declared(name: &str, aliased: bool) {
+    let case = golden_case(name);
+    let mut options = engine_options(&case["input"]);
+    let (provider, ids) = prepare_local_signer_for("asterdex", &mut options).unwrap();
+    let (primary, secondary) = (ids.primary.unwrap(), ids.secondary.unwrap());
+    // An aliased read agent shares the primary's one ref and declaration.
+    assert_eq!(secondary.signing == primary.signing, aliased, "{name}");
+    let expected = |field: &str| {
+        case["expected"][field]
+            .as_str()
+            .unwrap()
+            .to_ascii_lowercase()
+    };
+    let read = if aliased {
+        "signerAddress"
+    } else {
+        "readSignerAddress"
+    };
+    for (identity, field) in [(&primary, "signerAddress"), (&secondary, read)] {
+        assert_eq!(
+            wallet_address(&provider, identity).map(|a| a.to_ascii_lowercase()),
+            Ok(expected(field)),
+            "{name}: {field}"
+        );
+        // The Code (EIP-712) and query endpoints sign on the declared refs.
+        assert_eq!(
+            signatures(&provider, identity, Algorithm::Secp256k1Digest)
+                .map(|values| values[1].len()),
+            Ok(65),
+            "{name}"
+        );
+        assert!(
+            signatures(&provider, identity, Algorithm::HmacSha256).is_err(),
+            "{name}"
+        );
+    }
+}
+#[test]
+fn v3_read_agent_on_the_alias_signs_through_the_primary_declaration() {
+    assert_v3_declared("v3 auth wallet key aliased by the read agent", true);
+}
+#[test]
+fn v3_read_agent_with_its_own_wallet_is_declared_separately() {
+    assert_v3_declared(
+        "v3 auth addresses with the read agent's own wallet key",
+        false,
+    );
+}
+#[test]
+fn v1_hmac_secrets_are_not_declared() {
+    let case = golden_case("v1 HMAC with its own read agent");
+    let mut options = engine_options(&case["input"]);
+    let (provider, ids) = prepare_local_signer_for("asterdex", &mut options).unwrap();
+    for identity in [ids.primary.unwrap(), ids.secondary.unwrap()] {
+        assert!(wallet_address(&provider, &identity).is_err());
+        assert!(signatures(&provider, &identity, Algorithm::HmacSha256).is_ok());
+    }
+}

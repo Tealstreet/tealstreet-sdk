@@ -1781,43 +1781,83 @@ mod tests {
         )
     }
 
-    #[cfg(all(feature = "secp256k1", feature = "ed25519"))]
-    #[test]
-    fn undeclared_mac_secrets_never_sign_asymmetric_algorithms() {
+    fn undeclared_mac_secret() -> (LocalSigner, KeyRef) {
         // A 32-byte HMAC secret parses as a valid secp256k1 and Ed25519 key.
         let (signer, ids) = LocalSigner::from_json(
             serde_json::json!({"primary": {"key": "account", "secret": "s".repeat(32)}})
                 .to_string(),
         )
         .unwrap();
-        let key = ids.primary.unwrap().signing;
-        for algorithm in ["secp256k1Digest", "ed25519"] {
-            assert_eq!(
-                signer.sign_now(&sign_request(algorithm, &key, vec![7; 32])),
-                Err(SignError::InvalidRequest),
-                "{algorithm}"
-            );
-        }
-        // The same secret still MACs exactly as before.
+        (signer, ids.primary.unwrap().signing)
+    }
+    // One test per algorithm, so every variant runs. The declaration check
+    // precedes the arm, so these refuse the same way in every build.
+    fn assert_undeclared_refused(algorithm: &str) {
+        let (signer, key) = undeclared_mac_secret();
         assert_eq!(
-            signer
-                .sign_now(&sign_request("hmacSha256", &key, b"m".to_vec()))
-                .unwrap()
-                .values[0]
-                .len(),
-            32
+            signer.sign_now(&sign_request(algorithm, &key, vec![7; 32])),
+            Err(SignError::InvalidRequest),
+            "{algorithm}"
         );
     }
-
     #[test]
-    fn declared_wallet_keys_never_sign_mac_algorithms() {
+    fn undeclared_ref_never_signs_secp256k1_digest() {
+        assert_undeclared_refused("secp256k1Digest");
+    }
+    #[test]
+    fn undeclared_ref_never_signs_ed25519() {
+        assert_undeclared_refused("ed25519");
+    }
+    #[test]
+    fn undeclared_ref_never_signs_es256() {
+        assert_undeclared_refused("es256");
+    }
+    #[test]
+    fn undeclared_ref_never_signs_stark_digest() {
+        assert_undeclared_refused("starkDigest");
+    }
+    #[test]
+    fn undeclared_ref_never_signs_schnorr_digest() {
+        assert_undeclared_refused("schnorrDigest");
+    }
+    #[test]
+    fn undeclared_mac_secret_still_macs() {
+        let (signer, key) = undeclared_mac_secret();
+        let result = signer
+            .sign_now(&sign_request("hmacSha256", &key, b"m".to_vec()))
+            .unwrap();
+        assert_eq!(result.values[0].len(), 32);
+    }
+
+    fn assert_declared_wallet_never_macs(algorithm: &str) {
         let (signer, key) = public_setup("secp256k1Digest", SCALAR);
-        for algorithm in ["hmacSha256", "hmacSha512", "sha256SecretSuffix"] {
-            assert_eq!(
-                signer.sign_now(&sign_request(algorithm, &key, b"m".to_vec())),
-                Err(SignError::InvalidRequest),
-                "{algorithm}"
-            );
-        }
+        assert_eq!(
+            signer.sign_now(&sign_request(algorithm, &key, b"m".to_vec())),
+            Err(SignError::InvalidRequest),
+            "{algorithm}"
+        );
+    }
+    #[test]
+    fn declared_wallet_never_signs_hmac_sha256() {
+        assert_declared_wallet_never_macs("hmacSha256");
+    }
+    #[test]
+    fn declared_wallet_never_signs_hmac_sha512() {
+        assert_declared_wallet_never_macs("hmacSha512");
+    }
+    #[test]
+    fn declared_wallet_never_signs_sha256_secret_suffix() {
+        assert_declared_wallet_never_macs("sha256SecretSuffix");
+    }
+
+    // A declared ref in a build without its arm stays Unsupported.
+    #[cfg(not(feature = "secp256k1"))]
+    #[test]
+    fn declared_refs_without_their_arm_are_unsupported() {
+        let (signer, key) = public_setup("secp256k1Digest", SCALAR);
+        assert_eq!(
+            signer.sign_now(&sign_request("secp256k1Digest", &key, vec![7; 32])),
+            Err(SignError::Unsupported)
+        );
     }
 }

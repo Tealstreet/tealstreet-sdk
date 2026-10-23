@@ -591,10 +591,24 @@ still has the gap.
   land, which is why it touches `crypto/src/signer.rs` after them.
 
 **Raw `insert`.** Tests that `insert` asymmetric material get a trusted
-`LocalSigner::insert_declared(ref, bytes, algorithm)` that accepts only
-asymmetric algorithms. Plain `insert` stays undeclared (P4).
+`LocalSigner::insert_declared(ref, bytes, algorithm)`.
+- It accepts only asymmetric algorithms.
+- It is atomic: it replaces any old declaration in the same step.
+- It refuses a role ref, and an algorithm that differs from an alias's
+  existing declaration.
 
-**REDs** (existing API, shown failing first):
+Plain `insert` stays undeclared (P4).
+
+**Version parity.** The Aster refinement uses the same resolution as venue
+construction, defaults and overrides included, so setup and the venue can
+never disagree about V1 and V3.
+
+**REDs** (existing API, shown failing first). Each one is its own test per
+algorithm or case, so every variant runs. In the default build every RED
+fails. With all arms enabled, `es256` and `starkDigest` already refuse the
+32-byte test secret through key-form checks, so the undeclared case there
+proves the rule only through `secp256k1Digest`, `ed25519` and
+`schnorrDigest`.
 - R1: a 32-byte HMAC secret installed undeclared signs `Secp256k1Digest` and
   `Ed25519` today; it must be `InvalidRequest`.
 - R2: a ref declared `secp256k1Digest` signs `HmacSha256` today; it must be
