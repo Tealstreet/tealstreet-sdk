@@ -321,3 +321,28 @@ observer-group completion authority when it lands, together with the joined
 metadata read conversion. The exact-map tests pin both source revisions and map
 hashes; existing controls reject regrowth, altered original maps, unrelated paths
 and attempts to override a newer pruned map. Every other inventory map is retained.
+
+## Reviewed read-authority stack and paired-public delivery checkpoint
+
+Genuinely integrate reviewed #1792 `ea0f416a2e3` (including actual #1784) under
+owner exact-stack authorization. The independently audited merge preserves all
+incoming paths and both exact bootstrap maps, with checker logic AST-identical;
+actual #1792 with that ancestry remains a landing prerequisite.
+
+Apply the existing shared `Cx.validate_read_http_delivery(root, leg)` where this
+branch already has Context authority: the real managed unsigned single-command
+metadata release fixture. Retain the original logical root separately from its
+current physical child. Validate before any settings/native publication and
+synchronous completion, and complete/fail with the original root. Original-RED
+controls substitute the child as root or an unrelated live command root on the
+second leg, while the metadata freshness token remains current: neither may
+publish or complete. The positive two-leg read must still publish once with its
+original deadline/lease. Use the shared validator directly, no copied checks.
+
+WEEX/BingX private native metadata requests remain legacy and cannot gain managed
+rights from a helper call. Their dispatch signers and shared execution/observer
+core are separate prerequisites. This checkpoint adds no private production
+adoption, joined completion authority, raw-header adapter, numeric managed
+fallback, new lifecycle API or send permission. Native/freshness proof remains
+separate from delivery authority. Review and run focused engine/WEEX/BingX gates,
+strict checks and exact inventory controls before pushing the refreshed draft.
