@@ -38,8 +38,8 @@ fn spot_public_catalogue_preserves_the_same_broker_header() {
         }),
     );
     engine.start(0.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
+    let requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -106,13 +106,14 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
     assert_headers: impl Fn(&HttpRequest),
 ) {
     engine.start(1700000000123.0);
-    let initial: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| match a {
-            Action::Http(request) => Some(request),
-            _ => None,
-        })
-        .collect();
+    let initial: Vec<_> =
+        safe_cex_engine::test_support::prepared_actions(&mut engine, 1700000000123.0)
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .collect();
     assert!(!initial.is_empty());
     for request in initial {
         assert_headers(&request);
@@ -138,13 +139,14 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
             },
         );
     }
-    let requests: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| match a {
-            Action::Http(request) => Some(request),
-            _ => None,
-        })
-        .collect();
+    let requests: Vec<_> =
+        safe_cex_engine::test_support::prepared_actions(&mut engine, 1700000000123.0)
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .collect();
     let mut saw_public_bullet = false;
     let mut saw_tickers = false;
     for request in requests {
@@ -180,7 +182,9 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
             );
         }
     }
-    for action in engine.drain_actions() {
+    for action in
+        safe_cex_engine::test_support::prepared_actions(&mut engine, 1700000000123.0).into_iter()
+    {
         if let Action::Http(request) = action {
             assert_headers(&request);
             saw_public_bullet |= request.url.ends_with("/bullet-public");
