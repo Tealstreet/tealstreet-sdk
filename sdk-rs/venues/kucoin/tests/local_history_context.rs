@@ -22,6 +22,9 @@ struct Probe {
 }
 impl Venue for Probe {
     type Pending = Pending;
+    fn guard_order_mutations(&self) -> bool {
+        self.inner.guard_order_mutations()
+    }
     fn capabilities(&self) -> Capabilities {
         self.inner.capabilities()
     }
