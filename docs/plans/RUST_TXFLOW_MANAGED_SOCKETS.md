@@ -267,3 +267,41 @@ The independent archived b007 result above stays pinned to its original20tests;
 this expanded23-test execution is the owner receipt, not relabeled independent
 proof. Local log:/tmp/codex-txflow-socket-zero-address-controls.log. Production
 refusal/retirement/stale-wake transfer controls and runtime review remain gates.
+
+## Implementation contract decisions
+
+The overseer authorized shared desired/coalesced subscriptions after the original
+FIFO controls exposed the difference: the observable subscription contract is the
+final desired set at150ms pacing, rather than a transcript of every transient
+command. Coalescing removes unnecessary frames/rate-limit risk; the old4096-flip
+close guarded unbounded FIFO growth and is unnecessary with bounded desired state.
+The original FIFO/backlog tests remain identifiable at8d130e81837. Their explicit
+updates prove final burst convergence, heartbeat and unsubscribe after an already
+returned subscription; the rate-limit fixture no longer requires an extra empty
+queue timer after the final frame. No venue queue, repair-loop, one-shot workaround
+or churn counter is introduced.
+
+The overseer separately authorized inverting only the opposite-order original
+positive original_native_refresh_precedes_paced_private_batch (b007/8d) into
+released_private_batch_precedes_opening_refresh, because the approved1943 handoff
+requires all private frames before opening HTTP. The other11 original GREEN
+control assertions remain unchanged; the11 original RED assertions are green.
+Additional real-engine controls cover partial paced release/final frame versus
+actual wake ingress, native poll consumption before a delayed wake, admitted
+retirement and old wake while new work waits, and actual proposal-capacity refusal
+followed by drained pressure and real reconnect. The pressure fixture delegates
+to native TxFlow and fills the existing bounded shared proposal pool; it does not
+fabricate native started/inflight, epochs or financial reducer state.
+
+Connection retains only FeedId, native open state and a refresh-due intent. Shared
+feeds own identity/epoch, expiry, retry and150ms pacing. The only account reducer
+file addition clears the intent after native state/orders/fills ownership exists;
+all native HTTP builders, row preparation, publication and fences are preserved.
+Only TxFlow's4socket fingerprints/4occurrences and its legacy family root are
+removed. #1970/#1974 remain frozen and are not modified by this work.
+
+Pre-integration owner checkpoint: scoped native143 tests across12targets
+PASS,0ignored; all-target/all-feature Clippy -D warnings and package formatting
+PASS. Bans exposed incoming Aster/BingX provenance pruning after a fresh fetch;
+current landing must be genuinely integrated, with no foreign inventory waiver.
+Fresh post-integration checks and independent source/runtime reviews follow.

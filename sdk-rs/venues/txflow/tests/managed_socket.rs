@@ -5,6 +5,7 @@ mod public;
 
 use safe_cex_engine::{
     Action, Command, Engine, Event, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use safe_cex_venue_txflow::{Options, TxFlow};
 use std::collections::HashMap;
@@ -19,8 +20,8 @@ const API_SUB: &str =
     r#"{"method":"subscribe","subscription":{"type":"ticker","coin":"BTC","instrumentId":1}}"#;
 const PING: &str = r#"{"method":"ping"}"#;
 
-struct Rig {
-    engine: Engine<TxFlow>,
+struct Rig<V: Venue = TxFlow> {
+    engine: Engine<V>,
     now: f64,
     timers: HashMap<TimerId, f64>,
     node: SocketId,
@@ -81,13 +82,19 @@ impl Rig {
     }
 
     fn before_account_start(private: bool, policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
+        let engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
             testnet: true,
             public_data_only: !private,
             application_id: private.then(|| account::WALLET.into()),
             secret: private.then(|| format!("0x{:064x}", 1)),
             ..Default::default()
         }));
+        Self::connecting(engine, policy)
+    }
+}
+
+impl<V: Venue> Rig<V> {
+    fn connecting(mut engine: Engine<V>, policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(account::NOW);
         let mut rig = Self {
@@ -361,13 +368,13 @@ fn opening_refresh_waits_for_all_paced_private_subscriptions() {
 }
 
 #[test]
-fn original_native_refresh_precedes_paced_private_batch() {
+fn released_private_batch_precedes_opening_refresh() {
     let (rig, trace) = opening_trace();
     let positions = private_subscription_positions(&trace, rig.node);
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     let refresh = trace.iter().position(|action| matches!(action, Action::Http(request) if account::kind(request) == "clearinghouseState"))
         .expect("opening native refresh");
-    assert!(refresh < positions[0]);
+    assert!(positions.iter().all(|position| *position < refresh));
 }
 
 #[test]
@@ -626,4 +633,325 @@ fn public_only_without_address_has_no_private_refresh_obligation() {
     assert!(!trace.iter().any(|action| matches!(action, Action::Http(_))));
     rig.message(false, &financial_frame());
     assert!(rig.engine.store().positions().is_empty());
+}
+
+fn hold_refresh_wake<V: Venue>(rig: &mut Rig<V>) -> (TimerId, Vec<Action>) {
+    let at = rig.now;
+    let mut trace = rig.open(false);
+    trace.extend(rig.advance(at + 449.0));
+    assert!(
+        !trace.iter().any(|action| matches!(action, Action::Http(_))),
+        "partial paced private batch must not release HTTP"
+    );
+    let timer = *rig
+        .timers
+        .iter()
+        .find(|(_, when)| **when == at + 450.0)
+        .unwrap()
+        .0;
+    rig.timers.remove(&timer);
+    rig.now = at + 450.0;
+    let final_frame = rig.handle(Event::TimerFired { timer });
+    assert_eq!(
+        sent(&final_frame, rig.node),
+        [private_frame("userAssetData")]
+    );
+    assert!(
+        !final_frame
+            .iter()
+            .any(|action| matches!(action, Action::Http(_))),
+        "final frame handoff is not the later callback ingress"
+    );
+    let wake = final_frame
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == rig.now => Some(*timer),
+            _ => None,
+        })
+        .expect("real shared released-interest wake");
+    trace.extend(final_frame);
+    (wake, trace)
+}
+
+#[test]
+fn partial_private_batch_and_final_frame_wait_for_real_callback_ingress() {
+    let mut rig = Rig::new(true);
+    let (wake, _) = hold_refresh_wake(&mut rig);
+    rig.timers.remove(&wake);
+    let released = rig.handle(Event::TimerFired { timer: wake });
+    assert_eq!(
+        released
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Http(request) if account::kind(request) == "clearinghouseState"))
+            .count(),
+        1
+    );
+    let duplicate = rig.handle(Event::TimerFired { timer: wake });
+    assert!(
+        !duplicate
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+}
+
+#[test]
+fn current_native_poll_ownership_consumes_due_before_a_delayed_handoff() {
+    let mut rig = Rig::new(true);
+    let (wake, _) = hold_refresh_wake(&mut rig);
+    rig.timers.remove(&wake);
+    let poll_at = account::NOW + 5025.0;
+    let reads = rig.advance(poll_at);
+    assert_eq!(
+        reads
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Http(request) if account::kind(request) == "clearinghouseState"))
+            .count(),
+        1
+    );
+    rig.answer_reads(reads);
+    let late = rig.handle(Event::TimerFired { timer: wake });
+    assert!(
+        !late.iter().any(|action| matches!(action, Action::Http(_))),
+        "completed current native ownership must not be duplicated by old intent"
+    );
+}
+
+#[test]
+fn retired_admitted_refresh_recovers_and_stale_wake_cannot_consume_new_work() {
+    let mut rig = Rig::new(true);
+    let (old_wake, _) = hold_refresh_wake(&mut rig);
+    rig.timers.remove(&old_wake);
+    let old = rig.node;
+    let retired = rig.handle(Event::WsClosed {
+        socket: old,
+        code: 1006,
+    });
+    let retry_at = retired
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { at_ms, .. } if *at_ms > rig.now => Some(*at_ms),
+            _ => None,
+        })
+        .min_by(f64::total_cmp)
+        .expect("shared retry after retirement");
+    let stale = rig.handle(Event::TimerFired { timer: old_wake });
+    assert!(!stale.iter().any(|action| matches!(action, Action::Http(_))));
+    let connecting = rig.advance(retry_at);
+    rig.node = connected(&connecting, false).expect("real replacement");
+    assert_ne!(rig.node, old);
+    let (fresh_wake, _) = hold_refresh_wake(&mut rig);
+    assert_ne!(fresh_wake, old_wake);
+    let stale = rig.handle(Event::TimerFired { timer: old_wake });
+    assert!(!stale.iter().any(|action| matches!(action, Action::Http(_))));
+    rig.timers.remove(&fresh_wake);
+    let fresh = rig.handle(Event::TimerFired { timer: fresh_wake });
+    assert_eq!(
+        fresh
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Http(request) if account::kind(request) == "clearinghouseState"))
+            .count(),
+        1
+    );
+    rig.answer_reads(fresh);
+    for timer in [old_wake, fresh_wake] {
+        let duplicate = rig.handle(Event::TimerFired { timer });
+        assert!(
+            !duplicate
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+    }
+}
+
+struct Pressure {
+    inner: TxFlow,
+    inject: bool,
+    spare: Option<safe_cex_engine::socket_lifecycle::FeedId>,
+}
+
+impl Venue for Pressure {
+    type Pending = safe_cex_venue_txflow::Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        self.inner.capabilities()
+    }
+    fn cancel_needs_stored_order(&self) -> bool {
+        self.inner.cancel_needs_stored_order()
+    }
+    fn guard_order_mutations(&self) -> bool {
+        self.inner.guard_order_mutations()
+    }
+    fn book(&self, symbol: &str) -> Option<&safe_cex_engine::book::Book> {
+        self.inner.book(symbol)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+        self.inner.books()
+    }
+    fn start(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>) {
+        self.inner.start(cx);
+    }
+    fn on_open(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>, socket: SocketId) {
+        self.inner.on_open(cx, socket);
+    }
+    fn on_close(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        socket: SocketId,
+        code: u16,
+    ) {
+        self.inner.on_close(cx, socket, code);
+    }
+    fn on_message(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        socket: SocketId,
+        text: &str,
+    ) {
+        self.inner.on_message(cx, socket, text);
+    }
+    fn on_response(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.inner.on_response(cx, pending, response);
+    }
+    fn on_item(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: &mut Self::Pending,
+        item: &str,
+    ) {
+        self.inner.on_item(cx, pending, item);
+    }
+    fn on_request_failed(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: &str,
+    ) {
+        self.inner.on_request_failed(cx, pending, error);
+    }
+    fn on_command(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>, command: Command) {
+        self.inner.on_command(cx, command);
+    }
+    fn on_timer(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>, timer: TimerId) {
+        self.inner.on_timer(cx, timer);
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        use safe_cex_engine::socket_lifecycle::*;
+        if self.inject && matches!(event, LifecycleEvent::Ready { .. }) {
+            self.inject = false;
+            let spare = cx.register_socket_feed(FeedPolicy {
+                role: SocketChannel::Public,
+                supervision: safe_cex_engine::socket::Config::default(),
+                auth: AuthMode::None,
+                recovery: AuthRecovery::Reconnect,
+                permanent_refusal_group: None,
+                traffic: TrafficPolicy::AnyText,
+                controls: ControlPolicy::None,
+                invalidation: Invalidation::None,
+                subscription_interval_ms: 0.,
+            })?;
+            self.spare = Some(spare);
+            for _ in 0..MAX_FEEDS {
+                cx.set_socket_interests(spare, Vec::new())?;
+            }
+        }
+        self.inner.on_socket_event(cx, event)
+    }
+    fn on_socket_interests_released(
+        &mut self,
+        cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        pending: Self::Pending,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.inner.on_socket_interests_released(cx, epoch, pending)
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        interests: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if self.spare == Some(feed) {
+            assert!(interests.is_empty());
+            Ok(())
+        } else {
+            self.inner
+                .encode_socket_interests(store, feed, subscribe, interests, emit)
+        }
+    }
+}
+
+#[test]
+fn real_proposal_capacity_refusal_frees_then_reconnects_and_refreshes_once() {
+    let engine = safe_cex_engine::test_support::seeded_engine(Pressure {
+        inner: TxFlow::new(Options {
+            testnet: true,
+            application_id: Some(account::WALLET.into()),
+            secret: Some(format!("0x{:064x}", 1)),
+            ..Default::default()
+        }),
+        inject: true,
+        spare: None,
+    });
+    let (mut rig, _) = Rig::connecting(engine, PublicFeedPolicy::Direct);
+    let startup = rig.advance(account::NOW + 25.0);
+    rig.answer_reads(startup);
+    let old = rig.node;
+    let refused = rig.open(false);
+    assert!(refused.iter().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message.contains("Capacity"))), "real retained proposal capacity must refuse");
+    assert!(
+        refused
+            .iter()
+            .any(|action| matches!(action, Action::WsClose { socket } if *socket == old))
+    );
+    assert!(
+        !refused
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::WsSend { .. }))
+    );
+    let retry_at = refused
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { at_ms, .. } if *at_ms > rig.now => Some(*at_ms),
+            _ => None,
+        })
+        .min_by(f64::total_cmp)
+        .expect("shared refusal backoff");
+    let connecting = rig.advance(retry_at);
+    rig.node = connected(&connecting, false).expect("shared replacement after pressure drained");
+    assert_ne!(rig.node, old);
+    let (wake, _) = hold_refresh_wake(&mut rig);
+    rig.timers.remove(&wake);
+    let fresh = rig.handle(Event::TimerFired { timer: wake });
+    assert_eq!(
+        fresh
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Http(request) if account::kind(request) == "clearinghouseState"))
+            .count(),
+        1
+    );
+    rig.answer_reads(fresh);
+    let duplicate = rig.handle(Event::TimerFired { timer: wake });
+    assert!(
+        !duplicate
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    assert_eq!(rig.engine.store().positions()[0].contracts, 2.0);
 }

@@ -6130,3 +6130,32 @@ This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_CANDLES.md).
 - **Refusals are unchanged.** Unknown market still answers `[]`. Invalid
   bounds and unsupported bars keep their text, with no kind or outcome. Live
   candle subscriptions are unchanged.
+
+## TxFlow whole managed socket family
+
+TxFlow uses shared managed feeds for both api-ws and node ws. API is Public;
+node is Private unless public_data_only. Shared/Disabled public-feed policy
+suppresses public sockets/topics while retaining private node financial traffic.
+Both feeds retain receive-before-decode AnyText liveness, native JSON/ping bytes,
+10s connect,30s idle,10s ping and1s-to16s retry bounds. Duplicate/retired/expired
+socket ingress is inert before native publication. Only node retirement clears
+published books and invalidates the account generation/settings/read owners.
+
+Subscriptions represent the final desired set, reconciled against frames already
+returned to the host, with150ms pacing. Transient subscribe/unsubscribe flips may
+coalesce before release. They do not create an unbounded FIFO or a4096-flip close;
+actual retained-capacity refusal remains bounded by the shared core. Unsubscribe
+after an already-returned subscribe still emits the native unsubscribe frame at
+the existing cadence. The final set converges after a burst of flips.
+
+Private opening/reconnect refresh follows the complete desired node batch and a
+subsequent shared released-interest timer ingress. This deliberately replaces
+native HTTP-before-paced-private-frames ordering; it is host-action handoff, not
+peer acknowledgement. The callback selects current native read/revision state.
+Refresh intent survives refusal/retirement and is consumed only by native read
+ownership. Startup and poll reads remain independent; startup consumption prevents
+a later wake from adding a refresh the native early-open path never admitted.
+Public-only mode has no private refresh. A missing private address still fails
+configuration before I/O; the defensive no-address callback remains a guarded
+native no-op. HTTP builders, PublicCors/static headers, financial reducers,
+history, signing and trading retain their existing contracts.
