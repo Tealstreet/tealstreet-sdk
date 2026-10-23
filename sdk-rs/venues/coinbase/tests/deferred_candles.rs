@@ -12,7 +12,11 @@ fn fail_catalogue(mode: u8) {
         })
         .unwrap(),
     );
-    let symbol = if mode >= 4 { "BTC-USD" } else { "BTC-PERP-INTX" };
+    let symbol = if mode >= 4 {
+        "BTC-USD"
+    } else {
+        "BTC-PERP-INTX"
+    };
     engine.start(0.);
     let catalogue = engine
         .drain_actions()
@@ -177,6 +181,10 @@ fn malformed_catalogue_settles_deferred_candles_once() {
 }
 
 #[test]
-fn spot_product_failure_settles_deferred_candles_once() { fail_catalogue(4); }
+fn spot_product_failure_settles_deferred_candles_once() {
+    fail_catalogue(4);
+}
 #[test]
-fn empty_spot_catalogue_settles_deferred_candles_once() { fail_catalogue(5); }
+fn empty_spot_catalogue_settles_deferred_candles_once() {
+    fail_catalogue(5);
+}

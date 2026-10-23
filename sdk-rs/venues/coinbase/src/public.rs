@@ -820,7 +820,7 @@ impl Coinbase {
                 invalid,
                 initial,
             } => {
-                if invalid && markets.is_empty() {
+                if markets.is_empty() && (initial || invalid) {
                     self.public_failed(
                         cx,
                         Request::Instruments {
@@ -974,6 +974,21 @@ impl Coinbase {
                     self.public.seed_tickers.extend(tickers);
                     self.public.seeds_left = self.public.seeds_left.saturating_sub(1);
                     if self.public.seeds_left == 0 {
+                        if self.public.seed_markets.is_empty() {
+                            self.public_failed(
+                                cx,
+                                Request::Products {
+                                    kind,
+                                    generation,
+                                    cursors: vec![],
+                                    markets: vec![],
+                                    tickers: vec![],
+                                    invalid: true,
+                                },
+                                "Coinbase catalogue contains no supported markets",
+                            );
+                            return;
+                        }
                         self.public.seeding = false;
                         cx.store
                             .set_markets(std::mem::take(&mut self.public.seed_markets));
@@ -1072,6 +1087,11 @@ impl Coinbase {
         pending: Request,
         error: &str,
     ) {
+        if let Request::Products { generation, .. } = &pending
+            && *generation != self.public.generation
+        {
+            return;
+        }
         let mut failures = vec![];
         match pending {
             Request::Candles { command, .. } => {
