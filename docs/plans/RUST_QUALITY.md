@@ -897,3 +897,55 @@ strict all-target/all-feature Lighter Clippy, scoped fmt, bans and both request
 checks/14 controls. Actual e233cb05dfb is genuinely integrated; its incoming
 KuCoin/MEXC source and prunes are preserved. CI owns WASM/replay/size/timing;
 native success alone does not claim these broad gates or whole-venue closure.
+
+## WOO family compiler throughput controls
+
+A plan and baseline named profile preceded the WOO-only compiler change.
+Five interleaved baseline/candidate Rust pairs alternate execution order:
+medians23.105/18.957ms, four of five pairs improve. Every run serves77 frames
+without protocol errors or unserved requests. One correctness replay per
+artifact has identical final snapshots and all five checkpoints; every
+nonmetric output field also matches. The normal candidate grows61,376 bytes
+(1,142,442→1,203,818), within the unchanged1,343,488-byte ceiling. Inventory,
+tape, clocks, budgets, comparison rules and runtime/shared paths are unchanged.
+Local medians and sparse overlapping profiles do not establish the TS/Rust1.10x
+CI target or private runtime proof. The exact-head CI build and replay gates
+remain required. [Reproduction and evidence](RUST_WOO_PUBLIC_CPU.md).
+
+Production WOO CI at f564c7b50f1 (run 39977265913, job 120495031043) passes the
+nine-pair public gate at reported TS 15.8 ms / Rust 8.9 ms steady CPU, 1.78x.
+Its actual CI WASM is 1,197,465 bytes within the unchanged 1,343,488-byte ceiling;
+manifest hashes and the CI checkout tree match the tested head. Strict
+verification records one public PASS, one existing declared known-private FAIL
+and zero unexpected failures. This does not establish private authenticated
+lifecycle parity. The tested head has 43 successful checks and one browser skip;
+source-equivalent current integration, final guard and merge GO remain separate.
+The fixed gates and comparison policies are unchanged.
+
+## SDK master venue parity controls
+
+Separate original-RED commit637fe5832d6 pins seven assertion failures: three
+Hyperliquid fee-subject/startup controls, Lighter timestamp candidate and48-bit
+exhaustion, Robinhood approval preflight and signed attribution. The zero-candidate
+compatibility control remains positive1,2. Native private master/vault fee rates,
+empty-vault fallback, missing/empty applicationId agent discovery, public/default
+fee retention, both Robinhood networks and explicit builder overrides are covered.
+Existing Lighter split/bracket/batch, receipt and failed-send controls remain.
+Shared ProbeVenue tests seed boundary state privately without a production test
+hook. Master TS sources, prepared tape/harness and all incoming inventories remain
+unchanged. Native local checks and independent reviews precede the #1869 handoff;
+its owner supplies the full CI replay evidence.
+
+## Robinhood frozen CI fixture receipt
+
+CI39953255157/1845 supplies the frozen LightRobinhood engine and three reports.
+The original boundary control reproduces one NotSent builder-approval failure
+with21 other cases passing. The corrected fixture preserves every existing
+native assertion and adds exact signed attribution. Independent and executable
+provenance checks reproduce both old and new37-record tape hashes: only three
+approved account indices and seven order-attribute objects differ per tape.
+Existing assessGateReport finds eleven unknown diagnostics per private report
+before the two-hash refresh, and zero errors/eleven known afterward; the public
+report remains186 known. Every diagnostic path/rationale and all other manifest
+entries are byte-preserved; the original reports remain strict FAIL. No replay,
+local release build, new declaration, threshold or comparison-policy change.
