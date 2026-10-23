@@ -3,12 +3,13 @@
 use std::collections::{HashMap, VecDeque};
 
 use safe_cex_engine::Level;
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::{Cx, Method, RequestRoute, Response, TimerId, Venue};
 use serde::Deserialize;
 
-use crate::sign::{Query, Version};
+use crate::sign::{Query, Recipe, Version};
 use crate::{AsterDex, Pending, reset_pending};
 
 const CLOCK_INTERVAL_MS: f64 = 300_000.0;
@@ -34,6 +35,7 @@ pub struct SignedRequest {
     signature_retried: bool,
     version: Version,
     public: bool,
+    role: CredentialRole,
 }
 
 #[derive(Clone, Copy)]
@@ -104,12 +106,13 @@ impl AsterDex {
     pub(crate) fn signed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
+        role: CredentialRole,
         method: Method,
         path: &str,
         query: Query,
         pending: Pending,
     ) -> bool {
-        self.queue_signed(cx, method, path, query, pending, None)
+        self.queue_signed(cx, role, method, path, query, pending, None)
     }
 
     pub(crate) fn signed_streamed(
@@ -119,7 +122,16 @@ impl AsterDex {
         query: Query,
         pending: Pending,
     ) -> bool {
-        self.queue_signed(cx, Method::Get, path, query, pending, Some(ArrayAt::Root))
+        let role = CredentialRole::Read { scope: None };
+        self.queue_signed(
+            cx,
+            role,
+            Method::Get,
+            path,
+            query,
+            pending,
+            Some(ArrayAt::Root),
+        )
     }
 
     pub(crate) fn public_read(
@@ -140,13 +152,16 @@ impl AsterDex {
             signature_retried: false,
             version: self.version,
             public: true,
+            role: CredentialRole::Read { scope: None },
         });
         self.dispatch_signed(cx, request);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn queue_signed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
+        role: CredentialRole,
         method: Method,
         path: &str,
         query: Query,
@@ -164,6 +179,7 @@ impl AsterDex {
             signature_retried: false,
             version: self.version,
             public: false,
+            role,
         });
         let stale = self
             .requests
@@ -178,11 +194,7 @@ impl AsterDex {
         }
     }
 
-    fn dispatch_signed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        mut request: Box<SignedRequest>,
-    ) -> bool {
+    fn dispatch_signed(&mut self, cx: &mut Cx<'_, Pending>, request: Box<SignedRequest>) -> bool {
         if request.public {
             let url = format!("{}{}", self.urls.rest, request.path);
             match request.stream {
@@ -195,41 +207,39 @@ impl AsterDex {
             }
             return true;
         }
-        let credentials = if request.method == Method::Get {
-            self.read_credentials.as_ref().or(self.credentials.as_ref())
-        } else {
-            self.credentials.as_ref()
-        };
-        let Some(credentials) = credentials else {
+        let Ok((selection, slot)) = self.credentials.select(request.role) else {
             self.on_request_failed(cx, request.pending, "Missing required Aster credentials");
             return false;
         };
-        request.version = credentials.version;
-        let query = match request.query.clone().signed(
-            credentials,
-            request.method,
-            &request.path,
-            cx.protocol_stamp_ms(),
-            self.options.testnet,
-        ) {
-            Ok(query) => query,
+        let recipe = self.auth(slot).and_then(|auth| {
+            Recipe::new(
+                slot.identity.clone(),
+                auth,
+                request.method,
+                self.urls.rest,
+                &request.path,
+                request.query.clone(),
+                self.options.testnet,
+            )
+        });
+        let recipe = match recipe {
+            Ok(recipe) => recipe,
             Err(error) => {
                 self.on_request_failed(cx, request.pending, &error);
                 return false;
             }
         };
-        let url = format!("{}{}?{query}", self.urls.rest, request.path);
-        let headers = vec![("X-MBX-APIKEY", credentials.key.clone())];
+        // The recipe writes the signed query and API-key header at dispatch.
+        let path = &request.path;
+        let url = format!("{}{path}", self.urls.rest);
+        let headers = Vec::new();
         let method = request.method;
         let stream = request.stream;
-        match stream {
-            Some(at) => {
-                cx.request_streamed(method, url, headers, at, Pending::Signed(request));
-            }
-            None => {
-                cx.request(method, url, headers, None, Pending::Signed(request));
-            }
-        }
+        let id = match stream {
+            Some(at) => cx.request_streamed(method, url, headers, at, Pending::Signed(request)),
+            None => cx.request(method, url, headers, None, Pending::Signed(request)),
+        };
+        selection.sign(cx, id, Box::new(recipe));
         true
     }
 
@@ -444,9 +454,16 @@ impl AsterDex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Options;
+    use crate::fixture::Options;
     use safe_cex_engine::book::Book;
     use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId};
+
+    fn role(method: Method) -> CredentialRole {
+        match method {
+            Method::Get => CredentialRole::Read { scope: None },
+            _ => CredentialRole::Mutation,
+        }
+    }
 
     /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
     fn jittered(actual: f64, nominal: f64) -> bool {
@@ -466,6 +483,7 @@ mod tests {
             self.inner.requests.last_sync_success = Some(cx.now);
             self.inner.signed(
                 cx,
+                role(self.method),
                 self.method,
                 "/fapi/v1/probe",
                 Query::new().str("symbol", "BTCUSDT"),
@@ -534,8 +552,14 @@ mod tests {
                 self.inner
                     .signed_streamed(cx, "/fapi/v1/probe", Query::new(), pending);
             } else {
-                self.inner
-                    .signed(cx, self.method, "/fapi/v1/probe", Query::new(), pending);
+                self.inner.signed(
+                    cx,
+                    role(self.method),
+                    self.method,
+                    "/fapi/v1/probe",
+                    Query::new(),
+                    pending,
+                );
             }
         }
         fn book(&self, _: &str) -> Option<&Book> {
@@ -574,13 +598,16 @@ mod tests {
                     ..Options::default()
                 }
             };
+            let (inner, signer) = options.build();
+            let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
+                inner,
+                method,
+                streamed: false,
+                clock_samples: Vec::new(),
+            });
+            engine.set_signer(Some(signer)).unwrap();
             let mut h = Self {
-                engine: safe_cex_engine::test_support::seeded_engine(Probe {
-                    inner: AsterDex::new(options),
-                    method,
-                    streamed: false,
-                    clock_samples: Vec::new(),
-                }),
+                engine,
                 now: 1_700_000_000_000.0,
                 requests: Vec::new(),
                 timers: Vec::new(),
@@ -591,7 +618,9 @@ mod tests {
             h
         }
         fn collect(&mut self) {
-            for action in self.engine.drain_actions() {
+            for action in
+                safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now)
+            {
                 match action {
                     Action::Http(request) => self.requests.push(request),
                     Action::SetTimer { timer, at_ms } => {
@@ -767,6 +796,7 @@ mod tests {
             signature_retried: false,
             version: Version::V1,
             public: false,
+            role: CredentialRole::Mutation,
         };
         for method in [Method::Post, Method::Put, Method::Delete] {
             assert!(request(method, "/fapi/v3/listenKey").is_read());
@@ -950,10 +980,12 @@ mod tests {
     impl PublicHarness {
         fn new() -> Self {
             let mut h = Self {
-                engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(Options {
-                    public_data_only: true,
-                    ..Options::default()
-                })),
+                engine: safe_cex_engine::test_support::seeded_engine(AsterDex::new(
+                    crate::Options {
+                        public_data_only: true,
+                        ..Default::default()
+                    },
+                )),
                 now: 1700000000000.0,
                 requests: Vec::new(),
                 timers: Vec::new(),

@@ -2628,3 +2628,42 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+
+## Subscription handoff custody boundary
+
+The shared correction adds bounded native Pending custody and a read-only
+arming tail after the existing final drain dispatch/fence/retirement checks.
+Native callbacks run only at later timer ingress; they cannot retroactively
+remove prerequisite frames from an already returned batch. Required canonical
+interests bind work to committed revisions, and only committed changes cancel
+or rebase existing work. Refused replacements do not revoke old committed work.
+
+The uufub4 API/drain review of 4583d233556 plus 8739ef44fcf cleared this timer-boundary
+design with explicit committed-change, subsequent-ingress and timer-bookkeeping
+controls. The runtime source review is separate. HTTP lifecycle, signing
+release/gates, Plan flushing, financial reducers and request recipes retain
+their existing ownership. No legacy-inventory or performance-budget changes
+are part of this shared correction; WOO consumes the seam in its own PR.
+
+The independent ih35js runtime review clears the handoff-owned d9fd54ff531 source
+(exact at 3bebb12dc9f), excluding build/CI claims. Uufub4 identified early-fire
+liveness before final clearance: both hosts consume one-shot timers, so retaining
+armed custody without a returned rearm can strand work. The narrow correction
+re-emits the existing TimerId at its immutable armed_at, with no early callback
+or new authority. Original assertion RED and one-use host/engine controls bind
+the correction; final runtime clearance is tracked separately from API review.
+
+Final bounded runtime/drain clearance is recorded at 08fca8e6ec4 from uufub4,
+including independent archived host 4/4 execution and inspection of the early
+rearm correction. Ih35js independently clears that correction and its RED/control
+coverage at the same source pin without a build-execution claim. Actual #1932
+expiry cleanup is genuinely merged without conflicts at 856daa0a1c2; its incoming
+production bodies are retained verbatim.
+
+The #1932 owner confirms `http_plan_expiring` is an expiry cleanup/seal barrier,
+not a callback loan. Socket continuation readiness gates on its absence. A
+synthetic matching wake during cleanup consumes only its timer, unarms retained
+work and leaves the barrier intact; a fresh handoff arm resumes after cleanup.
+No expiry flush, lifecycle, seal or poison invariant is rewritten. Two cases in
+the original-RED composition control cover both initial arming and prior wakeup.

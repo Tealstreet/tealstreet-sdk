@@ -36,7 +36,8 @@ export class WasmEngine implements WasmEngineLike {
   httpClaim(permit: string, now: number): string;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner(): boolean;
-  useExternalSigner(): void;
+  /** JSON array of SignAlgorithm the JS provider can sign; omitted means unknown. */
+  useExternalSigner(algorithmsJson?: string): void;
   hostedSigningClock(now: number): string;
   prepareHostedSigning(inputJson: string, now: number): string;
   localHostedSigning(id: number, now: number): string;

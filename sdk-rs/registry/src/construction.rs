@@ -29,6 +29,16 @@ struct Rule {
     bridge: BridgeRule,
     signer_setup: CredentialSetupPolicy,
     remote_signing: RemoteSigningPolicy,
+    // Read only by builds that compile a mapped family.
+    #[cfg_attr(not(feature = "asterdex"), allow(dead_code))]
+    setup_mapping: Option<SetupMapping>,
+}
+
+/// A family whose trusted setup maps account fields before provider install.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetupMapping {
+    /// Version-resolved V1/V3 slots and the read agent's primary-wallet alias.
+    Asterdex,
 }
 
 struct BridgeRule {
@@ -92,6 +102,12 @@ pub fn bridge(venue: &str, options: &EngineOptions) -> BridgeConstruction {
 }
 
 include!(concat!(env!("OUT_DIR"), "/construction_rules.rs"));
+
+/// The declared family setup mapping, if any.
+#[cfg_attr(not(feature = "asterdex"), allow(dead_code))]
+pub fn signer_setup_mapping(venue: &str) -> Option<SetupMapping> {
+    venue_rule(venue).and_then(|rule| rule.setup_mapping)
+}
 
 /// Family declarations are compiled from the shared construction table.
 pub fn signer_setup_policy(venue: &str) -> CredentialSetupPolicy {
@@ -166,8 +182,22 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
                 Input::AsterLocalAuth => {
                     #[cfg(feature = "asterdex")]
                     {
-                        use safe_cex_venue_asterdex::sign::Version;
-                        if options.aster_api_version() == Version::V3 {
+                        use safe_cex_venue_asterdex::sign::{Version, is_address};
+                        // After trusted setup: the installed wallet ref plus the
+                        // public V3 wallets setup resolved.
+                        if let Some(identities) = identities {
+                            let address = |value: &Option<String>| {
+                                value.as_deref().is_some_and(|text| is_address(text.trim()))
+                            };
+                            identities
+                                .primary
+                                .as_ref()
+                                .is_some_and(|id| !id.signing.0.is_empty())
+                                && (options.aster_api_version() == Version::V1
+                                    || (address(&options.asterdex.signer_address)
+                                        && (address(&options.asterdex.user_address)
+                                            || address(&options.application_id))))
+                        } else if options.aster_api_version() == Version::V3 {
                             options.aster_version(None) == Version::V3
                         } else {
                             present(&options.secret)

@@ -39,6 +39,9 @@ mod planned_calls {
         responses: usize,
         timers: usize,
         retired: usize,
+        // A delivered call reports itself as a complete order read.
+        #[cfg(feature = "order-locks")]
+        reconcile_reads: bool,
     }
     fn credential() -> crate::request_context::Credential {
         crate::request_context::Credential {
@@ -381,6 +384,10 @@ mod planned_calls {
                 .unwrap();
                 cx.validate_http_write_effects(&context).unwrap();
             }
+            #[cfg(feature = "order-locks")]
+            if self.reconcile_reads {
+                cx.orders_reconciled(None);
+            }
             cx.finish_plan_call(&plan, &slot, &context).unwrap();
             if self.responses
                 == if self.long {
@@ -663,6 +670,54 @@ mod planned_calls {
                     body,
                 },
             },
+        );
+    }
+    /// A serial Read Plan is one logical read: while it waits for its next
+    /// step its settled call has left the context map, and an unrelated
+    /// admission's prune must not reset its earliest read mark.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_serial_plans_read_mark_survives_an_unrelated_prune_between_steps() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            wait: 1_000,
+            reconcile_reads: true,
+            ..Default::default()
+        });
+        start(&mut e, 0.);
+        let timer = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms: 1_000. } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(1_000., Event::TimerFired { timer });
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 1_000.);
+        response(&mut e, first, 1_500., "ok");
+        e.drain_actions().for_each(drop);
+        assert_eq!(e.venue.responses, 1);
+        e.io.order_locks.fence(Some(&["BTCUSD".into()]));
+        Cx { now: 1_600., store: &mut e.store, io: &mut e.io }
+            .http_context(
+                crate::request_context::Scope::Background,
+                crate::request_context::Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 1_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        e.handle(2_500., Event::TimerFired { timer });
+        let (second, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, second, 2_500.);
+        response(&mut e, second, 3_000., "ok");
+        assert_eq!(e.venue.responses, 2);
+        assert!(
+            e.io.order_locks.uncertain("BTCUSD"),
+            "the Plan's first call predates the fence"
         );
     }
     #[test]

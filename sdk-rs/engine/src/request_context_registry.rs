@@ -16,6 +16,9 @@ use std::collections::VecDeque;
 
 const CAPACITY: usize = 256;
 
+#[path = "session_context.rs"]
+mod session;
+
 #[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_tests.rs"]
 mod preflight_tests;
@@ -34,6 +37,10 @@ mod read_delivery_tests;
 
 #[path = "execution_registry.rs"]
 mod execution;
+
+#[cfg(test)]
+#[path = "request_context_background_delivery_tests.rs"]
+mod background_delivery_tests;
 
 struct CommandOwner {
     generation: u64,
@@ -174,6 +181,7 @@ pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
     contexts: HashMap<u64, Context>,
     commands: HashMap<CommandId, CommandOwner>,
+    sessions: session::Sessions,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     executions: execution::Executions,
@@ -191,9 +199,42 @@ pub(super) struct ContextRegistry {
     plan_index: Vec<CommandId>,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
+    /// Order-read epoch at each live owner's first released Read: one logical
+    /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
+    #[cfg(feature = "order-locks")]
+    read_marks: HashMap<Owner, u64>,
 }
 
 impl ContextRegistry {
+    /// The order-read token for a Read released now under `owner`: the epoch of
+    /// its earliest released Read. A mark only ever keeps a fence longer.
+    #[cfg(feature = "order-locks")]
+    pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
+        *self.read_marks.entry(owner).or_insert(epoch)
+    }
+    #[cfg(all(test, feature = "order-locks"))]
+    pub(super) fn read_mark_count(&self) -> usize {
+        self.read_marks.len()
+    }
+    /// A mark lives while its owner does: a live context, or a command owner in
+    /// any phase (a serial Plan between steps has no current context).
+    #[cfg(feature = "order-locks")]
+    fn forget_dead_read_marks(&mut self) {
+        if self.read_marks.is_empty() {
+            return;
+        }
+        let mut live: std::collections::HashSet<Owner> =
+            self.contexts.values().map(Context::owner).collect();
+        live.extend(self.commands.iter().map(|(id, owner)| Owner::Command {
+            id: *id,
+            generation: owner.generation,
+        }));
+        self.read_marks.retain(|owner, _| live.contains(owner));
+    }
+    fn forget_read_mark(&mut self, _owner: Owner) {
+        #[cfg(feature = "order-locks")]
+        self.read_marks.remove(&_owner);
+    }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
         self.commands.retain(|_, old| {
@@ -203,6 +244,8 @@ impl ContextRegistry {
                 || old.pending > 0
                 || old.deliveries > 0
         });
+        #[cfg(feature = "order-locks")]
+        self.forget_dead_read_marks();
     }
     pub(super) fn command_entry_unowned(&self, command: CommandId) -> bool {
         !self.commands.contains_key(&command)
@@ -227,6 +270,7 @@ impl ContextRegistry {
         };
         self.commands.remove(&command);
         self.contexts.retain(|_, context| context.owner() != old);
+        self.forget_read_mark(old);
         true
     }
 
@@ -335,10 +379,44 @@ impl ContextRegistry {
                 Scope::Execution => return Err(Error::Invalid),
             },
         };
+        self.commit(owner, identity, policy, now, parent)
+    }
+
+    fn issue_session(
+        &mut self,
+        identity: u64,
+        generation: u64,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+    ) -> Result<Context, Error> {
+        if let Some(parent) = parent {
+            self.validate(parent, now)?;
+            if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
+                return Err(Error::Invalid);
+            }
+        }
+        if !now.is_finite() || policy.timeout_ms == 0 {
+            return Err(Error::Invalid);
+        }
+        self.sessions.admit(generation, &policy)?;
+        self.contexts.retain(|_, old| old.deadline() > now);
+        self.sessions.prune(&self.contexts);
+        self.commit(Owner::Session { generation }, identity, policy, now, parent)
+    }
+
+    fn commit(
+        &mut self,
+        owner: Owner,
+        identity: u64,
+        policy: Policy,
+        now: f64,
+        parent: Option<&Context>,
+    ) -> Result<Context, Error> {
         let deadline = parent.map_or(now + f64::from(policy.timeout_ms), |parent| {
             parent.deadline().min(now + f64::from(policy.timeout_ms))
         });
-        if let Scope::Command(id) = scope
+        if let Owner::Command { id, .. } = owner
             && let Some(root) = self.commands.get(&id).and_then(|owner| match &owner.phase {
                 CommandPhase::Context {
                     root,
@@ -366,7 +444,7 @@ impl ContextRegistry {
         )?
         .with_retry(policy.retry)?;
         if self.contexts.len() + self.reserved_context_count() >= CAPACITY
-            || matches!(scope, Scope::Command(id)
+            || matches!(owner, Owner::Command { id, .. }
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
         {
             return Err(Error::Capacity);
@@ -377,7 +455,7 @@ impl ContextRegistry {
         self.contexts
             .try_reserve(1 + self.reserved_context_count())
             .map_err(|_| Error::Capacity)?;
-        if matches!(scope, Scope::Command(id) if !self.commands.contains_key(&id)) {
+        if matches!(owner, Owner::Command { id, .. } if !self.commands.contains_key(&id)) {
             self.commands.try_reserve(1).map_err(|_| Error::Capacity)?;
         }
         context.bind_issuer(&self.issuer);
@@ -503,6 +581,8 @@ impl ContextRegistry {
             .expect("validated journal")
             .replace(delivery.attempt.request, &legs)?;
         self.contexts.retain(|_, context| context.deadline() > now);
+        #[cfg(feature = "order-locks")]
+        self.forget_dead_read_marks();
         self.contexts.extend(
             children
                 .iter()
@@ -542,6 +622,8 @@ impl ContextRegistry {
             || self.contexts.get(&context.leg()) != Some(context)
             || matches!(context.owner(), Owner::Command {id, generation}
                 if self.commands.get(&id).is_none_or(|owner| owner.generation != generation))
+            || matches!(context.owner(), Owner::Session { generation }
+                if !self.sessions.live(generation))
             || (matches!(context.owner(), Owner::Execution { .. }) && !self.execution_live(context))
         {
             return Err(Error::Revoked);
@@ -580,6 +662,9 @@ impl ContextRegistry {
         {
             return Ok(());
         }
+        if matches!(context.owner(), Owner::Session { .. }) {
+            return self.sessions.register(context, request);
+        }
         if matches!(context.owner(), Owner::Execution { .. }) {
             return self.execution_leg_issued(context);
         }
@@ -616,7 +701,11 @@ impl ContextRegistry {
         Ok(())
     }
 
-    pub(super) fn retire_attempt(&mut self, context: &Context) {
+    pub(super) fn retire_attempt(&mut self, context: &Context, request: RequestId) {
+        if matches!(context.owner(), Owner::Session { .. }) {
+            self.sessions.retire_attempt(context, request);
+            return;
+        }
         if matches!(context.owner(), Owner::Execution { .. }) {
             self.execution_leg_retired(context);
             return;
@@ -666,7 +755,9 @@ impl ContextRegistry {
         context: &Context,
         request: RequestId,
     ) -> Result<Option<&mut bool>, Error> {
-        if context.operation() != Operation::Mutation {
+        if context.operation() != Operation::Mutation
+            || matches!(context.owner(), Owner::Session { .. })
+        {
             return Ok(None);
         }
         self.command_mut(context)?
@@ -677,9 +768,22 @@ impl ContextRegistry {
             .map(Some)
     }
 
+    /// Session writes record release separately: they have no command journal.
+    pub(super) fn session_released(&mut self, context: &Context, request: RequestId) {
+        if context.operation() == Operation::Mutation {
+            self.sessions.released(context, request);
+        }
+    }
+
     pub(super) fn result(&mut self, delivery: &Delivery, result: WriteResult) -> Result<(), Error> {
         if delivery.context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
+        }
+        if matches!(delivery.context.owner(), Owner::Session { .. }) {
+            self.validate_handle(&delivery.context)?;
+            return self
+                .sessions
+                .result(&delivery.context, delivery.attempt.request, &result);
         }
         self.command_mut(&delivery.context)?
             .writes
@@ -958,6 +1062,7 @@ impl ContextRegistry {
                     owner.phase = CommandPhase::Retiring(token.clone());
                     self.contexts
                         .retain(|_, context| context.owner() != token.preflight().owner());
+                    self.forget_read_mark(token.preflight().owner());
                     self.retirements.push_back(token);
                     return true;
                 }
@@ -968,13 +1073,13 @@ impl ContextRegistry {
         }
         self.forget_observer(command);
         if let Some(owner) = self.commands.remove(&command) {
-            self.contexts.retain(|_, context| {
-                context.owner()
-                    != Owner::Command {
-                        id: command,
-                        generation: owner.generation,
-                    }
-            });
+            let retired = Owner::Command {
+                id: command,
+                generation: owner.generation,
+            };
+            self.contexts
+                .retain(|_, context| context.owner() != retired);
+            self.forget_read_mark(retired);
         }
         true
     }
@@ -1045,6 +1150,16 @@ impl<P> Cx<'_, P> {
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
+            Owner::Session { generation } => {
+                let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+                return self.io.request_contexts.issue_session(
+                    identity,
+                    generation,
+                    policy,
+                    self.now,
+                    Some(parent),
+                );
+            }
             Owner::Execution { .. } => Scope::Execution,
         };
         self.make_http_context(scope, policy, Some(parent))
@@ -1138,6 +1253,29 @@ impl<P> Cx<'_, P> {
             .commands
             .get(&id)
             .is_none_or(|owner| owner.context_root() != Some(root))
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
+    /// Validate a Background Read in this exact managed HTTP callback. Publish
+    /// synchronously after validation, before retiring the Context. Native
+    /// response validity and publication freshness remain separate requirements.
+    /// Failure callbacks also carry delivery identity, but prove no response data.
+    /// This grants no send, retry, session or command completion authority.
+    pub fn validate_background_read_http_delivery(&self, context: &Context) -> Result<(), Error> {
+        self.validate_http_context(context)?;
+        if context.operation() != Operation::Read
+            || !matches!(context.owner(), Owner::Background { .. })
+        {
+            return Err(Error::Invalid);
+        }
+        if self
+            .io
+            .http_delivery
+            .as_ref()
+            .is_none_or(|delivery| delivery.context != *context)
         {
             return Err(Error::Revoked);
         }
@@ -1431,7 +1569,8 @@ impl<P> Cx<'_, P> {
         if absent {
             self.fence_absent_orders(context);
         }
-        if !resendable {
+        // Session writes get one attempt per operation: no resend grant.
+        if !resendable || !matches!(context.owner(), Owner::Command { .. }) {
             return Ok(None);
         }
         match self.io.request_contexts.grant_resend(&delivery) {
@@ -1536,7 +1675,11 @@ impl<P> Cx<'_, P> {
     /// created outside dispatch has no trusted intent.
     fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
         let Owner::Command { id, generation } = context.owner() else {
-            return Ok(crate::classify::Intent::Place);
+            // Session writes (listen keys, logins) change account state, not orders.
+            return Ok(match context.owner() {
+                Owner::Session { .. } => crate::classify::Intent::Setting,
+                _ => crate::classify::Intent::Place,
+            });
         };
         let owner = self
             .io
@@ -3318,7 +3461,7 @@ mod write_tests {
         assert!(registry.commands[&7].writes.is_none());
         let callback = delivery(&preflight, 12);
         registry.enter_delivery(&callback);
-        registry.retire_attempt(&preflight);
+        registry.retire_attempt(&preflight, RequestId(12));
         registry
             .issue(
                 3,
