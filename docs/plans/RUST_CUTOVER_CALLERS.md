@@ -4333,6 +4333,19 @@ correctness checks retain their existing thresholds and known-failure policies.
 Combined and native release builds keep their existing profile selection.
 
 
+## AsterDEX, GRVT and TxFlow row-reporting adoption (2026-10-23)
+
+AsterDEX position, GRVT coin/order/position and TxFlow position diagnostics use
+the existing bounded engine Once reporter. Native notice text, severity and
+repeat/re-arm ordering remain. AsterDEX and TxFlow keep early REST per-ID
+forgetting before full snapshot admission, and zero-size rows do not gain a
+per-key rearm. TxFlow retains exact composite/asset/anonymous labels and its
+separate WS behavior. GRVT retains namespace isolation, unfiltered duplicate
+coin rearm, filtered order/position rearm and rearming before per-row timestamp
+rejection on a current response. Callers retain the same account data, command
+outcomes, health policy, transports, signing and snapshot/financial authority.
+
+
 ### Paradex managed independent book snapshots
 
 Rust `fetchOrderBook` uses the engine managed preparation/binding/final claim

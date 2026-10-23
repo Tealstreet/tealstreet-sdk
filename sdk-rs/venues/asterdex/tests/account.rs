@@ -1411,3 +1411,94 @@ fn present_null_or_non_string_flat_entry_is_rejected() {
         assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
     }
 }
+
+// Drive the native poll, including its protocol-clock gate, without changing
+// the mapping/publication ordering under test.
+fn reporter_begin_positions(h: &mut H) {
+    h.fire_after(75_000.0);
+    if h.requests.iter().any(|r| r.url.contains("/time")) {
+        h.reply("/time", &format!(r#"{{"serverTime":{}}}"#, h.now));
+    }
+}
+fn reporter_positions(h: &mut H, rows: &str) {
+    reporter_begin_positions(h);
+    h.reply("/positionRisk", rows);
+    h.reply("/openOrders", "[]");
+}
+#[test]
+fn reporter_zero_quantity_does_not_rearm_a_key_in_a_rejected_read() {
+    let mut h = H::new();
+    let bad = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"},{}]"#;
+    let message = "Aster skipped malformed position row BTCUSDT";
+    reporter_positions(&mut h, bad);
+    assert_eq!(h.logs.iter().filter(|m| *m == message).count(), 1);
+    let zero = POSITION.replace(r#""positionAmt":"1""#, r#""positionAmt":"0""#);
+    reporter_positions(&mut h, &format!("[{},{{}}]", &zero[1..zero.len() - 1]));
+    reporter_positions(&mut h, bad);
+    assert_eq!(h.logs.iter().filter(|m| *m == message).count(), 1);
+    assert_eq!(
+        h.logs
+            .iter()
+            .filter(|m| m.contains("without a symbol"))
+            .count(),
+        1
+    );
+    reporter_positions(&mut h, "[]");
+    reporter_positions(&mut h, bad);
+    assert_eq!(h.logs.iter().filter(|m| *m == message).count(), 2);
+    assert_eq!(
+        h.logs
+            .iter()
+            .filter(|m| m.contains("without a symbol"))
+            .count(),
+        2
+    );
+}
+#[test]
+fn reporter_mapped_key_rearms_before_stale_read_rejection_but_anonymous_key_does_not() {
+    let mut h = H::new();
+    let bad = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"},{}]"#;
+    reporter_positions(&mut h, bad);
+    reporter_begin_positions(&mut h);
+    h.ws(account(json!(10), "3", "BOTH"));
+    h.reply(
+        "/positionRisk",
+        &format!("[{},{{}}]", &POSITION[1..POSITION.len() - 1]),
+    );
+    h.reply("/openOrders", "[]");
+    assert_eq!(h.engine.store().positions()[0].contracts, 3.0);
+    reporter_positions(&mut h, bad);
+    assert_eq!(
+        h.logs
+            .iter()
+            .filter(|m| m.as_str() == "Aster skipped malformed position row BTCUSDT")
+            .count(),
+        2
+    );
+    assert_eq!(
+        h.logs
+            .iter()
+            .filter(|m| m.contains("without a symbol"))
+            .count(),
+        1
+    );
+}
+#[test]
+fn reporter_once_does_not_upgrade_a_remembered_warning_after_its_stored_copy_disappears() {
+    let mut h = H::new();
+    let bad = r#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"bad"}]"#;
+    reporter_positions(&mut h, bad);
+    assert!(h.errors.is_empty());
+    // Independent store mutation is not a clean native read and must not rearm.
+    h.engine.store_mut().set_positions(vec![]);
+    reporter_positions(&mut h, bad);
+    assert!(h.errors.is_empty());
+    reporter_positions(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","positionSide":"SHORT","positionAmt":"bad"}]"#,
+    );
+    assert_eq!(
+        h.errors,
+        ["Aster skipped malformed position row BTCUSDT:short"]
+    );
+}
