@@ -2,7 +2,7 @@
 
 Lane codex-ih35js, overseer claude-ddi2il, 2026-10-23. The candidate changes only
 WOO family WASM compilation. Local controls and independent reviews are complete;
-current landing is integrated; production WOO public CI passes, with full PR CI pending. No merge without
+current landing is integrated; the tested head has complete green CI. No merge without
 an explicit window.
 
 ## Problem and scope
@@ -130,39 +130,56 @@ ratios. The execution sweep is small in this sample and is not the primary fix.
 ## Verification and remaining gates
 
 489 WOO/Binance native tests across 38 targets pass, as do scoped strict Clippy,
-fmt, bash syntax and diff checks. The 14 request-context checker controls pass.
-Actual landing 2badd1cb0e3217b844e73d6b81ec023b3abc6d8b is genuinely integrated locally; it is not pushed while the earlier head finishes CI.
+fmt, bash syntax and diff checks. The original 14 request-context checker controls pass; the current incoming scanner passes all 15 controls.
+Actual landing cd9580ed8231d469a3218a2033c8294c144e81cf is genuinely integrated.
 The initial stale incoming Paradex/Lighter ratchet failures were resolved by
 preserving landing's source and inventory. Both request-context checks now pass;
 the inventory has zero delta against that integrated landing.
 
 Independent source/adversarial, caller and full-map reviews are clean.
 Architecture gate: no per-venue replacement of a cross-cutting concern; this uses
-the existing family compiler policy and retains shared paths. Final integrated ledger review and exact-head CI remain required. Preserve the fixed public/private correctness, CPU, memory and size
+the existing family compiler policy and retains shared paths. The integrated ledger review is clean, and the tested head has complete green CI. The final current-landing guard and merge window remain required. Preserve the fixed public/private correctness, CPU, memory and size
 acceptance gates. A separate fresh revert guard and head-matched PR merge require
 an explicit overseer window and the post-restart merge GO.
 
 ## Production WOO CI confirmation
 
-Rust SDK run39977265913 at PR head f564c7b50f18bb629a1a047b3d95206f0234e3d3
-completed the production WOO replay job120495031043 successfully. Its nine
-interleaved public performance pairs report steady CPU TS15.8ms/Rust8.9ms,
-1.78x, above the1.10x objective. It serves77frames,222markets/tickers and two
-books, with zero overwritten fields. Retained memory is TS1.7MB/Rust0.8MB;
-reported WASM linear memory is0.7MB. These are rounded CI log values, not the
-historical diagnostic artifact measurements.
+Rust SDK run 39977265913 at tested PR head
+f564c7b50f18bb629a1a047b3d95206f0234e3d3 completed successfully. That head has
+43 successful checks and one browser coldstart skip. Production WOO job
+120495031043 uses nine interleaved public performance pairs and reports steady
+CPU TS 15.8 ms / Rust 8.9 ms, 1.78x, above the 1.10x objective. It serves
+77 frames, 222 markets/tickers and two books, with zero overwritten fields.
+Retained memory is TS 1.7 MB / Rust 0.8 MB; reported WASM linear memory is 0.7 MB.
+These are rounded CI log values, separate from historical diagnostic artifacts.
 
-The downloaded ci-wasm-woo module is1,197,465bytes, below the unchanged
-1,343,488-byte ceiling by146,023bytes. Its three build-manifest file hashes
-match. CI checkout ab1abfa01b349c507853b0ab3611494748ebe1ab has parents actual7b6b
-and the tested f564 head, and its entire tree matches f564. Production WASM SHA256:
+The downloaded ci-wasm-woo module is 1,197,465 bytes, below the unchanged
+1,343,488-byte ceiling by 146,023 bytes. Its three build-manifest file hashes
+match. CI checkout ab1abfa01b349c507853b0ab3611494748ebe1ab has parents actual
+7b6b4a2d029 and the tested f564 head; its entire tree matches f564. WASM SHA256:
 1e951c00e0f8ad2100074afc2d336bf5e9daced3d9d66f678f80ea004fc2613d.
-Receipt: /tmp/codex-ih35js-woo-production-ci-receipt.json; raw job log and cleaned
-log are alongside it. This is a focused own-artifact check, not a full-package
+Receipt: /tmp/codex-ih35js-woo-production-ci-receipt.json; raw and cleaned job
+logs are alongside it. This is a focused own-artifact check, not a full-package
 provenance claim.
 
 Strict verification reports one public strict PASS, one declared known-private
 FAIL and zero unexpected failures. The private fixture still lacks authenticated
 lifecycle/stream coverage; no complete private parity is established. Existing
-comparison policy is unchanged. Full PR CI still has jobs pending; neither the
-remaining suite nor a merge window is inferred from this successful WOO job.
+comparison policy is unchanged.
+
+## Current landing and source-equivalent proof
+
+The local integration consumes actual book #1887 and snapshot #1787. WOO/Binance,
+engine, crypto, registry, hosts, Cargo/config and harness inputs remain identical
+to tested f564. Incoming changes affect unrelated venue crates, documentation,
+the inventory and its scanner's exact Paradex rehash transition plus regression
+control. The updated scanner and its 15 controls pass locally; the manifest is
+incoming-exact, with zero WOO delta. The three own shared-ledger sections retain
+incoming content first and the reviewed WOO appendix once.
+
+The overseer instructed integration of current landing after f564 became green,
+with a train slot after #1895 and before #1869's final integration. CI success is
+attributed to f564; no fresh-CI pass is claimed for a later integrated head.
+Independent reviews and a fresh separate guard must validate source equivalence
+before a head-matched merge on explicit GO. Any new shared runtime or compiler
+input change requires fresh CI.
