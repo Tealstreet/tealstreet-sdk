@@ -219,3 +219,16 @@ test('provider mutation cannot rewrite the expected receipt snapshot', async () 
   assert.deepEqual(r.events, [['installed'], ['failed', 7, 'invalidResult', 1234]]);
   r.host.dispose();
 });
+
+test('an engine-bound recipe op reaches the signer context; ordinary work carries none', async () => {
+  const contexts = [];
+  const r = rig((request, context) => { contexts.push(context); return { values: [[1]], receipt: request.receipt }; });
+  const remote = { recipe: 'orderly.rest.1', inputs: { path: '/v1/positions' } };
+  r.host.execute({ ...action, remote });
+  await tick();
+  r.host.execute({ ...action, attempt: 8 });
+  await tick();
+  assert.deepEqual(contexts.map((context) => context.remote), [remote, undefined]);
+  assert.equal(Object.hasOwn(contexts[1], 'remote'), false);
+  r.host.dispose();
+});

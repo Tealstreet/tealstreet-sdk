@@ -625,6 +625,10 @@ fn hosted_error(error: safe_cex_engine::signing::SignError) -> js_sys::Error {
 }
 
 #[cfg(feature = "dispatch-signing")]
+/// A captured hosted HTTP stamp is usable for this long after capture; the
+/// remaining window is also the provider deadline.
+const HOSTED_HTTP_FRESHNESS_MS: f64 = 5000.;
+
 #[wasm_bindgen]
 impl WasmEngine {
     /// Clock capture only: does not start the venue or emit any action.
@@ -670,11 +674,15 @@ impl WasmEngine {
         } = &input
         {
             let age = protocol_now - *stamp_ms;
-            if captured != &revision.to_string() || !age.is_finite() || !(0. ..5000.).contains(&age)
+            if captured != &revision.to_string()
+                || !age.is_finite()
+                || !(0. ..HOSTED_HTTP_FRESHNESS_MS).contains(&age)
             {
                 return Err(hosted_error(SignError::InvalidRequest));
             }
-            timeout = (5000. - age).ceil().clamp(1., 5000.) as u32;
+            timeout = (HOSTED_HTTP_FRESHNESS_MS - age)
+                .ceil()
+                .clamp(1., HOSTED_HTTP_FRESHNESS_MS) as u32;
         }
         let (work, kind) = safe_cex_venues::hosted_signing::prepare(venue, identities, input)
             .map_err(hosted_error)?;
@@ -1273,6 +1281,45 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sign_action_json_is_unchanged_without_a_recipe_and_carries_one_when_bound() {
+        use safe_cex_engine::signing::{Algorithm, KeyRef, Operation, PayloadPart, SignRequest};
+        let work = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: KeyRef("primary.signing".into()),
+                payload: vec![PayloadPart::Bytes { bytes: vec![49] }],
+            }],
+        };
+        let action = |remote| safe_cex_engine::Action::Sign {
+            attempt: safe_cex_engine::RequestId(7),
+            work: work.clone(),
+            remote,
+            timeout_ms: 1000,
+        };
+        let plain = super::encode(&[action(None)]);
+        assert_eq!(
+            plain,
+            r#"[{"op":"sign","attempt":7,"work":{"receipt":{},"operations":[{"kind":"sign","algorithm":"hmacSha256","key":"primary.signing","payload":[{"kind":"bytes","bytes":[49]}]}],"context":{"venue":"","method":"","host":"","path":""}},"timeoutMs":1000}]"#
+        );
+        let bound = super::encode(&[action(Some(Box::new(
+            safe_cex_engine::signing_remote::RemoteWire {
+                recipe: "orderly.rest.1",
+                role: None,
+                inputs: serde_json::json!({ "path": "/v1/positions" }),
+            },
+        )))]);
+        assert_eq!(
+            bound,
+            plain.replace(
+                r#","timeoutMs""#,
+                r#","remote":{"recipe":"orderly.rest.1","inputs":{"path":"/v1/positions"}},"timeoutMs""#
+            )
+        );
+    }
+
     #[cfg(feature = "bybit")]
     mod bybit_signer_construction {
         use crate::WasmEngine;

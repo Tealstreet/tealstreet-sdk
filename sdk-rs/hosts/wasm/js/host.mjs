@@ -702,7 +702,8 @@ export class EngineHost {
     if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
     const id = action.attempt;
     const pending = this.primitiveSigning(action.work, action.timeoutMs,
-      this.signer && ((context) => this.signer(action.work, context)), (result, code) => {
+      this.signer && ((context) => this.signer(action.work,
+        action.remote === undefined ? context : { ...context, remote: action.remote })), (result, code) => {
         if (this.primitiveSignings.get(id) !== pending || this.disposed) return;
         this.primitiveSignings.delete(id);
         if (code) this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));

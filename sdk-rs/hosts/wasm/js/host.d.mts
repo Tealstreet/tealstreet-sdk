@@ -282,15 +282,18 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' }
+  | { kind: 'op'; recipe: string; inputs: unknown };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
   operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
   context: { venue: string; method: string; host: string; path: string };
 }
+/** Engine-bound versioned recipe description of the request (P8); absent for ordinary work. */
+export interface RemoteSignOp { recipe: string; role?: string; inputs: unknown }
 /** Owns secrets. Atomic results are exact raw operation bytes; errors are never logged. */
-export type Signer = (request: SignRequest, context: { signal: AbortSignal }) => Promise<SignResult> | SignResult;
+export type Signer = (request: SignRequest, context: { signal: AbortSignal; remote?: RemoteSignOp }) => Promise<SignResult> | SignResult;
 
 export interface EngineHostOptions {
   /** Transfer raw engine allocation ownership after successful construction.

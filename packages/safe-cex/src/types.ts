@@ -1293,7 +1293,9 @@ export interface PublicDataSource {
 // Remote signing types — used for hosted CLI servers that delegate signing to clients
 export interface RemoteSignerRequest {
   id: string;
-  type: 'http' | 'ws-auth';
+  /** `op` (wire v2) carries a versioned recipe; `http`/`ws-auth` are unchanged. */
+  type: 'http' | 'ws-auth' | 'op';
+  v?: 2;
   exchangeName: ExchangeName;
   accountName?: string; // Account name for multi-account matching
   // For HTTP: unsigned axios config
@@ -1318,6 +1320,8 @@ export interface RemoteSignerRequest {
       | 'coinbase-jwt';
     extraData?: unknown;
   };
+  /** Wire v2: the signer rebuilds the exact bytes from `inputs` with `recipe`. */
+  op?: { recipe: string; inputs: unknown };
 }
 
 export interface RemoteSignerResponse {
@@ -1329,6 +1333,8 @@ export interface RemoteSignerResponse {
     headers: Record<string, string>;
   };
   wsAuthSignature?: string;
+  /** Wire v2: lowercase hex of the raw signature for an `op` request. */
+  opSignature?: string;
   error?: string;
 }
 
@@ -1356,4 +1362,6 @@ export interface RemoteSigner {
   onAvailabilityChange(callback: (available: boolean) => void): () => void;
   /** Account name for multi-account matching (e.g., "bear2") */
   accountName?: string;
+  /** Exact versioned recipe ids this signer executes (wire v2); absent means none. */
+  signOps?: { readonly recipes: readonly string[] };
 }

@@ -538,6 +538,9 @@ export interface Exchange {
    * Returns the signature string for WebSocket authentication.
    */
   signWsAuth: (request: RemoteSignerRequest) => Promise<RemoteSignerResponse>;
+
+  /** Sign a wire-v2 `op` request with this account's versioned recipe executor. */
+  signOperation: (request: RemoteSignerRequest) => Promise<RemoteSignerResponse>;
 }
 
 export type AccountMarketOverlay = (markets: Market[]) => Market[];
@@ -2313,6 +2316,12 @@ export class BaseExchange implements Exchange {
    * Sign a remote HTTP request using this exchange's axios interceptors.
    * Capture adapter pattern: swaps the adapter, runs interceptors, captures signed config.
    */
+  /** Wire v2 recipe signing; only engine accounts with an admitted recipe override it. */
+  public signOperation = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => ({
+    id: request.id,
+    error: 'Remote recipe signing is not supported for this exchange',
+  });
+
   public signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     const xhr = (this as any).xhr;
     if (!xhr) {
