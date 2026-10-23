@@ -343,3 +343,38 @@ test('pure cache entry digest agrees with disk and needs no original filesystem'
   }
   assert.throws(() => api.cacheEntriesDigest({ root, cachePath: '/cache', entries }), /path/);
 });
+
+test('sparse selected files retain only their real directory ancestors and explicit anchors', t => {
+  const { root, destination, options } = fixture(t);
+  options.paths = ['source/main.mjs', 'packages/pkg/.hidden', 'node_modules'];
+  options.directoryAnchors = ['packages/pkg'];
+  const sealed = api.sealRuntime(options);
+  assert.equal(api.runtimeFingerprint(sealed.manifest), sealed.fingerprint);
+  assert.ok(sealed.manifest.entries.some(entry => entry.path === 'source' && entry.type === 'directory'));
+  assert.ok(sealed.manifest.entries.some(entry => entry.path === 'packages/pkg' && entry.type === 'directory'));
+  for (const name of ['source/main.mjs-extra', 'source/other.mjs', 'packages/pkg/.hidden-extra', 'packages/peer']) {
+    const manifest = structuredClone(sealed.manifest);
+    manifest.entries.push({ path: name, type: 'file', mode: 0o644, bytes: 0, sha256: '0'.repeat(64) });
+    manifest.entries.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    assert.throws(() => api.runtimeFingerprint(manifest), /unselected immutable entry/);
+  }
+  const poisoned = structuredClone(sealed.manifest);
+  Object.assign(poisoned.entries.find(entry => entry.path === 'source'), { type: 'symlink', target: 'packages' });
+  assert.throws(() => api.runtimeFingerprint(poisoned), /unselected immutable entry/);
+});
+
+test('selected directory descendants are admitted without admitting adjacent prefix names', t => {
+  const { options } = fixture(t);
+  const sealed = api.sealRuntime(options);
+  const nested = structuredClone(sealed.manifest);
+  nested.entries.push({ path: 'source/nested', type: 'directory', mode: 0o755 });
+  nested.entries.push({ path: 'source/nested/file', type: 'file', mode: 0o644, bytes: 0, sha256: '0'.repeat(64) });
+  nested.entries.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  assert.equal(typeof api.runtimeFingerprint(nested), 'string');
+  for (const name of ['source-extra', 'node_modules-extra', 'packages-extra']) {
+    const adjacent = structuredClone(sealed.manifest);
+    adjacent.entries.push({ path: name, type: 'directory', mode: 0o755 });
+    adjacent.entries.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    assert.throws(() => api.runtimeFingerprint(adjacent), /unselected immutable entry/);
+  }
+});

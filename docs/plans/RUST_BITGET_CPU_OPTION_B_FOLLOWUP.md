@@ -177,3 +177,15 @@ verification. A real Git shallow-checkout regression reproduces the original
 refusal; negative controls reject tested head only as first parent, absent tested
 head and single-parent commits. No fetch, ancestry fallback or identity relaxation
 is used. The rejected PR cohort stays preserved; corrected-source CI is separate.
+
+### Runtime metadata verification cost
+
+The preserved first cohort's Binance/Bybit jobs reach the unchanged30-minute
+boundary without finishing. Its authentic Bitget manifest has150,129 entries and
+4,086 selected roots; a bounded metadata-only validation takes19.57seconds.
+Replace per-entry linear root/ancestor scans with exact path and ancestor sets.
+Keep every structural, mode, link, overlap, sort, digest and filesystem check.
+Verify the authentic manifest retains its exact fingerprint and add sparse-root,
+near-prefix and ancestor-poisoning controls. Measure this verifier operation only;
+change no replay timing, thresholds, fixtures or workflow timeouts. Fresh CI
+remains the integration proof; incomplete cohorts cannot certify.
