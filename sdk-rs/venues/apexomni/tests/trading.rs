@@ -879,7 +879,7 @@ fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
 }
 
 #[test]
-#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+#[ignore = "P8 remote zkLink adoption, owner codex-hcmq3f + claude-19pt8s; #1874 placement RED retained"]
 fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
     let mut e = ready();
     let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
@@ -918,7 +918,7 @@ fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
 }
 
 #[test]
-#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+#[ignore = "P8 remote zkLink adoption, owner codex-hcmq3f + claude-19pt8s; #1874 placement RED retained"]
 fn p0_write_unlisted_native_code_is_explicitly_unknown() {
     let mut e = ready();
     let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
@@ -949,4 +949,96 @@ fn p0_write_unlisted_native_code_is_explicitly_unknown() {
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].venue_code.as_deref(), Some("987654"));
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+
+fn hmac_write_failure_is_unknown(command: Command, status: u16, body: &str, code: &str) {
+    let mut e = ready();
+    e.handle(NOW + 10.0, Event::Command(command));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.0,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions.iter().any(|action| matches!(action,
+            Action::Http(request) if request.method == first.method && request.url == first.url)),
+        "an uncertain HMAC write must not be replayed"
+    );
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 43, .. })
+    )));
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 43, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "one terminal per HMAC command");
+    assert_eq!(failures[0].venue_code.as_deref(), Some(code));
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+
+fn hmac_cancel() -> Command {
+    Command::CancelOrders {
+        command: 43,
+        ids: vec!["native-order".into()],
+    }
+}
+fn hmac_setting() -> Command {
+    Command::SetLeverage {
+        command: 43,
+        symbol: "BTCUSDT".into(),
+        leverage: 10.0,
+        side: None,
+    }
+}
+
+#[test]
+fn managed_hmac_cancel_503_signature_body_is_unknown_without_resend() {
+    hmac_write_failure_is_unknown(
+        hmac_cancel(),
+        503,
+        r#"{"code":20016,"msg":"signature rejected"}"#,
+        "20016",
+    );
+}
+
+#[test]
+fn managed_hmac_setting_408_signature_body_is_unknown_without_resend() {
+    hmac_write_failure_is_unknown(
+        hmac_setting(),
+        408,
+        r#"{"code":20016,"msg":"signature rejected"}"#,
+        "20016",
+    );
+}
+
+#[test]
+fn managed_hmac_cancel_unlisted_code_is_unknown_with_native_evidence() {
+    hmac_write_failure_is_unknown(
+        hmac_cancel(),
+        200,
+        r#"{"code":987654,"msg":"unlisted native failure"}"#,
+        "987654",
+    );
+}
+
+#[test]
+fn managed_hmac_setting_unlisted_code_is_unknown_with_native_evidence() {
+    hmac_write_failure_is_unknown(
+        hmac_setting(),
+        200,
+        r#"{"code":987654,"msg":"unlisted native failure"}"#,
+        "987654",
+    );
 }

@@ -520,3 +520,51 @@ actual merely because its branch is inspectable.
 Architecture gate: native facts and adoption only. Any missing signer-mode
 capability, admission, preflight, session or remote-wire support is requested
 from its shared owner; no venue policy replacement or stale-context bypass.
+
+
+### Plan-audit corrections and explicit shared dependencies
+
+The actual implementation uses Plan custody and settlement throughout:
+`validate_plan_delivery` before native reducers, classifier facts before
+`finish_plan_call`, `plan_resend_context` for a granted resend, and
+`done_plan`/`fail_plan` for the command. Context-only completion and resend
+APIs do not replace Plan completion. Pending state retains the exact Plan,
+Slot and Context; cleanup is fenced by owner and generation.
+
+Before releasing any managed mutation, implement the bounded native
+`capture_http_reconciliation` codec and restricted late-reply reducer. The
+default hook rejects dispatch. Capture only native correlation facts, never
+requests, recipes, credentials or signing material.
+
+Independent review identified three shared prerequisites; none is replaced
+with a venue workaround:
+
+- **Conditional mutation terminal.** An amend cancel may succeed while racing
+  fills eliminate its replacement. A declared conditional terminal must project
+  the existing journal and retire the unreleased suffix under exact current
+  delivery custody. `done_read_plan_after_data`, silent slot skips and
+  post-admission `done_empty_plan` cannot authorize this. Codex-hcmq3f owns a
+  separate engine follow-up after #1873; codex-uufub4 reviews API fit.
+- **FIFO activation.** Native job B may wait behind A. A's delivery or an
+  ordinary timer cannot admit B. Retained Preflight activation requires B's
+  own engine-issued readiness custody. Codex-hcmq3f owns a separate engine
+  follow-up, coordinated with the reconciliation-continuation owner.
+- **Whole-command signing capability.** Single placement refusal at recipe
+  preparation is sufficient for that attempt, but it cannot prevent an amend's
+  HMAC cancel from executing before a later unsupported zkLink replacement.
+  Claude-19pt8s owns a trusted identity-bound provider capability seam, queried
+  before the first foreground release. Neither KeyRef text, extra-ref presence,
+  raw Options secrets nor Signer::immediate proves provider capability.
+
+The shared Plan owner confirmed the first two gaps are outside reviewed
+#1873 and no composed implementation pin exists yet. Multi-request source
+remains held until reviewed contracts exist. Four original HMAC controls
+(cancel 503, setting 408, and unlisted-code cancel/setting) reproduce the
+phase-one classifier failures independently of the two P8 placement controls.
+The placement assertions remain unchanged and explicitly P8-gated.
+
+The opaque Options identity handoff does not establish account/startup/session
+readiness: those legacy paths still require their own managed conversion.
+Remote proof must state its actual scope and use the real async host/provider
+adapter, not relabel a local immediate signer as remote. No inventory entries
+are removed by this preparation.
