@@ -64,7 +64,7 @@ pub enum Pending {
         generation: u32,
     },
     BookQuery {
-        command: CommandId,
+        context: Context,
         size: f64,
         limit: usize,
     },
@@ -555,12 +555,14 @@ impl MexcFutures {
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error);
             }
-            Pending::BookQuery { command, .. } => cx.fail(
-                command,
-                VenueError::new(error)
-                    .kind(ErrorKind::Network)
-                    .outcome(Outcome::NotSent),
-            ),
+            Pending::BookQuery { context, .. } => {
+                let _ = cx.fail_context(
+                    &context,
+                    VenueError::new(error)
+                        .kind(ErrorKind::Network)
+                        .outcome(Outcome::NotSent),
+                );
+            }
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => {
                 let error = VenueError::new(error).kind(ErrorKind::Network);
@@ -785,12 +787,12 @@ impl Venue for MexcFutures {
             return;
         }
         if let Pending::BookQuery {
-            command,
+            context,
             size,
             limit,
         } = pending
         {
-            self.book_query_response(cx, command, size, limit, response);
+            self.book_query_response(cx, context, size, limit, response);
             return;
         }
         if matches!(&pending, Pending::Markets { .. } | Pending::Tickers { .. })
@@ -966,17 +968,40 @@ impl Venue for MexcFutures {
             }
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if let Pending::Account(request) = &pending
+            && self.account_startup_refusal(cx, request, &response)
+        {
+            return;
+        }
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
+    }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error);
+            }
+            Pending::BookQuery { context, .. } => {
+                let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
             }
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
-            Pending::Candles { context, .. } => {
+            Pending::Candles { context, .. } | Pending::BookQuery { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
             }
             pending => self.on_request_failed(cx, pending, &error.message),
@@ -1099,10 +1124,10 @@ impl Venue for MexcFutures {
                 }
             }
             Command::FetchOrderBook {
-                command,
+                command: _,
                 symbol,
                 limit,
-            } => self.fetch_book(cx, command, &symbol, limit),
+            } => self.fetch_book(cx, &symbol, limit),
             Command::FetchCandles {
                 command: _,
                 symbol,
