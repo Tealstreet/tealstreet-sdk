@@ -147,9 +147,6 @@
     "bcd45e2e77893c71604dfc34d2a327ce254b90adc4e9178be8643e022a6f4219": 2,
     "c4fdc5b119a2342e4494f8ba9691545abcda5a6eb945131bf4ee4639cfa3257c": 1
   },
-  "venues/binance/src/account.rs": {
-    "5d0fccdcddd401826fcc62f4d7095fc26a74517dab4720e71a40cc9c38107389": 1
-  },
   "venues/binance/src/history.rs": {
     "5d6691e305370ef1b5e22426e494d28b28936de80d5d5af079e9deae52eb33f2": 1,
     "153ef00b195a92e18337317fde397c0707f7778eadc4bfc02b2c0d2ffbf493c5": 1,
