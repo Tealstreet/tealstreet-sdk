@@ -283,3 +283,10 @@ From the worktree root: `python3 sdk-rs/scripts/check-request-context.py`
 4. Each read gets its own context: the recent page, then the history
    fallback, both bounded by the command's original 20 s deadline (Binance
    precedent).
+
+**Implementation note on decision 4.** The recent page is sent on the admitted
+command root, and only the history fallback opens a separate leg. A separate
+leg for the first read would hold two live contexts per command and halve the
+256-context registry cap (only 128 concurrent candle commands). That is the
+KuCoin/Phemex single-send shape plus one leg. Each read still has its own
+context under the command's original 20 s deadline.
