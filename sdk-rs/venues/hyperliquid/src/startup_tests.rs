@@ -298,6 +298,7 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     let balance = e.store().balance().clone();
     let coins = e.store().coin_balances().unwrap().to_vec();
     let btc = e.store().market("BTC/USDC").unwrap().clone();
+    e.handle(1000.0, Event::WsOpened { socket });
     e.handle(1500.0, Event::WsMessage { socket, text: r#"{"channel":"spotState","data":{"spotState":{"balances":[{"coin":"ETH","token":2,"total":"3","hold":"0"}]}}}"# });
     assert_eq!(*e.store().balance(), balance);
     assert_eq!(e.store().coin_balances().unwrap(), coins);

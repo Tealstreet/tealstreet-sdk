@@ -5731,3 +5731,27 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
+## Hyperliquid whole-family managed socket lifecycle
+
+Hyperliquid perps, standalone spot and merged spot accounts use one managed
+socket for their public and private topics. Connect10s, idle45s, ping15s and
+native retry/JSON behavior remain unchanged. Duplicate opens and retired or
+idle-expired ingress cannot replay subscriptions or publish financial/market
+data, even when a watchdog callback arrives late. Shared/Disabled public-feed
+policy still permits native private traffic while suppressing direct public
+subscriptions and publication.
+
+For an actual private subscription obligation, the complete private-then-public
+frame batch is handed to the host before a subsequent ordinary timer ingress
+starts the native account/spot refresh. This moves refresh HTTP after the public
+frames compared with the earlier private/HTTP/public opening trace; it promises
+host handoff ordering, neither peer acknowledgement nor a later JavaScript turn.
+Custom hosts must dispatch returned actions in order and deliver timers through
+normal engine ingress. Mode resolution still synchronously clears its own timer.
+Refreshes with no private frames (not open, unresolved mode or no private user)
+retain their native behavior instead of waiting for nonexistent convergence.
+
+Book/candle refcounts, spot depth variants, account snapshot/revision guards,
+HTTP request and signer formats, history and cached lookup/candle results retain
+their native semantics. A stale handoff cannot start a refresh on a retired feed.
+Bitunix retains the separately tracked legacy boundary under Sam's decision.

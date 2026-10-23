@@ -173,3 +173,38 @@ history.rs and only its Pending/callback/pump_reads branches, which stay exact;
 19pt8s confirms no socket-region claim and requires both existing wallet-check
 sites/outcomes to remain exact. Native coupling reviews of the original plan
 and controls are bounded read-only clearances, not production certification.
+
+## Adapter checkpoint
+
+The plain prerequisite merge is `12cc6044e5f`, with frozen #1943 `2f7102ac0e3`
+as its second parent. Its engine, host and OKX blobs are retained exactly. The
+only merge resolutions retain both independent shared-doc additions. No seam
+source is edited by this adapter; actual #1943 remains the landing dependency.
+
+The native family now uses one shared FeedId and its current epoch. The remaining
+open bit selects native topic eligibility and is updated only by accepted shared
+Ready/Retired events; it owns no transport admission, retry, timer or identity.
+Private/public JSON projection supplies desired interests, and the wire encoder
+retains private-first ordering and the five spot depth variants. Both refresh
+sites use shared handoff custody when private frames exist, and native immediate
+refresh/publication when no private subscription obligation exists.
+
+All 241 scoped Hyperliquid tests pass across 17 targets, none ignored, including
+16 dedicated socket controls. Five original ingress REDs become GREEN; the
+original private/HTTP/public trace remains identifiable at `d8bc46e7ca5`, while
+the adopted assertion checks full returned batches through the actual wake.
+New mode controls pin synchronous timer retirement, zero-frame refreshes,
+post-handoff balance publication and stale mode wake inertness.
+
+Existing account/trading fixtures that replayed duplicate opens now drive genuine
+close/retry/replacement/open/handoff transitions. They consume actual jittered
+retry timestamps, retain the evolved physical socket, and sequence repeated
+snapshot fixture clocks monotonically. Tight post-reconnect ingress clocks move
+by 1 second with their existing timer expectations. Financial assertions and
+wire bodies remain unchanged. One startup fixture now opens its real socket
+before delivering its private financial frame; pre-open ingress is fenced.
+
+The socket scanner removes exactly Hyperliquid's 2 fingerprints/3 occurrences
+and its family root; every other family entry remains exact. Native source,
+strict and preservation review evidence is separate from rebuilt CI's CPU,
+retained-memory, size and replay gates. No native result is a performance claim.

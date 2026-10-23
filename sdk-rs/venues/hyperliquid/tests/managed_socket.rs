@@ -58,8 +58,12 @@ fn public_open() -> (Engine<Hyperliquid>, SocketId) {
     (engine, socket)
 }
 
-fn private_connecting_before_mode() -> (Engine<Hyperliquid>, SocketId, safe_cex_engine::HttpRequest)
-{
+fn private_connecting_before_mode() -> (
+    Engine<Hyperliquid>,
+    SocketId,
+    safe_cex_engine::HttpRequest,
+    safe_cex_engine::TimerId,
+) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
@@ -67,10 +71,11 @@ fn private_connecting_before_mode() -> (Engine<Hyperliquid>, SocketId, safe_cex_
     engine.start(1000.0);
     let mut socket = None;
     let mut mode = None;
+    let mut mode_timer = None;
     for _ in 0..20 {
         let actions: Vec<_> = engine.drain_actions().collect();
         if actions.is_empty() {
-            return (engine, socket.unwrap(), mode.unwrap());
+            return (engine, socket.unwrap(), mode.unwrap(), mode_timer.unwrap());
         }
         for action in actions {
             match action {
@@ -89,6 +94,12 @@ fn private_connecting_before_mode() -> (Engine<Hyperliquid>, SocketId, safe_cex_
                         other => panic!("unexpected pre-mode read {other}"),
                     };
                     support::reply(&mut engine, &request, 200, body);
+                }
+                Action::SetTimer {
+                    timer,
+                    at_ms: 7000.0,
+                } => {
+                    assert!(mode_timer.replace(timer).is_none());
                 }
                 Action::WsConnect {
                     socket: current,
@@ -374,7 +385,20 @@ fn private_reconnect_hands_subscriptions_off_before_account_refresh() {
             socket: replacement,
         },
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let mut actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
+        "refresh waits for the subscription batch handoff"
+    );
+    let wake = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 4000.0 => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(wake.1, Event::TimerFired { timer: wake.0 });
+    actions.extend(engine.drain_actions());
     let refresh = actions
         .iter()
         .position(|a| matches!(a, Action::Http(_)))
@@ -407,15 +431,16 @@ fn private_reconnect_hands_subscriptions_off_before_account_refresh() {
             _ => false,
         })
         .unwrap();
+    assert!(private.iter().all(|index| *index < public));
     assert!(
-        refresh < public,
-        "original native trace is private, HTTP, public"
+        public < refresh,
+        "reviewed handoff moves HTTP after public frames and real wake"
     );
 }
 
 #[test]
 fn unresolved_mode_does_not_park_the_native_open_refresh() {
-    let (mut engine, socket, _mode) = private_connecting_before_mode();
+    let (mut engine, socket, _mode, _mode_timer) = private_connecting_before_mode();
     engine.handle(2000.0, Event::WsOpened { socket });
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(a,
@@ -433,9 +458,16 @@ fn unresolved_mode_does_not_park_the_native_open_refresh() {
 
 #[test]
 fn mode_before_first_open_still_refreshes_spot_without_a_subscription() {
-    let (mut engine, _socket, mode) = private_connecting_before_mode();
+    let (mut engine, _socket, mode, mode_timer) = private_connecting_before_mode();
     support::reply(&mut engine, &mode, 200, "\"portfolioMargin\"");
     let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == mode_timer))
+    );
+    assert_eq!(engine.store().balance().total, 0.0);
+    assert_eq!(engine.store().balance().used, 0.0);
     assert!(actions.iter().any(|a| matches!(a,
         Action::Http(request) if support::kind(request) == "spotClearinghouseState")));
     assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
@@ -443,7 +475,7 @@ fn mode_before_first_open_still_refreshes_spot_without_a_subscription() {
 
 #[test]
 fn mode_while_closed_still_refreshes_spot_without_a_subscription() {
-    let (mut engine, socket, mode) = private_connecting_before_mode();
+    let (mut engine, socket, mode, mode_timer) = private_connecting_before_mode();
     engine.handle(2000.0, Event::WsClosed { socket, code: 1006 });
     engine.drain_actions().for_each(drop);
     engine.handle(
@@ -458,7 +490,117 @@ fn mode_while_closed_still_refreshes_spot_without_a_subscription() {
         },
     );
     let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == mode_timer))
+    );
+    assert_eq!(engine.store().balance().total, 0.0);
+    assert_eq!(engine.store().balance().used, 0.0);
     assert!(actions.iter().any(|a| matches!(a,
         Action::Http(request) if support::kind(request) == "spotClearinghouseState")));
     assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+}
+
+#[test]
+fn mode_after_open_clears_its_timer_then_hands_private_topics_off_before_spot_read() {
+    let (mut engine, socket, mode, mode_timer) = private_connecting_before_mode();
+    engine.handle(2000.0, Event::WsOpened { socket });
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        2001.0,
+        Event::HttpResponse {
+            request: mode.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "\"portfolioMargin\"",
+            },
+        },
+    );
+    let mut actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == mode_timer))
+    );
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(engine.store().balance().total, 0.0);
+    let private: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, a)| match a {
+            Action::WsSend { text, .. } => {
+                let value: serde_json::Value = serde_json::from_str(text).unwrap();
+                value["subscription"]["user"].is_string().then_some(index)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(private.len(), 10);
+    let wake = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 2001.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(2001.0, Event::TimerFired { timer: wake });
+    actions.extend(engine.drain_actions());
+    let (read_index, read) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(index, a)| match a {
+            Action::Http(request) if support::kind(request) == "spotClearinghouseState" => {
+                Some((index, request))
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(private.iter().all(|index| *index < read_index));
+    engine.handle(2002.0, Event::HttpResponse {
+        request:read.id,
+        response:Response { status:200, headers:"", body:r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"# },
+    });
+    assert_eq!(engine.store().balance().total, 1100.0);
+    assert_eq!(engine.store().balance().free, 1050.0);
+    engine.drain_actions().for_each(drop);
+    engine.handle(7000.0, Event::TimerFired { timer: mode_timer });
+    assert!(
+        !engine.drain_actions().any(|a| matches!(a, Action::Http(_))),
+        "retired mode timer is inert"
+    );
+}
+
+#[test]
+fn retired_mode_handoff_never_starts_its_spot_read() {
+    let (mut engine, socket, mode, _mode_timer) = private_connecting_before_mode();
+    engine.handle(2000.0, Event::WsOpened { socket });
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        2001.0,
+        Event::HttpResponse {
+            request: mode.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "\"portfolioMargin\"",
+            },
+        },
+    );
+    let wake = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 2001.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(2001.0, Event::WsClosed { socket, code: 1006 });
+    engine.drain_actions().for_each(drop);
+    engine.handle(2002.0, Event::TimerFired { timer: wake });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(engine.store().balance().total, 0.0);
 }
