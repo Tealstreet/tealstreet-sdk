@@ -287,3 +287,27 @@ Before source freeze, add controls for direct numeric/typed observer seal denial
 observer completion while an unrelated delivery marker remains held, observer
 expiry before Plan-timer return, non-Context membership refusal, and full-credit
 refusal/one-credit admission. Existing incoming group assertions stay unchanged.
+
+## Genuine-entry Preflight transaction
+
+`begin_preflight(policy)` consumes the same genuine callback loan as
+`admit_http_command(policy)`. It has no command-ID parameter. Extract the existing
+entry boundary once and keep its fresh-resource watermark, delivery exclusion,
+owner pruning, bound-before-issue ordering, typed rejection and lock cleanup
+unchanged. Its private issuer may retain a Preflight owner directly; do not mint
+an intermediate Context or copy entry state into the registry.
+
+Read rejection emits one failure without a write outcome; write rejection proves
+NotSent. Revoked means the loan was absent, previously used or burned, and emits
+no second terminal. Cached completion spends the loan. A Context and a Preflight
+cannot both be initial owners in one callback, including after terminal or
+rejection. Preserve every existing Context entry and retained-owner test.
+
+Before the API change, add genuine Engine callback regressions for start, timer,
+public feed and socket callbacks, opaque side effects, Context-first/Preflight-first
+ordering, cached terminal/remint and invalid-policy/capacity rejection. The
+baseline-only test adapter calls the old numeric API with command 7 and converts
+its error type; it creates no authority or notices. Its assertion failures must
+precede the signature change. Pure registry/state fixtures can call the private
+issuer explicitly; native flow fixtures and new consumer evidence must use the
+public genuine-entry operation.
