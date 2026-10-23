@@ -895,10 +895,15 @@ fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 42, .. })
+    )));
     assert!(
         !actions
             .iter()
-            .any(|action| matches!(action, Action::Http(_))),
+            .any(|action| matches!(action, Action::Http(request)
+                if request.method == first.method && request.url == first.url)),
         "an uncertain write must not be released a second time"
     );
     let failures: Vec<_> = actions
@@ -924,6 +929,16 @@ fn p0_write_unlisted_native_code_is_explicitly_unknown() {
         r#"{"code":987654,"msg":"unlisted native failure"}"#,
     );
     let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.method == first.method && request.url == first.url))
+    );
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 42, .. })
+    )));
     let failures: Vec<_> = actions
         .iter()
         .filter_map(|action| match action {
