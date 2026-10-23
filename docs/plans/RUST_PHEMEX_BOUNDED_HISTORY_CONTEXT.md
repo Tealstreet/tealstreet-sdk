@@ -63,8 +63,9 @@ starting work. Private credential availability precedes normal symbol/bounds
 validation. Lookup first checks client ID, then unknown market returns the
 non-definitive sentinel, before ordinary private checks. Input bounds are
 nonnegative safe integer milliseconds, ordered when both supplied. The native
-symbol accepts ASCII alphanumeric/underscore only. Private limits clamp 1..200;
-the public endpoint has no size parameter and refuses over 1000 tuples.
+symbol accepts ASCII alphanumeric/underscore only. Every query's output limit
+defaults to 100 and clamps 1..200, including public trades. The public endpoint
+has no size parameter and separately refuses over 1000 response tuples.
 
 Keep exact nanosecond division before conversion, millisecond filtering, current
 fill timestamp units, strict textual enums, fees, native quantities, closed-only
@@ -83,9 +84,14 @@ this slice, as are account repair, startup, trading and all sockets.
 ## Shared authority and prerequisites
 
 Use genuine admit_http_command with Operation::Read, a declared 20000 ms root,
-RetryPolicy::Never and the selected credential. Bind one original ReadCompletion;
-admit every streamed item and final payload through exact shared delivery
-validation before row mutation or terminal publication. There is one response,
+RetryPolicy::Never and the selected credential. Admit before history.active
+insertion or any deferral timer; rejected admission consumes no native slot.
+Bind one original ReadCompletion; admit every streamed item and final payload
+through exact shared delivery validation before row mutation or completion.
+The History delivery gate must precede common lib.rs response side effects,
+including 429 paused_until mutation and envelope-error routing. Terminal cleanup
+must match the retained root/generation before removing a reused numeric ID.
+There is one response,
 no command-wait propagation, group G1/G2, Plan, execution join or session owner.
 No #1945 stack, feature or root API is needed for this bounded slice.
 
@@ -95,7 +101,13 @@ timer, validate the original root when it wakes and never renew it or send after
 expiry. Queued cleanup is observed at that native wake; this plan does not claim
 an automatic exact-at-root queue timer. Record the bounded-wait change in CALLERS
 with implementation. Released/parked deadline failures and preparation/network
-errors keep their typed kind/metadata; do not infer type from text. Duplicate,
+errors preserve their typed kind/metadata; do not infer type from text. Native
+transport failures currently lose their type: Network/Timeout preservation is
+a new RED requirement. Non-lookup HistoryRows already enriches untyped errors
+to Internal; adopting ReadCompletion extends that enrichment to lookup errors,
+whose native numeric failure currently has no kind. Declare this caller delta
+with implementation and preserve all preexisting typed fields. Initial Read
+admission refuses InvalidInput/Internal with outcome None. Duplicate,
 foreign, late and reused-ID callbacks grant no row or completion authority.
 
 Ordinary GETs select Secondary when present, else Primary. Client-ID lookup is
@@ -123,8 +135,11 @@ do not add a fake Context, timer driver, issuer, signer or numeric fallback.
 Required original assertions: public/private/Primary-lookup paths expose managed
 preparation instead of physical I/O; preparation cannot release data or complete
 early; the original 20 s deadline and typed Timeout survive late/reused-ID input;
-network failures remain Network; exhausted shared Context capacity refuses the
-read before I/O. Count only compiled assertion failures as REDs, never fixture
+network failures retain Network; exhausted shared Context capacity refuses the
+read before I/O. Add actual native pause longer than 20 s, preparation parked
+across expiry, native16-slot recovery after terminal cleanup, and stale429 that
+cannot extend the pause. Expiry must neither send nor yield lookup absence.
+Count only compiled assertion failures as REDs, never fixture
 or compile failures. Preserve positive native controls for exact public tuple
 identities/values, strict malformed-after-valid streamed rows, private signing
 and Primary/Secondary selection, lookup absence, duplicates and active-capacity
