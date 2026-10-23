@@ -91,9 +91,16 @@ pub fn sign_digest(digest: &[u8], private_key: &str) -> Result<String, String> {
 }
 
 /// Pre-release check for a host/remote signature (P4): true only when the
-/// 65-byte r || s || v (v 0/1 or 27/28) over `digest` recovers to the bound
-/// actual signer. Callers never pass expected venue config here.
+/// 65-byte low-s r || s || v (v 0/1 or 27/28) over `digest` recovers to the
+/// bound actual signer. Callers never pass expected venue config here.
 pub fn signed_by(digest: &[u8], signature: &[u8], signer: &str) -> bool {
+    // secp256k1 n / 2: recovery normalizes s, but venues enforcing low-s would
+    // reject a malleated signature only after it was sent.
+    const HALF_ORDER: [u8; 32] = [
+        0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0x5d, 0x57, 0x6e, 0x73, 0x57, 0xa4, 0x50, 0x1d, 0xdf, 0xe9, 0x2f, 0x46, 0x68, 0x1b,
+        0x20, 0xa0,
+    ];
     let (Ok(digest), Ok(signer)) = (
         <[u8; 32]>::try_from(digest),
         signer.parse::<alloy_primitives::Address>(),
@@ -109,6 +116,7 @@ pub fn signed_by(digest: &[u8], signature: &[u8], signer: &str) -> bool {
         _ => return false,
     };
     body.len() == 64
+        && body[32..] <= HALF_ORDER[..]
         && alloy_primitives::Signature::from_bytes_and_parity(body, parity)
             .recover_address_from_prehash(&B256::from(digest))
             .is_ok_and(|recovered| recovered == signer)
@@ -189,6 +197,20 @@ mod tests {
                 "0x0000000000000000000000000000000000000001"
             ));
             assert!(!signed_by(&digest, &raw, "not an address"));
+            let mut invalid_v = raw.clone();
+            invalid_v[64] = 29;
+            assert!(!signed_by(&digest, &invalid_v, signer));
+            // The malleated twin (n - s, flipped parity) recovers the same signer.
+            let order = U256::from_str_radix(
+                "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+                16,
+            )
+            .unwrap();
+            let high = order - U256::from_be_slice(&raw[32..64]);
+            let mut malleated = raw.clone();
+            malleated[32..64].copy_from_slice(&high.to_be_bytes::<32>());
+            malleated[64] = 55 - raw[64];
+            assert!(!signed_by(&digest, &malleated, signer));
             let signature: alloy_primitives::Signature = signature.parse().unwrap();
             let recovered = signature
                 .recover_address_from_prehash(&B256::from(digest))

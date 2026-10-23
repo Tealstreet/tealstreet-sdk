@@ -454,19 +454,29 @@ pub fn fetch_public(
     {
         return Err(SignError::InvalidRequest);
     }
-    if !provider.immediate() {
-        return Err(SignError::Unavailable);
-    }
     let request = SignRequest {
         receipt: Default::default(),
         operations,
         context: Default::default(),
     };
+    // A malformed request is refused first, whatever provider would answer.
     request.validate()?;
+    if !provider.immediate() {
+        return Err(SignError::Unavailable);
+    }
     let mut result = provider
         .sign_ready(&request)
         .ok_or(SignError::Unavailable)??;
     request.validate_result(&result)?;
+    // Widths alone admit off-curve and non-canonical values from any provider.
+    if !request
+        .operations
+        .iter()
+        .zip(&result.values)
+        .all(|(operation, value)| safe_cex_crypto::signer::valid_public_value(operation, value))
+    {
+        return Err(SignError::InvalidResult);
+    }
     Ok(std::mem::take(&mut result.values))
 }
 

@@ -354,22 +354,28 @@ must never receive the key.
   `Secp256k1Digest` have no consumer and are deferred. Any other algorithm
   is `InvalidRequest`.
 - **Key typing.** A public operation is answered only for a ref that setup
-  policy or a role declares as an asymmetric key of exactly that algorithm.
+  policy declares as an asymmetric key of exactly that algorithm.
   The declaration is `IdentitySetupPolicy.signing_algorithm` (trusted family
   policy in `construction-rules.json`, never caller setup); #1899's `KeyUse`
-  only selects the ref. An HMAC or untyped ref, a credential, a passphrase or a
-  cross-slot ref is refused. Otherwise the result would be a stable
-  fingerprint of a secret. Role aliases are closed and listed: `l1Wallet`
-  and an EIP-191/EIP-712 `signing` ref are `Secp256k1Digest`, and
-  `zklinkSeed` answers nothing.
+  only selects the ref. An HMAC or undeclared ref, a credential, a passphrase
+  or an extra-role ref is refused. Otherwise the result would be a stable
+  fingerprint of a secret. Each slot's ref answers only for its own
+  declaration. There is no request-level expected-slot check, so two
+  separately declared slots may both be fetched. Replacing a ref's material
+  (`insert`) drops its declaration. Role refs declare nothing yet, and
+  `zklinkSeed` answers nothing. `l1Wallet` derivation (an EIP-191/EIP-712
+  `Secp256k1Digest` role) is held for P6b's own slice, which adds the role and
+  its declaration.
 - **Key forms.** Each algorithm reads the same installed form as its `Sign`
   arm:
   - `Secp256k1Digest`: raw 32 bytes;
   - `Ed25519`: 32-byte seed or the checked 64-byte keypair (#1948);
   - `StarkDigest`: the felt below the curve order.
   
-  Results are validated for canonical encoding, field bounds and on-curve
-  points, not only width.
+  The engine checks exact widths. `fetch_public`, the trusted setup boundary,
+  also checks every provider's answer semantically through the crypto crate:
+  a canonical, nonzero, on-curve Stark x and a decodable, non-weak Ed25519
+  point. The engine stays crypto-free.
 - **Mixed requests.** Public operations may share a request with
   `Sign`/`Present`/`Sha256`. Ordering, atomicity and dependencies are
   unchanged. P8 `remote` still requires exactly one `Sign`: a remote request
@@ -396,7 +402,8 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
   selector.
 - **Local provider.** Trusted setup calls
   `safe_cex_venues::fetch_public(provider, ops)`:
-  - public-only, bounded by op count;
+  - public-only, bounded by op count, and validated before any provider
+    check;
   - runs through `sign_ready`;
   - returns `Unavailable` without scheduling for a non-immediate provider.
 - **Two values, never merged.** The *expected* value is venue config:
@@ -440,7 +447,7 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
   GRVT and Polymarket), the family recovers the signer and compares it with
   the declared value *before* physical release, import or any private
   effect, in `SignStep::apply` or the P8 verifier, through the one shared
-  `safe_cex_crypto::ethereum::signed_by`. The engine has no crypto
+  `safe_cex_crypto::ethereum::signed_by` (low-s only, v 0/1 or 27/28). The engine has no crypto
   dependency, so the check cannot sit in dispatch itself. It compares only with the
   actual signer metadata, never the expected config. An actual-signer
   mismatch refuses with zero HTTP; this is never a post-send startup check. The comparison is
@@ -510,7 +517,9 @@ R1-R3 shapes above):
 - pre-release recovery wiring.
 
 The P8 remote-refusal test lands with #1926, where `bind` lives. The Ed25519
-keypair form arrives with #1948.
+keypair form arrives with #1948. P6b's `l1Wallet` role derivation is P6b's
+slice. This source does not prove the per-family pre-release enforcement or
+the compare-not-overwrite admission; each family conversion gates on those.
 
 **Architecture gate.** One shared provider operation and one setup channel
 for every family that needs a public value, with no venue derivation. The

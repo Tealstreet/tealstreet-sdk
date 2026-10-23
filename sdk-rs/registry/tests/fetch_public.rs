@@ -1,5 +1,5 @@
 //! P4 setup-time public fetch: public-only, bounded, inline providers only,
-//! and results held to the engine's exact widths.
+//! and results held to exact widths and to the curve, whatever the provider.
 #![cfg(feature = "dispatch-signing")]
 
 use std::sync::Arc;
@@ -10,10 +10,10 @@ use safe_cex_engine::signing::{
 };
 use safe_cex_venues::fetch_public;
 
-/// Answers every operation with `width` bytes and counts the calls it sees.
+/// Answers every operation with `value` and counts the calls it sees.
 struct Fixed {
     immediate: bool,
-    width: usize,
+    value: Vec<u8>,
     calls: AtomicUsize,
 }
 impl Signer for Fixed {
@@ -24,7 +24,7 @@ impl Signer for Fixed {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.immediate.then(|| {
             Ok(SignResult::new(
-                vec![vec![1; self.width]; request.operations.len()],
+                vec![self.value.clone(); request.operations.len()],
                 request.receipt,
             ))
         })
@@ -33,47 +33,104 @@ impl Signer for Fixed {
         panic!("setup fetch never schedules provider work")
     }
 }
-fn provider(immediate: bool, width: usize) -> (Arc<Fixed>, Provider) {
+fn provider(immediate: bool, value: Vec<u8>) -> (Arc<Fixed>, Provider) {
     let fixed = Arc::new(Fixed {
         immediate,
-        width,
+        value,
         calls: AtomicUsize::new(0),
     });
     (fixed.clone(), fixed)
 }
+fn key() -> KeyRef {
+    KeyRef("primary.signing".into())
+}
 fn address() -> Operation {
-    Operation::PublicAddress {
-        key: KeyRef("primary.signing".into()),
+    Operation::PublicAddress { key: key() }
+}
+fn public_key(algorithm: Algorithm) -> Operation {
+    Operation::PublicKey {
+        algorithm,
+        key: key(),
     }
+}
+fn hex32(value: &str) -> Vec<u8> {
+    let value = format!("{:0>64}", value.trim_start_matches("0x"));
+    (0..64)
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&value[i..i + 2], 16).unwrap())
+        .collect()
+}
+/// Independent public keys: Node/OpenSSL Ed25519 and starknet.js.
+fn vector(path: &str) -> Vec<u8> {
+    let corpus: serde_json::Value = serde_json::from_str(path).unwrap();
+    hex32(corpus["cases"][0]["publicKey"].as_str().unwrap())
+}
+fn ed25519_vector() -> Vec<u8> {
+    vector(include_str!(
+        "../../crypto/tests/fixtures/ed25519/node.json"
+    ))
+}
+fn stark_vector() -> Vec<u8> {
+    vector(include_str!(
+        "../../crypto/tests/fixtures/starknet/sdk.json"
+    ))
 }
 
 #[test]
-fn inline_provider_answers_exact_width_public_values() {
-    let (_, signer) = provider(true, 20);
+fn inline_provider_answers_exact_valid_public_values() {
+    let (_, signer) = provider(true, vec![1; 20]);
     assert_eq!(
         fetch_public(&signer, vec![address()]),
         Ok(vec![vec![1; 20]])
     );
-    let (_, signer) = provider(true, 32);
-    let stark = Operation::PublicKey {
-        algorithm: Algorithm::StarkDigest,
-        key: KeyRef("primary.signing".into()),
-    };
-    assert_eq!(fetch_public(&signer, vec![stark]), Ok(vec![vec![1; 32]]));
+    for (algorithm, value) in [
+        (Algorithm::Ed25519, ed25519_vector()),
+        (Algorithm::StarkDigest, stark_vector()),
+    ] {
+        let (_, signer) = provider(true, value.clone());
+        assert_eq!(
+            fetch_public(&signer, vec![public_key(algorithm)]),
+            Ok(vec![value])
+        );
+    }
 }
 
 #[test]
-fn wrong_width_results_are_invalid() {
-    let (_, signer) = provider(true, 32);
+fn malformed_provider_results_are_invalid() {
+    let mut identity = vec![0; 32];
+    identity[0] = 1;
+    for (operation, value) in [
+        (address(), vec![1; 32]),
+        (public_key(Algorithm::Ed25519), vec![1; 31]),
+        // The identity point decodes but has small order.
+        (public_key(Algorithm::Ed25519), identity),
+        (public_key(Algorithm::StarkDigest), vec![0; 32]),
+        // At or above the field modulus: not a canonical felt.
+        (public_key(Algorithm::StarkDigest), vec![0xff; 32]),
+    ] {
+        let (_, signer) = provider(true, value);
+        assert_eq!(
+            fetch_public(&signer, vec![operation.clone()]),
+            Err(SignError::InvalidResult),
+            "{operation:?}"
+        );
+    }
+    // An x with no curve point; crypto's tests pin the predicate against
+    // starknet-crypto's own refusal.
+    let off_curve = (1u8..=64)
+        .map(|x| hex32(&format!("{x:x}")))
+        .find(|x| !safe_cex_crypto::starknet::is_public_key(x))
+        .unwrap();
+    let (_, signer) = provider(true, off_curve);
     assert_eq!(
-        fetch_public(&signer, vec![address()]),
+        fetch_public(&signer, vec![public_key(Algorithm::StarkDigest)]),
         Err(SignError::InvalidResult)
     );
 }
 
 #[test]
 fn host_or_remote_provider_is_unavailable_without_any_provider_call() {
-    let (fixed, signer) = provider(false, 20);
+    let (fixed, signer) = provider(false, vec![1; 20]);
     assert_eq!(
         fetch_public(&signer, vec![address()]),
         Err(SignError::Unavailable)
@@ -82,25 +139,27 @@ fn host_or_remote_provider_is_unavailable_without_any_provider_call() {
 }
 
 #[test]
-fn only_bounded_public_only_requests_reach_the_provider() {
-    let (fixed, signer) = provider(true, 20);
-    let present = Operation::Present {
-        key: KeyRef("primary.credential".into()),
-    };
-    for operations in [
-        vec![],
-        vec![address(); 5],
-        vec![address(), present],
-        vec![Operation::PublicKey {
-            algorithm: Algorithm::Es256,
-            key: KeyRef("primary.signing".into()),
-        }],
-    ] {
-        assert_eq!(
-            fetch_public(&signer, operations),
-            Err(SignError::InvalidRequest)
-        );
+fn only_bounded_valid_public_only_requests_reach_any_provider() {
+    for immediate in [true, false] {
+        let (fixed, signer) = provider(immediate, vec![1; 20]);
+        let present = Operation::Present {
+            key: KeyRef("primary.credential".into()),
+        };
+        for operations in [
+            vec![],
+            vec![address(); 5],
+            vec![address(), present],
+            vec![public_key(Algorithm::Es256)],
+            vec![Operation::PublicAddress {
+                key: KeyRef(String::new()),
+            }],
+        ] {
+            assert_eq!(
+                fetch_public(&signer, operations),
+                Err(SignError::InvalidRequest),
+                "immediate={immediate}"
+            );
+        }
+        assert_eq!(fixed.calls.load(Ordering::SeqCst), 0);
     }
-    // Es256 has no public form yet; request validation refuses it first.
-    assert_eq!(fixed.calls.load(Ordering::SeqCst), 0);
 }

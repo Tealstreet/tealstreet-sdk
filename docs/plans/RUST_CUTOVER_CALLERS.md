@@ -5773,16 +5773,19 @@ conversions adopt them. Caller-visible changes:
   different algorithm from its primary.
 - **Only a declared ref answers.** A provider answers a public operation only
   for a ref that setup policy declared for exactly that algorithm. An HMAC,
-  undeclared, credential, passphrase, cross-slot or extra-role ref is refused,
-  so no secret is fingerprinted.
+  undeclared, credential, passphrase or extra-role ref is refused, so no
+  secret is fingerprinted. `LocalSigner::insert` drops a replaced ref's
+  declaration.
 - **`Operation` gains two variants.** Exhaustive matches on
   `safe_cex_engine::signing::Operation` outside this repo must add them.
   Injected providers may refuse them (`InvalidRequest`/`Unsupported`); result
   widths are exact (20-byte address, 32-byte Ed25519 key or Stark felt).
 - **`safe_cex_venues::fetch_public`.** Trusted setup asks a local provider
-  inline for public values: at most 4 public-only operations. A host or
-  remote provider gets `Unavailable` and nothing is scheduled. Those accounts
+  inline for public values: at most 4 public-only operations, validated first.
+  A host or remote provider gets `Unavailable` and nothing is scheduled. Every
+  answer is checked on the curve (Stark x, Ed25519 point), and a malformed one
+  is `InvalidResult`. Those accounts
   supply the value as bound account metadata instead.
 - **`safe_cex_crypto::ethereum::signed_by`.** A shared pre-release check that
-  a host/remote signature recovers to the bound actual signer. Families call
+  a low-s host/remote signature recovers to the bound actual signer. Families call
   it before release; it never compares with expected venue config.
