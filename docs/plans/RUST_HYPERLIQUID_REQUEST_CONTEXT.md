@@ -701,3 +701,19 @@ shared roots/expiry/row/terminal APIs, with no venue replacement policy.
 This receipt and caller default-stamp precision are documentation only.
 Replacement1976 integration, full provenance and fresh CI remain required
 before READY; no landing merge has been attempted.
+
+## Frozen replacement composition
+
+Plain mergef8098c527f2 consumes exact frozen #1976 replacement
+`a7d6f52f89a53b141cca6f54bca930c24b13c50c` on actual6c7f4fcf292. All six
+consumer source/test blobs are byte-exact to reviewed973162a489e/source06d057.
+README equals incoming; AUDITS/CALLERS/QUALITY retain incoming followed by each
+exact own suffix once. Bounded independent integration review is CLEAR: only11
+intended paths differ, foreign paths/maps are exact and the sole9F/11O prune is
+retained. Incoming signer-prerequisite whitespace remains unchanged.
+
+Fresh native568 Hyperliquid/Binance tests across45 targets, strict all-target/
+all-feature Clippy, scoped rustfmt, exact provenance and15 checker controls PASS
+on this composition. The previous foreign-prune provenance blocker is resolved.
+Exact-head CI remains required; this consumer lands only after #1976 and an
+explicit overseer window.
