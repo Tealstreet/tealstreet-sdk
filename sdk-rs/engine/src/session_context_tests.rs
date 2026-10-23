@@ -20,6 +20,7 @@ struct Probe {
     fact_on_failure: Fact,
     command_fact: Fact,
     classified: bool,
+    refusal: Option<&'static crate::classify::CodeTable>,
     finish_first: bool,
     retire_in_response: Option<Session>,
     facts: Vec<Result<(), Error>>,
@@ -36,6 +37,7 @@ impl Default for Probe {
             fact_on_failure: Fact::None,
             command_fact: Fact::None,
             classified: false,
+            refusal: None,
             finish_first: false,
             retire_in_response: None,
             facts: vec![],
@@ -95,7 +97,19 @@ impl Venue for Probe {
         if session && self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
-        if pending.0.operation() == Operation::Mutation && session && self.classified {
+        if pending.0.operation() == Operation::Mutation
+            && session
+            && let Some(table) = self.refusal
+        {
+            let native = crate::classify::Native {
+                code: crate::classify::NativeCode::Int(-2015),
+                message: "invalid API key",
+            };
+            self.facts.push(
+                cx.http_write_failure(&pending.0, table, Some(&native), "refused", None)
+                    .map(drop),
+            );
+        } else if pending.0.operation() == Operation::Mutation && session && self.classified {
             self.facts.push(
                 cx.http_write_fact(
                     &pending.0,
@@ -167,6 +181,21 @@ fn fact(fact: Fact) -> Option<WriteResult> {
         Fact::Rejected => Some(WriteResult::Rejected(VenueError::new("listen key refused"))),
     }
 }
+
+const fn refusing(verdict: crate::classify::Verdict) -> crate::classify::CodeTable {
+    crate::classify::CodeTable {
+        rows: &[],
+        success: &[],
+        unlisted: verdict,
+        status: &[],
+    }
+}
+const REFUSED: crate::classify::CodeTable = refusing(crate::classify::Verdict::Refused(
+    crate::ErrorKind::AuthInvalid,
+));
+const REFUSED_RESEND: crate::classify::CodeTable = refusing(
+    crate::classify::Verdict::RefusedResend(crate::ErrorKind::AuthInvalid),
+);
 
 fn engine() -> Engine<Probe> {
     let mut engine = crate::test_support::seeded_engine(Probe::default());
@@ -1170,4 +1199,34 @@ fn a_session_write_accepted_through_the_classifier_resolves_without_order_ids() 
             .session_context(&session, policy(Operation::Mutation)))
         .is_ok()
     );
+}
+
+#[test]
+fn a_classified_session_refusal_resolves_the_operation_without_a_resend_grant() {
+    for table in [&REFUSED, &REFUSED_RESEND] {
+        let mut engine = engine();
+        engine.venue.refusal = Some(table);
+        let session = open(&mut engine, false);
+        let token = session_write(&mut engine, &session, 1.);
+        let request = release(&mut engine, token, 2.);
+        engine.handle(
+            3.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 401,
+                    headers: "",
+                    body: "{\"code\":-2015}",
+                },
+            },
+        );
+        engine.drain_actions().for_each(drop);
+        assert_eq!(engine.venue.facts, [Ok(())]);
+        assert!(
+            with(&mut engine, 4., |cx| cx
+                .session_context(&session, policy(Operation::Mutation)))
+            .is_ok(),
+            "a definitive refusal resolves the operation"
+        );
+    }
 }
