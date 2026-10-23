@@ -51,7 +51,8 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
     if (value === 'true' && !offered) throw new Error(`${name} is not available on ${exchange}`);
     return value === 'true';
   };
-  const options = toggle('EXCHANGE_OPTIONS', metadata.supportsOptionsToggle);
+  const options =
+    toggle('EXCHANGE_OPTIONS', metadata.supportsOptionsToggle || metadata.optionsOnly) || Boolean(metadata.optionsOnly);
   const inverse = toggle('EXCHANGE_INVERSE', metadata.supportsInverseToggle);
 
   const secret = optional(env, 'EXCHANGE_API_SECRET');
