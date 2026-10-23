@@ -26,7 +26,7 @@ _spec.loader.exec_module(_request)
 tokens = _request.tokens
 
 # Venue-local key choice, evidence tagging and nonce allocation.
-VENUE_TERMS = {'read_credentials', 'ReadCredentials', 'tag_account_read', 'ethereum_agent', 'NONCES'}
+VENUE_TERMS = {'read_credentials', 'ReadCredentials', 'tag_account_read', 'ethereum_agent', 'NONCES', 'reserve_kraken_legacy'}
 NONCE_CALL = 'nonce::next'
 HOST_TERM = 'Method::Get'
 NATIVE_HOST = 'hosts/native/src/routing.rs'
