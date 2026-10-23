@@ -2,6 +2,7 @@ use super::{
     KrakenSpot, Pending,
     account::{Kind, order_kind},
 };
+use safe_cex_engine::history::{Completion, HistoryRows};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Outcome, Query, VenueError, model::*, num,
 };
@@ -430,15 +431,34 @@ impl KrakenSpot {
                 not_sent("Kraken Spot does not support this account setting")
                     .kind(ErrorKind::Unsupported),
             ),
-            Command::Query { command, query } => match query {
-                Query::OrderByClientId { .. } => {
-                    cx.done(*command, r#"{"found":false,"definitive":false}"#.into())
+            Command::Query { command, query } => {
+                let mut completion = Completion::new(*command);
+                match query {
+                    Query::OrderByClientId { .. } => {
+                        completion.finish(cx, Ok(r#"{"found":false,"definitive":false}"#.into()));
+                    }
+                    Query::PublicTrades { .. } => {
+                        completion.finish(
+                            cx,
+                            Err(
+                                VenueError::new("Kraken Spot public trades are not implemented")
+                                    .kind(ErrorKind::Unsupported)
+                                    .outcome(Outcome::NotSent),
+                            ),
+                        );
+                    }
+                    Query::Fills { .. } | Query::OrderHistory { .. } | Query::Income { .. } => {
+                        completion.incomplete(
+                            "history is INCOMPLETE: Kraken Spot adapter has no native history read",
+                        );
+                        HistoryRows::<()>::new(completion, |rows| {
+                            serde_json::to_string(rows)
+                                .map_err(|error| VenueError::new(error.to_string()))
+                        })
+                        .finish(cx, Ok(()));
+                    }
                 }
-                Query::PublicTrades { .. } => {
-                    cx.fail(*command, "Kraken Spot public trades are not implemented")
-                }
-                _ => cx.done(*command, "[]".into()),
-            },
+            }
             _ => return false,
         }
         true
