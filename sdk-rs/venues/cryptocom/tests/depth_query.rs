@@ -19,16 +19,21 @@ fn ask(e: &mut Engine<Cryptocom>, command: u32, symbol: &str, limit: Option<u32>
             limit,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(e, 1000.0);
+    let requests: Vec<_> = actions
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(packet) => Some(packet),
+            Action::SetTimer { .. } | Action::ClearTimer { .. } => None,
+            other => panic!("unexpected public depth action: {other:?}"),
+        })
+        .collect();
     assert_eq!(
-        actions.len(),
+        requests.len(),
         1,
         "one unsigned REST request, no startup/stream actions"
     );
-    let Action::Http(request) = actions.into_iter().next().unwrap() else {
-        panic!("REST query must dispatch")
-    };
-    request
+    requests.into_iter().next().unwrap()
 }
 fn reply(e: &mut Engine<Cryptocom>, request: &HttpRequest, status: u16, body: &str) -> Vec<Action> {
     reply_with_headers(e, request, status, "", body)

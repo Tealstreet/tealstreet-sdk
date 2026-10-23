@@ -4704,6 +4704,106 @@ Session upkeep and history retain their explicit legacy ownership and existing
 native retry/completion contracts. Hosted admission is disabled. These read
 adapters require no new caller option or persisted identity mapping.
 
+
+### Lighter managed candle reads
+
+For both `lighter` and `lighter-robinhood`, Rust `fetchOHLCV` and the REST
+fallback behind `listenOHLCV` use the engine managed preparation/binding/final
+claim path. Custom worker/hosted HTTP transports must implement `prepareHttp`;
+legacy `request()` alone cannot service these candle reads. Report route denial
+and preparation failure through the existing typed error path, without a legacy
+send fallback. Typed pre-send failures retain their kind and `notSent` outcome.
+
+A candle read has one original 20,000 ms raw upper bound including route
+preparation; a shorter host request timeout can shorten it. Streaming progress
+does not renew that bound. Expired/retired replies cannot complete a reused
+command ID or publish candles to a new subscription. Background failure retires
+its read, clears only the matching generation's in-flight flag, emits no command
+result and allows later fallback polling. Command failure rejects the existing
+OHLCV promise. Candle shapes, seconds timestamps, sorted results, interval/range
+validation and recovered-stream dominance remain unchanged.
+
+Chart callers and custom `RestTransportContext` adapters consuming
+`RustEngineExchange` must preserve typed failure propagation and cancellation
+through their existing worker/hosted round trip. This requires no caller method
+signature or chart data-shape change. Private Lighter requests, other public
+reads and native Schnorr/nonce ownership are separate migrations; this behavior
+does not establish NX adoption, deployment or live private connectivity.
+
+## Paradex independent public startup Read Contexts
+
+Paradex catalog `/markets` and ticker `/markets/summary?market=ALL` GETs use the
+shared managed preparation and final claim protocol. Custom transports must
+complete that handshake before delivering a response. Each independent startup
+attempt has one original 20-second bound covering preparation and HTTP; expiry,
+preparation denial and transport failure retire the attempt, preserve the current
+Store and schedule the existing startup Backoff. Late callbacks cannot publish.
+These background reads emit Warn diagnostics and no command result.
+
+Catalog publication still starts private initialization without waiting for the
+ticker seed. Native metadata/ticker shapes, row filtering, live ticker dominance,
+public feed policy and successful startup publication retain their contracts.
+The standard hosts already implement managed preparation. The tealstreet-next
+venue setup/load consumers continue reading the same Store events and fields;
+custom raw-HTTP transport adapters must implement the shared handoff.
+
+## Hyperliquid perps candle command ownership
+
+Perps FetchCandles, including HIP-3 markets and perps on an account with merged
+spot markets, enters shared command admission before interval, market or range
+validation. At exhausted capacity it receives the engine's correlated Internal
+failure with no financial outcome; it cannot retire another owner. With capacity,
+native validation messages and unclassified metadata remain. Standalone and
+merged spot candle commands retain their existing path in this area.
+
+The unsigned JSON POST keeps its native REST route, Content-Type, raw coin,
+field order, limit/time geometry and encounter-order candle output. Its original
+20-second deadline includes preparation and stream progress cannot extend it.
+Preparation failures preserve shared typed metadata (NotSent); released network
+or deadline failures retain Network/Timeout with no financial outcome. Native
+HTTP and malformed candle response errors remain unclassified. Failed stream
+prefixes never become a partial result, and stale or duplicate delivery cannot
+complete a reused command ID. SDK command/result shapes are unchanged; transport
+fixtures execute the existing shared Prepare/Bind/Claim contract.
+
+
+## Crypto.com standalone REST depth on managed HTTP
+
+`fetchOrderBook` for Rust Crypto.com uses the engine's prepared HTTP release
+contract, including unsigned public `credentialIntent`. Custom transports must
+provide preparation, binding and final synchronous claim/handoff; the legacy
+`request()` interface is not a fallback. Route preparation consumes the original
+20-second read budget. Success at or beyond that bound is suppressed, and one
+typed timeout settles the original owner; late or duplicate replies cannot settle
+a later reuse of the same numeric command ID. Typed route/setup refusal remains
+distinct from a network failure and supplies no account-credential evidence.
+
+The request remains one unsigned GET to the selected live/UAT host, with encoded
+symbol, fixed depth50 and no automatic retry. Native level order, exact price IDs,
+zero amounts, totals and result/error shapes retain their existing contract.
+HTTP/native error kinds, native code/message and bounded Retry-After remain
+available. Auth-looking public errors never invalidate account credentials;
+standalone results never change subscription books, tickers or account state.
+Worker/hosted callers preserve the typed error fields and surface one rejection;
+no signature change or NX adoption/deployment is implied by this adapter change.
+
+Crypto.com standalone depth now uses genuine engine command-entry admission
+before any transport work. An initial clock or resource-capacity rejection emits
+one typed failure with no write outcome, replacing the old pre-Context numeric
+NotSent fallback. Existing owners remain intact; a rejected new command ID can
+be reused later. Post-release read Network/Timeout behavior retains its existing
+NotSent declaration. No retry, payload or host transport contract changes.
+
+## BloFin candle command admission
+
+FetchCandles admits its original Read owner through the shared genuine command
+entry before market/interval preflight or managed HTTP. Initial capacity and
+invalid-clock refusals now carry the engine's typed reason and Read outcome
+convention; they emit exactly one failure without a fabricated Context or numeric
+fallback. A duplicate entry leaves the original preparation and completion
+authority intact. Existing market-before-interval validation, native candle
+request bytes, result sorting and preparation/release/expiry behavior remain.
+
 ## WEEX trusted passphrase setup and managed header declaration
 
 WEEX's trusted signer setup requires a passphrase for a complete private primary
