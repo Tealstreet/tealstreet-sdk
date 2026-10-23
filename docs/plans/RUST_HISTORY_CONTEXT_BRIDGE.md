@@ -66,39 +66,65 @@ a new authority implementation or converting Read ownership into a legacy owner.
 
 The common row/paging algorithm is shared, not copied into a second managed
 executor. Existing legacy stage/accept/fresh/advance signatures remain available
-only on the legacy authority instantiation. Read instantiations have checked
-variants taking `cx` and the exact page leg, returning `Result<_, Error>`:
+only on the legacy authority instantiation. A Read owner exposes one borrowed
+`admit(&mut self, cx: &Cx<P>, exact_page_leg: &Context) -> Result<Admission, Error>`
+guard for its row/cursor/range core. The guard validates
+`validate_read_http_delivery(original_root, leg)` once and holds the owner and
+immutable Cx borrow for the synchronous callback. Its mutators delegate to the
+same shared stage/fresh/admit/advance/coverage algorithms as legacy admission;
+there are no checked twins of every mutator and no alternate executor.
 
-- HistoryRows: stage, accept_page and coverage admission.
-- CursorHistory: fresh, stage, advance, advance_probe and advance_with_coverage.
-- RangeHistory: row/fact staging and every accept_page/where/coverage admission.
+An unguarded legacy admission method on a Read history is a compile error. The
+guard cannot move with the owner into the next Pending or outlive the callback.
+Record the page leg on the first page-mutating operation; a different leg cannot
+stage/admit a previous failed prefix or its identity/coverage state. Binding is
+per staged page, not per row. Clear it on validated admission, safe discard or
+stage restart. Safe discard removes only unvalidated staging and its leg binding.
+Native response validity is still a separate condition before accepting a page;
+existing native retry/fallback identity behavior must remain explicit.
 
-Each checked entry validates `validate_read_http_delivery(original_root, leg)`
-before changing staging, dedupe, accepted output, paging coverage or cursor
-state. Staged rows remember their page leg; a sibling/retry leg cannot admit a
-previous failed prefix. Safe discard removes only unvalidated staging and its
-leg binding. Native data validation still precedes admission. Retry/fallback
-identity semantics remain those documented by the existing cursor owner.
+Admission exists only inside a managed HTTP delivery callback, including its
+failure callback. Empty failed-alternative transitions (WOO/TxFlow patterns) use
+that failure delivery, not a later timer. Timer-resumed continuations do not
+advance a second time; terminal-from-timer uses only root completion validation.
+A denied admission changes no output, dedupe, page facts or coverage. It grants
+no native body truth, physical send or retry permission.
 
-Pure read-only inspection, request selection, safe discard and stage restart
-share the current algorithms. They do not confer publication/send rights or
-replace the retained root. Venue-native cache/Store publication outside the row
-owner must validate the same exact root/leg immediately before synchronous
-publication, and independently satisfy its native/freshness fences.
+Read-only inspection and pure request selection share the current algorithms.
+`step()` changes only selection bookkeeping; cursor/pages inspect it.
+`with_request_budget` is construction-only, before any fetch, as currently
+enforced. `restrict_active_range` is pre-send geometry selection, not response
+admission: its only production caller is Phemex income after step()->Fetch,
+clipping the selected padded interval to the caller's command end before
+income_send. Preserve its finite/narrowing-only/active/empty-staging invariants.
+Inputs must derive from command bounds or selected geometry, never native
+response data; any future response-derived restriction requires admit(). It may
+run while a previous callback selects its next request, which is still pre-send
+for that next leg. Managed prepare/claim remains the sole send authority.
 
-An alternative to audit before source is the earlier runtime-authority enum plus
-borrowed page guards. The preferred typed API makes use of an unguarded legacy
-admission method on a Read history a compile error, with no legacy footprint for
-managed-state flags. Do not implement both mechanisms. API review settles this
-choice before implementation; consumers must receive a concrete reviewed pin.
+Pure inspection/selection, safe discard and stage restart do not replace the
+root or confer publication/send rights. Venue-native cache/Store publication
+outside the row owner must validate the same exact root/leg immediately before
+synchronous publication, and independently satisfy native/freshness fences.
+
+Independent API review accepts sealed typed authority and legacy-default
+constructor compatibility, and recommends this single borrowed admission guard
+instead of checked twins. Only this mechanism will be implemented. Consumers
+receive a concrete reviewed API pin before adapting source.
 
 ## Finalization and error behavior
 
 Legacy finalization returns `()`, as before. Read finalization returns
 `Result<(), request_context::Error>` through the sealed authority's terminal
-result type. Caller ownership denial never retries numeric done/fail. The Read
-constructor and every terminal path use the shared read-root/read-companion
-checks, including typed failure, strict rejection and encoder failure.
+result type. A venue migrates its history owner as a whole; it does not mix
+legacy and Read terminal result types through an ad-hoc generic local adapter.
+A Read terminal Err is handled or deliberately ignored as ownership denial,
+never unwrap'd and never retried through numeric done/fail. The Read constructor uses the exact shared read-root check. Every terminal
+path explicitly calls validate_read_completion_context before done_context OR
+fail_context, including typed failure, strict rejection and encoder failure.
+Neither terminal API itself supplies the no-mutation read-companion check.
+A dedicated mixed-mutation failure-path control proves that a denied Read reject
+cannot consume the sibling mutation owner's terminal authority.
 
 Before a custom finalizer receives accepted rows, validate completion authority;
 a stale owner must not run a captured native-cache side effect. Immediately
@@ -152,7 +178,7 @@ private signer compatibility path is permitted to manufacture the proof.
 
 BingX history migration removes history callers of its temporary sign_http stage.
 The shared stage also serves listen-key POST/PUT upkeep, so final physical
-allowance removal additionally requires uufub4's background-session Context.
+allowance removal additionally requires claude-55ao7t's background-session Context.
 This bridge alone does not close that allowance, joined metadata completion,
 Plan legs, observer fan-out, legacy history inventory or NX deployment work.
 
@@ -171,3 +197,10 @@ No merge/proof status belongs in caller prose. Fresh CI/artifact proof binds the
 actual dependency pins; no historical acceptance is inherited. The owner grants
 a landing window, followed by announcement, fresh separate exact-scope guard,
 separate head-matched merge and actual-tree audit. No merge is authorized here.
+
+Session coordination confirmation (claude-55ao7t): history and listen-key
+callers have separate migrations; the physical legacy sign_http allowance is
+deleted only after both land, by whichever migration lands second. Session
+source stays outside this lane. Lighter additionally requires unchanged early
+input/keyless compatibility, strict account-auth/native-budget refusals after
+accepted rows, trade-to-funding stage baselines and zero-filtered-row failure.
