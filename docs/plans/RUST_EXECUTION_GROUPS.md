@@ -436,3 +436,44 @@ the BingX/WEEX signers), and a second production consumer. Consumers call
 existing or spent custody (no fresh first entry), so returning without a new
 terminal is correct (confirmed with uufub4).
 
+
+## Plan-backed executions (claude-fe7lgm, 2026-10-23)
+
+Branch `feat/rust-planned-execution`, stacked on the reviewed #1873 pin
+`2fe13f4d892`, behind `http-plans`. This implements the composition contract
+(full text on `feat/rust-hyro-execution`, cleared for API fit by uufub4).
+The three Plan extensions (reconciliation continuation, reconciliation resend
+grant, imported journal facts) and the intent ledger are separate follow-ups.
+
+- **Admission:** `Cx::begin_planned_execution(&preflight, steps, policy,
+  Window::UntilTerminal) -> (Plan, ExecutionHandle)`. It checks the
+  identities and one more registry slot than the Plan reserves (for the
+  execution root), then runs `admit_plan` unchanged, then commits the group.
+  A refusal leaves no Plan, group, root, identity or action. `BeforeRelease`
+  is refused: Plan slots do not report release to the group.
+- **Owner:** the founder's Plan is the one physical owner and journal. The
+  founder is not a group member; it completes through the Plan and cannot
+  detach. A retained Preflight has no deadline, so its bound is the Plan
+  root. The group's bound is that root, never renewed.
+- **Followers:** `join_execution` with their own genuine entry root, as for
+  ordinary executions. A Mutation follower may be mutation-declared because
+  it never holds a journal. Each follower's bound is `min(own, Plan root)`
+  and it expires on its own.
+- **Terminal:** `Cx::seal_plan` is the one funnel for `done_plan`,
+  `done_read_plan_after_data` and `fail_plan` (including expiry and failed
+  delivery). After the founder's seal it sweeps expired observers, then
+  seals the group once with the founder's projection. Each follower is
+  finished through `seal_projected`, which takes that projection verbatim:
+  an Unknown write stays Unknown, accepted IDs survive, and no empty
+  follower journal can rewrite the outcome. This hook moves into
+  hcmq3f's `commit_plan_terminal` when #1894 lands (agreed).
+- **Refusals:** `abort_execution` and `complete_execution` are refused on a
+  planned handle; `http_leg_context` under its root is refused, so the only
+  physical work is the Plan's slots. The group's own timer covers only
+  follower deadlines earlier than the root; the Plan's timer owns the root.
+
+Controls (`execution_planned_tests.rs`, original REDs `cac95ea3531`): one
+write serves founder and followers with one projection; an unresolved
+write projects Unknown to everyone; an early follower expiry leaves the
+write running; the root bounds every observer and is never renewed; no
+direct completion or extra leg; atomic refusal spends nothing.
