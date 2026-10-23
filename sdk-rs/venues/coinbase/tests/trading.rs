@@ -2276,3 +2276,92 @@ fn transient_then_mismatched_key_check_still_discovers_the_portfolio() {
     s.collect();
     assert!(!s.deactivated);
 }
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_mixed_cancel_keeps_successful_native_ids() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.command(Command::CancelOrders {
+        command: 721,
+        ids: vec!["one".into(), "two".into()],
+    });
+    let request = s.write();
+    assert!(request.url.ends_with("/batch_cancel"));
+    s.reply(request, 200, r#"{"results":[{"order_id":"one","success":true},{"order_id":"two","success":false,"failure_reason":"ORDER_NOT_FOUND"}]}"#);
+    let out: Vec<_> = s.e.drain_actions().collect();
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.method == safe_cex_engine::Method::Post
+            && (request.url.ends_with("/orders") || request.url.ends_with("/batch_cancel"))))
+    );
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed {
+                command: 721,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].message, "two: ORDER_NOT_FOUND");
+    assert!(!matches!(
+        failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected | safe_cex_engine::Outcome::NotSent)
+    ));
+    assert_eq!(
+        failures[0]
+            .partial
+            .as_ref()
+            .map(|partial| partial.order_ids.as_slice()),
+        Some(["one".to_owned()].as_slice())
+    );
+    assert!(!out.iter().any(|action| matches!(
+        action,
+        Action::Notice(safe_cex_engine::Notice::CommandDone { command: 721, .. })
+    )));
+}
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_duplicate_client_id_remains_unknown() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+    order.client_order_id = Some("stable-client".into());
+    s.command(Command::PlaceOrders {
+        command: 722,
+        orders: vec![order],
+    });
+    let request = s.write();
+    s.reply(request, 200, r#"{"success":false,"error_response":{"error":"DUPLICATE_CLIENT_ORDER_ID","new_order_failure_reason":"DUPLICATE_CLIENT_ORDER_ID"}}"#);
+    let out: Vec<_> = s.e.drain_actions().collect();
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.method == safe_cex_engine::Method::Post
+            && (request.url.ends_with("/orders") || request.url.ends_with("/batch_cancel"))))
+    );
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed {
+                command: 722,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].message,
+        "Coinbase placement rejected: DUPLICATE_CLIENT_ORDER_ID"
+    );
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(failures[0].partial.is_none());
+    assert!(!out.iter().any(|action| matches!(
+        action,
+        Action::Notice(safe_cex_engine::Notice::CommandDone { command: 722, .. })
+    )));
+}

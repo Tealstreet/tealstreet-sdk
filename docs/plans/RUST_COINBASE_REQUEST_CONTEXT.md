@@ -262,3 +262,10 @@ three independent reviews and exact-head CI remain the implementation gates.
 Architecture gate: No for native evidence/tests and shared API planning.
 Admission, credential/session authority, scheduling, retry and aggregation
 remain engine/provider concerns rather than a Coinbase substitute.
+
+Local plan/test evidence: 2 original-source controls compile and fail
+by the intended behavior assertions; normal venue suites pass
+(194 tests, 2 explicit ignored RED controls).
+Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
+pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
+controls expose defects; they are not GREEN adoption or P0 closure evidence.
