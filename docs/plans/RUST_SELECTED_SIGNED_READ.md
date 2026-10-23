@@ -35,24 +35,22 @@ roles at each call site, not a lookup on the method.
 
 ## Design
 
-**Engine (one addition, built on `SelectedRead`, with no parallel path):**
+**Engine (one addition to `SelectedRead`; no new `Cx` method).** claude-ddi2il
+ruled that venues call `SelectedRead` (#1962) directly, so there is a single
+venue-facing entry.
 
 - **`SelectedRead::scoped(cx, selected, scope, policy)`**: issues under an
-  existing `Scope::Command(id)` (or `Background`) through `http_context`. It
-  is the missing third admission, alongside `command` (entry root) and
-  `background`. `background` becomes `scoped(.., Scope::Background, ..)`.
-- **`Cx::request_signed_read(selected, admission, policy, request, recipe,
-  pending)`**: the one-call form. It selects, admits (entry, scoped or
-  background), queues and streams, then tags account-read evidence through
-  the `Selection`.
-  - It returns the `RequestId`, or a typed refusal carrying the pending value
-    back, with `Outcome::NotSent`.
-  - It is a composition of `SelectedRead`, which stays the API for multi-step
-    reads (retry).
-  - Venues no longer write a Read `Policy`, a slot or a NotSent mapping.
-- The refusal is the engine's NotSent "managed read lifecycle is
-  unavailable", carrying the venue name the caller supplies. Native error
-  texts stay byte-identical.
+  existing `Scope::Command(id)` through `http_context`. It is the missing
+  third admission, alongside `command` (entry root) and `background`.
+  `background` keeps its signature and delegates to the same issuance with
+  `Scope::Background`.
+- Queueing, streaming, account-read evidence and retry stay with
+  `AdmittedRead::queue` and `AdmittedRead::retry`, unchanged. Venues no longer
+  write a Read `Policy` by hand or pick a slot; they pass a `ReadPolicy`.
+- Refusals stay typed (`CredentialUnavailable`, admission `Error`, or the
+  `(pending, Error)` from `queue`). Each venue maps them to its existing
+  NotSent "managed read lifecycle is unavailable" text, so native error texts
+  stay byte-identical.
 
 **Venues (cutover, with no dual path):**
 
@@ -65,13 +63,14 @@ roles at each call site, not a lookup on the method.
   `AccountReadScope`. No call site changes slot. The method parameter
   disappears from selection.
 - **BingX.**
-  - `managed::read` and `managed::queue` → `cx.request_signed_read`.
+  - `managed::read` and `managed::queue` → `SelectedRead::background` or
+    `SelectedRead::scoped` (candles), then `AdmittedRead::queue`.
   - `managed::retry` → `AdmittedRead::retry`.
   - `account::tag_read(.., method, ..)` → the Selection's evidence.
   - `managed.rs` keeps only `session_write`, plus `finish` if it is still
     shared.
 - **WEEX.**
-  - Leverage → `cx.request_signed_read` (scoped).
+  - Leverage → `SelectedRead::scoped`, then `AdmittedRead::queue`.
   - Identity → `SelectedRead::command` (entry root), removing the inline
     copy.
   - `Credentials::select(method)` is deleted.
@@ -83,11 +82,11 @@ roles at each call site, not a lookup on the method.
 ## REDs (each shown failing first)
 
 - R1 (engine): `SelectedRead::scoped` issues under `Command(id)` with the
-  Selection's slot and egress. Today there is no such admission (a compile
-  RED, so it is shown through `request_signed_read`'s missing method).
-- R2 (engine): `request_signed_read` refuses NotSent and returns the pending
-  value when admission or queueing is refused; it emits no HTTP and settles
-  no command.
+  Selection's slot and egress, and a queued read tags the Selection's
+  evidence. Today there is no such admission (a compile RED).
+- R2 (engine): `scoped` refuses a missing selection or a refused admission
+  without issuing a context, emitting HTTP or settling the command. The
+  caller keeps its pending value.
 - R3 (BingX): the wire is byte-identical (URL, headers, signature) for
   account, daily, premium and candle reads, with the read key, the primary
   key, and the read key without a primary (refused, as today). The account
@@ -104,8 +103,8 @@ Branch `feat/rust-selected-signed-read`, off tip `ba3d7da1d3a`. One draft PR:
 engine helper, then BingX, then WEEX, in separate commits. claude-4yjlw0
 reviews the venue cutover. codex-uufub4 reviews the engine API fit. Each
 change gets an independent review answering "per-venue fix of a cross-cutting
-concern?". OKX, Bitget and KuCoin adopt `request_signed_read` in their own
-PRs after this lands.
+concern?". OKX, Bitget and KuCoin adopt `SelectedRead` in their own PRs after
+this lands.
 
 **Coordination** (from claude-4yjlw0):
 - **claude-4yjlw0's #1884** (BingX paired metadata, draft) changes BingX
@@ -113,14 +112,8 @@ PRs after this lands.
   second PR to land rebases its call sites onto the other.
 - **codex-cxxyqr's WEEX `send_account` plan** (`f52fd9d00be`, REDs
   `0fefb4e6c1e`) adds a Background read path in WEEX `account.rs`/`lib.rs`.
-  It should route through `request_signed_read`, not a revived
+  It should route through `SelectedRead`, not a revived
   `managed.rs`. We agree on the order before either lands.
 - **OKX account cycle** (claude-4yjlw0) needs Background reads per physical
   page. `SelectedRead::background` keeps its signature and stays usable as one
   `AdmittedRead` per page; `scoped` only adds the Command-scope form.
-
-**Open for claude-ddi2il:** the request named `cx.request_signed_read`.
-`SelectedRead` already is the lifted wrapper, so the new name is only the
-one-call composition over it, not a second helper. If you would rather
-venues call `SelectedRead` directly, drop the `Cx` method; the venue cutover
-is the same either way.
