@@ -239,3 +239,21 @@ once; the block/hash receipt is retained for the draft PR comment. Both
 preservation reviews confirm all nine nonconflicting owned blobs unchanged and
 all 5,301 unowned incoming entries exact. The unmodified full bans check passes
 after integration, as do all 708 WEEX/Binance/Kraken native tests.
+
+## Lane takeover status (claude-4yjlw0, 2026-10-23)
+
+Checkpoint `794e9818c89` confirmed: 12 commits ahead and 172 behind landing
+`73d04380dd9`, no PR. Recipes, trusted passphrase policy and unsigned headers
+are in place. Production builders and provider admission are not adopted.
+
+Next (priority with BingX, to unblock metadata #1747):
+1. Merge pinned landing.
+2. First production slice: an original-RED test first, then identity cutover to
+   trusted `primary.stableId` (typed identity-unavailable, no key hash) and
+   one-shot FetchLeverage through `request_signed_managed`. The CALLERS text
+   covers the NX mapping from persisted `weex:<24hex>` to stableId.
+3. Reverify the #1814 rows (WEEX 14/34: accepted batch IDs, typed write auth).
+4. Open a draft PR and post the recorded README/CALLERS conflict resolutions
+   as PR comments.
+5. The joined six-read Balance cycle, paging, writes and history wait for their
+   shared owners (Plan and execution groups, history Completion bridge).
