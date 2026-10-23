@@ -5,6 +5,7 @@ mod history;
 mod identity;
 mod paths;
 mod reads;
+mod session;
 mod sign;
 pub use sign::hosted_signing;
 mod trading;
