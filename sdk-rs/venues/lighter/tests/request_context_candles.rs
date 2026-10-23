@@ -502,7 +502,13 @@ fn duplicate_live_command_entry_cannot_replace_its_original_candle_owner() {
     fetch(&mut engine, NOW, 700);
     let (original, _) = preparation(&engine.drain_actions().collect::<Vec<_>>());
     fetch(&mut engine, NOW + 1., 700);
-    assert!(engine.drain_actions().next().is_none());
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Notice(Notice::Event(event))]
+            if event.code == safe_cex_engine::log::code::COMMAND_DUPLICATE
+    ));
+    assert!(terminal(&actions, 700).is_empty());
     let request = release(&mut engine, original, NOW + 2.);
     reply_at(&mut engine, NOW + 3., &request, 200, CANDLES);
     assert!(matches!(
