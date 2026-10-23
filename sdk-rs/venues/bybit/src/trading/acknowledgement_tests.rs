@@ -45,8 +45,8 @@ fn a_single_identity_needs_its_bounded_id_and_consistent_echoes() {
     let (result, _) = success(r#"{"retCode":0,"result":{"orderId":"n1","orderLinkId":"c1"}}"#);
     assert_eq!(created(result, Some("c1")), Ok("n1".into()));
     assert_eq!(created(result, Some("other")), Err(Malformed));
-    // An echo the request never sent is not this order's identity.
-    assert_eq!(created(result, None), Err(Malformed));
+    // A single create names one order; an unrequested echo is harmless.
+    assert_eq!(created(result, None), Ok("n1".into()));
     let (bare, _) = success(r#"{"retCode":0,"result":{"orderId":"n1"}}"#);
     assert_eq!(created(bare, Some("c1")), Ok("n1".into()));
     assert_eq!(targeted(result, "n1"), Ok(()));
@@ -92,6 +92,11 @@ fn created_rows_match_by_count_echo_and_unique_ids() {
         r#"{"retCode":0,"result":{"list":[{"orderId":"n1"},{"orderId":"n1"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
     );
     assert_eq!(created_rows(twice, twice_ext, &[None, None]), Err(Malformed));
+    // A refused row that names an order may have placed it.
+    let (named, named_ext) = success(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"n1"}]},"retExtInfo":{"list":[{"code":110007,"msg":"no balance"}]}}"#,
+    );
+    assert_eq!(created_rows(named, named_ext, &[None]), Err(Malformed));
     for body in [
         r#"{"retCode":0,"result":{"list":[["n1","c1"]]},"retExtInfo":{"list":[{"code":0}]}}"#,
         r#"{"retCode":0,"result":{"list":[{"orderId":"n1","orderLinkId":"c1"}]},"retExtInfo":{"list":[[0,"OK"]]}}"#,
@@ -183,6 +188,27 @@ fn cancel_all_needs_object_rows_and_a_successful_flag() {
         let (result, _) = success(body);
         assert_eq!(cancelled_all(result), Err(Malformed), "{body}");
     }
+}
+
+#[test]
+fn a_whole_refusal_carrying_rows_of_any_shape_contradicts_itself() {
+    for body in [
+        r#"{"retCode":10004,"result":[{"orderId":"x"}]}"#,
+        r#"{"retCode":10004,"result":{"list":[{"orderId":"x"}]}}"#,
+        r#"{"retCode":10004,"retExtInfo":{"list":[{"code":0}]}}"#,
+        r#"{"retCode":10004,"retExtInfo":[{"code":0}]}"#,
+    ] {
+        let Ok(Answer::Refused { result, ext, .. }) = answer(body) else {
+            panic!("{body}");
+        };
+        assert!(carries_rows(result, ext), "{body}");
+    }
+    let Ok(Answer::Refused { result, ext, .. }) =
+        answer(r#"{"retCode":10004,"result":{},"retExtInfo":{}}"#)
+    else {
+        panic!()
+    };
+    assert!(!carries_rows(result, ext));
 }
 
 #[test]

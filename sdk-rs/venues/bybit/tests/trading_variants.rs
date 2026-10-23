@@ -125,6 +125,15 @@ fn place(h: &mut Harness, command: u32, orders: Vec<PlaceOrderOpts>) {
 fn body(request: &HttpRequest) -> &str {
     request.body.as_deref().unwrap()
 }
+/// D2: an absent-order answer is no Cancelled transition; the engine's one
+/// reconcile order read decides. Answer it (empty: the rows are gone).
+fn answer_reconcile(h: &mut Harness) {
+    assert!(h.has_request("/v5/order/realtime"), "one reconcile read");
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+}
+
 fn resolve_mode(h: &mut Harness, symbol: &str) {
     h.respond(
         "/v5/position/list",
@@ -1526,9 +1535,11 @@ fn demo_cancel_ack_fences_in_flight_order_snapshot_at_same_clock() {
             _ => r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
         };
         h.reply(cancel.id, 200, reply);
+        // D2: an absent-order answer waits for the reconcile read below.
+        let retired_by_ack = !matches!(mode, "rejected" | "already-gone");
         assert_eq!(
             h.engine.store().order("canceled").is_none(),
-            mode != "rejected",
+            retired_by_ack,
             "{mode}"
         );
         h.reply(
@@ -1539,7 +1550,7 @@ fn demo_cancel_ack_fences_in_flight_order_snapshot_at_same_clock() {
         h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
         assert_eq!(
             h.engine.store().order("canceled").is_none(),
-            mode != "rejected",
+            retired_by_ack,
             "{mode}: old snapshot reopened canceled order"
         );
         assert_eq!(
@@ -2037,6 +2048,11 @@ fn ordinary_gateway_already_gone_text_cannot_authorize_cancellation_effects() {
             !h.has_request("/v5/order/cancel"),
             "no automatic cancel replay"
         );
+        if status == 200 {
+            // D2: only the reconcile read, never the answer, retires the row.
+            answer_reconcile(&mut h);
+            assert!(h.engine.store().order("kept").is_none());
+        }
     }
     assert_eq!(
         observed,
@@ -2045,7 +2061,7 @@ fn ordinary_gateway_already_gone_text_cannot_authorize_cancellation_effects() {
             (500, 0, true, Some(Outcome::Unknown), true),
             (408, 110001, true, Some(Outcome::Unknown), true),
             (500, 110001, true, Some(Outcome::Unknown), true),
-            (200, 110001, false, None, false),
+            (200, 110001, true, None, false),
         ],
         "gateway status dominates benign text; only a definitive native response may cancel",
     );
@@ -2328,6 +2344,8 @@ fn managed_cancel_benign_native_refusal_keeps_valid_target_echoes() {
     });
     let cancel = h.take("/v5/order/cancel-batch");
     h.reply(cancel.id,200,r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel","result":{"list":[{"orderId":"one"},{"orderId":"two"}]}}"#);
+    assert!(h.engine.store().order("one").is_some(), "no local Cancelled transition");
+    answer_reconcile(&mut h);
     assert!(h.engine.store().order("one").is_none());
     assert!(h.engine.store().order("two").is_none());
     assert_eq!(h.result(99), Some(&Ok("[]".into())));
@@ -2467,6 +2485,8 @@ fn managed_cancel_code_reply(body: &str, accepted: bool) {
     });
     h.respond("/v5/order/cancel-batch", 200, body);
     if accepted {
+        assert_eq!(h.engine.store().order("kept"), Some(&before), "no local transition");
+        answer_reconcile(&mut h);
         assert!(h.engine.store().order("kept").is_none());
         assert_eq!(h.result(104), Some(&Ok("[]".into())));
         assert!(!h.unknown.contains(&104));
@@ -3018,4 +3038,45 @@ fn managed_preflight_signature_retry_keeps_its_native_physical_deadline() {
     );
     assert_eq!(h.result(116), Some(&Ok(r#"["after-read-retry"]"#.into())));
     assert!(!h.unknown.contains(&116));
+}
+
+// The legacy pipeline has no engine deadline (the host owns its timeout), so
+// these also prove the controls above run on the managed Plan path.
+#[test]
+fn managed_write_window_expiry_without_a_reply_is_unknown_and_never_resent() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, 117, vec![order("BTCUSDT", 0.1)]);
+    let create = h.take("/v5/order/create");
+    assert_eq!(create.timeout_ms, Some(20_000));
+    h.advance(19_999.);
+    assert_eq!(h.result(117), None, "the native window is still open");
+    h.advance(2.);
+    assert!(h.result(117).expect("the window expired").is_err());
+    assert!(h.unknown.contains(&117));
+    assert!(!h.has_request("/v5/order/create"), "never resent");
+    // A late answer after expiry cannot reopen the command.
+    h.reply(create.id, 200, r#"{"retCode":0,"result":{"orderId":"late"}}"#);
+    assert!(h.engine.store().order("late").is_none());
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 117).count(), 1);
+}
+
+#[test]
+fn managed_mode_read_window_expiry_fails_not_sent_before_any_write() {
+    let mut h = ready(Variant::Linear);
+    place(&mut h, 118, vec![order("BTCUSDT", 0.1)]);
+    let read = h.take("/v5/position/list?category=linear&symbol=BTCUSDT");
+    assert_eq!(read.timeout_ms, Some(20_000));
+    h.advance(20_001.);
+    assert!(h.result(118).expect("the read window expired").is_err());
+    assert!(
+        h.outcomes
+            .contains(&(118, Some(safe_cex_engine::Outcome::NotSent)))
+    );
+    assert!(!h.has_request("/v5/order/create-batch"));
+    h.reply(
+        read.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+    );
+    assert!(!h.has_request("/v5/order/create-batch"), "a late read plans nothing");
 }

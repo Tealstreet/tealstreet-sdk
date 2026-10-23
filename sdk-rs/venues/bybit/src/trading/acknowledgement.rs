@@ -199,10 +199,11 @@ fn echo_matches(echo: Option<String>, sent: Option<&str>) -> bool {
     }
 }
 
-/// `/v5/order/create`: the native order ID and a consistent client echo.
+/// `/v5/order/create`: the native order ID, and the client echo when one was
+/// sent. A single create names one order, so an unrequested echo is harmless.
 pub(crate) fn created(result: Option<&RawValue>, order_link_id: Option<&str>) -> Result<String, Malformed> {
     let row: Identity = object(result.ok_or(Malformed)?)?;
-    if !echo_matches(row.order_link_id, order_link_id) {
+    if order_link_id.is_some() && !echo_matches(row.order_link_id, order_link_id) {
         return Err(Malformed);
     }
     native_id(row.order_id)
@@ -226,7 +227,7 @@ pub(crate) fn created_rows(
     ext: Option<&RawValue>,
     order_link_ids: &[Option<&str>],
 ) -> Result<Vec<Row>, Malformed> {
-    let rows = rows(result, ext, order_link_ids.len(), true, |index, row| {
+    let rows = rows(result, ext, order_link_ids.len(), true, true, |index, row| {
         let row = row.ok_or(Malformed)?;
         if !echo_matches(row.order_link_id, order_link_ids[index]) {
             return Err(Malformed);
@@ -256,7 +257,7 @@ pub(crate) fn cancelled_rows(
     ext: Option<&RawValue>,
     order_ids: &[&str],
 ) -> Result<Vec<Row>, Malformed> {
-    rows(result, ext, order_ids.len(), false, |index, row| {
+    rows(result, ext, order_ids.len(), false, false, |index, row| {
         let Some(row) = row else {
             return Ok(order_ids[index].to_owned());
         };
@@ -306,12 +307,14 @@ pub(crate) fn cancelled_one(
 
 /// Pair each status with its result row. A refused row may carry an empty
 /// identity; an accepted one must prove its target through `accept`. With
-/// `required`, the result list must be present.
+/// `required`, the result list must be present; with `anonymous_refusals`, a
+/// refused row naming an order contradicts itself (a create that may exist).
 fn rows(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
     expected: usize,
     required: bool,
+    anonymous_refusals: bool,
     mut accept: impl FnMut(usize, Option<Identity>) -> Result<String, Malformed>,
 ) -> Result<Vec<Row>, Malformed> {
     let list = match result {
@@ -337,6 +340,11 @@ fn rows(
         .map(|(index, status)| (index, results.as_mut().and_then(Iterator::next), status))
         .map(|(index, row, status)| match code(status.code)? {
             0 => accept(index, row).map(Row::Accepted),
+            _ if anonymous_refusals
+                && row.is_some_and(|row| non_empty(row.order_id).is_some()) =>
+            {
+                Err(Malformed)
+            }
             code => Ok(Row::Refused {
                 code,
                 message: status.msg.unwrap_or_default(),
@@ -383,10 +391,24 @@ pub(crate) fn evidence_ids(result: Option<&RawValue>) -> Vec<String> {
 /// `retExtInfo.list` with at least one element), which contradict a whole one.
 pub(crate) fn carries_rows(result: Option<&RawValue>, ext: Option<&RawValue>) -> bool {
     [result, ext].into_iter().flatten().any(|raw| {
-        object::<List<'_>>(raw).is_ok_and(|list| {
-            serde_json::from_str::<Vec<&RawValue>>(list.list.get()).map_or(true, |rows| !rows.is_empty())
-        })
+        // Anything but an object (an array of rows, a scalar) is no whole refusal.
+        !is_object(raw)
+            || object::<List<'_>>(raw).is_ok_and(|list| {
+                serde_json::from_str::<Vec<&RawValue>>(list.list.get())
+                    .map_or(true, |rows| !rows.is_empty())
+            })
     })
+}
+
+/// A margin refusal's native reasons, joined, when they are well-formed text.
+pub(crate) fn margin_reasons(result: Option<&RawValue>) -> Option<String> {
+    let reasons: MarginReasons<'_> = object(result?).ok()?;
+    let reasons: Vec<MarginReason> = objects(reasons.reasons?).ok()?;
+    let text: Vec<String> = reasons
+        .into_iter()
+        .filter_map(|reason| non_empty(reason.reason_msg))
+        .collect();
+    (!text.is_empty()).then(|| text.join(", "))
 }
 
 /// `/v5/account/set-margin-mode`: `true` is proven success (no reasons). A

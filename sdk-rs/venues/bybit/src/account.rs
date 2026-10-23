@@ -2718,9 +2718,10 @@ impl BybitLinear {
         {
             cx.store.set_orders(cx.store.orders().to_vec());
         }
-        // A committed fresh read clears the engine's uncertain-write fence once
-        // no product's order read is still out.
-        if self.account.orders.is_none()
+        // A committed, wholly admitted fresh read clears the engine's
+        // uncertain-write fence once no product's order read is still out.
+        if !join.rejected.any()
+            && self.account.orders.is_none()
             && self
                 .products
                 .iter()

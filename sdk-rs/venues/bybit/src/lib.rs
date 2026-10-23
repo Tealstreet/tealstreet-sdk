@@ -394,7 +394,7 @@ fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
         .max(http_pause)
 }
 
-fn signing_rejection(code: i64, message: &str) -> Option<String> {
+pub(crate) fn signing_rejection(code: i64, message: &str) -> Option<String> {
     let reason = if code == 10004 || message.to_ascii_lowercase().contains("error sign") {
         "request signature rejected"
     } else if code == 10002 || message.to_ascii_lowercase().contains("recv_window") {
@@ -2159,6 +2159,21 @@ impl Venue for BybitLinear {
         self.ordinary_reconciliation(pending)
     }
 
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending.then {
+            Then::Ordinary(request) => self.on_ordinary_leg_failed(cx, request, error),
+            then => self.on_request_failed(
+                cx,
+                Pending {
+                    category: pending.category,
+                    rest: pending.rest,
+                    then,
+                },
+                &error.message,
+            ),
+        }
+    }
+
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_ordinary(cx);
     }
@@ -2391,8 +2406,10 @@ impl Venue for BybitLinear {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        // The engine seals an ordinary preflight or plan on its own refusals.
-        if matches!(pending.then, Then::Ordinary(_)) {
+        // The engine seals an ordinary preflight or plan unless an
+        // independent-order leg retires alone.
+        if let Then::Ordinary(request) = pending.then {
+            self.on_ordinary_leg_failed(cx, request, error);
             return;
         }
         if pending.rest.resent {
@@ -2419,7 +2436,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if matches!(pending.then, Then::Ordinary(_)) {
+        if let Then::Ordinary(request) = pending.then {
+            let error = VenueError::new(error).outcome(safe_cex_engine::Outcome::Unknown);
+            self.on_ordinary_leg_failed(cx, request, error);
             return;
         }
         if matches!(&pending.then, Then::RefreshMarkets(_)) {

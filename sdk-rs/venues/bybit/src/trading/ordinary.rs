@@ -516,14 +516,9 @@ impl BybitLinear {
         };
         let context = match leg.intent {
             LegIntent::Setting => cx.plan_leg_context_with_intent(&run.plan, &slot, Intent::Setting),
-            _ => cx.plan_leg_context(&run.plan, &slot),
+            LegIntent::ProtectionCancel => cx.plan_protection_cancel_leg_context(&run.plan, &slot),
+            LegIntent::Command => cx.plan_leg_context(&run.plan, &slot),
         };
-        let context = context.and_then(|context| {
-            if leg.intent == LegIntent::ProtectionCancel {
-                cx.http_write_protection_cancel_leg(&context)?;
-            }
-            Ok(context)
-        });
         let Ok(context) = context else {
             let _ = cx.fail_plan(&run.plan, internal("Bybit trading plan refused its next leg"));
             return;
@@ -659,6 +654,8 @@ impl BybitLinear {
         let mode = match ack::answer(response.body) {
             Ok(Answer::Success { result, .. }) => ack::position_mode(result, &symbol).map_err(not_sent),
             Ok(Answer::Refused { code, message, .. }) => {
+                // Signature diagnostics can contain the complete signed origin.
+                let message = crate::signing_rejection(code, &message).unwrap_or(message);
                 let native = Native {
                     code: NativeCode::Int(code),
                     message: &message,
@@ -812,6 +809,44 @@ impl BybitLinear {
         self.continue_ordinary(cx, id, entry);
     }
 
+    /// A leg the engine failed before or after release (provider refusal,
+    /// transport loss). Independent orders of one batch (`continue_on_error`)
+    /// retire only that leg and continue; otherwise the engine seals the plan.
+    pub(crate) fn on_ordinary_leg_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        let Some(mut entry) = self.trading.ordinary.remove(&request.command) else {
+            return;
+        };
+        let Stage::Plan(run) = &mut entry.stage else {
+            self.trading.ordinary.insert(request.command, entry);
+            return;
+        };
+        let matches = run
+            .active
+            .as_ref()
+            .is_some_and(|active| active.context == request.context);
+        if !matches || !run.continue_on_error {
+            self.trading.ordinary.insert(request.command, entry);
+            return;
+        }
+        let active = run.active.take().expect("matched active leg");
+        if cx
+            .finish_plan_failed_call(&run.plan, &active.slot, &active.context)
+            .is_err()
+        {
+            run.active = Some(active);
+            self.trading.ordinary.insert(request.command, entry);
+            return;
+        }
+        cx.command_error(request.command, error.message.clone());
+        run.error.get_or_insert(error);
+        self.continue_ordinary(cx, request.command, entry);
+    }
+
     /// Record the classified failure before anything else. `weaken` marks a
     /// refusal the codec cannot prove; `evidence` IDs are reconciliation-only.
     fn record_failure(
@@ -896,6 +931,13 @@ impl BybitLinear {
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
+        // Signature diagnostics can contain the complete signed origin.
+        let mut message = crate::signing_rejection(code, &message).unwrap_or(message);
+        if let Call::MarginMode { .. } = planned.call
+            && let Some(reasons) = ack::margin_reasons(result)
+        {
+            message = reasons;
+        }
         let native = Native {
             code: NativeCode::Int(code),
             message: &message,

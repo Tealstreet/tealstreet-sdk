@@ -127,7 +127,31 @@ fn work(actions: Vec<Action>) -> (RequestId, SignRequest) {
 }
 fn command(engine: &mut Engine<BybitLinear>, now: f64, command: Command) -> Vec<Action> {
     engine.handle(now, Event::Command(command));
-    engine.drain_actions().collect()
+    managed(engine, now)
+}
+/// Prepare one managed request whose signing the provider parks; the
+/// returned actions carry its signing job.
+fn prepare_parked(engine: &mut Engine<BybitLinear>, now: f64) -> Vec<Action> {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    engine.prepare_dispatch(now);
+    let actions: Vec<Action> = engine.drain_actions().collect();
+    let mut rest = Vec::new();
+    for action in actions {
+        match action {
+            Action::ManagedHttp(managed) => {
+                if let HttpAction::Prepare { preparation, request, .. } = *managed {
+                    engine.http_prepared(now, preparation, Prepared { id: request.id.0, expires_at: None });
+                }
+            }
+            action => rest.push(action),
+        }
+    }
+    rest.extend(engine.drain_actions());
+    rest
+}
+/// Ordinary writes and mode reads are managed: drive Prepare/Bind/Claim.
+fn managed(engine: &mut Engine<BybitLinear>, now: f64) -> Vec<Action> {
+    safe_cex_engine::test_support::prepared_actions(engine, now)
 }
 fn failed(actions: &[Action], command: u32) -> safe_cex_engine::VenueError {
     let failures: Vec<_> = actions
@@ -408,7 +432,7 @@ fn ordinary_and_hyro_write_provider_refusal_never_becomes_ambiguous_or_resends()
             assert!(request.url.contains("/v5/position/list"));
             gate.mode.store(2, Ordering::SeqCst);
             h.engine.handle(h.now,Event::HttpResponse {request:request.id,response:Response {status:200,headers:"",body:r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#}});
-            actions = h.engine.drain_actions().collect();
+            actions = managed(&mut h.engine, h.now);
         }
         assert_eq!(failed(&actions, 42).outcome, Some(Outcome::NotSent));
         assert!(h.engine.store().orders().is_empty());
@@ -654,7 +678,7 @@ fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence
             "20000",
         );
         h.engine.handle(h.now,Event::HttpResponse {request:request.id,response:Response {status:200,headers:"",body:r#"{"retCode":110007,"retMsg":"Insufficient available balance","result":{}}"#}});
-        let actions: Vec<_> = h.engine.drain_actions().collect();
+        let actions = managed(&mut h.engine, h.now);
         let error = failed(&actions, 42);
         assert_eq!(
             error.outcome,
@@ -663,13 +687,10 @@ fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence
         );
         assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
         assert_eq!(error.venue_code.as_deref(), Some("110007"));
+        // The journal reports the earliest leg that reached the venue.
         assert!(
-            error.message.contains(if provider_first {
-                "Signing provider refused"
-            } else {
-                "Insufficient available balance"
-            }),
-            "keep first error text: {}",
+            error.message.contains("Insufficient available balance"),
+            "reached-venue error text: {}",
             error.message
         );
         assert!(h.engine.store().orders().is_empty());
@@ -726,7 +747,7 @@ fn spot_mixed_provider_and_bare_http_failures_match_native_outcome_in_both_order
                     },
                 },
             );
-            let actions: Vec<_> = h.engine.drain_actions().collect();
+            let actions = managed(&mut h.engine, h.now);
             let error = failed(&actions, 42);
             assert_eq!(
                 error.outcome, expected.outcome,
@@ -734,11 +755,8 @@ fn spot_mixed_provider_and_bare_http_failures_match_native_outcome_in_both_order
             );
             assert_eq!(error.kind, expected.kind);
             assert_eq!(error.venue_code, expected.venue_code);
-            assert!(error.message.contains(if provider_first {
-                "Signing provider refused"
-            } else {
-                &expected.message
-            }));
+            // The journal reports the earliest leg that reached the venue.
+            assert!(error.message.contains(&expected.message));
             assert!(h.engine.store().orders().is_empty());
         }
     }
@@ -797,7 +815,12 @@ fn refused_retry_after_initial_dispatch(
             },
         );
     }
-    let (attempt, retry_work) = work(h.engine.drain_actions().collect());
+    let retry_actions = if variant.is_hyro() {
+        h.engine.drain_actions().collect()
+    } else {
+        prepare_parked(&mut h.engine, h.now)
+    };
+    let (attempt, retry_work) = work(retry_actions);
     assert!(retry_work.operations.iter().any(|op| matches!(op,safe_cex_engine::signing::Operation::Sign {payload,..} if matches!(payload.last(),Some(safe_cex_engine::signing::PayloadPart::Bytes {bytes}) if bytes==body.as_bytes()))),"retry must retain exact body and immutable client identity");
     assert_eq!(
         h.progress
@@ -813,7 +836,11 @@ fn refused_retry_after_initial_dispatch(
             result: Err(SignError::Refused),
         },
     );
-    let mut actions: Vec<_> = h.engine.drain_actions().collect();
+    let mut actions: Vec<_> = if variant.is_hyro() {
+        h.engine.drain_actions().collect()
+    } else {
+        managed(&mut h.engine, h.now)
+    };
     if variant.is_hyro() {
         // The established Hyro path reconciles the earlier dispatched create;
         // no new mutation may be emitted on this provider failure.
@@ -838,8 +865,8 @@ fn refused_retry_after_initial_dispatch(
 
 #[test]
 fn native_signature_rejection_then_retry_provider_refusal_retains_prior_attempt_uncertainty() {
-    // Owner-approved fallback: Rest::resent has no precise attempt provenance.
-    // Shared RequestContext follow-up may retain native Rejected/code evidence.
+    // The Plan journal keeps the retry's typed provider refusal, and the
+    // earlier released attempt keeps the whole command Unknown.
     for code in [10004, 10002] {
         let error = refused_retry_after_initial_dispatch(Variant::Spot, Some(code));
         assert_eq!(
@@ -847,21 +874,41 @@ fn native_signature_rejection_then_retry_provider_refusal_retains_prior_attempt_
             Some(Outcome::Unknown),
             "native code {code}: retry refusal cannot imply whole command NotSent"
         );
-        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
         assert_eq!(error.venue_code, None);
     }
 }
 
 #[test]
-fn host_failure_eligible_retry_then_provider_refusal_retains_ambiguity() {
-    let error = refused_retry_after_initial_dispatch(Variant::Spot, None);
-    assert_eq!(
-        error.outcome,
-        Some(Outcome::Unknown),
-        "prior transport failure remains ambiguous even if retry was never sent"
+fn host_failure_never_resends_an_ordinary_write_and_stays_unknown() {
+    // Transport text, even "error sign", is no resend authority for a write.
+    let (mut h, _gate) = ready(Variant::Spot);
+    let mut order = order();
+    order.client_order_id = Some("immutable-dispatch-id".into());
+    h.command(Command::PlaceOrders {
+        command: 42,
+        orders: vec![order],
+    });
+    let original = h.take("/v5/order/create");
+    h.engine.handle(
+        h.now,
+        Event::HttpFailed {
+            request: original.id,
+            error: "network lost; error sign",
+        },
     );
+    let actions = managed(&mut h.engine, h.now);
+    assert!(
+        !actions.iter().any(|action| matches!(action, Action::Sign { .. } | Action::Http(_)
+            if !matches!(action, Action::Http(request) if request.url.contains("/v5/order/realtime")))),
+        "no write resend"
+    );
+    let error = failed(&actions, 42);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
     assert_eq!(error.venue_code, None);
+    assert!(!error.message.contains("dispatch-secret"));
+    assert!(h.engine.store().orders().is_empty());
 }
 
 #[test]
