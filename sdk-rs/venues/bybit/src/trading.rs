@@ -476,12 +476,7 @@ impl BybitLinear {
                     | Command::SetPositionMode { command, .. } => *command,
                     _ => return,
                 };
-                cx.fail(
-                    id,
-                    not_sent(
-                        "HyroTrader account is reconnecting; wait for private state reconciliation",
-                    ),
-                );
+                cx.fail(id, not_sent(ordinary::HYRO_RECONNECTING));
                 return;
             }
             if let Command::PlaceOrders { command, orders } = command {

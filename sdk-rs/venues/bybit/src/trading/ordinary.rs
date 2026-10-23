@@ -114,6 +114,9 @@ fn call_bound<'a>(after_refusal: &'a [StepBound<'a>]) -> CallBound<'a> {
     }
 }
 
+pub(crate) const HYRO_RECONNECTING: &str =
+    "HyroTrader account is reconnecting; wait for private state reconciliation";
+
 /// Bybit names its own clock in a recv-window refusal; it corrects ours.
 pub(crate) fn server_time(message: &str) -> Option<f64> {
     message
@@ -143,8 +146,8 @@ fn fields(body: &str) -> Fields {
 }
 
 impl BybitLinear {
-    /// Hyro and every option-symbol command stay on the legacy job pipeline
-    /// (D5, removed before the master merge).
+    /// Hyro placements and every option-symbol command stay on the legacy job
+    /// pipeline (D5, removed before the master merge).
     pub(crate) fn ordinary_command(&self, store: &Store, command: &Command) -> bool {
         let option = |symbol: &str| self.category_for(symbol) == Category::Option;
         let order_option = |id: &String| store.order(id).is_some_and(|order| option(&order.symbol));
@@ -157,7 +160,8 @@ impl BybitLinear {
             | Command::SetMarginType { symbol, .. } => option(symbol),
             _ => false,
         };
-        !self.variant.is_hyro()
+        // Hyro placements keep the legacy pipeline until their own adoption.
+        !(self.variant.is_hyro() && matches!(command, Command::PlaceOrders { .. }))
             && trade_command_id(command).is_some()
             && !matches!(command, Command::CancelOrdersWithSymbols { .. })
             && !touches_options
@@ -223,6 +227,9 @@ impl BybitLinear {
         if let Some(error) = self.config_error.clone() {
             return Some(Gate::Fail(not_sent(error)));
         }
+        if !self.private_ready() {
+            return Some(Gate::Fail(not_sent(HYRO_RECONNECTING)));
+        }
         let symbol = match command {
             Command::CancelSymbolOrders { symbol, .. }
             | Command::SetLeverage { symbol, .. }
@@ -273,7 +280,8 @@ impl BybitLinear {
 
     /// A settle-coin snapshot omits flat symbols; their mode is read first.
     fn unresolved_mode(&self, cx: &Cx<'_, Pending>, command: &Command) -> Option<String> {
-        if self.variant.is_spot() {
+        // Spot has no position mode; Hyro is one-way by venue contract.
+        if self.variant.is_spot() || self.variant.is_hyro() {
             return None;
         }
         match command {
@@ -547,6 +555,12 @@ impl BybitLinear {
             );
             return;
         };
+        // A Hyro write waits for reconciled private state, as at entry.
+        if !self.private_ready() {
+            let _ = cx.fail_plan(&run.plan, not_sent(HYRO_RECONNECTING));
+            return;
+        }
+        self.note_hyro_write();
         self.route_body(&leg.planned.body);
         let local = self.local_order_lifecycle().then(|| LocalWrite {
             path: leg.planned.path,
@@ -1440,7 +1454,11 @@ impl BybitLinear {
     /// Reconcile unknown or absent-order writes with one fresh order read per
     /// product; an in-flight read predates the write, so it is not joined.
     pub(crate) fn reconcile_ordinary(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.variant.is_hyro() || self.credentials.is_none() {
+        if self.credentials.is_none() {
+            return;
+        }
+        if self.variant.is_hyro() {
+            self.reconcile_hyro_snapshot(cx);
             return;
         }
         let selected = self.category;

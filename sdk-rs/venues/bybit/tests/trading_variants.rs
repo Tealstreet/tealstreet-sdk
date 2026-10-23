@@ -1680,15 +1680,20 @@ fn local_cancel_tombstone_filters_replica_stale_reads_issued_after_ack() {
             command: 95,
             ids: vec!["retired".into()],
         });
-        h.respond(
-            if variant.is_hyro() {
-                "/v5/order/cancel"
-            } else {
-                "/v5/order/cancel-batch"
-            },
-            200,
-            r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
-        );
+        if variant.is_hyro() {
+            // "Cancel Order", the documented single-cancel acknowledgement (D).
+            h.respond(
+                "/v5/order/cancel",
+                200,
+                r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"retired","orderLinkId":""},"retExtInfo":{},"time":1}"#,
+            );
+        } else {
+            h.respond(
+                "/v5/order/cancel-batch",
+                200,
+                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+            );
+        }
         assert!(h.engine.store().order("retired").is_none());
         // The stale replica read starts after cancellation is already acknowledged.
         for (terminal, reconnect) in [(false, false), (true, false), (false, true)] {
