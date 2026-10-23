@@ -78,3 +78,7 @@ a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbas
 # adjectives), verified not a credential; owner approved this one historical
 # commit/file/rule/line fingerprint. Current prose is reworded; no path/rule bypass.
 1a72d442724332d247511dc58fd81f77e5bd2e19:docs/plans/RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md:generic-api-key:83
+
+# Synthetic Coinbase capability-test key, replaced with the signing-test fixture.
+# Owner approved this exact historical fingerprint only; future changes scan.
+04c434dc2d482cd4498a50e9086be82dfb2071c4:sdk-rs/venues/coinbase/tests/support/history_family.rs:generic-api-key:116
