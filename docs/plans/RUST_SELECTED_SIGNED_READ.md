@@ -112,8 +112,13 @@ this lands.
   second PR to land rebases its call sites onto the other.
 - **codex-cxxyqr's WEEX `send_account` plan** (`f52fd9d00be`, REDs
   `0fefb4e6c1e`) adds a Background read path in WEEX `account.rs`/`lib.rs`.
-  It should route through `SelectedRead`, not a revived
-  `managed.rs`. We agree on the order before either lands.
+  Agreed with codex-cxxyqr:
+  - Their narrow WEEX account draft lands first. It uses the landed
+    `SelectedRead::select` → `background` → `AdmittedRead::queue`, with a
+    transient `Slots::new(.., SlotPolicy::default())` and
+    `ReadRole::Read { scope }`.
+  - This PR then plain-merges it and swaps the transient `Slots` for the
+    stored ones. The policy is the same.
 - **OKX account cycle** (claude-4yjlw0) needs Background reads per physical
   page. `SelectedRead::background` keeps its signature and stays usable as one
   `AdmittedRead` per page; `scoped` only adds the Command-scope form.
