@@ -82,16 +82,16 @@ impl ContextRegistry {
         parent: Option<&Context>,
         egress: Option<RoutingIntent>,
     ) -> Result<Context, Error> {
-        let egress = match (egress, parent.and_then(Context::egress)) {
-            (Some(own), Some(inherited)) if own != inherited => return Err(Error::Invalid),
-            (own, inherited) => own.or(inherited),
-        };
         if let Some(parent) = parent {
             self.validate(parent, now)?;
             if parent.operation() == Operation::Read && policy.operation == Operation::Mutation {
                 return Err(Error::Invalid);
             }
         }
+        let egress = match (egress, parent.and_then(Context::egress)) {
+            (Some(own), Some(inherited)) if own != inherited => return Err(Error::Invalid),
+            (own, inherited) => own.or(inherited),
+        };
         if scope == Scope::Background && policy.operation == Operation::Mutation {
             return Err(Error::Invalid);
         }
@@ -1121,7 +1121,7 @@ mod tests {
                 .http_context_with_egress(Scope::Background, signed(slot), intent)
                 .unwrap();
             assert_eq!(confirmed.routing_intent(), intent);
-            assert_eq!(confirmed.egress(), None);
+            assert_eq!(confirmed.egress(), Some(intent));
             for other in [
                 RoutingIntent::Primary,
                 RoutingIntent::Secondary,
@@ -1135,6 +1135,38 @@ mod tests {
                 }
             }
         }
+        // A keyed leg under a keyless primary root keeps the pin for its own legs.
+        let keyed = cx
+            .http_leg_context(&keyless, signed(CredentialSlot::Primary))
+            .unwrap();
+        assert_eq!(
+            cx.http_leg_context(&keyed, policy())
+                .map(|c| c.routing_intent()),
+            Ok(RoutingIntent::Primary)
+        );
+        assert_eq!(
+            cx.http_leg_context(&keyed, signed(CredentialSlot::Secondary)),
+            Err(Error::Invalid)
+        );
+        // Keyless primary egress is for reads only.
+        let write = Policy {
+            operation: Operation::Mutation,
+            retry: RetryPolicy::Never,
+            ..policy()
+        };
+        assert_eq!(
+            cx.http_context_with_egress(Scope::Command(9), write, RoutingIntent::Primary),
+            Err(Error::Invalid)
+        );
+        // A command's completion root holds the egress; its retry still validates.
+        let root = cx
+            .http_context_with_egress(Scope::Command(7), policy(), RoutingIntent::Primary)
+            .unwrap();
+        let retry = cx
+            .http_retry_context(&root, RetryEvidence::ReadFailure)
+            .unwrap();
+        cx.io.request_contexts.validate(&retry, cx.now).unwrap();
+        assert_eq!(retry, root);
         // Public is the default and records nothing.
         let public = cx
             .http_context_with_egress(Scope::Background, policy(), RoutingIntent::Public)

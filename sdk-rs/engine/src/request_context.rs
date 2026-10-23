@@ -191,21 +191,25 @@ impl Context {
     }
 
     /// Capture explicit egress before issuer binding. A credentialed context
-    /// may only confirm its slot's intent; an unsigned one may declare only
-    /// Primary (keyless primary-egress reads). Public is the default.
+    /// may only confirm its slot's intent; an unsigned read may declare only
+    /// Primary (keyless primary-egress reads). Public is the default. Once
+    /// declared it is kept, so every descendant stays on the same egress.
     pub(crate) fn with_egress(mut self, egress: Option<RoutingIntent>) -> Result<Self, Error> {
         let Some(intent) = egress else {
             return Ok(self);
         };
-        let derived = self.credential_intent();
         let valid = match self.credential {
-            Some(_) => intent == derived,
-            None => matches!(intent, RoutingIntent::Primary | RoutingIntent::Public),
+            Some(_) => intent == self.credential_intent(),
+            None => match intent {
+                RoutingIntent::Public => true,
+                RoutingIntent::Primary => self.operation == Operation::Read,
+                RoutingIntent::Secondary => false,
+            },
         };
         if !valid {
             return Err(Error::Invalid);
         }
-        self.egress = (intent != derived).then_some(intent);
+        self.egress = (intent != RoutingIntent::Public).then_some(intent);
         Ok(self)
     }
 
