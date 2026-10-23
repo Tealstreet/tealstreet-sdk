@@ -1,7 +1,7 @@
 # Plan and Slot history authority
 
-Status: plan only; API fit review required before source. This is a separate
-engine follow-up to original-root history bridge #1848, landed as
+Status: plan and original assertion controls; exact API review required before
+runtime source. This is a separate engine follow-up to original-root history bridge #1848, landed as
 `6872554ac85244ec7b768b79af7187013dba429a`. Its ReadCompletion constructor and
 original Read-root authority remain unchanged. Plan and Slot are opaque engine
 owners, never original-root Context substitutes.
@@ -52,7 +52,13 @@ startup policy. The native owners explicitly approve this declaration:
 The per-call 20-second default already exists. The explicit whole-query root is
 new: native legacy history previously had no whole-query deadline. The BloFin
 consumer's CALLERS entry must describe that new root-expiry boundary alongside
-strict closed preparation refusal. Test final-slot physical timeout versus root
+strict closed preparation refusal. Before consumer readiness, inventory the
+actual NX/Agent outer wait bounds and abandonment path with their owners. State
+whether callers stop waiting sooner and what they observe; distinguish a local
+wait timeout from an engine observer detach or command cancellation. Do not
+claim either cancels engine work without an executed control. This consumer
+evidence remains open; the engine root is not a promise that a caller waits
+for its full duration. Test final-slot physical timeout versus root
 expiry precedence: root expiry never permits retained success. Do not tighten
 these declared bounds or add retries without another explicit owner decision.
 
@@ -209,7 +215,8 @@ Constructor, opaque Slot admission, prepared accept/settle and new failure-cause
 API shape controls are implementation tests after signatures freeze. Do not
 claim they were executable REDs before that API existed. The BloFin closed
 preparation-refusal RED is a separately identified native-lane receipt. All
-listed reproductions still need execution; this plan claims no new RED result.
+constructor and custody controls remain unexecuted until the API exists. The
+landed-source reproduction results are recorded below.
 
 ### Required implementation and consumer controls
 
@@ -294,3 +301,18 @@ assertion REDs, not compile or setup failures. The numeric owner exists only in
 the original negative test seam and must be replaced by opaque Plan authority;
 all terminal/marker/result assertions remain when that seam changes. No new
 runtime authority or exact API-signature readiness is claimed.
+
+Independent reviews of original checkpoint `27a68bef107` are CLEAR from
+claude-8x5tm1 and codex-uufub4 for original evidence only. The independent
+receipt command is `cargo test -p safe-cex-engine --all-features --test
+history_plan_bridge --jobs 2`: one GREEN control and two assertion REDs. The
+target is gated by both http-plans and test-support; a feature-off run executing
+zero tests is not this receipt. Marker detection uses HISTORY_INCOMPLETE plus
+command-field membership so additional diagnostic fields cannot hide a stale
+marker. Runtime signatures, consumer outer-wait evidence and adoption remain
+open gates.
+
+After marker-predicate hardening, the same all-features target was rerun:
+one control passed, the accepted-prefix assertion still observed no CommandDone,
+and the stale-owner assertion still observed one terminal and one marker.
+All three test bodies and expected terminal/marker values are unchanged.

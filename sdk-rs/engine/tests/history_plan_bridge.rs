@@ -215,7 +215,8 @@ fn terminal(action: &Action, id: u32) -> bool {
 fn marker(action: &Action, id: u32) -> bool {
     matches!(action, Action::Notice(Notice::Event(event))
         if event.code == code::HISTORY_INCOMPLETE
-        && event.fields == vec![("command", Value::Num(f64::from(id)))])
+        && event.fields.iter().any(|(key, value)|
+            *key == "command" && *value == Value::Num(f64::from(id))))
 }
 
 #[test]
