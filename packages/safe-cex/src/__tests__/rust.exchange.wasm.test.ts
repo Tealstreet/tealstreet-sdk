@@ -149,6 +149,7 @@ const recordedOkxTransport = () => {
     'amend-order': [{ ordId: '301', sCode: '0', sMsg: '' }],
   };
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (_url, { onOpen, onMessage }) => {
       let closed = false;
