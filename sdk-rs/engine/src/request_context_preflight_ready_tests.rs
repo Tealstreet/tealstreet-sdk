@@ -43,6 +43,7 @@ struct ScopeProbe {
     session_attack: Option<SessionAttack>,
     session: Option<Session>,
     session_parent: Option<Context>,
+    session_plan_ready: bool,
     #[cfg(feature = "managed-sockets")]
     socket_mode: bool,
     #[cfg(feature = "managed-sockets")]
@@ -70,6 +71,56 @@ fn session_policy() -> SessionPolicy {
     SessionPolicy {
         credential: None,
         repeat_safe: true,
+    }
+}
+impl ScopeProbe {
+    fn assert_session_scope(&self, cx: &mut Cx<'_, Context>) {
+        let attack = self.session_attack.unwrap();
+        let session = self.session.as_ref().unwrap();
+        let before = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
+        match attack {
+            SessionAttack::Open => {
+                assert_eq!(cx.open_session(session_policy()).err(), Some(Error::State));
+            }
+            SessionAttack::Context => {
+                assert_eq!(
+                    cx.session_context(session, policy()).err(),
+                    Some(Error::State)
+                );
+            }
+            SessionAttack::Leg => {
+                assert_eq!(
+                    cx.http_leg_context(self.session_parent.as_ref().unwrap(), policy())
+                        .err(),
+                    Some(Error::State),
+                );
+            }
+            SessionAttack::Retire => {
+                assert_eq!(cx.retire_session(session).err(), Some(Error::State));
+            }
+            SessionAttack::Ready => assert!(cx.session_ready(session).is_empty()),
+            SessionAttack::Failed => {
+                assert!(
+                    cx.session_failed(session, VenueError::new("foreign"))
+                        .is_empty()
+                );
+            }
+            SessionAttack::Wait => {
+                let owner = self.leg.as_ref().unwrap();
+                assert_eq!(
+                    cx.session_wait(session, owner, owner.clone())
+                        .err()
+                        .map(|(_, error)| error),
+                    Some(Error::State),
+                );
+            }
+        }
+        assert_eq!(
+            (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len(),),
+            before,
+            "foreign Session work must refuse before IDs, timers, holds or waiters change",
+        );
+        assert!(cx.session_live(session));
     }
 }
 impl Venue for ScopeProbe {
@@ -105,6 +156,33 @@ impl Venue for ScopeProbe {
             self.root = Some(owner);
             self.leg = Some(other);
             self.session = Some(session);
+            return;
+        }
+        if id == 20 && self.session_plan_ready {
+            let preflight = cx.begin_preflight(preflight_policy()).unwrap();
+            let calls = [CallBound {
+                timeout_ms: 100,
+                attempts: 1,
+                retry_window: RetryWindow::Shared,
+                after_refusal: &[],
+            }];
+            let plan = cx
+                .admit_plan(
+                    &preflight,
+                    &[StepBound {
+                        wait_ms: 1,
+                        calls: &calls,
+                    }],
+                    PlanPolicy {
+                        operation: Operation::Read,
+                        credential: None,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            assert!(cx.plan_slots(&plan).unwrap().is_empty());
+            self.plan = Some(plan);
             return;
         }
         if id == 20 || self.hold_parked {
@@ -198,52 +276,8 @@ impl Venue for ScopeProbe {
     }
     fn on_http_preflight_ready(&mut self, cx: &mut Cx<'_, Context>, preflight: &Preflight) {
         self.ready += 1;
-        if let Some(attack) = self.session_attack {
-            let session = self.session.as_ref().unwrap();
-            let before = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
-            match attack {
-                SessionAttack::Open => {
-                    assert_eq!(cx.open_session(session_policy()).err(), Some(Error::State));
-                }
-                SessionAttack::Context => {
-                    assert_eq!(
-                        cx.session_context(session, policy()).err(),
-                        Some(Error::State)
-                    );
-                }
-                SessionAttack::Leg => {
-                    assert_eq!(
-                        cx.http_leg_context(self.session_parent.as_ref().unwrap(), policy())
-                            .err(),
-                        Some(Error::State),
-                    );
-                }
-                SessionAttack::Retire => {
-                    assert_eq!(cx.retire_session(session).err(), Some(Error::State));
-                }
-                SessionAttack::Ready => assert!(cx.session_ready(session).is_empty()),
-                SessionAttack::Failed => {
-                    assert!(
-                        cx.session_failed(session, VenueError::new("foreign"))
-                            .is_empty()
-                    );
-                }
-                SessionAttack::Wait => {
-                    let owner = self.leg.as_ref().unwrap();
-                    assert_eq!(
-                        cx.session_wait(session, owner, owner.clone())
-                            .err()
-                            .map(|(_, error)| error),
-                        Some(Error::State),
-                    );
-                }
-            }
-            assert_eq!(
-                (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len(),),
-                before,
-                "foreign Session work must refuse before IDs, timers, holds or waiters change",
-            );
-            assert!(cx.session_live(session));
+        if self.session_attack.is_some() {
+            self.assert_session_scope(cx);
             cx.done_preflight(preflight, "ready owner only".into())
                 .unwrap();
             return;
@@ -354,8 +388,14 @@ impl Venue for ScopeProbe {
         }
         cx.done_preflight(preflight, "cached".into()).unwrap();
     }
-    #[cfg(feature = "managed-sockets")]
     fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, Context>, plan: &Plan) {
+        if self.session_plan_ready {
+            self.ready += 1;
+            self.assert_session_scope(cx);
+            cx.fail_plan(plan, "Plan readiness tested").unwrap();
+            return;
+        }
+        #[cfg(feature = "managed-sockets")]
         if self.socket_plan_tail {
             self.retire_ready_sockets(cx);
             cx.fail_plan(plan, "tail callback completed").unwrap();
@@ -429,15 +469,30 @@ fn terminal(actions: &[Action], id: CommandId) -> usize {
     actions.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandDone{command,..}|Notice::CommandFailed{command,..}) if *command==id)).count()
 }
 fn session_attack_preserves_waiter(attack: SessionAttack) {
+    session_attack_preserves_waiter_in_scope(attack, false);
+}
+fn session_attack_preserves_waiter_in_scope(attack: SessionAttack, plan_ready: bool) {
     let mut e = crate::test_support::seeded_engine(ScopeProbe {
         session_attack: Some(attack),
+        session_plan_ready: plan_ready,
         ..Default::default()
     });
     command(&mut e, 10, 0.);
     let initial = crate::test_support::prepared_actions(&mut e, 0.);
     assert_eq!(terminal(&initial, 10), 0);
     command(&mut e, 20, 1.);
-    let ready = crate::test_support::prepared_actions(&mut e, 1.);
+    let mut ready = crate::test_support::prepared_actions(&mut e, 1.);
+    if plan_ready {
+        let timer = ready
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == 2. => Some(*timer),
+                _ => None,
+            })
+            .expect("native Plan delay arms readiness");
+        e.handle(2., Event::TimerFired { timer });
+        ready.extend(crate::test_support::prepared_actions(&mut e, 2.));
+    }
     assert_eq!(terminal(&ready, 20), 1);
     assert_eq!(terminal(&ready, 10), 0);
     let session = e.venue.session.clone().unwrap();
@@ -476,6 +531,20 @@ fn retained_ready_cannot_issue_foreign_session_work_before_ids() {
 #[test]
 fn retained_ready_cannot_derive_foreign_session_legs_before_ids() {
     session_attack_preserves_waiter(SessionAttack::Leg);
+}
+#[test]
+fn plan_readiness_cannot_consume_foreign_session_authority() {
+    for attack in [
+        SessionAttack::Ready,
+        SessionAttack::Failed,
+        SessionAttack::Retire,
+        SessionAttack::Wait,
+        SessionAttack::Context,
+        SessionAttack::Open,
+        SessionAttack::Leg,
+    ] {
+        session_attack_preserves_waiter_in_scope(attack, true);
+    }
 }
 #[test]
 fn ready_cannot_mutate_a_foreign_legacy_plan_or_execution_owner() {
