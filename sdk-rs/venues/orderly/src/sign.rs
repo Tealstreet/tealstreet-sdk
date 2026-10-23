@@ -56,7 +56,7 @@ impl Credentials {
             return Err("Orderly invalid clock".into());
         }
         let timestamp = (safe_cex_engine::time::wire_stamp_ms(now) as u64).to_string();
-        let text = format!("{timestamp}{}{path}{}", method.as_str(), body.unwrap_or(""));
+        let text = canonical_text(&timestamp, method.as_str(), path, body.unwrap_or(""));
         Ok(vec![
             ("orderly-key", self.key.clone()),
             ("orderly-account-id", self.account.clone()),
@@ -76,6 +76,83 @@ impl Credentials {
         ])
     }
 }
+
+/// The exact `orderly-textsign` bytes; local signing and the remote recipe share it.
+fn canonical_text(timestamp: &str, method: &str, path: &str, body: &str) -> String {
+    format!("{timestamp}{method}{path}{body}")
+}
+
+/// Private REST paths this venue signs; anything else is refused remotely.
+const SIGNED_PATHS: &[&str] = &[
+    "/v1/client/info",
+    "/v1/client/margin_modes",
+    "/v1/client/margin_mode",
+    "/v1/client/leverages",
+    "/v1/client/leverage",
+    "/v1/positions",
+    "/v1/orders",
+    "/v1/algo/orders",
+    "/v1/order",
+    "/v1/algo/order",
+    "/v1/trades",
+    "/v1/funding_fee/history",
+];
+
+fn signed_path(path: &str) -> bool {
+    let route = path.split_once('?').map_or(path, |(route, _)| route);
+    SIGNED_PATHS.contains(&route)
+        || route
+            .strip_prefix("/v1/order/")
+            .and_then(|rest| rest.strip_suffix("/trades"))
+            .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// `orderly.rest.1`: ed25519 over `timestamp ‖ METHOD ‖ path?query ‖ body`.
+pub struct Rest;
+impl safe_cex_engine::signing_remote::RemoteRecipe for Rest {
+    fn id(&self) -> &'static str {
+        "orderly.rest.1"
+    }
+    fn algorithm(&self) -> safe_cex_engine::signing::Algorithm {
+        safe_cex_engine::signing::Algorithm::Ed25519
+    }
+    fn role(&self) -> Option<safe_cex_engine::signing::ExtraKey> {
+        None
+    }
+    fn canonicalize(
+        &self,
+        inputs: &serde_json::Value,
+    ) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError::Refused;
+        let field = |name| inputs.get(name).and_then(serde_json::Value::as_str);
+        let object = inputs.as_object().ok_or(Refused)?;
+        if object
+            .keys()
+            .any(|key| !matches!(key.as_str(), "timestamp" | "method" | "path" | "body"))
+        {
+            return Err(Refused);
+        }
+        let timestamp = field("timestamp").ok_or(Refused)?;
+        let method = field("method").ok_or(Refused)?;
+        let path = field("path").ok_or(Refused)?;
+        let body = match inputs.get("body") {
+            None => "",
+            Some(body) => body.as_str().ok_or(Refused)?,
+        };
+        if timestamp.is_empty()
+            || timestamp.len() > 16
+            || !timestamp.bytes().all(|b| b.is_ascii_digit())
+            || !matches!(method, "GET" | "POST" | "PUT" | "DELETE")
+            || !signed_path(path)
+            || path.bytes().any(|b| b.is_ascii_control() || b == b'#')
+        {
+            return Err(Refused);
+        }
+        Ok(canonical_text(timestamp, method, path, body).into_bytes())
+    }
+}
+pub static REST: Rest = Rest;
+pub static REMOTE_RECIPES: &[&dyn safe_cex_engine::signing_remote::RemoteRecipe] = &[&REST];
 
 impl safe_cex_crypto::secrets::EraseSecrets for Credentials {
     fn erase_secrets(&mut self) {
@@ -101,6 +178,58 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn remote_recipe_rebuilds_the_exact_local_preimage_and_signature() {
+        use safe_cex_engine::signing_remote::RemoteRecipe;
+        let c = credentials();
+        let body = r#"{"symbol":"PERP_BTC_USDC","client_order_id":"caller-42"}"#;
+        let h = c
+            .headers(Method::Post, "/v1/order", Some(body), 1234.0)
+            .unwrap();
+        let header = |name: &str| h.iter().find(|(k, _)| *k == name).unwrap().1.clone();
+        let bytes = REST
+            .canonicalize(&serde_json::json!({
+                "timestamp": "1234", "method": "POST", "path": "/v1/order", "body": body
+            }))
+            .unwrap();
+        assert_eq!(bytes, header("orderly-textsign").into_bytes());
+        assert_eq!(
+            c.signature(std::str::from_utf8(&bytes).unwrap()).unwrap(),
+            header("orderly-signature")
+        );
+        let read = REST
+            .canonicalize(&serde_json::json!({
+                "timestamp": "1", "method": "GET", "path": "/v1/order/123/trades"
+            }))
+            .unwrap();
+        assert_eq!(read, b"1GET/v1/order/123/trades");
+    }
+
+    #[test]
+    fn remote_recipe_refuses_paths_methods_and_fields_outside_its_allowlist() {
+        use safe_cex_engine::signing::SignError::Refused;
+        use safe_cex_engine::signing_remote::RemoteRecipe;
+        let ok = serde_json::json!({ "timestamp": "1", "method": "GET", "path": "/v1/positions" });
+        assert!(REST.canonicalize(&ok).is_ok());
+        for (field, value) in [
+            ("path", serde_json::json!("/v1/withdraw")),
+            ("path", serde_json::json!("/v1/order/../withdraw/trades")),
+            ("path", serde_json::json!("/v1/positions#x")),
+            ("path", serde_json::json!("/v1/public/info")),
+            ("method", serde_json::json!("PATCH")),
+            ("timestamp", serde_json::json!("12a")),
+            ("timestamp", serde_json::json!(1)),
+            ("body", serde_json::json!({})),
+            ("extra", serde_json::json!("x")),
+        ] {
+            let mut inputs = ok.clone();
+            inputs[field] = value;
+            assert_eq!(REST.canonicalize(&inputs), Err(Refused), "{field}");
+        }
+        assert_eq!(REMOTE_RECIPES.len(), 1);
+        assert_eq!(REMOTE_RECIPES[0].id(), "orderly.rest.1");
+    }
+
     #[test]
     fn exact_method_query_and_body_bytes_are_signed_with_padding() {
         let c = credentials();

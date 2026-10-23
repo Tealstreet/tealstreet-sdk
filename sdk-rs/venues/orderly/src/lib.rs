@@ -4,6 +4,7 @@ mod funding;
 mod history;
 mod sign;
 mod trading;
+pub use sign::REMOTE_RECIPES;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
