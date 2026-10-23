@@ -108,10 +108,13 @@ WASM EngineHost.dispose already marks disposed before cleanup, aborts requests,
 disposes managed HTTP, cancels primitive/hosted signings and timers, and frees an
 owned engine. RustEngineExchange.dispose also releases its setup/provider and
 host. G2c integrates snapshot lifetime into those existing teardown paths; it
-does not claim they currently implement snapshot retirement. Native borrowed-
-engine hosts must explicitly invalidate the installed snapshot at teardown if
-they retain the Rust engine for cleanup, without installing replacement config.
-The exact native failure-only cleanup hook is an API review gate. It must retire
+does not claim they currently implement snapshot retirement. EVERY host disposal must invalidate the snapshot before freeing an owned
+engine or retaining a borrowed one, including borrowed WASM EngineHost (the
+current default), not merely native borrowed-engine hosts. Disposed guards fence
+host callbacks but alone do not retire a retained Rust engine's snapshot.
+EngineHost.invoke refuses after disposed=true, so use an explicit private
+teardown call path after public access is fenced; do not reopen normal invoke.
+The exact shared failure-only cleanup hook is an API review gate. It must retire
 owners under registry authority even after public validation refuses the snapshot.
 
 Engine-owned bounds and existing resource limits cap retained stale handles;
@@ -130,7 +133,8 @@ the same installed identity/role channel rather than a second subject path.
    slot/role/ref mismatch; immutable binding survives queueing but not teardown;
    old Prepared/Sign/Bind/DATA/timer after new engine cannot release/publish;
    same refs and numeric IDs do not restore authority; native and WASM teardown
-   converge; accepted/Unknown prior write evidence remains conservative.
+   converge, including disposing a borrowed host while retaining its engine; old
+   admission/Prepare/Bind/DATA refuse while private cleanup can still retire; accepted/Unknown prior write evidence remains conservative.
 3. Implement trusted registration and common admission/release validation, then
    compose G2 recursive bindings and G1 independent per-child Selection. No source
    hook is edited while frozen sibling PRs hold it; use actual landings and owner
