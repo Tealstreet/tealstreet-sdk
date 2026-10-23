@@ -129,7 +129,7 @@ fn opaque_remote_read_prepares_then_signs_the_selected_secondary_without_local_k
             attempt,
             result: Ok(SignResult {
                 values,
-                receipt: work.receipt.clone(),
+                receipt: work.receipt,
                 headers: Vec::new(),
             }),
         },
