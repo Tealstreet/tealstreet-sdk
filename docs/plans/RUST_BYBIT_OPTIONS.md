@@ -24,7 +24,8 @@ The gate becomes option-aware before any I/O, as the legacy pre-validation was:
   batch still makes no request (no mode read runs first).
 
 Option leverage and margin settings stay a typed `Unsupported`/`NotSent`
-refusal, now worded for options. No option code rows are added without a cited
+refusal, now worded for options. A disabled option product refuses trade
+commands `InvalidInput`/`NotSent`, as reads do. No option code rows are added without a cited
 Bybit code.
 
 **4b: option queries and seeds.**
@@ -83,5 +84,7 @@ Compatibility controls:
 - the combined-products harness's option parity (TS-identical IV and plain
   creates, the zero-write invalid mixed batch, options-disabled refusals).
 
-The legacy create fixture without an `orderLinkId` echo moves to the documented
-acknowledgement, as ruling D did for ordinary fixtures.
+No fixture changes: the strict codec accepts a create acknowledgement without
+an `orderLinkId` echo and refuses only a mismatched one. Absent-order answers
+are recognised only by native code (`110001`/`170213`); if Bybit options turn
+out to use another code, it needs a cited row.

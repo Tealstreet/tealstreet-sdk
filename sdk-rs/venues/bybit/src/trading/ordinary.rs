@@ -206,6 +206,7 @@ impl BybitLinear {
     }
 
     /// Native validation before any read or write, in the legacy order.
+    // A product the account has not enabled is its configuration (as for reads).
     fn ordinary_gate(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> Option<Gate> {
         if let Some(error) = self.config_error.clone() {
             return Some(Gate::Fail(not_sent(error)));
@@ -220,12 +221,12 @@ impl BybitLinear {
         if let Some(symbol) = symbol
             && !self.category_enabled(self.category_for(&symbol))
         {
-            return Some(Gate::Fail(not_sent("Bybit product is not enabled")));
+            return Some(Gate::Fail(disabled_product()));
         }
         if let Command::PlaceOrders { orders, .. } = command {
             for order in orders {
                 if !self.category_enabled(self.category_for(&order.symbol)) {
-                    return Some(Gate::Fail(not_sent("Bybit product is not enabled")));
+                    return Some(Gate::Fail(disabled_product()));
                 }
                 let option = self.category_for(&order.symbol) == Category::Option;
                 if !option && order.implied_volatility.is_some() {
@@ -1450,4 +1451,8 @@ fn context_command(context: &Context) -> CommandId {
         safe_cex_engine::request_context::Owner::Command { id, .. } => id,
         _ => 0,
     }
+}
+
+fn disabled_product() -> VenueError {
+    not_sent("Bybit product is not enabled").kind(ErrorKind::InvalidInput)
 }

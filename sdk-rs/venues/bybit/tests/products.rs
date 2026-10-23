@@ -1250,3 +1250,25 @@ fn option_leverage_is_refused_as_an_option_setting() {
     assert!(error.message.contains("option"), "{}", error.message);
     assert!(!error.message.contains("spot"), "{}", error.message);
 }
+
+/// A disabled option product refuses a trade command as the account's
+/// configuration, as it does for reads.
+#[test]
+fn a_disabled_option_product_refuses_trading_as_invalid_input() {
+    let mut h = Harness::started(Options {
+        variant: Variant::Linear,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    h.command(Command::SetLeverage {
+        command: 86,
+        symbol: OPTION.into(),
+        leverage: 2.0,
+        side: None,
+    });
+    let error = failed(&h, 86);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert!(h.requests.iter().all(|r| !r.url.contains("/v5/position")));
+}
