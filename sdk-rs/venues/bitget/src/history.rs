@@ -1,6 +1,6 @@
 //! Native cursor reads; response lists stream and never enter the flush frame.
 use crate::wire::{Envelope, Identifier, Number};
-use crate::{BitgetFutures, Pending, paths, sign};
+use crate::{BitgetFutures, Pending, sign};
 use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, json::ArrayAt, num};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
@@ -22,7 +22,7 @@ pub struct History {
 }
 
 pub struct Request {
-    command: CommandId,
+    pub(crate) command: CommandId,
     detect_deadline: f64,
     query: Query,
     uta: bool,
@@ -409,20 +409,20 @@ impl BitgetFutures {
                 .collect::<Vec<_>>()
                 .join("&")
         );
-        let id = cx.request_streamed(
+        let at = if r.uta && matches!(r.query, Query::Income { .. }) {
+            ArrayAt::Path(&["data", "list"])
+        } else {
+            ArrayAt::Envelope(ARRAYS)
+        };
+        let pending = Pending::History(Box::new(r));
+        self.send(
+            cx,
             Method::Get,
-            format!("{}{path}", paths::REST),
-            vec![],
-            if r.uta && matches!(r.query, Query::Income { .. }) {
-                ArrayAt::Path(&["data", "list"])
-            } else {
-                ArrayAt::Envelope(ARRAYS)
-            },
-            Pending::History(Box::new(r)),
+            &path,
+            crate::Payload::Stream(at),
+            !public,
+            pending,
         );
-        if !public {
-            self.sign_request(cx, id, Method::Get, &path);
-        }
     }
     pub(crate) fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
         if r.uta && matches!(r.query, Query::Income { .. }) {
@@ -848,14 +848,6 @@ impl BitgetFutures {
             Err(error) => cx.fail(r.command, error),
         };
     }
-    pub(crate) fn history_sign_failed(
-        cx: &mut Cx<'_, Pending>,
-        r: Request,
-        error: safe_cex_engine::VenueError,
-    ) {
-        cx.fail(r.command, error);
-    }
-
     pub(crate) fn query_failed(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
         if r.retries >= 3 {
             cx.fail(r.command, format!("Bitget history incomplete: {error}"));

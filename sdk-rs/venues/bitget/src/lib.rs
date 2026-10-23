@@ -113,6 +113,12 @@ fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     )
 }
 
+/// A private send's body, or the array its streamed response decodes.
+pub(crate) enum Payload {
+    Body(Option<String>),
+    Stream(ArrayAt),
+}
+
 impl BitgetFutures {
     fn public_failed(
         &mut self,
@@ -226,6 +232,37 @@ impl BitgetFutures {
             vec![("X-CHANNEL-API-CODE", "Tealstreet".into())],
             ArrayAt::Envelope(&[&["data"]]),
             pending,
+        );
+    }
+
+    /// Owner-approved staging: every private send and its signing step, until
+    /// the shared Plan/history bridge owns them. Remove before master.
+    pub(crate) fn send(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        payload: Payload,
+        signed: bool,
+        pending: Pending,
+    ) {
+        let url = format!("{}{path}", paths::REST);
+        let id = match payload {
+            Payload::Stream(at) => cx.request_streamed(method, url, vec![], at, pending),
+            Payload::Body(body) => cx.request(method, url, vec![], body, pending),
+        };
+        if !signed {
+            return;
+        }
+        if self.primary_balance_read(path) {
+            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
+        }
+        cx.sign_http(
+            id,
+            Box::new(sign::Http::new(
+                self.signing_identity(method, path).cloned(),
+                path.into(),
+            )),
         );
     }
 
@@ -903,7 +940,10 @@ impl Venue for BitgetFutures {
             Pending::Identity(command) | Pending::Candles { command, .. } => {
                 cx.fail(command, error)
             }
-            Pending::History(request) => Self::history_sign_failed(cx, *request, error),
+            Pending::History(request) => {
+                let command = request.command;
+                self.on_sign_error(cx, Pending::Identity(command), error)
+            }
             Pending::Trade(request) => self.trade_sign_failed(cx, *request, error),
             Pending::Account {
                 generation,

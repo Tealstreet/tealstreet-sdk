@@ -505,20 +505,14 @@ impl BitgetFutures {
         let command = job.id;
         self.trading.active = Some(job);
         cx.command_progress(command, call.identities());
-        let request = cx.request(
-            method,
-            format!("{}{path}", paths::REST),
-            vec![],
-            body,
-            Pending::Trade(Box::new(Request {
-                command,
-                call,
-                stream_revision: self.order_revision_clock(),
-                signature_retry,
-                read_retries,
-            })),
-        );
-        self.sign_request(cx, request, method, &path);
+        let pending = Pending::Trade(Box::new(Request {
+            command,
+            call,
+            stream_revision: self.order_revision_clock(),
+            signature_retry,
+            read_retries,
+        }));
+        self.send(cx, method, &path, crate::Payload::Body(body), true, pending);
     }
 
     fn plan_job(&self, cx: &Cx<'_, Pending>, job: &mut Job) -> Result<(), String> {

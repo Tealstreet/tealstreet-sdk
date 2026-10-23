@@ -154,7 +154,7 @@ impl BitgetFutures {
                 .is_some_and(|id| id.validate().is_ok())
     }
 
-    fn primary_balance_read(&self, path: &str) -> bool {
+    pub(crate) fn primary_balance_read(&self, path: &str) -> bool {
         self.account.degraded
             && matches!(
                 path.split('?').next().unwrap_or(path),
@@ -162,7 +162,7 @@ impl BitgetFutures {
             )
     }
 
-    fn signing_identity(
+    pub(crate) fn signing_identity(
         &self,
         method: Method,
         path: &str,
@@ -174,22 +174,6 @@ impl BitgetFutures {
             .or(self.options.credentials.as_ref())
     }
 
-    pub(crate) fn sign_request(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        request: safe_cex_engine::RequestId,
-        method: Method,
-        path: &str,
-    ) {
-        cx.sign_http(
-            request,
-            Box::new(sign::Http::new(
-                self.signing_identity(method, path).cloned(),
-                path.into(),
-            )),
-        );
-    }
-
     fn account_request(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -197,20 +181,12 @@ impl BitgetFutures {
         at: Option<ArrayAt>,
         request: Request,
     ) {
-        let url = format!("{}{path}", paths::REST);
         let pending = Pending::Account {
             generation: self.account.generation,
             request,
         };
-        let id = if let Some(at) = at {
-            cx.request_streamed(Method::Get, url, vec![], at, pending)
-        } else {
-            cx.request(Method::Get, url, vec![], None, pending)
-        };
-        if self.primary_balance_read(&path) {
-            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
-        }
-        self.sign_request(cx, id, Method::Get, &path);
+        let payload = at.map_or(crate::Payload::Body(None), crate::Payload::Stream);
+        self.send(cx, Method::Get, &path, payload, true, pending);
     }
 
     pub(crate) fn start_private(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -836,11 +812,10 @@ impl BitgetFutures {
         request: Request,
         error: &str,
     ) {
-        if matches!(request, Request::Probe) {
+        match request {
             // Provider refusal is not transport evidence for Classic fallback.
-            self.probe_failed(cx, error, 0.0);
-        } else {
-            self.account_failed(cx, request, error);
+            Request::Probe => self.probe_failed(cx, error, 0.0),
+            request => self.account_failed(cx, request, error),
         }
     }
 

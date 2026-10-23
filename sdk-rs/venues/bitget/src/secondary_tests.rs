@@ -27,14 +27,15 @@ pub(crate) fn headers(
     impl Venue for Probe {
         type Pending = Pending;
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-            let id = cx.request(
+            let pending = Pending::Identity(1);
+            self.venue.send(
+                cx,
                 self.method,
-                format!("{}{path}", paths::REST, path = self.path),
-                vec![],
-                None,
-                Pending::Identity(1),
+                &self.path,
+                Payload::Body(None),
+                true,
+                pending,
             );
-            self.venue.sign_request(cx, id, self.method, &self.path);
         }
         fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
         fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
