@@ -47,7 +47,7 @@ describe('measured false positives — must never fire', () => {
   });
 });
 
-describe('block — refused in EVERY tier, including advanced', () => {
+describe('block — refused in EVERY tier, including standard', () => {
   it('blocks document.cookie', () => {
     expect(severityOf(`const c = document.cookie;`, 'document-cookie')).toBe('block');
   });
@@ -90,36 +90,35 @@ describe('block — refused in EVERY tier, including advanced', () => {
  * it was written and is never stored on our servers, which is precisely what
  * puts it out of reach of a stolen session.
  */
-describe('local-only — allowed, but must never sync', () => {
-  const localOnly = (code: string, rule: string) => {
-    expect(severityOf(code, rule)).toBe('local-only');
+describe('standard — allowed, mounts in the frame with network', () => {
+  const standard = (code: string, rule: string) => {
+    expect(severityOf(code, rule)).toBe('standard');
     // Emphatically NOT a block: these authors keep working.
     expect(hasBlockingFinding(scanCircumvention(code))).toBe(false);
-    expect(requiredTier(scanCircumvention(code))).toBe('local-only');
+    expect(requiredTier(scanCircumvention(code))).toBe('standard');
   };
 
-  it('routes fetch to local-only', () => localOnly(`fetch('/x');`, 'network-fetch'));
-  it('routes WebSocket to local-only', () => localOnly(`new WebSocket('wss://x');`, 'network-socket'));
-  it('routes EventSource to local-only', () => localOnly(`new EventSource('/s');`, 'network-sse'));
-  it('routes XHR to local-only', () => localOnly(`new XMLHttpRequest();`, 'xhr'));
-  it('routes sendBeacon to local-only', () => localOnly(`navigator.sendBeacon('/x', d);`, 'send-beacon'));
-  it('routes importScripts to local-only', () => localOnly(`importScripts('/x.js');`, 'import-scripts'));
-  it('routes dynamic import to local-only', () => localOnly(`const m = await import('/x.js');`, 'dynamic-import'));
+  it('routes fetch to standard', () => standard(`fetch('/x');`, 'network-fetch'));
+  it('routes WebSocket to standard', () => standard(`new WebSocket('wss://x');`, 'network-socket'));
+  it('routes EventSource to standard', () => standard(`new EventSource('/s');`, 'network-sse'));
+  it('routes XHR to standard', () => standard(`new XMLHttpRequest();`, 'xhr'));
+  it('routes sendBeacon to standard', () => standard(`navigator.sendBeacon('/x', d);`, 'send-beacon'));
+  it('routes importScripts to standard', () => standard(`importScripts('/x.js');`, 'import-scripts'));
+  it('routes dynamic import to standard', () => standard(`const m = await import('/x.js');`, 'dynamic-import'));
 
   /**
    * Measured: 3 of 70 production modules embed a widget or pull a charting
    * library this way. Loading foreign code means the code that runs is not the
-   * code that was screened — so it cannot sync, but it is entirely reasonable
-   * on your own machine.
+   * code that was screened — an accepted risk of the standard tier.
    */
-  it('routes createElement of an executable element to local-only', () =>
-    localOnly(`const s = document.createElement('script');`, 'create-executable-element'));
+  it('routes createElement of an executable element to standard', () =>
+    standard(`const s = document.createElement('script');`, 'create-executable-element'));
 
   it('still ignores React.createElement of the same tag', () => {
     expect(rules(`const f = React.createElement('iframe', { src });`)).toEqual([]);
   });
 
-  it('treats an ordinary element as neither executable nor local-only', () => {
+  it('treats an ordinary element as neither executable nor standard', () => {
     expect(severityOf(`const d = document.createElement('div');`, 'create-element')).toBe('flag');
     expect(requiredTier(scanCircumvention(`const d = document.createElement('div');`))).toBe('strict');
   });
@@ -132,12 +131,12 @@ describe('flag — evidence only, changes no tier', () => {
   };
 
   /**
-   * Advanced mode relaxes the network, NOT the origin, so storage stays
+   * The standard tier relaxes the network, NOT the origin, so storage stays
    * unreachable in both tiers. These modules need api.createStorageAtom
    * whatever tier they land in — which is why this is a flag and not a route
-   * into local-only.
+   * into standard.
    */
-  it('flags localStorage without routing it to local-only', () =>
+  it('flags localStorage without routing it to standard', () =>
     flagged(`localStorage.setItem('k','v');`, 'local-storage'));
   it('flags sessionStorage', () => flagged(`sessionStorage.getItem('k');`, 'session-storage'));
   it('flags indexedDB', () => flagged(`indexedDB.open('db');`, 'indexed-db'));
@@ -157,13 +156,13 @@ describe('requiredTier', () => {
     expect(requiredTier(scanCircumvention(`const Component = () => <div>hi</div>;`))).toBe('strict');
   });
 
-  it('block wins over local-only', () => {
+  it('block wins over standard', () => {
     const found = scanCircumvention(`fetch('/x');\nconst c = document.cookie;`);
     expect(requiredTier(found)).toBe('blocked');
   });
 
-  it('local-only wins over flag', () => {
-    expect(requiredTier(scanCircumvention(`atob('x');\nfetch('/y');`))).toBe('local-only');
+  it('standard wins over flag', () => {
+    expect(requiredTier(scanCircumvention(`atob('x');\nfetch('/y');`))).toBe('standard');
   });
 });
 
