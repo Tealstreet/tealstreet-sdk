@@ -121,3 +121,20 @@ unreachable through production account-cycle admission: start/poll requires a
 configured primary, GET selection then necessarily finds primary or secondary,
 and identities cannot rotate in place. The defensive refusal has no auth or
 deactivation classification; it uses the ordinary failed-cycle path.
+
+## SelectedRead coordination before publication
+
+Credential-core owner claude-m26ps4 requests using landed SelectedRead directly
+rather than duplicating the selection/admission/tag transaction. Select with
+ReadRole::Read and the existing per-kind auth scope, then SelectedRead::background
+and AdmittedRead::queue using ReadPolicy(20,000 ms, None, Never). The queue binds
+the same selected Identity to the existing recipe and emits its auth tag.
+
+For this narrow slice, construct a transient Slots from the existing immutable
+primary/read Identity refs with SlotPolicy::default(), preserving WEEX's
+secondary-without-primary selection policy. No credential layout change or
+managed.rs edit. #1992 follows this PR by plain merge and replaces that transient
+construction with its canonical stored Slots. The current command helper and
+its typed NotSent text `WEEX managed read lifecycle is unavailable` stay intact.
+Exact delivery/finish/native snapshot controls remain unchanged. This removes
+the new manual selection/admit/queue/tag block; no fallback path is retained.
