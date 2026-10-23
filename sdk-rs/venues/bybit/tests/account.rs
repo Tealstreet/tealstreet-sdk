@@ -592,10 +592,17 @@ fn places_a_batch_with_attached_brackets_and_exact_parameters() {
         200,
         r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"category":"linear","symbol":"BTCUSDT","orderId":"1666800494330512128","orderLinkId":"","createAt":"1713434102752"},{"category":"linear","symbol":"ETHUSDT","orderId":"","orderLinkId":"","createAt":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110007,"msg":"Insufficient available balance"}]},"time":1713434102753}"#,
     );
+    // D4: a partial batch fails KnownPartial with its proven native IDs.
+    let error = h.notices.iter().find_map(|notice| match notice {
+        safe_cex_engine::Notice::CommandFailed { command: 7, error } => Some(error),
+        _ => None,
+    });
+    let error = error.expect("partial batch failure");
     assert_eq!(
-        h.result(7),
-        Some(&Ok(r#"["1666800494330512128"]"#.to_owned()))
+        error.partial.as_ref().map(|p| p.order_ids.clone()),
+        Some(vec!["1666800494330512128".to_owned()])
     );
+    assert_ne!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
         h.logs
             .iter()
@@ -646,8 +653,9 @@ fn a_transport_failure_on_a_batch_is_not_resent() {
         request: batch,
         error: "connection reset",
     });
-    assert!(h.requests.is_empty(), "the venue may have the orders");
     assert!(matches!(h.result(9), Some(Err(message)) if message == "connection reset"));
+    // The venue may have the orders: reconcile once, never resend.
+    h.reconcile_once(EMPTY_LIST);
 }
 
 #[test]
@@ -711,12 +719,12 @@ fn amends_in_place_and_moves_attached_brackets_on_the_parent() {
     h.reply(
         amend.id,
         200,
-        r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"c6f055d9-7f21-4079-913d-e6523a9cfffa","orderLinkId":"linear-004"},"retExtInfo":{},"time":1672217093461}"#,
+        // The documented shape, echoing this amend's target (strict ACK).
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"orderId":"{ORDER_ID}","orderLinkId":"linear-004"}},"retExtInfo":{{}},"time":1672217093461}}"#
+        ),
     );
-    assert_eq!(
-        h.result(12),
-        Some(&Ok(r#"["c6f055d9-7f21-4079-913d-e6523a9cfffa"]"#.to_owned()))
-    );
+    assert_eq!(h.result(12), Some(&Ok(format!(r#"["{ORDER_ID}"]"#))));
 
     h.command(Command::AmendOrder {
         command: 13,
@@ -781,8 +789,15 @@ fn cancels_in_batches_and_treats_an_order_already_gone_as_canceled() {
             .status,
         OrderStatus::Canceled
     );
-    assert_eq!(store.order(other).unwrap().status, OrderStatus::Canceled);
+    // D2: an absent-order row is no local Cancelled transition; the one
+    // reconcile order read decides.
+    assert_eq!(store.order(other).unwrap().status, OrderStatus::Open);
     assert_eq!(h.result(14), Some(&Ok("[]".to_owned())));
+    assert!(h.has_request("/v5/order/realtime"), "one reconcile read");
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY_LIST);
+    }
+    assert!(h.engine.store().order(other).is_none());
 }
 
 #[test]
@@ -962,11 +977,9 @@ fn ambiguous_batch_responses_never_resend_creates() {
         );
         let batch = h.take("/v5/order/create-batch");
         h.reply(batch.id, status, response);
-        assert!(
-            h.requests.is_empty(),
-            "an accepted batch may be hidden: {status} {response}"
-        );
         assert!(matches!(h.result(50), Some(Err(_))));
+        // An accepted batch may be hidden: reconcile once, never resend.
+        h.reconcile_once(EMPTY_LIST);
     }
 }
 
@@ -1961,7 +1974,10 @@ fn write_failures_never_claim_a_refusal_the_answer_does_not_prove() {
     h.reply(
         cancel.id,
         200,
-        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":"x"},{"orderId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110020,"msg":"not allowed"}]}}"#,
+        // Strict ACK: the accepted row echoes its requested target.
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{{"orderId":"{ORDER_ID}"}},{{"orderId":""}}]}},"retExtInfo":{{"list":[{{"code":0,"msg":"OK"}},{{"code":110020,"msg":"not allowed"}}]}}}}"#
+        ),
     );
     assert_eq!(h.outcomes, [(14, None)]);
 }

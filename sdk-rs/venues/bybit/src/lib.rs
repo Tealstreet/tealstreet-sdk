@@ -2145,7 +2145,10 @@ impl Venue for BybitLinear {
         self.on_ordinary_plan_ready(cx, plan);
     }
 
-    fn on_http_owner_retired(&mut self, owner: &safe_cex_engine::request_context::HttpOwnerRetirement) {
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
         self.on_ordinary_retired(owner);
     }
 

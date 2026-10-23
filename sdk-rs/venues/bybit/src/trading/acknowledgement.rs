@@ -201,7 +201,10 @@ fn echo_matches(echo: Option<String>, sent: Option<&str>) -> bool {
 
 /// `/v5/order/create`: the native order ID, and the client echo when one was
 /// sent. A single create names one order, so an unrequested echo is harmless.
-pub(crate) fn created(result: Option<&RawValue>, order_link_id: Option<&str>) -> Result<String, Malformed> {
+pub(crate) fn created(
+    result: Option<&RawValue>,
+    order_link_id: Option<&str>,
+) -> Result<String, Malformed> {
     let row: Identity = object(result.ok_or(Malformed)?)?;
     if order_link_id.is_some() && !echo_matches(row.order_link_id, order_link_id) {
         return Err(Malformed);
@@ -227,13 +230,20 @@ pub(crate) fn created_rows(
     ext: Option<&RawValue>,
     order_link_ids: &[Option<&str>],
 ) -> Result<Vec<Row>, Malformed> {
-    let rows = rows(result, ext, order_link_ids.len(), true, true, |index, row| {
-        let row = row.ok_or(Malformed)?;
-        if !echo_matches(row.order_link_id, order_link_ids[index]) {
-            return Err(Malformed);
-        }
-        native_id(row.order_id)
-    })?;
+    let rows = rows(
+        result,
+        ext,
+        order_link_ids.len(),
+        true,
+        true,
+        |index, row| {
+            let row = row.ok_or(Malformed)?;
+            if !echo_matches(row.order_link_id, order_link_ids[index]) {
+                return Err(Malformed);
+            }
+            native_id(row.order_id)
+        },
+    )?;
     let mut ids: Vec<&str> = rows
         .iter()
         .filter_map(|row| match row {
@@ -276,8 +286,7 @@ pub(crate) fn cancelled_one(
     ext: Option<&RawValue>,
     order_id: &str,
 ) -> Result<Row, Malformed> {
-    let mut statuses: Vec<Status<'_>> =
-        objects(object::<List<'_>>(ext.ok_or(Malformed)?)?.list)?;
+    let mut statuses: Vec<Status<'_>> = objects(object::<List<'_>>(ext.ok_or(Malformed)?)?.list)?;
     if statuses.len() != 1 {
         return Err(Malformed);
     }
@@ -340,9 +349,7 @@ fn rows(
         .map(|(index, status)| (index, results.as_mut().and_then(Iterator::next), status))
         .map(|(index, row, status)| match code(status.code)? {
             0 => accept(index, row).map(Row::Accepted),
-            _ if anonymous_refusals
-                && row.is_some_and(|row| non_empty(row.order_id).is_some()) =>
-            {
+            _ if anonymous_refusals && row.is_some_and(|row| non_empty(row.order_id).is_some()) => {
                 Err(Malformed)
             }
             code => Ok(Row::Refused {
@@ -357,7 +364,11 @@ fn rows(
 /// present; every row must be an object with a bounded ID.
 pub(crate) fn cancelled_all(result: Option<&RawValue>) -> Result<Vec<String>, Malformed> {
     let affected: Affected<'_> = object(result.ok_or(Malformed)?)?;
-    if affected.success.as_deref().is_some_and(|success| success != "1") {
+    if affected
+        .success
+        .as_deref()
+        .is_some_and(|success| success != "1")
+    {
         return Err(Malformed);
     }
     let rows: Vec<Identity> = objects(affected.list)?;

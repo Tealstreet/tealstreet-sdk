@@ -751,10 +751,14 @@ fn demo_capped_cancel_all_preserves_omitted_live_order_and_reports_partial_failu
             .contains("1 live order")
     );
 
-    // A read issued after the ACK must commit the omitted row and unrelated
-    // arrivals while still filtering a replica-stale listed order.
-    h.message("/v5/private", r#"{"op":"auth","success":true}"#);
-    h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+    // The Unknown seal's one reconcile read, issued after the ACK, must
+    // commit the omitted row and unrelated arrivals while still filtering a
+    // replica-stale listed order.
+    assert!(
+        h.requests
+            .iter()
+            .all(|r| r.url.contains("/v5/order/realtime"))
+    );
     let unrelated = survivor.replace("survivor", "unrelated-live");
     let stale = survivor.replace("survivor", "active-0");
     h.respond("settleCoin=USDT&limit=50", 200, &format!(r#"{{"retCode":0,"result":{{"list":[{survivor},{unrelated},{stale}],"nextPageCursor":""}}}}"#));
@@ -799,8 +803,13 @@ fn demo_cancel_all_without_affected_identity_cannot_retire_or_tombstone_live_row
         h.respond("/v5/order/cancel-all", 200, ack);
         assert!(h.engine.store().order("live").is_some(), "{ack}");
         assert!(h.result(92).unwrap().is_err(), "{ack}");
-        h.message("/v5/private", r#"{"op":"auth","success":true}"#);
-        h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+        // The Unknown seal's one reconcile read keeps the live row.
+        assert!(
+            h.requests
+                .iter()
+                .all(|r| r.url.contains("/v5/order/realtime")),
+            "{ack}"
+        );
         h.respond(
             "settleCoin=USDT&limit=50",
             200,
@@ -1526,11 +1535,12 @@ fn demo_cancel_ack_fences_in_flight_order_snapshot_at_same_clock() {
             "cancel-all" => {
                 r#"{"retCode":0,"result":{"list":[{"orderId":"canceled","orderLinkId":""}],"success":"1"}}"#
             }
+            // Refusals by native code: 110001 is the absent-order answer (D2).
             "partial" => {
-                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110001,"msg":"permission denied"}]}}"#
+                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110020,"msg":"permission denied"}]}}"#
             }
             "rejected" => {
-                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":110001,"msg":"permission denied"}]}}"#
+                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":110020,"msg":"permission denied"}]}}"#
             }
             _ => r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
         };
@@ -2344,7 +2354,10 @@ fn managed_cancel_benign_native_refusal_keeps_valid_target_echoes() {
     });
     let cancel = h.take("/v5/order/cancel-batch");
     h.reply(cancel.id,200,r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel","result":{"list":[{"orderId":"one"},{"orderId":"two"}]}}"#);
-    assert!(h.engine.store().order("one").is_some(), "no local Cancelled transition");
+    assert!(
+        h.engine.store().order("one").is_some(),
+        "no local Cancelled transition"
+    );
     answer_reconcile(&mut h);
     assert!(h.engine.store().order("one").is_none());
     assert!(h.engine.store().order("two").is_none());
@@ -2485,7 +2498,11 @@ fn managed_cancel_code_reply(body: &str, accepted: bool) {
     });
     h.respond("/v5/order/cancel-batch", 200, body);
     if accepted {
-        assert_eq!(h.engine.store().order("kept"), Some(&before), "no local transition");
+        assert_eq!(
+            h.engine.store().order("kept"),
+            Some(&before),
+            "no local transition"
+        );
         answer_reconcile(&mut h);
         assert!(h.engine.store().order("kept").is_none());
         assert_eq!(h.result(104), Some(&Ok("[]".into())));
@@ -3055,7 +3072,11 @@ fn managed_write_window_expiry_without_a_reply_is_unknown_and_never_resent() {
     assert!(h.unknown.contains(&117));
     assert!(!h.has_request("/v5/order/create"), "never resent");
     // A late answer after expiry cannot reopen the command.
-    h.reply(create.id, 200, r#"{"retCode":0,"result":{"orderId":"late"}}"#);
+    h.reply(
+        create.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"late"}}"#,
+    );
     assert!(h.engine.store().order("late").is_none());
     assert_eq!(h.done.iter().filter(|(id, _)| *id == 117).count(), 1);
 }
@@ -3078,5 +3099,8 @@ fn managed_mode_read_window_expiry_fails_not_sent_before_any_write() {
         200,
         r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
     );
-    assert!(!h.has_request("/v5/order/create-batch"), "a late read plans nothing");
+    assert!(
+        !h.has_request("/v5/order/create-batch"),
+        "a late read plans nothing"
+    );
 }

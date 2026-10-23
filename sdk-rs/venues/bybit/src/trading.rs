@@ -658,7 +658,11 @@ impl BybitLinear {
                         .str("category", self.paths.category)
                         .str("symbol", symbol)
                         .finish();
-                    Ok(single("/v5/order/cancel-all", body, Call::CancelAll { ids }))
+                    Ok(single(
+                        "/v5/order/cancel-all",
+                        body,
+                        Call::CancelAll { ids },
+                    ))
                 }
             }
             Command::SetLeverage {

@@ -612,6 +612,8 @@ fn managed_partial_replacement_unresolved_noop_text_does_not_schedule_success_re
         );
         assert!(h.result(91).unwrap().is_err());
         assert!(h.unknown.contains(&91));
+        // The Unknown seal reconciles once; that read is not a success refresh.
+        h.reconcile_once(EMPTY);
         h.advance(250.0);
         for path in [
             "/v5/position/trading-stop",
@@ -951,6 +953,14 @@ fn already_gone_cancel_allows_replacement_but_replacement_failure_never_restores
                 h.result(91).unwrap().is_ok(),
                 matches!(outcome, "not-modified" | "accepted")
             );
+            if !profile.variant.is_hyro() {
+                // D2: the absent old leg is retired by the reconcile read, not
+                // by the answer; a replacement failure never restores it.
+                assert!(h.has_request("/v5/order/realtime"), "{profile:?}/{outcome}");
+                while h.has_request("/v5/order/realtime") {
+                    h.respond("/v5/order/realtime", 200, EMPTY);
+                }
+            }
             assert!(
                 h.engine
                     .store()

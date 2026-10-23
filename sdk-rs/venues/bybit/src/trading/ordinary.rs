@@ -51,7 +51,7 @@ enum Stage {
         version: u64,
         context: Context,
     },
-    Plan(Run),
+    Plan(Box<Run>),
 }
 
 struct Run {
@@ -307,7 +307,8 @@ impl BybitLinear {
                 .ok()
                 .filter(|context| self.send_mode_read(cx, id, &symbol, context.clone()));
             let Some(context) = context else {
-                let error = internal("Bybit position-mode read was refused").outcome(Outcome::NotSent);
+                let error =
+                    internal("Bybit position-mode read was refused").outcome(Outcome::NotSent);
                 let _ = cx.fail_preflight(&entry.preflight, error);
                 return;
             };
@@ -336,18 +337,20 @@ impl BybitLinear {
             return;
         }
         let Some(run) = self.admit_ordinary(cx, &entry, job) else {
-            let error = internal("Bybit trading plan admission was refused").outcome(Outcome::NotSent);
+            let error =
+                internal("Bybit trading plan admission was refused").outcome(Outcome::NotSent);
             let _ = cx.fail_preflight(&entry.preflight, error);
             return;
         };
-        entry.stage = Stage::Plan(run);
+        entry.stage = Stage::Plan(Box::new(run));
         self.continue_ordinary(cx, id, entry);
     }
 
     /// One serial step per native request; a batch's single-create fallback is
     /// its declared after-refusal branch.
     fn admit_ordinary(&self, cx: &mut Cx<'_, Pending>, entry: &Ordinary, job: Job) -> Option<Run> {
-        let amend_virtual = matches!(&entry.command, Command::AmendOrder { id, .. } if is_virtual(id));
+        let amend_virtual =
+            matches!(&entry.command, Command::AmendOrder { id, .. } if is_virtual(id));
         let placing = matches!(entry.command, Command::PlaceOrders { .. });
         let mut legs = VecDeque::new();
         let mut delays = Vec::new();
@@ -382,10 +385,8 @@ impl BybitLinear {
                     .collect()
             })
             .collect();
-        let calls: Vec<[CallBound<'_>; 1]> = branches
-            .iter()
-            .map(|branch| [call_bound(branch)])
-            .collect();
+        let calls: Vec<[CallBound<'_>; 1]> =
+            branches.iter().map(|branch| [call_bound(branch)]).collect();
         let steps: Vec<StepBound<'_>> = calls
             .iter()
             .zip(&delays)
@@ -416,7 +417,13 @@ impl BybitLinear {
         })
     }
 
-    fn send_mode_read(&self, cx: &mut Cx<'_, Pending>, id: CommandId, symbol: &str, context: Context) -> bool {
+    fn send_mode_read(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        id: CommandId,
+        symbol: &str,
+        context: Context,
+    ) -> bool {
         let query = Query::new()
             .str("category", self.paths.category)
             .str("symbol", symbol)
@@ -515,12 +522,17 @@ impl BybitLinear {
             return;
         };
         let context = match leg.intent {
-            LegIntent::Setting => cx.plan_leg_context_with_intent(&run.plan, &slot, Intent::Setting),
+            LegIntent::Setting => {
+                cx.plan_leg_context_with_intent(&run.plan, &slot, Intent::Setting)
+            }
             LegIntent::ProtectionCancel => cx.plan_protection_cancel_leg_context(&run.plan, &slot),
             LegIntent::Command => cx.plan_leg_context(&run.plan, &slot),
         };
         let Ok(context) = context else {
-            let _ = cx.fail_plan(&run.plan, internal("Bybit trading plan refused its next leg"));
+            let _ = cx.fail_plan(
+                &run.plan,
+                internal("Bybit trading plan refused its next leg"),
+            );
             return;
         };
         self.route_body(&leg.planned.body);
@@ -567,10 +579,14 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_ordinary_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
-        let id = self.trading.ordinary.iter().find_map(|(id, entry)| match &entry.stage {
-            Stage::Plan(run) if run.plan.owner() == plan.owner() => Some(*id),
-            _ => None,
-        });
+        let id = self
+            .trading
+            .ordinary
+            .iter()
+            .find_map(|(id, entry)| match &entry.stage {
+                Stage::Plan(run) if run.plan.owner() == plan.owner() => Some(*id),
+                _ => None,
+            });
         if let Some(id) = id
             && let Some(entry) = self.trading.ordinary.remove(&id)
         {
@@ -652,7 +668,9 @@ impl BybitLinear {
         }
         let released = Released::Response(response);
         let mode = match ack::answer(response.body) {
-            Ok(Answer::Success { result, .. }) => ack::position_mode(result, &symbol).map_err(not_sent),
+            Ok(Answer::Success { result, .. }) => {
+                ack::position_mode(result, &symbol).map_err(not_sent)
+            }
             Ok(Answer::Refused { code, message, .. }) => {
                 // Signature diagnostics can contain the complete signed origin.
                 let message = crate::signing_rejection(code, &message).unwrap_or(message);
@@ -677,7 +695,10 @@ impl BybitLinear {
                         cx.observe_protocol_time(server);
                     }
                     if !self.send_mode_read(cx, id, &symbol, context.clone()) {
-                        let _ = cx.fail_preflight(&entry.preflight, failure.error.outcome(Outcome::NotSent));
+                        let _ = cx.fail_preflight(
+                            &entry.preflight,
+                            failure.error.outcome(Outcome::NotSent),
+                        );
                         return;
                     }
                     entry.stage = Stage::Mode {
@@ -690,7 +711,9 @@ impl BybitLinear {
                 }
                 Err(failure.error)
             }
-            Err(_) => Err(classify::read(&BYBIT, released, None, "Invalid position mode response").error),
+            Err(_) => {
+                Err(classify::read(&BYBIT, released, None, "Invalid position mode response").error)
+            }
         };
         let mode = match mode {
             Ok(mode) => mode,
@@ -701,7 +724,10 @@ impl BybitLinear {
                 return;
             }
         };
-        if cx.finish_preflight_call(&entry.preflight, &context).is_err() {
+        if cx
+            .finish_preflight_call(&entry.preflight, &context)
+            .is_err()
+        {
             return;
         }
         // A mode change while the read was out leaves this answer stale.
@@ -724,7 +750,10 @@ impl BybitLinear {
             return;
         };
         let active = run.active.take().expect("matched active leg");
-        if cx.validate_plan_delivery(&run.plan, &active.context).is_err() {
+        if cx
+            .validate_plan_delivery(&run.plan, &active.context)
+            .is_err()
+        {
             run.active = Some(active);
             self.trading.ordinary.insert(id, entry);
             return;
@@ -737,7 +766,10 @@ impl BybitLinear {
         match decision {
             Decision::Next(ids) => {
                 run.ids.extend(ids);
-                if cx.finish_plan_call(&plan, &active.slot, &active.context).is_err() {
+                if cx
+                    .finish_plan_call(&plan, &active.slot, &active.context)
+                    .is_err()
+                {
                     let _ = cx.fail_plan(&plan, internal("Bybit trading plan lost its call"));
                     return;
                 }
@@ -749,7 +781,10 @@ impl BybitLinear {
                     return;
                 }
                 run.error.get_or_insert(error);
-                if cx.finish_plan_call(&plan, &active.slot, &active.context).is_err() {
+                if cx
+                    .finish_plan_call(&plan, &active.slot, &active.context)
+                    .is_err()
+                {
                     let _ = cx.fail_plan(&plan, internal("Bybit trading plan lost its call"));
                     return;
                 }
@@ -784,7 +819,10 @@ impl BybitLinear {
                 return;
             }
             Decision::Replace(fallback) => {
-                if cx.replace_plan_call(&plan, &active.slot, &active.context).is_err() {
+                if cx
+                    .replace_plan_call(&plan, &active.slot, &active.context)
+                    .is_err()
+                {
                     let _ = cx.fail_plan(&plan, internal("Bybit batch fallback was refused"));
                     return;
                 }
@@ -880,7 +918,12 @@ impl BybitLinear {
         Some((verdict, grant, error))
     }
 
-    fn unproven(cx: &mut Cx<'_, Pending>, context: &Context, message: &str, evidence: &[String]) -> Decision {
+    fn unproven(
+        cx: &mut Cx<'_, Pending>,
+        context: &Context,
+        message: &str,
+        evidence: &[String],
+    ) -> Decision {
         match Self::record_failure(cx, context, None, message.into(), true, evidence, false) {
             Some((_, _, error)) => Decision::Failed(error),
             None => Decision::Lost,
@@ -888,14 +931,8 @@ impl BybitLinear {
     }
 
     fn accepted(cx: &mut Cx<'_, Pending>, context: &Context, order_ids: Vec<String>) -> bool {
-        cx.http_write_fact(
-            context,
-            WriteFact::Accepted {
-                order_ids,
-            },
-            None,
-        )
-        .is_ok()
+        cx.http_write_fact(context, WriteFact::Accepted { order_ids }, None)
+            .is_ok()
     }
 
     fn leg_decision(
@@ -914,7 +951,9 @@ impl BybitLinear {
                 result,
                 ext,
             }) => self.refused_leg(cx, id, active, code, message, result, ext),
-            Ok(Answer::Success { result, ext }) => self.accepted_leg(cx, active, response, result, ext),
+            Ok(Answer::Success { result, ext }) => {
+                self.accepted_leg(cx, active, response, result, ext)
+            }
         }
     }
 
@@ -961,9 +1000,9 @@ impl BybitLinear {
             Verdict::Satisfied(_) => {
                 matches!(planned.call, Call::CancelAll { .. })
                     || (rows && evidence.is_empty())
-                    || evidence.iter().any(|echo| {
-                        !targets.contains(echo) && partial_stop != Some(echo.as_str())
-                    })
+                    || evidence
+                        .iter()
+                        .any(|echo| !targets.contains(echo) && partial_stop != Some(echo.as_str()))
             }
             verdict => verdict.is_refusal() && (rows || !evidence.is_empty()),
         };
@@ -987,7 +1026,9 @@ impl BybitLinear {
                 Decision::Next(Vec::new())
             }
             (Verdict::RefusedResend(_), _) if grant.is_some() => {
-                if let Some(server) = server_time(error.venue_message.as_deref().unwrap_or_default()) {
+                if let Some(server) =
+                    server_time(error.venue_message.as_deref().unwrap_or_default())
+                {
                     cx.observe_protocol_time(server);
                 }
                 Decision::Resend(grant.expect("checked above"))
@@ -995,7 +1036,10 @@ impl BybitLinear {
             (Verdict::Refused(_), Call::PlaceBatch { fallback })
                 if code == 10001 && !fallback.is_empty() =>
             {
-                cx.command_error(id, format!("Failed to place batch orders: {}", error.message));
+                cx.command_error(
+                    id,
+                    format!("Failed to place batch orders: {}", error.message),
+                );
                 Decision::Replace(fallback.clone())
             }
             _ => Decision::Failed(error),
@@ -1057,7 +1101,12 @@ impl BybitLinear {
                 let link = fields(&planned.body).order_link_id;
                 let Ok(id) = ack::created(result, link.as_deref()) else {
                     let evidence = ack::evidence_ids(result);
-                    return Self::unproven(cx, context, "Bybit create acknowledgement does not prove its order", &evidence);
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Bybit create acknowledgement does not prove its order",
+                        &evidence,
+                    );
                 };
                 if !Self::accepted(cx, context, vec![id.clone()]) {
                     return Decision::Lost;
@@ -1076,7 +1125,12 @@ impl BybitLinear {
                 let refs: Vec<Option<&str>> = links.iter().map(Option::as_deref).collect();
                 let Ok(rows) = ack::created_rows(result, ext, &refs) else {
                     let evidence = ack::evidence_ids(result);
-                    return Self::unproven(cx, context, "Bybit create-batch acknowledgement does not prove its orders", &evidence);
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Bybit create-batch acknowledgement does not prove its orders",
+                        &evidence,
+                    );
                 };
                 let items = Self::batch_items(&rows);
                 let Ok(outcome) = cx.http_write_batch(
@@ -1093,7 +1147,11 @@ impl BybitLinear {
                     if let Row::Refused { code, message } = row {
                         cx.command_error(
                             context_command(context),
-                            format!("Order {}: {}", index + 1, describe((*code, message.clone()))),
+                            format!(
+                                "Order {}: {}",
+                                index + 1,
+                                describe((*code, message.clone()))
+                            ),
                         );
                     }
                 }
@@ -1122,7 +1180,12 @@ impl BybitLinear {
                     return Self::unproven(cx, context, "Bybit cancel has no single target", &[]);
                 };
                 if ack::targeted(result, target).is_err() {
-                    return Self::unproven(cx, context, "Bybit cancel acknowledgement does not name its order", &ack::evidence_ids(result));
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Bybit cancel acknowledgement does not name its order",
+                        &ack::evidence_ids(result),
+                    );
                 }
                 if !Self::accepted(cx, context, Vec::new()) {
                     return Decision::Lost;
@@ -1134,7 +1197,12 @@ impl BybitLinear {
             Call::Cancel { ids } => {
                 let targets: Vec<&str> = ids.iter().map(String::as_str).collect();
                 let Ok(rows) = ack::cancelled_rows(result, ext, &targets) else {
-                    return Self::unproven(cx, context, "Bybit cancel acknowledgement does not prove its orders", &[]);
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Bybit cancel acknowledgement does not prove its orders",
+                        &[],
+                    );
                 };
                 let items = Self::batch_items(&rows);
                 let Ok(outcome) = cx.http_write_batch(
@@ -1175,7 +1243,12 @@ impl BybitLinear {
                     ack::targeted(result, id).map(|()| Row::Accepted(id.clone()))
                 };
                 let Ok(row) = row else {
-                    return Self::unproven(cx, context, "Partial stop cancellation was not confirmed: malformed or mismatched acknowledgement", &[]);
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Partial stop cancellation was not confirmed: malformed or mismatched acknowledgement",
+                        &[],
+                    );
                 };
                 let rows = [row];
                 let items = Self::batch_items(&rows);
@@ -1205,7 +1278,12 @@ impl BybitLinear {
             }
             Call::CancelAll { ids } => {
                 let Ok(affected) = ack::cancelled_all(result) else {
-                    return Self::unproven(cx, context, "Bybit cancel-all outcome is unknown: missing or malformed affected-order list", &[]);
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Bybit cancel-all outcome is unknown: missing or malformed affected-order list",
+                        &[],
+                    );
                 };
                 // Futures select at most 500 native orders. The affected
                 // list, including uncaptured arrivals, is the only proof.
@@ -1227,7 +1305,15 @@ impl BybitLinear {
                     let message = format!(
                         "Bybit cancel-all left {omitted} live order(s) unconfirmed; reconcile before retrying"
                     );
-                    match Self::record_failure(cx, context, None, message, true, &[], !affected.is_empty()) {
+                    match Self::record_failure(
+                        cx,
+                        context,
+                        None,
+                        message,
+                        true,
+                        &[],
+                        !affected.is_empty(),
+                    ) {
                         Some((_, _, error)) => Decision::Failed(error),
                         None => return Decision::Lost,
                     }
@@ -1257,7 +1343,12 @@ impl BybitLinear {
                     return Self::unproven(cx, context, "Bybit amend has no target", &[]);
                 };
                 if ack::targeted(result, &target).is_err() {
-                    return Self::unproven(cx, context, "Bybit amend acknowledgement does not name its order", &ack::evidence_ids(result));
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Bybit amend acknowledgement does not name its order",
+                        &ack::evidence_ids(result),
+                    );
                 }
                 if !Self::accepted(cx, context, vec![target.clone()]) {
                     return Decision::Lost;
@@ -1287,7 +1378,12 @@ impl BybitLinear {
             Call::MarginMode { isolated } => {
                 // Success is retCode 0 with no reasons; the message is not "OK".
                 if ack::margin_applied(result) != Ok(true) {
-                    return Self::unproven(cx, context, "Bybit margin mode change was not confirmed", &[]);
+                    return Self::unproven(
+                        cx,
+                        context,
+                        "Bybit margin mode change was not confirmed",
+                        &[],
+                    );
                 }
                 if !Self::accepted(cx, context, Vec::new()) {
                     return Decision::Lost;
@@ -1312,9 +1408,12 @@ impl BybitLinear {
                 self.apply_position_mode(cx, *hedged);
                 Decision::Next(Vec::new())
             }
-            Call::Hyro(_) | Call::ResolveMode { .. } => {
-                Self::unproven(cx, context, "Bybit ordinary plan carried a legacy call", &[])
-            }
+            Call::Hyro(_) | Call::ResolveMode { .. } => Self::unproven(
+                cx,
+                context,
+                "Bybit ordinary plan carried a legacy call",
+                &[],
+            ),
         }
     }
 

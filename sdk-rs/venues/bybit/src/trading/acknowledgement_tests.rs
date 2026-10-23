@@ -56,7 +56,10 @@ fn a_single_identity_needs_its_bounded_id_and_consistent_echoes() {
     let (none, _) = success(r#"{"retCode":0,"result":{}}"#);
     assert_eq!(created(none, None), Err(Malformed));
     assert_eq!(created(None, None), Err(Malformed));
-    let long = format!(r#"{{"retCode":0,"result":{{"orderId":"{}"}}}}"#, "n".repeat(1025));
+    let long = format!(
+        r#"{{"retCode":0,"result":{{"orderId":"{}"}}}}"#,
+        "n".repeat(1025)
+    );
     let (long, _) = success(&long);
     assert_eq!(created(long, None), Err(Malformed));
 }
@@ -91,7 +94,10 @@ fn created_rows_match_by_count_echo_and_unique_ids() {
     let (twice, twice_ext) = success(
         r#"{"retCode":0,"result":{"list":[{"orderId":"n1"},{"orderId":"n1"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
     );
-    assert_eq!(created_rows(twice, twice_ext, &[None, None]), Err(Malformed));
+    assert_eq!(
+        created_rows(twice, twice_ext, &[None, None]),
+        Err(Malformed)
+    );
     // A refused row that names an order may have placed it.
     let (named, named_ext) = success(
         r#"{"retCode":0,"result":{"list":[{"orderId":"n1"}]},"retExtInfo":{"list":[{"code":110007,"msg":"no balance"}]}}"#,
@@ -161,7 +167,10 @@ fn one_partial_stop_cancel_needs_exactly_one_status_and_no_other_target() {
         ),
         (r#"{"retCode":0}"#, Err(Malformed)),
         (r#"{"retCode":0,"retExtInfo":{"list":[]}}"#, Err(Malformed)),
-        (r#"{"retCode":0,"retExtInfo":{"list":[{}]}}"#, Err(Malformed)),
+        (
+            r#"{"retCode":0,"retExtInfo":{"list":[{}]}}"#,
+            Err(Malformed),
+        ),
         (
             r#"{"retCode":0,"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
             Err(Malformed),

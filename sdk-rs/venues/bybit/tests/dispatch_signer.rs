@@ -139,8 +139,20 @@ fn prepare_parked(engine: &mut Engine<BybitLinear>, now: f64) -> Vec<Action> {
     for action in actions {
         match action {
             Action::ManagedHttp(managed) => {
-                if let HttpAction::Prepare { preparation, request, .. } = *managed {
-                    engine.http_prepared(now, preparation, Prepared { id: request.id.0, expires_at: None });
+                if let HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } = *managed
+                {
+                    engine.http_prepared(
+                        now,
+                        preparation,
+                        Prepared {
+                            id: request.id.0,
+                            expires_at: None,
+                        },
+                    );
                 }
             }
             action => rest.push(action),
