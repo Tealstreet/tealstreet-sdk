@@ -22,6 +22,7 @@
     "lighter-robinhood": {"privateEligible": [["secret", "remoteSigner"], ["apiKeyIndex"]], "bridge": {"apiKeyIndexRequired": true}},
     "hyperliquid": {"privateEligible": [["vault", "applicationId", "key"]]},
     "asterdex": {"canSign": [["key"], ["remoteSigner", "asterLocalAuth"]], "bridge": {"isolatedBookSubscriptions": true}},
+    "bingx": {"bridge": {"dispatchSigning": true}},
     "bybit": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
     "bybitinverse": {"bridge": {"dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},
     "bybitspot": {"bridge": {"spot": true, "dispatchSigning": true}, "remoteSigning": {"wire": {"exchangeName": "bybit", "extraData": "bybitExpiry"}, "enabled": true, "payloadSupported": true, "payloadRestOnly": true, "protectedHeaders": ["X-BAPI-SIGN", "X-BAPI-API-KEY", "X-BAPI-TIMESTAMP"]}},

@@ -4626,6 +4626,84 @@ The original 20-second root, independent retry budgets, exact response fence,
 query/result codec and native unsupported-interval preflight remain. Admission
 of a fresh command grants no additional rights to later retries or callbacks.
 
+## MEXC candle initial command admission
+
+`FetchCandles` borrows initial HTTP command ownership directly from the engine,
+without passing a numeric command ID to issuance or falling back to a numeric
+terminal. Invalid command time and exhausted owner capacity emit one typed
+InvalidInput/Internal rejection before any Context or transport exists. These
+initial read rejections have no write outcome or credential evidence. A later
+valid invocation may reuse the rejected ID, and capacity refusal preserves all
+existing parked reads. Revoked entry custody grants no adapter completion.
+The existing 20-second public Read policy, no-retry behavior and issued-Context
+transport/expiry error contract remain in force.
+
+
+## MEXC, Phemex and Polymarket bounded row reporting
+
+MEXC, Phemex and Polymarket use the engine's bounded Once diagnostic memory
+for their existing account-row skip notices. Repeated identities remain silent
+until native recovery or the shared 4096-entry rollover rearms them. Notice
+codes, messages and severity stay the same; Once does not upgrade a remembered
+Warn to Error. This changes internal reporting ownership without requiring a
+caller option, credential transfer or persisted identity migration.
+
+MEXC keeps coin, position and shared order namespaces and its accepted-identity
+filters. Phemex keeps currency-scoped clean recovery and position-leg rejection
+filters before symbol-key recovery, inside its write/slice admission guards.
+Polymarket keeps valid zero/priced holding recovery before final snapshot
+admission and whole-memory recovery only for an admitted clean read. Existing
+rows, financial calculations, snapshot authority, signing and HTTP/WS lifecycle
+retain their native contracts.
+
+### BingX native dispatch signing and refusal ownership
+
+BingX HTTP signing and listen-key API-key presentation use the shared
+host-injected provider. Venue options retain
+opaque primary/secondary refs; generic engine/SDK options retain no signing
+secret. Ordinary GET work uses the secondary identity when present, while writes
+and listen-key creation/renewal select primary. Native sorted query bytes,
+integer protocol stamps, typed POST parameters and API-key/source headers stay
+unchanged. Worker or custom-host callers must provision the shared provider
+where the engine executes; secrets are not copied back into venue objects.
+
+Provider refusal is not a venue authentication response or a signature rejection.
+Identity/history/metadata commands preserve the original typed failure; failed
+history preparation discards buffered results rather than returning success.
+Background read cleanup releases only its captured in-flight reservation, while
+obsolete listen-key epochs cannot retire a replacement session. Existing read
+backoff, metadata publication and private socket ownership policies remain.
+
+A first refused write is `notSent`. After an earlier write or signature retry
+reached the venue, a later refused signer cannot make the whole operation
+`notSent`; uncertain prior effects require reconciliation. Accepted IDs remain
+in the existing partial result, including when another leg fails before send.
+BingX hosted/keyless admission is disabled. Hosted callers use their existing
+supported runtime route. Native provider signing uses hex HMAC and API-key
+presentation; WebSocket session ownership remains separate.
+
+## BingX managed single-owner reads
+
+Credentialed startup quotes, account identity, candle commands and recurring
+private snapshot reads prepare their route before provider signing, using the same native primary
+or secondary credential selection and exact header/query/body bytes. A read keeps
+its original raw 20s deadline through route/provider delays and its existing
+one-signature retry; identity retains its native no-retry behavior. Identity and candle
+success and failures complete through generation-bearing Context authority.
+Provider or route refusal stays typed and does not become native account-auth
+evidence. Account snapshot, revision, settings and stale-owner publication fences
+remain native and unchanged.
+
+Candle rows keep native time sorting and seconds conversion. Refused response
+rows and decode status are discarded before a signature retry; they cannot
+appear in or poison its successful response. Provider, route, malformed-stream
+and deadline failures settle the command once, and late responses cannot revive
+it. Unsigned public candles retain their existing request path.
+
+Session upkeep and history retain their explicit legacy ownership and existing
+native retry/completion contracts. Hosted admission is disabled. These read
+adapters require no new caller option or persisted identity mapping.
+
 ## WEEX trusted passphrase setup and managed header declaration
 
 WEEX's trusted signer setup requires a passphrase for a complete private primary

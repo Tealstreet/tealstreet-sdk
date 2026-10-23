@@ -301,6 +301,8 @@ const bingxTransport = () => {
   const writes: Array<{ path: string; body?: string }> = [];
   let nextOrderId = 4242;
   const transport: Transport = {
+    // BingX credentialed reads are managed; route preparation precedes signing.
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       sockets.set(new URL(url).pathname, onMessage);

@@ -405,10 +405,26 @@ SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e1
                                 '931fea11387a3eb1ccf2c909b869b3ee559925055e436a3987df14969b35fc81': 1,
                                 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 1})}
 
-# Owner-approved temporary WEEX staging site (6cf35cca, sign_http) for its legacy-owned
-# account cycle, trading and history. Delete once the shared Plan/execution-group
-# API and cxxyqr's history bridge (#1848) own them. No other WEEX additions.
-STAGING_BOOTSTRAPS = {'venues/weex/src/lib.rs': ({'067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1': 1,
+# Owner-approved temporary staging sites (6cf35cca, sign_http), exactly one per family:
+# BingX legacy history and listen-key work, until cxxyqr's history bridge (#1848) and the
+# session Context (#1832/#1842) own them; WEEX account cycle, trading and history, until
+# the shared Plan/execution-group API and the history bridge own them. No other additions.
+STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
+ '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 2,
+ 'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
+ 'ca1a695870588abe078efa57b2d1e6f789b219044369ce2f8d1119a9c10664b7': 1,
+ 'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 2},
+    {'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
+ '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 1,
+ '6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219': 1,
+ 'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
+ 'c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548': 1,
+ 'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
+ 'ca1a695870588abe078efa57b2d1e6f789b219044369ce2f8d1119a9c10664b7': 1,
+ 'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1}),
+ 'venues/weex/src/lib.rs': ({'067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1': 1,
  '0d6bbb8e01da4f9bc9a177c0e8ca9d0d015c922780050cfeda6b33807cac8e78': 1,
  '1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
  '1805af84e51e32d19a267749aeea1b85d4e801cb4df04d796274edac35db929d': 1,
@@ -441,6 +457,7 @@ STAGING_BOOTSTRAPS = {'venues/weex/src/lib.rs': ({'067aa233d0ebbb24c837ae5cb4549
  'c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa': 2,
  'cd66da21afeeef22b98026c1d44238cf77b537c7b5ea67ee5d4fb4464905d893': 1,
  'fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6': 1})}
+
 
 
 def subset(counts, baseline):
