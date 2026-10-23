@@ -568,3 +568,47 @@ readiness: those legacy paths still require their own managed conversion.
 Remote proof must state its actual scope and use the real async host/provider
 adapter, not relabel a local immediate signer as remote. No inventory entries
 are removed by this preparation.
+
+
+## Managed trading implementation checkpoint (2026-10-24, #1891)
+
+The trading queue now begins genuine Preflight ownership, prepares native payloads
+without signing, and admits the immutable serial Plan before release. Each write
+uses `plan_leg_context_with_intent` and the shared signer recipe; the provider
+checks all required algorithms before the first call of Place or Amend. Local
+zkLink remains supported. A provider lacking zkLink refuses the whole command
+before cancel/replacement I/O. A missing role-bound ref gives InvalidInput;
+unsupported algorithms give Unsupported. Both are typed NotSent.
+
+FIFO successors activate only through their retained Preflight readiness callback.
+Amend racing fills use predeclared conditional terminals, with all earlier facts
+projected by the common journal. The venue no longer demotes later rejection
+outcomes or creates pacing timers. Ten-cancel pauses are declared Plan waits.
+Retries remain the single native 20016 signature-refusal grant, with fresh native
+20-second attempt windows; message substrings and bare status codes cannot grant
+resend. Native integer strings use the same strict integer table as JSON integers.
+Only native code zero on a 2xx response enters successful write reducers.
+
+Bounded late metadata retains exact native cancellation targets and placement
+client correlation, never request bytes, recipes or credentials. Late ACKs emit no Store update, command terminal, retry or auth state. The shared
+Store revision fence alone cannot update ApeX's native account-read version fence;
+an older account snapshot could otherwise resurrect a canceled row. Until that
+composition is provided, late cancellation and placement evidence remain uncertain
+and no optimistic row is published. Active successes still use the native fence.
+
+All four original HMAC error controls are active. The three original provider
+controls now pass, as do non-2xx/code-zero, quoted-code, partial cancellation IDs
+and timeout/late-ACK revision controls. The native helper drives the existing
+Prepare/Bind/Claim fixture at each test's actual event time. This proves local
+provider behavior; the HmacOnly fixture is not a remote-signing proof. Positive
+async remote HMAC cancel and multipart-setting proof remains a merge prerequisite.
+The two placement REDs remain explicitly P8-gated, unchanged.
+
+The exact ratchet prune removes only `venues/apexomni/src/trading.rs`: 11
+fingerprints / 17 occurrences to zero. The shared legacy lib sender, startup,
+account, history, public and session paths remain inventoried. Opaque identity
+registration and SDK admission are separately owned by claude-m26ps4; no raw
+fallback or registry migration is claimed by this checkpoint. Shared source
+composition includes reviewed conditional/readiness/signer capability and actual
+Plan core 632da7717e2 plus Store landing c55a6a76044. Those open prerequisites
+must land and be genuinely integrated before final venue CI and a merge window.

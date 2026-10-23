@@ -78,6 +78,12 @@ pub struct Request {
     unsigned: sign::Request,
     contracts: Vec<[u8; 36]>,
     legacy: bool,
+    late: LateTrade,
+}
+#[derive(serde::Serialize, Deserialize)]
+struct LateTrade {
+    cancel_ids: Vec<String>,
+    clients: Vec<String>,
 }
 struct Amendment {
     id: String,
@@ -984,7 +990,13 @@ impl ApexOmni {
             );
             return;
         };
-        let context = match cx.plan_leg_context(&plan, &slot) {
+        let intent = match &accepted {
+            Accepted::Place => Intent::Place,
+            Accepted::Cancel(_) | Accepted::CancelSymbol(_) => Intent::Cancel,
+            Accepted::AmendCancel => Intent::Amend,
+            Accepted::Leverage(..) => Intent::Setting,
+        };
+        let context = match cx.plan_leg_context_with_intent(&plan, &slot, intent) {
             Ok(context) => context,
             Err(error) => {
                 self.trading.active = Some(job);
@@ -992,15 +1004,32 @@ impl ApexOmni {
                 return;
             }
         };
-        if matches!(accepted, Accepted::Cancel(_) | Accepted::CancelSymbol(_)) {
-            if let Err(error) = cx.http_write_leg_intent(&context, Intent::Cancel) {
-                self.trading.active = Some(job);
-                let _ = cx.fail_plan(&plan, error.venue_error());
-                return;
-            }
-        }
+        let cancel_ids = match &accepted {
+            Accepted::Cancel(ids) => ids.clone(),
+            Accepted::AmendCancel => self
+                .trading
+                .amendment
+                .as_ref()
+                .map(|amendment| vec![amendment.id.clone()])
+                .unwrap_or_default(),
+            Accepted::CancelSymbol(symbol) => cx
+                .store
+                .orders()
+                .iter()
+                .filter(|order| &order.symbol == symbol)
+                .map(|order| parent_id(&order.id).to_owned())
+                .collect(),
+            _ => vec![],
+        };
+        let late = LateTrade {
+            cancel_ids,
+            clients: receipts
+                .iter()
+                .map(|receipt| receipt.identity.clone())
+                .collect(),
+        };
         cx.command_progress(job.command, receipts);
-        let request = Request {
+        let delivery = Request {
             command: job.command,
             accepted,
             plan,
@@ -1009,52 +1038,53 @@ impl ApexOmni {
             unsigned,
             contracts,
             legacy: false,
+            late,
         };
         self.trading.active = Some(job);
-        self.send_trading(cx, request);
+        self.send_trading(cx, delivery);
     }
 
-    fn send_trading(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+    fn send_trading(&mut self, cx: &mut Cx<'_, Pending>, delivery: Request) {
         let identity = self
             .options
             .identity
             .as_ref()
             .expect("admitted identity")
             .clone();
-        let query = sign::query(&request.unsigned.params);
+        let query = sign::query(&delivery.unsigned.params);
         let url = format!(
             "{}{}{}{}",
             self.rest,
-            request.unsigned.path,
+            delivery.unsigned.path,
             if query.is_empty() { "" } else { "?" },
             query
         );
         let recipe = sign::Http::with_contracts(
             identity,
-            request.unsigned.clone(),
-            request.legacy,
-            request.contracts.clone(),
+            delivery.unsigned.clone(),
+            delivery.legacy,
+            delivery.contracts.clone(),
         );
         self.trading.waiting = true;
-        if let Err((Pending::Trade(request), error)) = cx.request_signed_managed(
-            request.context.clone(),
-            request.unsigned.method,
+        if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
+            delivery.context.clone(),
+            delivery.unsigned.method,
             url,
             None,
             Box::new(recipe),
-            Pending::Trade(request),
+            Pending::Trade(delivery),
         ) {
-            self.trading_failed(cx, request, error.venue_error());
+            self.trading_failed(cx, delivery, error.venue_error());
         }
     }
 
     pub(crate) fn trading_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
+        delivery: Request,
         error: VenueError,
     ) {
-        let _ = cx.fail_plan(&request.plan, error);
+        let _ = cx.fail_plan(&delivery.plan, error);
     }
 
     pub(crate) fn trading_retired(&mut self, owner: &HttpOwnerRetirement) -> Option<Preflight> {
@@ -1141,11 +1171,11 @@ impl ApexOmni {
     pub(crate) fn trading_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
+        delivery: Request,
         response: Response<'_>,
     ) {
         if cx
-            .validate_plan_delivery(&request.plan, &request.context)
+            .validate_plan_delivery(&delivery.plan, &delivery.context)
             .is_err()
         {
             return;
@@ -1154,7 +1184,7 @@ impl ApexOmni {
             .trading
             .active
             .as_ref()
-            .is_some_and(|job| job.command == request.command)
+            .is_some_and(|job| job.command == delivery.command)
         {
             return;
         }
@@ -1163,25 +1193,26 @@ impl ApexOmni {
             .as_ref()
             .and_then(|e| e.code.as_ref())
             .and_then(strict_code);
-        if code != Some(0) {
+        if code != Some(0) || !(200..300).contains(&response.status) {
             let native = envelope.as_ref().map(|e| Native {
-                code: match e.code.as_ref() {
-                    Some(crate::Code::Integer(value)) => NativeCode::Int(*value),
-                    Some(crate::Code::Text(value)) => NativeCode::Text(value),
-                    _ => NativeCode::None,
-                },
+                code: code.map_or(NativeCode::None, NativeCode::Int),
                 message: e.msg.as_ref(),
             });
             let message = envelope
                 .as_ref()
                 .map_or("ApeX Omni malformed write response", |e| e.msg.as_ref());
-            let Ok(fact) = cx.classify_write(&request.context, &APEX, native.as_ref(), message)
+            let message = format!(
+                "ApeX Omni request failed [{}]: {}",
+                code.unwrap_or(i64::from(response.status)),
+                message
+            );
+            let Ok(fact) = cx.classify_write(&delivery.context, &APEX, native.as_ref(), message)
             else {
                 return;
             };
             let error = fact.error().clone();
             let grant = cx.http_write_fact(
-                &request.context,
+                &delivery.context,
                 WriteFact::Failed {
                     fact,
                     known_effects: false,
@@ -1189,20 +1220,24 @@ impl ApexOmni {
                 None,
             );
             if let Ok(Some(grant)) = grant {
-                match cx.plan_resend_context(&request.plan, &request.slot, &request.context, grant)
-                {
+                match cx.plan_resend_context(
+                    &delivery.plan,
+                    &delivery.slot,
+                    &delivery.context,
+                    grant,
+                ) {
                     Ok(context) => {
-                        let mut request = request;
-                        request.context = context;
-                        request.legacy = true;
-                        self.send_trading(cx, request);
+                        let mut delivery = delivery;
+                        delivery.context = context;
+                        delivery.legacy = true;
+                        self.send_trading(cx, delivery);
                     }
                     Err(_) => {
-                        let _ = cx.fail_plan(&request.plan, error);
+                        let _ = cx.fail_plan(&delivery.plan, error);
                     }
                 }
             } else {
-                let _ = cx.fail_plan(&request.plan, error);
+                let _ = cx.fail_plan(&delivery.plan, error);
             }
             return;
         }
@@ -1214,7 +1249,7 @@ impl ApexOmni {
         struct Data {
             id: String,
         }
-        let placed = if matches!(request.accepted, Accepted::Place) {
+        let placed = if matches!(delivery.accepted, Accepted::Place) {
             serde_json::from_str::<Envelope>(response.body)
                 .ok()
                 .and_then(|e| e.data)
@@ -1223,20 +1258,24 @@ impl ApexOmni {
         } else {
             None
         };
-        if matches!(request.accepted, Accepted::Place) && placed.is_none() {
+        if matches!(delivery.accepted, Accepted::Place) && placed.is_none() {
             let message = "ApeX Omni placement response has no order ID";
-            let _ = cx.http_write_unproven(&request.context, message);
+            let _ = cx.http_write_unproven(&delivery.context, message);
             let _ = cx.fail_plan(
-                &request.plan,
+                &delivery.plan,
                 VenueError::new(message).kind(ErrorKind::Internal),
             );
             return;
         }
         if cx
             .http_write_fact(
-                &request.context,
+                &delivery.context,
                 WriteFact::Accepted {
-                    order_ids: placed.iter().cloned().collect(),
+                    order_ids: if matches!(delivery.accepted, Accepted::Place) {
+                        placed.iter().cloned().collect()
+                    } else {
+                        delivery.late.cancel_ids.clone()
+                    },
                 },
                 None,
             )
@@ -1244,7 +1283,7 @@ impl ApexOmni {
         {
             return;
         }
-        match request.accepted.clone() {
+        match delivery.accepted.clone() {
             Accepted::Place => {
                 self.trading
                     .active
@@ -1257,7 +1296,8 @@ impl ApexOmni {
             Accepted::Cancel(ids) => self.note_cancel(cx, &ids),
             Accepted::AmendCancel => {
                 let Some(mut amendment) = self.trading.amendment.take() else {
-                    let _ = cx.fail_plan(&request.plan, "ApeX Omni amendment state is unavailable");
+                    let _ =
+                        cx.fail_plan(&delivery.plan, "ApeX Omni amendment state is unavailable");
                     return;
                 };
                 if let Some(parent) = cx.store.order(&amendment.id) {
@@ -1268,7 +1308,7 @@ impl ApexOmni {
                 self.note_cancel(cx, &[amendment.id]);
                 if amendment.overflow {
                     let error = "ApeX Omni amendment exceeded the observed fill limit";
-                    let _ = cx.fail_plan(&request.plan, error);
+                    let _ = cx.fail_plan(&delivery.plan, error);
                     return;
                 }
                 if amendment.default_amount {
@@ -1311,7 +1351,7 @@ impl ApexOmni {
                             }
                         }
                         Err(error) => {
-                            let _ = cx.fail_plan(&request.plan, error);
+                            let _ = cx.fail_plan(&delivery.plan, error);
                             return;
                         }
                     }
@@ -1357,19 +1397,19 @@ impl ApexOmni {
             };
             if job.amending {
                 let _ = cx.done_mutation_plan_after_data(
-                    &request.plan,
-                    &request.slot,
-                    &request.context,
+                    &delivery.plan,
+                    &delivery.slot,
+                    &delivery.context,
                     result,
                 );
             } else if cx
-                .finish_plan_call(&request.plan, &request.slot, &request.context)
+                .finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context)
                 .is_ok()
             {
-                let _ = cx.done_plan(&request.plan, result);
+                let _ = cx.done_plan(&delivery.plan, result);
             }
         } else if cx
-            .finish_plan_call(&request.plan, &request.slot, &request.context)
+            .finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context)
             .is_ok()
         {
             self.drive_trading(cx);
@@ -1377,8 +1417,18 @@ impl ApexOmni {
     }
 }
 
+pub(crate) fn capture_reconciliation(
+    delivery: &Request,
+) -> Result<
+    safe_cex_engine::request_context::ReconciliationData,
+    safe_cex_engine::request_context::Error,
+> {
+    let data = serde_json::to_string(&delivery.late)
+        .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
+    safe_cex_engine::request_context::ReconciliationData::new(data)
+}
 pub(crate) fn capture_unproven(
-    request: &Request,
+    delivery: &Request,
     response: Response<'_>,
     evidence: &mut UnprovenEvidence,
 ) {
@@ -1388,7 +1438,7 @@ pub(crate) fn capture_unproven(
         }
         evidence.venue_message(envelope.msg.as_ref());
     }
-    if matches!(request.accepted, Accepted::Place) {
+    if matches!(delivery.accepted, Accepted::Place) {
         #[derive(Deserialize)]
         struct Envelope {
             data: Option<Data>,
@@ -1411,7 +1461,7 @@ fn strict_code(code: &crate::Code) -> Option<i64> {
     }
 }
 
-/// A failed ApeX Omni request: transport, a gateway status or a coded reply.
+/// A failed ApeX Omni delivery: transport, a gateway status or a coded reply.
 /// No ApeX code table is documented, so other codes stay unclassified.
 pub(crate) fn failure(code: Option<i64>, status: u16, message: String) -> VenueError {
     let error = VenueError::new(message);
@@ -1440,7 +1490,7 @@ pub(crate) fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
-/// Refused before any request was sent.
+/// Refused before any delivery was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }

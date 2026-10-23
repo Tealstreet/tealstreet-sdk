@@ -17,6 +17,50 @@ use std::sync::Arc;
 use support::*;
 
 const NOW: f64 = 1_700_000_000_123.0;
+struct TestEngine {
+    inner: support::TestEngine,
+    now: f64,
+}
+impl std::ops::Deref for TestEngine {
+    type Target = support::TestEngine;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+impl std::ops::DerefMut for TestEngine {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+impl TestEngine {
+    fn handle(&mut self, now: f64, event: Event<'_>) {
+        self.now = now;
+        self.inner.handle(now, event);
+    }
+}
+fn actions(e: &mut TestEngine) -> Vec<Action> {
+    safe_cex_engine::test_support::prepared_actions(&mut e.inner, e.now)
+}
+fn requests(e: &mut TestEngine) -> Vec<HttpRequest> {
+    http(actions(e))
+}
+fn response(e: &mut TestEngine, request: &HttpRequest, now: f64, body: &str) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+fn ws(e: &mut TestEngine, socket: SocketId, now: f64, text: &str) {
+    e.handle(now, Event::WsMessage { socket, text });
+}
+
 fn ready() -> TestEngine {
     ready_with_socket().0
 }
@@ -24,8 +68,16 @@ fn ready_with_socket() -> (TestEngine, SocketId) {
     ready_with_provider(false)
 }
 fn ready_with_provider(hmac_only: bool) -> (TestEngine, SocketId) {
+    ready_with_provider_mode(hmac_only, false)
+}
+fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, SocketId) {
     let (provider, identities) = write_provider(hmac_only);
-    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
+    let provider: Arc<dyn Signer> = if remote {
+        Arc::new(DelegatedHmac)
+    } else {
+        provider
+    };
+    let inner = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         key: Some("api-key".into()),
         secret: Some("mysecret".into()),
         passphrase: Some("pass".into()),
@@ -33,6 +85,7 @@ fn ready_with_provider(hmac_only: bool) -> (TestEngine, SocketId) {
         identity: identities.primary.clone(),
         ..Options::default()
     }));
+    let mut e = TestEngine { inner, now: NOW };
     e.set_identities(identities).unwrap();
     e.set_signer(Some(provider)).unwrap();
     e.start(NOW);
@@ -100,7 +153,7 @@ fn place_with_id(
         NOW + 10.0,
         Event::Command(Command::PlaceOrders { command, orders }),
     );
-    e.drain_actions().collect()
+    actions(e)
 }
 fn http(actions: Vec<Action>) -> Vec<HttpRequest> {
     actions
@@ -313,7 +366,7 @@ fn network_failure_does_not_retry_an_order_and_releases_fifo() {
             error: "connection reset after write",
         },
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = actions(&mut e);
     assert!(
         actions
             .iter()
@@ -573,7 +626,7 @@ fn genuine_full_fill_during_cancel_suppresses_explicit_replacement_quantity() {
     amend_fill(&mut e, socket, NOW + 11.0, 4.0);
     e.drain_actions().for_each(drop);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = actions(&mut e);
     assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
     assert!(http(actions).is_empty());
 }
@@ -593,7 +646,7 @@ fn fully_filled_parent_while_amend_is_queued_never_sends_cancellation() {
             error: "lost placement response",
         },
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = actions(&mut e);
     assert!(actions.iter().any(|action| matches!(
         action,
         Action::Notice(Notice::CommandFailed { command: 99, .. })
@@ -616,7 +669,7 @@ fn unchanged_or_invalid_amendment_rejects_before_cancellation() {
                 amount: None,
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = actions(&mut e);
         assert!(actions.iter().any(|action| matches!(
             action,
             Action::Notice(Notice::CommandFailed { command: 99, .. })
@@ -636,7 +689,7 @@ fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
         parent_update(&mut e, socket, NOW + 12.0, filled, status, false);
         e.drain_actions().for_each(drop);
         response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = actions(&mut e);
         if status == "FILLED" {
             assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
             assert!(http(actions).is_empty());
@@ -755,7 +808,7 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
             amount: None,
         }),
     );
-    let cancel_actions: Vec<_> = e.drain_actions().collect();
+    let cancel_actions: Vec<_> = actions(&mut e);
     assert!(
         !cancel_actions
             .iter()
@@ -766,7 +819,7 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
     e.drain_actions().for_each(drop);
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    let out: Vec<_> = e.drain_actions().collect();
+    let out: Vec<_> = actions(&mut e);
     let write = out
         .iter()
         .position(|a| matches!(a, Action::Http(_)))
@@ -798,13 +851,13 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_use_shared_classification_and_preserve_network_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
     for (status, body, kind, outcome, code) in [
         (
             500,
             r#"{"msg":"server error"}"#,
-            None,
+            Some(ErrorKind::VenueUnavailable),
             Some(Outcome::Unknown),
             None,
         ),
@@ -812,7 +865,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             200,
             r#"{"code":10003,"msg":"insufficient funds"}"#,
             None,
-            None,
+            Some(Outcome::Unknown),
             Some("10003"),
         ),
         (
@@ -825,7 +878,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"code":0,"data":{}}"#,
-            None,
+            Some(ErrorKind::Internal),
             Some(Outcome::Unknown),
             None,
         ),
@@ -910,7 +963,7 @@ fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
             },
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = actions(&mut e);
     assert!(!actions.iter().any(|action| matches!(
         action,
         Action::Notice(Notice::CommandDone { command: 42, .. })
@@ -944,7 +997,7 @@ fn p0_write_unlisted_native_code_is_explicitly_unknown() {
         NOW + 11.0,
         r#"{"code":987654,"msg":"unlisted native failure"}"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = actions(&mut e);
     assert!(
         !actions
             .iter()
@@ -982,7 +1035,7 @@ fn hmac_write_failure_is_unknown(command: Command, status: u16, body: &str, code
             },
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = actions(&mut e);
     assert!(
         !actions.iter().any(|action| matches!(action,
             Action::Http(request) if request.method == first.method && request.url == first.url)),
@@ -1020,7 +1073,6 @@ fn hmac_setting() -> Command {
 }
 
 #[test]
-#[ignore = "original RED: managed write adoption #1891, owner codex-hcmq3f; FIFO and conditional Plan seams"]
 fn managed_hmac_cancel_503_signature_body_is_unknown_without_resend() {
     hmac_write_failure_is_unknown(
         hmac_cancel(),
@@ -1031,7 +1083,6 @@ fn managed_hmac_cancel_503_signature_body_is_unknown_without_resend() {
 }
 
 #[test]
-#[ignore = "original RED: managed write adoption #1891, owner codex-hcmq3f; FIFO and conditional Plan seams"]
 fn managed_hmac_setting_408_signature_body_is_unknown_without_resend() {
     hmac_write_failure_is_unknown(
         hmac_setting(),
@@ -1042,7 +1093,6 @@ fn managed_hmac_setting_408_signature_body_is_unknown_without_resend() {
 }
 
 #[test]
-#[ignore = "original RED: managed write adoption #1891, owner codex-hcmq3f; FIFO and conditional Plan seams"]
 fn managed_hmac_cancel_unlisted_code_is_unknown_with_native_evidence() {
     hmac_write_failure_is_unknown(
         hmac_cancel(),
@@ -1053,7 +1103,6 @@ fn managed_hmac_cancel_unlisted_code_is_unknown_with_native_evidence() {
 }
 
 #[test]
-#[ignore = "original RED: managed write adoption #1891, owner codex-hcmq3f; FIFO and conditional Plan seams"]
 fn managed_hmac_setting_unlisted_code_is_unknown_with_native_evidence() {
     hmac_write_failure_is_unknown(
         hmac_setting(),
@@ -1178,4 +1227,343 @@ fn managed_provider_without_zklink_refuses_entire_amend_before_cancel() {
         e.store().order("parent").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
     );
+}
+
+#[test]
+fn non_success_status_with_code_zero_never_accepts_or_changes_leverage() {
+    let mut e = ready();
+    let before = e.store().setting("BTCUSDT").unwrap().leverage;
+    e.handle(NOW + 10., Event::Command(hmac_setting()));
+    let first = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 11.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":0,"data":null}"#,
+            },
+        },
+    );
+    let out = actions(&mut e);
+    assert_eq!(out.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 43, error }) if error.outcome == Some(safe_cex_engine::Outcome::Unknown))).count(), 1);
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Notice(Notice::CommandDone { .. })))
+    );
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, before);
+}
+
+#[test]
+fn quoted_refusal_codes_share_the_integer_code_table_and_message() {
+    for code in ["401", "429"] {
+        let mut e = ready();
+        e.handle(NOW + 10., Event::Command(hmac_cancel()));
+        let first = requests(&mut e).remove(0);
+        response(
+            &mut e,
+            &first,
+            NOW + 11.,
+            &format!(r#"{{"code":"{code}","msg":"native refusal"}}"#),
+        );
+        let out = actions(&mut e);
+        let error = out
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 43, error }) => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+        assert_eq!(error.venue_message.as_deref(), Some("native refusal"));
+        assert_eq!(
+            error.message,
+            format!("ApeX Omni request failed [{code}]: native refusal")
+        );
+    }
+}
+
+#[test]
+fn accepted_cancel_ids_survive_the_next_cancel_transport_loss() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.,
+        Event::Command(Command::CancelOrders {
+            command: 43,
+            ids: vec!["one".into(), "two".into()],
+        }),
+    );
+    let first = requests(&mut e).remove(0);
+    response(&mut e, &first, NOW + 11., r#"{"code":0,"data":null}"#);
+    let second = requests(&mut e).remove(0);
+    e.handle(
+        NOW + 12.,
+        Event::HttpFailed {
+            request: second.id,
+            error: "lost after dispatch",
+        },
+    );
+    let out = actions(&mut e);
+    let error = out
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 43, error }) => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["one"]);
+}
+
+#[test]
+fn late_cancel_ack_preserves_uncertainty_without_bypassing_native_read_fences() {
+    for update_after_release in [false, true] {
+        let (mut e, socket) = ready_with_socket();
+        parent_update(&mut e, socket, NOW + 5., 0., "OPEN", true);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW + 10.,
+            Event::Command(Command::CancelOrders {
+                command: 43,
+                ids: vec!["parent".into()],
+            }),
+        );
+        let issued = actions(&mut e);
+        let (timer, deadline) = issued
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms > NOW + 10. => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        let first = http(issued).remove(0);
+        e.handle(deadline, Event::TimerFired { timer });
+        let terminal = actions(&mut e);
+        assert_eq!(
+            terminal
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    Action::Notice(Notice::CommandFailed { command: 43, .. })
+                ))
+                .count(),
+            1
+        );
+        if update_after_release {
+            parent_update(&mut e, socket, deadline + 1., 1., "OPEN", true);
+            e.drain_actions().for_each(drop);
+        }
+        response(&mut e, &first, deadline + 2., r#"{"code":0,"data":null}"#);
+        let late = actions(&mut e);
+        assert!(!late.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+        )));
+        assert_eq!(
+            e.store().order("parent").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+    }
+}
+
+struct DelegatedHmac;
+impl Signer for DelegatedHmac {
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        Box::pin(std::future::pending())
+    }
+    fn can_sign(&self, _: &KeyRef, algorithm: Algorithm) -> Capability {
+        if algorithm == Algorithm::HmacSha256 {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        }
+    }
+}
+fn remote_actions(e: &mut TestEngine) -> Vec<Action> {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    let now = e.now;
+    e.inner.prepare_dispatch(now);
+    let mut queue = std::collections::VecDeque::from(e.drain_actions().collect::<Vec<_>>());
+    let mut out = vec![];
+    while let Some(action) = queue.pop_front() {
+        match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => {
+                    assert!(
+                        !request
+                            .headers
+                            .iter()
+                            .any(|(key, _)| key.starts_with("APEX-"))
+                    );
+                    e.inner.http_prepared(
+                        now,
+                        preparation,
+                        Prepared {
+                            id: request.id.0,
+                            expires_at: None,
+                        },
+                    );
+                }
+                HttpAction::Bind {
+                    permit, request, ..
+                } => {
+                    assert!(matches!(
+                        e.inner.claim_http(now, permit),
+                        Ok(Claim::Released(_))
+                    ));
+                    out.push(Action::Http(request));
+                }
+                HttpAction::Cancel { .. } => {}
+            },
+            action => out.push(action),
+        }
+        queue.extend(e.drain_actions().collect::<Vec<_>>());
+    }
+    out
+}
+fn remote_hmac_answer(work: &SignRequest) -> safe_cex_engine::signing::SignResult {
+    use safe_cex_engine::signing::{Operation, PayloadPart};
+    assert_eq!(work.context.venue, "apexomni");
+    assert_eq!(work.context.method, "POST");
+    assert_eq!(work.operations.len(), 3);
+    assert!(matches!(work.operations[0], Operation::Present { .. }));
+    assert!(matches!(work.operations[1], Operation::Present { .. }));
+    let Operation::Sign {
+        algorithm: Algorithm::HmacSha256,
+        payload,
+        ..
+    } = &work.operations[2]
+    else {
+        panic!("remote wire must carry HMAC only")
+    };
+    let payload: Vec<_> = payload
+        .iter()
+        .flat_map(|part| match part {
+            PayloadPart::Bytes { bytes } => bytes.clone(),
+            _ => panic!("unexpected interpolation in HMAC-only wire"),
+        })
+        .collect();
+    let suffix = match work.context.path.as_str() {
+        "/api/v3/delete-order" => "POST/api/v3/delete-orderid=native-order",
+        "/api/v3/set-initial-margin-rate" => {
+            "POST/api/v3/set-initial-margin-rateinitialMarginRate=0.10000&symbol=BTC-USDT&token=USDT"
+        }
+        _ => panic!("unexpected remote command scope"),
+    };
+    let expected = format!(
+        "{}{suffix}",
+        safe_cex_engine::num::format(work.receipt.stamp_ms.unwrap())
+    );
+    assert_eq!(payload, expected.as_bytes());
+    // Independent remote-side primitive, never LocalSigner or the venue recipe.
+    let key = safe_cex_crypto::encode(b"mysecret", safe_cex_crypto::Encoding::Base64);
+    let hex =
+        safe_cex_crypto::hmac_sha256(key.as_bytes(), &payload, safe_cex_crypto::Encoding::Hex);
+    let mac = hex
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect();
+    safe_cex_engine::signing::SignResult::new(
+        vec![b"api-key".to_vec(), b"pass".to_vec(), mac],
+        work.receipt,
+    )
+}
+#[test]
+fn delegated_hmac_cancel_and_multipart_setting_release_only_after_remote_reply() {
+    for command in [hmac_cancel(), hmac_setting()] {
+        let (mut e, _) = ready_with_provider_mode(true, true);
+        e.handle(NOW + 10., Event::Command(command));
+        let staged = remote_actions(&mut e);
+        assert!(
+            !staged
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        let (attempt, work) = staged
+            .into_iter()
+            .find_map(|action| match action {
+                Action::Sign { attempt, work, .. } => Some((attempt, work)),
+                _ => None,
+            })
+            .unwrap();
+        let result = remote_hmac_answer(&work);
+        let expected_mac =
+            safe_cex_crypto::encode(&result.values[2], safe_cex_crypto::Encoding::Base64);
+        e.handle(
+            NOW + 11.,
+            Event::Signed {
+                attempt,
+                result: Ok(result.clone()),
+            },
+        );
+        let released = remote_actions(&mut e);
+        let mut sent = http(released);
+        assert_eq!(
+            sent.len(),
+            1,
+            "one physical request follows the remote receipt"
+        );
+        let first = sent.remove(0);
+        let headers: HashMap<_, _> = first
+            .headers
+            .iter()
+            .map(|(key, value)| (*key, value.as_str()))
+            .collect();
+        assert_eq!(headers["APEX-SIGNATURE"], expected_mac);
+        assert_eq!(headers["APEX-API-KEY"], "api-key");
+        assert_eq!(headers["APEX-PASSPHRASE"], "pass");
+        if first.url.ends_with("/delete-order") {
+            assert_eq!(first.body.as_deref(), Some("id=native-order"));
+        } else {
+            assert!(headers["Content-Type"].starts_with("multipart/form-data; boundary="));
+            assert!(first.body.as_ref().unwrap().contains("0.10000"));
+            assert!(first.body.as_ref().unwrap().contains("BTC-USDT"));
+        }
+        e.handle(
+            NOW + 12.,
+            Event::Signed {
+                attempt,
+                result: Ok(result),
+            },
+        );
+        assert!(
+            !remote_actions(&mut e)
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        response(&mut e, &first, NOW + 13., r#"{"code":0,"data":null}"#);
+        let terminal = remote_actions(&mut e);
+        assert_eq!(terminal.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandDone { command:43, result }) if result == "[]")).count(), 1);
+    }
+}
+#[test]
+fn delegated_provider_refusal_is_typed_not_sent_before_http() {
+    let (mut e, _) = ready_with_provider_mode(true, true);
+    e.handle(NOW + 10., Event::Command(hmac_setting()));
+    let staged = remote_actions(&mut e);
+    let attempt = staged
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Sign { attempt, .. } => Some(attempt),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        NOW + 11.,
+        Event::Signed {
+            attempt,
+            result: Err(safe_cex_engine::signing::SignError::Refused),
+        },
+    );
+    let out = remote_actions(&mut e);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    assert_eq!(out.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandFailed { command:43,error }) if error.kind == Some(safe_cex_engine::ErrorKind::InvalidInput) && error.outcome == Some(safe_cex_engine::Outcome::NotSent))).count(),1);
 }

@@ -297,11 +297,10 @@ impl Venue for ApexOmni {
         safe_cex_engine::request_context::ReconciliationData,
         safe_cex_engine::request_context::Error,
     > {
-        if !matches!(pending, Pending::Trade(_)) {
-            return Err(safe_cex_engine::request_context::Error::Invalid);
+        match pending {
+            Pending::Trade(delivery) => trading::capture_reconciliation(delivery),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
         }
-        // Late acknowledgements reconcile through fenced account reads.
-        safe_cex_engine::request_context::ReconciliationData::new(String::new())
     }
     fn unproven_http_evidence(
         &self,
