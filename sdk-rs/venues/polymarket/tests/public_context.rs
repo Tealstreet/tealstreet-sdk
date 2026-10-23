@@ -221,3 +221,54 @@ fn local_account_remains_network_free_and_fixed_settings_keep_native_success() {
     let a = actions(&mut e, 1.);
     assert!(matches!(&a[..],[Action::Notice(Notice::CommandDone{result,..})] if result=="[]"));
 }
+
+#[test]
+fn released_attempt_deadline_preserves_typed_read_failure() {
+    let mut e = engine_with_market();
+    e.handle_command(0., book(), Some(60_000)).unwrap();
+    let r = request(&mut e, 0.);
+    let a = answer(&mut e, 20_000., r.id, "{}");
+    assert_timeout(&a);
+}
+
+#[test]
+fn a_stalled_prepare_uses_the_shorter_attempt_timer() {
+    let mut e = engine_with_market();
+    e.handle_command(0., book(), Some(60_000)).unwrap();
+    let a: Vec<_> = e.drain_actions().collect();
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 20_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("managed preparation has the declared attempt timer");
+    assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+    e.handle(20_000., Event::TimerFired { timer });
+    let a = actions(&mut e, 20_000.);
+    let errors: Vec<_> = a
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 9, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, Some(ErrorKind::Timeout));
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
+}
+
+#[test]
+fn unstamped_local_read_has_a_typed_refusal_without_io() {
+    let mut e = engine_with_market();
+    e.handle(
+        f64::NAN,
+        Event::Command(Command::FetchAccount { command: 9 }),
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    assert!(
+        matches!(&a[..], [Action::Notice(Notice::CommandFailed { error, .. })]
+        if error.kind == Some(ErrorKind::InvalidInput) && error.outcome.is_none())
+    );
+}

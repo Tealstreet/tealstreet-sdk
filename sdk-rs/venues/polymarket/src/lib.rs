@@ -1,6 +1,7 @@
 //! Polymarket CLOB V2 outcome tokens on the sans-I/O engine.
 mod account;
 mod history;
+mod public_read;
 pub mod sign;
 mod trading;
 mod wire;
@@ -16,7 +17,7 @@ use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Venue, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -70,7 +71,7 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     Book {
-        command: CommandId,
+        read: public_read::Read,
         token: String,
         limit: Option<u32>,
     },
@@ -84,7 +85,7 @@ pub enum Pending {
         offset: usize,
     },
     Candles {
-        command: Option<CommandId>,
+        read: public_read::Read,
         symbol: String,
         interval: Interval,
         limit: usize,
@@ -637,13 +638,16 @@ impl Polymarket {
         })();
         match result {
             Ok(path) => {
-                cx.request_streamed(
+                let Some(read) = public_read::Read::new(cx, command.is_some()) else {
+                    return;
+                };
+                match cx.request_managed(
+                    read.context.clone(),
                     Method::Get,
                     path,
-                    vec![],
-                    ArrayAt::Field("history"),
+                    None,
                     Pending::Candles {
-                        command,
+                        read,
                         symbol,
                         interval,
                         limit: limit.unwrap_or(u32::MAX) as usize,
@@ -652,11 +656,21 @@ impl Polymarket {
                         to_ms,
                         invalid: false,
                     },
-                );
+                ) {
+                    Ok(request) => cx.stream_response(request, ArrayAt::Field("history")),
+                    Err((Pending::Candles { read, .. }, reason)) => {
+                        read.failed(cx, reason.venue_error())
+                    }
+                    Err(_) => unreachable!("price history continuation"),
+                }
             }
             Err(e) => {
-                if let Some(command) = command {
-                    cx.fail(command, e);
+                if command.is_some() {
+                    public_read::local(
+                        cx,
+                        safe_cex_engine::request_context::Operation::Read,
+                        Err(e),
+                    );
                 } else {
                     cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, e);
                 }
@@ -760,13 +774,8 @@ impl Venue for Polymarket {
             self.trading_response(cx, request, response);
             return;
         }
-        if let Pending::Book {
-            command,
-            token,
-            limit,
-        } = pending
-        {
-            self.book_response(cx, command, &token, limit, response);
+        if let Pending::Book { read, token, limit } = pending {
+            self.book_response(cx, read, &token, limit, response);
             return;
         }
         if let Err(e) = success(response) {
@@ -942,7 +951,7 @@ impl Venue for Polymarket {
                 self.flush_midpoints(cx);
             }
             Pending::Candles {
-                command,
+                read,
                 symbol,
                 interval,
                 limit,
@@ -951,10 +960,11 @@ impl Venue for Polymarket {
                 to_ms,
                 invalid,
             } => {
+                if !read.validate(cx) {
+                    return;
+                }
                 if invalid {
-                    if let Some(c) = command {
-                        cx.fail(c, "Invalid Polymarket price history");
-                    }
+                    read.finish(cx, Err("Invalid Polymarket price history".into()));
                     return;
                 }
                 rows.retain(|c| {
@@ -973,22 +983,19 @@ impl Venue for Polymarket {
                 if rows.len() > limit {
                     rows.drain(..rows.len() - limit);
                 }
-                if let Some(c) = command {
-                    {
-                        let result: Result<String, String> =
-                            serde_json::to_string(&rows).map_err(|e| e.to_string());
-                        match result {
-                            Ok(data) => cx.done(c, data),
-                            Err(error) => cx.fail(c, error),
-                        }
-                    };
-                } else if let Some(sub) = self.candles.get_mut(&(symbol.clone(), interval)) {
-                    for row in rows {
-                        if row.timestamp > sub.last {
-                            cx.candle(&symbol, interval, row);
-                            sub.last = row.timestamp;
+                if read.command() {
+                    let result = serde_json::to_string(&rows).map_err(|e| e.to_string());
+                    read.finish(cx, result);
+                } else {
+                    if let Some(sub) = self.candles.get_mut(&(symbol.clone(), interval)) {
+                        for row in rows {
+                            if row.timestamp > sub.last {
+                                cx.candle(&symbol, interval, row);
+                                sub.last = row.timestamp;
+                            }
                         }
                     }
+                    read.finish(cx, Ok(String::new()));
                 }
             }
         }
@@ -1100,7 +1107,15 @@ impl Venue for Polymarket {
                     });
                 }
             }
-            Pending::Candles { rows, invalid, .. } => {
+            Pending::Candles {
+                read,
+                rows,
+                invalid,
+                ..
+            } => {
+                if !read.validate(cx) {
+                    return;
+                }
                 match serde_json::from_str::<HistoryPoint>(item) {
                     Ok(point) if point.t.0 >= 0.0 && (0.0..=1.0).contains(&point.p.0) => {
                         rows.push(Candle {
@@ -1118,6 +1133,21 @@ impl Venue for Polymarket {
             _ => {}
         }
     }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: VenueError,
+    ) {
+        self.on_http_failed(cx, pending, error);
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Book { read, .. } | Pending::Candles { read, .. } => read.failed(cx, error),
+            other => self.on_request_failed(cx, other, &error.message),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let retry = match pending {
             Pending::Trade(request) => {
@@ -1128,11 +1158,8 @@ impl Venue for Polymarket {
                 self.account_failed(cx, request);
                 return;
             }
-            Pending::Book { command: c, .. }
-            | Pending::Candles {
-                command: Some(c), ..
-            } => {
-                cx.fail(c, error);
+            Pending::Book { read, .. } | Pending::Candles { read, .. } => {
+                read.failed(cx, VenueError::new(error));
                 return;
             }
             Pending::Markets { .. } => Some(None),
@@ -1149,7 +1176,6 @@ impl Venue for Polymarket {
                 self.flush_midpoints(cx);
                 return;
             }
-            _ => None,
         };
         cx.notice(
             if retry.is_some() {
@@ -1229,10 +1255,14 @@ impl Venue for Polymarket {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::FetchOptionChain { command, .. }
-            | Command::FetchOptionExpiries { command, .. }
-            | Command::FetchAccountGreeks { command } => {
-                cx.fail(command, "Options are not enabled on this account");
+            Command::FetchOptionChain { .. }
+            | Command::FetchOptionExpiries { .. }
+            | Command::FetchAccountGreeks { .. } => {
+                public_read::local(
+                    cx,
+                    safe_cex_engine::request_context::Operation::Read,
+                    Err("Options are not enabled on this account".into()),
+                );
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
@@ -1311,8 +1341,12 @@ impl Venue for Polymarket {
                     ids: orders.into_iter().map(|o| o.id).collect(),
                 },
             ),
-            Command::AmendOrderWithSymbol { command, .. } => {
-                cx.fail(command, "Symbol-scoped amendment is unsupported");
+            Command::AmendOrderWithSymbol { .. } => {
+                public_read::local(
+                    cx,
+                    safe_cex_engine::request_context::Operation::Mutation,
+                    Err("Symbol-scoped amendment is unsupported".into()),
+                );
             }
             command @ (Command::PlaceOrders { .. }
             | Command::CancelOrders { .. }

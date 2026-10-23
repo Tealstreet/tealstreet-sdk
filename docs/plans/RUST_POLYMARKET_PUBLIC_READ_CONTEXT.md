@@ -33,10 +33,13 @@ Revoked grants no second terminal. No numeric fallback follows admission.
 This uses the landed command-entry mechanism, without opting into Plan features.
 
 Book and price-history requests each issue one unsigned managed Read Context.
-Command reads retain the shared caller receipt through initial admission; the
-native explicit per-attempt bound is 20000 ms, capped by the caller's remaining
-wait observed once at genuine entry. Expired entry uses reject_expired_command.
-The bound starts before Prepare/Bind; a host that never prepares must time out.
+Command reads use actual #1976 admit_caller_read_root at the immutable exact
+caller receipt deadline, then one physical Read leg bounded by min(root, 20000 ms).
+The root owns expiry and the leg owns the managed per-attempt timer. Expired
+entry uses reject_expired_command(Read); command_wait None explicitly uses
+reject_unstamped_command(Read), preserving its cause-aware typed refusal instead
+of inventing a fresh/default cap. The same entry check protects local completion.
+The leg bound starts before Prepare/Bind; a host that never prepares times out.
 RetryPolicy is Never; no new retry, pacing, page, generation or local timer.
 Background candle polls each get one Background Read Context with the same
 20000 ms cap and preserve the existing five-second scheduling.
@@ -99,3 +102,38 @@ No merge is authorized by this plan.
 - `venues/polymarket/src/lib.rs:1135`: `f06dce80ebd266653d22bf24f105c411c21c1de8a011cd3d6fe688214267e373` — cx.fail(c, error)
 - `venues/polymarket/src/lib.rs:1235`: `cab66fc0399e6d1f53504198a9a5df6893df31bad853bf84c1dcd416c2326cdd` — cx.fail(command, "Options are not enabled on this account")
 - `venues/polymarket/src/lib.rs:1315`: `40062be4474042e41b637a57fd5647a9f5db174340233694f3e8de781b16c177` — cx.fail(command, "Symbol-scoped amendment is unsupported")
+
+## Original checkpoint
+
+Plan b4bf10011c2 precedes original controls e9d094f9298. Against unchanged
+Polymarket production, the seven-control target executes six assertion REDs and
+one compatibility GREEN, zero ignored. The background test first proves live
+publication before asserting the expired case. The failures are same-ID cached
+completion, late book and candle successes, stalled-prepare noncompletion,
+expired background publication and missing NotSent on a keyless mutation refusal.
+Fixture compile corrections are not counted as REDs.
+
+The first conversion turns all seven original controls GREEN without changing
+any assertion. Existing Polymarket native targets pass 139 tests, including the
+original controls and one doc test. Additional bounded-deadline/expired-entry
+controls and final strict checks are recorded separately. Existing fixture
+changes only drive real Prepare/Bind/Claim and omit engine timer bookkeeping from
+exact HTTP/terminal assertions; native wire/financial assertions stay intact.
+
+## Focused implementation evidence
+
+The original seven controls remain unchanged in their assertions. Three further
+controls pass: released 20-second attempt expiry keeps typed Timeout/no outcome;
+stalled Prepare expires at the shorter attempt timer with typed Timeout/NotSent
+and no HTTP; an unstamped local read is a typed InvalidInput/no-outcome refusal.
+A proposed zero-wait fixture was removed because handle_command rejects that
+invalid host input before reaching the venue; it is not counted as RED evidence.
+
+Scoped native verification before the last entry guard passed 139 tests across
+nine targets (including one doc test); the final ten-control target, strict
+all-target Clippy, package fmt, both request-context checks (15 checker controls)
+and bans pass. The earlier root-level cargo-fmt invocation selected no targets;
+the corrected explicit package invocation passes. The manifest delta is exactly
+the two Polymarket source maps: history 9/13 -> 1/1, lib 9/10 -> 2/2; all other
+maps retain their incoming order and values. Final full-head CI and independent
+reviews remain required before readiness; no size/replay or merge claim yet.
