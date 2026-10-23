@@ -4625,3 +4625,21 @@ numeric completion or automatic resubmission.
 The original 20-second root, independent retry budgets, exact response fence,
 query/result codec and native unsupported-interval preflight remain. Admission
 of a fresh command grants no additional rights to later retries or callbacks.
+
+## KuCoin Spot candle Read authority
+
+FetchCandles admits its original Public Read owner before interval preflight and
+uses prepared unsigned HTTP with the declared ordered public headers. Its
+20-second budget includes preparation. Exact physical delivery is checked before
+row staging and result publication; stale, unclaimed and expired responses cannot
+complete it. Unsupported interval preflight gains Unsupported/NotSent metadata.
+Initial admission refusal has the shared typed reason and no Read outcome;
+immediate HTTP-queue refusal retains NotSent.
+
+Preparation, transport and expiry failures retain their typed errors and the
+existing correlated error companion before rejection. Decoded malformed candle
+rows and unsupported preflight keep their companion-free failure timeline. The
+native query order, flooring/u64 casts, default500/cap1500, unknown-symbol HTTP,
+candle codec, duplicate timestamps, oversized results and ascending sorting are
+preserved. Private credentials, successful setting no-ops and capability policy
+retain their existing behavior.

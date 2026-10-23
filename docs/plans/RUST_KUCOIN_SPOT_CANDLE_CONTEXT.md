@@ -105,3 +105,18 @@ previously unexecuted recovery assertions. Independent corrected-test and
 source/adversarial reviews are CLEAN (source SHA256d629d9898a1e, test58bb16996ea0).
 Caller source review is CLEAN, architecture No. Full native/strict gates and
 current-landing integration remain separate checks.
+
+## Production and focused gates
+
+Corrected tests-firstd589f5a44bd is separate from production. The managed source
+passes all14 controls and all575 KuCoin/Binance native tests across42 targets.
+Strict scoped all-target/all-feature Clippy and scoped formatting pass. Caller,
+source/adversarial and full-map implementation reviews are CLEAN; architecture No.
+QUALITY names queued physical requests under one background root explicitly,
+without claiming256 logical leg Contexts.
+
+The exact own prune removes only the four planned hashes:84->80 occurrences,
+74->70 hash rows, nine files, Spot mod20->16. Global checker/bans still require
+incoming BingX/Lighter/MEXC manifest prunes via genuine current-landing integration.
+The13 ratchet regressions already pass. Final CI follows that integration; no
+merge readiness or zero-legacy claim is implied by these local gates.

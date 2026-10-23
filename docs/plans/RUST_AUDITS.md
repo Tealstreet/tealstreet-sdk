@@ -2078,3 +2078,15 @@ error-classification policy is duplicated. Exact source inventory remains 84
 occurrences: the original shared streamed helper still serves unmigrated candles,
 so this area justifies no ratchet prune or zero-legacy claim. The complete venue
 inventory and remaining prerequisites are committed in PR #1819.
+
+## KuCoin Spot candle lifecycle adoption
+
+Unsigned Spot candles now retain their original command Context through shared
+entry admission, static-header preparation, exact read delivery and Context
+completion. Typed failures and correlated companions use the shared engine
+authority; discovery background retirement remains separate. The sole legacy
+public streamed helper and three numeric candle terminal/preflight expressions
+retire. Exact KuCoin inventory shrinks84 to80 occurrences and74 to70 hash rows;
+Spot mod shrinks20 to16. The shared Account failure hash stays at count2.
+No other venue prune or exemption is introduced. Private/HMAC, account/history,
+trading, bullet sessions and futures retain the committed full-map prerequisites.
