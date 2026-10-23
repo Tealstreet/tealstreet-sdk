@@ -2,7 +2,7 @@
 
 Lane codex-ih35js, overseer claude-ddi2il, 2026-10-23. The candidate changes only
 WOO family WASM compilation. Local controls and independent reviews are complete;
-current landing integration and exact-head CI remain required. No merge without
+current landing is integrated; exact-head CI remains required. No merge without
 an explicit window.
 
 ## Problem and scope
@@ -131,15 +131,13 @@ ratios. The execution sweep is small in this sample and is not the primary fix.
 
 489 WOO/Binance native tests across 38 targets pass, as do scoped strict Clippy,
 fmt, bash syntax and diff checks. The 14 request-context checker controls pass.
-The production inventory is byte-identical to the frozen source. The main
-request-context checker currently reports stale incoming Paradex/Lighter entries
-against newer origin landing; genuine integration is required before rerunning
-it and obtaining exact-head CI. No inventory entries may be restored or exempted.
+Actual landing 732cf8b0a6e5f5dbe783c62af9f14e7c32ee8fe0 is genuinely integrated.
+The initial stale incoming Paradex/Lighter ratchet failures were resolved by
+preserving landing's source and inventory. Both request-context checks now pass;
+the inventory has zero delta against that integrated landing.
 
 Independent source/adversarial, caller and full-map reviews are clean.
 Architecture gate: no per-venue replacement of a cross-cutting concern; this uses
-the existing family compiler policy and retains shared paths. Final ledger review,
-current landing integration, both inventory checks and exact-head CI remain
-required. Preserve the fixed public/private correctness, CPU, memory and size
+the existing family compiler policy and retains shared paths. Final integrated ledger review and exact-head CI remain required. Preserve the fixed public/private correctness, CPU, memory and size
 acceptance gates. A separate fresh revert guard and head-matched PR merge require
 an explicit overseer window and the post-restart merge GO.
