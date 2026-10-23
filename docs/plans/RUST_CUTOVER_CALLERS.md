@@ -4170,3 +4170,27 @@ final descending sort/limit and no live Store writes are preserved. No SDK
 argument/result shape or new NX handler is added. Numeric completion uses legacy
 authority rather than managed Context completion. Callers must handle typed query
 rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+## WOO and Crypto.com joined order-snapshot freshness
+
+Rust WOO and Crypto.com retain the last accepted order rows when a regular/algo
+or regular/advanced REST census crosses an accepted native order mutation.
+The shared Store token rejects the entire joined publication before changing
+native algo classification, advanced-list membership or startup fill baselines.
+Accepted ACKs invalidate older reads even when their IDs have no stored copy;
+malformed/refused order responses and leverage/mode operations keep their
+existing acceptance and outcome rules. Successful members of a batch retain
+their fence if a later member fails. Bounded Crypto.com retries keep the original
+read's token and collected regular half, so retrying after an ACK cannot renew
+old authority.
+
+Per-ID WS version/timestamp/terminal fences remain in force: newer live rows
+survive while healthy snapshot peers progress, and snapshot publication does
+not invalidate sibling read tokens. A discarded WOO join waits its ordinary
+account cadence rather than publishing caches or issuing an immediate repair;
+Crypto.com releases its reconciliation cycle and schedules its ordinary timer.
+When capture for a new census is exhausted, no new order census starts; stored
+rows and readiness are preserved. Existing in-flight retries can finish but cannot
+publish exhausted authority. Positions, balances and normal polling continue. Public wire
+payloads, signing, commands/results, IDs and frame shapes keep their contracts.
+No wrapper, SDK, CLI, MCP or server caller needs a new parameter or outcome type.

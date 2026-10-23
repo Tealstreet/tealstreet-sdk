@@ -504,6 +504,14 @@ impl Cryptocom {
                 _ => Ok(None),
             }
         });
+        // Only validated accepted order mutations supersede older joined reads.
+        // Retain partial-batch acceptance even if a later sibling is refused.
+        if result.is_ok()
+            && let Call::Place(_) | Call::Amend | Call::Cancel | Call::CancelSymbol =
+                request.step.call
+        {
+            cx.store.invalidate_order_snapshots();
+        }
         // The balance read that precedes a leverage change sends nothing.
         let read = matches!(request.step.call, Call::LeverageAccount { .. });
         let job = self.trading.jobs.get_mut(&request.command).unwrap();
