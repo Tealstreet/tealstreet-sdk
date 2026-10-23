@@ -500,3 +500,11 @@ rollback, same-ID economics after retries, independent signature/GET budgets,
 strict timestamp increments, 1000/1001 admission, native duplicate/filter order,
 missing-array versus empty success, concurrent owners and Store isolation.
 The adapter retains endpoint facts, not another completion or pager policy.
+
+Backpack fills/orders/funding/public trades now adopt the existing CursorHistory
+owner for staged admission, typed first failure, accepted-only later recovery and
+command-owned repeat/cap/skipped-fill coverage. The existing engine offset helper
+only computes raw displacement after owner More; no second pagination authority
+or venue marker emitter is introduced. Original-source assertion RED controls
+cover the changed contracts; native shape/filter/units/request order, eager
+non-fill diagnostics and strict setup remain. NX coverage/runtime proof stay open.

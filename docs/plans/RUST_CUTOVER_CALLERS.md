@@ -4170,3 +4170,34 @@ final descending sort/limit and no live Store writes are preserved. No SDK
 argument/result shape or new NX handler is added. Numeric completion uses legacy
 authority rather than managed Context completion. Callers must handle typed query
 rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
+
+### Backpack histories: shared owner with native offset requests
+
+Fills, closed orders, funding income and single-page public trades now use the
+engine CursorHistory/Completion owner. An actual HTTP/stream/decode failure
+before eligible rows were accepted rejects typed with the shared `internal`
+fallback where legacy failures previously had no kind; resulting error-kind
+telemetry changes accordingly. The shared callback multiplexes transport and
+decode origins, so this does not classify all failures as Network. A later
+actual failure returns only earlier validated pages with one command-owned Warn
+`history.incomplete` before success, also at Error-only logging. Failed-page
+prefixes and pages containing only filtered output cannot authorize recovery.
+
+A repeated raw page or the existing fifty-page limit now resolves admitted rows
+with owned incompleteness instead of rejecting the whole query. Valid coverage
+may therefore return incomplete [] when no rows passed local filters; this never
+proves coverage complete. Malformed fills still skip without hiding healthy
+peers, but admitted skips now also supply an owned coverage gap. The existing
+row.skipped summary includes only admitted pages, once per successful result;
+failed-page skips cannot replace an earlier gap or enter the summary. Non-fill
+invalid rows still invalidate the entire page and retain their existing eager
+CommandError diagnostic, even when earlier valid pages subsequently resolve.
+
+Native request offsets still count all raw rows, including filtered/skipped
+neighbors. Query limits, page sizes, native row order, ID/quantity/fee/time units,
+fractional bounds, filtering and unsigned public trades stay unchanged. Setup
+refusal in the existing consuming signed helper stays strict and separate;
+client-ID lookup and unsupported-ledger/time/market admission are unchanged.
+There is no history Store publication or new SDK argument/row shape. Callers must
+ingest command-scoped incomplete-query warnings, gate coverage accordingly and
+handle typed rejection as unavailable history. [Scope](RUST_OWNED_HISTORY.md).
