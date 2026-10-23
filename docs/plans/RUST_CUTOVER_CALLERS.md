@@ -6163,3 +6163,16 @@ conversions adopt them. Caller-visible changes:
 - **`safe_cex_crypto::ethereum::signed_by`.** A shared pre-release check that
   a low-s host/remote signature recovers to the bound actual signer. Families call
   it before release; it never compares with expected venue config.
+
+## Explicit request egress (#1833) and Plan/preflight issuance
+
+#1833 captures explicit egress (`Primary`, `PublicCors`, `Direct`) when a
+context is issued through `issue_with_egress` / `Cx::http_context_with_egress`.
+Legs, replacements and retries inherit it. Plan and preflight contexts from
+#1873 are minted directly with `Context::new`, so they have no explicit-egress
+admission. Without one, they derive routing from the credential: no credential
+routes Public, the primary slot Primary, and the secondary slot Secondary.
+Callers must not treat #1873 together with #1833 as Plan-egress support, for
+example for WOO or TxFlow entry. The additive seam (explicit egress on
+Plan/preflight issuance) is owned by claude-m26ps4, plan first after #1833
+lands, with codex-uufub4 reviewing API fit.
