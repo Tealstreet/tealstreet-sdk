@@ -126,3 +126,21 @@ Plan audit refinements before implementation:
 
 Independent plan audit accepts one private scoped Io loan/state, no new registry,
 resource counter or venue workaround. Source implementation follows these gates.
+
+Source-audit refinements (before guard fixes): a non-finite command clock must
+still treat any existing managed owner as live; failed existing-owner preflight
+consumes entry custody rather than restoring legacy terminal rights. Generic
+same-command Context issuance after automatic rejection or any terminal result
+must refuse before reserving an identity, including legacy cached completion.
+Sibling issuance while Bound and APIs outside the genuine callback keep their
+existing behavior. Regression controls retain actual Engine callback delivery.
+
+Additive companion prerequisite in this shared entry slice: expose
+Cx::validate_read_root_context(&Context) -> Result<(), Error>. It composes the
+existing actual1792 read-companion validator with exact equality to the registry's
+completion_root. This grants no I/O, mutation, lifetime renewal or observer/group
+authority. It lets the independently owned history bridge bind its constructor
+and no-I/O terminal path to the original Read root rather than a same-owner child.
+Keep existing expiry/completion semantics and full Context/issuer equality. Test
+real issued root/child, foreign issuer, mutation sibling and post-terminal reuse;
+the history owner consumes only a reviewed committed pin. No history.rs edits.
