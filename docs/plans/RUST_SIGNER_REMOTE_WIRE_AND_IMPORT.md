@@ -235,7 +235,9 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
    - The managed entry and generation-liveness check runs first. A response
      for a retired generation is zeroized and never imported.
    - Otherwise, on a 2xx response the engine passes the body bytes straight
-     to `Signer::import(ImportRequest {slot, generation, spec, body})`.
+     to `Signer::import(ImportRequest {authority, spec, body})`, where
+     `authority` is the full `ImportAuthority` tuple (issuer, identity, slot,
+     generation, attempt) defined in the implementation plan.
    - For import attempts only, `on_import` replaces `on_response`; transport
      loss still goes to `on_request_failed`. The session plan
      (RUST_BACKGROUND_SESSION.md, "no new callback") must be amended to say
@@ -246,13 +248,13 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      Debug, request logs and verbose response streaming. The WASM path hands
      over bytes, never a JS string, because JS strings cannot be wiped.
    - The provider parses, validates, decodes and installs refs bound to
-     `(slot, session generation)`, and returns the ref names plus echoed
+     the `ImportAuthority`, and returns the ref names plus echoed
      non-secret fields. The engine then calls the venue's
      `on_import(pending, Result<ImportReceipt, VenueError>)`.
    - A non-2xx or unparseable body is a typed failure: status and the venue
      code are kept, and secret-shaped fields are never echoed.
 4. **Retirement hook.**
-   - `Signer::drop_imported(slot, generation)` is called by
+   - `Signer::drop_imported(ImportScope)` (the authority without the attempt) is called by
      `retire_session` (claude-55ao7t) and on engine disposal. It is
      idempotent and fire-and-forget, and it runs again on re-open.
    - The engine records each receipt's refs per authority tuple and checks
@@ -277,7 +279,7 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
 6. **Credential conditions (claude-m26ps4, 2026-10-23).**
    - **Slot.** Import installs refs only for the slot whose L1 identity
      derived them (primary today). The derived refs form a session identity
-     bound to (slot, generation) beside the L1 identity, never overwriting
+     bound to its `ImportScope` beside the L1 identity, never overwriting
      it. Venues reach it only by selecting that slot, with no new selector.
      Secondary import is refused.
    - **Subject.** Echoed non-secret fields (address, funder, API-key id)
@@ -302,7 +304,7 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
      `Signer::import`, so a late 2xx for a retired generation is never
      imported.
    - **Host providers.** Host-injected JS and Workers providers receive
-     `Action::DropImported { generation }` through the existing provider
+     `Action::DropImported { scope }` through the existing provider
      action seam. The local provider drops synchronously. Engine disposal
      retires every live session, which drops all imports.
    - **Readiness.** On `on_import` success the venue calls `session_ready`,
@@ -432,12 +434,18 @@ no passphrase in venue state, and derives nothing from them.**
      `on_response` for import attempts only; transport loss stays on
      `on_request_failed`. A 2xx carrying an error envelope is a provider
      `Refused`, so only non-2xx statuses reach the venue classifier.
-   - The engine records each receipt's refs per (slot, generation) and
+   - `ImportAuthority { issuer, identity, slot, generation, attempt }` is the
+     one authority key for import and install. `ImportScope` is the same
+     tuple without `attempt` and keys drops, so a drop covers every attempt
+     of that generation. The issuer is the engine instance, so one shared
+     Worker or JS host provider serving several engines or accounts never
+     confuses their imports.
+   - The engine records each receipt's refs per `ImportAuthority` and
      checks membership before signing. It does not parse ref names. A
      stale-generation recipe refuses `Unavailable` before sending.
 5. **Provider and host.**
    - `Signer::import -> ImportFuture` plus `import_ready` for the local
-     provider. Host providers get `Action::Import { attempt, slot, generation, spec, body }`
+     provider. Host providers get `Action::Import { authority, spec, body }`
      and `Event::Imported` / `Event::ImportFailed`, fenced by attempt id, with
      a host.mjs `import` callback using the same timeout and cancel as
      primitive signing. Host providers implement `import` and drop
@@ -454,9 +462,9 @@ no passphrase in venue state, and derives nothing from them.**
      key.
    - Drop: claude-55ao7t's `retire_session` calls one hunk this PR adds,
      after the HTTP discard and before the registry revoke. It emits
-     `Action::DropImported { generation }` for host providers and drops
+     `Action::DropImported { scope }` for host providers and drops
      synchronously for local ones. Host providers tombstone a dropped
-     generation, so an import promise settling later installs nothing.
+     `ImportScope`, so an import promise settling later installs nothing.
      Disposal retires every session through claude-55ao7t's path.
 6. **Readiness.** On `on_import` success the venue calls `session_ready`; on
    failure it calls `session_failed` (`NotSent` fan-out), then backs off.
