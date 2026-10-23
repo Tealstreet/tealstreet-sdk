@@ -30,7 +30,9 @@ payloadSigner contract in [RUST_REMOTE_SIGNING.md](RUST_REMOTE_SIGNING.md).
   - `request_signed_managed`/`sign_http`/`send_signed`/`connect_signed` stage
     unsigned work.
   - Every resend re-prepares and re-signs.
-  - A failure before dispatch is `notSent`.
+  - A failure before dispatch is `notSent` for that physical attempted leg only.
+    Command aggregation keeps any earlier released, accepted or unknown legs;
+    a later signer refusal cannot erase them.
 - **Provider today:** the local provider (`crypto/src/signer.rs`) implements
   only HMAC-SHA256/512, SHA256 and SHA256(secret-suffix).
   - `Ed25519`, `Es256`, `Secp256k1Digest` and `StarkDigest` are declared but
@@ -67,7 +69,7 @@ that is still before engine release, so it is not the choke point either.
 | --- | --- | --- | --- | --- |
 | ApeX Omni | REST and WS login: HMAC-SHA256 base64, keyed by the base64 text of the secret, plus key and passphrase headers. Orders: zkLink Rescue/MuSig over a 36-byte contract, seeded by a 65-byte `omniKeySeed`. | REST: `lib.rs:112 send_signed` → `sign.rs:95` at venue send. zkLink: eager in `trading.rs:292 prepare_order` (`:369`, `:469`), every lot signed before the first write. WS: `account.rs:645`. | Wire stamp; the legacy stamp is floored to seconds. One legacy resend on a signature rejection reuses the zkLink body. Up to 3 read retries. | 13/45 |
 | AsterDEX V1 | HMAC-SHA256 hex over the raw query. | `request.rs:181 dispatch_signed`: venue send with the protocol stamp. GET uses the secondary identity; writes use the primary. | One `-1022` resend; a `-1021` resync then one resend. listenKey comes from a signed POST/PUT. | 28/71 |
-| AsterDEX V3 standard / Code | secp256k1 over `eip191(keccak(abi(payload,user,signer,nonce)))`. Code endpoints use EIP-712 `Message(string)`, chain 1666/714, and are not URL-encoded. | `sign.rs:141 Query::signed` (venue send). | The nonce comes from a process-global static map per signer address, `max(now·1000, prev+1)` (`sign.rs:231`). V3 never resends. | (above) |
+| AsterDEX V3 standard / Code | secp256k1 over `eip191(keccak(abi(payload,user,signer,nonce)))`. Code endpoints use EIP-712 `Message(string)`, chain 1666/714, and are not URL-encoded. | `sign.rs:141 Query::signed` (venue send). | The nonce comes from a process-global static map per signer address, `max(now·1000, prev+1)` (`sign.rs:231`). The `-1022` signature resend is V1-only, but the `-1021` Timestamp clock resync and one resend apply to V3 as well (`request.rs:276`). | (above) |
 | Bitunix | `hex(sha256(hex(sha256(nonce‖ts‖key‖query‖body))‖secret))`, the `Sha256SecretSuffix` shape. | `account.rs:281 signed_request` at venue send. GET uses the secondary identity. WS login (`account.rs:581`) uses the trimmed primary. | UUID nonce from `fill_signing_entropy` plus a wire stamp. 2 s login retry. | 25/23 |
 | Crypto.com | HMAC-SHA256 hex over `method‖nonce‖key‖params‖nonce`; key and sig go in the JSON body. | `account.rs:420 signed` at venue send, always primary (`read_credentials` is validated but unused). WS `public/auth` at `account.rs:779`. | Nonce and `id` are the wire stamp in ms, so they collide within one millisecond. One 40101 resend. | 14/35 |
 | Orderly | Ed25519 over `{ts}{METHOD}{path}{body}`, base64url with padding. The seed is base58; the public `orderly-key` is supplied. | Eager at issue: `account.rs:334`, `history.rs:451`, `trading.rs:1106`. WS auth at `account.rs:1395`. | Wire stamp; the WS stamp is `now as u64`. | 12/39 |
