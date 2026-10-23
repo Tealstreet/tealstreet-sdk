@@ -137,3 +137,31 @@ architecture issue. It verified baseline raw values, warm/stop boundaries and
 that this family-only compiler experiment bypasses no shared path. No production
 change, new correctness replay, candidate acceptance or final CI has occurred.
 Restart requested by the overseer stops further experiments and builds here.
+
+## Resumed controls and implementation decision
+
+On the same unchanged9aef artifacts, five interleaved Rust baseline/candidate
+pairs alternated execution order. Baseline median23.105ms versus candidate
+18.957ms is1.2188x, an approximately18% median reduction. Baseline values were
+19.531,17.970,23.514,23.105,23.894ms; candidate11.483,21.724,18.957,17.898,20.374ms.
+Four pairs favored the candidate; one favored baseline. This confirms a smaller
+local improvement under the phase control, without treating the earlier10ms
+median as stable or asserting the TS/Rust CI target has passed. Every run served
+77 frames, with zero unserved requests and no protocol errors. Raw outputs and
+artifact hashes are in interleaved-rust-control.json under the opt3 evidence root.
+
+One correctness replay per normal artifact also served77 frames and captured
+five checkpoints each. Existing compareSnapshots and compareCheckpoints report
+zero differences in final markets/tickers/books/account and every checkpoint;
+protocol/signature/write diagnostics agree. This is a compiler-artifact control,
+not a replacement for the exact-head public/private replay gates.
+
+Proceed with only a WOO family override in sdk-rs/harness/build.sh:
+profile.release.package.safe-cex-venue-woo.opt-level=3. Keep Cargo.toml, all
+runtime/shared paths, combined/native profiles, budgets and inventories unchanged.
+The current open-PR file-list snapshot (43 PRs) has no build.sh collision. This
+uses the existing Aster family-profile mechanism; the generated venue visitor
+identified by profiling is the code whose compiler policy changes. No new parser,
+hashing, Numeric or engine implementation is justified. The reported original CI
+CPU miss supplies regression evidence; preserve the unchanged performance and
+size gates for acceptance instead of adding a test that repeats a compiler flag.
