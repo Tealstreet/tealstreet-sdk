@@ -203,3 +203,87 @@ Focused checks pass locally:
 Independent adversarial review: CLEAN. Its minor findings are addressed:
 policy-owned seed encoding, the narrowed field vocabulary, the CI feature-off
 step, the seed wipe and role binding. CI owns the WASM size and timing gates.
+
+## Public derivations (P4)
+
+Plan, 2026-10-24. Owner claude-19pt8s. Approved by claude-ddi2il as its own
+engine PR off landing. Reviewers: codex-uufub4 (engine) and codex-hcmq3f
+(consumer). It unblocks the Hyperliquid, TxFlow and GRVT recipes and P6b
+(Polymarket `l1Wallet`). The Paradex Ethereum-to-Stark derivation stays out
+until Sam's B/C decision.
+
+**Problem.** Venues still derive public values from key material: the
+Hyperliquid and TxFlow agent addresses (`account.rs:315`, `lib.rs:1077`,
+TxFlow `lib.rs:51`), the GRVT signer address in the order body, and the
+Polymarket address. Once a venue holds only refs it cannot do that, and it
+must never receive the key to try.
+
+**Operations** (engine `signing.rs`; non-secret results, no payload):
+- `Operation::PublicAddress { key }`: the 20-byte Ethereum address of a
+  secp256k1 key.
+- `Operation::PublicKey { algorithm, key }`: the public key for that
+  algorithm's key form. `Ed25519` gives 32 bytes, `Es256` 65-byte
+  uncompressed SEC1, `StarkDigest` the 32-byte big-endian felt, and
+  `Secp256k1Digest` 33-byte compressed SEC1. Any other algorithm is
+  `InvalidRequest`. Lighter's key is added with its own algorithm.
+- Both obey role binding: an extra ref answers only for its role's algorithm
+  (and `PublicAddress` only for a secp256k1 role, P6b's `l1Wallet`).
+- Validation:
+  - result widths are exact;
+  - a request mixing public operations with `Sign`/`Present`/`Sha256` is
+    allowed, since public values are never secrets;
+  - `remote` (P8) still requires exactly one `Sign`, so a public operation
+    is never sent as a recipe op.
+
+**Local provider.** It implements both from installed material, through the
+existing primitives (`ethereum::private_key_address`, `ed25519::public_key`,
+`starknet::public_key`, `p256` public key), behind the same crypto feature
+arms. Results are public bytes and never echo key material.
+
+**Setup-time fetch.**
+- Local providers answer synchronously (`immediate()`).
+  `safe_cex_venues::fetch_public(provider, ops) -> Result<Vec<Vec<u8>>,
+  SignError>` runs a public-only request through `sign_ready` inside trusted
+  construction. It returns `Unavailable` for a non-immediate provider instead
+  of blocking.
+- The family's admission maps results into non-secret `Options` fields such
+  as `agent_address` or `signer_address`, the same way public config already
+  arrives. The venue reads config; it never derives.
+- Host and remote providers cannot answer synchronously at construction.
+  This needs a reviewer decision:
+  - **A.** Their public values are declared account config, supplied with
+    the account (the browser or remote signer knows its own address). Setup
+    fails closed when a required value is missing, and a startup check
+    verifies it after the first signature where a family can (recovery,
+    P8 verifiers). No engine seam is needed.
+  - **B.** An engine startup seam `Cx::fetch_public(ops, pending)` emits
+    `Action::Sign` with public-only work, and `Venue::on_public` receives
+    the bytes before private startup.
+
+  A is smaller and matches how keyless accounts already carry public
+  identifiers; B is only needed if a family must start before any
+  configured value exists. I recommend A.
+- JS host contract: `SignOperation` gains `publicAddress` and `publicKey`
+  kinds in `host.d.mts`. `remoteSignerProvider` answers them only from
+  declared public identity metadata and refuses otherwise; it never forwards
+  them to the remote signer.
+
+**REDs** (each shown failing first):
+- R1: a `PublicAddress` request for a secp256k1 key is refused today (no
+  operation).
+- R2: an extra ref answers a public operation outside its role.
+- R3: `fetch_public` on a local provider returns the address equal to the
+  legacy `private_key_address` for the same key, and Hyperliquid's legacy
+  derivation for a corpus key.
+
+**Tests.**
+- Widths and refusals per algorithm.
+- The local provider matches independent vectors: ethers addresses, RFC 8032
+  public keys, the starknet.js public key and p256 SEC1.
+- Role binding, a mixed request, and P8 `remote` refusing public operations.
+- `fetch_public` returns `Unavailable` for a non-immediate provider.
+- TS provider: `publicAddress` answered from metadata, refused without it.
+
+**Architecture gate.** This is the shared choke point: one provider
+operation for every family that needs a public value, with no venue
+derivation.
