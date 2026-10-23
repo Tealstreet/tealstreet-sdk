@@ -286,6 +286,7 @@ impl<P> Cx<'_, P> {
         scope: Scope,
         policy: Policy,
     ) -> Result<Context, Error> {
+        self.session_scope()?;
         let generation = self.io.request_contexts.validate_session(session)?;
         let egress = self
             .io
