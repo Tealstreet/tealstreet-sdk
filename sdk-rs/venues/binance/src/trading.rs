@@ -16,8 +16,7 @@ use safe_cex_engine::model::{
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::request_context::{
-    Context, Credential, Operation, Owner, Policy, RejectionReports, RetryPolicy, Scope,
-    UnprovenEvidence,
+    Context, Credential, Operation, Owner, Policy, RejectionReports, RetryPolicy, UnprovenEvidence,
 };
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -462,44 +461,44 @@ impl BinanceFutures {
             cx.fail(id, error);
             return;
         }
-        let plan = plan.and_then(|mut job| {
+        let plan = plan.and_then(|job| {
             // Reserve no partial prefix for a predictably oversized plan. The
             // root also occupies one of the engine's bounded context slots.
             let count: usize = job.steps.iter().map(Vec::len).sum();
             if count >= 256 {
                 return Err("Binance command exceeds the HTTP lifecycle capacity".into());
             }
-            let operation = if count == 0 && job.amendment.is_none() {
-                Operation::Read
-            } else {
-                Operation::Mutation
-            };
-            let credential = (operation == Operation::Mutation).then(|| Credential {
-                slot: CredentialSlot::Primary,
-                reference: self
-                    .credentials
-                    .as_ref()
-                    .expect("checked above")
-                    .credential
-                    .clone(),
-            });
-            job.context = Some(
-                cx.http_context(
-                    Scope::Command(id),
-                    Policy {
+            Ok(job)
+        });
+        match plan {
+            Ok(mut job) => {
+                let count: usize = job.steps.iter().map(Vec::len).sum();
+                let operation = if count == 0 && job.amendment.is_none() {
+                    Operation::Read
+                } else {
+                    Operation::Mutation
+                };
+                let credential = (operation == Operation::Mutation).then(|| Credential {
+                    slot: CredentialSlot::Primary,
+                    reference: self
+                        .credentials
+                        .as_ref()
+                        .expect("checked above")
+                        .credential
+                        .clone(),
+                });
+                job.context = Some(
+                    match cx.admit_http_command(Policy {
                         operation,
                         credential,
                         timeout_ms: 120_000,
                         pacing: None,
                         retry: RetryPolicy::Never,
+                    }) {
+                        Ok(context) => context,
+                        Err(_) => return, // Engine owns initial admission rejection.
                     },
-                )
-                .map_err(|_| "Binance command lifecycle is unavailable".to_owned())?,
-            );
-            Ok(job)
-        });
-        match plan {
-            Ok(job) => {
+                );
                 self.trading.jobs.insert(id, job);
                 self.advance(cx, id);
             }
