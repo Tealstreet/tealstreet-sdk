@@ -877,3 +877,61 @@ fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "0.1");
 }
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_signature_body_on_5xx_does_not_authorize_resend() {
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    e.handle(
+        NOW + 11.0,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 500,
+                headers: "",
+                body: r#"{"code":20016,"msg":"signature rejected"}"#,
+            },
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_))),
+        "an uncertain write must not be released a second time"
+    );
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 42, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_unlisted_native_code_is_explicitly_unknown() {
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(
+        &mut e,
+        &first,
+        NOW + 11.0,
+        r#"{"code":987654,"msg":"unlisted native failure"}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 42, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].venue_code.as_deref(), Some("987654"));
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+}

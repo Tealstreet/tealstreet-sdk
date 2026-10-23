@@ -453,3 +453,10 @@ engine policy. Any missing reusable admission, signing or retry mechanism is a
 shared prerequisite, never a second venue implementation. Implementation
 validation remains venue + Binance tests, scoped strict Clippy/fmt, bans, both
 request-context ratchets and exact-head CI; no local replay/timing sweep.
+
+Local evidence at the plan/test head: both original RED tests compile and fail
+by the intended assertion (extra HTTP resend; None instead of Unknown). The
+normal ApeX + Binance suites pass with these two controls explicitly ignored;
+scoped strict all-target Clippy, fmt and both request-context checks pass. This
+is regression preparation, not GREEN adoption evidence. The landed classifier
+source is #1837 (`e0322577e354739dde6d7e5011e74ab660145885`).
