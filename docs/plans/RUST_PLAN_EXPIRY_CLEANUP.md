@@ -43,3 +43,18 @@ A callback-panic control checks permanent poisoning. A working non-expired
 failure control preserves the ordinary callback path. Run focused engine tests
 with http-plans on, strict clippy with plans on/off, then the actual WEEX native
 control after integrating the reviewed fix. Independent source review is a gate.
+
+## Implementation checkpoint
+
+Original engine controls at ccbfe9ef099: four assertion REDs and one ordinary
+pre-root typed-failure GREEN. The implementation uses the same extracted seal
+origin validator for deferred and ordinary terminals; deferral cannot accept a
+foreign issuer or mismatched delivery attempt. The drain rechecks each current
+managed token through `plan_from_context` and picks the lowest request ID without
+allocating a second request ledger.
+
+Seven focused controls are GREEN, including mixed unsent/released peers and an
+accepted prefix before unresolved siblings. Existing active-Plan25 and boundary4
+controls pass. Strict engine clippy passes with http-plans on and off. Independent
+source review is CLEAR; full fresh CI and actual WEEX consumer replay remain PR
+gates. No merge or whole-repository proof is claimed by this local checkpoint.

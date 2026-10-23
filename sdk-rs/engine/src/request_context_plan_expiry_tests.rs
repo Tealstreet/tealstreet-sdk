@@ -9,6 +9,7 @@ mod plan_expiry_cleanup {
     #[derive(Default)]
     struct Cleanup {
         plan: Option<Plan>,
+        slots: Vec<crate::request_context::plan::Slot>,
         count: usize,
         cleaned: Vec<usize>,
         retired_after: Vec<usize>,
@@ -42,6 +43,21 @@ mod plan_expiry_cleanup {
                 .is_err(),
                 "expired cleanup cannot send again"
             );
+            let previous = cx.io.http_delivery.clone().unwrap();
+            let mut foreign_delivery = previous.clone();
+            foreign_delivery.attempt.request =
+                RequestId(foreign_delivery.attempt.request.0 + 1_000_000);
+            cx.io.http_delivery = Some(foreign_delivery);
+            assert_eq!(cx.fail_plan(plan, "wrong attempt"), Err(Error::Revoked));
+            cx.io.http_delivery = Some(previous);
+            let Owner::Command { id, generation } = plan.owner() else {
+                unreachable!()
+            };
+            let forged = Plan::new(
+                &crate::request_context::Preflight::new(&std::sync::Arc::new(()), id, generation),
+                plan.deadline(),
+            );
+            assert_eq!(cx.fail_plan(&forged, "wrong issuer"), Err(Error::Revoked));
             self.cleaned.push(index);
             let id = format!("native-{index}");
             if index == 0 {
@@ -93,6 +109,7 @@ mod plan_expiry_cleanup {
                 .unwrap();
             for (index, slot) in cx.plan_slots(&plan).unwrap().into_iter().enumerate() {
                 let context = cx.plan_leg_context(&plan, &slot).unwrap();
+                self.slots.push(slot);
                 let mut order = fixture_order(&format!("native-{index}"));
                 order.status = match index {
                     0 => OrderStatus::Creating,
@@ -148,11 +165,23 @@ mod plan_expiry_cleanup {
         }
         fn on_response(
             &mut self,
-            _: &mut Cx<'_, Self::Pending>,
-            _: Self::Pending,
+            cx: &mut Cx<'_, Self::Pending>,
+            pending: Self::Pending,
             _: Response<'_>,
         ) {
-            panic!("expired reply reached codec");
+            let (index, context) = pending;
+            let plan = self.plan.as_ref().unwrap();
+            cx.validate_plan_delivery(plan, &context).unwrap();
+            cx.http_write_result(
+                &context,
+                crate::request_context::WriteResult::Accepted {
+                    order_ids: vec!["accepted-prefix".into()],
+                },
+            )
+            .unwrap();
+            cx.finish_plan_call(plan, &self.slots[index], &context)
+                .unwrap();
+            cx.store.remove_orders(&[&format!("native-{index}")]);
         }
         fn on_request_failed(&mut self, _: &mut Cx<'_, Self::Pending>, _: Self::Pending, _: &str) {
             panic!("untyped failure");
@@ -340,6 +369,71 @@ mod plan_expiry_cleanup {
             VenueError::new("host deadline"),
         );
         assert_cleaned(&mut e, false);
+    }
+    #[test]
+    fn mixed_unsent_and_released_peers_keep_unknown_until_all_cleanup_finishes() {
+        let (mut e, tokens) = setup(3, Phase::Preparation);
+        let token = tokens[2];
+        e.http_prepared(
+            0.,
+            token,
+            Prepared {
+                id: token.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let (attempt, work) = work(&e.drain_actions().collect::<Vec<_>>());
+        e.handle(
+            0.,
+            Event::Signed {
+                attempt,
+                result: Ok(crate::signing::SignResult {
+                    values: vec![b"value".to_vec()],
+                    receipt: work.receipt,
+                    headers: vec![],
+                }),
+            },
+        );
+        let permit = bound(&e.drain_actions().collect::<Vec<_>>());
+        e.claim_http(0., permit).unwrap();
+        e.drain_actions().for_each(drop);
+        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        e.handle(20_000., Event::TimerFired { timer });
+        assert_cleaned(&mut e, true);
+    }
+    #[test]
+    fn root_cleanup_preserves_accepted_prefix_before_unresolved_parallel_writes() {
+        let (mut e, tokens) = setup(3, Phase::Released);
+        e.handle(
+            1.,
+            Event::HttpResponse {
+                request: tokens[0].attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "accepted",
+                },
+            },
+        );
+        e.drain_actions().for_each(drop);
+        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        e.handle(20_000., Event::TimerFired { timer });
+        assert_eq!(e.venue.cleaned, vec![1, 2]);
+        assert_eq!(e.venue.retired_after, vec![2]);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let errors = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(
+            errors[0].partial.as_ref().unwrap().order_ids,
+            vec!["accepted-prefix"]
+        );
     }
     #[test]
     fn cleanup_panic_poisons_the_engine_instead_of_leaving_a_deferred_seal() {

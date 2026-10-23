@@ -615,6 +615,16 @@ impl<V: Venue> Engine<V> {
         self.assert_live();
         self.io.dispatch_now = now;
         let request = token.attempt().request;
+        #[cfg(feature = "http-plans")]
+        if self
+            .io
+            .managed_http
+            .get(&request)
+            .is_some_and(|managed| managed.lifecycle.preparation() == token)
+            && self.expire_plan_before_http_failure(now, request)
+        {
+            return;
+        }
         let Some(managed) = self.io.managed_http.get(&request) else {
             return;
         };
@@ -887,6 +897,11 @@ impl<V: Venue> Engine<V> {
             });
             return true;
         }
+        #[cfg(feature = "http-plans")]
+        if self.expire_plan_before_http_failure(now, request) {
+            return true;
+        }
+        let managed = &self.io.managed_http[&request];
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
             self.handle_event(
