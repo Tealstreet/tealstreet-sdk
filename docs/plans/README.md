@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Subscription handoff and native read continuation | Shared ordering correction | Before issuing native reads after managed subscription frames or changing final drain/timer custody. | [RUST_SOCKET_INTEREST_HANDOFF.md](RUST_SOCKET_INTEREST_HANDOFF.md) |
 | WOO public steady CPU headroom | Implemented; public CI 1.78x | Before optimizing WOO public steady CPU or interpreting its named-WASM profile and local medians. | [RUST_WOO_PUBLIC_CPU.md](RUST_WOO_PUBLIC_CPU.md) |
 | Conditional mutation completion | Shared post-#1873 implementation plan | Before retiring an unissued mutation suffix after an exact declared terminal delivery. | [RUST_PLAN_CONDITIONAL_TERMINAL.md](RUST_PLAN_CONDITIONAL_TERMINAL.md) |
 | AsterDEX RequestContext adoption | Pinned inventory and single-request-first plan | Before migrating Aster HTTP/completion, pruning its legacy inventory or touching files claimed by concurrent PRs. | [RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md) |
@@ -208,6 +209,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Visibility and recovery | Retained plan/evidence | Changing error visibility, coded notices, startup or retry/recovery policy. | [RUST_STARTUP_RETRY.md](RUST_STARTUP_RETRY.md) |
 | WEEX Contract V3 Rust lane | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_WEEX.md](RUST_WEEX.md) |
 | WEEX selected-symbol metadata refresh | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_WEEX_METADATA_REFRESH.md](RUST_WEEX_METADATA_REFRESH.md) |
+| WEEX ordinary trading Context adoption | Plan and original RED controls | Before migrating ordinary WEEX trading to Preflight and complete Plan admission. | [RUST_WEEX_TRADING_CONTEXT.md](RUST_WEEX_TRADING_CONTEXT.md) |
 | WOO perpetual Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [RUST_WOO_PROGRESS.md](RUST_WOO_PROGRESS.md) |
 | Shared dispatch signer provider | In progress | Enabling trusted provider construction in another standalone family. | [RUST_SHARED_DISPATCH_PROVIDER.md](RUST_SHARED_DISPATCH_PROVIDER.md) |
 | Hosted signer compatibility | In progress: signing-side capture; keyless companion pending | Changing public hosted sign APIs or migrating a family away from raw credentials. | [RUST_HOSTED_SIGNER_BRIDGE.md](RUST_HOSTED_SIGNER_BRIDGE.md) |
@@ -255,3 +257,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Paradex public-trades Read history | Consumer plan | Before migrating the native unsigned single-page public trade command through the reviewed history bridge. | [RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md](RUST_PARADEX_PUBLIC_TRADES_CONTEXT.md) |
 | KuCoin local Read terminals | Frozen-base adoption plan | Before converting Spot cached/empty/refusal reads and futures unsupported leverage to genuine initial Read authority. | [RUST_KUCOIN_LOCAL_READ_CONTEXT.md](RUST_KUCOIN_LOCAL_READ_CONTEXT.md) |
 | BloFin PublicTrades Context | Committed native consumer plan | Before moving the single unsigned trade-history response onto the shared Read completion bridge. | [RUST_BLOFIN_PUBLIC_TRADES_CONTEXT.md](RUST_BLOFIN_PUBLIC_TRADES_CONTEXT.md) |
+| Bitunix public REST Read authority | Managed adoption; native proof | Before moving public markets/tickers/candles, extracting native codes or pruning their eight legacy occurrences. | [RUST_BITUNIX_PUBLIC_READ_CONTEXT.md](RUST_BITUNIX_PUBLIC_READ_CONTEXT.md) |
+| WEEX local history custody | Committed plan; unimplemented | Before adopting synchronous WEEX history results/refusals or pruning their seven legacy terminals. | [RUST_WEEX_LOCAL_HISTORY_CONTEXT.md](RUST_WEEX_LOCAL_HISTORY_CONTEXT.md) |
+| WEEX account identity Read custody | Plan; original REDs next | Before changing FetchAccount local refusals or initial managed identity validation. | [RUST_WEEX_IDENTITY_CONTEXT.md](RUST_WEEX_IDENTITY_CONTEXT.md) |

@@ -9,8 +9,8 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let request = engine
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -31,7 +31,7 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             },
         },
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.);
     let tickers = actions
         .iter()
         .find_map(|action| match action {
