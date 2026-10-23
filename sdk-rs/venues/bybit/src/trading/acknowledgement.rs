@@ -40,15 +40,20 @@ pub(crate) enum Row {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Malformed;
 
+/// A present field, `null` included (serde reads a `null` Option as absent).
+fn present<'de, D: serde::Deserializer<'de>>(raw: D) -> Result<Option<&'de RawValue>, D::Error> {
+    <&RawValue>::deserialize(raw).map(Some)
+}
+
 #[derive(Deserialize)]
 struct Envelope<'a> {
     #[serde(rename = "retCode", borrow)]
     ret_code: &'a RawValue,
     #[serde(rename = "retMsg", default)]
     ret_msg: Option<String>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "present")]
     result: Option<&'a RawValue>,
-    #[serde(rename = "retExtInfo", borrow, default)]
+    #[serde(rename = "retExtInfo", borrow, default, deserialize_with = "present")]
     ret_ext_info: Option<&'a RawValue>,
 }
 
@@ -64,6 +69,13 @@ struct Identity {
 struct List<'a> {
     #[serde(borrow)]
     list: &'a RawValue,
+}
+
+/// A result whose `list` may be omitted (a present `null` is not).
+#[derive(Deserialize)]
+struct MaybeList<'a> {
+    #[serde(borrow, default, deserialize_with = "present")]
+    list: Option<&'a RawValue>,
 }
 
 #[derive(Deserialize)]
@@ -84,7 +96,7 @@ struct Affected<'a> {
 
 #[derive(Deserialize)]
 struct MarginReasons<'a> {
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "present")]
     reasons: Option<&'a RawValue>,
 }
 
@@ -214,7 +226,8 @@ pub(crate) fn created_rows(
     ext: Option<&RawValue>,
     order_link_ids: &[Option<&str>],
 ) -> Result<Vec<Row>, Malformed> {
-    let rows = rows(result, ext, order_link_ids.len(), |index, row| {
+    let rows = rows(result, ext, order_link_ids.len(), true, |index, row| {
+        let row = row.ok_or(Malformed)?;
         if !echo_matches(row.order_link_id, order_link_ids[index]) {
             return Err(Malformed);
         }
@@ -236,14 +249,17 @@ pub(crate) fn created_rows(
     Ok(rows)
 }
 
-/// Cancel-batch: one status per requested order, and each accepted row must
-/// echo the requested native order ID.
+/// Cancel-batch: one status per requested order. A returned `result.list`
+/// must match the request one-for-one and echo each accepted target.
 pub(crate) fn cancelled_rows(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
     order_ids: &[&str],
 ) -> Result<Vec<Row>, Malformed> {
-    rows(result, ext, order_ids.len(), |index, row| {
+    rows(result, ext, order_ids.len(), false, |index, row| {
+        let Some(row) = row else {
+            return Ok(order_ids[index].to_owned());
+        };
         let id = native_id(row.order_id)?;
         if id != order_ids[index] {
             return Err(Malformed);
@@ -289,23 +305,37 @@ pub(crate) fn cancelled_one(
 }
 
 /// Pair each status with its result row. A refused row may carry an empty
-/// identity; an accepted one must prove its target through `accept`.
+/// identity; an accepted one must prove its target through `accept`. With
+/// `required`, the result list must be present.
 fn rows(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
     expected: usize,
-    mut accept: impl FnMut(usize, Identity) -> Result<String, Malformed>,
+    required: bool,
+    mut accept: impl FnMut(usize, Option<Identity>) -> Result<String, Malformed>,
 ) -> Result<Vec<Row>, Malformed> {
-    let results: Vec<Identity> = objects(object::<List<'_>>(result.ok_or(Malformed)?)?.list)?;
+    let list = match result {
+        Some(result) => object::<MaybeList<'_>>(result)?.list,
+        None => None,
+    };
+    let results: Option<Vec<Identity>> = match list {
+        Some(list) => Some(objects(list)?),
+        None if required => return Err(Malformed),
+        None => None,
+    };
     let statuses: Vec<Status<'_>> = objects(object::<List<'_>>(ext.ok_or(Malformed)?)?.list)?;
-    if expected == 0 || results.len() != expected || statuses.len() != expected {
+    if expected == 0
+        || statuses.len() != expected
+        || results.as_ref().is_some_and(|rows| rows.len() != expected)
+    {
         return Err(Malformed);
     }
-    results
+    let mut results = results.map(Vec::into_iter);
+    statuses
         .into_iter()
-        .zip(statuses)
         .enumerate()
-        .map(|(index, (row, status))| match code(status.code)? {
+        .map(|(index, status)| (index, results.as_mut().and_then(Iterator::next), status))
+        .map(|(index, row, status)| match code(status.code)? {
             0 => accept(index, row).map(Row::Accepted),
             code => Ok(Row::Refused {
                 code,

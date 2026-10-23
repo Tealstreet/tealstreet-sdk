@@ -251,9 +251,10 @@ impl BybitLinear {
                 not_sent("Bybit trading needs an API key").kind(ErrorKind::AuthInvalid),
             ));
         }
-        if let Command::PlaceOrders { orders, .. } = command
+        if let Command::PlaceOrders { command, orders } = command
             && let Err(message) = check_client_order_ids(cx, orders)
         {
+            cx.command_error(*command, message.clone());
             return Some(Gate::Fail(not_sent(message)));
         }
         None
