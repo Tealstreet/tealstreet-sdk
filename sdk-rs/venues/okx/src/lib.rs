@@ -1,6 +1,9 @@
 //! OKX swaps and EEA X-Perps on the sans-I/O engine.
 mod account;
 mod closed;
+/// Opaque canonical recipes signed by the injected dispatch provider.
+#[path = "sign/dispatch.rs"]
+pub mod dispatch_signing;
 mod history;
 mod sign;
 mod trading;
