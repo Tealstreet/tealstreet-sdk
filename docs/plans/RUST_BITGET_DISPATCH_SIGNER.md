@@ -95,3 +95,23 @@ construction. Strict all-target Bitget/registry Clippy, fmt, SDK typecheck/lint
 and59 focused SDK setup tests pass. Independent adversarial scan verifies exact
 501 matches/501 allowances and unchanged non-Bitget allowances. Reviews are
 clear after the rollback fix. Final actual-WASM/replay/hosted gates are pending.
+
+## Lane takeover status (claude-4yjlw0, 2026-10-23)
+
+Checkpoint `686cf48c92e` confirmed: native-only, 2 commits ahead and 457 behind
+landing `73d04380dd9`, no PR. A copy of the TS #8093 diff
+(`123d14f64a7`) is kept at `.aimux/plans/bitget-next-8093.diff` in the main
+checkout because the `/tmp` copy is not durable.
+
+Next, sequenced after #1773 because both edit hosted registry admission:
+1. Merge pinned landing, including actual #1839 and #1773.
+2. Hosted admission per alias with actual-WASM HTTP/WS positives. Generalise the
+   shared WS-seconds codec to construction-declared suffix data and move OKX to
+   it in the same PR. Keep the native three-part shape and exact receipt.
+3. Reverify the #1814 rows (Bitget 16/34: partial IDs, typed auth, f64 codes,
+   40009 resend) through shared tables. Then open a draft PR.
+4. UTA routing parity, as a separate follow-up PR: wsPrivateUta/privateUta
+   route fields, proxyConditional `/bitget/v2/private` and `/bitget/v3/private`,
+   relayUpstream/relayWhenTunnelled, the immediate 40018 auth-refusal walk and
+   native prelogin/connect fallback bounds. Replace the routing test that
+   requires UTA to stay direct.
