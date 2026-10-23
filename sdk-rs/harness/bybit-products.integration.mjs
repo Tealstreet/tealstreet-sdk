@@ -111,7 +111,7 @@ function market(m) {
 function chain(rows) { return rows.map((row) => ({ market: market(row.market), quote: row.quote })); }
 class Native {
   constructor(options) {
-    this.now = Date.now(); this.requests = []; this.sockets = []; this.sent = []; this.results = new Map(); this.queue = [];
+    this.now = Date.now(); this.resources = 0; this.requests = []; this.sockets = []; this.sent = []; this.results = new Map(); this.queue = [];
     this.engine = new WasmEngine('bybit', JSON.stringify({ key: KEY, secret: SECRET, ...options }));
     this.collect(this.engine.start(this.now)); this.run();
   }
@@ -120,6 +120,17 @@ class Native {
     for (let count = 0; this.queue.length; count++) {
       assert(count < 500, 'native finite action sequence');
       const a = this.queue.shift();
+      // Managed requests reach the fake venue only after the engine's own claim.
+      if (a.op === 'managedHttp') {
+        if (a.phase === 'prepare') {
+          this.collect(this.engine.httpPrepared(a.preparation, String(++this.resources), undefined, this.now));
+        } else if (a.phase === 'bind') {
+          const claim = JSON.parse(this.engine.httpClaim(a.permit, this.now));
+          if (claim.status === 'released') this.queue.unshift({ ...a.packet, op: 'http' });
+          this.collect(this.engine.prepareDispatch(this.now));
+        }
+        continue;
+      }
       if (a.op === 'http') {
         validate(a); this.requests.push(a); const body = JSON.stringify(response(a));
         this.collect(this.engine.httpStart(a.request, 200, '', this.now));

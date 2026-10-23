@@ -63,7 +63,9 @@ fn all_bybit_aliases_accept_setup_and_ordinary_startup_gets_use_secondary() {
             // Hyro waits for its catalogue before private startup; provider setup
             // must construct without pretending it has issued ordinary V5 reads.
             assert!(signed.is_empty());
-            assert!(!requests.is_empty());
+            // Public discovery is managed: it starts as a Prepare, not raw HTTP.
+            assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(m)
+                if matches!(m.as_ref(), safe_cex_engine::request_context::HttpAction::Prepare { .. }))));
             continue;
         }
         assert!(
