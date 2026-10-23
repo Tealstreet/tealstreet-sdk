@@ -111,15 +111,7 @@ impl Credentials {
             .and_then(CredentialField::text)
             .unwrap_or(key)
             .trim();
-        let mut parts = key.split('/');
-        if parts.next() != Some("organizations")
-            || !parts.next().is_some_and(|part| !part.is_empty())
-            || parts.next() != Some("apiKeys")
-            || !parts.next().is_some_and(|part| !part.is_empty())
-            || parts.next().is_some()
-            || key.chars().any(char::is_whitespace)
-            || key.chars().any(char::is_control)
-        {
+        if !valid_key_name(key) {
             return Err(KEY_ERROR.into());
         }
         let secret = secret_json
@@ -169,41 +161,11 @@ impl Credentials {
         if !now.is_finite() || now < 0.0 || seconds >= (u64::MAX - 120) as f64 {
             return Err("Coinbase invalid clock".into());
         }
-        if uri.is_some_and(|value| {
-            value.is_empty() || value.len() > MAX_URI_BYTES || value.chars().any(char::is_control)
-        }) {
-            return Err("Coinbase invalid JWT URI".into());
-        }
-        if nonce.is_empty() || nonce.len() > 128 || nonce.chars().any(char::is_control) {
-            return Err("Coinbase invalid JWT nonce".into());
-        }
-        let nbf = seconds as u64;
-        // Keep the active TS claim contract; current Coinbase examples disagree.
-        let (alg, iss, aud) = match self.signer {
-            Signer::Es256(_) => ("ES256", "coinbase-cloud", None),
-            Signer::Ed25519(_) => ("EdDSA", "cdp", Some(["cdp_service"])),
+        let kind = match self.signer {
+            Signer::Es256(_) => JwtKind::Es256,
+            Signer::Ed25519(_) => JwtKind::EdDsa,
         };
-        let header = serde_json::to_vec(&Header {
-            alg,
-            typ: "JWT",
-            kid: &self.key,
-            nonce,
-        })
-        .map_err(|_| "Coinbase JWT header encoding failed")?;
-        let claims = serde_json::to_vec(&Claims {
-            iss,
-            aud,
-            nbf,
-            exp: nbf + 120,
-            sub: &self.key,
-            uri,
-        })
-        .map_err(|_| "Coinbase JWT claims encoding failed")?;
-        let input = format!(
-            "{}.{}",
-            URL_SAFE_NO_PAD.encode(header),
-            URL_SAFE_NO_PAD.encode(claims)
-        );
+        let input = signing_input(kind, &self.key, nonce, seconds as u64, uri)?;
         let signature = match &self.signer {
             Signer::Es256(key) => key.sign(input.as_bytes())?,
             Signer::Ed25519(seed) => {
@@ -238,6 +200,185 @@ impl Credentials {
         ])
     }
 }
+
+#[derive(Clone, Copy)]
+enum JwtKind {
+    Es256,
+    EdDsa,
+}
+
+/// `base64url(header).base64url(claims)`: the exact JWS signing input the local
+/// signer and the remote JWT recipes share.
+fn signing_input(
+    kind: JwtKind,
+    kid: &str,
+    nonce: &str,
+    nbf: u64,
+    uri: Option<&str>,
+) -> Result<String, String> {
+    if uri.is_some_and(|value| {
+        value.is_empty() || value.len() > MAX_URI_BYTES || value.chars().any(char::is_control)
+    }) {
+        return Err("Coinbase invalid JWT URI".into());
+    }
+    if nonce.is_empty() || nonce.len() > 128 || nonce.chars().any(char::is_control) {
+        return Err("Coinbase invalid JWT nonce".into());
+    }
+    let exp = nbf.checked_add(120).ok_or("Coinbase invalid clock")?;
+    // Keep the active TS claim contract; current Coinbase examples disagree.
+    let (alg, iss, aud) = match kind {
+        JwtKind::Es256 => ("ES256", "coinbase-cloud", None),
+        JwtKind::EdDsa => ("EdDSA", "cdp", Some(["cdp_service"])),
+    };
+    let header = serde_json::to_vec(&Header {
+        alg,
+        typ: "JWT",
+        kid,
+        nonce,
+    })
+    .map_err(|_| "Coinbase JWT header encoding failed")?;
+    let claims = serde_json::to_vec(&Claims {
+        iss,
+        aud,
+        nbf,
+        exp,
+        sub: kid,
+        uri,
+    })
+    .map_err(|_| "Coinbase JWT claims encoding failed")?;
+    Ok(format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(header),
+        URL_SAFE_NO_PAD.encode(claims)
+    ))
+}
+
+fn valid_key_name(key: &str) -> bool {
+    let mut parts = key.split('/');
+    parts.next() == Some("organizations")
+        && parts.next().is_some_and(|part| !part.is_empty())
+        && parts.next() == Some("apiKeys")
+        && parts.next().is_some_and(|part| !part.is_empty())
+        && parts.next().is_none()
+        && !key.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// Brokerage routes this venue signs, relative to `/api/v3/brokerage/`;
+/// `*` is one UUID segment, so a named route such as `portfolios/move_funds`
+/// never matches it. Fund movement and every other route are refused.
+const SIGNED_ROUTES: &[&str] = &[
+    "key_permissions",
+    "portfolios",
+    "portfolios/*",
+    "cfm/balance_summary",
+    "cfm/positions",
+    "intx/portfolio/*",
+    "intx/positions/*",
+    "orders",
+    "orders/edit",
+    "orders/batch_cancel",
+    "orders/historical/*",
+    "orders/historical/batch",
+    "orders/historical/fills",
+];
+
+/// `METHOD api.coinbase.com/api/v3/brokerage/<route>`, pathname only.
+fn signed_uri(uri: &str) -> bool {
+    let Some((method, target)) = uri.split_once(' ') else {
+        return false;
+    };
+    let Some(route) = target.strip_prefix("api.coinbase.com/api/v3/brokerage/") else {
+        return false;
+    };
+    let id = |segment: &str| {
+        let groups: Vec<_> = segment.split('-').collect();
+        groups.iter().map(|group| group.len()).eq([8, 4, 4, 4, 12])
+            && groups
+                .iter()
+                .all(|group| group.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    matches!(method, "GET" | "POST" | "PUT" | "DELETE")
+        && SIGNED_ROUTES.iter().any(|pattern| {
+            let mut wanted = pattern.split('/');
+            let mut given = route.split('/');
+            loop {
+                match (wanted.next(), given.next()) {
+                    (None, None) => return true,
+                    (Some("*"), Some(segment)) if id(segment) => {}
+                    (Some(a), Some(b)) if a == b => {}
+                    _ => return false,
+                }
+            }
+        })
+}
+
+/// `coinbase.restJwt*.1`: the JWS signing input from non-secret claims. The
+/// header nonce comes from engine signing entropy; `exp - nbf` is fixed at 120 s.
+/// `coinbase.restJwt*.1` inputs; any other field is refused.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JwtInputs {
+    kid: String,
+    nonce: String,
+    nbf: u64,
+    #[serde(default)]
+    uri: Option<String>,
+}
+
+pub struct RestJwt(JwtKind);
+impl safe_cex_engine::signing_remote::RemoteRecipe for RestJwt {
+    fn id(&self) -> &'static str {
+        match self.0 {
+            JwtKind::Es256 => "coinbase.restJwtEs256.1",
+            JwtKind::EdDsa => "coinbase.restJwtEd25519.1",
+        }
+    }
+    fn algorithm(&self) -> safe_cex_engine::signing::Algorithm {
+        match self.0 {
+            JwtKind::Es256 => safe_cex_engine::signing::Algorithm::Es256,
+            JwtKind::EdDsa => safe_cex_engine::signing::Algorithm::Ed25519,
+        }
+    }
+    fn role(&self) -> Option<safe_cex_engine::signing::ExtraKey> {
+        None
+    }
+    fn bound_credential(
+        &self,
+        inputs: &str,
+    ) -> Result<Option<String>, safe_cex_engine::signing::SignError> {
+        let inputs: JwtInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
+        Ok(Some(inputs.kid))
+    }
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError::Refused;
+        let inputs: JwtInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
+        if inputs.uri.as_deref().is_some_and(|uri| !signed_uri(uri))
+            || !valid_key_name(&inputs.kid)
+            || inputs.nbf > u64::MAX / 2
+        {
+            return Err(Refused);
+        }
+        signing_input(
+            self.0,
+            &inputs.kid,
+            &inputs.nonce,
+            inputs.nbf,
+            inputs.uri.as_deref(),
+        )
+        .map(String::into_bytes)
+        .map_err(|_| Refused)
+    }
+    fn stamp_ms(&self, inputs: &str) -> Result<f64, safe_cex_engine::signing::SignError> {
+        let inputs: JwtInputs = safe_cex_engine::signing_remote::parse_inputs(inputs)?;
+        (inputs.nbf <= u64::MAX / 2000)
+            .then(|| (inputs.nbf * 1000) as f64)
+            .ok_or(safe_cex_engine::signing::SignError::Refused)
+    }
+}
+pub static REST_JWT_ES256: RestJwt = RestJwt(JwtKind::Es256);
+pub static REST_JWT_ED25519: RestJwt = RestJwt(JwtKind::EdDsa);
+pub static REMOTE_RECIPES: &[&dyn safe_cex_engine::signing_remote::RemoteRecipe] =
+    &[&REST_JWT_ES256, &REST_JWT_ED25519];
 
 fn decode_base64(value: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     let normalized = Zeroizing::new(
@@ -365,6 +506,92 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(der)
         );
         (Credentials::new(KEY, &pem).unwrap(), key)
+    }
+
+    #[test]
+    fn rest_jwt_recipes_rebuild_the_exact_local_signing_input() {
+        use safe_cex_engine::signing_remote::RemoteRecipe;
+        // RFC 8032 test 1 seed: a published vector, not account material.
+        let rfc8032 = base64::engine::general_purpose::STANDARD.encode([
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
+            0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03,
+            0x1c, 0xae, 0x7f, 0x60,
+        ]);
+        let uri = "POST api.coinbase.com/api/v3/brokerage/orders";
+        for (credentials, recipe) in [
+            (ec_credentials(false).0, &REST_JWT_ES256),
+            (Credentials::new(KEY, &rfc8032).unwrap(), &REST_JWT_ED25519),
+        ] {
+            for uri in [Some(uri), None] {
+                let token = credentials.jwt_with_nonce(1_234_567.9, uri, "n-1").unwrap();
+                let (_, _, _, input) = decode(&token);
+                let mut inputs = serde_json::json!({ "kid": KEY, "nonce": "n-1", "nbf": 1_234 });
+                if let Some(uri) = uri {
+                    inputs["uri"] = uri.into();
+                }
+                assert_eq!(
+                    recipe.canonicalize(&inputs.to_string()).unwrap(),
+                    input.into_bytes()
+                );
+            }
+        }
+        assert_eq!(
+            REMOTE_RECIPES.iter().map(|r| r.id()).collect::<Vec<_>>(),
+            ["coinbase.restJwtEs256.1", "coinbase.restJwtEd25519.1"]
+        );
+    }
+
+    #[test]
+    fn rest_jwt_recipes_refuse_routes_keys_and_fields_outside_the_allowlist() {
+        use safe_cex_engine::signing::SignError::Refused;
+        use safe_cex_engine::signing_remote::RemoteRecipe;
+        let ok = serde_json::json!({
+            "kid": KEY, "nonce": "n", "nbf": 1,
+            "uri": "GET api.coinbase.com/api/v3/brokerage/orders/historical/0b9e2c4a-1f3d-4c5e-8a7b-6d5c4b3a2f10"
+        });
+        assert!(REST_JWT_ES256.canonicalize(&ok.to_string()).is_ok());
+        for (field, value) in [
+            (
+                "uri",
+                serde_json::json!("POST api.coinbase.com/api/v3/brokerage/portfolios/move_funds"),
+            ),
+            (
+                "uri",
+                serde_json::json!("POST api.coinbase.com/v2/accounts/x/transactions"),
+            ),
+            (
+                "uri",
+                serde_json::json!("GET evil.example/api/v3/brokerage/orders"),
+            ),
+            (
+                "uri",
+                serde_json::json!("GET api.coinbase.com/api/v3/brokerage/orders?x=1"),
+            ),
+            (
+                "uri",
+                serde_json::json!("GET api.coinbase.com/api/v3/brokerage/orders/historical/../x"),
+            ),
+            (
+                "uri",
+                serde_json::json!("PATCH api.coinbase.com/api/v3/brokerage/orders"),
+            ),
+            (
+                "uri",
+                serde_json::json!("GET api.coinbase.com/api/v3/brokerage/orders/historical/abc-1"),
+            ),
+            ("kid", serde_json::json!("organizations/o/apiKeys/k/extra")),
+            ("nonce", serde_json::json!("")),
+            ("nbf", serde_json::json!("1")),
+            ("exp", serde_json::json!(999_999)),
+        ] {
+            let mut inputs = ok.clone();
+            inputs[field] = value;
+            assert_eq!(
+                REST_JWT_ES256.canonicalize(&inputs.to_string()),
+                Err(Refused),
+                "{field}"
+            );
+        }
     }
 
     #[test]

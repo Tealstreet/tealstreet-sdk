@@ -1,4 +1,4 @@
-import type { Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
+import type { RemoteSignOp, Signer, SignReceipt, SignRequest, SignResult } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 
 import { nanoid } from 'nanoid';
@@ -240,13 +240,55 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     if (!remoteSigner && !payloadSigner) throw refused();
   } catch { throw refused(); }
 
-  return async (request, { signal }): Promise<RemoteSignerResult> => {
+  // Wire v2: one engine-bound recipe op per request, primary slot only, exact
+  // advertised recipe ids, never on the payload-signer path.
+  const signOp = async (request: SignRequest, receipt: SignReceipt, remote: RemoteSignOp, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    const recipes = remoteSigner?.signOps?.recipes;
+    // Role-bound (extra) keys never ride this provider; only the primary signing key does.
+    if (!remoteSigner || !record(remote) || typeof remote.recipe !== 'string' || remote.role !== undefined
+      || !Array.isArray(recipes) || !recipes.includes(remote.recipe)) throw refused();
+    if (!Array.isArray(request.operations) || request.operations.length > MAX_OPERATIONS
+      || request.operations.filter((operation) => operation.kind === 'sign').length !== 1) throw refused();
+    const values: number[][] = [];
+    let signIndex = -1;
+    for (const [index, operation] of request.operations.entries()) {
+      if (operation.kind === 'present') {
+        const item = credentials.get(operation.key);
+        if (!item) throw refused();
+        values.push(item.bytes.slice());
+      } else if (operation.kind === 'sign') {
+        const entry = owned.get(operation.key);
+        if (!entry || entry.identity.signing !== operation.key || !entry.primary) throw refused();
+        values.push([]);
+        signIndex = index;
+      } else throw refused();
+    }
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({
+      id,
+      type: 'op',
+      v: 2,
+      exchangeName,
+      ...(accountName === undefined ? {} : { accountName }),
+      op: { recipe: remote.recipe, inputs: remote.inputs },
+    }));
+    if (!record(response) || response.id !== id
+      || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))
+      || typeof response.opSignature !== 'string' || !/^(?:[0-9a-f]{2}){1,1024}$/.test(response.opSignature)) throw refused();
+    values[signIndex] = Array.from({ length: response.opSignature.length / 2 },
+      (_, index) => Number.parseInt(response.opSignature!.slice(index * 2, index * 2 + 2), 16));
+    if (signal.aborted) throw canceled();
+    return { values, receipt };
+  };
+
+  return async (request, { signal, remote }): Promise<RemoteSignerResult> => {
     try {
       if (signal.aborted) throw canceled();
       const receipt: SignReceipt = { ...request.receipt };
       if (!record(request.receipt) || Object.entries(receipt).some(([key, value]) =>
         !['stampMs', 'expiryMs'].includes(key) || (value !== undefined && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)))) throw refused();
       if (receipt.stampMs !== undefined && receipt.expiryMs !== undefined && receipt.expiryMs <= receipt.stampMs) throw refused();
+      if (remote !== undefined) return await signOp(request, receipt, remote, signal);
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
       let total = 0;
       // Validate the complete batch before invoking any callback.

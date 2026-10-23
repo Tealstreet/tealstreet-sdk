@@ -49,6 +49,11 @@ pub trait SignStep: Send {
     ) -> Result<SignRequest, SignError>;
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError>;
     fn freshness_ms(&self) -> f64;
+    /// A versioned recipe description of the request `prepare` just built, for
+    /// remote signers. The engine binds it to that request before it leaves.
+    fn remote(&self) -> Option<&crate::signing_remote::RemoteOp> {
+        None
+    }
     /// Only trusted HTTP recipes may declare callback header precedence.
     fn result_header_policy(&self) -> ResultHeaderPolicy {
         ResultHeaderPolicy::Deny
@@ -73,6 +78,8 @@ pub(crate) struct Pending {
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
     header_policy: ResultHeaderPolicy,
+    /// Sign-op index and bound payload when the step's remote op verifies.
+    remote_check: Option<(usize, Vec<u8>)>,
 }
 impl Pending {
     fn receipt_expired(&self, raw_now: f64) -> bool {
@@ -299,6 +306,7 @@ impl Dispatch {
                 receipt: Default::default(),
                 prepared_protocol_at: None,
                 header_policy,
+                remote_check: None,
             },
         );
         Ok(deadline)
@@ -373,7 +381,7 @@ impl Dispatch {
         now: f64,
         context: &DispatchContext<'_>,
         clock_revision: u64,
-    ) -> Result<SignRequest, SignError> {
+    ) -> Result<(SignRequest, Option<Box<crate::signing_remote::RemoteWire>>), SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
         if !now.is_finite() || now >= p.deadline {
             return Err(SignError::TimedOut);
@@ -403,6 +411,36 @@ impl Dispatch {
             return Err(SignError::InvalidRequest);
         }
         work.validate()?;
+        let remote = p
+            .step
+            .remote()
+            .map(|op| op.bind(&work).map(Box::new))
+            .transpose()?;
+        p.remote_check = p
+            .step
+            .remote()
+            .filter(|op| op.verify.is_some())
+            .and_then(|_| {
+                work.operations
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, op)| match op {
+                        crate::signing::Operation::Sign { payload, .. } => Some((
+                            index,
+                            payload
+                                .iter()
+                                .flat_map(|part| match part {
+                                    crate::signing::PayloadPart::Bytes { bytes } => {
+                                        bytes.as_slice()
+                                    }
+                                    _ => &[],
+                                })
+                                .copied()
+                                .collect(),
+                        )),
+                        _ => None,
+                    })
+            });
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work
@@ -417,7 +455,7 @@ impl Dispatch {
         p.expected = work.expected_result_lengths();
         p.prepared_at = Some(now);
         p.prepared_revision = Some(clock_revision);
-        Ok(work)
+        Ok((work, remote))
     }
     pub fn timeout_ms(&self, id: RequestId, now: f64) -> u32 {
         self.pending
@@ -461,6 +499,16 @@ impl Dispatch {
         }
         if p.receipt_expired(now) || now - p.prepared_at.unwrap() >= p.step.freshness_ms() {
             return Some(Completion::Stale(p));
+        }
+        if let Some((index, payload)) = &p.remote_check {
+            let verified = p
+                .step
+                .remote()
+                .and_then(|op| op.verify.as_ref())
+                .is_some_and(|verify| verify(payload, &result.values[*index]));
+            if !verified {
+                return Some(Completion::Failed(p, SignError::InvalidResult));
+            }
         }
         if let Err(error) = p.step.apply(&mut p.outbound, &result) {
             wipe(&mut p.outbound);
@@ -637,7 +685,7 @@ mod header_tests {
                 1000.,
             )
             .unwrap();
-        let work = dispatch
+        let (work, _) = dispatch
             .prepare(RequestId(10), 1000., &DispatchContext::new(1000., None), 3)
             .unwrap();
         let mut result = SignResult::new(vec![vec![7; 32]], work.receipt);

@@ -36,6 +36,10 @@ compile_error!(
 );
 
 mod construction;
+#[cfg(feature = "remote-recipes")]
+mod remote_recipes;
+#[cfg(feature = "remote-recipes")]
+pub use remote_recipes::{recipe_family, remote_recipe, remote_recipes};
 #[cfg(feature = "dispatch-signing")]
 pub mod hosted_signing;
 pub use construction::{

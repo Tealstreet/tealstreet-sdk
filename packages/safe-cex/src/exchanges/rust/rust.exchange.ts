@@ -427,6 +427,21 @@ export class RustEngineExchange extends BaseExchange {
     return (await signer).signHttpRequest(request);
   };
 
+  override signOperation = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
+    const op = request.op;
+    if (request.type !== 'op' || request.v !== 2 || !op || typeof op.recipe !== 'string') {
+      return { id: request.id, error: 'Invalid recipe signing request' };
+    }
+    try {
+      await this.ensureHost();
+      const output = await this.host!.hostedSigning({ kind: 'op', recipe: op.recipe, inputs: JSON.stringify(op.inputs) });
+      if (typeof output.signature !== 'string' || !output.signature) throw new Error('missing signature');
+      return { id: request.id, opSignature: output.signature };
+    } catch {
+      return { id: request.id, error: 'Hosted recipe signing failed' };
+    }
+  };
+
   override signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {
       try {

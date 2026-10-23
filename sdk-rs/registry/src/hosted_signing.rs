@@ -34,6 +34,13 @@ pub enum Input {
         to_sign: String,
         output_format: OutputFormat,
     },
+    /// P8 versioned recipe: non-secret inputs as JSON text the recipe parses
+    /// itself (text, because tagged enums cannot carry raw JSON values).
+    #[cfg(feature = "remote-recipes")]
+    Op {
+        recipe: String,
+        inputs: String,
+    },
 }
 
 /// Formatting metadata remains bound to its one capture token.
@@ -42,6 +49,10 @@ pub enum OutputKind {
     Credential,
     Http(RemoteSigningPolicy),
     WsAuth(OutputFormat),
+    /// SHA-256 of the input a recipe binds to this account's own credential.
+    Op {
+        bound: Option<[u8; 32]>,
+    },
 }
 
 impl OutputKind {
@@ -105,6 +116,10 @@ pub fn prepare(
         method: "HOSTED".into(),
         ..Default::default()
     };
+    #[cfg(feature = "remote-recipes")]
+    if let Input::Op { recipe, inputs } = input {
+        return op_work(venue, identity, context, &recipe, &inputs);
+    }
     let binance = cfg!(feature = "binance")
         && matches!(
             venue,
@@ -165,10 +180,116 @@ pub fn prepare(
                 OutputKind::WsAuth(output_format),
             ))
         }
+        #[cfg(feature = "remote-recipes")]
+        Input::Op { .. } => unreachable!("handled before HMAC admission"),
     }
 }
 
+/// Freshness gate for an `op` input against the executor's protocol clock,
+/// checked once for every family: the recipe's own stamp must be at most
+/// `REMOTE_FRESHNESS_MS` old and `MAX_REMOTE_LEAD_MS` ahead. Returns the
+/// remaining window, which bounds the provider deadline.
+pub fn op_timeout_ms(input: &Input, protocol_now: f64) -> Result<Option<u32>, SignError> {
+    #[cfg(not(feature = "remote-recipes"))]
+    {
+        let _ = (input, protocol_now);
+        Ok(None)
+    }
+    #[cfg(feature = "remote-recipes")]
+    op_window(input, protocol_now)
+}
+
+#[cfg(feature = "remote-recipes")]
+fn op_window(input: &Input, protocol_now: f64) -> Result<Option<u32>, SignError> {
+    use safe_cex_engine::signing_remote::{MAX_REMOTE_LEAD_MS, REMOTE_FRESHNESS_MS};
+    let Input::Op { recipe, inputs } = input else {
+        return Ok(None);
+    };
+    let recipe = crate::remote_recipe(recipe).ok_or(SignError::Unsupported)?;
+    let age = protocol_now - recipe.stamp_ms(inputs)?;
+    if !age.is_finite() || !(-MAX_REMOTE_LEAD_MS..REMOTE_FRESHNESS_MS).contains(&age) {
+        return Err(SignError::Refused);
+    }
+    Ok(Some(
+        (REMOTE_FRESHNESS_MS - age.max(0.))
+            .ceil()
+            .clamp(1., REMOTE_FRESHNESS_MS) as u32,
+    ))
+}
+
+/// The browser half of P8: only the account's own family, the recipe's own
+/// allowlist (defence in depth beside the server guard) and its role-bound key.
+#[cfg(feature = "remote-recipes")]
+fn op_work(
+    venue: &str,
+    identity: &Identity,
+    context: Context,
+    recipe: &str,
+    inputs: &str,
+) -> Result<(SignRequest, OutputKind), SignError> {
+    let recipe = crate::remote_recipe(recipe)
+        .filter(|recipe| {
+            crate::remote_recipes::recipe_family(venue)
+                .is_some_and(|family| recipe.id().split('.').next() == Some(family))
+        })
+        .ok_or(SignError::Unsupported)?;
+    if inputs.len() > safe_cex_engine::signing_remote::MAX_REMOTE_INPUT_BYTES {
+        return Err(SignError::InvalidRequest);
+    }
+    let payload = recipe.canonicalize(inputs)?;
+    let key = match recipe.role() {
+        None => identity.signing.clone(),
+        Some(role) => identity
+            .extra
+            .get(&role)
+            .cloned()
+            .ok_or(SignError::Unavailable)?,
+    };
+    let bound = recipe
+        .bound_credential(inputs)?
+        .map(|value| safe_cex_crypto::sha256(value.as_bytes()));
+    let mut operations = Vec::with_capacity(2);
+    if bound.is_some() {
+        operations.push(Operation::Present {
+            key: identity.credential.clone(),
+        });
+    }
+    operations.push(Operation::Sign {
+        algorithm: recipe.algorithm(),
+        key,
+        payload: vec![safe_cex_engine::signing::PayloadPart::Bytes { bytes: payload }],
+    });
+    Ok((
+        SignRequest {
+            receipt: SignReceipt::default(),
+            context,
+            operations,
+        },
+        OutputKind::Op { bound },
+    ))
+}
+
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    if let OutputKind::Op { bound } = kind {
+        let signature = match (bound, result.values.as_slice()) {
+            (None, [signature]) => signature,
+            (Some(expected), [credential, signature])
+                if safe_cex_crypto::sha256(credential) == expected =>
+            {
+                signature
+            }
+            (Some(_), [_, _]) => return Err(SignError::Refused),
+            _ => return Err(SignError::InvalidResult),
+        };
+        if !result.headers.is_empty() {
+            return Err(SignError::InvalidResult);
+        }
+        return Ok(Output {
+            credential: None,
+            signature: Some(safe_cex_crypto::hex(signature)),
+            headers: None,
+        });
+    }
     let expected = match kind {
         OutputKind::Credential => 1,
         OutputKind::Http(policy) if policy.passphrase_header.is_some() => 3,
@@ -210,7 +331,7 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         .filter(|mac| mac.len() == 32)
         .ok_or(SignError::InvalidResult)?;
     let signature = match kind {
-        OutputKind::Credential => unreachable!(),
+        OutputKind::Credential | OutputKind::Op { .. } => unreachable!(),
         OutputKind::Http(policy) => match policy.signature_encoding {
             SignatureEncoding::Hex => safe_cex_crypto::hex(mac),
             SignatureEncoding::Base64 => {

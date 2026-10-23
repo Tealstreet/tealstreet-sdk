@@ -479,6 +479,9 @@ pub enum Action {
     Sign {
         attempt: RequestId,
         work: crate::signing::SignRequest,
+        /// Present only for steps with a versioned recipe; host providers that
+        /// sign remotely forward it, others ignore it.
+        remote: Option<Box<crate::signing_remote::RemoteWire>>,
         timeout_ms: u32,
     },
     SignPayload {
@@ -1975,6 +1978,7 @@ impl<P> Cx<'_, P> {
                     operations: Vec::new(),
                     context: Default::default(),
                 },
+                remote: None,
                 timeout_ms: 0,
             },
         );
@@ -3900,6 +3904,7 @@ impl<V: Venue> Engine<V> {
                         operations: Vec::new(),
                         context: Default::default(),
                     },
+                    remote: None,
                     timeout_ms: 0,
                 });
             }
@@ -4206,12 +4211,14 @@ impl<V: Venue> Engine<V> {
                     Action::Sign {
                         attempt,
                         work,
+                        remote,
                         timeout_ms,
                     } => {
                         if !work.operations.is_empty() {
                             self.io.actions.push(Action::Sign {
                                 attempt,
                                 work,
+                                remote,
                                 timeout_ms,
                             });
                             continue;
@@ -4219,7 +4226,7 @@ impl<V: Venue> Engine<V> {
                         if !self.io.signing.can_prepare(attempt) {
                             continue;
                         }
-                        let work = match self.io.signing.prepare(
+                        let (work, remote) = match self.io.signing.prepare(
                             attempt,
                             now,
                             &crate::DispatchContext::new(
@@ -4228,7 +4235,7 @@ impl<V: Venue> Engine<V> {
                             ),
                             self.io.protocol_clock.revision(),
                         ) {
-                            Ok(work) => work,
+                            Ok(prepared) => prepared,
                             Err(error) => {
                                 let emitted = self.io.actions.len();
                                 self.sign_completed(now, attempt, Err(error));
@@ -4266,6 +4273,7 @@ impl<V: Venue> Engine<V> {
                             self.io.actions.push(Action::Sign {
                                 attempt,
                                 work,
+                                remote,
                                 timeout_ms,
                             });
                         }
@@ -4286,6 +4294,7 @@ impl<V: Venue> Engine<V> {
                         operations: vec![],
                         context: Default::default(),
                     },
+                    remote: None,
                     timeout_ms: 0,
                 });
                 continue;

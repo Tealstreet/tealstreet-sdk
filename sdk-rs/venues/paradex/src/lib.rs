@@ -6,6 +6,7 @@ mod identity;
 mod public;
 mod sbe;
 pub mod sign;
+pub use sign::REMOTE_RECIPES;
 mod trading;
 mod wire;
 

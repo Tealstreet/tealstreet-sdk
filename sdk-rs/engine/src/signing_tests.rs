@@ -612,6 +612,7 @@ fn complete_callback_retry(engine: &mut Engine<TestVenue>, now: f64) {
             if let Action::Sign {
                 attempt,
                 work,
+                remote: _,
                 timeout_ms,
             } = action
             {
@@ -750,6 +751,7 @@ fn protocol_sign_attempt(actions: &[Action], timestamp: f64, timeout: u32) -> Re
             Action::Sign {
                 attempt,
                 work,
+                remote: _,
                 timeout_ms,
             } => {
                 assert_eq!(*timeout_ms, timeout);
@@ -1680,5 +1682,179 @@ fn wire_stamp_floors_after_fractional_calibration_without_changing_clock_domains
         }
         .validate()
         .is_ok()
+    );
+}
+
+/// `qty:<n>` over HmacSha256; quantities over 100 are a designed refusal.
+struct QtyRecipe;
+impl crate::signing_remote::RemoteRecipe for QtyRecipe {
+    fn id(&self) -> &'static str {
+        "test.qty.1"
+    }
+    fn algorithm(&self) -> Algorithm {
+        Algorithm::HmacSha256
+    }
+    fn role(&self) -> Option<crate::signing::ExtraKey> {
+        None
+    }
+    fn canonicalize(&self, inputs: &str) -> Result<Vec<u8>, SignError> {
+        match qty_of(inputs) {
+            Some(qty) if qty <= 100 => Ok(format!("qty:{qty}").into_bytes()),
+            _ => Err(SignError::Refused),
+        }
+    }
+    fn stamp_ms(&self, _: &str) -> Result<f64, SignError> {
+        Ok(0.)
+    }
+}
+static QTY: QtyRecipe = QtyRecipe;
+fn qty_of(inputs: &str) -> Option<u64> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Inputs {
+        qty: u64,
+    }
+    crate::signing_remote::parse_inputs::<Inputs>(inputs)
+        .ok()
+        .map(|inputs| inputs.qty)
+}
+/// Builds its payload and its remote description from the same quantity.
+struct RemoteStep(crate::signing_remote::RemoteOp);
+impl RemoteStep {
+    fn new(qty: u64) -> Self {
+        Self(crate::signing_remote::RemoteOp::new(
+            &QTY,
+            format!(r#"{{"qty":{qty}}}"#),
+        ))
+    }
+}
+impl crate::SignStep for RemoteStep {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        _: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let qty = qty_of(&self.0.inputs).unwrap();
+        Ok(SignRequest {
+            receipt: Default::default(),
+            context: Context::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: KeyRef("account/primary".into()),
+                payload: vec![PayloadPart::Bytes {
+                    bytes: format!("qty:{qty}").into_bytes(),
+                }],
+            }],
+        })
+    }
+    fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+    fn remote(&self) -> Option<&crate::signing_remote::RemoteOp> {
+        Some(&self.0)
+    }
+}
+fn remote_sign_actions(qty: u64) -> (Vec<Action>, Engine<TestVenue>) {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/order".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(request, Box::new(RemoteStep::new(qty)));
+    let actions = engine.drain_actions().collect();
+    (actions, engine)
+}
+
+#[test]
+fn bound_remote_op_travels_with_host_sign_work() {
+    let (actions, _) = remote_sign_actions(7);
+    let remote = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Sign { remote, .. } => Some(remote.clone()),
+            _ => None,
+        })
+        .expect("host signs the work");
+    assert_eq!(
+        remote,
+        Some(Box::new(crate::signing_remote::RemoteWire {
+            recipe: "test.qty.1",
+            role: None,
+            inputs: serde_json::value::RawValue::from_string(r#"{"qty":7}"#.into()).unwrap(),
+        }))
+    );
+}
+
+#[test]
+fn designed_remote_refusal_fails_before_any_sign_or_http_leaves() {
+    let (actions, engine) = remote_sign_actions(101);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::Http(_)))
+    );
+    assert_eq!(engine.venue.failed, 1);
+    assert_eq!(
+        engine.venue.last_sign_error.as_deref(),
+        Some(SignError::Refused.venue_error().message.as_str())
+    );
+}
+
+#[test]
+fn ordinary_steps_carry_no_remote_description() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.start(1000.);
+    assert!(engine.drain_actions().all(|a| match a {
+        Action::Sign { remote, .. } => remote.is_none(),
+        _ => true,
+    }));
+}
+
+fn verified_release(accept: bool) -> (Vec<Action>, Engine<TestVenue>) {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_signer(Some(std::sync::Arc::new(Ready))).unwrap();
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/order".into(),
+        vec![],
+        None,
+        (),
+    );
+    let mut step = RemoteStep::new(7);
+    step.0.verify = Some(Box::new(move |payload: &[u8], signature: &[u8]| {
+        payload == b"qty:7" && (signature == [0; 32]) == accept
+    }));
+    cx.sign_http(request, Box::new(step));
+    let actions = engine.drain_actions().collect();
+    (actions, engine)
+}
+
+#[test]
+fn declared_verification_key_gates_release_of_a_remote_signature() {
+    let (actions, engine) = verified_release(true);
+    assert!(actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(engine.venue.failed, 0);
+    let (actions, engine) = verified_release(false);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(engine.venue.failed, 1);
+    assert_eq!(
+        engine.venue.last_sign_error.as_deref(),
+        Some(SignError::InvalidResult.venue_error().message.as_str())
     );
 }

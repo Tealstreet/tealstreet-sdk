@@ -90,10 +90,49 @@ pub fn sign_digest(digest: &[u8], private_key: &str) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
+/// Signer address recovered from a 32-byte digest and r||s||v (v = 0/1), or
+/// `None` for any malformed or non-recoverable signature.
+pub fn recover_digest_address(digest: &[u8], signature: &[u8]) -> Option<[u8; 20]> {
+    let digest: &[u8; 32] = digest.try_into().ok()?;
+    let (rs, v) = signature.split_at_checked(64)?;
+    let parity = match v {
+        [0] => false,
+        [1] => true,
+        _ => return None,
+    };
+    alloy_primitives::Signature::from_bytes_and_parity(rs, parity)
+        .recover_address_from_prehash(&B256::from(*digest))
+        .ok()
+        .map(|address| address.into_array())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::Value;
+
+    #[test]
+    fn recovery_returns_the_signer_address_only_for_valid_signatures() {
+        let key = format!("0x{}", "11".repeat(32));
+        let digest = keccak256(b"digest");
+        let wire = sign_digest(&digest, &key).unwrap();
+        let mut signature = bytes(&wire);
+        signature[64] -= 27;
+        let address = private_key_address(&key).unwrap();
+        let recovered = recover_digest_address(&digest, &signature).unwrap();
+        assert_eq!(
+            format!("0x{}", crate::hex(&recovered)),
+            address.to_lowercase()
+        );
+        let other = recover_digest_address(&keccak256(b"other"), &signature);
+        assert_ne!(other, Some(recovered));
+        signature[64] = 27;
+        assert_eq!(recover_digest_address(&digest, &signature), None);
+        assert_eq!(
+            recover_digest_address(&digest[..31], &signature[..64]),
+            None
+        );
+    }
     fn corpus() -> Value {
         serde_json::from_str(include_str!("../tests/fixtures/ethereum/primitives.json")).unwrap()
     }
