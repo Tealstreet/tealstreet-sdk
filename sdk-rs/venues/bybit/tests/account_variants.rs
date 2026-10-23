@@ -872,3 +872,42 @@ fn hyro_overtaken_but_successful_reads_reset_the_transient_streak() {
     );
     only_public_idle_closes(&h);
 }
+
+#[test]
+fn capability_profile_spot_does_not_advertise_income() {
+    assert_no_income_capability(Variant::Spot);
+}
+
+#[test]
+fn capability_profile_hyro_does_not_advertise_income() {
+    assert_no_income_capability(Variant::Hyrotrader);
+}
+
+fn assert_no_income_capability(variant: Variant) {
+    let mut h = Harness::started(options(variant));
+    assert!(!h.engine.capabilities().income_history, "{variant:?}");
+    h.requests.clear();
+    h.command(Command::Query {
+        command: 971,
+        query: safe_cex_engine::Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    });
+    assert!(h.requests.is_empty(), "refusing variant issued no HTTP");
+    assert_eq!(
+        h.result(971).unwrap().as_ref().unwrap_err(),
+        "This Bybit variant does not support income history"
+    );
+}
+
+#[test]
+fn capability_profile_linear_inverse_demo_keep_income_advertised() {
+    for variant in [Variant::Linear, Variant::Inverse, Variant::Demo] {
+        let h = Harness::started(options(variant));
+        assert!(h.engine.capabilities().income_history, "{variant:?}");
+    }
+}
