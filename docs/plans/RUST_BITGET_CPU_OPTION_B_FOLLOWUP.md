@@ -233,3 +233,35 @@ two retrieval attempts. No measurement or second-run job is repeated. Normal API
 counts remain unchanged; each affected immutable read adds at most one retrieval
 sequence, without a quota exemption. Prove recovery, exhaustion, HTTP refusal,
 body failure and credential stripping with deterministic controls before fresh CI.
+
+### Bounded runtime-artifact transport
+
+The first real second-runner path fails before restoration or timing: Bybit's
+authenticated runtime archive is743,167,768bytes, while the shared HTTP reader
+rejects every response above512MiB. Both artifact metadata and the original
+producer upload agree; this is not an empty response or a CPU ratio failure.
+Keep that cohort failed. No measurement retry or third sample is authorized.
+
+First extract the unchanged512MiB size validator so the observed archive length
+can be tested without allocating a giant buffer. Commit assertion REDs for that
+observed runtime size and for one empty-200 artifact response followed by valid
+bytes, alongside working metadata/log/ordinary-artifact and exhaustion controls.
+Then type only validated cpu-runtime suite artifacts to the existing4GiB ZIP
+bound. Metadata, logs and ordinary artifacts retain512MiB. Recheck cached bytes
+under the requested type. Retain exact metadata size/digest, producer, source,
+archive and runtime identity checks, with no free-form bound or retry budget.
+
+An empty HTTP200 may repeat the same immutable artifact GET once, sharing the
+existing two-attempt budget with socket recovery. Repeated empties, HTTP errors,
+metadata/log empties, invalid bytes and oversized responses still fail closed.
+Only complete nonempty bytes enter snapshots or cache. No replay, CPU, fixture,
+threshold or job-retry policy changes. Independently review the runtime-only
+routing and controls, integrate the post-5a actual tip once, and run fresh CI
+under the next short freeze.
+
+The runtime archive seals the original Node binary, selected workspace source,
+installed root/workspace dependency trees and cache so the second runner can
+restore exact bytes without install or rebuild. It is not the venue WASM size.
+The broad installed-workspace closure explains why an archive can be large;
+per-directory contribution is not measured here. Reducing that closure is a
+separate follow-up, never an excuse to drop identity checks in this correction.

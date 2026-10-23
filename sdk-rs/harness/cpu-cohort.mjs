@@ -218,6 +218,11 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
   return { schema: 1, key, runId: job.run_id, jobId: job.id, runnerId: job.runner_id, stepName: candidates[0].name, startedAt: execution.startedAt, completedAt: execution.completedAt, beginLoggedAt: new Date(begin.at).toISOString(), endLoggedAt: new Date(finish.at).toISOString(), logSha256: sha(bytes(logBytes)) };
 }
 
+export function requireGithubResponseSize(length, kind = 'metadata') {
+  check(['metadata', 'log', 'artifact', 'runtime-artifact'].includes(kind), 'invalid GitHub response kind');
+  check(integer(length) && length <= 512 * 1024 * 1024, 'empty/oversized GitHub response');
+}
+
 export function createGithubReader({ repository, token, fetch: fetchImpl = globalThis.fetch }) {
   check(typeof repository === 'string' && /^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repository) && typeof fetchImpl === 'function', 'invalid GitHub reader');
   check(token === undefined || typeof token === 'string', 'invalid read token');
@@ -240,7 +245,7 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
           response = await fetchImpl(location.href, { method: 'GET', redirect: 'error', cache: 'no-store' });
         }
         check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
-        raw = Buffer.from(await response.arrayBuffer()); check(raw.length > 0 && raw.length <= 512 * 1024 * 1024, 'empty/oversized GitHub response');
+        raw = Buffer.from(await response.arrayBuffer()); requireGithubResponseSize(raw.length);
         break;
       } catch (error) {
         // Retrieval of the same immutable bytes can recover one closed socket.
