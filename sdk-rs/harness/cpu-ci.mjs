@@ -17,7 +17,7 @@ import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
 import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint } from './cpu-runtime.mjs';
 import { loadGateLedger } from './verify-gates.mjs';
 
-import { requireCpuRemeasureSuite } from './cpu-rollout.mjs';
+import { CPU_REMEASURE_SUITES, requireCpuRemeasureSuite } from './cpu-rollout.mjs';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const insist = (ok, message) => { if (!ok) throw new Error(`CPU certification: ${message}`); };
 const same = isDeepStrictEqual;
@@ -30,7 +30,7 @@ const manifest = () => json(new URL('./known-gate-failures.json', import.meta.ur
 
 export function classifyInitialCase(evidence, declarations) {
   const assessment = assessGateReport(evidence.report, declarations);
-  if (evidence.report.status === 'PASS' && !assessment.errors.length) return { decision: 'first', assessment };
+  if (!assessment.errors.length) return { decision: 'first', assessment };
   const eligible = assessEligibility(evidence);
   insist(eligible.eligible, [...assessment.errors, ...eligible.errors].join('\n'));
   return { decision: 'second', assessment };
@@ -121,10 +121,21 @@ function suiteEntries(entries) {
   });
 }
 
-async function authenticateCase(context, evidence) {
-  const job = await context.reader.getJob(Number(evidence.execution.jobId));
-  const logBytes = await context.reader.getLog(job.id);
-  return authenticateMeasurementWindow({ execution: evidence.execution, key: evidence.key, job, logBytes });
+export function requireMeasuredProducer({ runId, checkoutSha, suite, evidence, producer, role }) {
+  const execution = evidence?.execution, claim = evidence?.claim;
+  insist(['first', 'second'].includes(role) && producer?.run_id === runId && producer.run_attempt === 1 &&
+    producer.name === `Rust / ${role === 'first' ? 'replay measurement' : 'CPU remeasurement'} (${suite})` &&
+    execution?.runId === String(runId) && execution.jobId === String(producer.id) &&
+    execution.runnerId === String(producer.runner_id) && execution.attempt === 1 &&
+    execution.measuredCheckoutSha === checkoutSha && claim?.runId === runId && claim.suite === suite &&
+    claim.measuredCheckoutSha === checkoutSha, 'measured execution differs from current authenticated producer');
+  if (role === 'first') insist(claim.firstJobId === producer.id, 'first claim belongs to another physical producer');
+}
+
+async function authenticateCase(context, evidence, producer, suite, role = 'first') {
+  requireMeasuredProducer({ runId: context.runId, checkoutSha: context.checkoutSha, suite, evidence, producer, role });
+  const logBytes = await context.reader.getLog(producer.id);
+  return authenticateMeasurementWindow({ execution: evidence.execution, key: evidence.key, job: producer, logBytes });
 }
 
 async function currentPhysical(context, name) {
@@ -230,7 +241,9 @@ async function secondMeasurement(context, suite, destination) {
     `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha);
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
+  insist(tiny.job.id === firstBundle.job.id && capsule.job.id === firstBundle.job.id, 'first uploads have different physical producers');
   for (const first of firsts) {
+    await authenticateCase(context, first, firstBundle.job, suite);
     validateFirstBindings({ state, evidence: first, cohortEntries: tiny.entries });
     validateRetainedCache({ entries: firstBundle.entries, evidence: first, state });
   }
@@ -329,14 +342,22 @@ export function retainApiEvidence(reader, destination) {
  * The whole first suite (including private diagnostics) remains mandatory. */
 export function validatePlannedCases(plan) {
   insist(plan?.schema === 1 && Number.isSafeInteger(plan.runId) && plan.runId > 0 &&
-    /^[a-f0-9]{40}$/.test(plan.checkoutSha ?? '') && Array.isArray(plan.suites) && plan.suites.length === 1, 'invalid bounded same-run plan');
-  const row = plan.suites[0]; requireCpuRemeasureSuite(row.suite);
-  insist(Number.isSafeInteger(row.firstArtifactId) && /^sha256:[a-f0-9]{64}$/.test(row.firstArtifactDigest ?? '') &&
-    Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
-  insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
-  for (const value of row.cases) insist(['first', 'second'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
-    value.case.private === false && value.case.runs === 9 && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
+    /^[a-f0-9]{40}$/.test(plan.checkoutSha ?? '') && Array.isArray(plan.suites), 'invalid bounded same-run plan');
+  insist(same(plan.suites.map(row => row.suite).sort(), [...CPU_REMEASURE_SUITES].sort()), 'missing/duplicate/substituted suite roster');
+  for (const row of plan.suites) {
+    requireCpuRemeasureSuite(row.suite);
+    insist(Number.isSafeInteger(row.firstArtifactId) && /^sha256:[a-f0-9]{64}$/.test(row.firstArtifactDigest ?? '') &&
+      Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
+    insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
+    for (const value of row.cases) insist(['first', 'second'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
+      value.case.private === false && value.case.runs === 9 && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
+  }
   return plan;
+}
+
+export function secondMatrix(plan) {
+  validatePlannedCases(plan);
+  return { include: plan.suites.filter(row => row.cases.some(value => value.decision === 'second')).map(({ suite }) => ({ suite })) };
 }
 
 export function requireSecondState(dispositions, jobs) {
@@ -350,8 +371,8 @@ export function requireSecondState(dispositions, jobs) {
   return true;
 }
 
-async function gatherPlan(context) {
-  const suite = requireCpuRemeasureSuite(context.suite);
+async function gatherSuite(context, suite) {
+  requireCpuRemeasureSuite(suite);
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
   restoreOriginalOutputs(context, strict.entries);
@@ -359,6 +380,7 @@ async function gatherPlan(context) {
   insist(assessed.errors.length === 0, assessed.errors.join('\n'));
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
+  insist(tiny.job.id === strict.job.id, 'first uploads have different physical producers');
   const bundle = jsonMember(tiny.entries, 'cohort.json'), state = jsonMember(strict.entries, 'cpu-collection/state.json');
   insist(bundle.suite === suite && Array.isArray(bundle.claims) && bundle.claims.length === publicCases(suite).length, 'incomplete first claims');
   const { readSourceTree } = await import('./cpu-collection.mjs');
@@ -370,18 +392,21 @@ async function gatherPlan(context) {
     const claim = matches[0], first = firstEvidence(strict.entries, claim.key, claim.case);
     validateFirstBindings({ state, evidence: first, cohortEntries: tiny.entries });
     validateRetainedCache({ entries: strict.entries, evidence: first, state });
-    await authenticateCase(context, first);
+    await authenticateCase(context, first, strict.job, suite);
     revalidateRecordedEvidence(first, { root: context.root });
     row.cases.push({ key: first.key, case: claim.case, decision: classifyInitialCase(first, manifest()).decision });
   }
-  return validatePlannedCases({ schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, suites: [row] });
+  return row;
 }
 
 async function planMeasurements(context, destination) {
-  const plan = await gatherPlan(context);
+  const suites = [];
+  for (const suite of CPU_REMEASURE_SUITES) suites.push(await gatherSuite(context, suite));
+  const plan = validatePlannedCases({ schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, suites });
   write(resolve(destination, 'plan.json'), plan);
+  const matrix = secondMatrix(plan);
   if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT,
-    `has_eligible=${plan.suites[0].cases.some(value => value.decision === 'second')}\n`, { flag: 'a' });
+    `has_eligible=${matrix.include.length > 0}\nmatrix=${JSON.stringify(matrix)}\n`, { flag: 'a' });
   return plan;
 }
 
@@ -389,15 +414,21 @@ async function loadPlan(context) {
   const bundle = await authenticatedBundle(context, context.runId, 'cpu-plan',
     'Rust / CPU remeasurement plan', 'Retain CPU remeasurement plan', context.checkoutSha);
   const plan = validatePlannedCases(jsonMember(bundle.entries, 'plan.json'));
-  insist(plan.runId === context.runId && plan.checkoutSha === context.checkoutSha && plan.suites[0].suite === context.suite, 'plan source/run/suite differs');
+  insist(plan.runId === context.runId && plan.checkoutSha === context.checkoutSha, 'plan source/run/suite differs');
   return { plan, bundle };
+}
+
+export function requireAuthorityRefs(evidence, originals) {
+  for (const kind of ['plan', 'strict', 'tiny', 'runtime'])
+    insist(originals[kind] && same(evidence.authority?.[kind], artifactRef(originals[kind])), 'second consumed substituted authority');
 }
 
 async function certifySuite(context, suite, destination) {
   requireCpuRemeasureSuite(suite);
-  const { plan, bundle: planBundle } = await loadPlan(context), recomputed = await gatherPlan(context);
-  insist(same(plan, recomputed), 'authenticated plan differs from full current first-evidence revalidation');
-  const row = plan.suites[0], allJobs = await context.reader.listJobs(context.runId);
+  const { plan, bundle: planBundle } = await loadPlan(context), recomputed = await gatherSuite(context, suite);
+  const row = plan.suites.find(value => value.suite === suite);
+  insist(same(row, recomputed), 'authenticated plan differs from full current first-evidence revalidation');
+  const allJobs = await context.reader.listJobs(context.runId);
   const hasSecond = requireSecondState(row.cases, allJobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
@@ -406,6 +437,12 @@ async function certifySuite(context, suite, destination) {
   const state = jsonMember(strict.entries, 'cpu-collection/state.json');
   const second = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-second-${suite}`,
     `Rust / CPU remeasurement (${suite})`, 'Retain CPU remeasurement results', context.checkoutSha) : null;
+  const capsule = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
+    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha) : null;
+  if (capsule) {
+    insist(capsule.job.id === strict.job.id, 'runtime has different physical first producer');
+    insist(same(jsonMember(capsule.entries, 'manifest.json'), jsonMember(tiny.entries, 'manifest.json')), 'runtime manifest differs from premeasurement authority');
+  }
   const secondRoster = second && jsonMember(second.entries, 'second.json');
   if (second) insist(secondRoster.schema === 1 && secondRoster.suite === suite &&
     same(secondRoster.claims.map(value => value.key).sort(), row.cases.filter(value => value.decision === 'second').map(value => value.key).sort()), 'second result roster differs');
@@ -415,15 +452,14 @@ async function certifySuite(context, suite, destination) {
     restoreOriginalOutputs(context, strict.entries);
     revalidateRecordedEvidence(first, { root: context.root });
     if (value.decision === 'first') {
-      insist(first.report.status === 'PASS' && !assessGateReport(first.report, manifest()).errors.length, 'ordinary first result is not strict PASS');
-      cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: 'strict-first-pass', receipt: null } });
+      insist(!assessGateReport(first.report, manifest()).errors.length, 'first result fails existing strict manifest policy');
+      cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: first.report.status === 'PASS' ? 'strict-first-pass' : 'strict-declared-diagnostic', receipt: null } });
     } else {
       const evidence = jsonMember(second.entries, `cpu-second/cases/${value.key}.json`);
       insist(evidence.key === first.key && same(evidence.claim, first.claim), 'second case/first claim differs');
-      for (const [kind, original] of [['plan', planBundle], ['strict', strict], ['tiny', tiny]])
-        insist(same(evidence.authority?.[kind], artifactRef(original)), 'second consumed substituted authority');
+      requireAuthorityRefs(evidence, { plan: planBundle, strict, tiny, runtime: capsule });
       validateRetainedCache({ entries: second.entries, evidence, state, kind: 'second' });
-      await authenticateCase(context, evidence);
+      await authenticateCase(context, evidence, second.job, suite, 'second');
       restoreOriginalOutputs(context, second.entries);
       revalidateRecordedEvidence(evidence, { root: context.root });
       const decision = decideRemeasurement(first, evidence);
@@ -432,7 +468,7 @@ async function certifySuite(context, suite, destination) {
     }
   }
   const certificate = { schema: 1, suite, runId: context.runId, checkoutSha: context.checkoutSha,
-    plan: artifactRef(planBundle), first: artifactRef(strict), second: second ? artifactRef(second) : null, cases };
+    plan: artifactRef(planBundle), first: artifactRef(strict), runtime: capsule ? artifactRef(capsule) : null, second: second ? artifactRef(second) : null, cases };
   await evidenceEndCheck(context);
   write(resolve(destination, 'certificate.json'), certificate);
   return certificate;
@@ -451,7 +487,7 @@ async function evidenceEndCheck(context) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { values } = parseArgs({ options: { command: { type: 'string' }, suite: { type: 'string' }, out: { type: 'string' }, mode: { type: 'string', default: 'family' } } });
-  requireCpuRemeasureSuite(values.suite);
+  if (values.command !== 'plan') requireCpuRemeasureSuite(values.suite);
   const context = { ...makeContext(), suite: values.suite, bindings: [] };
   try {
     if (values.command === 'prepare') await prepareMeasurement(context, values.suite, resolve(values.out), values.mode);

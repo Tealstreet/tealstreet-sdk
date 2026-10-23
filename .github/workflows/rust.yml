@@ -215,7 +215,7 @@ jobs:
   # Replays recorded traffic through TS and Rust: output must be identical, and
   # on public data Rust must use less CPU and less memory (see the plan's gates).
   gate:
-    name: ${{ matrix.venue == 'bitget' && format('Rust / replay measurement ({0})', matrix.venue) || format('Rust / replay gate ({0})', matrix.venue) }}
+    name: Rust / replay measurement (${{ matrix.venue }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -429,7 +429,6 @@ jobs:
         if: matrix.venue == 'binance'
         run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT --runs "$PRIVATE_REPLAY_RUNS"
       - name: Seal approved CPU measurement inputs
-        if: matrix.venue == 'bitget'
         id: cpu_prepare
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -560,13 +559,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [[ '${{ matrix.venue }}' == bitget ]]; then
-            node sdk-rs/harness/cpu-ci.mjs --command collect --suite '${{ matrix.venue }}'
-          else
-            corepack yarn -s rust:gate:verify --suite '${{ matrix.venue }}'
-          fi
+          node sdk-rs/harness/cpu-ci.mjs --command collect --suite '${{ matrix.venue }}'
       - name: Retain CPU runtime capsule
-        if: always() && matrix.venue == 'bitget'
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: cpu-cohort-${{ matrix.venue }}
@@ -574,7 +569,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
       - name: Retain the eligible original runtime bytes
-        if: matrix.venue == 'bitget' && steps.cpu_collect.outputs.has_eligible == 'true'
+        if: steps.cpu_collect.outputs.has_eligible == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: cpu-runtime-${{ matrix.venue }}
@@ -618,6 +613,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       has_eligible: ${{ steps.plan.outputs.has_eligible }}
+      matrix: ${{ steps.plan.outputs.matrix }}
     defaults:
       run:
         working-directory: .
@@ -630,7 +626,7 @@ jobs:
         id: plan
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/cpu-ci.mjs --command plan --suite bitget --out '${{ runner.temp }}/cpu-plan'
+        run: node sdk-rs/harness/cpu-ci.mjs --command plan --out '${{ runner.temp }}/cpu-plan'
       - name: Retain CPU remeasurement plan
         if: always()
         uses: actions/upload-artifact@v7
@@ -641,9 +637,12 @@ jobs:
           if-no-files-found: error
 
   cpu-second:
-    name: Rust / CPU remeasurement (bitget)
+    name: Rust / CPU remeasurement (${{ matrix.suite }})
     needs: cpu-plan
     if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.cpu-plan.outputs.matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -658,20 +657,24 @@ jobs:
       - name: Public CPU remeasurement from sealed original runtime
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/cpu-ci.mjs --command second --suite bitget --out '${{ runner.temp }}/cpu-runtime-second'
+        run: node sdk-rs/harness/cpu-ci.mjs --command second --suite '${{ matrix.suite }}' --out '${{ runner.temp }}/cpu-runtime-second'
       - name: Retain CPU remeasurement results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cpu-second-bitget
+          name: cpu-second-${{ matrix.suite }}
           path: sdk-rs/harness/out/
           retention-days: 14
           if-no-files-found: error
 
   cpu-final:
-    name: Rust / replay gate (bitget)
+    name: Rust / replay gate (${{ matrix.suite }})
     needs: [gate, cpu-plan, cpu-second]
     if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [breakoutprop, apexomni, asterdex, woo, binance, bitunix, orderly, coinbase, bitget, bitgetusdc, backpack, blofin, mexc, polymarket, kucoin, kucoinspot, bingx, bybit, okx, cryptocom, weex, grvt, phemex, krakenspot, hyperliquidspot, kraken, lighter, lighter-robinhood, bitrue, hyperliquid, paradex, txflow]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -685,12 +688,12 @@ jobs:
       - name: Verify strict first pass or complete two-run mean
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node sdk-rs/harness/cpu-ci.mjs --command certify --suite bitget --out '${{ runner.temp }}/cpu-certificate'
+        run: node sdk-rs/harness/cpu-ci.mjs --command certify --suite '${{ matrix.suite }}' --out '${{ runner.temp }}/cpu-certificate'
       - name: Retain CPU certificate
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cpu-cert-bitget
+          name: cpu-cert-${{ matrix.suite }}
           path: ${{ runner.temp }}/cpu-certificate/
           retention-days: 14
           if-no-files-found: error

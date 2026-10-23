@@ -131,5 +131,5 @@ test('enabled Bitget collection retains an eligible miss as unresolved without r
   assert.equal(collected.rows[0].label, 'UNRESOLVED CPU MISS (not certification)');
   assert.equal(JSON.stringify(values), before, 'strict FAIL, exit1 and original raw remain unchanged');
   assert.ok(verifyGateSuite({ suite: 'bitget', entries: values, manifest }).errors.length, 'default strict still rejects');
-  assert.ok(verifyGateSuite({ suite: 'bitgetusdc', entries: values, manifest, mode: 'collect' }).errors.length, 'no alias rollout');
+  assert.ok(verifyGateSuite({ suite: 'bitgetusdc', entries: values, manifest, mode: 'collect' }).errors.length, 'wrong suite cannot substitute Bitget workload identities');
 });
