@@ -4920,6 +4920,69 @@ Callers must gate history polling and coverage on the capability record. An
 empty branded fallback means unavailable history, not a fetched complete
 ledger; live cached rows are separate. A future Polymarket history implementation
 must re-enable each axis in the same PR that supplies its valid-state dispatch.
+
+
+### TxFlow indexed history shares accepted-page completion
+
+Fills, historical orders and indexed income stages now use the engine
+CursorHistory/Completion owner. HTTP/native, transport, decode and malformed-row
+failures reject with kind `internal` when no eligible output was accepted. A
+later actual failure returns only validated prior pages/stages with one command-
+scoped Warn `history.incomplete`. The failed page's streamed prefix is excluded;
+a filtered-only page cannot authorize recovery. Earlier fill-derived income and
+funding remain available if the later ledger stage fails. This replaces the
+previous whole-read rejection after later page/stage failures. No write outcome
+is added; transport and decode retain the shared Internal fallback.
+
+Empty/repeated no-progress continuation and the native offset cap remain strict
+refusals even after accepted output. Terminal offset 200000 can complete; a
+required offset 202000 rejects. The budget resets per native income stage while
+accepted output and identities persist. Losing account identity before a native
+leg also remains strict, now with Internal classification. Initial testnet/
+identity, range/limit, symbol, unsupported public-trade/lookup and selected-empty
+ledger admission contracts retain their existing behavior.
+
+Native offset steps remain 2000, and pagination continues before applying the
+caller's final output limit. Original time sorting, numeric fill-ID tie sorting,
+generic income/order tie order, exact IDs, delisted/archived symbol mapping,
+financial signs, timestamp units and result shapes are preserved. A validated
+empty result remains complete `[]`. No history Store publication, SDK argument,
+signing change or managed Context migration is added. Callers must ingest
+command-scoped incomplete warnings, gate coverage accordingly and treat typed
+rejection as unavailable history. This SDK contract does not establish NX
+runtime adoption. [Scope](RUST_OWNED_HISTORY.md).
+
+
+### Orderly history uses the shared accepted-page owner
+
+Fills, regular/algo orders, settled funding and public trades now complete
+through the engine CursorHistory/Completion owner. An HTTP, transport, decode,
+missing-list or row-validation failure before any eligible accepted output
+rejects with kind `internal`. A later failure returns only prior validated
+eligible rows plus one command-scoped Warn `history.incomplete`; streamed rows
+from the failed page are excluded. Regular orders remain available if the later
+algo read fails. A prior page containing only filtered rows cannot authorize
+partial recovery. This replaces the former whole-read rejection after a failed
+continuation or algo read.
+
+Native metadata inconsistencies, impossible/no-progress continuation and the
+fifty-page budget remain strict refusals, even after accepted output. The budget
+spans both order endpoints; a terminal fiftieth page completes. Native signing
+setup/refusal also stays strict and now has the shared `internal` classification
+(previously unclassified), with no write outcome added. Initial unsupported,
+credential, time, limit and market admission checks retain their existing errors.
+Transport and decode errors share the Internal fallback because they reach the
+same terminal callback.
+
+Exact IDs and regular/algo identity spaces, nested protective order mapping,
+settled-only funding, public trade occurrence keys, query/signing bytes,
+account-wide funding start spacing, per-stage limits, final sort/truncation and
+row shapes are preserved. A valid empty result remains complete `[]`. There is
+no history Store publication or managed Context adoption; this adapter retains
+explicit legacy completion authority. Callers must ingest command-scoped
+incomplete warnings, gate coverage accordingly and treat typed rejection as
+unavailable history. SDK adapter work does not imply NX runtime adoption.
+[Scope](RUST_OWNED_HISTORY.md).
 ## Managed native-plan admission and preflight
 
 Managed commands using Preflight retain one command generation while prerequisite
