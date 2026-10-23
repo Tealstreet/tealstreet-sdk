@@ -20,7 +20,9 @@ pub struct Trading {
     active: Option<Job>,
     inflight: bool,
     waiting_limits: bool,
-    next_nonce: Option<u64>,
+    next_nonce: safe_cex_engine::nonce::VenueCounter,
+    /// Counter epoch captured with the in-flight nextNonce request.
+    nonce_epoch: u64,
     next_id: u64,
     timer: Option<TimerId>,
     position_wait: Option<PositionWait>,
@@ -475,10 +477,11 @@ impl Lighter {
             );
             return;
         }
-        if self.trading.next_nonce.is_none() {
+        if !self.trading.next_nonce.seeded() {
             let account = self.account.account_index.unwrap();
             let key = self.account.api_key_index.unwrap();
             self.trading.inflight = true;
+            self.trading.nonce_epoch = self.trading.next_nonce.epoch();
             cx.request(
                 Method::Get,
                 format!(
@@ -502,8 +505,10 @@ impl Lighter {
         let count = txs.len();
         let mut signed = Vec::with_capacity(count);
         for tx in txs {
-            let nonce = self.trading.next_nonce.unwrap();
-            self.trading.next_nonce = nonce.checked_add(1);
+            let Some(nonce) = self.trading.next_nonce.take() else {
+                self.trade_finish(cx, not_sent("Lighter transaction nonce exhausted"));
+                return;
+            };
             match self
                 .account
                 .signer
@@ -514,7 +519,7 @@ impl Lighter {
                 }) {
                 Ok(tx) => signed.push(tx),
                 Err(error) => {
-                    self.trading.next_nonce = None;
+                    self.trading.next_nonce.invalidate();
                     self.trade_finish(cx, not_sent(error));
                     return;
                 }
@@ -715,18 +720,22 @@ impl Lighter {
                 self.trade_kick(cx);
             }
             Request::Nonce => {
+                let epoch = self.trading.nonce_epoch;
                 let reply = serde_json::from_str::<Reply>(response.body);
                 match reply {
                     Ok(reply)
                         if response.status < 300
                             && reply.code.as_ref().and_then(Number::integer) == Some(200) =>
                     {
-                        self.trading.next_nonce = reply
-                            .nonce
-                            .as_ref()
-                            .and_then(Number::integer)
-                            .filter(|n| *n < i64::MAX as u64);
-                        if self.trading.next_nonce.is_none() {
+                        let seeded =
+                            reply
+                                .nonce
+                                .as_ref()
+                                .and_then(Number::integer)
+                                .is_some_and(|n| {
+                                    self.trading.next_nonce.seed(epoch, n, i64::MAX as u64 - 1)
+                                });
+                        if !seeded {
                             self.trade_finish(
                                 cx,
                                 not_sent("Lighter returned an invalid transaction nonce"),
@@ -763,7 +772,7 @@ impl Lighter {
                     && !self.trading.active.as_ref().unwrap().retried_nonce
                 {
                     self.trading.active.as_mut().unwrap().retried_nonce = true;
-                    self.trading.next_nonce = None;
+                    self.trading.next_nonce.invalidate();
                     self.trading.timer = Some(cx.set_timer(150.0));
                     return;
                 }
@@ -774,7 +783,7 @@ impl Lighter {
                     _ => 0,
                 };
                 if response.status >= 300 || code != Some(200) || hash_count != submission.count {
-                    self.trading.next_nonce = None;
+                    self.trading.next_nonce.invalidate();
                     // The sequencer may still accept individual transactions of a refused batch.
                     let unknown = response.status >= 500
                         || code.is_none()
@@ -945,7 +954,7 @@ impl Lighter {
     }
 
     fn submission_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
-        self.trading.next_nonce = None;
+        self.trading.next_nonce.invalidate();
         if let Effect::Setting { symbol, .. } = effect {
             self.account_setting_write(symbol);
             self.trading
