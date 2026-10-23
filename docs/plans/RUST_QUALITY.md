@@ -520,3 +520,13 @@ bounded duplicate replacement after eviction, two/four candidate requests,
 signature reset, concurrent owners and persistent live cache. Native endpoint
 selection/upsert facts remain local; no new owner/pager/marker policy or shared
 signing-provenance implementation is copied into the venue.
+
+
+### Profile capability truthfulness
+
+Aster V1 STP, Bybit Spot/Hyro income and Coinbase Spot/INTX/CFM income no longer
+inherit an advertised command they refuse for that profile. Six original
+assertion REDs cover those profiles; supported Aster V3 and Bybit
+linear/inverse/demo remain positive peers. Native refusals and V3 STP route
+contracts stay separate from capability assertions. Only the three capability
+fields change in production; no handler, signing, history or PnL policy changes.

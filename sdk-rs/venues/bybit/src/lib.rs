@@ -2161,6 +2161,7 @@ impl Venue for BybitLinear {
             } else {
                 safe_cex_engine::AccountLookup::Query
             },
+            income_history: !self.variant.is_spot() && !self.variant.is_hyro(),
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
             market_refresh: true,
