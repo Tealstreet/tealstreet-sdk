@@ -602,9 +602,9 @@ separately, and there is no Plan-to-Context cast.
   bound is the physical root minted by `begin_planned_execution`, exactly as
   `admit_plan` mints it. Followers keep their own entry roots; each follower's
   effective deadline is `min(own root, physical root)`. Nothing renews the
-  physical root: not a park, a wake, a join, a resume or progress. Time parked
-  before admission (#1896) is bounded by the predecessor chain, since each
-  predecessor retires by its own admitted root. Hyro declares per lot,
+  physical root: not a park, a wake, a join, a resume or progress. The root
+  bounds admitted work only; this contract claims no bound on time spent before
+  admission (parked or repeated preflight). Hyro declares per lot,
   up front: create, the two `orderLinkId` reads, one reconciliation resend, its
   two reads, and the position-stop read.
 - **Timer:** the existing single execution timer covers observer deadlines
@@ -663,14 +663,21 @@ claude-fe7lgm and reviewed by uufub4 for API fit.
 
 The engine-owned ledger is keyed by credential subject + variant + canonical
 orders, per leg.
-- **Single writer:** a Plan journal imports ledger facts at begin and writes
-  its recovery facts back once, at seal.
+- **Single store, monotonic merge:** the ledger is the only durable record of
+  a leg. A Plan journal imports it at begin and merges its facts back once, at
+  seal. Every write, including the seal, is a join, never an overwrite:
+  attempt counts only rise, accepted order IDs only accumulate, uncertainty
+  leaves `Unknown` only on proof, and a proven fact never reverts. A stale
+  seal snapshot therefore cannot erase a newer observation.
 - **Attempt count:** the ledger's per-leg count is the only authority. Each
   Plan slot's attempt budget is capped at the ledger's remaining count.
 - **Credential change:** intents are frozen as non-resumable but kept until
   reconciled or expired.
 - **Resolution without a caller retry:** private order observations
-  (`observe_hyro_order`, WS) record reconciled facts into the ledger.
+  (`observe_hyro_order`, WS) join reconciled facts into the ledger at once,
+  whether or not an execution is active for that intent. An active journal
+  sees them at its next delivery through the same join; they never grant a
+  resend or a new attempt by themselves.
 - **Capacity:** a count cap, plus a lifetime after which an unresolved leg is
   kept refused, not forgotten. New intents beyond the cap are refused with
   typed `Capacity`.
