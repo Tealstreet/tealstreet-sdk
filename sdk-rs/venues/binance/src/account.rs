@@ -401,7 +401,8 @@ impl BinanceFutures {
                 None,
                 Pending::Account(request),
             );
-            cx.sign_http(
+            selection.sign(
+                cx,
                 request,
                 Box::new(crate::sign::Http::new(
                     credentials.clone(),
@@ -410,7 +411,6 @@ impl BinanceFutures {
                     false,
                 )),
             );
-            selection.bind(cx, request);
         }
     }
 

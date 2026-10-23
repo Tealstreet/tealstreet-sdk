@@ -322,7 +322,7 @@ impl BinanceFutures {
             self.lookup(cx, command, symbol, client_order_id);
             return;
         }
-        if self.credentials.primary().is_none() && !matches!(read, Read::PublicTrades { .. }) {
+        if !self.credentials.has_primary() && !matches!(read, Read::PublicTrades { .. }) {
             cx.done(command, "[]".into());
             return;
         }
@@ -481,7 +481,7 @@ impl BinanceFutures {
             };
             return;
         }
-        if self.credentials.primary().is_none() || self.options.public_data_only {
+        if !self.credentials.has_primary() || self.options.public_data_only {
             cx.fail(command, "Binance client order lookup requires credentials");
             return;
         }
@@ -510,11 +510,11 @@ impl BinanceFutures {
             None,
             Pending::History(Request { command }),
         );
-        cx.sign_http(
+        selection.sign(
+            cx,
             request,
             Box::new(self.signed_recipe(credentials.clone(), query)),
         );
-        selection.bind(cx, request);
     }
 
     fn lookup_response(

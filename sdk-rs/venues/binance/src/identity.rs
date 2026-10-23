@@ -74,12 +74,7 @@ impl BinanceFutures {
                 return;
             }
         };
-        if self.options.public_data_only
-            || self
-                .credentials
-                .primary()
-                .is_none_or(|c| c.credential.0.is_empty() || c.signing.0.is_empty())
-        {
+        if self.options.public_data_only || !self.credentials.has_primary() {
             finish_unissued(
                 cx,
                 command,

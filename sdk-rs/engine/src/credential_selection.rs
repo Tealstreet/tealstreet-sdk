@@ -3,7 +3,7 @@
 //! is never an input. See docs/plans/RUST_CREDENTIAL_SELECTION.md.
 use crate::request_context::{Credential, RoutingIntent};
 use crate::signing::KeyRef;
-use crate::{AccountReadScope, CredentialSlot, Cx, RequestId, RequestRoute};
+use crate::{AccountReadScope, CredentialSlot, Cx, RequestId, RequestRoute, SignStep};
 
 /// Why a read must stay on the primary account's key and egress.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +49,7 @@ pub enum CredentialUnavailable {
 
 /// One immutable choice, used for signing, routing and account-auth evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use = "sign with `Selection::sign` so egress and evidence follow the chosen key"]
 pub struct Selection {
     slot: CredentialSlot,
     /// Primary-only reads always declare primary egress.
@@ -97,6 +98,13 @@ impl Selection {
             cx.tag_account_read(request, self.slot, scope);
         }
     }
+
+    /// Sign a non-managed request with the selected key and bind its egress
+    /// and evidence in one step.
+    pub fn sign<P>(&self, cx: &mut Cx<'_, P>, request: RequestId, step: Box<dyn SignStep>) {
+        cx.sign_http(request, step);
+        self.bind(cx, request);
+    }
 }
 
 /// A venue's signers per slot. The venue indexes it only through a selection.
@@ -104,7 +112,6 @@ impl Selection {
 pub struct Slots<T> {
     primary: Option<T>,
     secondary: Option<T>,
-    secondary_retired: bool,
     policy: SlotPolicy,
 }
 
@@ -119,25 +126,18 @@ impl<T> Slots<T> {
         Self {
             primary,
             secondary,
-            secondary_retired: false,
             policy,
         }
     }
 
-    /// Primary material for checks that do not sign (presence, identity setup).
-    pub fn primary(&self) -> Option<&T> {
-        self.primary.as_ref()
+    /// Signing material is reachable only through `select`.
+    pub fn has_primary(&self) -> bool {
+        self.primary.is_some()
     }
 
-    /// A read key was supplied at construction, retired or not.
+    /// A read key was supplied at construction.
     pub fn secondary_supplied(&self) -> bool {
         self.secondary.is_some()
-    }
-
-    /// Stop serving reads with the read key after definitive venue evidence.
-    /// Primary-signed requests keep their explicit primary egress.
-    pub fn retire_secondary(&mut self) {
-        self.secondary_retired = true;
     }
 
     pub fn select(&self, role: CredentialRole) -> Result<(Selection, &T), CredentialUnavailable> {
@@ -168,7 +168,6 @@ impl<T> Slots<T> {
 
     fn secondary_serves_reads(&self) -> bool {
         self.secondary.is_some()
-            && !self.secondary_retired
             && (!self.policy.secondary_requires_primary || self.primary.is_some())
     }
 }
@@ -262,18 +261,6 @@ mod tests {
             "secondary"
         );
         assert!(slots(false, false, gated).select(SessionAuth).is_err());
-    }
-
-    #[test]
-    fn retiring_the_read_key_moves_reads_to_primary_on_the_primary_egress() {
-        // Coinbase keeps primary routing once a read key was supplied.
-        let mut both = slots(true, true, SlotPolicy::default());
-        both.retire_secondary();
-        assert_eq!(
-            chosen(&both, Read { scope: BALANCE }),
-            Some(("primary", Some(RequestRoute::Primary)))
-        );
-        assert!(both.secondary_supplied());
     }
 
     #[test]

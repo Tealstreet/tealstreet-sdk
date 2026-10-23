@@ -415,11 +415,11 @@ impl BinanceFutures {
             None,
             pending,
         );
-        cx.sign_http(
+        selection.sign(
+            cx,
             request,
             Box::new(self.signed_recipe(credentials.clone(), query)),
         );
-        selection.bind(cx, request);
     }
 
     fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
@@ -694,7 +694,7 @@ impl BinanceFutures {
         } else {
             self.discovery.succeeded(cx, &0);
         }
-        if self.credentials.primary().is_some() {
+        if self.credentials.has_primary() {
             self.start_account(cx);
         }
         if was_loaded {
@@ -714,7 +714,7 @@ impl BinanceFutures {
                 }
             }
         }
-        if !was_loaded && self.credentials.primary().is_some() && !self.is_spot() {
+        if !was_loaded && self.credentials.has_primary() && !self.is_spot() {
             self.request_leverage_brackets(cx);
         }
         self.start_ticker_seed(cx);
@@ -847,7 +847,7 @@ impl BinanceFutures {
         self.live_tickers.finish(cx.store, &mut tickers);
         cx.store.set_tickers(tickers);
         self.revalue_pending_wallet(cx);
-        if self.credentials.primary().is_none() {
+        if !self.credentials.has_primary() {
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(Vec::new());
             cx.store.set_balance(Default::default());

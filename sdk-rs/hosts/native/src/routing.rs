@@ -240,7 +240,11 @@ impl RoutingState {
         {
             return Err("Secondary HTTP routing requires secondary credentials".into());
         }
-        if let Some(route) = self.explicit_http(request.route)? {
+        // A declared secondary route still requires a configured read egress.
+        if let Some(route) = self
+            .explicit_http(request.route)?
+            .filter(|_| request.route != Some(safe_cex_engine::RequestRoute::Secondary))
+        {
             return Ok(route);
         }
         match intent {
@@ -1118,6 +1122,11 @@ mod tests {
         for intent in [RoutingIntent::Primary, RoutingIntent::Public] {
             assert!(state.managed_http(&request, intent).is_err());
         }
+        assert!(
+            unconfigured
+                .managed_http(&request, RoutingIntent::Secondary)
+                .is_err()
+        );
     }
 
     #[test]
