@@ -1998,3 +1998,12 @@ nonempty paths retain native/cache selection; bounded native upsert remains an
 endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
+
+## MEXC public candle lifecycle adoption
+
+The single `FetchCandles` path now consumes shared Context admission, managed
+public HTTP release and Context completion. Original-source RED controls cover
+unprepared dispatch, parked/released expiry, stale owner delivery and HTTP429
+side-effect authority. Native mapping/decoding/status/pause policy is retained.
+This closes only this command's lifecycle sites; startup, history, account,
+signing and background subscription repair remain separately inventoried.

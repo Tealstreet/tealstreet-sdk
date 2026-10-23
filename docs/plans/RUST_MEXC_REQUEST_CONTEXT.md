@@ -254,3 +254,23 @@ CI owns actual-WASM/replay/size/timing proof. CALLERS records prepared-transport
 requirements, original-budget expiry/late suppression and typed causes without
 changing candle payloads or native retry/status/pause policy. Architecture No:
 the venue supplies native semantics and consumes shared lifecycle/error custody.
+
+### Candle implementation checkpoint
+
+Plan commit `1eac68ce71f` precedes original regression commit `e3545f4edd9`:
+seven lifecycle controls fail against the legacy adapter; immediate native
+validation remains green. Caller review added transport/native-error controls
+and a public fixture proving account pause precedence without account source or
+shared-support changes. The adapter consumes shared managed HTTP and typed
+callbacks; no engine, signer, timer or classification implementation is added.
+The precise manifest delta is confined to lib.rs, 9 to5 occurrences /8 to5
+entries, giving venue totals41 occurrences/39 entries. The one retained numeric
+failure occurs only when root Context issuance fails. Eventual zero still needs
+the genuine shared command-entry custody seam; other native paths stay listed.
+
+Native checkpoint: full MEXC+Binance suites pass,443 tests across39 suites,
+including9 candle lifecycle controls; scoped fmt and strict all-target Clippy
+pass. Both request-context checks pass with13 adversarial controls. Independent
+source/adversarial and full-map reviews are clean (architecture No); caller
+review's additional controls are included. CI supplies the remaining WASM/replay/
+size/timing gates after publication; no merge permission is implied.

@@ -520,3 +520,13 @@ bounded duplicate replacement after eviction, two/four candidate requests,
 signature reset, concurrent owners and persistent live cache. Native endpoint
 selection/upsert facts remain local; no new owner/pager/marker policy or shared
 signing-provenance implementation is copied into the venue.
+
+## MEXC candle Context regression controls
+
+The candle lifecycle regression suite exercises public preparation/binding/final
+claim, original-budget expiry before and after release, typed route and transport
+failures, late/duplicate callbacks and numeric owner reuse. Native controls retain
+query bounds, tail/zero/no-limit results, atomic malformed-column rejection,
+HTTP/native envelope errors, and live versus stale HTTP429 depth/account pauses.
+The original 1000-row no-limit fixture retains its payload/result assertions and
+uses only the shared prepared-actions executor for this command.

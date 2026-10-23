@@ -155,7 +155,7 @@ fn candles_wait_for_route_binding_and_final_claim_without_signing() {
     let rows: serde_json::Value = serde_json::from_str(results[0]).unwrap();
     assert_eq!(
         rows,
-        serde_json::json!([{"timestamp":1700000060,"open":2,"high":4,"low":1.5,"close":3,"volume":20}])
+        serde_json::json!([{"timestamp":1700000060.0,"open":2.0,"high":4.0,"low":1.5,"close":3.0,"volume":20.0}])
     );
     assert!(reply(&mut e, 1_504., &bound).is_empty());
 }
@@ -398,6 +398,24 @@ fn public_429_preserves_pause_and_late_429_has_no_pause_authority() {
         let actions: Vec<_> = e.drain_actions().collect();
         assert_eq!(actions.iter().any(|a| matches!(a, Action::Http(_))), late);
         assert_eq!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command:16, error }) if error.kind == Some(ErrorKind::RateLimited))), !late);
+        e.handle(
+            now + 2.,
+            Event::Command(Command::FetchLeverage {
+                command: 18,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let expected = if late {
+            "MEXC leverage requires credentials"
+        } else {
+            "MEXC account reads are rate limited"
+        };
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command:18, error }) if error.message == expected)).count(), 1);
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::Notice(Notice::AccountAuth { .. })
+        )));
     }
 }
 
@@ -425,5 +443,68 @@ fn immediate_native_validation_still_never_sends_http() {
             a,
             Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
         )));
+    }
+}
+
+#[test]
+fn released_transport_failure_stays_typed_and_native_failures_do_not_retry() {
+    for (status, body, message) in [
+        (0, "", "transport lost"),
+        (
+            200,
+            r#"{"success":false,"code":401,"message":"native refusal"}"#,
+            "MEXC 401: native refusal",
+        ),
+        (503, "", "MEXC HTTP 503"),
+    ] {
+        let mut e = engine();
+        command(&mut e, 1_000., 19);
+        let packet = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        if status == 0 {
+            e.handle(
+                1_001.,
+                Event::HttpFailed {
+                    request: packet.id,
+                    error: message,
+                },
+            );
+        } else {
+            e.handle(
+                1_001.,
+                Event::HttpResponse {
+                    request: packet.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        let actions: Vec<_> = e.drain_actions().collect();
+        if status == 0 {
+            failed(&actions, 19, ErrorKind::Network);
+        }
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command:19, error }) if error.message == message)).count(), 1);
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_)
+                | Action::Sign { .. }
+                | Action::SetTimer { .. }
+                | Action::Notice(Notice::CommandDone { .. } | Notice::AccountAuth { .. })
+        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::ManagedHttp(action)
+            if matches!(action.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. })))
+        );
+        assert!(reply(&mut e, 1_002., &packet).is_empty());
     }
 }

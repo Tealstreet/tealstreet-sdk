@@ -4331,3 +4331,21 @@ size budget still applies. SDK construction, commands, transports, payloads and
 row shapes keep their existing contracts. CPU objectives and all strict
 correctness checks retain their existing thresholds and known-failure policies.
 Combined and native release builds keep their existing profile selection.
+
+## MEXC single public candle read Context
+
+`FetchCandles` retains one engine Read Context from command admission through
+route preparation, binding and final release. Hosts must execute managed HTTP
+preparation/claim actions before sending the unsigned public GET; direct action
+consumers use the shared prepared-actions executor. Preparation time consumes the
+original 20-second budget. Expiry rejects once, and late/duplicate transport
+callbacks cannot complete a reused numeric command or update HTTP429 pause state.
+Typed route refusals, Network failures and Timeout expiry retain their causes;
+public reads provide no account credential evidence. Existing unsupported
+interval/unknown-market messages, native error messages and no-retry policy stay.
+
+Candle query and results retain native symbol/interval encoding, floor-second
+bounds/timestamps, OHLCV ordering, all rows when no limit is supplied and tail
+selection for an explicit limit (including zero). Unequal native columns fail
+atomically. A current HTTP429 response still pauses depth and account reads.
+The other MEXC HTTP consumers keep their existing transport paths.
