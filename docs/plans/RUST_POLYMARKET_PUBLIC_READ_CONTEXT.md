@@ -46,7 +46,7 @@ Background candle polls each get one Background Read Context with the same
 
 Pending owns the exact Context, with no raw completion ID. Before streamed
 staging, native body decoding, command completion or candle publication, validate
-the exact current delivery: validate_read_http_delivery(context, context) for a
+the exact current delivery: validate_read_http_delivery(root, leg) for a
 command and validate_background_read_http_delivery for a background poll.
 Command completion uses done_context/fail_context; background retirement uses
 finish_http_context. Typed preparation/failure hooks preserve engine error kinds
@@ -137,3 +137,20 @@ the corrected explicit package invocation passes. The manifest delta is exactly
 the two Polymarket source maps: history 9/13 -> 1/1, lib 9/10 -> 2/2; all other
 maps retain their incoming order and values. Final full-head CI and independent
 reviews remain required before readiness; no size/replay or merge claim yet.
+
+
+## Independent bounded reviews
+
+At source f6a93e74aa9, the caller and full-map reviews are CLEAR. The own delta
+against #1976 is ten paths, with all 5588 unowned entries preserved. The original
+control file is an exact prefix (three controls appended); other family manifest
+maps preserve values and key order. Review wording was corrected to name the
+actual command delivery pair (root, leg). Both reviews were read-only, with no
+independent build/CI claim. Actual ba3d7da1d3a integrates cleanly afterward and
+adds only incoming order-fence documentation; own runtime remains exact f6a93.
+
+
+Final integrated focused run on ba3d7da1d3a plus this slice passes 142 tests
+across nine targets (including the doc test), zero failures or ignored tests.
+The ten-control target, strict all-target Clippy and package fmt pass after the
+last receipt guard. Full CI/replay/WASM/size remain pending for the draft.
