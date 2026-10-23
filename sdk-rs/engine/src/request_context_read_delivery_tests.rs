@@ -11,6 +11,7 @@ struct ReadPublicationProbe {
     native_publications: usize,
     callbacks: usize,
     failure_authority: Option<Result<(), Error>>,
+    failure_kind: Option<crate::ErrorKind>,
 }
 
 fn read_policy(timeout_ms: u32) -> Policy {
@@ -74,6 +75,10 @@ impl Venue for ReadPublicationProbe {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Context>, leg: Context, _: &str) {
         self.failure_authority =
             Some(cx.validate_read_http_delivery(self.root.as_ref().unwrap(), &leg));
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Context>, leg: Context, error: VenueError) {
+        self.failure_kind = error.kind;
+        self.on_request_failed(cx, leg, &error.message);
     }
     fn on_command(&mut self, _: &mut Cx<'_, Context>, _: crate::Command) {}
     fn book(&self, _: &str) -> Option<&crate::book::Book> {
@@ -209,6 +214,55 @@ fn read_delivery_failure_ownership_does_not_prove_native_response_data() {
             .drain_actions()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
     );
+}
+
+#[test]
+fn released_deadline_expiry_is_a_typed_timeout_and_host_loss_stays_network() {
+    let (mut engine, request) = released_read(false);
+    // Managed identities are reserved as request, generation, timer.
+    engine.handle(
+        50.,
+        Event::TimerFired {
+            timer: TimerId(request.0 + 2),
+        },
+    );
+    assert_eq!(engine.venue().failure_kind, Some(crate::ErrorKind::Timeout));
+
+    let (mut engine, request) = released_read(false);
+    engine.handle(
+        3.,
+        Event::HttpFailed {
+            request,
+            error: "network lost",
+        },
+    );
+    assert_eq!(engine.venue().failure_kind, Some(crate::ErrorKind::Network));
+}
+
+#[test]
+fn a_delivered_body_that_is_not_utf8_is_a_typed_malformed_reply() {
+    let (mut engine, request) = released_read(false);
+    engine.handle(
+        3.,
+        Event::HttpStart {
+            request,
+            status: 200,
+            headers: "",
+        },
+    );
+    engine.handle(
+        3.,
+        Event::HttpChunk {
+            request,
+            data: &[0xff, 0xfe],
+        },
+    );
+    engine.handle(3., Event::HttpEnd { request });
+    assert_eq!(
+        engine.venue().failure_kind,
+        Some(crate::ErrorKind::Internal)
+    );
+    assert_eq!(engine.venue().native_publications, 0);
 }
 
 #[test]
