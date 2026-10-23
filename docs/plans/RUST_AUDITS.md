@@ -2636,6 +2636,16 @@ work and leaves the barrier intact; a fresh handoff arm resumes after cleanup.
 No expiry flush, lifecycle, seal or poison invariant is rewritten. Two cases in
 the original-RED composition control cover both initial arming and prior wakeup.
 
+
+### Bitunix public REST Read authority
+
+- [x] Public markets/tickers/candles dispatch and their selected terminals use
+  genuine shared Read authority and managed static-header HTTP; exact8occ7row
+  prune18->10. No early/unclaimed/expired publication or numeric fallback.
+- [x] Shared BITUNIX table/read classifier preserves typed engine failures,
+  safe diagnostics and native rate floors. Native successful candle codec and
+  wire behavior remain compatible. Private P0#33 and signer conversion remain.
+
 ### WEEX local history admission custody (2026-10-24)
 
 Original test-only checkpoint `d5746d2d490` on actual `a828ede7ebb` compiles and

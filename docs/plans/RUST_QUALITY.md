@@ -1251,6 +1251,18 @@ a previously armed wake remain blocked during the exact expiry barrier, retain
 the pending credit and barrier, and resume once afterward with a fresh timer.
 The unguarded integrated source is assertion RED at aa6613f7677.
 
+
+### Bitunix public REST managed Read proof
+
+Plan756a precedes original tests fda4818/c2aa (10 then14 assertion REDs, five
+compatibility controls GREEN); public source follows. Native authority tests
+cover Prepare/Bind/Claim, stale/duplicate/reused command IDs, invalid clock,
+entry capacity, typed provider refusal, expiry, parser versus transport failure,
+public auth isolation and both seeds' repeated fixed-clock retirement. Existing
+private/socket native assertions are preserved through genuine preparation
+fixtures. Immediate managed queue-capacity is reviewed defense/shared-engine
+coverage, explicitly not a native execution receipt (owner ruling in plan).
+
 ### WEEX local history original REDs and typed Read completion
 
 The new dedicated local-history target compiled against unchanged actual
