@@ -1999,6 +1999,35 @@ endpoint normalization fact. No invented pager, partial recovery or cache-backed
 coverage proof is added. Setup/refusal provenance and B11 runtime coverage stay
 separate. [Scope and controls](RUST_OWNED_HISTORY.md).
 
+
+### Row reporting: AsterDEX, GRVT and TxFlow consumers (2026-10-23)
+
+Replaced three account-owned bounded suppression sets with existing engine
+RowReports Once, including GRVT's shared coin/order/position namespaces.
+Architecture gate YES: consumer fan-out through the existing cross-cutting
+reporting path; no new venue policy or engine API. Exact native notice text,
+severity, empty/composite identities, clear-before-lookup capacity and re-arm
+ordering are preserved. Aster/TxFlow mapping still forgets a mapped ID before
+full-read admission, zero quantity does not gain forgetting, and TxFlow WS has
+no REST-only per-key effect. GRVT duplicate coins rearm from unfiltered totals;
+position/order identities keep native rejection filters, including unknown
+identity preventing absence proof. Per-row timestamp rejection still follows
+current-response rearming.
+
+Final original125 account tests, including nine new compatibility controls,
+pass on unchanged actual1782 production. The source/test/log receipt is
+`/tmp/codex-row-aster-grvt-txflow-original-final125-receipt.json`, SHA256
+`0fa028da226ab076553c0d607657ba113482547141490dd1550817ac38fb8602`.
+This is standardization without a product defect RED or financial repair.
+Other persistent reporter consumers remain open; no all-venue closure or new
+private parity/provenance claim. See RUST_ROW_ADMISSION.md.
+
+Migrated focused engine/AsterDEX/GRVT/TxFlow/Binance suites pass1294 native tests
+across66 result groups; strict all-target Clippy, scoped fmt, bans (13 controls)
+and root44 typecheck/28 lint pass. Both independent source/test/caller reviews
+are CLEAN. Fresh full CI, current artifact proof and separate guard/merge remain
+required; no all-venue reporter-completion claim.
+
 ## WOO and Crypto.com shared snapshot-token fan-out
 
 ~~Their joined order censuses publish native cache state and Store rows without
