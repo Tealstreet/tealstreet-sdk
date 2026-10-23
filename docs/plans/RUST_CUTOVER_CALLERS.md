@@ -5856,3 +5856,15 @@ engine command Read admission: shared capacity and invalid clock policy emit
 one correlated typed refusal without a financial outcome. Admitted terminals
 create no HTTP, signer, timer, Store mutation or history marker. Remote history,
 its credential selection and paging retain their existing paths and wire bytes.
+
+### WEEX FetchAccount initial Read authority
+
+WEEX account identity validation now requires genuine engine Read admission for
+both its local refusals and its signed accountConfig GET. Shared capacity or an
+invalid request clock produces one typed correlated Read failure without the
+old numeric CommandError fallback or a financial outcome. Admitted native
+refusals keep their validation order, exact messages, metadata and checked
+CommandError-before-CommandFailed delivery, including the existing missing
+stableId Unsupported/NotSent result. Valid reads keep the selected primary or
+secondary GET signer and exact native wire; the returned userId remains the
+trusted primary stableId. Account state, polling and reconciliation stay intact.
