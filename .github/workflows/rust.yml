@@ -75,8 +75,8 @@ jobs:
           - check: clippy
             command: cargo clippy --locked --workspace --all-targets -- -D warnings
           - check: test
-            # Workspace builds unify crypto's zklink feature on; prove the off arm too.
-            command: RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer::
+            # Workspace builds unify crypto features; prove disabled and enabled provider arms.
+            command: RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark --lib signer::
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
