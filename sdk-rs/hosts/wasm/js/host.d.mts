@@ -265,7 +265,7 @@ export interface SigningIdentity {
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface LocalIdentityMetadata {
   stableId?: string;
-  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
+  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
   trimCredential?: boolean;
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */

@@ -768,6 +768,7 @@ mod tests {
             ("base64", base64.clone()),
             ("hex", crate::hex(secret.as_bytes())),
             ("pem", pem("PRIVATE KEY", &base64)),
+            ("base58", bs58::encode(secret.as_bytes()).into_string()),
         ] {
             let (signer, identities) = LocalSigner::from_json(
                 serde_json::json!({
@@ -894,6 +895,13 @@ mod tests {
             ("base64", "not base64!".to_owned()),
             ("hex", "123".to_owned()),
             ("hex", "0g".to_owned()),
+            // Base58 excludes 0, O, I and l; an empty decode is no key.
+            ("base58", "0OIl".to_owned()),
+            ("base58", "".to_owned()),
+            (
+                "base58",
+                "ed25519:11111111111111111111111111111111".to_owned(),
+            ),
             (
                 "pem",
                 pem("PRIVATE KEY", "AQ==").replace("END PRIVATE KEY", "END EC PRIVATE KEY"),
