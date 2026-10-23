@@ -1068,8 +1068,11 @@ impl Coinbase {
         pending: Request,
         error: &str,
     ) {
+        let mut failures = vec![];
         match pending {
-            Request::Candles { command, .. } => cx.fail(command, error),
+            Request::Candles { command, .. } => {
+                failures.push((command, safe_cex_engine::VenueError::new(error)));
+            }
             Request::Daily {
                 symbol, generation, ..
             } => {
@@ -1084,6 +1087,20 @@ impl Coinbase {
                 }
             }
             pending => {
+                for deferred in std::mem::take(&mut self.public.deferred) {
+                    if let Command::FetchCandles { command, .. } = deferred {
+                        failures.push((
+                            command,
+                            safe_cex_engine::VenueError::new(
+                                "Coinbase public catalogue unavailable",
+                            )
+                            .kind(safe_cex_engine::ErrorKind::Internal)
+                            .venue_message(error),
+                        ));
+                    } else {
+                        self.public.deferred.push(deferred);
+                    }
+                }
                 let key = match pending {
                     Request::Products { kind, .. } => Some(kind),
                     _ => None,
@@ -1094,6 +1111,9 @@ impl Coinbase {
                 }
                 self.public.retry.failed(cx, key);
             }
+        }
+        for (command, error) in failures {
+            cx.fail(command, error);
         }
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
