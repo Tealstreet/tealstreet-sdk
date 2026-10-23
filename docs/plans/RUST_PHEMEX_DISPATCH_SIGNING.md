@@ -184,6 +184,43 @@ PR. No production/inventory reduction is claimed by this plan or original REDs.
 Architecture gate: native canonical recipe and adapters use shared core custody;
 no per-venue expiry, clock projection, scheduler, crypto or error-policy mechanism.
 
+## Executed original assertion checkpoint
+
+Test-only checkpoint `5f9e6ab8cd7` compiles and runs16 native tests on unchanged
+actual15bd production:6 native/provider controls PASS,10 intended assertion
+REDs,0ignored. The separate registry target compiles/runs3tests:2controls PASS,
+1assertion RED,0ignored. Commands from sdk-rs, with CARGO_BUILD_JOBS=2:
+
+```sh
+cargo test -p safe-cex-venue-phemex --test dispatch_signing
+cargo test -p safe-cex-venues --no-default-features --features phemex,dispatch-signing --test phemex_signer
+```
+
+Native REDs expose provider bypass/refusal, missing-provider local fallback,
+eager read/write/WS release and raw-clock signatures under calibration. The
+registry RED is the existing unsupported injected-provider rejection. Working
+controls retain fixed HMAC/query vectors, ordinary Secondary and lookup/repair
+Primary selection, truly unsigned headers and exact native auth-before-ping wire.
+Fractional dispatch cases at +499/+500/-30000.4 require the receipt to equal the
+rounded signed expiry seconds*1000 and compare complete native headers. They
+currently stop at the initial eager-HTTP assertion; deeper receipt/release and
+deferred auth ordering assertions are regression requirements, not executed proof.
+
+Fixture compilation/bootstrap mistakes were corrected in follow-up commits and
+are excluded from RED evidence. Both scoped strict test Clippy targets, scoped
+rustfmt and diff checks pass. Source/adversarial and caller rechecks at5f9 are
+CLEAN; full-map and HMAC-owner final rechecks remain separately reported. No
+production, manifest, feature, provider, construction or scanner changes exist.
+No CI, replay, WASM, size, cutover or inventory-shrink PASS is claimed.
+
+Shared prerequisite #1968 plan/original tests at093a9d0ad45 received read-only
+Phemex consumer/API clearance: immutable engine-minted uncapped expiry at exact
+final release, additive hook with old-hook delegation once, and unchanged capped
+managed repair bound. Required expiry refusal must occur before release; a void
+observation hook cannot abort transport. This is not runtime or actual-landing
+clearance. Both that actual seam and reviewed WS auth/ping ordering still gate
+all Phemex production attachment; dispatchSigning remains off.
+
 ## Pinned inventory and routing
 
 Signing manifest at15bd: Phemex lib.rs14F/14O. Legacy sign.rs is excluded by the
