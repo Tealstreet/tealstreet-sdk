@@ -98,3 +98,46 @@ fn cfm_to_spot_keeps_accepted_rows_and_per_family_limits() {
         }
     }
 }
+
+#[test]
+fn capability_profile_intx_has_no_income_ledger() {
+    assert_no_income_ledger(ProductKind::Intx);
+}
+#[test]
+fn capability_profile_cfm_has_no_income_ledger() {
+    assert_no_income_ledger(ProductKind::Cfm);
+}
+#[test]
+fn capability_profile_spot_has_no_income_ledger() {
+    assert_no_income_ledger(ProductKind::Spot);
+}
+fn assert_no_income_ledger(kind: ProductKind) {
+    let mut venue = Coinbase::new(Options {
+        key: "organizations/test/apiKeys/test".into(),
+        secret: STANDARD.encode([7; 32]),
+        spot_only: kind == ProductKind::Spot,
+        ..Default::default()
+    })
+    .unwrap();
+    venue.account.kind = Some(kind);
+    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+    assert!(!engine.capabilities().income_history, "{kind:?}");
+    assert!(engine.capabilities().fill_history);
+    assert!(engine.capabilities().order_history);
+    engine.handle(
+        1704067200000.,
+        Event::Command(Command::Query {
+            command: 971,
+            query: Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: None,
+                to_ms: None,
+                limit: Some(1),
+            },
+        }),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a|matches!(a, Action::Notice(Notice::CommandFailed { command: 971, error }) if error.message == "Coinbase Advanced Trade does not publish an income ledger API for this account path")));
+}

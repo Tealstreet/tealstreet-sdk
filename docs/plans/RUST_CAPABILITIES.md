@@ -80,8 +80,8 @@ Owner broadened the same small correction to all confirmed profile mismatches:
 - Aster remains the version predicate above. CALLERS also names per-order STP
   alongside fetch/change STP, since all three are V3-only.
 
-Tests use existing native integration test files (Aster trading, Bybit history,
-Coinbase history) and prove refusing profiles false plus supported peers true.
+Tests use existing native integration test files (Aster trading, Bybit account_variants,
+Coinbase history_family support tests) and prove refusing profiles false plus supported peers true.
 Each venue's actual command refusal remains asserted independently of its bit;
 V3 STP continues to dispatch exact GET/POST routes. Tests are committed and run
 on unchanged production before the three capability-field edits.
@@ -93,3 +93,10 @@ income overrides in its TS exchange classes). BaseExchange.capabilities selects
 these method brands, so all report incomeHistory/incomeRange=false today. No TS
 production change or new endpoint is authorized. No other capability fields
 change, and the separate positive conformance branch keeps its gate strict.
+
+
+Expanded plan independent review (claude-8x5tm1): CLEAN at41b280ab36a.
+Credentialed Bybit controls are mandatory because the keyless legacy short-circuit
+returns [] before its native variant refusal; tests use the existing authenticated
+fixture. Coinbase controls select each private ProductKind (INTX, CFM, Spot) in
+the existing crate-local history-family tests, without adding a production API.
