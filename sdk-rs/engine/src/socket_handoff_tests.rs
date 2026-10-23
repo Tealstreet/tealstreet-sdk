@@ -732,3 +732,41 @@ fn early_one_shot_wakeup_rearms_without_early_callback_or_retained_credit() {
     e.drain_actions().for_each(drop);
     assert_eq!(e.venue.calls, [7]);
 }
+
+#[cfg(feature = "http-plans")]
+#[test]
+fn expiry_cleanup_barrier_is_never_borrowed_by_a_socket_continuation() {
+    use crate::request_context::{Plan, Preflight};
+    for already_armed in [false, true] {
+        let (mut e, _) = started(Probe::default());
+        queue(&mut e, &["book"], &["book"], 7).unwrap();
+        let previous = already_armed.then(|| wake(&e.drain_actions().collect::<Vec<_>>(), 1.));
+        let barrier = Plan::new(&Preflight::new(&std::sync::Arc::new(()), 99, 1), 100.);
+        e.io.http_plan_expiring = Some(barrier.clone());
+        if let Some(timer) = previous {
+            e.handle(1., Event::TimerFired { timer });
+        }
+        let blocked: Vec<_> = e.drain_actions().collect();
+        assert!(e.venue.calls.is_empty());
+        assert!(
+            !blocked.iter().any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1.)),
+            "expiry cleanup cannot arm a native continuation"
+        );
+        assert!(e.io.http_plan_expiring.as_ref().unwrap().same_plan(&barrier));
+        assert_eq!(e.io.socket_continuations.len(), 1);
+        assert!(e.io.socket_continuation_bytes > 0);
+        e.io.http_plan_expiring = None;
+        let after: Vec<_> = e.drain_actions().collect();
+        let timer = wake(&after, 1.);
+        if let Some(previous) = previous {
+            assert_ne!(timer, previous);
+            e.handle(1., Event::TimerFired { timer: previous });
+            assert!(e.venue.calls.is_empty());
+        }
+        e.handle(1., Event::TimerFired { timer });
+        e.drain_actions().for_each(drop);
+        assert_eq!(e.venue.calls, [7]);
+        assert_eq!(e.io.socket_continuation_bytes, 0);
+        assert!(e.io.socket_continuations.is_empty());
+    }
+}
