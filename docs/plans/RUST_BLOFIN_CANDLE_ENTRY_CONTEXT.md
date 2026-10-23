@@ -72,3 +72,20 @@ Source/adversarial, caller/documentation and full-map implementation reviews are
 CLEAN; architecture No. Scanner proves23 occurrences in19 hash rows across four
 files, removing only the lib497d count-one site. Full native and strict gates
 follow the genuine current-landing integration before CI.
+
+## Current landing and final local gates
+
+Production9bd816d0ec4 integrates actual landingbe8889cb4b3 at7bd49c4d9fb,
+including incoming Backpack/Kraken venue work. The only conflict was CALLERS;
+resolution retains the full incoming prefix followed by our appendix once
+verbatim. Independent preservation review is CLEAN: exactly eight intended
+paths differ, every unowned incoming file and manifest prune is preserved, and
+our complete BloFin/runtime dependency blobs match the pre-integration source.
+
+Executed final local gates:494 BloFin/Binance native tests across43 targets,
+strict scoped all-target/all-feature Clippy, scoped fmt, bans, request-context
+checker and all13 checker regressions PASS. The native run uses those unchanged
+runtime/dependency blobs; no incoming engine dependency changed. Independent
+source/adversarial, caller/documentation, full-map and integration reviews are
+CLEAN, architecture No. Fresh own-head CI and the separate current-landing guard
+remain required before a granted parallel venue merge.
