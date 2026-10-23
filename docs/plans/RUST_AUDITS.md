@@ -2557,3 +2557,12 @@ predates #1867; current BloFin is 23 occurrences /19 rows /four files, unchanged
 by PublicTrades adoption. Its private dispatcher and conservative history macro
 sites remain explicit debt; neither the actual bridge nor the capacity assertion
 update claims a ratchet removal or private signer/Plan readiness.
+
+## WOO local history admission
+
+The three synchronous pre-I/O history refusal sites use genuine engine Read
+entry and Context completion. The separately committed original tests reproduce
+three typed-admission assertion failures and four compatibility passes on native
+source; the narrow cutover passes all seven assertions unchanged. Exact inventory
+shrink is three fingerprints/three occurrences, WOO34/37 to31/34. HTTP pagination,
+private signing and socket ownership are separate conversion targets.
