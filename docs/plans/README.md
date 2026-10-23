@@ -235,5 +235,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Paradex RequestContext adoption | Inventory and phased plan | Before migrating Paradex HTTP/completions; independent public GET book first, held account/trading and shared JWT/plan prerequisites. | [RUST_PARADEX_REQUEST_CONTEXT.md](RUST_PARADEX_REQUEST_CONTEXT.md) |
 | KuCoin Spot managed candles | Focused adoption plan | Before migrating unsigned candle HTTP and command completion to shared authority. | [RUST_KUCOIN_SPOT_CANDLE_CONTEXT.md](RUST_KUCOIN_SPOT_CANDLE_CONTEXT.md) |
 | SDK master venue parity | Implementation plan | Before aligning Hyperliquid fee subjects or Lighter Robinhood attribution/client index reservation with master #1869. | [RUST_MASTER_VENUE_PARITY.md](RUST_MASTER_VENUE_PARITY.md) |
+| Per-user Rust bundle rollout | Preparation only; Sam-selected bundle switch | Before cohort, client/server engine, frozen-state compatibility or rollback implementation. | [RUST_BUNDLE_ROLLOUT.md](RUST_BUNDLE_ROLLOUT.md) |
+| Bundle source readiness matrix | Immutable source inventory; no live certification | Before assessing all-held-venue eligibility or refreshing rollout source evidence. | [rust-bundle-readiness.json](rust-bundle-readiness.json) |
 
 | Shared live Plan admission | Implementation plan | Before consuming Preflight, native whole-plan roots, reserved call slots or owned readiness. | [RUST_LIVE_PLAN_ADMISSION.md](RUST_LIVE_PLAN_ADMISSION.md) |
