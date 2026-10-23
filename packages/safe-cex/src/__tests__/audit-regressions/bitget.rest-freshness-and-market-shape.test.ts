@@ -251,6 +251,9 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     vi.useFakeTimers();
     try {
       const exchange = createExchange();
+      // Only a started instance arms the watchdog; the never-started web mirror
+      // no longer does (private-ws-login-and-mirror fix). This is the started one.
+      (exchange as any).privateStreamStarted = true;
       const warning = vi.spyOn(exchange.emitter, 'emit');
       const privateWebsocket = exchange.privateWebsocket as any;
       const reconnect = vi.spyOn(privateWebsocket, 'reconnect').mockImplementation(() => {});
@@ -290,7 +293,8 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
         expect.stringContaining('Bitget private WS is not receiving live order/position updates'),
         { forceToast: true },
       );
-      expect(privateWebsocket.useFallbackUrl).toBe(true);
+      // The watchdog no longer flips a fallback route (removed with useFallbackUrl in the
+      // bitget egress change); route changes now follow 40018 / closes before login.
       expect(reconnect).toHaveBeenCalled();
       expect(fetchOrders).toHaveBeenCalled();
       expect(exchange.store.orders).toEqual([expect.objectContaining({ id: 'tp-1', status: OrderStatus.Open })]);
@@ -304,6 +308,9 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     vi.useFakeTimers();
     try {
       const exchange = createExchange();
+      // Only a started instance arms the watchdog; the never-started web mirror
+      // no longer does (private-ws-login-and-mirror fix). This is the started one.
+      (exchange as any).privateStreamStarted = true;
       const warning = vi.spyOn(exchange.emitter, 'emit');
       exchange.unlimitedXHR = {
         post: vi.fn().mockResolvedValue({ data: { code: '00000', data: { orderId: 'tp-1' } } }),
