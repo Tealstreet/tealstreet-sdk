@@ -133,6 +133,38 @@ then. In-flight children are already root-capped. The overseer accepted
 next-dequeue expiry for now. When fe7lgm's engine root-expiry funnel (a
 #1945 follow-up) lands, this venue adopts it. It never adds a venue timer.
 
+## Candidate shared API: engine-owned root expiry (fe7lgm)
+
+fe7lgm's `feat/rust-read-root-expiry` (`031c829395c`, no PR yet, not reviewed
+or landed) supplies the missing pieces. It is recorded here as the intended
+composition. Production adopts it only at its reviewed, landed pin, and
+re-proves the REDs against it.
+
+- **Root.** `cx.admit_caller_read_root(credential, pacing)` replaces steps 1-2
+  above. It issues the original Read root at the caller's exact receipt
+  deadline, and the engine expires it with one engine timer, not a venue
+  timer.
+  - `Revoked` on an expired wait; the venue then calls
+    `reject_expired_command(Read)`.
+  - A missing receipt gets the shared typed refusal (Read, no outcome),
+    which is the overseer's fail-closed ruling.
+  - `reject_unstamped_command(Read)` is the explicit form for an entry that
+    must refuse before admission.
+- **Expiry.** At the deadline the engine retires the root, discards in-flight
+  transport and seals the command itself. It then calls
+  `Venue::read_root_retired(owner, pending)` with no `Cx`. Bitget drops the
+  handed-back `Pending::History` continuation and removes every
+  `history.waiting` entry whose `Request` root has that owner. That covers
+  detection polls, 100 ms page spacing and 250/500/750 ms retries. Their
+  timers fire later and find no entry, so they do nothing.
+- **Effect on this plan.** Root expiry becomes exact-at-deadline instead of
+  next-dequeue. The engine seals the root timeout, so the venue emits no
+  terminal on expiry. Leg minting, delivery validation and page retirement
+  are unchanged.
+- **Effect on the REDs.** REDs 2 and 3 already accept the typed Timeout
+  terminal at or before the first dequeue past the wait, so they hold under
+  exact expiry. RED 7 is the `reject_unstamped_command` path.
+
 ## Native invariants kept
 
 - Credential absence precedes range validation; PublicTrades needs no
