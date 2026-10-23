@@ -1264,4 +1264,55 @@ mod tests {
             Err(SignError::Unsupported)
         );
     }
+
+    #[test]
+    fn capability_mirrors_installed_roles_and_compiled_arms_without_signing() {
+        let (seed, _, _) = zklink_case();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let primary = ids.primary.unwrap();
+        let seed_ref = primary.extra[&ExtraKey::ZklinkSeed].clone();
+        let zklink = if cfg!(feature = "zklink") {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        };
+        for (key, algorithm, expected) in [
+            (
+                &primary.signing,
+                Algorithm::HmacSha256,
+                Capability::Supported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::HmacSha512,
+                Capability::Supported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::Sha256SecretSuffix,
+                Capability::Supported,
+            ),
+            (&seed_ref, Algorithm::ZkLinkContract, zklink),
+            // Role binding: neither ref crosses into the other's algorithm.
+            (&seed_ref, Algorithm::HmacSha256, Capability::Unsupported),
+            (
+                &primary.signing,
+                Algorithm::ZkLinkContract,
+                Capability::Unsupported,
+            ),
+            (
+                &primary.signing,
+                Algorithm::Ed25519,
+                Capability::Unsupported,
+            ),
+            (
+                &KeyRef("absent".into()),
+                Algorithm::HmacSha256,
+                Capability::Unsupported,
+            ),
+        ] {
+            assert_eq!(signer.can_sign(key, algorithm), expected, "{algorithm:?}");
+        }
+    }
 }

@@ -1682,3 +1682,138 @@ fn wire_stamp_floors_after_fractional_calibration_without_changing_clock_domains
         .is_ok()
     );
 }
+
+/// Answers per ref from a fixed table, like a provider reporting installed state.
+struct Declares(Vec<(&'static str, crate::signing::Algorithm)>);
+impl crate::signing::Signer for Declares {
+    fn sign(&self, _: SignRequest) -> crate::signing::SignFuture {
+        panic!("capability admission must never sign")
+    }
+    fn can_sign(
+        &self,
+        key: &crate::signing::KeyRef,
+        algorithm: crate::signing::Algorithm,
+    ) -> crate::signing::Capability {
+        if self.0.contains(&(key.0.as_str(), algorithm)) {
+            crate::signing::Capability::Supported
+        } else {
+            crate::signing::Capability::Unsupported
+        }
+    }
+}
+fn capability_identities() -> crate::signing::Identities {
+    let key = |name: &str| crate::signing::KeyRef(name.into());
+    crate::signing::Identities {
+        primary: Some(crate::signing::Identity {
+            credential: key("api"),
+            signing: key("hmac"),
+            passphrase: None,
+            stable_id: None,
+            extra: [(crate::signing::ExtraKey::ZklinkSeed, key("seed"))].into(),
+        }),
+        secondary: None,
+    }
+}
+fn can_sign_with(
+    engine: &mut Engine<TestVenue>,
+    slot: crate::CredentialSlot,
+    needs: &[crate::signing::Need],
+) -> Result<(), SignError> {
+    let cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.can_sign(slot, needs)
+}
+const AMEND_NEEDS: [crate::signing::Need; 2] = [
+    crate::signing::Need {
+        key: crate::signing::KeyUse::Signing,
+        algorithm: crate::signing::Algorithm::HmacSha256,
+    },
+    crate::signing::Need {
+        key: crate::signing::KeyUse::Extra(crate::signing::ExtraKey::ZklinkSeed),
+        algorithm: crate::signing::Algorithm::ZkLinkContract,
+    },
+];
+
+#[test]
+fn capability_admission_requires_every_need_supported_for_the_registered_slot() {
+    use crate::CredentialSlot::{Primary, Secondary};
+    use crate::signing::Algorithm::{HmacSha256, ZkLinkContract};
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_signer(Some(std::sync::Arc::new(Declares(vec![
+            ("hmac", HmacSha256),
+            ("seed", ZkLinkContract),
+        ]))))
+        .unwrap();
+    engine.set_identities(capability_identities()).unwrap();
+    assert_eq!(can_sign_with(&mut engine, Primary, &AMEND_NEEDS), Ok(()));
+    // An unregistered slot is refused; the venue's claim is never trusted.
+    assert_eq!(
+        can_sign_with(&mut engine, Secondary, &AMEND_NEEDS[..1]),
+        Err(SignError::InvalidRequest)
+    );
+
+    let mut hmac_only = crate::test_support::seeded_engine(TestVenue::default());
+    hmac_only
+        .set_signer(Some(std::sync::Arc::new(Declares(vec![(
+            "hmac", HmacSha256,
+        )]))))
+        .unwrap();
+    hmac_only.set_identities(capability_identities()).unwrap();
+    assert_eq!(
+        can_sign_with(&mut hmac_only, Primary, &AMEND_NEEDS[..1]),
+        Ok(())
+    );
+    assert_eq!(
+        can_sign_with(&mut hmac_only, Primary, &AMEND_NEEDS),
+        Err(SignError::Unsupported)
+    );
+    assert_eq!(
+        SignError::Unsupported.venue_error().outcome,
+        Some(crate::Outcome::NotSent)
+    );
+}
+
+#[test]
+fn capability_admission_fails_closed_for_missing_refs_and_undeclared_hosts() {
+    use crate::CredentialSlot::Primary;
+    use crate::signing::Algorithm::HmacSha256;
+    let mut identities = capability_identities();
+    identities.primary.as_mut().unwrap().extra.clear();
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_identities(identities).unwrap();
+    // No Rust provider: the host fulfils Action::Sign and declared nothing.
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS[..1]),
+        Err(SignError::Unsupported)
+    );
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS),
+        Err(SignError::InvalidRequest)
+    );
+    engine.set_host_algorithms(vec![HmacSha256]).unwrap();
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS[..1]),
+        Ok(())
+    );
+
+    let mut provider_default = crate::test_support::seeded_engine(TestVenue::default());
+    provider_default
+        .set_signer(Some(std::sync::Arc::new(Ready)))
+        .unwrap();
+    provider_default
+        .set_identities(capability_identities())
+        .unwrap();
+    assert_eq!(
+        can_sign_with(&mut provider_default, Primary, &AMEND_NEEDS[..1]),
+        Err(SignError::Unsupported)
+    );
+
+    let mut started = crate::test_support::seeded_engine(TestVenue::default());
+    started.start(1000.);
+    assert!(started.set_identities(capability_identities()).is_err());
+    assert!(started.set_host_algorithms(vec![HmacSha256]).is_err());
+}

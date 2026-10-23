@@ -1615,14 +1615,17 @@ impl<P> Cx<'_, P> {
             CredentialSlot::Secondary => self.io.identities.secondary.as_ref(),
         }
         .ok_or(SignError::InvalidRequest)?;
-        for need in needs {
-            let key = match need.key {
-                KeyUse::Signing => &identity.signing,
-                KeyUse::Extra(extra) => identity
-                    .extra
-                    .get(&extra)
-                    .ok_or(SignError::InvalidRequest)?,
-            };
+        // Resolve every ref first, so a malformed command is InvalidRequest
+        // regardless of the order of its needs.
+        let keys = needs
+            .iter()
+            .map(|need| match need.key {
+                KeyUse::Signing => Some(&identity.signing),
+                KeyUse::Extra(extra) => identity.extra.get(&extra),
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or(SignError::InvalidRequest)?;
+        for (need, key) in needs.iter().zip(keys) {
             let capability = match (&self.io.signer, &self.io.host_algorithms) {
                 (Some(signer), _) => signer.can_sign(key, need.algorithm),
                 (None, Some(declared)) if declared.contains(&need.algorithm) => {
