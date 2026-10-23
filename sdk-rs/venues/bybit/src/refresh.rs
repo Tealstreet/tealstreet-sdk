@@ -1,8 +1,10 @@
 //! Explicit public discovery, staged independently from startup/account reconciliation.
 use super::*;
+use safe_cex_engine::engine::{ExecutionHandle, Window};
+use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy};
 use serde::Deserialize;
 
-const DEADLINE_MS: f64 = 30_000.0;
+const DEADLINE_MS: u32 = 30_000;
 const MAX_PAGES: usize = 1000;
 fn statuses(category: Category) -> &'static [bool] {
     if matches!(category, Category::Linear | Category::Inverse) {
@@ -20,10 +22,10 @@ pub(crate) struct State {
     pub(crate) retired_startup: bool,
     fees: HashMap<String, (Option<f64>, Option<f64>)>,
 }
+/// One public discovery walk; joined commands observe its engine execution.
 struct Walk {
     generation: u64,
-    waiters: Vec<CommandId>,
-    deadline: TimerId,
+    execution: ExecutionHandle,
     lists: HashMap<(Category, bool), List>,
 }
 #[derive(Default)]
@@ -37,6 +39,7 @@ struct List {
 }
 pub struct Page {
     generation: u64,
+    leg: Context,
     prelaunch: bool,
     markets: Vec<Market>,
     classifications: HashMap<String, InstrumentClassification>,
@@ -72,11 +75,19 @@ impl BybitLinear {
             );
             return;
         }
-        if let Some(walk) = self.market_refresh.active.as_mut() {
-            if !walk.waiters.contains(&command) {
-                walk.waiters.push(command);
+        let Ok(root) = cx.admit_http_command(refresh_policy()) else {
+            return; // The engine owns initial admission rejection.
+        };
+        if let Some(walk) = self.market_refresh.active.as_ref() {
+            match cx.join_execution(&walk.execution, &root, "") {
+                Ok(_) => return,
+                // The walk's execution already ended; start a fresh one.
+                Err(Error::Revoked) => self.market_refresh.active = None,
+                Err(error) => {
+                    let _ = cx.fail_context(&root, error.venue_error());
+                    return;
+                }
             }
-            return;
         }
         // An optional product that degraded during startup must recover through
         // restart; refresh never activates a new account product as a side effect.
@@ -87,16 +98,16 @@ impl BybitLinear {
                 .iter()
                 .any(|category| !self.catalogs.contains_key(category))
         {
-            cx.fail(
-                command,
+            let _ = cx.fail_context(
+                &root,
                 VenueError::new("Bybit market catalogue is not loaded")
                     .kind(ErrorKind::InvalidInput),
             );
             return;
         }
         if cx.now < self.discovery_paused_until {
-            cx.fail(
-                command,
+            let _ = cx.fail_context(
+                &root,
                 VenueError::new("Bybit public discovery is rate limited")
                     .kind(ErrorKind::RateLimited)
                     .retry_after_ms(self.discovery_paused_until - cx.now),
@@ -115,10 +126,17 @@ impl BybitLinear {
                     .map(move |prelaunch| ((*category, *prelaunch), List::default()))
             })
             .collect();
+        let execution = match cx.begin_execution(&root, refresh_policy(), Window::UntilTerminal, "")
+        {
+            Ok(execution) => execution,
+            Err(error) => {
+                let _ = cx.fail_context(&root, error.venue_error());
+                return;
+            }
+        };
         self.market_refresh.active = Some(Walk {
             generation,
-            waiters: vec![command],
-            deadline: cx.set_timer(DEADLINE_MS),
+            execution,
             lists,
         });
         let selected = self.category;
@@ -167,18 +185,47 @@ impl BybitLinear {
         if let Some(cursor) = cursor {
             query = query.str("cursor", cursor);
         }
-        self.send(
-            cx,
-            Rest::get("/v5/market/instruments-info", query).streamed(),
-            Then::RefreshMarkets(Page {
+        if self.config_error.is_some() {
+            return;
+        }
+        let walk = self
+            .market_refresh
+            .active
+            .as_ref()
+            .expect("generation checked");
+        let leg = match cx.http_leg_context(walk.execution.context(), refresh_policy()) {
+            Ok(leg) => leg,
+            Err(error) => {
+                self.fail_refresh(cx, error.venue_error());
+                return;
+            }
+        };
+        let rest = Rest::get("/v5/market/instruments-info", query).streamed();
+        let url = format!("{}{}?{}", self.paths.rest, rest.path, rest.payload);
+        let pending = Pending {
+            category: self.category,
+            rest,
+            then: Then::RefreshMarkets(Page {
                 generation,
+                leg: leg.clone(),
                 prelaunch,
                 markets: Vec::new(),
                 classifications: HashMap::new(),
                 derivatives: HashMap::new(),
                 rejected: false,
             }),
-        );
+        };
+        match cx.request_managed_with_headers(
+            leg,
+            Method::Get,
+            url,
+            &[("X-Referer", sign::BROKER_ID)],
+            None,
+            pending,
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Path(MARKETS_PATH)),
+            Err((_, error)) => self.fail_refresh(cx, error.venue_error()),
+        }
     }
     pub(crate) fn refresh_item(&mut self, page: &mut Page, item: &str) {
         if self
@@ -239,12 +286,13 @@ impl BybitLinear {
         page: Page,
         response: Response<'_>,
     ) {
-        if self
-            .market_refresh
-            .active
-            .as_ref()
-            .is_none_or(|walk| walk.generation != page.generation)
-        {
+        // Publication gate before any native state or Store change.
+        if self.market_refresh.active.as_ref().is_none_or(|walk| {
+            walk.generation != page.generation
+                || cx
+                    .validate_execution_read_delivery(&walk.execution, &page.leg)
+                    .is_err()
+        }) {
             return;
         }
         let pause = discovery_rate_limit_pause_ms(&response, cx.now);
@@ -332,33 +380,14 @@ impl BybitLinear {
             self.fail_refresh(cx, VenueError::new(message).kind(ErrorKind::Network));
         }
     }
-    pub(crate) fn refresh_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self
-            .market_refresh
-            .active
-            .as_ref()
-            .is_some_and(|walk| walk.deadline == timer)
-        {
-            self.fail_refresh(
-                cx,
-                VenueError::new("Bybit market refresh timed out").kind(ErrorKind::Timeout),
-            );
-            true
-        } else {
-            false
-        }
-    }
     fn fail_refresh(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
         if let Some(walk) = self.market_refresh.active.take() {
-            cx.clear_timer(walk.deadline);
-            for command in walk.waiters {
-                cx.fail(command, error.clone());
-            }
+            // An already-ended execution has no owner left to fail.
+            let _ = cx.abort_execution(&walk.execution, error);
         }
     }
     fn commit_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         let mut walk = self.market_refresh.active.take().expect("completed walk");
-        cx.clear_timer(walk.deadline);
         let mut catalogs = HashMap::new();
         let mut classifications = HashMap::new();
         let mut derivatives = HashMap::new();
@@ -386,13 +415,11 @@ impl BybitLinear {
             markets.extend(rows);
         }
         if markets.is_empty() {
-            for command in walk.waiters {
-                cx.fail(
-                    command,
-                    VenueError::new("Bybit market refresh returned an empty catalogue")
-                        .kind(ErrorKind::VenueUnavailable),
-                );
-            }
+            let _ = cx.abort_execution(
+                &walk.execution,
+                VenueError::new("Bybit market refresh returned an empty catalogue")
+                    .kind(ErrorKind::VenueUnavailable),
+            );
             return;
         }
         // Capture at commit, so concurrent account fee/settings changes win over stale discovery.
@@ -448,8 +475,16 @@ impl BybitLinear {
             self.subscribe(cx, "subscribe", &topics);
         }
         self.select_category(selected);
-        for command in walk.waiters {
-            cx.done(command, "null".into());
-        }
+        let _ = cx.complete_execution(&walk.execution, |_| Ok("null".into()));
+    }
+}
+
+fn refresh_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: DEADLINE_MS,
+        pacing: None,
+        retry: RetryPolicy::Never,
     }
 }
