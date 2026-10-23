@@ -10,8 +10,14 @@ use std::collections::HashMap;
 
 const CAPACITY: usize = 256;
 
+#[cfg(test)]
+#[path = "request_context_replacement_registry_tests.rs"]
+mod replacement_tests;
+
 struct CommandOwner {
     generation: u64,
+    /// Exact logical completion authority survives expired-handle cleanup.
+    completion_root: Context,
     /// Owner retention only. This never extends any issued logical deadline.
     last_deadline: f64,
     writes: Option<CommandWrites>,
@@ -145,6 +151,7 @@ impl ContextRegistry {
                 })
                 .or_insert(CommandOwner {
                     generation,
+                    completion_root: context.clone(),
                     last_deadline,
                     writes: None,
                     mutation_declared: context.operation() == Operation::Mutation,
@@ -156,6 +163,110 @@ impl ContextRegistry {
         Ok(context)
     }
 
+    fn replace(
+        &mut self,
+        parent: &Context,
+        delivery: &Delivery,
+        first: u32,
+        policies: &[Policy],
+        now: f64,
+    ) -> Result<Vec<Context>, Error> {
+        self.validate(parent, now)?;
+        if parent.operation() != Operation::Mutation || delivery.context != *parent {
+            return Err(Error::Revoked);
+        }
+        parent.retry(RetryEvidence::DefinitiveRefusal, now)?;
+        let Owner::Command { id, generation } = parent.owner() else {
+            return Err(Error::Invalid);
+        };
+        if policies.is_empty() {
+            return Err(Error::Invalid);
+        }
+        if policies.len() > CAPACITY
+            || first == 0
+            || first.checked_add(policies.len() as u32).is_none()
+            || self
+                .contexts
+                .values()
+                .filter(|context| context.deadline() > now)
+                .count()
+                + policies.len()
+                > CAPACITY
+        {
+            return Err(Error::Capacity);
+        }
+        let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
+        let writes = owner.writes.as_ref().ok_or(Error::State)?;
+        if owner.generation != generation
+            || writes.latest(parent.leg()) != Some(delivery.attempt.request)
+        {
+            return Err(Error::Revoked);
+        }
+        let mut children = Vec::new();
+        children
+            .try_reserve_exact(policies.len())
+            .map_err(|_| Error::Capacity)?;
+        let mut legs = Vec::new();
+        legs.try_reserve_exact(policies.len())
+            .map_err(|_| Error::Capacity)?;
+        for (index, policy) in policies.iter().enumerate() {
+            if policy.operation != Operation::Mutation
+                || policy.credential.as_ref() != parent.credential()
+                || policy.pacing != parent.pacing()
+                || policy.timeout_ms == 0
+            {
+                return Err(Error::Invalid);
+            }
+            let leg = u64::from(first + index as u32);
+            if self.contexts.contains_key(&leg) {
+                return Err(Error::Duplicate);
+            }
+            let mut child = Context::new(
+                parent.owner(),
+                leg,
+                policy.operation,
+                policy.credential.clone(),
+                now,
+                parent.deadline().min(now + f64::from(policy.timeout_ms)),
+                policy.pacing,
+            )?
+            .with_retry(policy.retry)?;
+            child.bind_issuer(&self.issuer);
+            legs.push(leg);
+            children.push(child);
+        }
+        // Reserve the pre-cleanup peak. Nothing visible has changed yet, and
+        // journal.replace is the final fallible operation in the transaction.
+        self.contexts
+            .try_reserve(children.len())
+            .map_err(|_| Error::Capacity)?;
+        self.commands
+            .get_mut(&id)
+            .expect("validated owner")
+            .writes
+            .as_mut()
+            .expect("validated journal")
+            .replace(delivery.attempt.request, &legs)?;
+        self.contexts.retain(|_, context| context.deadline() > now);
+        self.contexts.extend(
+            children
+                .iter()
+                .cloned()
+                .map(|context| (context.leg(), context)),
+        );
+        Ok(children)
+    }
+
+    fn superseded(&self, context: &Context) -> bool {
+        let Owner::Command { id, .. } = context.owner() else {
+            return false;
+        };
+        self.commands
+            .get(&id)
+            .and_then(|owner| owner.writes.as_ref())
+            .is_some_and(|writes| writes.superseded(context.leg()))
+    }
+
     pub(super) fn validate(&self, context: &Context, now: f64) -> Result<(), Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
@@ -163,7 +274,11 @@ impl ContextRegistry {
         if now >= context.deadline() {
             return Err(Error::TimedOut);
         }
-        self.validate_handle(context)
+        self.validate_handle(context)?;
+        if self.superseded(context) {
+            return Err(Error::Revoked);
+        }
+        Ok(())
     }
 
     /// Retirement authority only; expiry cannot create fresh send permission.
@@ -277,6 +392,27 @@ impl ContextRegistry {
             .result(delivery.attempt.request, result)
     }
 
+    pub(super) fn unproven_result(
+        &mut self,
+        delivery: &Delivery,
+        status: u16,
+        capture: impl FnOnce(&mut crate::request_context::UnprovenEvidence),
+    ) -> Result<(), Error> {
+        self.validate_handle(&delivery.context)?;
+        if delivery.context.operation() != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        let writes = self
+            .command_mut(&delivery.context)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?;
+        if writes.latest(delivery.context.leg()) != Some(delivery.attempt.request) {
+            return Err(Error::Revoked);
+        }
+        writes.unproven_result(delivery.attempt.request, status, capture)
+    }
+
     fn result_with_reports(
         &mut self,
         delivery: &Delivery,
@@ -306,6 +442,17 @@ impl ContextRegistry {
             if !authority.issued_by(&self.issuer)
                 || !matches!(authority.owner(), Owner::Command { id, generation } if id == command
                     && self.commands.get(&id).is_some_and(|owner| owner.generation == generation))
+            {
+                return Err(Error::Revoked);
+            }
+            // An original logical timer may seal after its root was used as a
+            // replaced physical parent. This grants no send permission and
+            // never bypasses the delivery validation below.
+            if self.superseded(authority)
+                && self
+                    .commands
+                    .get(&command)
+                    .is_none_or(|owner| owner.completion_root != *authority)
             {
                 return Err(Error::Revoked);
             }
@@ -394,6 +541,34 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    /// Atomically replace a definitively refused physical write with bounded
+    /// engine-issued child legs. This queues no HTTP and extends no deadline.
+    pub fn http_replacement_contexts(
+        &mut self,
+        parent: &Context,
+        policies: &[Policy],
+    ) -> Result<Vec<Context>, Error> {
+        if policies.is_empty() {
+            return Err(Error::Invalid);
+        }
+        if policies.len() > CAPACITY {
+            return Err(Error::Capacity);
+        }
+        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?.clone();
+        let first = self.io.next_id;
+        let next = first
+            .checked_add(policies.len() as u32)
+            .ok_or(Error::Capacity)?;
+        if first == 0 {
+            return Err(Error::Capacity);
+        }
+        // Failed admission may leave monotonic gaps, never reused identities.
+        self.io.next_id = next;
+        self.io
+            .request_contexts
+            .replace(parent, &delivery, first, policies, self.now)
+    }
+
     /// Capture the logical raw deadline and engine-owned owner/leg generation.
     /// This neither queues HTTP nor reserves admission, a transport or pacing.
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
