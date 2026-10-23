@@ -472,6 +472,13 @@ policy; its controls were kept and extended.
   physical owner with no notice and seals the group once: every surviving
   observer gets the journal's projection verbatim through `seal_projected`,
   with its rejection reports. `PreparedPlanSeal` carries the Plan's `Owner`.
+  Before the seal, preparation also clones one terminal and report set per
+  surviving observer, reserves the `Sealed` storage, the notice actions and
+  the physical owner's request list with its cleanup actions; after the seal
+  the observer fan-out only moves (`Groups::complete_into`). The claim is
+  narrow: shared cleanup (`take_managed`'s boxed Cancel, late-ACK custody)
+  still allocates as on the command path, and a deep clone during
+  preparation follows #1894's OOM-abort model.
 - **Orphans:** when the last observer leaves, unsent slots are revoked
   (`revoke_unsent_execution_legs`), `validate_plan_delivery` refuses before
   any codec, and the event-boundary sweep fails the Plan (journal facts kept:
