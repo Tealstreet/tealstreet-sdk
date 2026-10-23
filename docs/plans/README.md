@@ -218,3 +218,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Backpack perpetuals RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_BACKPACK_REQUEST_CONTEXT.md](RUST_BACKPACK_REQUEST_CONTEXT.md) |
 | Orderly broker family RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_ORDERLY_REQUEST_CONTEXT.md](RUST_ORDERLY_REQUEST_CONTEXT.md) |
 | TxFlow testnet perpetuals RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_TXFLOW_REQUEST_CONTEXT.md](RUST_TXFLOW_REQUEST_CONTEXT.md) |
+| Polymarket CLOB V2 RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_POLYMARKET_REQUEST_CONTEXT.md](RUST_POLYMARKET_REQUEST_CONTEXT.md) |
