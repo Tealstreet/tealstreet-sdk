@@ -68,6 +68,15 @@ pub enum TrafficPolicy {
     AnyText,
     TextAfterFirstPong,
 }
+/// Whether this feed carries native control messages. No control decoding is
+/// needed only when every text frame is ordinary traffic without auth evidence.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlPolicy {
+    #[default]
+    Native,
+    None,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Invalidation {
     None,
@@ -82,6 +91,7 @@ pub struct FeedPolicy {
     pub recovery: AuthRecovery,
     pub permanent_refusal_group: Option<u16>,
     pub traffic: TrafficPolicy,
+    pub controls: ControlPolicy,
     pub invalidation: Invalidation,
     pub subscription_interval_ms: f64,
 }
@@ -102,6 +112,8 @@ impl FeedPolicy {
             || self.subscription_interval_ms < 0.
             || matches!(self.recovery, AuthRecovery::RetrySameSocket { delay_ms } if !positive(delay_ms))
             || self.auth == AuthMode::None && c.auth_timeout_ms.is_some()
+            || self.controls == ControlPolicy::None
+                && (self.auth != AuthMode::None || self.traffic != TrafficPolicy::AnyText)
         {
             return Err(SocketError::InvalidPolicy);
         }
@@ -973,6 +985,7 @@ mod tests {
             recovery: AuthRecovery::Reconnect,
             permanent_refusal_group: None,
             traffic: TrafficPolicy::PongOnly,
+            controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
         }

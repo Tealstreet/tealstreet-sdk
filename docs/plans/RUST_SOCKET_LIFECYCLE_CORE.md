@@ -846,3 +846,12 @@ stale-timer controls. Supervisor remains the only deadline/backoff authority.
 No raw-now caching, deadline change, allocator/HTTP edit, frame policy or budget
 change. Review concrete API/tests before source; focused native/strict/fmt/bans,
 independent reviews and fresh CI must establish the remaining CPU objective.
+
+PhaseD source passes1,433 four-crate all-target controls, strict all-feature/
+all-target Clippy, fmt, diff and bans. Both independent correctness/adversarial
+source/API/math/ordering reviews are CLEAR. The original-formula oracle checks
+72 policy variants across77 raw-time boundaries per variant; classifier tests
+pin Native/default behavior, no-classifier native delivery, invalid raw time,
+exact idle expiry and retired ingress. Contradictory None policies refuse before
+registration. This is native/source verification only; remaining Bitunix CPU is
+still a real blocker until fresh CI measurement passes.

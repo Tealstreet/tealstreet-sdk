@@ -1,8 +1,8 @@
 //! Native codecs and store invalidation; Engine owns auth, epochs and replay.
 use super::*;
 use safe_cex_engine::socket_lifecycle::{
-    AuthEvidence, AuthMode, AuthRecovery, Control, EncodedBatch, FeedId, FeedPolicy, Interest,
-    Invalidation, LifecycleEvent, SocketError, TrafficPolicy,
+    AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
+    Interest, Invalidation, LifecycleEvent, SocketError, TrafficPolicy,
 };
 #[derive(serde::Deserialize)]
 struct EventName<'a> {
@@ -127,6 +127,7 @@ impl Okx {
                 recovery: AuthRecovery::Reconnect,
                 permanent_refusal_group: (channel != PUBLIC).then_some(1),
                 traffic: TrafficPolicy::PongOnly,
+                controls: ControlPolicy::Native,
                 invalidation: if channel == PUBLIC {
                     Invalidation::Required
                 } else {

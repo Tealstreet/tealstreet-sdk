@@ -2,8 +2,8 @@
 use super::*;
 use crate::socket_driver::{Driver, Effect};
 use crate::socket_lifecycle::{
-    Admission, Control, EncodedBatch, Epoch, FeedId, FeedPolicy, Ingress, Interest, LifecycleEvent,
-    MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, SocketError,
+    Admission, Control, ControlPolicy, EncodedBatch, Epoch, FeedId, FeedPolicy, Ingress, Interest,
+    LifecycleEvent, MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, SocketError,
 };
 const MAX_EFFECTS: usize = MAX_FEEDS * 16;
 const MAX_PROPOSALS: usize = MAX_FEEDS;
@@ -496,12 +496,22 @@ impl<V: Venue> Engine<V> {
             }
             Event::WsMessage { text, .. } => {
                 self.io.sockets.received(socket, now, &mut self.io.health);
-                let control = self.venue.socket_control(
-                    &self.store,
-                    epoch.feed(),
-                    self.io.socket_driver.state.authenticated(epoch.feed()),
-                    text,
-                );
+                let control = match self
+                    .io
+                    .socket_driver
+                    .state
+                    .policy(epoch.feed())
+                    .expect("current managed feed")
+                    .controls
+                {
+                    ControlPolicy::None => Control::Other,
+                    ControlPolicy::Native => self.venue.socket_control(
+                        &self.store,
+                        epoch.feed(),
+                        self.io.socket_driver.state.authenticated(epoch.feed()),
+                        text,
+                    ),
+                };
                 let other = matches!(control, Control::Other);
                 let ready = self.venue.socket_startup_ready(&self.store);
                 let effects = self.socket_mutate(now, |d, cx| d.control(cx, epoch, control, ready));
@@ -646,6 +656,8 @@ mod tests {
     #[derive(Default)]
     struct Probe {
         feed: Option<FeedId>,
+        controls: ControlPolicy,
+        control_calls: std::cell::Cell<usize>,
         events: Vec<LifecycleEvent>,
         messages: usize,
         timers: usize,
@@ -664,6 +676,7 @@ mod tests {
             recovery: AuthRecovery::Reconnect,
             permanent_refusal_group: None,
             traffic: TrafficPolicy::AnyText,
+            controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
         }
@@ -671,9 +684,15 @@ mod tests {
     impl Venue for Probe {
         type Pending = ();
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
-            let feed = cx.register_socket_feed(policy()).unwrap();
+            let mut declared = policy();
+            declared.controls = self.controls;
+            let feed = cx.register_socket_feed(declared).unwrap();
             self.feed = Some(feed);
             cx.connect_socket(feed, "wss://socket.test").unwrap();
+        }
+        fn socket_control(&self, _: &Store, _: FeedId, _: bool, _: &str) -> Control {
+            self.control_calls.set(self.control_calls.get() + 1);
+            Control::Other
         }
         fn on_socket_event(
             &mut self,
@@ -778,6 +797,75 @@ mod tests {
         };
         cx.stop_socket_feed(feed);
     }
+    #[test]
+    fn declared_control_free_frames_skip_only_codec_and_keep_fresh_expiry() {
+        for controls in [ControlPolicy::Native, ControlPolicy::None] {
+            let mut e = crate::test_support::seeded_engine(Probe {
+                controls,
+                ..Probe::default()
+            });
+            e.start(0.);
+            let socket = e
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::WsConnect { socket, .. } => Some(socket),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(0., Event::WsOpened { socket });
+            e.drain_actions().for_each(drop);
+            e.handle(
+                100.,
+                Event::WsMessage {
+                    socket,
+                    text: "ordinary-native-data",
+                },
+            );
+            e.drain_actions().for_each(drop);
+            assert_eq!(e.venue.messages, 1);
+            let expected = usize::from(controls == ControlPolicy::Native);
+            assert_eq!(e.venue.control_calls.get(), expected);
+            for now in [f64::NAN, f64::INFINITY, f64::MAX] {
+                e.handle(
+                    now,
+                    Event::WsMessage {
+                        socket,
+                        text: "invalid-clock",
+                    },
+                );
+                assert_eq!(e.venue.messages, 1);
+                assert_eq!(e.venue.control_calls.get(), expected);
+            }
+            // No watchdog timer is delivered: expiry must win at ingress.
+            e.handle(
+                60_100.,
+                Event::WsMessage {
+                    socket,
+                    text: "too-late",
+                },
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::WsClose {socket:s} if *s==socket))
+                    .count(),
+                1
+            );
+            assert_eq!(e.venue.messages, 1);
+            assert_eq!(e.venue.control_calls.get(), expected);
+            e.handle(
+                60_101.,
+                Event::WsMessage {
+                    socket,
+                    text: "retired",
+                },
+            );
+            assert_eq!(e.venue.messages, 1);
+            assert_eq!(e.venue.control_calls.get(), expected);
+        }
+    }
+
     #[test]
     fn caught_fatal_socket_callback_stops_all_later_callbacks_and_output() {
         let (mut e, socket) = engine();

@@ -40,9 +40,53 @@ pub(crate) struct IngressResult {
     pub effects: Vec<Effect>,
 }
 
+/// Immutable arithmetic bounds, not a cached clock or admission decision.
+/// Rounded addition is monotonic: if both extreme positive delays advance a
+/// finite raw time without overflow, all delays in this fixed policy do too.
+#[derive(Clone, Copy)]
+struct TimeBounds {
+    shortest: f64,
+    longest: f64,
+}
+impl TimeBounds {
+    fn new(policy: &FeedPolicy) -> Self {
+        let c = policy.supervision;
+        let mut bounds = Self {
+            shortest: 5_000.,
+            longest: 5_000.,
+        };
+        for delay in [
+            Some(c.connect_timeout_ms),
+            Some(c.idle_timeout_ms),
+            Some(c.backoff_base_ms * 0.75),
+            Some(c.backoff_cap_ms),
+            c.auth_timeout_ms,
+            c.ping_interval_ms,
+            (policy.subscription_interval_ms != 0.).then_some(policy.subscription_interval_ms),
+            match policy.recovery {
+                AuthRecovery::Reconnect => None,
+                AuthRecovery::RetrySameSocket { delay_ms } => Some(delay_ms),
+            },
+        ]
+        .into_iter()
+        .flatten()
+        {
+            debug_assert!(delay.is_finite() && delay > 0.);
+            bounds.shortest = bounds.shortest.min(delay);
+            bounds.longest = bounds.longest.max(delay);
+        }
+        bounds
+    }
+    fn valid(self, now: f64) -> bool {
+        let advances = |delay: f64| (now + delay).is_finite() && now + delay > now;
+        now.is_finite() && advances(self.shortest) && advances(self.longest)
+    }
+}
+
 struct Runtime {
     feed: FeedId,
     supervisor: Supervisor,
+    time: TimeBounds,
     login_retry: Option<TimerId>,
     batch_timer: Option<TimerId>,
     next_batch: Option<f64>,
@@ -65,7 +109,7 @@ impl Driver {
                     && r.batch_timer.is_none()
                     && self.state.has_batches(r.feed)
                     && r.next_batch.is_none_or(|at| now >= at)
-                    && Self::valid_time(self.state.policy(r.feed).expect("registered feed"), now)
+                    && r.time.valid(now)
                     && !barrier(e.socket())
             })
         })
@@ -74,41 +118,20 @@ impl Driver {
         self.state.ready(epoch)
             && !self.state.has_batches(epoch.feed())
             && !barrier
-            && self
-                .state
-                .policy(epoch.feed())
-                .is_ok_and(|policy| Self::valid_time(policy, now))
+            && self.valid_time(epoch.feed(), now)
     }
-    /// Representability only: Supervisor remains the sole expiry/backoff
-    /// authority. Every interval it can schedule must advance raw time, even
-    /// its 5-second watchdog polling cap and minimum jittered retry.
-    fn valid_time(policy: &FeedPolicy, now: f64) -> bool {
-        let c = policy.supervision;
-        let advances = |delay: f64| (now + delay).is_finite() && now + delay > now;
-        now.is_finite()
-            && [
-                5_000.,
-                c.connect_timeout_ms,
-                c.idle_timeout_ms,
-                c.backoff_base_ms * 0.75,
-            ]
-            .into_iter()
-            .all(advances)
-            && c.auth_timeout_ms.is_none_or(advances)
-            && c.ping_interval_ms.is_none_or(advances)
-            && advances(c.backoff_cap_ms)
-            && (policy.subscription_interval_ms == 0. || advances(policy.subscription_interval_ms))
-            && match policy.recovery {
-                AuthRecovery::Reconnect => true,
-                AuthRecovery::RetrySameSocket { delay_ms } => advances(delay_ms),
-            }
+    /// Fresh representability only. Supervisor still owns all deadlines/backoff.
+    fn valid_time(&self, feed: FeedId, now: f64) -> bool {
+        self.runtimes
+            .get(feed.index())
+            .is_some_and(|r| r.time.valid(now))
     }
 
     /// Called before allocating/queuing the physical connection. begin repeats
     /// this check so a caller cannot accidentally bypass it.
     pub(crate) fn preflight_begin(&self, feed: FeedId, now: f64) -> Result<(), SocketError> {
         self.state.can_begin(feed)?;
-        if !Self::valid_time(self.state.policy(feed)?, now) {
+        if !self.valid_time(feed, now) {
             return Err(SocketError::InvalidTime);
         }
         Ok(())
@@ -117,11 +140,13 @@ impl Driver {
     pub(crate) fn register(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
         let config = policy.supervision;
         let feed = self.state.register(policy)?;
+        let time = TimeBounds::new(self.state.policy(feed).expect("registered feed"));
         let supervisor = Supervisor::new(config);
         debug_assert_eq!(feed.index(), self.runtimes.len());
         self.runtimes.push(Runtime {
             feed,
             supervisor,
+            time,
             login_retry: None,
             batch_timer: None,
             next_batch: None,
@@ -271,8 +296,7 @@ impl Driver {
         ingress: Ingress,
     ) -> IngressResult {
         let expired = if let Some(epoch) = self.state.socket_epoch(socket) {
-            let policy = self.state.policy(epoch.feed()).expect("registered feed");
-            if !Self::valid_time(policy, cx.now) {
+            if !self.valid_time(epoch.feed(), cx.now) {
                 return IngressResult {
                     admission: Admission::Denied,
                     effects: Vec::new(),
@@ -435,10 +459,10 @@ impl Driver {
         acknowledged: bool,
         retry: bool,
     ) -> Result<(), SocketError> {
-        if acknowledged
-            && retry
-            && !Self::valid_time(self.state.policy(retirement.epoch.feed())?, cx.now)
-        {
+        if acknowledged && retry {
+            self.state.policy(retirement.epoch.feed())?;
+        }
+        if acknowledged && retry && !self.valid_time(retirement.epoch.feed(), cx.now) {
             return Err(SocketError::InvalidTime);
         }
         self.state.retired(retirement.epoch, acknowledged)?;
@@ -457,10 +481,7 @@ impl Driver {
                 || r.batch_timer == Some(timer)
                 || r.supervisor.owns_timer(timer)
         })?;
-        Some(Self::valid_time(
-            self.state.policy(runtime.feed).expect("registered feed"),
-            now,
-        ))
+        Some(runtime.time.valid(now))
     }
 
     /// None means an unowned timer; Some(empty) is owned but has no callback.
@@ -741,6 +762,7 @@ mod tests {
             recovery: AuthRecovery::Reconnect,
             permanent_refusal_group: None,
             traffic: TrafficPolicy::PongOnly,
+            controls: crate::socket_lifecycle::ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
         }
@@ -750,6 +772,123 @@ mod tests {
             recovery: AuthRecovery::RetrySameSocket { delay_ms: 2_000. },
             traffic: TrafficPolicy::TextAfterFirstPong,
             ..policy(AuthMode::Observe)
+        }
+    }
+
+    // Independent pre-optimization formula; keep the full interval list here.
+    fn original_time_check(policy: &FeedPolicy, now: f64) -> bool {
+        let c = policy.supervision;
+        let advances = |delay: f64| (now + delay).is_finite() && now + delay > now;
+        now.is_finite()
+            && [
+                5_000.,
+                c.connect_timeout_ms,
+                c.idle_timeout_ms,
+                c.backoff_base_ms * 0.75,
+            ]
+            .into_iter()
+            .all(advances)
+            && c.auth_timeout_ms.is_none_or(advances)
+            && c.ping_interval_ms.is_none_or(advances)
+            && advances(c.backoff_cap_ms)
+            && (policy.subscription_interval_ms == 0. || advances(policy.subscription_interval_ms))
+            && match policy.recovery {
+                AuthRecovery::Reconnect => true,
+                AuthRecovery::RetrySameSocket { delay_ms } => advances(delay_ms),
+            }
+    }
+
+    #[test]
+    fn precomputed_time_extremes_match_original_formula_at_float_boundaries() {
+        for delay in [
+            f64::from_bits(1),
+            f64::MIN_POSITIVE,
+            1e-100,
+            0.125,
+            1.,
+            5_000.,
+            1e100,
+            f64::MAX / 2.,
+        ] {
+            for field in 0..9 {
+                let mut p = policy(AuthMode::None);
+                match field {
+                    0 => p.supervision.connect_timeout_ms = delay,
+                    1 => p.supervision.idle_timeout_ms = delay,
+                    2 => {
+                        p.supervision.backoff_base_ms = delay;
+                        p.supervision.backoff_cap_ms = delay.max(30_000.);
+                    }
+                    3 => {
+                        p.supervision.backoff_base_ms = delay;
+                        p.supervision.backoff_cap_ms = delay;
+                    }
+                    4 => {
+                        p.auth = AuthMode::Required;
+                        p.supervision.auth_timeout_ms = Some(delay);
+                    }
+                    5 => p.supervision.ping_interval_ms = Some(delay),
+                    6 => p.subscription_interval_ms = delay,
+                    7 => p.recovery = AuthRecovery::RetrySameSocket { delay_ms: delay },
+                    _ => {
+                        p.supervision.ping_interval_ms = None;
+                        p.subscription_interval_ms = -0.;
+                    }
+                }
+                let mut driver = Driver::default();
+                let feed = driver.register(p.clone()).unwrap();
+                let mut times = vec![
+                    f64::NAN,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::MAX,
+                    -f64::MAX,
+                    0.,
+                    -0.,
+                    delay,
+                    -delay,
+                    f64::from_bits(1),
+                    -f64::MIN_POSITIVE,
+                ];
+                for exponent in [-1074, -1022, -100, -1, 0, 1, 52, 53, 100, 1000, 1023] {
+                    let at = 2_f64.powi(exponent);
+                    times.extend([
+                        at.next_down(),
+                        at,
+                        at.next_up(),
+                        -at.next_down(),
+                        -at,
+                        -at.next_up(),
+                    ]);
+                }
+                for now in times {
+                    assert_eq!(
+                        driver.valid_time(feed, now),
+                        original_time_check(&p, now),
+                        "field={field} delay={delay} now={now}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn contradictory_control_free_policy_refuses_before_runtime_registration() {
+        use crate::socket_lifecycle::ControlPolicy;
+        assert_eq!(ControlPolicy::default(), ControlPolicy::Native);
+        for (auth, traffic) in [
+            (AuthMode::Required, TrafficPolicy::AnyText),
+            (AuthMode::Observe, TrafficPolicy::AnyText),
+            (AuthMode::None, TrafficPolicy::PongOnly),
+            (AuthMode::None, TrafficPolicy::TextAfterFirstPong),
+        ] {
+            let mut p = policy(auth);
+            p.controls = ControlPolicy::None;
+            p.traffic = traffic;
+            let mut driver = Driver::default();
+            assert_eq!(driver.register(p), Err(SocketError::InvalidPolicy));
+            assert!(!driver.state.enabled());
+            assert!(driver.runtimes.is_empty());
         }
     }
 

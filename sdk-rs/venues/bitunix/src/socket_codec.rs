@@ -1,8 +1,8 @@
 //! Native feed data and codecs; lifecycle authority belongs to Engine.
 use super::*;
 use safe_cex_engine::socket_lifecycle::{
-    AuthEvidence, AuthMode, AuthRecovery, Control, EncodedBatch, FeedId, FeedPolicy, Interest,
-    Invalidation, LifecycleEvent, RetireReason, SocketError, TrafficPolicy,
+    AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
+    Interest, Invalidation, LifecycleEvent, RetireReason, SocketError, TrafficPolicy,
 };
 #[derive(serde::Serialize)]
 struct PublicArg<'a> {
@@ -52,6 +52,11 @@ impl BitunixFutures {
                 TrafficPolicy::TextAfterFirstPong
             } else {
                 TrafficPolicy::AnyText
+            },
+            controls: if private {
+                ControlPolicy::Native
+            } else {
+                ControlPolicy::None
             },
             invalidation: if matches!(feed, Feed::Futures) {
                 Invalidation::Required
