@@ -7876,3 +7876,7 @@ mod fill_frame_tests {
 #[cfg(test)]
 #[path = "signing_tests.rs"]
 mod dispatch_signing_tests;
+
+#[cfg(all(test, feature = "order-locks"))]
+#[path = "http_plan_boundary_tests.rs"]
+mod http_plan_boundary_tests;
