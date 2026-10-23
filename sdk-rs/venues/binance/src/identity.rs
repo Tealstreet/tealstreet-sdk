@@ -1,7 +1,8 @@
 //! Rare identity reads are independent of recurring account reconciliation.
 use crate::{BinanceFutures, Pending, Variant};
-use safe_cex_engine::request_context::{Context, Credential};
-use safe_cex_engine::{CommandId, CredentialSlot, Cx, Response, VenueError};
+use safe_cex_engine::credential_selection::CredentialRole;
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::{CommandId, Cx, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -73,12 +74,7 @@ impl BinanceFutures {
                 return;
             }
         };
-        if self.options.public_data_only
-            || self
-                .credentials
-                .as_ref()
-                .is_none_or(|c| c.credential.0.is_empty() || c.signing.0.is_empty())
-        {
+        if self.options.public_data_only || !self.credentials.has_primary() {
             finish_unissued(
                 cx,
                 command,
@@ -86,26 +82,17 @@ impl BinanceFutures {
             );
             return;
         }
-        let (credentials, slot) = match &self.options.read_credentials {
-            Some(credentials) => (credentials.clone(), CredentialSlot::Secondary),
-            None => (
-                self.credentials.as_ref().expect("validated above").clone(),
-                CredentialSlot::Primary,
-            ),
-        };
+        let (selection, credentials) = self
+            .credentials
+            .select(CredentialRole::Read { scope: None })
+            .expect("validated above");
+        let credentials = credentials.clone();
         let context = match Self::read_context(
             cx,
-            command,
-            Some(Credential {
-                slot,
-                reference: credentials.credential.clone(),
-            }),
+            Some(selection.credential(credentials.credential.clone())),
         ) {
             Ok(context) => context,
-            Err(error) => {
-                finish_unissued(cx, command, Err(error.message));
-                return;
-            }
+            Err(_) => return, // Engine owns initial admission rejection.
         };
         self.managed_read(
             cx,

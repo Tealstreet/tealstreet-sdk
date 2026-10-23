@@ -58,9 +58,35 @@ pub(super) struct ContextRegistry {
 }
 
 impl ContextRegistry {
+    pub(super) fn command_entry_unowned(&self, command: CommandId) -> bool {
+        !self.commands.contains_key(&command)
+    }
+
+    pub(super) fn prepare_command_entry(&mut self, command: CommandId, now: f64) -> bool {
+        let Some(owner) = self.commands.get(&command) else {
+            return true;
+        };
+        if !now.is_finite()
+            || now < owner.last_deadline
+            || owner.writes.is_some()
+            || owner.pending != 0
+            || owner.deliveries != 0
+        {
+            return false;
+        }
+        let old = Owner::Command {
+            id: command,
+            generation: owner.generation,
+        };
+        self.commands.remove(&command);
+        self.contexts.retain(|_, context| context.owner() != old);
+        true
+    }
+
     pub(super) fn command_live(&self, id: CommandId, now: f64) -> bool {
         self.commands.get(&id).is_some_and(|owner| {
-            now < owner.last_deadline
+            !now.is_finite()
+                || now < owner.last_deadline
                 || owner.writes.is_some()
                 || owner.pending > 0
                 || owner.deliveries > 0
@@ -709,6 +735,9 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         parent: Option<&Context>,
     ) -> Result<Context, Error> {
+        if !self.io.entry_context_allowed(scope) {
+            return Err(Error::Revoked);
+        }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = if let Some(parent) = parent {
             self.io
@@ -765,6 +794,26 @@ impl<P> Cx<'_, P> {
             || owner.writes.is_some()
         {
             return Err(Error::Invalid);
+        }
+        Ok(())
+    }
+
+    /// Bind a read-only completion owner to its exact original root, including
+    /// constructors and no-I/O terminal paths. This grants no send permission.
+    /// Expiry follows the existing completion rules, never renews a request.
+    pub fn validate_read_root_context(&self, root: &Context) -> Result<(), Error> {
+        self.validate_read_completion_context(root)?;
+        let Owner::Command { id, .. } = root.owner() else {
+            return Err(Error::Invalid);
+        };
+        if self
+            .io
+            .request_contexts
+            .commands
+            .get(&id)
+            .is_none_or(|owner| owner.completion_root != *root)
+        {
+            return Err(Error::Revoked);
         }
         Ok(())
     }
