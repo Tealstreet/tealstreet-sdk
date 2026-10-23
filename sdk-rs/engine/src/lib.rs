@@ -10,9 +10,7 @@ pub mod engine;
 pub mod entropy;
 pub mod error;
 pub mod execution;
-// Hooks into the registry and managed HTTP land behind the command-entry pin.
-#[allow(dead_code)]
-mod execution_group;
+pub mod execution_group;
 pub mod fence;
 pub mod history;
 pub mod json;

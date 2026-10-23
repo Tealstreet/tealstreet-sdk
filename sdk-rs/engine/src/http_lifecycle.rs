@@ -12,7 +12,7 @@ mod unsigned_headers_tests;
 pub(super) struct Managed {
     lifecycle: Lifecycle,
     original: HttpRequest,
-    timer: TimerId,
+    pub(super) timer: TimerId,
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
@@ -171,6 +171,8 @@ impl<P> Cx<'_, P> {
             timer,
             at_ms: deadline,
         });
+        // A leg in flight owns the execution deadline through its own timer.
+        self.io.rearm_execution_timer();
         self.io
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
@@ -232,6 +234,7 @@ impl<P> Io<P> {
         let managed = self.managed_http.remove(&request)?;
         self.request_contexts
             .retire_attempt(managed.lifecycle.context());
+        self.rearm_execution_timer();
         self.signing.remove_request(request);
         self.timers.remove(&managed.timer);
         self.actions.push(Action::ClearTimer {
@@ -541,6 +544,9 @@ impl<V: Venue> Engine<V> {
             if let Some(released) = release_flag {
                 *released = true;
             }
+            self.io
+                .request_contexts
+                .execution_leg_released(managed.lifecycle.context());
             managed.recipe = None;
             managed.signing_attempt = None;
             if mutation {

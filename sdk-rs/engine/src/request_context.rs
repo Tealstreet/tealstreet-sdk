@@ -67,8 +67,17 @@ impl<'a> Reconciliation<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Owner {
-    Command { id: CommandId, generation: u64 },
-    Background { generation: u64 },
+    Command {
+        id: CommandId,
+        generation: u64,
+    },
+    Background {
+        generation: u64,
+    },
+    /// One physical execution serving several command observers.
+    Execution {
+        generation: u64,
+    },
 }
 
 /// Independent of HTTP method: private POST snapshots are still reads.
@@ -116,6 +125,8 @@ pub struct Policy {
 pub enum Scope {
     Command(CommandId),
     Background,
+    /// Legs of an execution; issued only beneath its engine-issued root.
+    Execution,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

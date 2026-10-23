@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 pub(crate) const MAX_OBSERVERS: usize = 64;
 const MAX_MEMBERS: usize = 256;
+#[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
 const MAX_PROGRESS: usize = 256;
 const MAX_KEY: usize = 128;
 
@@ -15,7 +16,7 @@ const MAX_KEY: usize = 128;
 pub(crate) struct Execution(u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Window {
+pub enum Window {
     BeforeRelease,
     UntilTerminal,
 }
@@ -34,6 +35,8 @@ pub(crate) struct Member {
 pub(crate) enum Root {
     Command(Member),
     /// An existing background read Context keeps its own publication rights.
+    #[cfg_attr(not(test), allow(dead_code))]
+    // Background roots and writes: Bitrue/Hyro phases.
     Background {
         deadline: f64,
     },
@@ -47,7 +50,7 @@ pub(crate) struct Observer {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum Joined {
+pub enum Joined {
     /// Retained identity progress, replayed once; it is not a new send.
     Live(Vec<OrderIdentityReceipt>),
     Already,
@@ -261,6 +264,7 @@ impl Groups {
     }
 
     /// The next read of the same background root adopts its queued joiners.
+    #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
     pub(crate) fn begin_successor(
         &mut self,
         previous: Execution,
@@ -387,6 +391,7 @@ impl Groups {
             .is_ok_and(|group| !group.terminal && (group.background || !group.observers.is_empty()))
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
     pub(crate) fn member(&self, command: CommandId) -> Option<(Execution, u64)> {
         self.members
             .get(&command)
@@ -497,6 +502,7 @@ impl Groups {
         Ok(sealed)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
     pub(crate) fn abort(
         &mut self,
         execution: Execution,
@@ -505,6 +511,7 @@ impl Groups {
         self.complete(execution, |_| Err(error.clone()))
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // Background roots and writes: Bitrue/Hyro phases.
     pub(crate) fn progress(
         &mut self,
         execution: Execution,
