@@ -2124,3 +2124,13 @@ One existing numeric failure remains solely when Context issuance itself refuses
 before returning authority; its removal belongs to the shared pre-authority
 failure seam. All other venue maps remain exact. This closes this candle area
 only, not the remaining public/private/history/signing inventory or master gate.
+
+## Paradex independent startup authority
+
+~~Paradex public catalog and ticker seeds bypass managed HTTP authority and can
+remain pending without an engine-owned original deadline.~~ Independent background
+Read Contexts now own preparation, release and each 20-second attempt. Native
+staging commits only on successful validated delivery; refusal, expiry and
+transport failure retire authority before the existing startup Backoff runs.
+Candle fallback, authenticated/account/history and joined startup work remain in
+their previously committed inventory; this closes only public_seed's send site.
