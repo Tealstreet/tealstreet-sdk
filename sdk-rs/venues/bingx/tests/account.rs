@@ -2784,3 +2784,60 @@ mod metadata_entry_capacity {
         check(true);
     }
 }
+
+fn retired_metadata_token(margin: bool) {
+    let mut h = Harness::ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    let packet = if margin {
+        margin_stage(&mut h, 980)
+    } else {
+        metadata(&mut h, 980)
+    };
+    let live = h.engine.store().metadata_executions();
+    assert_eq!(live.len(), 1);
+    h.engine.store_mut().retire_metadata_work(&live[0].0);
+    assert!(h.engine.store().metadata_executions().is_empty());
+    h.reply(packet.id, 200, if margin { ISOLATED } else { RAILS });
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/trade/marginType"))
+    );
+    let terminal = h
+        .done
+        .iter()
+        .filter(|(id, _)| *id == 980)
+        .cloned()
+        .collect::<Vec<_>>();
+    let failure = h
+        .failures
+        .iter()
+        .filter(|(id, _)| *id == 980)
+        .cloned()
+        .collect::<Vec<_>>();
+    let fresh = margin_stage(&mut h, 981);
+    h.reply(fresh.id, 200, ISOLATED);
+    assert_eq!(metadata_rails(&h, 981), (12.0, 34.0));
+    assert_eq!(
+        terminal.len(),
+        1,
+        "missing Store custody cannot strand a live Plan"
+    );
+    assert!(terminal[0].1.is_err());
+    assert_eq!(failure.len(), 1);
+    assert_eq!(
+        failure[0].1.kind,
+        Some(safe_cex_engine::ErrorKind::Internal)
+    );
+    h.reply(packet.id, 200, ISOLATED);
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 980).count(), 1);
+}
+#[test]
+fn retired_metadata_token_rejects_current_settings_fallback_once() {
+    retired_metadata_token(false);
+}
+#[test]
+fn retired_metadata_token_rejects_final_margin_publication_once() {
+    retired_metadata_token(true);
+}
