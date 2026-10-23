@@ -266,3 +266,17 @@ runtime hooks remain held until the owner's reviewed feature-isolation pin.
 ReadOnly default/activation failure has no write outcome, and the restricted
 retirement-output panic must preserve sticky poison. Neither this approval nor
 a future local test makes the feature-isolation WIP consumable.
+
+Execution composition refinement: physical owner retirement and its wake of B
+run only AFTER A's single seal has completed every surviving observer. Observer
+detach/expiry does not trigger this wake, and B cannot activate while any of A's
+observers still awaits its terminal.
+
+Original source controls now exist in engine/tests/preflight_ready.rs, using
+only reviewed-parent APIs. A and B each enter genuinely; B retains its own
+Preflight while A is active. A's exact DATA still cannot admit B (Revoked), A
+completes once, and the desired same-event B activation fails with zero released
+requests versus one. The ordinary immediate-owner/two-genuine-entry control
+passes (1 behavioral RED, 1 compatibility GREEN). Initial fixture compilation
+issues were corrected before this run; only the behavioral failure is RED
+evidence. The local immediate Present fixture is not remote family proof.
