@@ -492,6 +492,9 @@ pub fn auth_outcome(table: &CodeTable, native: &Native<'_>) -> Option<AuthOutcom
     .then_some(AuthOutcome::Rejected)
 }
 
+/// The engine's wait for a rate limit that names no Retry-After (rule 5).
+pub const DEFAULT_RATE_LIMIT_DEFERRAL_MS: f64 = 10_000.0;
+
 /// How a failed read may continue. A read carries no money effect, so this
 /// is retry evidence only, separate from signing and transport budgets.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -521,11 +524,20 @@ pub fn read(
 ) -> ReadFailure {
     let verdict = verdict(table, Intent::Read, released, native);
     let error = error(verdict, Intent::Read, released, native, message);
-    let retry = match verdict {
-        Verdict::RefusedResend(_) => Some(ReadRetry::NativeResend),
-        _ if error.retry_after_ms.is_some() => error.retry_after_ms.map(ReadRetry::After),
-        Verdict::Unknown(_) => Some(ReadRetry::ReadFailure),
-        Verdict::Refused(_) | Verdict::Satisfied(_) => None,
+    let header = match released {
+        Released::Response(response) => retry_after_ms(response),
+        Released::Transport => None,
+    };
+    let retry = match (verdict, verdict.kind()) {
+        (Verdict::RefusedResend(_), _) => Some(ReadRetry::NativeResend),
+        (_, Some(ErrorKind::RateLimited)) => Some(ReadRetry::After(
+            header.unwrap_or(DEFAULT_RATE_LIMIT_DEFERRAL_MS),
+        )),
+        (_, Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)) => {
+            None
+        }
+        (Verdict::Unknown(_), _) => Some(header.map_or(ReadRetry::ReadFailure, ReadRetry::After)),
+        (Verdict::Refused(_) | Verdict::Satisfied(_), _) => None,
     };
     ReadFailure { error, retry }
 }
@@ -542,6 +554,10 @@ pub fn assert_table(table: &CodeTable) {
         assert!(
             satisfied_ok(row),
             "row {index}: Satisfied needs a matching `only`"
+        );
+        assert!(
+            row.verdict != Verdict::RefusedResend(ErrorKind::RateLimited),
+            "row {index}: a rate limit waits; it never resends"
         );
         if let Key::Range(low, high) = row.key {
             assert!(low <= high, "row {index}: empty range");

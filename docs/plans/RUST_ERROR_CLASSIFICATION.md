@@ -98,15 +98,16 @@ duplicated, with divergence, between write, read, startup and WS-login paths.
     - Code 0 or a 2xx status never proves a successful body or list; success proof
       stays with the venue codec.
     - Auth is derived once, from the table, inside the existing
-      `Venue::account_auth_outcome` hook, through `classify::auth_outcome`. It
-      applies only when the read's Context carries a credential: public reads
+      `Venue::account_auth_outcome` hook, through `classify::auth_outcome(table,
+      native)`. The engine consults that hook only for credentialed account
+      reads (`PendingHttp.auth`, set by `tag_account_read`), so public reads
       never produce credential evidence, even with auth-looking codes such as
-      Crypto.com 40101.
-    - `account_auth_outcome` gains a `credentialed: bool` argument. The engine
-      fills it from the delivery Context on managed reads, and on legacy reads from
-      its own per-request credential record (`PendingHttp.auth`). The venue never
-      supplies it. `auth_outcome(table,
-      credentialed, native)` returns `None` whenever `credentialed` is false.
+      Crypto.com 40101. Venues must not call `auth_outcome` outside the hook.
+      Managed reads must keep the same gate when they adopt the hook.
+    - Read retry: a rate limit waits for its Retry-After, or else the engine
+      default (10 s). An auth refusal never retries. A proven `RefusedResend`
+      resends once. Any other unproven answer is a read failure, which honours a
+      Retry-After on any status.
 
 `kind` comes from the verdict. `retryAfterMs` is set only when a Retry-After header
 is actually present. A new `startup::retry_after_ms(&Response) -> Option<f64>`
@@ -156,8 +157,8 @@ impl CodeTable {
     pub fn verdict(&self, native: &Native<'_>, intent: Intent) -> Verdict; // WS login, startup
 }
 pub fn decode_int(token: &str) -> Option<i64>;            // strict integer, rule 4
-pub fn auth_outcome(table: &CodeTable, credentialed: bool, native: &Native<'_>)
-    -> Option<AuthOutcome>;                               // rule 10, credentialed only
+pub fn auth_outcome(table: &CodeTable, native: &Native<'_>)
+    -> Option<AuthOutcome>;          // rule 10, only inside account_auth_outcome
 pub fn assert_table(table: &CodeTable);                   // venue table tests
 
 // Managed path (Cx). Each call records the fact in the command journal.

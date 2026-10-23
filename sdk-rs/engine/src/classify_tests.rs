@@ -349,6 +349,24 @@ fn read_failures_carry_retry_evidence_and_never_an_outcome() {
         Some(ReadRetry::After(2_000.))
     );
     assert_eq!(at(503, "", None).retry, Some(ReadRetry::ReadFailure));
+    assert_eq!(
+        at(503, "Retry-After: 5\r\n", None).retry,
+        Some(ReadRetry::After(5_000.))
+    );
+    // A rate limit without a header still waits; an auth refusal never retries.
+    assert_eq!(
+        at(429, "", None).retry,
+        Some(ReadRetry::After(DEFAULT_RATE_LIMIT_DEFERRAL_MS))
+    );
+    assert_eq!(
+        at(400, "", Some(&int(-1003))).retry,
+        Some(ReadRetry::After(DEFAULT_RATE_LIMIT_DEFERRAL_MS))
+    );
+    assert_eq!(
+        at(418, "", None).retry,
+        Some(ReadRetry::After(DEFAULT_RATE_LIMIT_DEFERRAL_MS))
+    );
+    assert_eq!(at(401, "", None).retry, None);
     let lost = read(&TABLE, Released::Transport, None, "lost");
     assert_eq!(lost.error.kind, Some(ErrorKind::Network));
     assert_eq!(lost.error.outcome, None);
