@@ -397,3 +397,14 @@ the capacity test now retains every genuine peer Preparation and verifies each
 remains pending before and after the owner refusal, while forbidding new Prepare/
 Bind. All20 controls and focused strict Clippy still pass. These are review
 follow-ups, not additional original REDs or a runtime change.
+
+Independent source/adversarial, caller/fixture and full-map reviews are CLEAR
+for source2bdce833c21 and the reviewed documentation/test follow-ups through
+1f7547d78c7. Architecture gate: No per-venue implementation of a cross-cutting
+concern; this adapter consumes shared tracked roots, expiry, Context completion
+and existing dispatch recipes while preserving native codecs and pacing.
+Full-map review confirms exactly12 intended paths and all foreign source/maps
+unchanged. The signer owner reserves the optional OKX staging-bound tightening
+for a separate tiny PR after #1950 lands; frozen #1915 holds the checker files,
+so this consumer leaves them untouched. Replacement1976 integration, fresh full
+provenance and CI are still required before READY; no landing merge is authorized.
