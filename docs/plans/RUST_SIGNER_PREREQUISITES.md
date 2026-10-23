@@ -280,6 +280,13 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
   - public-only, bounded by op count;
   - runs through `sign_ready`;
   - returns `Unavailable` without scheduling for a non-immediate provider.
+- **Two values, never merged.** The *expected* value is venue config:
+  GRVT `signer_address`, the HL `key`/`user` wallet. It can be stale. The
+  *actual* signer value is the one fetched (local) or bound to the `KeyRef`
+  (host/remote) above. Only the actual value is signed with or checked by
+  recovery. The expected value only drives the native notices and the
+  deactivate. `applicationId`, the vault or the main wallet never stands in
+  for signer metadata.
 - **Admission compares, never overwrites.** When a value is declared,
   admission compares it with the fetched one, and a mismatch keeps today's
   outcome:
@@ -287,14 +294,18 @@ agree).** There is no engine startup seam (`Cx::fetch_public` is dropped).
   - Hyperliquid deactivating spot;
   - TxFlow refusing a key that does not parse.
 
-  With no declared value, the fetched value fills the field. GRVT keeps
-  signing with the derived (fetched) address.
+  The expected value is never replaced by the actual one. GRVT warns on a
+  stale `signer_address` and continues, signing `Signature.s` with the
+  actual address (`trading.rs:784/987`). HL compares `key.or(user)` for the
+  perps notice, and spot requires `key` with case-insensitive equality,
+  deactivating before I/O on a mismatch.
 - **Host and remote providers.** The value must be declared. Where the
   family's signature is recoverable (EIP-712/191 for Hyperliquid, TxFlow,
   GRVT and Polymarket), dispatch recovers the signer and compares it with
   the declared value *before* physical release, import or any private
-  effect, in `SignStep::apply` or the P8 verifier. A mismatch refuses with
-  zero HTTP; this is never a post-send startup check. The comparison is
+  effect, in `SignStep::apply` or the P8 verifier. It compares only with the
+  actual signer metadata, never the expected config. An actual-signer
+  mismatch refuses with zero HTTP; this is never a post-send startup check. The comparison is
   against the declared *signer* only: the Polymarket SignerType3 contract
   maker or funder is never compared as if it were the recovered wallet. A
   family that cannot verify before release
@@ -333,6 +344,11 @@ APIs are labelled as such, not REDs):
   non-immediate provider, and over-bound requests are refused.
 - Mismatch notices and the spot deactivate still fire, through the
   Hyperliquid and GRVT admission.
+- GRVT, local and host/remote: a stale expected `signer_address` warns and
+  orders still sign and send with the actual address.
+- HL: the agent, main wallet and vault stay distinct. This extends the
+  existing `spot_local_signer_identity_is_separate_from_main_wallet_and_vault`
+  control to refs and host metadata.
 - Missing or conflicting host metadata refuses setup.
 - A recovered-signer mismatch refuses before release.
 
