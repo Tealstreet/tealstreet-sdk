@@ -1,9 +1,10 @@
 //! Rare reads return JSON; no history rows enter the live store.
 use crate::{Hyperliquid, Pending, account::side, wire::*};
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{Completion, CursorHistory, HistoryRows};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
-use safe_cex_engine::{CommandId, Cx, Query, Response, VenueError};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::{CommandId, Cx, ErrorKind, Outcome, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -156,41 +157,65 @@ impl Hyperliquid {
             client_order_id,
         } = &query
         {
-            if let Some(order) = cx.store.orders().iter().find(|o| {
+            let cached = cx.store.orders().iter().position(|o| {
                 o.symbol == *symbol && o.client_order_id.as_deref() == Some(client_order_id)
-            }) {
-                #[derive(Serialize)]
-                struct Found<'a> {
-                    found: bool,
-                    order: &'a safe_cex_engine::model::Order,
-                }
-                cx.done(
-                    command,
-                    serde_json::to_string(&Found { found: true, order }).unwrap(),
-                );
-                return;
-            }
-            if !crate::account::valid_cloid(client_order_id) || self.user().is_none() {
-                cx.done(command, "{\"found\":false,\"definitive\":false}".into());
+            });
+            if cached.is_some()
+                || !crate::account::valid_cloid(client_order_id)
+                || self.user().is_none()
+            {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
+                let result = if let Some(index) = cached {
+                    #[derive(Serialize)]
+                    struct Found<'a> {
+                        found: bool,
+                        order: &'a safe_cex_engine::model::Order,
+                    }
+                    serde_json::to_string(&Found {
+                        found: true,
+                        order: &cx.store.orders()[index],
+                    })
+                    .unwrap()
+                } else {
+                    "{\"found\":false,\"definitive\":false}".into()
+                };
+                let _ = cx.done_context(&context, result);
                 return;
             }
         }
         if self.spot {
-            {
-                let result: Result<String, String> = match query {
-                    Query::OrderByClientId { .. } => {
-                        Ok("{\"found\":false,\"definitive\":false}".into())
-                    }
-                    Query::PublicTrades { .. } => {
-                        Err("Hyperliquid spot public trades query is not supported".into())
-                    }
-                    _ => Ok("[]".into()),
-                };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+            let mut completion = Completion::new(command);
+            match query {
+                Query::OrderByClientId { .. } => {
+                    completion.finish(cx, Ok("{\"found\":false,\"definitive\":false}".into()));
                 }
-            };
+                Query::PublicTrades { .. } => {
+                    completion.finish(
+                        cx,
+                        Err(VenueError::new(
+                            "Hyperliquid spot public trades query is not supported",
+                        )
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(Outcome::NotSent)),
+                    );
+                }
+                Query::Fills { .. } | Query::OrderHistory { .. } | Query::Income { .. } => {
+                    completion.incomplete("history is INCOMPLETE: Hyperliquid spot adapter has no native history read");
+                    HistoryRows::<()>::new(completion, |rows| {
+                        serde_json::to_string(rows)
+                            .map_err(|error| VenueError::new(error.to_string()))
+                    })
+                    .finish(cx, Ok(()));
+                }
+            }
             return;
         }
         let (kind, from, to) = match &query {

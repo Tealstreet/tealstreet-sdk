@@ -216,3 +216,117 @@ multiplicity to source and manifest, including all conservative matches. Both
 request-context checks pass, including13 adversarial controls; whitespace checks
 pass. Architecture gate: No for the proposed adapter adoption. This is planning
 proof; implementation, CI and merge authorization remain separate gates.
+
+
+## Perps candle implementation plan on actual public-header ingress
+
+This area starts from actual #1820 `2b1e35e50b2095c6651344fc5ffe0553ad456f35`,
+which includes actual #1830 command admission. The header owner released its
+`tests/public.rs` hold. The fresh open-PR map still reserves sign.rs/trading.rs
+for #1852 and history.rs/tests/spot.rs for #1797; none belong to this slice.
+Only lib.rs, a new request_context_candles.rs test and the existing public candle
+fixture's shared prepared-action drain change, plus required shared appendices.
+
+Keep both the standalone HyperliquidSpot instance and known merged spot markets
+on their existing Pending::Candles path while tests/spot.rs is held. Select this
+protocol boundary with self.spot and a pure market.is_spot==Some(true) lookup
+before admission; that lookup allocates no engine resource. Unknown symbols on a
+perps instance still use shared admission before native rejection. Use a distinct boxed ManagedCandles payload for perps; never store a runtime
+legacy-versus-Context authority switch inside one payload. The shared info sender
+and all spot numeric validation/completion expressions remain counted. Therefore
+this perps-only runtime cutover may remove zero lexical entries: preserve the
+52-occurrence inventory exactly unless the actual scanner proves a deletion.
+Do not delete still-used fingerprints to claim progress or add a numeric wrapper.
+Spot adoption later removes those shared sites. No all-family closure is claimed.
+
+For a perps FetchCandles, call admit_http_command before native validation or any
+resource allocation: Read, RetryPolicy::Never, no credential, 20,000ms original
+raw bound. Return on Rejected (already emitted) or Revoked, without numeric fail.
+Validate interval and coin exactly as today, retaining native text/classification.
+Extract only the pure existing candle JSON/time geometry into one helper reused
+by the old spot branch and new perps branch; preserve each old numeric expression
+verbatim to obey the shrink-only fingerprint rule. Preserve floor/clamp rules,
+limit default500/cap1500, from/to handling, raw coin/HIP-3 spelling, serialized
+field order and native REST api.hyperliquid.xyz / api.hyperliquid-testnet.xyz
+routes. Existing API-UI WS routes are unrelated and remain unchanged.
+
+Send POST /info with request_managed_with_headers using static ordered
+[("Content-Type","application/json")], unchanged body and no signer/credential.
+On successful queueing select ArrayAt::Root through stream_response. Pending
+retains the exact root/physical leg and native Vec<Candle>/valid facts. Gate each
+stream item and the final response through validate_read_http_delivery(root,leg)
+before mutation/publication. Reuse CandleRow::candle unchanged: native encounter
+order and seconds timestamps remain, with no new sorting, filtering or truncation.
+A failed stream prefix is discarded by strict Context failure, never returned.
+
+Preserve the existing single non-2xx codec in on_response; validate the managed
+read before reaching it. Add only the new pending arm to existing failure routing.
+Override typed preparation/released-failure hooks for this pending variant to
+forward the shared VenueError intact; other pending variants keep their existing
+callbacks. Read terminals use done_context/fail_context and deliberately handle
+or ignore ownership denial, never numeric fallback or unwrap. No venue deadline,
+retry, classifier, signer, auth, nonce or outcome algorithm is introduced.
+
+Original three assertion-RED controls are committed at 8fd78523f51; carry them
+with provenance onto this branch and rerun against actual legacy behavior before
+source. At full capacity, even an invalid perps request must receive canonical
+Internal with outcomeNone before validation; normal native preflight metadata
+remains. Extend controls first for failed incremental prefixes, original-bound
+stream progress, input/capacity refusal, sibling isolation and native HIP-3 text.
+Allow exact current-page Cancel on retirement; forbid new Prepare/Bind/legacy
+HTTP. Keep existing public wire/schema assertions and every held spot assertion.
+Use shared prepared_actions only for the immediate existing fixture, never to
+claim the parked controls automatically. After source, run full focused HL and
+Binance native packages with CARGO_BUILD_JOBS=2, strict touched-crate clippy/fmt,
+bans and both ratchets; CI runs WASM/replays/timing. Three independent plan and
+implementation reviews are required; architecture answer should be No, an
+adapter to existing shared choke points. Document concrete caller metadata,
+20-second preparation-inclusive bound and spot scope in CALLERS/AUDITS/QUALITY.
+
+## 2026-10-24: local client-order lookup completion
+
+Base: actual Store landing `c55a6a760443bf1531eb536bfc504a312cee1356`.
+The full inventory and destination map above remain the family map. Current
+manifest: Hyperliquid 50 sites, history.rs 13. This slice removes only the two
+local `OrderByClientId` completion fingerprints below, leaving 48 / 11:
+
+- `95ca4237828f8435d55e2d1e464bad969c28ac05efed94d2a1de945845738d75`
+  (one): matching cached symbol and client ID returns the complete native Order.
+- `da539b025b1000762173bebe5cbd496d99e02923664484e6f40e183ee7ff9118`
+  (one): invalid client ID or missing account identity returns the exact native
+  `{"found":false,"definitive":false}` payload.
+
+Only these synchronous returns enter the shared `admit_http_command` choke
+point, with Read, 20,000ms, no credential/pacing, RetryPolicy::Never. Decide the
+native local branch without effects, admit before serializing or publishing its
+result, then call `done_context`; rejected/revoked admission returns immediately
+without numeric completion or a fabricated owner. Cached lookup keeps precedence
+over ID validation, missing identity and the spot capability branch. Use a cached
+order index across admission and serialize the unchanged borrowed Order afterward;
+no clone, new result schema or venue finalizer is needed. Valid uncached perps
+lookups retain the native public-only refusal or private REST path; the public-only
+refusal keeps its exact text even at full Context capacity. Spot uncached lookups keep their existing
+non-definitive local result. Neither gets a new unused Context.
+
+Files: history.rs, a new tests/request_context_cached_lookup.rs, this appendix,
+CALLERS/AUDITS/QUALITY, and only the two manifest entries. The fresh open-PR map
+shows these source/new-test paths clear; candle fixtures and signing/trading
+files are held and stay outside the slice. No Paradex signing changes.
+
+Original RED commit precedes source: both local branches reject NaN/infinite
+entry clocks and full 256-owner capacity, emit exactly one typed correlated Read
+failure with no financial outcome, no HTTP/WS/timer/marker/store publication;
+freeing one parked genuine perps-candle peer enables exact native results and
+cannot complete another owner. Controls cover perps/spot, mainnet/testnet,
+public/missing identity, full cached Order wire equality and cache precedence,
+non-matching symbol/ID, duplicate active command ownership, finite ID reuse,
+300 synchronous retirements, and valid uncached perps REST fallthrough. Keep
+existing native history assertions unchanged. Tests must fail for the original
+admission assertions, rather than compilation or altered native expectations.
+
+Verify scoped Hyperliquid + Binance native tests (CARGO_BUILD_JOBS=2), strict
+all-target/all-feature Hyperliquid Clippy, scoped fmt, bans and both request-context
+checks. Independently review plan then source/adversarial, caller and full-map
+preservation. Architecture gate: No; only consumes existing shared entry and
+terminal authority. Draft PR and background CI; request a serialized train slot
+only after clean reviews and green exact-head CI. No engine or signer work.

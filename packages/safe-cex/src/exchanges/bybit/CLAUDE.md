@@ -92,7 +92,7 @@ Authentication uses HMAC-SHA256 with the following process:
    - `X-BAPI-TIMESTAMP`: the timestamp
    - `X-BAPI-RECV-WINDOW`: configurable, defaults to `20000` ms (via `options.extra.recvWindow` or `RECV_WINDOW` constant)
    - `X-Referer`: `Tealstreet` (broker ID)
-   - `Content-Type`: `application/json, charset=utf-8`
+   - `Content-Type`: `application/json`
    - `x-site-id`: `BRA_BTL` only when `options.bybitSiteId === 'BRA_BTL'`
 
 Each request gets a unique `requestId` param via `nanoid()`.
@@ -1214,21 +1214,33 @@ Slippage protection uses the simulator-configured gate. Explicit `maxSlippagePct
 and Bybit BBO/TickSize options are rejected because the contract does not establish
 client-defined protection. Plain market orders remain supported.
 Optional simulator preview/evidence endpoints are not used by this connector.
+Hyro conditional creates follow Bybit semantics but the simulator JSON contract is
+stricter about scalar types: send `triggerDirection` as numeric `1`/`2`, not a
+string.
 
 `hyrotrader.ws-private.ts` waits for correlated auth and subscribe acknowledgements,
 then reconciles all pages of current orders/positions and the UNIFIED wallet before
 opening the event gate. The snapshot publishes atomically; failed, malformed, stale
 or incomplete responses preserve prior state and leave recovery unhealthy. Position
-rows require valid leverage, and mapped numeric fields must be finite before publication. Frames
-arriving during recovery invalidate the in-flight snapshot and trigger a bounded
-re-read. A failed handshake or unsettled snapshot reconnects with visible errors.
-Creates are refused while an established private session is recovering.
+rows require valid leverage for open size, and mapped numeric fields must be finite
+before publication. Zero-size clear rows may omit leverage; map them with the
+existing symbol leverage (or `1`) so close events clear state without publishing
+`NaN`. Open position rows may use either `avgPrice` or `entryPrice` for the entry
+price alias. Frames arriving during recovery invalidate the in-flight snapshot and
+trigger a bounded re-read. A failed handshake or unsettled snapshot reconnects with
+visible errors. Creates are refused while an established private session is recovering.
 
 Public streams carry periodic snapshots. Hyro candles use authoritative kline volume
 and never accumulate publicTrade snapshots; seconds candles are unavailable. Bybit's
 trade-derived candle path is unchanged. Orderbook snapshot/delta and ticker parsing
 remain shared, but Hyro public endpoints are the venue source of truth for this
-adapter; do not swap in direct Bybit L2 as an assumed-equivalent fallback.
+adapter; do not swap in direct Bybit L2 as an assumed-equivalent fallback. Hyro's
+public WS rejects oversized subscribe batches with `at most 32 topics per
+connection`. The shared ticker/reconnect subscribe path already chunks at 10
+and is safe for both venues; the bulk kline subscribe (`listenOHLCVs`) stays at
+50 for ordinary Bybit livenet and is overridden to 10 on `HyrotraderExchange`
+via `publicKlineSubscribeChunkSize`. Do not blanket-shrink the kline chunk on
+the shared Bybit path.
 
 Configure the web build before enabling the connector:
 

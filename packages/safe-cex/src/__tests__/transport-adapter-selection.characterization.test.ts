@@ -15,6 +15,12 @@ import {
 } from '../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { DefaultStore } from '../store/store.base';
 
+// Inspect REST adapter construction, without bootstrapping a remote SDK account.
+vi.mock('../exchanges/paradex/paradex.sdk', async (original) => ({
+  ...await original<typeof import('../exchanges/paradex/paradex.sdk')>(),
+  initializeParadexSDK: vi.fn(async () => null),
+}));
+
 vi.hoisted(() => {
   // HyroTrader builds Bybit REST clients during construction, before the test ever starts I/O.
   process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL ??= 'https://hyrotrader-prod.test';

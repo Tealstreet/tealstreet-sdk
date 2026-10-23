@@ -41,7 +41,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 
 pub enum Pending {
     BookQuery {
-        command: CommandId,
+        context: safe_cex_engine::request_context::Context,
     },
     Account(account::Request),
     Trade(trading::Request),
@@ -622,8 +622,8 @@ impl Venue for Cryptocom {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if let Pending::BookQuery { command } = pending {
-            self.book_query_response(cx, command, response);
+        if let Pending::BookQuery { context } = pending {
+            self.book_query_response(cx, context, response);
             return;
         }
         if let Pending::Identity(request) = pending {
@@ -759,12 +759,40 @@ impl Venue for Cryptocom {
             }
         }
     }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::BookQuery { context } => {
+                let _ = cx.fail_context(&context, error);
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::BookQuery { context } => {
+                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::BookQuery { command } => cx.fail(
-                command,
-                depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
-            ),
+            Pending::BookQuery { context } => {
+                let _ = cx.fail_context(
+                    &context,
+                    depth_query::failure(error, safe_cex_engine::ErrorKind::Network),
+                );
+            }
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error), None),
             Pending::History(request) => self.history_failed(cx, request, error, true),
@@ -827,20 +855,8 @@ impl Venue for Cryptocom {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::FetchOrderBook {
-                command, symbol, ..
-            } => {
-                cx.request(
-                    Method::Get,
-                    format!(
-                        "{}/public/get-book?instrument_name={}&depth=50",
-                        self.rest,
-                        encode(&symbol)
-                    ),
-                    vec![],
-                    None,
-                    Pending::BookQuery { command },
-                );
+            Command::FetchOrderBook { symbol, .. } => {
+                self.fetch_book(cx, &symbol);
             }
             Command::SubscribeOrderBook { symbol } => {
                 let state = self
