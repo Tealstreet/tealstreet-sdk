@@ -418,3 +418,12 @@ visits across public ticker events, dispatch preparation and drains. Retain the
 assertion RED, then run it in native release mode and preserve all active-Plan,
 root-expiry, reservation-refusal, command-ID reuse and observer-isolation controls.
 Only normal CI establishes the WASM steady gate; no local WASM build is used.
+
+The first non-generic seal extraction recovers 2,957 bytes in normal Aster CI,
+leaving 17,458 above the same fixed budget. Next keep the idle Plan guard inline
+but move its active scheduling body out of line. Likewise keep owner-boundary
+custody clearing/fatal checks inline, and place only the nonempty retirement
+queue body out of line. Share the extracted deferred-command body rather than
+inlining a copy into both terminal boundaries. These are code-generation changes
+only; preserve every callback, clear/restore, panic and timer operation in order.
+Measure size and idle CPU together in normal CI; do not infer either from source.
