@@ -445,3 +445,24 @@ Only the validated subset receives effect authority. Add original assertion REDs
 for the public fact and batch mappings, plus all-unknown/count/empty/5xx negatives,
 exact-attempt binding and final Unknown-with-proven-IDs journal projection.
 Classifier ownership reviews this exact mapping before its source pin is shared.
+
+## Remaining shared cold-path containment
+
+The next normal CI measurement at `0f06f289fe4` is 1,362,187 bytes for
+Aster, 18,699 above the unchanged 1,343,488-byte budget. Bybit and Bitunix
+replay jobs both pass. That measurement includes the public partial-unknown
+mapping and actual capability/history integrations; it establishes no saving
+from the preceding outlining.
+
+Try three bounded shared registry boundaries: keep an inline empty Plan-index
+guard in `end_plan_admission`, outline only its nonempty custody-clearing loop,
+and prevent reinlining `record_owned_read_failure` and `ContextRegistry::finish`
+into generic engine failure/finalizer paths. Keep all validation and mutation
+order exact. These bodies are non-generic already; LLVM may already share them,
+so this is a size experiment, not an established duplication diagnosis or byte
+forecast. No new policy, rights, storage, thresholds or callback behavior.
+
+Preserve the native zero-Plan-visit regression and every active Plan/retirement
+control; run feature-on/off engine tests and strict checks, then independently
+review the extraction and measure normal CI again. Do not claim a byte floor
+or savings without the resulting artifact measurement.
