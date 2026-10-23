@@ -475,7 +475,7 @@ fn command_entry_capacity_is_typed_before_native_validation_and_preserves_peers(
                 let error = result[0].as_ref().unwrap_err();
                 assert_eq!(error.kind, Some(ErrorKind::Internal));
                 assert_eq!(error.outcome, None, "Read refusal has no financial outcome");
-                assert_eq!(error.message, "Too many requests in flight");
+                assert_eq!(error.message, "Engine request capacity reached");
                 assert_eq!(
                     actions.len(),
                     1,
