@@ -424,3 +424,31 @@ fn an_exhausted_receipt_sequence_never_wraps() {
     assert_eq!(observed(&e, 5), [None], "no receipt left: unstamped");
     assert_eq!(deadline(&e, 5), None);
 }
+
+#[test]
+fn a_duplicate_refused_before_its_entry_keeps_the_live_stamp() {
+    let duplicates = [
+        Command::FetchAccount { command: 1_000 },
+        Command::AmendOrderWithSymbol {
+            command: 1_000,
+            id: "x".into(),
+            symbol: "BTC".into(),
+            price: Some(1.),
+            amount: None,
+        },
+    ];
+    for duplicate in duplicates {
+        let mut e = engine(Probe {
+            ignore_high: true,
+            ..Default::default()
+        });
+        // A legacy command left awaiting its reply, with no Context.
+        deliver(&mut e, 0., &cancel(1_000, "x", Some(300_000)));
+        assert!(handle_with(&mut e, 10., duplicate.clone(), Some(5_000)));
+        assert_eq!(
+            deadline(&e, 1_000),
+            Some(300_000.),
+            "{duplicate:?} refused before its entry"
+        );
+    }
+}
