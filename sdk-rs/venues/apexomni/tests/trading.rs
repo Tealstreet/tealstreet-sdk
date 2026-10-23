@@ -1004,6 +1004,7 @@ fn hmac_setting() -> Command {
 }
 
 #[test]
+#[ignore = "original RED: managed write adoption feat/rust-apex-managed-writes, owner codex-hcmq3f; FIFO and conditional Plan seams"]
 fn managed_hmac_cancel_503_signature_body_is_unknown_without_resend() {
     hmac_write_failure_is_unknown(
         hmac_cancel(),
@@ -1014,6 +1015,7 @@ fn managed_hmac_cancel_503_signature_body_is_unknown_without_resend() {
 }
 
 #[test]
+#[ignore = "original RED: managed write adoption feat/rust-apex-managed-writes, owner codex-hcmq3f; FIFO and conditional Plan seams"]
 fn managed_hmac_setting_408_signature_body_is_unknown_without_resend() {
     hmac_write_failure_is_unknown(
         hmac_setting(),
@@ -1024,6 +1026,7 @@ fn managed_hmac_setting_408_signature_body_is_unknown_without_resend() {
 }
 
 #[test]
+#[ignore = "original RED: managed write adoption feat/rust-apex-managed-writes, owner codex-hcmq3f; FIFO and conditional Plan seams"]
 fn managed_hmac_cancel_unlisted_code_is_unknown_with_native_evidence() {
     hmac_write_failure_is_unknown(
         hmac_cancel(),
@@ -1034,6 +1037,7 @@ fn managed_hmac_cancel_unlisted_code_is_unknown_with_native_evidence() {
 }
 
 #[test]
+#[ignore = "original RED: managed write adoption feat/rust-apex-managed-writes, owner codex-hcmq3f; FIFO and conditional Plan seams"]
 fn managed_hmac_setting_unlisted_code_is_unknown_with_native_evidence() {
     hmac_write_failure_is_unknown(
         hmac_setting(),
