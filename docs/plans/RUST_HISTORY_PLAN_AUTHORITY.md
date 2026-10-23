@@ -385,3 +385,30 @@ Require an executed ingestion control for timeout -> failed/re-walk and late
 settlement without a second completion, alongside the final-slot physical
 failure versus root-expiry control. This engine plan changes neither NX callers
 nor host wait policy; no production CALLERS activation is claimed here.
+
+## Managed-host caller boundary control plan
+
+Refresh this tests-first branch onto actual c473342d483 before the new host
+controls. Keep the #1928 runtime API and original assertion evidence separate.
+Use EngineHost and its real managed-http prepare/bind/claim runner with a
+protocol fixture and deterministic deferred page responses. The protocol
+fixture is not a Rust native Plan or an NX deployment: it establishes the host
+boundary independently of the pending Plan-history implementation.
+
+Exercise a paged query that releases and completes pages every19seconds, so
+its seventh page is still pending at the120second caller deadline. Earlier
+physical pages fit their20second call window; progress cannot renew the caller
+wait. Model ingestion's unbounded await and per-exchange serial chain, without
+adding an SDK timeout or cancellation policy. At host expiry the awaited window
+must fail for re-walk once, accept no prefix as success, and release its chain.
+The managed response signal stays un-aborted and its resource remains until
+late work settles. A later successful or failed response cleans up the old
+resource and cannot change the failed window or settle the promise again; a
+fresh queued window succeeds independently. A within-bound control completes
+normally. Verify actual prepare/bind/claim activity and no legacy request path.
+
+These managed-host controls supplement the two earlier host-unit controls and
+owner-supplied NX inventory. They do not establish exact native Plan geometry,
+root-expiry disposition or private BloFin adoption; those remain the native
+managed consumer gates after runtime signatures freeze. No NX source, host wait
+policy, release behavior or production caller flow is changed by these tests.
