@@ -220,3 +220,16 @@ markers, then prefix a newline so arbitrary child output cannot absorb a marker.
 Commit the non-newline regression before correcting framing. Reuse all existing
 negative controls and independently review the four call sites. The old malformed
 cohort stays failed; no tape, raw hash, metric, threshold or verdict is rewritten.
+
+### Immutable evidence transport closure
+
+The complete planner succeeds, but certification loses an immutable artifact GET
+when GitHub closes the socket (UND_ERR_SOCKET). The same exact artifact was read
+successfully during planning. Add one bounded retrieval retry only for immutable
+binary evidence and this transport code; retry the same authority path and retain
+redirect/authentication and post-download checks. Metadata JSON, active-job logs,
+HTTP refusals and invalid evidence fail directly. Permanent closure fails after
+two retrieval attempts. No measurement or second-run job is repeated. Normal API
+counts remain unchanged; each affected immutable read adds at most one retrieval
+sequence, without a quota exemption. Prove recovery, exhaustion, HTTP refusal,
+body failure and credential stripping with deterministic controls before fresh CI.
