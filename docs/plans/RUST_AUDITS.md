@@ -2596,3 +2596,23 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+### WEEX local history admission custody (2026-10-24)
+
+Original test-only checkpoint `d5746d2d490` on actual `a828ede7ebb` compiles and
+runs eleven dedicated controls: three native controls pass; seven independent
+capacity assertions and the invalid-clock assertion fail at native legacy
+publication. The forwarding fixture retains256 genuine engine Read command
+roots and delegates WEEX Query unchanged; it creates no HTTP or fake Context.
+Source/adversarial, caller and full-map reviews cleared the plan and REDs.
+The seven inline terminals now use shared initial Read admission and checked
+Context completion. The unchanged eleven controls pass, including native
+credential-presence/validation order, exact error metadata, equal/one-sided/
+safe-integer bounds, budget boundaries, remote signed/public wire controls at
+full capacity, peer isolation, recovery and300 fixed-clock completions/refill.
+Exact own inventory prune is WEEX51->44/history10->3 occurrences; all remote
+macro records, foreign maps and held trading/dispatch regions are preserved.
+
+Scoped WEEX/Binance native verification passes506tests,0failed/ignored;
+strict WEEX all-target/all-feature Clippy, scoped formatting, source scan and
+all15request-context checker tests pass. Implementation review/CI remain separate.

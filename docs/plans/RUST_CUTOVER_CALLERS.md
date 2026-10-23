@@ -5709,3 +5709,14 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
+
+### WEEX synchronous local history Read terminals
+
+WEEX Futures keyless Fills, OrderHistory and Income retain exact `[]` before
+private input validation. Client-order lookup remains unsupported. Invalid
+family bounds and income/list budgets retain the existing messages, ordering
+and unclassified Read errors. These seven local terminals now require genuine
+engine command Read admission: shared capacity and invalid clock policy emit
+one correlated typed refusal without a financial outcome. Admitted terminals
+create no HTTP, signer, timer, Store mutation or history marker. Remote history,
+its credential selection and paging retain their existing paths and wire bytes.

@@ -1204,3 +1204,19 @@ caller and full-map reviews are CLEAN on this actual integration; architecture
 No. The seven-path diff preserves every unowned incoming blob and all foreign
 manifest entries, with only the four planned Paradex history occurrences pruned.
 CI and an authorized train slot remain separate gates.
+
+### WEEX local history original REDs and typed Read completion
+
+The new dedicated local-history target compiled against unchanged actual
+`a828ede7ebb`:3native controls passed and8intended assertion REDs exposed seven
+capacity bypasses plus invalid-clock publication. Test-only commit
+`d5746d2d490` and the committed plan received three independent CLEAN reviews.
+After the seven scoped terminal replacements, the same11controls pass without
+changing their assertions. A genuine retained-root probe covers the keyless
+case without credential fabrication; duplicate/recovery/300-cycle refill and
+full-capacity native remote wire controls keep custody and fallthrough explicit.
+No new per-venue lifecycle, retry, signer, history finalizer or engine seam.
+
+Scoped WEEX/Binance native verification passes506tests,0failed/ignored;
+strict WEEX all-target/all-feature Clippy, scoped formatting, source scan and
+all15request-context checker tests pass. Implementation review/CI remain separate.

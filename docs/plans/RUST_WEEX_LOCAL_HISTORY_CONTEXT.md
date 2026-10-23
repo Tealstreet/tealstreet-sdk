@@ -198,3 +198,28 @@ owner; no implementation/readiness claim follows from its proposed destination.
 | `venues/weex/src/trading.rs` | `a3929c62720c7893d6477453bb8092ee1dc649a8b5024ffd9867b8715c3afc2f` | 1 | Held #1934: Preflight/Plan/journal and Context outcome |
 | `venues/weex/src/trading.rs` | `c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa` | 1 | Held #1934: Preflight/Plan/journal and Context outcome |
 | `venues/weex/src/trading.rs` | `ea183a3f6fb38fae59d7c32102842bce797af23286a824eb9c17fa5cf43b38d5` | 1 | Held #1934: Preflight/Plan/journal and Context outcome |
+
+## Executed original RED and local adoption receipt
+
+Plan `39bf675e7e0` and test-only checkpoint `d5746d2d490` each received independent
+source/adversarial, caller and full-map CLEAN reviews; architecture gate No.
+The final original run compiled and executed all11tests on unchanged actual
+`a828ede7ebb` production source:3native controls PASS and8intentional assertion
+REDs (one for each seven selected capacity bypasses plus invalid clock).
+An initial fixture compile mismatch and a query-order expectation were corrected
+before freezing the original test commit; neither is counted as a regression RED.
+Command: `CARGO_BUILD_JOBS=2 cargo test -p safe-cex-venue-weex --test request_context_local_history --no-fail-fast`.
+
+Only the seven inline terminal branches plus their policy imports were adopted.
+The same eleven assertions now PASS, including genuine256-root capacity,
+recovery and surviving peers, fixed-clock300-cycle reuse/refill, exact native
+metadata and precedence, and valid remote wire behavior at full Context capacity.
+No held shared support/source, remote owner or dispatch code changed. The raw
+manifest removes only this history path's seven selected singleton fingerprints;
+its two remote fingerprints/three occurrences remain. Broader native/strict/
+ratchet checks, independent implementation reviews and CI are separate gates.
+
+Native gate: `cargo test -p safe-cex-venue-weex -p safe-cex-venue-binance`
+passes506tests with0failed/ignored across40result targets (including empty
+doctest targets). Strict WEEX all-target/all-feature Clippy, scoped rustfmt,
+request-context source scan and all15ratchet tests pass on this adoption.
