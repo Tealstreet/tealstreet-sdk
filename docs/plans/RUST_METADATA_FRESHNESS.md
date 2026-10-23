@@ -1,10 +1,12 @@
 # Engine-owned metadata reads and settings freshness
 
-Status: engine/Store core and legacy WEEX/BingX adapters implemented; common
-Epoch/Stamp adopted after actual #1741/#1759 integration. Shared scheduler and
-unsigned managed-read release controls pass. Private production adoption remains
-blocked on real family signers and shared observer-group completion/expiry.
-Final CI/proof, universal fan-out and runtime deployment remain open.
+Status: shared engine/Store freshness and BingX query owner are implemented.
+WEEX explicit leverage queries retain the incoming managed Context reader and
+native settings revision; shared observations apply to its background settings
+proposals and Store write fences, not query coalescing. The earlier design and
+checkpoint sections below describe the original two-adapter scope; this current
+boundary and the Plan/execution continuation supersede its WEEX query-cutover
+claims. BingX joined Plan adoption waits for the reviewed composition source.
 
 Owner assignment: architecture audit §G, rank 13. Start from actual
 `ecc84a798163c9f61ea9439e90001a98bb07b907`; retain the later decision-only merge
@@ -440,27 +442,28 @@ retry and late joining cannot renew the logical bound. Typed preparation and
 transport failures remain typed. A Plan or slot is never cast to an original
 Read Context, and direct execution completion cannot bypass a Plan seal.
 
-### Open composition decision
+### Execution-owned composition and source gate
 
-The proposed shared API exists locally at `779b8891ecf` on the reviewed Plan
-pin. Its `begin_planned_execution` returns `(Plan, ExecutionHandle)`; Read
-controls and independent source review are still being prepared by its owner.
-Do not consume it as a frozen reviewed seam yet.
+The ownership decision is resolved: the physical Plan belongs to
+`Owner::Execution`, with an explicit founder Observer. The group owner's local
+`e8914194951` implements this design, but independent source review and a frozen
+reviewed pin remain required. Do not consume the superseded founder-owned
+`779b8891ecf` implementation.
 
-That version keeps the founder command as the physical Plan owner. The founder
-cannot detach and survives until Plan sealing; it therefore cannot represent
-the standing metadata requirement that every observer, including the first,
-can detach or expire independently while a live peer remains eligible. Nor can
-it exercise a truly orphaned read's current-stamp denial before the codec.
-The group owner confirmed this difference. An execution-owned retained Plan
-with an explicit founder observer would be a shared additive change, not a
-venue adapter. Keep the original matrix as a gate until the owner settles this
-policy or supplies a reviewed shared authority that implements it. Do not
-weaken the controls or create local orphan bookkeeping to manufacture a pass.
-The group owner has agreed the revised design with the Plan owner: move physical
-Plan ownership to `Owner::Execution` and expose the founder as an explicit
-Observer. Its implementation and original Read controls are in that lane; a
-new reviewed frozen source pin is still required. Do not consume `779b`.
+The proposed shared constructor is
+`begin_planned_execution(&preflight, steps, policy, Window::UntilTerminal, key)`
+returning `(Plan, ExecutionHandle, founder_root)`. The founder root permits
+observer detach/completion only and cannot send. Followers retain their own
+bound capped by the Plan root; joining never extends the physical deadline.
+The adapter must map the complete work key to the handle because the engine
+does not look executions up by key and terminal projection is uniform.
+
+With a live peer, founder detach between first-leg DATA and second-leg issuance
+must preserve the second leg. Last-observer detach between legs must revoke
+unsent slots, deny delivery before codec even with a current Store token, and
+prevent publication. Event-boundary retirement also keeps late replies out of
+the venue codec. Exercise a two-step Read Plan with a fresh-attempt read retry;
+one-slot core evidence alone is insufficient for this adapter.
 
 ### Original REDs and implementation gates
 
@@ -496,7 +499,7 @@ Review this plan and test design independently before implementing. First commit
 the reproducible native-entry/managed-release REDs on unchanged source; retain
 them through the exact Plan integration. Review integration preservation before
 adapting fixtures to native signer changes, keeping the original assertions.
-Wait for the composition policy and reviewed Read API before group production
+Wait for the frozen reviewed composition source before group production
 wiring. Use build/test concurrency two. Run focused metadata/BingX/WEEX native
 controls, standalone feature-on/off checks, strict Clippy/fmt, bans and the
 existing scanner controls; shipped WASM and replay gates remain CI work.
@@ -520,3 +523,25 @@ rails result are three GREEN controls; the duplicate-ID case is not claimed as
 a reproduced defect. The earlier missing cargo/rustc shell runs did not compile
 tests and are not RED evidence. Record new entry-authority REDs against the
 integrated Plan/#1884 source separately, without weakening these assertions.
+
+### Exact Plan-stack checkpoint scope
+
+The exact `2fe13f4d892` integration preserves WEEX `lib.rs` byte-for-byte,
+including its managed explicit leverage read and native settings revision.
+Only background settings observations and Store write fences adopt the shared
+freshness boundary there. Five own unlanded query-cutover tests are removed by
+name in QUALITY; every incoming WEEX test remains. BingX typed signing failures
+retain the provider error and release settings-write ownership before a later
+eligible read publishes. A gated provider installed before startup delegates
+to the same native signing recipe with refusal off; its emitted URL, headers
+and body match the ordinary fixture byte-for-byte.
+
+At this checkpoint 416 BingX/WEEX native tests pass across 26 targets, with the
+one original legacy-release RED explicitly filtered and independently rerun as
+an assertion failure. Engine all-feature/all-target controls pass 908 across
+11 targets; the four original entry test bodies remain verbatim. The scanner's
+15 controls pass. The scanner/bans still refuse historical-pin inventory growth
+against the current landing and restored incoming WEEX sites against the older
+branch parent. This checkpoint is not ready for landing: integrate current
+actual source and complete the real managed conversion before claiming those
+gates pass. No staging entry is changed or enlarged.

@@ -5,7 +5,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Level, Method, Notice, RequestId, Response,
     SocketId, TimerId, wire,
 };
-use safe_cex_venue_bingx::{Bingx, Options};
+use safe_cex_venue_bingx::Bingx;
+mod support;
+use support::Options;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
@@ -45,12 +47,21 @@ impl Harness {
         h
     }
     fn unstarted() -> Self {
+        Self::unstarted_with_provider(|provider| provider)
+    }
+    fn unstarted_with_provider(
+        wrap: impl FnOnce(safe_cex_engine::signing::Provider) -> safe_cex_engine::signing::Provider,
+    ) -> Self {
+        let (venue, provider) = Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Options::default()
+        }
+        .build();
+        let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+        engine.set_signer(Some(wrap(provider))).unwrap();
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {
-                key: Some("key".into()),
-                secret: Some("secret".into()),
-                ..Options::default()
-            })),
+            engine,
             now: 1000.0,
             requests: Vec::new(),
             sockets: Vec::new(),
@@ -67,7 +78,7 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
@@ -144,7 +155,10 @@ impl Harness {
         let i = self
             .timers
             .iter()
-            .position(|(_, t)| *t == at)
+            // Drive the freshly rearmed native timer when an older managed
+            // response deadline shares its timestamp. This harness deliberately
+            // leaves unrelated physical deadlines parked; dedicated tests drive them.
+            .rposition(|(_, t)| *t == at)
             .unwrap_or_else(|| panic!("no timer at {at}; have {:?}", self.timers));
         let (timer, _) = self.timers.remove(i);
         self.now = at;
@@ -201,7 +215,9 @@ impl Harness {
         Self::ready_with_orders(OPEN)
     }
     fn ready_with_orders(orders: &str) -> Self {
-        let mut h = Self::new();
+        Self::finish_ready(Self::new(), orders)
+    }
+    fn finish_ready(mut h: Self, orders: &str) -> Self {
         h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
         h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
         h.respond(POSITIONS, 200, POSITION);
@@ -839,8 +855,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -2256,4 +2272,95 @@ fn metadata_plan_entry_native_pair_keeps_the_rails_result() {
     h.reply(margin.id, 200, ISOLATED);
     assert_eq!(metadata_rails(&h, 943), (12.0, 34.0));
     assert_eq!(h.done.iter().filter(|(id, _)| *id == 943).count(), 1);
+}
+
+#[test]
+fn metadata_write_provider_refusal_releases_pending_owner_before_next_read() {
+    struct Refusing {
+        inner: safe_cex_engine::signing::Provider,
+        refuse: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl safe_cex_engine::signing::Signer for Refusing {
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn sign(
+            &self,
+            request: safe_cex_engine::signing::SignRequest,
+        ) -> safe_cex_engine::signing::SignFuture {
+            self.inner.sign(request)
+        }
+        fn sign_ready(
+            &self,
+            request: &safe_cex_engine::signing::SignRequest,
+        ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+        {
+            if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                Some(Err(safe_cex_engine::signing::SignError::Refused))
+            } else {
+                self.inner.sign_ready(request)
+            }
+        }
+    }
+    for margin in [false, true] {
+        let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = refuse.clone();
+        let mut h = Harness::unstarted_with_provider(|inner| {
+            std::sync::Arc::new(Refusing {
+                inner,
+                refuse: flag,
+            })
+        });
+        h.respond("/quote/contracts", 200, MARKETS);
+        h.respond("/quote/ticker", 200, DAILY);
+        h.respond("/quote/premiumIndex", 200, PREMIUM);
+        let mut h = Harness::finish_ready(h, OPEN);
+        refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+        let requests = h.requests.len();
+        h.event(Event::Command(if margin {
+            Command::SetMarginType {
+                command: 944,
+                symbol: "BTCUSDT".into(),
+                isolated: true,
+            }
+        } else {
+            Command::SetLeverage {
+                command: 944,
+                symbol: "BTCUSDT".into(),
+                leverage: 25.0,
+                side: None,
+            }
+        }));
+        assert_eq!(
+            h.done
+                .iter()
+                .filter(|(id, result)| *id == 944 && result.is_err())
+                .count(),
+            1
+        );
+        assert_eq!(
+            h.requests.len(),
+            requests,
+            "provider refusal releases no HTTP"
+        );
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+        refuse.store(false, std::sync::atomic::Ordering::SeqCst);
+        let read = margin_stage(&mut h, 945);
+        let mut normal = Harness::ready();
+        let expected = margin_stage(&mut normal, 946);
+        assert_eq!(
+            (&read.url, &read.headers, &read.body),
+            (&expected.url, &expected.headers, &expected.body),
+            "refusal-off delegates to the unchanged native signing recipe"
+        );
+        h.reply(read.id, 200, ISOLATED);
+        assert_eq!(metadata_rails(&h, 945), (12.0, 34.0));
+        let setting = h.engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(
+            (setting.buy_leverage, setting.sell_leverage),
+            (Some(12.0), Some(34.0))
+        );
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 944).count(), 1);
+    }
 }

@@ -1,5 +1,6 @@
 use super::*;
 use crate::request_context::{Credential, Pacing, RetryPolicy};
+use crate::resource_ids::{MAX_RESOURCE_ID, ResourceIds};
 use crate::{CredentialSlot, Outcome, Store};
 
 fn policy() -> Policy {
@@ -18,7 +19,7 @@ fn policy() -> Policy {
     }
 }
 
-fn refusal(registry: &mut ContextRegistry, context: &Context, request: u32) -> Delivery {
+fn refusal(registry: &mut ContextRegistry, context: &Context, request: u64) -> Delivery {
     registry
         .register_attempt(context, RequestId(request), 0.)
         .unwrap();
@@ -30,7 +31,7 @@ fn refusal(registry: &mut ContextRegistry, context: &Context, request: u32) -> D
         context: context.clone(),
         attempt: Attempt {
             request: RequestId(request),
-            generation: u64::from(request),
+            generation: request,
         },
     };
     registry
@@ -42,7 +43,7 @@ fn refusal(registry: &mut ContextRegistry, context: &Context, request: u32) -> D
     delivery
 }
 
-fn unchanged(registry: &ContextRegistry, parent: &Context, request: u32, count: usize) {
+fn unchanged(registry: &ContextRegistry, parent: &Context, request: u64, count: usize) {
     assert_eq!(registry.contexts.len(), count);
     assert_eq!(registry.validate(parent, 1.), Ok(()));
     assert_eq!(
@@ -82,7 +83,7 @@ fn replacement_policies_are_atomic_and_keep_exact_parent_bounds() {
         Err(Error::Invalid)
     );
     assert_eq!(
-        registry.replace(&parent, &delivery, u32::MAX, &[policy()], 1.),
+        registry.replace(&parent, &delivery, MAX_RESOURCE_ID + 1, &[policy()], 1.),
         Err(Error::Capacity)
     );
     unchanged(&registry, &parent, 11, 1);
@@ -184,7 +185,7 @@ fn context_and_journal_capacity_fail_without_partial_supersession() {
         let mut registry = ContextRegistry::default();
         let parent = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
         let delivery = refusal(&mut registry, &parent, 11);
-        for id in 2..CAPACITY as u32 {
+        for id in 2..CAPACITY as u64 {
             if fill_contexts {
                 registry
                     .issue(
@@ -207,7 +208,7 @@ fn context_and_journal_capacity_fail_without_partial_supersession() {
                     .writes
                     .as_mut()
                     .unwrap()
-                    .register(RequestId(1000 + id), u64::from(1000 + id))
+                    .register(RequestId(1000 + id), 1000 + id)
                     .unwrap();
             }
         }
@@ -277,7 +278,7 @@ fn superseded_nonroot_cannot_seal_and_expired_root_timer_grants_no_send() {
 }
 
 #[test]
-fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
+fn public_replacement_children_cross_u32_without_narrowing_or_identity_reuse() {
     let mut io = super::super::Io::<()>::default();
     let mut store = Store::default();
     let parent = io
@@ -285,7 +286,44 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
         .issue(1, Scope::Command(7), policy(), 0.)
         .unwrap();
     io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
-    io.next_id = u32::MAX - 1;
+    let first = u64::from(u32::MAX);
+    io.next_id = ResourceIds::starting_at(first);
+    let mut cx = Cx {
+        now: 1.,
+        store: &mut store,
+        io: &mut io,
+    };
+    let children = cx
+        .http_replacement_contexts(&parent, &[policy(), policy()])
+        .unwrap();
+    assert_eq!(
+        children.iter().map(Context::leg).collect::<Vec<_>>(),
+        [first, first + 1]
+    );
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(first + 2));
+    assert!(children.iter().all(|child| child.owner() == parent.owner()
+        && child.deadline() == parent.deadline()
+        && cx.io.request_contexts.validate(child, 1.).is_ok()));
+    assert_eq!(
+        cx.io.request_contexts.validate(&parent, 1.),
+        Err(Error::Revoked)
+    );
+    assert!(!cx.io.next_id.failed());
+    assert!(cx.io.pending.is_empty());
+    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.timers.is_empty());
+}
+
+#[test]
+fn last_safe_replacement_range_refuses_atomically_then_admits_its_final_child() {
+    let mut io = super::super::Io::<()>::default();
+    let mut store = Store::default();
+    let parent = io
+        .request_contexts
+        .issue(1, Scope::Command(7), policy(), 0.)
+        .unwrap();
+    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
+    io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
     let mut cx = Cx {
         now: 1.,
         store: &mut store,
@@ -295,7 +333,45 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
         cx.http_replacement_contexts(&parent, &[policy(), policy()]),
         Err(Error::Capacity)
     );
-    assert_eq!(cx.io.next_id, u32::MAX - 1);
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID));
+    unchanged(&cx.io.request_contexts, &parent, 11, 1);
+    assert!(!cx.io.next_id.failed());
+    assert!(cx.io.pending.is_empty());
+    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.timers.is_empty());
+    let children = cx.http_replacement_contexts(&parent, &[policy()]).unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].leg(), MAX_RESOURCE_ID);
+    assert_eq!(children[0].owner(), parent.owner());
+    assert_eq!(children[0].deadline(), parent.deadline());
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID + 1));
+    assert_eq!(cx.io.reserve_ids(1), None); // Exclusive-end sentinel is not issued.
+    assert!(!cx.io.next_id.failed());
+    assert!(cx.io.pending.is_empty());
+    assert!(cx.io.actions.is_empty());
+    assert!(cx.io.timers.is_empty());
+}
+
+#[test]
+fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
+    let mut io = super::super::Io::<()>::default();
+    let mut store = Store::default();
+    let parent = io
+        .request_contexts
+        .issue(1, Scope::Command(7), policy(), 0.)
+        .unwrap();
+    io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
+    io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID);
+    let mut cx = Cx {
+        now: 1.,
+        store: &mut store,
+        io: &mut io,
+    };
+    assert_eq!(
+        cx.http_replacement_contexts(&parent, &[policy(), policy()]),
+        Err(Error::Capacity)
+    );
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(MAX_RESOURCE_ID));
     unchanged(&cx.io.request_contexts, &parent, 11, 1);
     let mut invalid = policy();
     invalid.timeout_ms = 0;
@@ -305,7 +381,7 @@ fn public_bridge_checks_whole_id_range_and_never_rewinds_on_refusal() {
     );
     assert_eq!(
         cx.io.next_id,
-        u32::MAX,
+        ResourceIds::starting_at(MAX_RESOURCE_ID + 1),
         "failed policy burns checked identities"
     );
     assert_eq!(
@@ -346,7 +422,7 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
             }),
             _ => Some(correct.clone()),
         };
-        io.next_id = 20;
+        io.next_id = ResourceIds::starting_at(20);
         let mut cx = Cx {
             now: 1.,
             store: &mut store,
@@ -366,7 +442,10 @@ fn public_replacement_requires_current_delivery_and_retry_permission() {
             cx.io.request_contexts.contexts.get(&parent.leg()),
             Some(&parent)
         );
-        assert_eq!(cx.io.next_id, if case == 0 { 20 } else { 21 });
+        assert_eq!(
+            cx.io.next_id,
+            ResourceIds::starting_at(if case == 0 { 20 } else { 21 })
+        );
         assert!(cx.io.pending.is_empty());
         assert!(cx.io.actions.is_empty());
         if case != 2 {
@@ -404,7 +483,7 @@ fn registry_state(registry: &ContextRegistry, parent: &Context) -> RegistryState
     RegistryState {
         contexts: registry.contexts.clone(),
         generation: owner.generation,
-        completion_root: owner.completion_root.clone(),
+        completion_root: owner.context_root().unwrap().clone(),
         last_deadline: owner.last_deadline,
         mutation_declared: owner.mutation_declared,
         pending: owner.pending,
@@ -442,7 +521,7 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
             .unwrap();
     }
     io.http_delivery = Some(refusal(&mut io.request_contexts, &parent, 11));
-    io.next_id = 20;
+    io.next_id = ResourceIds::starting_at(20);
     let before = registry_state(&io.request_contexts, &parent);
     let mut cx = Cx {
         now: 2.,
@@ -455,7 +534,8 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
     );
     assert_eq!(registry_state(&cx.io.request_contexts, &parent), before);
     assert_eq!(
-        cx.io.next_id, 22,
+        cx.io.next_id,
+        ResourceIds::starting_at(22),
         "the denied checked range is never reused"
     );
     assert!(!cx.io.request_contexts.contexts.contains_key(&20));
@@ -477,7 +557,7 @@ fn replacement_second_child_collision_defers_cleanup_and_commits_no_authority() 
             .iter()
             .all(|child| child.deadline() == 100. && child.owner() == parent.owner())
     );
-    assert_eq!(cx.io.next_id, 24);
+    assert_eq!(cx.io.next_id, ResourceIds::starting_at(24));
     assert!(!cx.io.request_contexts.contexts.contains_key(&99));
     assert!(cx.io.request_contexts.contexts.contains_key(&21));
     assert_eq!(
@@ -582,6 +662,8 @@ struct PhysicalReplacement {
     signed: bool,
     settled_children: usize,
     accepted_ids: Vec<String>,
+    fail_child_staging: bool,
+    immediate_failure_sealed: bool,
 }
 
 fn physical_policy() -> Policy {
@@ -734,6 +816,47 @@ impl crate::Venue for PhysicalReplacement {
             cx.http_retry_context(&root, RetryEvidence::DefinitiveRefusal)
                 .is_err()
         );
+        if self.fail_child_staging {
+            let background = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        retry: RetryPolicy::Never,
+                        ..physical_policy()
+                    },
+                )
+                .unwrap();
+            for _ in 0..255 {
+                cx.request_managed(
+                    background.clone(),
+                    crate::Method::Get,
+                    "https://replacement.test/unrelated".into(),
+                    None,
+                    background.clone(),
+                )
+                .unwrap();
+            }
+            let child = self.children[0].clone();
+            let failure = cx
+                .request_managed(
+                    child.clone(),
+                    crate::Method::Post,
+                    "https://replacement.test/refused-child".into(),
+                    None,
+                    child.clone(),
+                )
+                .unwrap_err();
+            assert_eq!(failure, (child, Error::Capacity));
+            self.immediate_failure_sealed = cx
+                .fail_replacement_context(
+                    &root,
+                    &failure.0,
+                    VenueError::new("replacement child staging refused"),
+                )
+                .is_ok();
+            return;
+        }
         if self.signed {
             for child in &self.children {
                 cx.request_signed_managed(
@@ -903,6 +1026,120 @@ fn replacement_real_handoff_revokes_parent_but_retains_exact_expired_root_comple
     assert_eq!(cx.validate_completion_context(&next), Ok(()));
 }
 
+#[test]
+fn replacement_child_capacity_abort_finishes_immediately_without_parent_authority_bypass() {
+    use crate::request_context::{Claim, HttpAction, Prepared};
+    use crate::{Action, Event, Notice};
+    let mut engine = crate::test_support::seeded_engine(PhysicalReplacement {
+        fail_child_staging: true,
+        ..Default::default()
+    });
+    engine.start(0.);
+    let preparation = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.http_prepared(
+        1.,
+        preparation,
+        Prepared {
+            id: 55,
+            expires_at: None,
+        },
+    );
+    let permit = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        engine.claim_http(2., permit),
+        Ok(Claim::Released(_))
+    ));
+    engine.handle(
+        3.,
+        Event::HttpResponse {
+            request: preparation.attempt().request,
+            response: crate::Response {
+                status: 200,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    assert!(
+        engine.venue().immediate_failure_sealed,
+        "a refused replacement child must retire immediately in its parent's callback"
+    );
+    assert_eq!(engine.venue().callbacks, 1);
+    assert!(!engine.io.request_contexts.commands.contains_key(&7));
+    for child in &engine.venue().children {
+        assert!(
+            !engine
+                .io
+                .request_contexts
+                .contexts
+                .contains_key(&child.leg())
+        );
+    }
+    assert_eq!(
+        engine.io.managed_http.len(),
+        255,
+        "unrelated routes survive"
+    );
+    assert_eq!(engine.io.pending.len(), 255);
+    assert_eq!(engine.io.timers.len(), 255);
+    assert!(
+        engine
+            .io
+            .managed_http
+            .values()
+            .all(|m| matches!(m.delivery().context.owner(), Owner::Background { .. }))
+    );
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::Unknown));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+    );
+    engine.handle(
+        4.,
+        Event::HttpResponse {
+            request: preparation.attempt().request,
+            response: crate::Response {
+                status: 200,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    assert_eq!(engine.venue().callbacks, 1);
+    assert!(!engine.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+    )));
+}
+
 mod signed_replacement_handoff {
     use super::*;
     use crate::request_context::{Claim, HttpAction, Permit, Preparation, Prepared};
@@ -930,7 +1167,7 @@ mod signed_replacement_handoff {
             now,
             preparation,
             Prepared {
-                id: u64::from(preparation.attempt().request.0),
+                id: preparation.attempt().request.0,
                 expires_at: None,
             },
         );
@@ -1312,5 +1549,237 @@ mod signed_replacement_handoff {
                 assert!(!engine.signing_pending(id));
             }
         }
+    }
+}
+
+fn replacement_failure_fixture() -> (ContextRegistry, Context, Vec<Context>, Delivery) {
+    let mut registry = ContextRegistry::default();
+    let root = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+    let delivery = refusal(&mut registry, &root, 11);
+    let children = registry
+        .replace(&root, &delivery, 20, &[policy(), policy()], 1.)
+        .unwrap();
+    (registry, root, children, delivery)
+}
+
+#[test]
+fn replacement_failure_denials_preserve_journal_and_all_owner_resources() {
+    for case in 0..10 {
+        let (mut registry, root, children, mut delivery) = replacement_failure_fixture();
+        let mut argument_root = root.clone();
+        let mut argument_child = children[0].clone();
+        let now = if case == 6 { 100. } else { 2. };
+        match case {
+            0 => {
+                argument_root = ContextRegistry::default()
+                    .issue(1, Scope::Command(7), policy(), 0.)
+                    .unwrap()
+            }
+            1 => argument_root = children[1].clone(),
+            2 => {
+                let (foreign, _, foreign_children, _) = replacement_failure_fixture();
+                argument_child = foreign_children[0].clone();
+                drop(foreign);
+            }
+            3 => argument_child = registry.issue(30, Scope::Command(7), policy(), 1.).unwrap(),
+            4 => delivery.context = children[1].clone(),
+            5 => delivery.attempt.request = RequestId(99),
+            6 => (),
+            7 => {
+                registry.contexts.remove(&argument_child.leg());
+            }
+            8 => argument_root = root.clone().with_retry(RetryPolicy::Never).unwrap(),
+            _ => argument_root = registry.issue(30, Scope::Command(8), policy(), 1.).unwrap(),
+        }
+        let before = registry.commands[&7]
+            .writes
+            .as_ref()
+            .unwrap()
+            .project_failure(VenueError::new("retained facts"))
+            .unwrap();
+        let contexts = registry.contexts.clone();
+        let pending = registry.commands[&7].pending;
+        let deliveries = registry.commands[&7].deliveries;
+        assert!(
+            registry
+                .seal_replacement_failure(
+                    &argument_root,
+                    &argument_child,
+                    &delivery,
+                    now,
+                    VenueError::new("denied abort")
+                )
+                .is_err(),
+            "case {case}"
+        );
+        assert_eq!(registry.contexts, contexts, "case {case}");
+        assert_eq!(registry.commands[&7].pending, pending);
+        assert_eq!(registry.commands[&7].deliveries, deliveries);
+        let writes = registry.commands[&7].writes.as_ref().unwrap();
+        assert_eq!(
+            writes
+                .project_failure(VenueError::new("retained facts"))
+                .unwrap(),
+            before
+        );
+        assert!(writes.reports().next().is_none());
+    }
+}
+
+#[test]
+fn replacement_failure_cannot_borrow_an_older_parent_retry_delivery() {
+    let mut registry = ContextRegistry::default();
+    let root = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+    let old = refusal(&mut registry, &root, 11);
+    registry.grant_resend(&old).unwrap();
+    registry.register_attempt(&root, RequestId(12), 1.).unwrap();
+    *registry
+        .release_flag(&root, RequestId(12))
+        .unwrap()
+        .unwrap() = true;
+    let current = Delivery {
+        context: root.clone(),
+        attempt: Attempt {
+            request: RequestId(12),
+            generation: 12,
+        },
+    };
+    registry
+        .result(
+            &current,
+            WriteResult::Rejected(VenueError::new("current refusal")),
+        )
+        .unwrap();
+    let children = registry
+        .replace(&root, &current, 20, &[policy()], 2.)
+        .unwrap();
+    assert!(matches!(
+        registry.seal_replacement_failure(
+            &root,
+            &children[0],
+            &old,
+            3.,
+            VenueError::new("old callback")
+        ),
+        Err(Error::Revoked)
+    ));
+    assert!(registry.commands[&7].writes.is_some());
+    match registry
+        .seal_replacement_failure(
+            &root,
+            &children[0],
+            &current,
+            3.,
+            VenueError::new("current callback"),
+        )
+        .unwrap()
+    {
+        Seal::Failure(error, _) => assert_eq!(error.outcome, Some(Outcome::Unknown)),
+        _ => panic!("replacement abort cannot grant success"),
+    }
+}
+
+#[test]
+fn replacement_failure_rejects_a_sent_child_hidden_by_its_unsent_retry() {
+    let (mut registry, root, children, delivery) = replacement_failure_fixture();
+    let child = &children[0];
+    registry.register_attempt(child, RequestId(31), 2.).unwrap();
+    *registry
+        .release_flag(child, RequestId(31))
+        .unwrap()
+        .unwrap() = true;
+    let child_delivery = Delivery {
+        context: child.clone(),
+        attempt: Attempt {
+            request: RequestId(31),
+            generation: 31,
+        },
+    };
+    registry
+        .result(
+            &child_delivery,
+            WriteResult::Rejected(VenueError::new("child refusal")),
+        )
+        .unwrap();
+    registry.grant_resend(&child_delivery).unwrap();
+    registry.register_attempt(child, RequestId(32), 3.).unwrap();
+    assert_eq!(
+        registry.commands[&7]
+            .writes
+            .as_ref()
+            .unwrap()
+            .latest(child.leg()),
+        Some(RequestId(32))
+    );
+    assert!(matches!(
+        registry.seal_replacement_failure(
+            &root,
+            child,
+            &delivery,
+            4.,
+            VenueError::new("unsent retry")
+        ),
+        Err(Error::Revoked)
+    ));
+    assert_eq!(
+        registry.commands[&7]
+            .writes
+            .as_ref()
+            .unwrap()
+            .project_failure(VenueError::new("retained sent facts"))
+            .unwrap()
+            .outcome,
+        Some(Outcome::Unknown)
+    );
+}
+
+#[test]
+fn replacement_failure_keeps_retired_original_root_authority_and_rejects_superseded_children() {
+    let mut registry = ContextRegistry::default();
+    let root = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
+    let parent = registry
+        .issue_bound(2, Scope::Command(7), policy(), 0., Some(&root))
+        .unwrap();
+    let delivery = refusal(&mut registry, &parent, 11);
+    let children = registry
+        .replace(&parent, &delivery, 20, &[policy(), policy()], 1.)
+        .unwrap();
+    let child_delivery = refusal(&mut registry, &children[0], 31);
+    let grandchildren = registry
+        .replace(&children[0], &child_delivery, 40, &[policy()], 2.)
+        .unwrap();
+    assert!(matches!(
+        registry.seal_replacement_failure(
+            &root,
+            &children[0],
+            &delivery,
+            3.,
+            VenueError::new("superseded child")
+        ),
+        Err(Error::Revoked)
+    ));
+    assert!(matches!(
+        registry.seal_replacement_failure(
+            &root,
+            &grandchildren[0],
+            &delivery,
+            3.,
+            VenueError::new("wrong ancestor")
+        ),
+        Err(Error::Revoked)
+    ));
+    registry.contexts.remove(&root.leg());
+    match registry
+        .seal_replacement_failure(
+            &root,
+            &children[1],
+            &delivery,
+            3.,
+            VenueError::new("exact original root"),
+        )
+        .unwrap()
+    {
+        Seal::Failure(error, _) => assert_eq!(error.outcome, Some(Outcome::Unknown)),
+        _ => panic!("failure continuation cannot grant success"),
     }
 }

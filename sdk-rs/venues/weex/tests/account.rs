@@ -4,7 +4,9 @@ use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{
     Action, Engine, Event, HttpRequest, Level, Notice, RequestId, Response, SocketId, TimerId,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
+use support::setup::Options;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
 
@@ -46,13 +48,13 @@ fn request(actions: &[Action], path: &str) -> RequestId {
         .id
 }
 fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    let mut e = support::setup::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
         private_ws_headers: ws,
         ..Options::default()
-    }));
+    });
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
@@ -203,45 +205,6 @@ fn duplicate_config_rows_keep_the_last_valid_native_configuration() {
     );
 }
 
-#[test]
-fn an_old_account_config_cannot_overwrite_completed_metadata() {
-    let (mut e, actions) = started(false);
-    e.handle(
-        NOW,
-        Event::Command(safe_cex_engine::Command::FetchLeverage {
-            command: 970,
-            symbol: "BTCUSDT".into(),
-        }),
-    );
-    let scoped: Vec<_> = e.drain_actions().collect();
-    response(
-        &mut e,
-        request(&scoped, "symbolConfig"),
-        200,
-        r#"[{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"30","isolatedLongLeverage":"7","isolatedShortLeverage":"9"}]"#,
-    );
-    let metadata = e.store().setting("BTCUSDT");
-    complete(&mut e, &actions, NORMAL, ALGO);
-    assert_eq!(e.store().setting("BTCUSDT"), metadata);
-    // The rejected old account proposal cannot overwrite the native config
-    // either: a later position lacking those fields resolves from the new one.
-    let actions = next_cycle(&mut e);
-    let position = POSITIONS
-        .replace("\"marginType\":\"CROSSED\",", "")
-        .replace("\"separatedMode\":\"COMBINED\",", "")
-        .replace("\"leverage\":\"100\",", "");
-    response(&mut e, request(&actions, "allPosition"), 200, &position);
-    response(
-        &mut e,
-        request(&actions, "accountConfig"),
-        200,
-        r#"{"dualSidePosition":false,"canTrade":true}"#,
-    );
-    for path in ["symbolConfig", "/balance", "/openOrders", "/openAlgoOrders"] {
-        response(&mut e, request(&actions, path), 200, "[]");
-    }
-    assert_eq!(e.store().positions()[0].leverage, 7.0);
-}
 #[test]
 fn failed_or_malformed_half_never_replaces_order_snapshot() {
     let (mut e, actions) = started(false);
@@ -1323,11 +1286,27 @@ fn failed_settings_read_backs_off_only_settings() {
 }
 #[test]
 fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        ..Options::default()
-    }));
+    // Trusted setup refuses it; a provider-supplied identity without a passphrase
+    // ref still deactivates rather than publishing an empty account.
+    assert!(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Options::default()
+        }
+        .try_build()
+        .is_err()
+    );
+    let mut e =
+        safe_cex_engine::test_support::seeded_engine(WeexFutures::new(support::NativeOptions {
+            credentials: Some(safe_cex_engine::signing::Identity {
+                credential: safe_cex_engine::signing::KeyRef("primary.credential".into()),
+                signing: safe_cex_engine::signing::KeyRef("primary.signing".into()),
+                passphrase: None,
+                stable_id: None,
+            }),
+            ..Default::default()
+        }));
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
@@ -1357,12 +1336,12 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
 }
 #[test]
 fn ticker_seed_failure_does_not_block_private_start() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    let mut e = support::setup::engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
         ..Options::default()
-    }));
+    });
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);

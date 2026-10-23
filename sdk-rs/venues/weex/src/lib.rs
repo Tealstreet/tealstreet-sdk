@@ -2,8 +2,12 @@
 mod account;
 mod account_wire;
 mod depth_query;
+/// Opaque canonical recipes signed by the injected dispatch provider.
+#[path = "sign/dispatch.rs"]
+pub mod dispatch_signing;
 mod history;
 mod identity;
+mod managed;
 mod paths;
 mod rate;
 mod sign;
@@ -18,31 +22,21 @@ use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
-    VenueError,
 };
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use wire::*;
 
-#[derive(Default)]
+const READ_CREDENTIALS_INVALID: &str =
+    "WEEX read credentials are incomplete in trusted signer setup";
+
+/// Opaque identities from trusted signer setup; the venue holds no material.
+#[derive(Clone, Debug, Default)]
 pub struct Options {
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    pub read_credentials: Option<safe_cex_engine::signing::Identity>,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub passphrase: Option<String>,
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
     /// Only a host able to attach authenticated upgrade headers may enable it.
     pub private_ws_headers: bool,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.passphrase);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
 }
 
 pub struct Pending {
@@ -58,7 +52,10 @@ enum Task {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
-    Identity(CommandId),
+    /// The engine Context owns the command until it completes.
+    Identity {
+        context: safe_cex_engine::request_context::Context,
+    },
     Daily,
     BookTickers,
     Depth {
@@ -70,8 +67,9 @@ enum Task {
         rows: Vec<Candle>,
     },
     Leverage {
-        token: safe_cex_engine::metadata::Token,
         symbol: String,
+        revision: u64,
+        context: safe_cex_engine::request_context::Context,
     },
 }
 struct DeferredGet {
@@ -160,11 +158,13 @@ pub struct WeexFutures {
     settings_auth: safe_cex_engine::MergedScopeAuth,
     trading: trading::State,
     history: history::State,
-    credentials: Option<sign::Credentials>,
+    credentials: sign::Credentials,
+    /// Trusted caller-assigned primary stableId; never derived from key material.
     identity: Option<String>,
-    /// Some but not all of key, secret and passphrase were supplied.
+    /// A supplied primary identity lacks a valid key/signing/passphrase ref.
     incomplete_credentials: bool,
-    read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    /// A supplied secondary identity that trusted setup did not complete.
+    invalid_read_credentials: bool,
     private_ws_headers: bool,
     books: HashMap<String, BookState>,
     candles: BTreeMap<(String, Interval), u32>,
@@ -176,36 +176,19 @@ pub struct WeexFutures {
 }
 impl WeexFutures {
     pub fn new(options: Options) -> Self {
-        let identity = options
-            .key
-            .as_deref()
-            .filter(|key| !options.public_data_only && !key.is_empty())
-            .map(identity::fingerprint);
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
-        let supplied = [&options.key, &options.secret, &options.passphrase]
-            .map(|v| v.as_deref().is_some_and(|s| !s.is_empty()));
-        let incomplete_credentials =
-            !options.public_data_only && supplied.contains(&true) && supplied.contains(&false);
-        let read_credentials = options.read_credentials.clone().map(|mut read| {
-            if read.passphrase.is_none() {
-                read.passphrase = options.passphrase.clone();
-            }
-            read
-        });
-        let credentials = match (&options.key, &options.secret, &options.passphrase) {
-            (Some(key), Some(secret), Some(passphrase))
-                if !options.public_data_only
-                    && !key.is_empty()
-                    && !secret.is_empty()
-                    && !passphrase.is_empty() =>
-            {
-                Some(sign::Credentials {
-                    key: key.clone(),
-                    secret: secret.clone(),
-                    passphrase: passphrase.clone(),
-                })
-            }
-            _ => None,
+        let complete = |identity: &safe_cex_engine::signing::Identity| {
+            identity.validate().is_ok() && identity.passphrase.is_some()
+        };
+        let primary = options.credentials.filter(|_| !options.public_data_only);
+        let incomplete_credentials = primary.as_ref().is_some_and(|p| !complete(p));
+        let invalid_read_credentials = options
+            .read_credentials
+            .as_ref()
+            .is_some_and(|read| !complete(read));
+        let identity = primary.as_ref().and_then(|p| p.stable_id.clone());
+        let credentials = sign::Credentials {
+            primary: primary.filter(complete),
+            read: options.read_credentials.filter(complete),
         };
         Self {
             public: Connection::default(),
@@ -219,7 +202,7 @@ impl WeexFutures {
             credentials,
             identity,
             incomplete_credentials,
-            read_credentials,
+            invalid_read_credentials,
             private_ws_headers: options.private_ws_headers,
             books: HashMap::new(),
             candles: BTreeMap::new(),
@@ -281,48 +264,41 @@ impl WeexFutures {
             cx.fail(command, String::from("WEEX account reads are rate limited"));
             return;
         }
-        let token = match cx.store.begin_metadata(
-            &symbol,
-            command,
-            true,
-            safe_cex_engine::metadata::Fallback::CompleteSetting,
-        ) {
-            Ok(safe_cex_engine::metadata::Admission::Start(token)) => token,
-            Ok(safe_cex_engine::metadata::Admission::Joined) => return,
-            Err(error) => {
-                cx.fail(command, error);
-                return;
-            }
+        let Some(signer) = self.credentials.select(Method::Get) else {
+            cx.fail(command, String::from("WEEX leverage requires credentials"));
+            return;
         };
-        let task = Task::Leverage {
-            token: token.clone(),
-            symbol: symbol.clone(),
-        };
-        let query = format!("symbol={market_id}");
-        if !self.signed_request(
+        let revision = self.account.settings_revision();
+        if let Err(error) = managed::read(
             cx,
-            Method::Get,
-            "/capi/v3/account/symbolConfig",
-            &query,
-            None,
-            task,
-            None,
+            signer,
+            command,
+            format!("/capi/v3/account/symbolConfig?symbol={market_id}"),
+            self.seed_generation,
+            |context| Task::Leverage {
+                symbol,
+                revision,
+                context,
+            },
         ) {
-            self.finish_leverage(
-                cx,
-                token,
-                &symbol,
-                Err(VenueError::new("WEEX leverage requires credentials")),
-            );
+            cx.fail(command, error);
         }
     }
     fn leverage_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        token: safe_cex_engine::metadata::Token,
+        context: &safe_cex_engine::request_context::Context,
         symbol: &str,
+        revision: u64,
         response: Response<'_>,
     ) {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Fetched {
+            buy_leverage: f64,
+            sell_leverage: f64,
+            margin_type: safe_cex_engine::model::MarginType,
+        }
         let market_id = cx.store.market(symbol).map(|m| m.id.clone());
         let config = serde_json::from_str::<Vec<account_wire::ConfigRow<'_>>>(response.body)
             .map_err(|e| format!("invalid WEEX symbol configuration: {e}"))
@@ -338,55 +314,55 @@ impl WeexFutures {
                     setting.sell_leverage,
                     setting.margin_type,
                 ) {
-                    (Some(buy), Some(sell), Some(_)) if buy > 0.0 && sell > 0.0 => {
-                        Ok(account::Config {
+                    (Some(buy), Some(sell), Some(margin_type)) if buy > 0.0 && sell > 0.0 => Ok((
+                        account::Config {
                             setting,
                             hedged: row.separated_type == "SEPARATED",
                             isolated_long_leverage: row.isolated_long_leverage,
                             isolated_short_leverage: row.isolated_short_leverage,
-                        })
-                    }
+                        },
+                        Fetched {
+                            buy_leverage: buy,
+                            sell_leverage: sell,
+                            margin_type,
+                        },
+                    )),
                     _ => Err("invalid WEEX symbol configuration: non-positive leverage".into()),
                 }
             });
-        self.finish_leverage(cx, token, symbol, config.map_err(VenueError::new));
-    }
-    fn finish_leverage(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        token: safe_cex_engine::metadata::Token,
-        symbol: &str,
-        result: Result<account::Config, VenueError>,
-    ) {
-        let mut native = None;
-        let proposal = result.and_then(|config| {
-            let snapshot = safe_cex_engine::metadata::Snapshot::new(config.setting)?;
-            native = Some(config);
-            Ok(safe_cex_engine::metadata::Proposal::complete(snapshot))
-        });
-        if let Some(completion) = cx.store.finish_metadata(&token, proposal) {
-            if completion.published {
-                self.account
-                    .configs
-                    .insert(symbol.to_owned(), native.expect("validated native config"));
+        let (config, fetched) = match config {
+            Ok(config) => config,
+            Err(error) => {
+                managed::reject(cx, context, error);
+                return;
             }
-            completion.finish(cx, |value| {
-                #[derive(serde::Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Fetched {
-                    buy_leverage: f64,
-                    sell_leverage: f64,
-                    margin_type: safe_cex_engine::model::MarginType,
-                }
-                serde_json::to_string(&Fetched {
-                    buy_leverage: value.buy,
-                    sell_leverage: value.sell,
-                    margin_type: value.margin.expect("complete setting fallback"),
+        };
+        // A settings write since issue supersedes this snapshot: answer the
+        // current settings instead, so the caller's store cannot regress either.
+        let fetched = if revision == self.account.settings_revision() {
+            cx.store
+                .update_setting(symbol, |setting| *setting = config.setting);
+            self.account.configs.insert(symbol.to_owned(), config);
+            fetched
+        } else {
+            cx.store
+                .setting(symbol)
+                .and_then(|s| {
+                    Some(Fetched {
+                        buy_leverage: s.buy_leverage?,
+                        sell_leverage: s.sell_leverage?,
+                        margin_type: s.margin_type?,
+                    })
                 })
-                .expect("validated finite metadata")
-            });
+                .unwrap_or(fetched)
+        };
+        match serde_json::to_string(&fetched) {
+            Ok(data) => managed::complete(cx, context, data),
+            Err(error) => managed::reject(cx, context, error.to_string()),
         }
     }
+    /// Legacy-owned private requests: native owners keep their lifecycle, and the
+    /// one temporary staging site hands canonical work to the injected provider.
     #[allow(clippy::too_many_arguments)]
     fn signed_request(
         &self,
@@ -398,20 +374,7 @@ impl WeexFutures {
         task: Task,
         stream: Option<ArrayAt>,
     ) -> bool {
-        let read_credentials = self
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get)
-            .map(|read| sign::Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-                passphrase: read
-                    .passphrase
-                    .clone()
-                    .or_else(|| self.credentials.as_ref().map(|c| c.passphrase.clone()))
-                    .unwrap_or_default(),
-            });
-        let Some(credentials) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
+        let Some((identity, slot)) = self.credentials.select(method) else {
             return false;
         };
         let mut pairs: Vec<_> = query.split('&').filter(|p| !p.is_empty()).collect();
@@ -421,13 +384,8 @@ impl WeexFutures {
         } else {
             format!("{path}?{}", pairs.join("&"))
         };
-        let headers = credentials.headers(
-            method.as_str(),
-            &path_query,
-            body.as_deref().unwrap_or(""),
-            cx.now,
-        );
-        let url = format!("{}{path_query}", paths::REST);
+        let recipe = dispatch_signing::Http::new(identity.clone(), method, path_query, body);
+        let (url, headers, body) = recipe.unsigned();
         let scope = account::auth_scope(&task);
         let pending = Pending {
             task,
@@ -440,16 +398,9 @@ impl WeexFutures {
         } else {
             cx.request(method, url, headers, body, pending)
         };
+        cx.sign_http(id, Box::new(recipe));
         if let Some(scope) = scope {
-            cx.tag_account_read(
-                id,
-                if read_credentials.is_some() {
-                    safe_cex_engine::CredentialSlot::Secondary
-                } else {
-                    safe_cex_engine::CredentialSlot::Primary
-                },
-                scope,
-            );
+            cx.tag_account_read(id, slot, scope);
         }
         true
     }
@@ -648,8 +599,8 @@ impl WeexFutures {
             cx.fail(command, depth_query::failure(error, ErrorKind::Network));
             return;
         }
-        if let Task::Identity(command) = task {
-            self.identity_failed(cx, command, error);
+        if let Task::Identity { context, .. } = &task {
+            Self::identity_failed(cx, context, error);
             return;
         }
         cx.notice(
@@ -658,7 +609,7 @@ impl WeexFutures {
             format!("WEEX: {error}"),
         );
         match task {
-            Task::Identity(_) | Task::BookQuery(_) => unreachable!(),
+            Task::Identity { .. } | Task::BookQuery(_) => unreachable!(),
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
                 self.discovery.failed(cx, true);
@@ -675,9 +626,7 @@ impl WeexFutures {
                 }
             }
             Task::Candles { command, .. } => cx.fail(command, error),
-            Task::Leverage { token, symbol } => {
-                self.finish_leverage(cx, token, &symbol, Err(VenueError::new(error)))
-            }
+            Task::Leverage { context, .. } => managed::reject(cx, &context, error),
             Task::Account(r) => self.account_failed(cx, r, error),
             Task::Trade(r) => {
                 self.trade_failed(cx, r, trading::unknown(error).kind(ErrorKind::Network))
@@ -748,12 +697,12 @@ impl Venue for WeexFutures {
 
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.read_credentials
-            && let Err(error) = read.validate().and_then(|_| {
-                read.validate_passphrase(self.credentials.as_ref().map(|c| c.passphrase.as_str()))
-            })
-        {
-            cx.notice(safe_cex_engine::Level::Error, code::CONFIG_INVALID, error);
+        if self.invalid_read_credentials {
+            cx.notice(
+                safe_cex_engine::Level::Error,
+                code::CONFIG_INVALID,
+                READ_CREDENTIALS_INVALID,
+            );
             return;
         }
         self.get(
@@ -1008,10 +957,13 @@ impl Venue for WeexFutures {
         }
         match p.task {
             Task::BookQuery(_) => unreachable!(),
-            Task::Leverage { token, symbol } => {
-                self.leverage_response(cx, token, &symbol, response)
-            }
-            Task::Identity(command) => self.identity_response(cx, command, response),
+            Task::Leverage {
+                symbol,
+                revision,
+                context,
+                ..
+            } => self.leverage_response(cx, &context, &symbol, revision, response),
+            Task::Identity { context, .. } => self.identity_response(cx, &context, response),
             Task::Account(r) => self.account_response(cx, r, response),
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
@@ -1106,6 +1058,21 @@ impl Venue for WeexFutures {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 cx.done(command, serde_json::to_string(&rows).expect("candles"));
             }
+        }
+    }
+    /// Provider refusal is typed, never sent and never venue auth evidence.
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        p: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match p.task {
+            Task::Identity { context, .. } => Self::identity_failed(cx, &context, error),
+            Task::Leverage { context, .. } => managed::reject(cx, &context, error),
+            Task::Trade(r) => self.trade_failed(cx, r, error),
+            Task::History(r) => self.history_refused(cx, r, error),
+            task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {
@@ -1332,11 +1299,8 @@ impl Venue for WeexFutures {
 
 #[cfg(test)]
 mod secondary_tests;
-
-impl Drop for WeexFutures {
-    fn drop(&mut self) {
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
-}
+#[cfg(test)]
+use Options as NativeOptions;
+#[cfg(test)]
+#[path = "../tests/support/setup.rs"]
+mod setup;

@@ -60,7 +60,7 @@ pub(crate) struct Pending {
     pub outbound: Action,
     unsigned: Action,
     step: Box<dyn SignStep>,
-    sequence: u32,
+    sequence: u64,
     plain: bool,
     pub managed: bool,
     route_ready: bool,
@@ -106,7 +106,7 @@ pub(crate) struct Dispatch {
     pending: HashMap<RequestId, Pending>,
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: HashMap<RequestId, Pending>,
-    next: u32,
+    next: crate::resource_ids::ResourceIds,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -115,11 +115,25 @@ pub(crate) enum Completion {
 }
 impl Dispatch {
     pub fn next_id(&mut self) -> RequestId {
-        self.next = self
-            .next
-            .checked_add(1)
-            .expect("signing attempt IDs exhausted");
-        RequestId(self.next)
+        RequestId(self.next.next_or_fatal())
+    }
+    pub fn available_id(&self) -> bool {
+        self.next.available(1)
+    }
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn available_ids(&self, count: u64) -> bool {
+        self.next.available(count)
+    }
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn reserve_ids(&mut self, count: u64) -> Option<std::ops::Range<u64>> {
+        self.next.reserve(count)
+    }
+    pub fn failed(&self) -> bool {
+        self.next.failed()
+    }
+    #[cfg(test)]
+    pub(crate) fn set_test_ids(&mut self, ids: crate::resource_ids::ResourceIds) {
+        self.next = ids;
     }
     fn head(&self) -> Option<(RequestId, &Pending)> {
         let entries = || self.pending.iter().chain(self.outbound.iter());
@@ -284,11 +298,14 @@ impl Dispatch {
         p.deadline = deadline;
         Ok(())
     }
-    pub fn activate_managed(&mut self, id: RequestId) -> Result<(), SignError> {
+    pub fn activate_managed(&mut self, id: RequestId, deadline: f64) -> Result<(), SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
-        if !p.managed || p.route_ready {
+        if !p.managed || p.route_ready || !deadline.is_finite() || deadline <= p.staged_at {
             return Err(SignError::InvalidRequest);
         }
+        // The route can only tighten the staged physical cap. Delayed provider
+        // preparation and every stale retry retain the same immutable bound.
+        p.deadline = p.deadline.min(deadline);
         p.route_ready = true;
         Ok(())
     }
@@ -315,10 +332,19 @@ impl Dispatch {
             .pending
             .values_mut()
             .find(|p| p.request_id() == Some(request))?;
+        let requested = p.staged_at + f64::from(timeout.max(1));
+        p.deadline = if p.managed {
+            p.deadline.min(requested)
+        } else {
+            requested
+        };
         if let Action::Http(http) = &mut p.outbound {
-            http.timeout_ms = Some(timeout.max(1));
+            http.timeout_ms = Some(if p.managed {
+                (p.deadline - p.staged_at).ceil().max(1.) as u32
+            } else {
+                timeout.max(1)
+            });
         }
-        p.deadline = p.staged_at + f64::from(timeout.max(1));
         Some((p.timer, p.deadline))
     }
     pub fn prepare(

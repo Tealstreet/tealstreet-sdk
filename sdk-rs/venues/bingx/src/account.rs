@@ -413,6 +413,7 @@ impl Account {
         self.poll = Some(cx.set_poll_timer(POLL_MS));
     }
 
+    /// Session and metadata requests keep their legacy signed transport.
     fn request(
         cx: &mut Cx<'_, Pending>,
         credentials: &Credentials,
@@ -422,15 +423,8 @@ impl Account {
         request: Request,
         stream: bool,
     ) {
-        let at = stream.then(|| {
-            if path == OPEN_ORDERS {
-                ArrayAt::EnvelopeFieldOrNested("data", "orders")
-            } else {
-                ArrayAt::EnvelopeField("data")
-            }
-        });
-        let scope = auth_scope(&request);
-        let id = crate::issue(
+        let at = stream.then_some(ArrayAt::EnvelopeField("data"));
+        crate::issue(
             cx,
             Some(credentials),
             method,
@@ -439,8 +433,53 @@ impl Account {
             at,
             Pending::Account(request),
         );
-        if let Some(scope) = scope {
-            tag_read(cx, id, method, credentials, scope);
+    }
+
+    /// Account snapshot reads run under an engine-issued background Context.
+    fn read_snapshot(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: &Credentials,
+        path: &'static str,
+        params: Params,
+        request: Request,
+        stream: bool,
+    ) {
+        let scope = auth_scope(&request);
+        let at = stream.then(|| {
+            if path == OPEN_ORDERS {
+                ArrayAt::EnvelopeFieldOrNested("data", "orders")
+            } else {
+                ArrayAt::EnvelopeField("data")
+            }
+        });
+        match crate::managed::read(
+            cx,
+            credentials,
+            crate::managed::Read {
+                method: Method::Get,
+                path,
+                params,
+                at,
+            },
+            Pending::Account(request),
+            safe_cex_engine::request_context::Scope::Background,
+        ) {
+            Ok(id) => {
+                if let Some(scope) = scope {
+                    tag_read(cx, id, Method::Get, credentials, scope);
+                }
+            }
+            Err((pending, error)) => {
+                let (pending, context) = match *pending {
+                    Pending::Signed(signed) => (signed.inner, signed.context),
+                    pending => (pending, None),
+                };
+                if let Pending::Account(request) = pending {
+                    self.on_sign_failed(cx, request, error, credentials);
+                }
+                crate::managed::finish(cx, context);
+            }
         }
     }
 
@@ -465,10 +504,9 @@ impl Account {
             return;
         }
         self.mode_in_flight = true;
-        Self::request(
+        self.read_snapshot(
             cx,
             credentials,
-            Method::Get,
             POSITION_MODE,
             Params::new(),
             Request::PositionMode {
@@ -482,10 +520,9 @@ impl Account {
             return;
         }
         self.balance_in_flight = Some(self.balance_revision);
-        Self::request(
+        self.read_snapshot(
             cx,
             credentials,
-            Method::Get,
             BALANCE,
             Params::new(),
             Request::Balance {
@@ -504,10 +541,9 @@ impl Account {
         self.last_positions = cx.now;
         self.positions_in_flight = Some(self.positions_revision);
         let settings_stamp = cx.store.metadata_observation();
-        Self::request(
+        self.read_snapshot(
             cx,
             credentials,
-            Method::Get,
             POSITIONS,
             Params::new(),
             Request::Positions {
@@ -526,10 +562,9 @@ impl Account {
             return;
         }
         self.orders_in_flight = Some(self.orders_revision);
-        Self::request(
+        self.read_snapshot(
             cx,
             credentials,
-            Method::Get,
             OPEN_ORDERS,
             Params::new(),
             Request::OpenOrders {
@@ -1152,6 +1187,30 @@ impl Account {
         }
     }
 
+    pub fn on_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+        credentials: &Credentials,
+    ) {
+        if let Request::Metadata { token, .. } = request {
+            self.metadata_done(cx, token, Err(error));
+            return;
+        }
+        let owns_read = match &request {
+            Request::Balance { revision, .. } => self.balance_in_flight == Some(*revision),
+            Request::Positions { revision, .. } => self.positions_in_flight == Some(*revision),
+            Request::OpenOrders { revision, .. } => self.orders_in_flight == Some(*revision),
+            _ => true,
+        };
+        if owns_read {
+            // Native recovery owns retries and listen-key epoch checks. A provider
+            // failure supplies no response and therefore no venue-auth evidence.
+            self.on_request_failed(cx, request, &error.message, credentials);
+        }
+    }
+
     pub fn on_request_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1767,8 +1826,267 @@ impl crate::Bingx {
 }
 
 /// Metadata reads do not submit a trading effect, including failed confirmations.
-pub(crate) fn metadata_error(message: impl Into<String>) -> safe_cex_engine::VenueError {
-    safe_cex_engine::VenueError::new(message).outcome(safe_cex_engine::Outcome::NotSent)
+pub(crate) fn metadata_error(
+    error: impl Into<safe_cex_engine::VenueError>,
+) -> safe_cex_engine::VenueError {
+    let error = error.into();
+    // Typed signer failures already declare their outcome and keep it.
+    if error.outcome.is_some() {
+        error
+    } else {
+        error.outcome(safe_cex_engine::Outcome::NotSent)
+    }
+}
+
+#[cfg(test)]
+mod sign_failure_owners {
+    use super::*;
+    use safe_cex_engine::{Action, Command, Event, Venue};
+
+    struct Probe {
+        native: crate::Bingx,
+        queued: Option<Request>,
+        observation: Observation,
+        error: safe_cex_engine::VenueError,
+    }
+    impl Venue for Probe {
+        type Pending = Pending;
+        fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            self.observation = cx.store.metadata_revision();
+            if self.queued.is_none() {
+                let Admission::Start(token) = cx
+                    .store
+                    .begin_metadata("BTCUSDT", 42, true, Fallback::IndependentRails)
+                    .unwrap()
+                else {
+                    panic!("fixture owns one metadata token");
+                };
+                self.queued = Some(Request::Metadata {
+                    token,
+                    symbol: "BTCUSDT".into(),
+                    leverage: Some((5., 6.)),
+                });
+            }
+            cx.set_timer(1.);
+        }
+        fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {
+            panic!("fixture issues no request")
+        }
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {
+            panic!("fixture is not a network failure")
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
+        fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+            self.native.on_message(cx, socket, text);
+        }
+        fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+        fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, _: TimerId) {
+            self.native.on_sign_error(
+                cx,
+                Pending::Account(self.queued.take().unwrap()),
+                self.error.clone(),
+            );
+        }
+        fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    fn fail(kind: u8, active: u64) -> safe_cex_engine::Engine<Probe> {
+        fail_with_error(
+            kind,
+            active,
+            safe_cex_engine::signing::SignError::Refused.venue_error(),
+        )
+    }
+    fn fail_with_error(
+        kind: u8,
+        active: u64,
+        error: safe_cex_engine::VenueError,
+    ) -> safe_cex_engine::Engine<Probe> {
+        let credentials = Credentials {
+            read: None,
+            primary: safe_cex_engine::signing::Identity {
+                credential: safe_cex_engine::signing::KeyRef("ref:owned-credential".into()),
+                signing: safe_cex_engine::signing::KeyRef("ref:owned-signing".into()),
+                passphrase: None,
+                stable_id: None,
+            },
+        };
+        let mut native = crate::Bingx::new(crate::Options {
+            credentials: Some(credentials.primary),
+            ..Default::default()
+        });
+        let a = &mut native.account;
+        a.balance_in_flight = Some(active);
+        a.positions_in_flight = Some(active);
+        a.orders_in_flight = Some(active);
+        // Financial revisions may advance while the original reservation owns a read.
+        a.balance_revision = 9;
+        a.positions_revision = 9;
+        a.orders_revision = 9;
+        a.epoch = 5;
+        a.key_in_flight = true;
+        a.socket = Some(SocketId(44));
+        a.keepalive = Some(TimerId(77));
+        let request = match kind {
+            0 => Some(Request::Balance {
+                revision: 1,
+                first: None,
+                usdt: None,
+                failed: false,
+            }),
+            1 => Some(Request::Positions {
+                revision: 1,
+                settings_stamp: Observation::default(),
+                rows: vec![],
+                settings: vec![],
+                skipped: vec![],
+                unavailable: false,
+            }),
+            2 => Some(Request::OpenOrders {
+                revision: 1,
+                rows: vec![],
+                metas: vec![],
+                skipped: vec![],
+                unavailable: false,
+            }),
+            3 => Some(Request::ListenKey { epoch: 4 }),
+            4 => Some(Request::Keepalive { epoch: 4 }),
+            _ => None,
+        };
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
+            native,
+            queued: request,
+            observation: Observation::default(),
+            error,
+        });
+        engine.start(1_000.);
+        let timers: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, .. } => Some(timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        if kind == 5 {
+            engine.handle(
+                1_000.5,
+                Event::WsMessage {
+                    socket: SocketId(44),
+                    text: r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":25}}"#,
+                },
+            );
+        }
+        engine.handle(1_001., Event::TimerFired { timer: timers[0] });
+        engine
+    }
+    #[test]
+    fn signer_failure_cannot_clear_a_newer_read_reservation() {
+        for kind in 0..3 {
+            let engine = fail(kind, 2);
+            let a = &engine.venue().native.account;
+            assert_eq!(
+                match kind {
+                    0 => a.balance_in_flight,
+                    1 => a.positions_in_flight,
+                    _ => a.orders_in_flight,
+                },
+                Some(2),
+                "owner {kind}"
+            );
+        }
+    }
+    #[test]
+    fn signer_failure_releases_its_reservation_after_financial_revision_advances() {
+        for kind in 0..3 {
+            let engine = fail(kind, 1);
+            let a = &engine.venue().native.account;
+            assert_eq!(
+                match kind {
+                    0 => a.balance_in_flight,
+                    1 => a.positions_in_flight,
+                    _ => a.orders_in_flight,
+                },
+                None,
+                "owner {kind}"
+            );
+        }
+    }
+    #[test]
+    fn stale_listen_and_keepalive_signer_failures_cannot_retire_replacement_session() {
+        for kind in 3..5 {
+            let mut engine = fail(kind, 2);
+            let a = &engine.venue().native.account;
+            assert_eq!(a.epoch, 5);
+            assert!(a.key_in_flight);
+            assert_eq!(a.socket, Some(SocketId(44)));
+            assert_eq!(a.keepalive, Some(TimerId(77)));
+            assert!(engine.drain_actions().next().is_none());
+        }
+    }
+    #[test]
+    fn typed_margin_failure_preserves_newer_native_settings_ack() {
+        let mut engine = fail(5, 1);
+        assert!(
+            !engine
+                .store()
+                .metadata_revision_current(&engine.venue().observation)
+        );
+        let setting = engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.leverage, 25.);
+        assert_eq!(
+            (setting.buy_leverage, setting.sell_leverage),
+            (Some(25.), Some(25.))
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 42, error }) => {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            errors,
+            [&safe_cex_engine::signing::SignError::Refused.venue_error()]
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+        );
+    }
+    #[test]
+    fn metadata_provider_refusal_keeps_typed_fields_without_auth_evidence() {
+        let mut error = safe_cex_engine::signing::SignError::Refused.venue_error();
+        error.venue_code = Some("fixture-provider-refusal".into());
+        let mut engine = fail_with_error(5, 1, error.clone());
+        let account = &engine.venue().native.account;
+        assert_eq!(account.epoch, 5);
+        assert_eq!(account.socket, Some(SocketId(44)));
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let failures = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 42, error }) => {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(failures, [&error]);
+        assert!(!actions.iter().any(|action| matches!(
+            action,
+            Action::Http(_) | Action::Sign { .. } | Action::WsClose { .. }
+        )));
+    }
 }
 
 #[cfg(test)]
@@ -1799,8 +2117,14 @@ mod tests {
                 text,
                 &Credentials {
                     read: None,
-                    key: "fixture".into(),
-                    secret: "fixture".into(),
+                    primary: safe_cex_engine::signing::Identity {
+                        credential: safe_cex_engine::signing::KeyRef(
+                            "ref:fixture-credential".into(),
+                        ),
+                        signing: safe_cex_engine::signing::KeyRef("ref:fixture-signing".into()),
+                        passphrase: None,
+                        stable_id: None,
+                    },
                 },
             );
         }

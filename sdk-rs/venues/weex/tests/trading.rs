@@ -4,20 +4,43 @@ use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
 };
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
 use serde_json::{Value, json};
+use support::setup::Options;
 
 fn engine() -> Engine<WeexFutures> {
     engine_with_private_ws(false)
 }
 fn engine_with_private_ws(private_ws_headers: bool) -> Engine<WeexFutures> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        private_ws_headers,
-        ..Options::default()
-    }));
+    engine_with(private_ws_headers, |local| local)
+}
+/// The provider signs (`true`) or refuses (`false`) requests in plan order.
+fn gated_engine(plan: &[bool]) -> Engine<WeexFutures> {
+    engine_with(false, |inner| {
+        std::sync::Arc::new(support::setup::Gated::new(inner, plan))
+    })
+}
+fn engine_with(
+    private_ws_headers: bool,
+    wrap: impl FnOnce(safe_cex_engine::signing::Provider) -> safe_cex_engine::signing::Provider,
+) -> Engine<WeexFutures> {
+    engine_from(
+        Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("passphrase".into()),
+            private_ws_headers,
+            ..Options::default()
+        },
+        wrap,
+    )
+}
+fn engine_from(
+    options: Options,
+    wrap: impl FnOnce(safe_cex_engine::signing::Provider) -> safe_cex_engine::signing::Provider,
+) -> Engine<WeexFutures> {
+    let mut e = support::setup::engine_with_provider(options, wrap);
     e.store_mut().set_markets(vec![Market {
         id: "BTCUSDT".into(),
         symbol: "BTCUSDT".into(),
@@ -107,7 +130,7 @@ fn order(id: &str, kind: OrderType) -> Order {
 }
 fn command(e: &mut Engine<WeexFutures>, command: Command) -> Vec<Action> {
     e.handle(1000.0, Event::Command(command));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, 1000.0)
 }
 fn writes(actions: &[Action]) -> Vec<HttpRequest> {
     actions
@@ -1859,167 +1882,6 @@ fn command_errors(actions: &[Action]) -> Vec<String> {
 }
 const ISOLATED_CONFIG: &str = r#"[{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"20","isolatedLongLeverage":"7","isolatedShortLeverage":"9"}]"#;
 
-fn joined_metadata(e: &mut Engine<WeexFutures>, first: u32, second: u32) -> HttpRequest {
-    let mut actions = Vec::new();
-    for id in [first, second] {
-        actions.extend(command(
-            e,
-            Command::FetchLeverage {
-                command: id,
-                symbol: "BTCUSDT".into(),
-            },
-        ));
-    }
-    let mut reads = actions
-        .into_iter()
-        .filter_map(|action| match action {
-            Action::Http(read) if read.url.contains("/account/symbolConfig") => Some(read),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        reads.len(),
-        1,
-        "same-revision metadata callers share one read"
-    );
-    reads.pop().unwrap()
-}
-
-#[test]
-fn metadata_owner_coalesces_native_config_and_completes_both_callers() {
-    let mut e = engine();
-    let read = joined_metadata(&mut e, 950, 951);
-    let actions = raw_response(&mut e, &read, ISOLATED_CONFIG);
-    for id in [950, 951] {
-        assert_eq!(
-            actions.iter().filter(|action| matches!(action,
-                Action::Notice(Notice::CommandDone { command, result })
-                if *command == id && result == r#"{"buyLeverage":7.0,"sellLeverage":9.0,"marginType":"isolated"}"#
-            )).count(),
-            1,
-            "each joined command completes once with the same validated result"
-        );
-    }
-    assert_eq!(
-        e.store().setting("BTCUSDT").unwrap().margin_type,
-        Some(MarginType::Isolated)
-    );
-    assert!(!actions.iter().any(|action| matches!(
-        action,
-        Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
-    )));
-}
-
-#[test]
-fn metadata_owner_fails_both_joined_callers_and_keeps_good_settings() {
-    let mut e = engine();
-    let before = e.store().setting("BTCUSDT");
-    let read = joined_metadata(&mut e, 952, 953);
-    let actions = raw_response(&mut e, &read, "[]");
-    for id in [952, 953] {
-        assert_eq!(
-            actions
-                .iter()
-                .filter(|action| matches!(action,
-                    Action::Notice(Notice::CommandFailed { command, .. }) if *command == id
-                ))
-                .count(),
-            1,
-            "each joined command rejects once"
-        );
-    }
-    assert_eq!(e.store().setting("BTCUSDT"), before);
-    assert!(!actions.iter().any(|action| matches!(
-        action,
-        Action::Http(_) | Action::Notice(Notice::CommandDone { .. })
-    )));
-}
-
-#[test]
-fn metadata_owner_preserves_secondary_only_get_credentials() {
-    let markets = engine().store().markets().to_vec();
-    let mut e = safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
-        read_credentials: Some(safe_cex_engine::ReadCredentials {
-            key: "read-key".into(),
-            secret: "read-secret".into(),
-            passphrase: Some("read-passphrase".into()),
-        }),
-        ..Options::default()
-    }));
-    e.store_mut().set_markets(markets);
-    let read = joined_metadata(&mut e, 954, 955);
-    assert!(
-        read.headers
-            .iter()
-            .any(|(key, value)| *key == "ACCESS-KEY" && value == "read-key")
-    );
-    let actions = raw_response(&mut e, &read, ISOLATED_CONFIG);
-    for id in [954, 955] {
-        assert_eq!(
-            actions
-                .iter()
-                .filter(|action| matches!(action,
-                    Action::Notice(Notice::CommandDone { command, .. }) if *command == id
-                ))
-                .count(),
-            1
-        );
-    }
-    assert_eq!(
-        e.store().setting("BTCUSDT").unwrap().sell_leverage,
-        Some(9.0)
-    );
-}
-
-#[test]
-fn metadata_started_during_a_write_stays_nonpublishing_after_refusal() {
-    let mut e = engine();
-    let before = e.store().setting("BTCUSDT");
-    let actions = command(
-        &mut e,
-        Command::SetLeverage {
-            command: 956,
-            symbol: "BTCUSDT".into(),
-            leverage: 30.0,
-            side: None,
-        },
-    );
-    let write = writes(&actions).pop().unwrap();
-    let read = joined_metadata(&mut e, 957, 958);
-    let refusal = response(
-        &mut e,
-        &write,
-        json!({"code":"40015","msg":"Insufficient balance"}),
-    );
-    assert!(done(&refusal).is_err());
-    let actions = raw_response(&mut e, &read, ISOLATED_CONFIG);
-    for id in [957, 958] {
-        assert!(actions.iter().any(|action| matches!(action,
-            Action::Notice(Notice::CommandDone { command, .. }) if *command == id
-        )));
-    }
-    assert_eq!(e.store().setting("BTCUSDT"), before);
-    // The finished write cannot upgrade the old read, but a newly admitted
-    // group is eligible and refreshes both the Store and native config cache.
-    let next = joined_metadata(&mut e, 959, 960);
-    raw_response(&mut e, &next, ISOLATED_CONFIG);
-    assert_eq!(
-        e.store().setting("BTCUSDT").unwrap().buy_leverage,
-        Some(7.0)
-    );
-    let actions = command(
-        &mut e,
-        Command::SetLeverage {
-            command: 961,
-            symbol: "BTCUSDT".into(),
-            leverage: 11.0,
-            side: Some(PositionSide::Long),
-        },
-    );
-    let write = writes(&actions).pop().unwrap();
-    assert_eq!(body(&write)["isolatedShortLeverage"], "9");
-}
-
 #[test]
 fn leverage_read_is_a_fresh_symbol_scoped_configuration_read() {
     let mut e = engine();
@@ -2106,4 +1968,145 @@ fn leverage_read_needs_a_known_market() {
     );
     assert_eq!(done(&actions), Err("unknown market ETHUSDT".into()));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+}
+
+fn auth_notices(actions: &[Action]) -> usize {
+    actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::Notice(Notice::AccountAuth { .. } | Notice::Deactivate)
+            )
+        })
+        .count()
+}
+
+#[test]
+fn provider_refusal_of_a_first_write_is_typed_not_sent_and_never_released() {
+    let mut e = gated_engine(&[false]);
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 61,
+            orders: vec![opts("refused")],
+        },
+    );
+    assert!(
+        writes(&actions).is_empty(),
+        "a refused write is never released"
+    );
+    let mut actions = actions;
+    actions.extend(e.drain_actions());
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert_eq!(
+        auth_notices(&actions),
+        0,
+        "provider refusal is not venue auth"
+    );
+}
+
+#[test]
+fn provider_refusal_after_an_accepted_lot_is_neither_not_sent_nor_rejected() {
+    let mut e = gated_engine(&[true, false]);
+    let orders: Vec<_> = (0..6).map(|i| opts(&format!("lot-{i}"))).collect();
+    let actions = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 62,
+            orders,
+        },
+    );
+    let first = writes(&actions).pop().unwrap();
+    let ack = batch_ack(&first, 100);
+    let actions = response(&mut e, &first, ack);
+    assert!(
+        writes(&actions).is_empty(),
+        "the second lot is refused before release"
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, None, "the first lot was accepted: {error:?}");
+}
+
+#[test]
+fn provider_refusal_of_a_leverage_read_is_typed_and_keeps_settings() {
+    let mut e = gated_engine(&[false]);
+    let before = e.store().setting("BTCUSDT");
+    let actions = command(
+        &mut e,
+        Command::FetchLeverage {
+            command: 63,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
+        "a refused read is never released"
+    );
+    let error = failure(&actions);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(auth_notices(&actions), 0);
+    assert_eq!(e.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn a_later_sent_rejection_supersedes_an_earlier_provider_refusal() {
+    let mut e = gated_engine(&[false]);
+    e.store_mut().upsert_order(order("1", OrderType::Limit));
+    e.store_mut().upsert_order(order("2", OrderType::StopLoss));
+    let actions = command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 64,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    // The regular-order step was refused before release; the algo step was sent.
+    let r = writes(&actions).pop().unwrap();
+    assert!(
+        r.url.ends_with("algoOpenOrders?symbol=BTCUSDT"),
+        "{}",
+        r.url
+    );
+    e.handle(
+        1001.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":"40015","msg":"rejected"}"#,
+            },
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let error = failure(&actions);
+    assert_ne!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::NotSent),
+        "a write reached the venue: {error:?}"
+    );
+}
+
+#[test]
+fn a_read_only_account_still_fetches_leverage_with_its_secondary_identity() {
+    let mut e = engine_from(
+        Options {
+            public_data_only: true,
+            read_credentials: Some(safe_cex_engine::ReadCredentials {
+                key: "read-key".into(),
+                secret: "read-secret".into(),
+                passphrase: Some("read-pass".into()),
+            }),
+            ..Options::default()
+        },
+        |local| local,
+    );
+    let r = leverage_read(&mut e, 65);
+    let key = r.headers.iter().find(|(k, _)| *k == "ACCESS-KEY").unwrap();
+    assert_eq!(key.1, "read-key");
+    let actions = raw_response(&mut e, &r, ISOLATED_CONFIG);
+    assert!(done(&actions).is_ok());
 }

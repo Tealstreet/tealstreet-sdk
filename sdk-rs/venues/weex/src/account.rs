@@ -18,7 +18,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const TERMINAL_LIMIT: usize = 20_000;
 const RECONCILIATION_DEADLINE_MS: f64 = 20_000.0;
-const PRIVATE_WS: &str = "wss://ws-contract.weex.com/v3/ws/private";
 const SKIP_LOG_LIMIT: usize = 4_096;
 #[derive(Clone, Copy)]
 pub enum Kind {
@@ -161,6 +160,7 @@ pub struct State {
     refresh: Option<TimerId>,
     revision: u64,
     orders_revision: u64,
+    settings_revision: u64,
     order_stage: Vec<Order>,
     order_skipped: Skipped,
     /// Revision, staged rows, and IDs of positions whose rows were malformed.
@@ -199,7 +199,11 @@ impl State {
     }
     /// Settings writes also supersede position snapshots; keep this financial
     /// fence separate from engine-owned settings publication authority.
+    pub fn settings_revision(&self) -> u64 {
+        self.settings_revision
+    }
     pub fn invalidate_settings(&mut self) {
+        self.settings_revision += 1;
         self.revision += 1;
     }
     pub fn invalidate_orders(&mut self) {
@@ -299,7 +303,7 @@ impl WeexFutures {
             cx.deactivate();
             return;
         }
-        if self.credentials.is_none() {
+        if self.credentials.primary.is_none() {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
             cx.store.set_orders(vec![]);
@@ -317,7 +321,7 @@ impl WeexFutures {
             self.start_account(cx);
             return;
         }
-        if self.credentials.is_none() || self.account.pending > 0 {
+        if self.credentials.primary.is_none() || self.account.pending > 0 {
             return;
         }
         if let Some(timer) = self.account.refresh.take() {
@@ -326,14 +330,10 @@ impl WeexFutures {
         self.account_cycle(cx);
     }
     fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(credentials) = &self.credentials {
-            self.account.socket = Some(
-                cx.connect(
-                    safe_cex_engine::SocketSpec::new(PRIVATE_WS)
-                        .headers(credentials.ws_headers(cx.now))
-                        .channel(safe_cex_engine::SocketChannel::Private),
-                ),
-            );
+        if let Some(primary) = &self.credentials.primary {
+            // The upgrade is signed with the primary identity at dispatch time.
+            let step = crate::dispatch_signing::Upgrade::new(primary.clone());
+            self.account.socket = Some(cx.connect_signed(step.unsigned(), Box::new(step)));
             self.account.supervisor.connecting(cx);
         }
     }

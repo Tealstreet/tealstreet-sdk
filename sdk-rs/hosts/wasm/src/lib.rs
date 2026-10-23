@@ -48,6 +48,9 @@ mod managed_http;
 use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
+    fn failed(&self) -> bool {
+        false
+    }
     #[cfg(feature = "dispatch-signing")]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
@@ -120,6 +123,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
     #[cfg(feature = "dispatch-signing")]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         Engine::signing_clock(self, now)
+    }
+    fn failed(&self) -> bool {
+        Engine::failed(self)
     }
     fn external_signer(&mut self) -> Result<(), safe_cex_engine::VenueError> {
         self.set_signer(None)
@@ -257,7 +263,7 @@ enum ActionOut<'a> {
     WsConnect {
         #[serde(skip_serializing_if = "is_false")]
         binary: bool,
-        socket: u32,
+        socket: u64,
         url: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
         channel: Option<&'static str>,
@@ -267,11 +273,11 @@ enum ActionOut<'a> {
         headers: Option<Vec<(&'static str, &'a str)>>,
     },
     WsSend {
-        socket: u32,
+        socket: u64,
         text: &'a str,
     },
     WsClose {
-        socket: u32,
+        socket: u64,
     },
     Http {
         #[serde(flatten)]
@@ -282,23 +288,23 @@ enum ActionOut<'a> {
         phase: HttpPhaseOut<'a>,
     },
     Sign {
-        attempt: u32,
+        attempt: u64,
         work: &'a safe_cex_engine::signing::SignRequest,
         #[serde(rename = "timeoutMs")]
         timeout_ms: u32,
     },
     SignPayload {
-        request: u32,
+        request: u64,
         payload: &'a safe_cex_engine::PayloadSignRequest,
         #[serde(rename = "timeoutMs")]
         timeout_ms: u32,
     },
     SetTimer {
-        timer: u32,
+        timer: u64,
         at: f64,
     },
     ClearTimer {
-        timer: u32,
+        timer: u64,
     },
     Event {
         level: &'static str,
@@ -573,6 +579,18 @@ fn callback_entropy(
     _source: js_sys::Function,
 ) -> Result<safe_cex_engine::entropy::Fill, safe_cex_engine::VenueError> {
     Err(entropy_configuration_error())
+}
+
+fn host_resource_id(value: f64) -> Result<u64, js_sys::Error> {
+    safe_cex_engine::resource_ids::from_host_number(value).ok_or_else(|| {
+        construction_error(
+            safe_cex_engine::VenueError::new(
+                "Engine resource ID must be a nonnegative safe integer",
+            )
+            .kind(safe_cex_engine::ErrorKind::InvalidInput)
+            .outcome(safe_cex_engine::Outcome::NotSent),
+        )
+    })
 }
 
 fn construction_error(detail: safe_cex_engine::VenueError) -> js_sys::Error {
@@ -871,7 +889,13 @@ impl WasmEngine {
     }
 
     #[wasm_bindgen(js_name = signed)]
-    pub fn signed(&mut self, attempt: u32, result_json: &str, now: f64) -> String {
+    pub fn signed(
+        &mut self,
+        attempt: f64,
+        result_json: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        let attempt = host_resource_id(attempt)?;
         let result = serde_json::from_str::<safe_cex_engine::signing::SignResult>(result_json)
             .map_err(|_| safe_cex_engine::signing::SignError::InvalidResult);
         self.inner.handle(
@@ -881,10 +905,16 @@ impl WasmEngine {
                 result,
             },
         );
-        self.flush()
+        Ok(self.flush())
     }
     #[wasm_bindgen(js_name = signFailed)]
-    pub fn sign_failed(&mut self, attempt: u32, code: &str, now: f64) -> String {
+    pub fn sign_failed(
+        &mut self,
+        attempt: f64,
+        code: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        let attempt = host_resource_id(attempt)?;
         use safe_cex_engine::signing::SignError;
         let error = match code {
             "timedOut" => SignError::TimedOut,
@@ -899,12 +929,17 @@ impl WasmEngine {
                 result: Err(error),
             },
         );
-        self.flush()
+        Ok(self.flush())
     }
     #[wasm_bindgen(js_name = prepareDispatch)]
     pub fn prepare_dispatch(&mut self, now: f64) -> String {
         self.inner.prepare_dispatch(now);
         self.flush()
+    }
+
+    /// Sticky fatal engine state; reading it grants no I/O authority.
+    pub fn failed(&self) -> bool {
+        self.inner.failed()
     }
 
     /// Resolved account choices; contains no credentials.
@@ -941,38 +976,65 @@ impl WasmEngine {
     }
 
     #[wasm_bindgen(js_name = wsOpen)]
-    pub fn ws_open(&mut self, socket: u32, now: f64) -> String {
+    pub fn ws_open(&mut self, socket: f64, now: f64) -> Result<String, js_sys::Error> {
+        let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsOpened { socket });
-        self.flush()
+        Ok(self.flush())
     }
 
     #[wasm_bindgen(js_name = wsMessage)]
-    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> String {
+    pub fn ws_message(
+        &mut self,
+        socket: f64,
+        text: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsMessage { socket, text });
-        self.flush()
+        Ok(self.flush())
     }
 
     /// Like `wsMessage`, returning `undefined` when there are no host actions.
     /// Hosts can avoid decoding an empty UTF-8 string on market-data messages.
     #[cfg(feature = "text-ingress")]
     #[wasm_bindgen(js_name = wsMessageActions)]
-    pub fn ws_message_actions(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
-        let actions = self.ws_message(socket, text, now);
-        (!actions.is_empty()).then_some(actions)
+    pub fn ws_message_actions(
+        &mut self,
+        socket: f64,
+        text: &str,
+        now: f64,
+    ) -> Result<Option<String>, js_sys::Error> {
+        host_resource_id(socket)?;
+        let actions = self.ws_message(socket, text, now)?;
+        Ok((!actions.is_empty()).then_some(actions))
     }
 
     /// A byte-input alternative that rejects invalid UTF-8 before handling any event.
     #[cfg(feature = "text-ingress")]
     #[wasm_bindgen(js_name = wsMessageBytes)]
-    pub fn ws_message_bytes(&mut self, socket: u32, bytes: &[u8], now: f64) -> Option<String> {
-        let text = std::str::from_utf8(bytes).ok()?;
+    pub fn ws_message_bytes(
+        &mut self,
+        socket: f64,
+        bytes: &[u8],
+        now: f64,
+    ) -> Result<Option<String>, js_sys::Error> {
+        host_resource_id(socket)?;
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(None);
+        };
         self.ws_message_actions(socket, text, now)
     }
 
     #[wasm_bindgen(js_name = wsBinary)]
-    pub fn ws_binary(&mut self, socket: u32, data: &[u8], now: f64) -> String {
+    pub fn ws_binary(
+        &mut self,
+        socket: f64,
+        data: &[u8],
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        let socket = host_resource_id(socket)?;
         self.inner.handle(
             now,
             Event::WsBinary {
@@ -980,20 +1042,28 @@ impl WasmEngine {
                 data,
             },
         );
-        self.flush()
+        Ok(self.flush())
     }
 
     #[wasm_bindgen(js_name = wsClose)]
-    pub fn ws_close(&mut self, socket: u32, code: u16, now: f64) -> String {
+    pub fn ws_close(&mut self, socket: f64, code: u16, now: f64) -> Result<String, js_sys::Error> {
+        let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsClosed { socket, code });
-        self.flush()
+        Ok(self.flush())
     }
 
     /// A response begins; `headers` is `name: value` lines. The body follows
     /// as chunks so a large list never has to fit in memory at once.
     #[wasm_bindgen(js_name = httpStart)]
-    pub fn http_start(&mut self, request: u32, status: u16, headers: &str, now: f64) -> String {
+    pub fn http_start(
+        &mut self,
+        request: f64,
+        status: u16,
+        headers: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        let request = host_resource_id(request)?;
         let request = RequestId(request);
         self.inner.handle(
             now,
@@ -1003,38 +1073,52 @@ impl WasmEngine {
                 headers,
             },
         );
-        self.flush()
+        Ok(self.flush())
     }
 
     #[wasm_bindgen(js_name = httpChunk)]
-    pub fn http_chunk(&mut self, request: u32, data: &[u8], now: f64) -> String {
+    pub fn http_chunk(
+        &mut self,
+        request: f64,
+        data: &[u8],
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        let request = host_resource_id(request)?;
         let request = RequestId(request);
         self.inner.handle(now, Event::HttpChunk { request, data });
-        self.flush()
+        Ok(self.flush())
     }
 
     #[wasm_bindgen(js_name = httpEnd)]
-    pub fn http_end(&mut self, request: u32, now: f64) -> String {
+    pub fn http_end(&mut self, request: f64, now: f64) -> Result<String, js_sys::Error> {
+        let request = host_resource_id(request)?;
         let request = RequestId(request);
         self.inner.handle(now, Event::HttpEnd { request });
-        self.flush()
+        Ok(self.flush())
     }
 
     #[wasm_bindgen(js_name = httpFailed)]
-    pub fn http_failed(&mut self, request: u32, error: &str, now: f64) -> String {
+    pub fn http_failed(
+        &mut self,
+        request: f64,
+        error: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        let request = host_resource_id(request)?;
         let request = RequestId(request);
         self.inner.handle(now, Event::HttpFailed { request, error });
-        self.flush()
+        Ok(self.flush())
     }
 
     #[wasm_bindgen(js_name = payloadSigned)]
     pub fn payload_signed(
         &mut self,
-        request: u32,
+        request: f64,
         signature: &str,
         headers: &str,
         now: f64,
-    ) -> String {
+    ) -> Result<String, js_sys::Error> {
+        let request = host_resource_id(request)?;
         let request = RequestId(request);
         match payload_headers(headers) {
             Some(headers) => self.inner.handle(
@@ -1053,11 +1137,17 @@ impl WasmEngine {
                 },
             ),
         }
-        self.flush()
+        Ok(self.flush())
     }
 
     #[wasm_bindgen(js_name = payloadSignFailed)]
-    pub fn payload_sign_failed(&mut self, request: u32, error: &str, now: f64) -> String {
+    pub fn payload_sign_failed(
+        &mut self,
+        request: f64,
+        error: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        let request = host_resource_id(request)?;
         self.inner.handle(
             now,
             Event::PayloadSignFailed {
@@ -1065,13 +1155,14 @@ impl WasmEngine {
                 error,
             },
         );
-        self.flush()
+        Ok(self.flush())
     }
 
-    pub fn timer(&mut self, timer: u32, now: f64) -> String {
+    pub fn timer(&mut self, timer: f64, now: f64) -> Result<String, js_sys::Error> {
+        let timer = host_resource_id(timer)?;
         let timer = TimerId(timer);
         self.inner.handle(now, Event::TimerFired { timer });
-        self.flush()
+        Ok(self.flush())
     }
 
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
@@ -1309,11 +1400,15 @@ mod tests {
                     })
                     .collect();
                 let completion = json!({"values": values, "receipt": sign["work"]["receipt"]});
-                let released: Vec<Value> = serde_json::from_str(&engine.signed(
-                    u32::try_from(sign["attempt"].as_u64().unwrap()).unwrap(),
-                    &completion.to_string(),
-                    NOW + 1.,
-                ))
+                let released: Vec<Value> = serde_json::from_str(
+                    &engine
+                        .signed(
+                            sign["attempt"].as_f64().unwrap(),
+                            &completion.to_string(),
+                            NOW + 1.,
+                        )
+                        .unwrap(),
+                )
                 .unwrap();
                 assert!(released.iter().any(|action| {
                     action["op"] == "http"
@@ -1497,6 +1592,7 @@ mod tests {
                     "krakenspot",
                     "binancespot",
                     "binanceinverse",
+                    "polymarket",
                 ],
                 venue,
             );
@@ -1554,7 +1650,11 @@ mod tests {
                 ) || any(&OKX, venue),
                 fill_history: !no_history,
                 order_history: !no_orders_or_income,
-                income_history: !no_orders_or_income,
+                income_history: !no_orders_or_income
+                    && !any(
+                        &["bybitspot", "hyrotrader", "coinbase", "coinbasespot"],
+                        venue,
+                    ),
                 fills_by_order_id: venue == "grvt",
                 cancel_all: if any(
                     &[
@@ -1702,7 +1802,7 @@ mod tests {
                     }
                     _ => safe_cex_engine::FillHistoryTime::AsProvided,
                 },
-                stp_controls: venue == "asterdex",
+                stp_controls: false,
                 bybit_execution_controls: any(
                     &[
                         "bybit",
@@ -2198,6 +2298,35 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     #[test]
+    fn numeric_websocket_abi_round_trips_ids_above_u32_without_bigint() {
+        for id in [
+            u64::from(u32::MAX) + 1,
+            safe_cex_engine::resource_ids::MAX_RESOURCE_ID,
+        ] {
+            let mut engine = WasmEngine {
+                dispatch_signing: false,
+                #[cfg(feature = "dispatch-signing")]
+                hosted_identity: None,
+                #[cfg(feature = "dispatch-signing")]
+                hosted_captures: Default::default(),
+                external_signer: false,
+                construction: "{}".into(),
+                inner: Box::<Messages>::default(),
+            };
+            let text = engine.ws_message(id as f64, "wide", 1.).unwrap();
+            let rows: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(rows.as_array().unwrap().len(), 2);
+            assert!(
+                rows.as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["socket"].as_u64() == Some(id))
+            );
+        }
+    }
+
+    #[cfg(feature = "text-ingress")]
+    #[test]
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
             dispatch_signing: false,
@@ -2211,19 +2340,19 @@ mod tests {
         };
         let mut legacy = engine();
         let mut optional = engine();
-        assert_eq!(legacy.ws_message(7, "quiet", 1.), "");
-        assert_eq!(optional.ws_message_actions(7, "quiet", 1.), None);
-        let expected = legacy.ws_message(7, "payload", 2.);
+        assert_eq!(legacy.ws_message(7., "quiet", 1.).unwrap(), "");
+        assert_eq!(optional.ws_message_actions(7., "quiet", 1.).unwrap(), None);
+        let expected = legacy.ws_message(7., "payload", 2.).unwrap();
         assert_eq!(
             expected,
             r#"[{"op":"wsSend","socket":7,"text":"first:payload"},{"op":"wsSend","socket":7,"text":"second:payload"}]"#
         );
         assert_eq!(
-            optional.ws_message_actions(7, "payload", 2.),
+            optional.ws_message_actions(7., "payload", 2.).unwrap(),
             Some(expected)
         );
-        assert_eq!(legacy.ws_message(7, "quiet", 3.), "");
-        assert_eq!(optional.ws_message_actions(7, "quiet", 3.), None);
+        assert_eq!(legacy.ws_message(7., "quiet", 3.).unwrap(), "");
+        assert_eq!(optional.ws_message_actions(7., "quiet", 3.).unwrap(), None);
     }
 
     #[cfg(feature = "text-ingress")]
@@ -2263,18 +2392,18 @@ mod tests {
             &[0xed, 0xa0, 0x80],
             &[0xf0, 0x9f],
         ] {
-            assert_eq!(bytes.ws_message_bytes(7, invalid, 2.), None);
+            assert_eq!(bytes.ws_message_bytes(7., invalid, 2.).unwrap(), None);
         }
         assert_eq!(
-            bytes.ws_message_bytes(7, b"quiet", 3.),
-            Some(legacy.ws_message(7, "pending", 1.))
+            bytes.ws_message_bytes(7., b"quiet", 3.).unwrap(),
+            Some(legacy.ws_message(7., "pending", 1.).unwrap())
         );
         for text in ["", "ASCII", "é漢🦀\u{fffd}", "a\0b"] {
             assert_eq!(
-                bytes.ws_message_bytes(7, text.as_bytes(), 4.),
-                Some(legacy.ws_message(7, text, 4.))
+                bytes.ws_message_bytes(7., text.as_bytes(), 4.).unwrap(),
+                Some(legacy.ws_message(7., text, 4.).unwrap())
             );
-            assert_eq!(bytes.ws_message_bytes(7, b"quiet", 5.), None);
+            assert_eq!(bytes.ws_message_bytes(7., b"quiet", 5.).unwrap(), None);
         }
     }
 

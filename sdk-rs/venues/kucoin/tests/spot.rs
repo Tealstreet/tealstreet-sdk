@@ -118,7 +118,7 @@ impl H {
     }
     fn collect(&mut self) {
         let mut receipts = Vec::new();
-        for action in self.e.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.e, self.now) {
             if let Action::Notice(Notice::CommandProgress {
                 receipts: actual, ..
             }) = &action

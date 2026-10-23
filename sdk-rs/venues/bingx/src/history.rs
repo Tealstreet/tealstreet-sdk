@@ -697,7 +697,29 @@ impl History {
         }
     }
 
+    pub fn on_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Some(timer) = self.reads.get(&request.command).and_then(|read| read.timer) {
+            cx.clear_timer(timer);
+        }
+        self.fail_read(cx, request, &error);
+    }
+
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        self.fail_read(cx, request, &error.into());
+    }
+
+    /// Native and signer failures share one command completion.
+    fn fail_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &safe_cex_engine::VenueError,
+    ) {
         self.reads.remove(&request.command);
         cx.fail(request.command, error.to_owned());
     }

@@ -452,11 +452,26 @@ impl Trading {
                     if job.effective && error.outcome == Some(Outcome::Rejected) {
                         error.outcome = None;
                     }
+                    if job.effective && error.outcome == Some(Outcome::NotSent) {
+                        error.outcome = Some(Outcome::Unknown);
+                    }
                     cx.fail(command, error.partial_ids(&job.ids));
                 }
                 None => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
             }
         }
+    }
+
+    pub fn on_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: Option<&Credentials>,
+        request: Request,
+        error: VenueError,
+    ) {
+        cx.store.metadata_write_finished(request.command);
+        let places = request.places_order();
+        self.finish(cx, credentials, request.command, places, Err(error));
     }
 
     pub fn on_failed(
@@ -647,11 +662,22 @@ impl Trading {
                     );
                 }
                 cx.command_error(command, error.message.clone());
-                // The first failure names the error; any unproven one makes it unknown.
-                let unknown = error.outcome == Some(Outcome::Unknown);
-                let recorded = job.error.get_or_insert(error);
-                if unknown {
-                    recorded.outcome = Some(Outcome::Unknown);
+                // Preserve the first diagnostic independently of sent evidence.
+                // Unsent sibling legs cannot erase a native refusal or uncertainty.
+                if let Some(recorded) = &mut job.error {
+                    if recorded.outcome.is_none()
+                        || error.outcome.is_none()
+                        || recorded.outcome == Some(Outcome::Unknown)
+                        || error.outcome == Some(Outcome::Unknown)
+                    {
+                        recorded.outcome = Some(Outcome::Unknown);
+                    } else if recorded.outcome == Some(Outcome::NotSent)
+                        && error.outcome == Some(Outcome::Rejected)
+                    {
+                        recorded.outcome = Some(Outcome::Rejected);
+                    }
+                } else {
+                    job.error = Some(error);
                 }
             }
         }

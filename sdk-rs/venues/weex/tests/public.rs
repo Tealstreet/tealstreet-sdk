@@ -1,12 +1,14 @@
 //! Oracles: WEEX futures Market_API/GetExchangeInfo, GetDepthData and streams
 //! public/{Depth-Channel,Tickers-Channel,Kline-Channel} documented examples.
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId, TimerId};
-use safe_cex_venue_weex::{Options, WeexFutures};
+mod support;
+use safe_cex_venue_weex::WeexFutures;
+use support::setup::Options;
 fn engine() -> Engine<WeexFutures> {
-    safe_cex_engine::test_support::seeded_engine(WeexFutures::new(Options {
+    support::setup::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }))
+    })
 }
 fn response(e: &mut Engine<WeexFutures>, id: RequestId, body: &str) {
     e.handle(
