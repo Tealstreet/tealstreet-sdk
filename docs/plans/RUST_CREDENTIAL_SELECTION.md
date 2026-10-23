@@ -12,8 +12,8 @@ Owner constraints carried unchanged:
   chosen in Rust before a payload reaches any signer (true today, preserved).
 - RUST_AUDITS.md "park read-key selection deduplication until after cutover"
   (Binance re-audit) predates the 2026-10-22 choke-point rule, which lists
-  credentials as an engine choke point. This plan follows the newer rule;
-  claude-ddi2il confirms before Phase 1 merges.
+  credentials as an engine choke point. claude-ddi2il confirmed (2026-10-23)
+  that the newer rule supersedes it; RUST_AUDITS.md is updated.
 - RUST_AUDITS.md known nonce limits (restart/cross-process, freshness window)
   stay "document only". This core centralizes reservation; it does not change
   allocation semantics, add cross-process coordination or alter clock sources.
@@ -188,7 +188,7 @@ slot/ref never implies equal account.
   Generalizes Coinbase's runtime drop; other families adopt it only
   explicitly, listed per PR.
 
-### C2. Account subject (decision required before implementation)
+### C2. Account subject (deferred; decision with Sam, not in Phase 2)
 
 `AccountSubject { signer, trading_account, fee_subject, public_id }` per slot,
 kept as separate fields, resolved once by the venue identity codec and read by

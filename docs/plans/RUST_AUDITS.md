@@ -535,9 +535,11 @@ dispositions are in [the architecture and gate ledger](RUST_ARCHITECTURE_GATE_AU
   private/write boundaries, passphrase inheritance and Bitget's degraded-balance
   primary-key exception when sharing it. ~~Copied per-venue test probes~~ were
   replaced by `engine::test_support::ProbeVenue` in #1427 (`1435005aea3`);
-  13 secondary-test files retain venue-specific assertions. **Owner decision:**
-  park selection deduplication until after cutover; this re-audit established no
-  wrong-key or missing-read-key production defect.
+  13 secondary-test files retain venue-specific assertions. This re-audit
+  established no wrong-key or missing-read-key production defect. ~~Owner
+  decision: park selection deduplication until after cutover.~~ Superseded by
+  the 2026-10-22 owner choke-point decision: selection moves to the engine per
+  [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md).
 - ~~`docs/plans` has 47 files; collapse the evidence documents; roster stale.~~
   **Owner decision:** retain the documents and use the single
   [topic/status/read-trigger/file index](README.md). The old in-progress port
