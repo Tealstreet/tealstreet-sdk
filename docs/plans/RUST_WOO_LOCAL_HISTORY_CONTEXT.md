@@ -90,3 +90,18 @@ the three selected terminals and a history-only native error projection onto
 existing shared admission/completion. All seven original tests then pass
 unchanged. No compilation/fixture failures are counted as REDs. Full focused
 gates, independent implementation review and exact-head CI are still pending.
+
+## Integrated verification
+
+Integration `3dae752db98` merges actual landing `c473342d483`. Source merges
+cleanly; shared documentation retains incoming content first and own sections
+once. An inventory check before integration correctly refused the older branch
+manifest because incoming Hyperliquid history entries had been pruned. After
+integration, all incoming prunes remain and both checks pass with 15 controls.
+
+WOO plus Binance native verification passes 496 tests across 39 targets, no
+failures or ignored tests. Strict all-target WOO Clippy passes. The original
+seven-control file remains byte-exact to the test-only checkpoint. Independent
+source/adversarial, caller and full-map implementation reviews report no source
+or boundary defect; the caller reviewer requested the updated README status.
+CI, including replay and family size, remains pending. No merge is authorized.
