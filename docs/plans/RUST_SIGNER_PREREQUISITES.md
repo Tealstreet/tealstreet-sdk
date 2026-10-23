@@ -127,3 +127,102 @@ need a new callback. `SigningTarget::Http` exposes the mutable venue pending val
 without its engine timer/deadline; `SigningTarget::Socket` names the released
 authentication action. No callback has `Cx` or credential bytes. Incoming clock,
 scheduler and financial regressions remain intact.
+
+## Non-HMAC schema extension (ApeX P0/P1/P3)
+
+Plan, 2026-10-23, base `fa5d5fb90c4`. Owner: claude-19pt8s. Schema sign-off
+was given by codex-uufub4 (placement) and claude-m26ps4 (nonce and
+credential semantics). It is the first shared prerequisite of
+[RUST_SIGNER_NON_HMAC_MIGRATIONS.md](RUST_SIGNER_NON_HMAC_MIGRATIONS.md).
+This PR enables no family.
+
+- **Extra signing refs (P0).**
+  - Names come from the closed enum `ExtraKey`, initially `zklinkSeed`.
+    Polymarket's `l1Wallet` is added with its family.
+  - `Identity.extra` maps `ExtraKey` to `KeyRef`. The closed enum bounds
+    count and names; each ref keeps the existing `KeyRef` bounds.
+  - Extra refs are signing material only. They are never a nonce domain, an
+    account subject, or a stable-id, account or slot fallback.
+  - Extra refs travel inside the selected slot's identity.
+- **Setup policy.**
+  - A family declares its extra key in `IdentitySetupPolicy.extra` as
+    `{ key, field, encoding }`.
+    - `field` is `optional` or `requiredForPrivate`. There is no fallback
+      variant, because extras never cross slots.
+    - A declared `encoding` is authoritative over caller metadata.
+  - The local provider binds each extra ref to its own algorithm. A
+    `zklinkSeed` ref is refused for `Present`, credential interpolation and
+    every other algorithm, and `ZkLinkContract` refuses ordinary refs.
+  - Trusted setup rejects duplicate JSON names and any undeclared extra.
+  - Required extras follow the passphrase rules for complete slots.
+- **Key encodings (P1).**
+  - `KeyEncoding` moves to the engine signing schema; crypto re-exports it.
+    This is a direct cutover.
+  - It gains `base64Text`: provider key bytes are the ASCII of standard
+    padded base64 of the input bytes. ApeX's HMAC key is the first user.
+  - A family may declare `IdentitySetupPolicy.secretEncoding`. Like trim, a
+    declared value is authoritative over caller metadata.
+- **`ZkLinkContract` (P3).**
+  - Key: exactly 65 decoded seed bytes. Payload: exactly 36 contract bytes.
+    Result: raw 64-byte packed signature.
+  - The local provider reuses `safe_cex_crypto::zklink` behind the crypto
+    feature `zklink`, which only ApeX enables. Builds without ApeX therefore
+    do not link franklin-crypto, and the provider returns `Unsupported`.
+  - No entropy and no nonce state: the zkLink nonce stays client-id-derived
+    protocol data.
+- **Mirrors.** These change together:
+  - WASM `host.d.mts`: `SignAlgorithm`, `SigningIdentity.extra`, and the
+    `secretEncoding` options;
+  - SDK `construction.ts` and `localSignerSetup.ts` policy and metadata
+    types;
+  - the registry `build_support.rs` policy generator.
+- **Not yet wired:** SDK `LocalSignerSetup` and the delegated identities do
+  not yet carry `extra`. The ApeX adoption PR adds that capsule input with
+  its family declaration.
+- **Proof.**
+  - ZkLink: independent npm-1.0.2 vectors already pinned for ApeX, plus
+    exact-length refusals.
+  - Base64Text: an independent Node vector.
+  - Duplicate and undeclared extra refusals.
+  - A redaction check that no extra material appears in refs or errors.
+  - Feature-off `Unsupported`. CI also runs the crypto signer tests without
+    workspace feature unification.
+  - Focused engine, crypto, registry and SDK checks run locally; CI owns
+    WASM size and timing.
+
+Implementation checkpoint: the engine, crypto, registry generator, WASM types
+and SDK types are implemented as above, plus the derived zkLink seed wipe.
+Focused checks pass locally:
+- engine lib (542 tests);
+- crypto signer without and with `zklink` (16 and 44 tests);
+- registry (71 tests);
+- Binance, Bybit and ApeX (801 tests);
+- SDK signer setup tests, typecheck and lint;
+- strict workspace Clippy, fmt and bans.
+
+Independent adversarial review: CLEAN. Its minor findings are addressed:
+policy-owned seed encoding, the narrowed field vocabulary, the CI feature-off
+step, the seed wipe and role binding. CI owns the WASM size and timing gates.
+
+## Local non-HMAC primitives (P2)
+
+Plan and implementation, 2026-10-23, stacked on the schema extension above.
+The local provider implements the declared `Ed25519`, `Es256`,
+`Secp256k1Digest` and `StarkDigest` contracts. Each arm sits behind its own
+crypto feature: `ed25519`, `es256`, `secp256k1` and `stark`.
+
+- **Gating.** The venue-facing primitive modules stay available. A family
+  enables its arm only when it signs through the provider, so other WASM
+  builds do not link that code. A disabled arm returns `Unsupported`.
+- **Exact contracts.**
+  - `Ed25519`: 32-byte seed, exact message, 64-byte signature.
+  - `Es256`: PKCS8 or SEC1 P-256 DER from trusted PEM decoding; one SHA-256
+    of the message; fixed r || s.
+  - `Secp256k1Digest`: 32-byte key and exact 32-byte digest;
+    r || s || recovery 0/1 (not ethers' 27/28).
+  - `StarkDigest`: canonical 32-byte big-endian felts for key and digest
+    (values at or above the modulus and a zero key refuse); r || s.
+- **Proof.** Independent vectors: Node Ed25519, RFC 6979 A.2.5 P-256 "sample",
+  pinned-ethers recoverable signatures and starknet.js signatures. Each arm
+  has width refusals, and the disabled-arm `Unsupported` test runs in CI with
+  the features on and off.
