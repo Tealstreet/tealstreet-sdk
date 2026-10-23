@@ -6326,3 +6326,20 @@ distinguish the following:
 | --- | --- |
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
+
+
+### Replay protocol diagnostics at final capture
+
+Replay checkpoints capture comparison state without finalizing protocol
+coverage. Both TS and Rust replay receivers aggregate protocol errors once at
+the logical end of the replay, before correctness-mode memory collection. A
+checkpoint taken before an authentication acknowledgement or the first
+heartbeat therefore cannot permanently introduce an incomplete-lifecycle
+diagnostic into an otherwise complete final result.
+
+Actual event violations remain recorded and appear in the final report. Missing
+final authentication, heartbeat or required subscriptions still fail; an audit
+exception still aborts replay. This changes harness reporting, not native order,
+fill, transport or signing behavior. The tape and declared-failure policy retain
+their existing meaning; a clean intermediate capture does not certify private
+parity.
