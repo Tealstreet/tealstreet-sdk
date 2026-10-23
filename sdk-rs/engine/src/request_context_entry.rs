@@ -32,10 +32,9 @@ pub const MAX_COMMAND_WAIT_MS: u32 = 2_147_483_647;
 pub(super) struct Waits {
     stamps: HashMap<CommandId, (u64, f64)>,
     receipts: u64,
-    /// The receipt the current external dispatch carries into its entry.
+    /// The exact receipt the current dispatch carries into its entry: an
+    /// external receipt, or the one a held or deferred command arrived with.
     pending: Option<(CommandId, Option<u64>)>,
-    /// A deferred command re-entering the public handler is no new receipt.
-    pub(super) redelivering: bool,
 }
 
 impl Waits {
@@ -59,13 +58,29 @@ impl Waits {
         self.pending = None;
     }
 
-    /// The receipt an entry for `command` serves: the external receipt being
-    /// dispatched, else (a deferred re-entry) the command's live stamp.
+    /// The receipt `command` carries in the current dispatch; never inferred
+    /// from another receipt's live stamp for the same id.
     fn entry_receipt(&self, command: CommandId) -> Option<u64> {
         match self.pending {
             Some((pending, own)) if pending == command => own,
-            _ => self.stamps.get(&command).map(|(receipt, _)| *receipt),
+            _ => None,
         }
+    }
+
+    /// The receipt to keep with `command` while it is held or deferred.
+    pub(super) fn receipt_of(&self, command: &Command) -> Option<u64> {
+        command
+            .completion_id()
+            .and_then(|command| self.entry_receipt(command))
+    }
+
+    /// Dispatch a held or deferred command with the receipt it arrived with;
+    /// returns the outer dispatch's provenance for the caller to restore.
+    pub(super) fn carry(
+        &mut self,
+        pending: Option<(CommandId, Option<u64>)>,
+    ) -> Option<(CommandId, Option<u64>)> {
+        std::mem::replace(&mut self.pending, pending)
     }
 
     /// Remove `command`'s stamp at its terminal. Inside its entry only that

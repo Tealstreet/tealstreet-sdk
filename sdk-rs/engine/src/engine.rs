@@ -3174,7 +3174,6 @@ impl<V: Venue> Engine<V> {
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         // An external command receipt gets the SDK default caller wait.
         if let Event::Command(command) = &event
-            && !self.io.command_waits.redelivering
             && let Some(id) = command.completion_id()
         {
             let deadline =
@@ -3322,8 +3321,11 @@ impl<V: Venue> Engine<V> {
         if !released.is_empty() {
             // A nested release (order-lock `ready` re-entering `handle`) keeps the flag.
             let was_releasing = std::mem::replace(&mut self.releasing, true);
-            for command in released {
+            for (command, receipt) in released {
+                let carried = command.completion_id().map(|id| (id, receipt));
+                let outer = self.io.command_waits.carry(carried);
                 self.handle_event(now, Event::Command(command));
+                self.io.command_waits.carry(outer);
             }
             self.releasing = was_releasing;
         }
@@ -3419,7 +3421,12 @@ impl<V: Venue> Engine<V> {
             match command {
                 Command::PlaceOrders { command, .. } => self.io.placement_acks.placing(*command),
                 Command::CancelOrders { .. } | Command::AmendOrder { .. }
-                    if self.io.placement_acks.hold(&self.store, command, now) =>
+                    if self.io.placement_acks.hold(
+                        &self.store,
+                        command,
+                        self.io.command_waits.receipt_of(command),
+                        now,
+                    ) =>
                 {
                     self.release_held(now);
                     return;
@@ -3661,7 +3668,11 @@ impl<V: Venue> Engine<V> {
                         );
                         return;
                     }
-                    if cx.io.order_locks.defer(&command) {
+                    if cx
+                        .io
+                        .order_locks
+                        .defer(&command, cx.io.command_waits.receipt_of(&command))
+                    {
                         return;
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
@@ -3757,7 +3768,9 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "order-locks")]
         let order_response = self.io.order_response_token.take();
         #[cfg(feature = "order-locks")]
-        for (command, failed) in self.io.order_locks.ready() {
+        for (command, failed, receipt) in self.io.order_locks.ready() {
+            let carried = command.completion_id().map(|id| (id, receipt));
+            let outer = self.io.command_waits.carry(carried);
             if failed && self.venue.fence_uncertain_cancel_all() {
                 let Command::CancelSymbolOrders { command, .. } = command else {
                     unreachable!()
@@ -3777,11 +3790,10 @@ impl<V: Venue> Engine<V> {
                 if let Some(id) = command.completion_id() {
                     self.io.active_commands.remove(&id);
                 }
-                // Not a new receipt: it keeps its original caller wait.
-                let outer = std::mem::replace(&mut self.io.command_waits.redelivering, true);
-                self.handle(now, Event::Command(command));
-                self.io.command_waits.redelivering = outer;
+                // Not a new receipt: it keeps the receipt it was deferred with.
+                self.handle_received(now, Event::Command(command));
             }
+            self.io.command_waits.carry(outer);
         }
         self.process_socket_work(now);
         self.io.http_delivery = delivery;
