@@ -1099,3 +1099,23 @@ fn a_parked_command_keeps_completion_authority_past_its_deadline() {
     engine.handle(parked.deadline() + 1., Event::TimerFired { timer });
     assert_eq!(engine.venue.completions, [Ok(())]);
 }
+
+#[test]
+fn command_entry_cannot_reclaim_a_command_with_a_parked_waiter() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let parked = owner(&mut engine, Scope::Command(7), 1_000, 1.);
+    wait(&mut engine, &session, &parked, 1.).unwrap();
+    let late = parked.deadline() + 1.;
+    assert!(!engine.io.request_contexts.prepare_command_entry(7, late));
+    assert!(engine.io.request_contexts.command_live(7, late));
+    let ready = with(&mut engine, late, |cx| cx.session_ready(&session));
+    let [Waiter::Failed(context, _, error)] = ready.as_slice() else {
+        panic!("expired owner must fail");
+    };
+    with(&mut engine, late, |cx| {
+        cx.fail_context(context, error.clone())
+    })
+    .unwrap();
+    assert!(engine.io.request_contexts.prepare_command_entry(7, late));
+}
