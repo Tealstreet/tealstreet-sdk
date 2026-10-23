@@ -6,7 +6,9 @@ mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope};
+use safe_cex_engine::request_context::{
+    Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
+};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
     VenueError,
