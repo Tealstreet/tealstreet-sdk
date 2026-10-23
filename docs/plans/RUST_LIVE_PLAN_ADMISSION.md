@@ -311,3 +311,24 @@ its error type; it creates no authority or notices. Its assertion failures must
 precede the signature change. Pure registry/state fixtures can call the private
 issuer explicitly; native flow fixtures and new consumer evidence must use the
 public genuine-entry operation.
+
+## Classified Plan resend and intent gate
+
+Generic `plan_retry_context` rejects `DefinitiveRefusal`, including when the
+journal already holds a classified grant. A separate `plan_resend_context`
+accepts only the opaque `ResendGrant` and delegates unchanged to
+`http_resend_context` before the shared declared-call selection. Validate exact
+Plan, slot, physical delivery, remaining declared attempt and original window
+before consuming journal retry credit. The existing journal owns one-resend
+consumption; the Plan adds no resend counter, code table or status precedence.
+
+Prove the generic bypass refusal with a real released Plan write and a grant
+issued by `http_write_failure` from a const CodeTable. After refusal, DATA
+identity, actions and reserved IDs remain unchanged; the opaque-grant path can
+select its declared retry. Retain wrong-slot/wrong-grant/reuse/expired-window
+controls and existing selected-retry queue-refusal uncertainty.
+
+Per-leg intent must be narrowed before the first journal registration, using
+one shared engine validation table. Admission reserves the intent vector along
+with journal, Context and ID backing. Do not relax the incoming registered-leg
+refusal or move journal enrollment after queue/preparation failures.
