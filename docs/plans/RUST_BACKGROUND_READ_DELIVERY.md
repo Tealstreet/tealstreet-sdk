@@ -46,7 +46,9 @@ Engine fixtures represent single-request background reads; they are not claims
 of native Kraken or other venue adoption. Native consumers own their later
 serializer/cache/caller proofs. Run the focused controls, complete engine suite,
 strict all-target/all-feature Clippy, feature-off controls, fmt and bans/ratchet;
-normal CI and current artifact proof follow publication. Actual #1820 must be
+normal CI (including its replay gates) and a separate guard follow publication.
+A separate full artifact-provenance collection is not a merge requirement under
+the owner's current speed rule. Actual #1820 must be
 integrated before the final shared-engine window if it lands first.
 
 ## Scope and gates
