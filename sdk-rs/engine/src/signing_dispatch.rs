@@ -114,6 +114,11 @@ pub(crate) enum Completion {
     Failed(Pending, SignError),
 }
 impl Dispatch {
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty() && self.outbound.is_empty()
+    }
+
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
     }
@@ -216,6 +221,21 @@ impl Dispatch {
             .values()
             .chain(self.outbound.values())
             .any(|p| p.socket() == Some(socket))
+    }
+    /// Read-only target for engine socket epoch/expiry admission. The pending
+    /// recipe and all HTTP lifecycle state remain owned by Dispatch.
+    #[cfg(feature = "managed-sockets")]
+    pub fn outbound_socket(&self, attempt: RequestId) -> Option<(SocketId, bool)> {
+        let pending = self
+            .pending
+            .get(&attempt)
+            .or_else(|| self.outbound.get(&attempt))?;
+        pending.socket().map(|socket| {
+            (
+                socket,
+                matches!(&pending.outbound, Action::WsConnect { .. }),
+            )
+        })
     }
     pub fn hold(&mut self, outbound: Action) -> Result<(), SignError> {
         let id = self.next_id();

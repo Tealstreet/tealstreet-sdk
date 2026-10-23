@@ -41,6 +41,7 @@ fn fixture() -> (LocalSigner, Identities) {
         signing: KeyRef(format!("owned/{slot}/mac")),
         passphrase: None,
         stable_id: Some(format!("fixture/{slot}")),
+        extra: Default::default(),
     };
     let primary = identity("primary");
     let secondary = identity("read");
