@@ -476,8 +476,13 @@ policy; its controls were kept and extended.
   a released write projects Unknown). A later reply reaches no venue codec.
 - **Refusals:** `abort_execution`, `complete_execution` and `seal_execution`
   are refused on a planned handle; `http_leg_context` under it is refused.
-- **Order locks:** a released physical write marks every observer's
-  placement scope as sent.
+- **Order locks:** a released physical write marks the placement scope of
+  every observer present at release as sent. A later joiner is not marked;
+  an observer present at release flags the symbol when it fails.
+- **Early observer seals:** a planned group does not see its Plan's releases,
+  so an observer that expires or detaches before the Plan seal never keeps an
+  outcome (no NotSent for a released write); only the Plan seal's journal
+  projection carries one.
 - **Group ids:** `Groups::next` cannot overflow: every begin first reserves
   one engine id (ceiling 2^53-1), so `next` stays below that.
 

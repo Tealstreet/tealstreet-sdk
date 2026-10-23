@@ -137,13 +137,9 @@ impl Group {
     /// shared journal unless this seal proves nothing was or will be sent.
     fn seal(&self, entry: Entry, result: Result<String, VenueError>, settled: bool) -> Sealed {
         let journal = self.operation == Operation::Mutation;
-        // A Plan seal is already the journal's projection; anything earlier
-        // cannot know the write outcome.
-        let keep = if self.planned {
-            settled
-        } else {
-            settled && !self.released && self.legs == 0
-        };
+        // A planned group never sees its Plan's releases; only the Plan seal
+        // (`complete`) knows the write outcome.
+        let keep = !self.planned && settled && !self.released && self.legs == 0;
         let result = result.map_err(|mut error| {
             if journal && !keep {
                 error.outcome = None;
@@ -161,7 +157,7 @@ impl Group {
 
     fn timeout(&self) -> VenueError {
         let error = VenueError::new("Execution deadline expired").kind(ErrorKind::Timeout);
-        if self.operation == Operation::Mutation && !self.released {
+        if self.operation == Operation::Mutation && !self.released && !self.planned {
             error.outcome(Outcome::NotSent)
         } else {
             error
@@ -559,7 +555,18 @@ impl Groups {
             .into_iter()
             .map(|entry| {
                 let result = project(&entry.key);
-                group.seal(entry, result, true)
+                if group.planned {
+                    // The Plan journal's own projection, verbatim.
+                    Sealed {
+                        command: entry.command,
+                        generation: entry.generation,
+                        result,
+                        journal: group.operation == Operation::Mutation,
+                        projected: true,
+                    }
+                } else {
+                    group.seal(entry, result, true)
+                }
             })
             .collect();
         self.release_members(&sealed);
