@@ -395,3 +395,28 @@ cold expiry guard: readiness sees only one of two cleanup callbacks. With the
 guard it passes unchanged. A direct scope control also pins failure-custody and
 activation refusal, and the foreign-owner control covers protection-cancel intent
 narrowing. The earlier six readiness controls remain active.
+
+## Combo-4a2 Session composition
+
+Actual fade3aa0a41 is genuinely merged. Source merged automatically, and the
+CALLERS conflict retains incoming sections first plus this lane's section once.
+Independent integration review found a new custody gap: Session entry points can
+allocate foreign work or drain another owner's waiters inside a ready callback,
+before the later physical-send guard rejects the foreign Context.
+
+Original controls at 8c46492af04 fail on Session Context issuance, Session-parent
+leg issuance and waiter drainage. Their GREEN matrix covers open_session,
+session_context, http_leg_context, retire_session, session_ready, session_failed
+and session_wait. Refusal must precede IDs, timer changes, holds or partial drain;
+pure session_live remains available. A legitimate later Session callback must
+still receive A's single continuation and complete A once. The existing ordinary
+Session waiter-drain control passes independently.
+
+The overseer moved #1896 to combo-5b and assigned the Session runtime guard to
+claude-55ao7t with codex-uufub4 review. The guard denies Session lifetime/drain
+operations only during retained-Preflight/Plan activation, with Error::State;
+session_wait returns its pending unchanged and checks exact activation ownership.
+Start, Session response/failure, socket and timer callbacks retain their normal
+Session authority. #1897's future session_scoped_context adopts the same guard
+in its own owner branch. Runtime Session source is still unchanged here; these
+controls are RED and the composition stays on hold until the reviewed fix.
