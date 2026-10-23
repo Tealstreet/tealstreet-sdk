@@ -22,7 +22,7 @@ import type {
   UpdateOrderPatch,
 } from '../api/CoreApi.types';
 import type { CoreAdapter } from './AdapterContext';
-import type { HostBindings, HostExchange } from './HostBindings';
+import type { HostBindings, HostExchange, HostWriteEvent } from './HostBindings';
 
 import { clampReduceOnlyOrder, prepareOrder } from '../order/prepareOrder';
 import {
@@ -34,6 +34,7 @@ import {
 import { nativePositionSize } from '../order/positionSizing';
 import { ScriptValidationError } from '../order/ScriptValidationError';
 import { bySymbol } from './HostBindings';
+import { ScriptBatchOrderError } from './ScriptBatchOrderError';
 
 /**
  * The `CoreAdapter` body — written ONCE, for every runtime.
@@ -147,7 +148,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
     account: string,
     summary: string,
     ok: boolean,
-    extra: { orderIds?: readonly string[]; error?: string } = {},
+    extra: Omit<HostWriteEvent, 'method' | 'account' | 'summary' | 'ok'> = {},
   ): void => {
     host.onWrite?.({ method, account, summary, ok, ...extra });
   };
@@ -209,7 +210,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
 
     // ── Store reads ──────────────────────────────────────────────────────
     getMarkets: (account): readonly Market[] =>
-      host.readMarkets?.(account) ?? ((host.getStore(account)?.markets as readonly Market[]) ?? EMPTY),
+      host.readMarkets?.(account) ?? (host.getStore(account)?.markets as readonly Market[]) ?? EMPTY,
     getMarket: (symbol, account): Market | undefined => findMarket(symbol, account),
     getTicker: (symbol, account): Ticker | undefined => findTicker(symbol, account),
     getTickers: (symbols, account): readonly Ticker[] => {
@@ -291,8 +292,17 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         observe('placeOrders', account, summary, true, { orderIds });
         return { orderIds };
       } catch (error) {
-        observe('placeOrders', account, summary, false, { error: messageOf(error) });
-        throw error;
+        const partial = ScriptBatchOrderError.from(error);
+        observe('placeOrders', account, summary, false, {
+          error: partial?.message ?? messageOf(error),
+          ...(partial && {
+            partialOrderIds: partial.partialOrderIds,
+            ...(partial.outcome !== undefined && { outcome: partial.outcome }),
+            ...(partial.partialOrderCount !== undefined && { partialOrderCount: partial.partialOrderCount }),
+            ...(partial.totalOrderCount !== undefined && { totalOrderCount: partial.totalOrderCount }),
+          }),
+        });
+        throw partial ?? error;
       }
     },
     cancelOrder: async (orderId, { account, symbol }) => {
