@@ -2,14 +2,25 @@
 //! widths follow `safe_cex_engine::signing::Algorithm`; failures never echo input.
 use safe_cex_engine::signing::SignError;
 
-/// 32-byte seed; exact message; raw 64-byte signature.
+/// 32-byte seed, or the 64-byte `seed || public` keypair form whose public half
+/// must match the seed; exact message; raw 64-byte signature.
 pub(super) fn ed25519(key: &[u8], message: &[u8]) -> Result<Vec<u8>, SignError> {
     #[cfg(feature = "ed25519")]
     {
-        if key.len() != 32 {
-            return Err(SignError::InvalidRequest);
-        }
-        crate::ed25519::sign(message, key)
+        let seed = match key.len() {
+            32 => key,
+            64 => {
+                let (seed, public) = key.split_at(32);
+                let derived =
+                    crate::ed25519::public_key(seed).map_err(|_| SignError::InvalidRequest)?;
+                if derived[..] != *public {
+                    return Err(SignError::InvalidRequest);
+                }
+                seed
+            }
+            _ => return Err(SignError::InvalidRequest),
+        };
+        crate::ed25519::sign(message, seed)
             .map(|signature| signature.to_vec())
             .map_err(|_| SignError::InvalidRequest)
     }
@@ -158,6 +169,29 @@ mod tests {
                 Err(SignError::InvalidRequest)
             );
         }
+    }
+
+    #[cfg(feature = "ed25519")]
+    #[test]
+    fn ed25519_keypair_form_signs_as_its_seed_and_refuses_a_foreign_public_half() {
+        // RFC 8032 test 1 seed and its published public key.
+        let seed = bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+        let public = bytes("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+        let keypair = [seed.clone(), public.clone()].concat();
+        assert_eq!(
+            ed25519(&keypair, b"payload"),
+            Ok(ed25519(&seed, b"payload").unwrap())
+        );
+        let mut foreign = keypair.clone();
+        foreign[63] ^= 1;
+        assert_eq!(
+            ed25519(&foreign, b"payload"),
+            Err(SignError::InvalidRequest)
+        );
+        assert_eq!(
+            ed25519(&keypair[..63], b"payload"),
+            Err(SignError::InvalidRequest)
+        );
     }
 
     #[cfg(feature = "es256")]
