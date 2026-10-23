@@ -1305,3 +1305,36 @@ fn p0_write_accepted_ids_survive(transport_loss: bool) {
         Action::Notice(Notice::CommandDone { command: 7, .. })
     )));
 }
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for signer and Plan seams"]
+fn p0_write_non_2xx_keeps_futures_native_code() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let request = http(&mut e, "/sendorder");
+    reply(
+        &mut e,
+        &request,
+        400,
+        r#"{"result":"error","error":"insufficientFunds"}"#,
+    );
+    let out: Vec<_> = e.drain_actions().collect();
+    assert!(!out.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 7, .. })
+    )));
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].venue_code.as_deref(), Some("insufficientFunds"));
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Http(request)
+        if request.url.ends_with("/sendorder")))
+    );
+}

@@ -293,7 +293,7 @@ Run `cargo test -p safe-cex-venue-kraken --test trading p0_write_ -- --ignored
 --nocapture`; both assertions must fail on original production source, not
 compilation. No new test key material is needed.
 
-Spot acceptance controls remain specified until its file reservation clears:
+Spot acceptance controls use the separate unreserved target described below:
 txid preservation after a later refusal; 401/403 with non-auth native evidence
 does not deactivate; 503 with a signature string grants no resend. Futures
 non-2xx native auth/rate-limit/refusal fields must survive, with 408/5xx still
@@ -313,3 +313,19 @@ by the intended behavior assertions; normal venue suites pass
 Scoped strict all-target Clippy, fmt, bans and both request-context ratchets
 pass. Binance's same-base 297 tests passed with the ApeX plan slice. These
 controls expose defects; they are not GREEN adoption or P0 closure evidence.
+
+
+Additional original-source controls avoid the #1797 reservation entirely:
+`tests/spot_write_adoption_red.rs` imports the existing Spot support module
+without editing Spot source or the held spot_trading target. It pins accepted
+txid preservation, non-auth native evidence on401 without deactivation, and a
+503 signature body without write replay. Futures trading adds a non-2xx native
+code preservation control. The combined six controls run with `cargo test -p
+safe-cex-venue-kraken --test trading --test spot_write_adoption_red
+--no-fail-fast p0_write_ -- --ignored --nocapture`. The earlier two-control
+receipt remains historical; the updated six-control proof supersedes it.
+
+Updated local evidence: all six original-source controls compile and fail the
+intended behavior assertions; the normal suite passes 244 tests with six
+explicit ignored controls. Scoped strict all-target Clippy, fmt, bans and both
+ratchets pass. This remains preparation, not a runtime fix or P0 closure.
