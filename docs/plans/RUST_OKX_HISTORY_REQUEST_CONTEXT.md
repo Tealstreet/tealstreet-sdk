@@ -70,19 +70,29 @@ not the earlier proposed command_timeout_ms name. Reviewed plan pin
 or landed. Do not copy receipt/deadline storage into this venue.
 
 Capture Remaining only in the genuine entry and admit the Read root once with
-that remaining duration. The root therefore retains the original receipt's
-absolute deadline even after held entry; no page or fallback renews it. Fresh
-Expired is handled as #1945's typed Timeout before any admission or effect,
+that remaining duration. The root is immutable and bounded by the original
+receipt deadline after held entry; Remaining floors whole milliseconds, so a
+fractional hold can make it under1ms earlier, never later. No page or fallback
+renews it. Fresh Expired needs shared typed Timeout rejection before any effect,
 Read outcome None. Missing custody grants no work. Initial entry refusal is
-already published by the engine; never add a numeric fallback.
+already published by the engine; never add a numeric fallback. #1945's planned
+Fresh Expired numeric terminal needs a shared no-ID entry refusal path for
+zero-inventory venue consumers; this API-fit request is pending with its owner.
+Do not fake an invalid zero-timeout Context to manufacture the refusal.
 
 Each physical page gets a Read child of that root with timeout 20000 ms and
 RetryPolicy::Never, minted only when the native queue dequeues it, before
 managed route preparation/signing. Its deadline is capped by the root. The
 root covers all native 100 ms pacing waits; the child budget starts at dequeue,
 so a waiting page cannot expire before it is minted. Preserve the existing
-100 ms cadence, not a new venue queue or cross-cutting timer implementation.
-At an observed expired root, stop new pages and discard staged query rows.
+100 ms cadence only where native orders/income continuation already waits.
+Initial calls, fills-to-fills-history and EEA SWAP-to-FUTURES transitions stay
+immediate, each minting a fresh child at its actual send/dequeue boundary.
+No new venue queue or cross-cutting timer implementation. At an observed expired
+root, stop new pages and discard staged query rows. There is no automatic root
+timer: in-flight child timers are root-capped, while queued work is cleaned up
+when its existing pacing timer wakes. Do not claim exact-at-root queued cleanup;
+that would require a separate shared seam.
 
 Preserve the native terminal projection after admission: command_error
 `OKX history: {error}`, then soft[] for ordinary queries; lookup rejects and
@@ -93,11 +103,14 @@ Cap/stall semantics stay separate: plain history marks its own incomplete result
 and retains rows; EEA composite cap/stall rejects. Root expiry must not publish
 staged partial history or borrow another command's marker.
 
-Use shared Read completion and guarded page/row admission. uufub4 API-fit review
-is requested for sequential Context-root/child composition versus Preflight/Plan
-and its history authority bridge; do not invent a Plan-as-Context wrapper or
-claim an unavailable constructor. This is an explicit implementation gate in
-addition to actual #1945 and source ownership. Record any missing shared seam.
+uufub4 confirmed API fit: original Context root plus http_leg_context is
+supported for sequential uniform-credential Read work with no mutation or join;
+Plan/1928 is not intrinsically required. Use ReadCompletion for native terminal
+shaping and validate_delivery/guarded row admission before staging. Do not use
+ReadHistoryRows.finish(Err) to replace native soft[] with retained prefix plus
+incomplete. Always derive children from the original root, not a prior child;
+queue validation precedes selection/build/send. This clearance supplies no
+caller-wait propagation until actual #1945 and does not clear source collisions.
 
 ## Native data and caller invariants
 
@@ -142,7 +155,8 @@ malformed/failed later page, rejecting lookup, finite local precedence, exact
 Primary/Secondary wire, and a20s child born at dequeue (response after enqueue
 +20s but before dequeue+20s remains eligible). Add a longer explicit caller wait
 control to forbid an unrelated fixed120s root. Later integration must add held
-entry, exact boundary, root-capped child, prefix rejection, provider refusal,
+entry (fractional hold and sub-ms expiry included), exact boundary, root-capped
+child, prefix rejection, provider refusal,
 duplicate/late/reused owner and same-command typed expiry controls.
 
 Report assertion failures and passing controls separately; no compile failure or
