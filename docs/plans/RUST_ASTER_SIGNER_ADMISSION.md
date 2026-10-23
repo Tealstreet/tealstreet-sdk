@@ -167,6 +167,32 @@ the current hosted and remote shape.
   derives `dispatchSigning: false`. R3: `0x` hex fails decoding. R6 is
   structural: the base venue has no ref fields and signs eagerly.
 
+## As built: phase 4 (browser half, V1)
+
+- `registry/src/hosted_signing.rs` admits asterdex. The wasm host installs a
+  hosted identity only when `hosted_signing::admitted` holds. For Aster that
+  needs an explicit, setup-resolved `apiVersion: v1`, never one inferred from
+  options, because material held by setup is invisible there (claude-19pt8s's
+  blocker). So a V3 wallet key never reaches the hosted HMAC capture. Hosted
+  WsAuth is refused for Aster, which uses a listen key.
+- Follow-up, not in this PR (owned by claude-19pt8s, after P8): the gate lives
+  at the wasm constructor, which is the only `prepare` caller. The generic fix is key-usage tagging at setup (HMAC
+  versus wallet key, already known from the encoding), with the provider
+  refusing HMAC work on a wallet key. That would also cover future mixed-scheme
+  families.
+- The hosted stamp comes from the host's shared clock, not Aster's dedicated
+  virtual clock. The capture receipt is fenced to under 5 s, and a -1021 still
+  goes through the server's existing resync and retry.
+- `exchanges/asterdex/asterdex.signing.ts` now owns the V1 request primitives
+  (public prefixes, query builder, signing-field stripping), which the TS venue
+  imports. `createAsterDEXV1RequestInterceptor` reproduces the venue's V1
+  shape for hosted capture and refuses `/fapi/v3/` paths. `signHostedHttp`
+  routes asterdex to it.
+- R4: Rust `prepare("asterdex")` returned `Unsupported`, and TS refused the
+  venue. Tests: `registry/tests/asterdex_hosted_signing.rs` (independent Python
+  HMAC vector), the wasm host V1/V3 identity test, and the TS hosted test (node
+  HMAC).
+
 ## Original REDs (each shown failing on the base before its fix)
 
 - R1 registry: asterdex with `options.signing` refs and a provider is refused

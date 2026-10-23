@@ -620,9 +620,18 @@ export class RustEngineExchange extends BaseExchange {
     const delegatedPolicy = deriveRemoteSigningPolicy(exchangeName);
     const delegatedMode = selectDelegatedSigningMode(options);
     const delegated = delegatedPolicy?.enabled === true && delegatedMode !== undefined;
-    const aster = bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'asterdex'
-      ? mapAsterDEXSignerSetup(options) : undefined;
-    const signerSetup = bridgeConstruction.dispatchSigning
+    // A setup refusal surfaces at start(), where callers route its message.
+    let aster: ReturnType<typeof mapAsterDEXSignerSetup> | undefined;
+    let setupError: ExchangeError | undefined;
+    if (bridgeConstruction.dispatchSigning && !delegated && deriveSignerSetupMapping(exchangeName) === 'asterdex') {
+      try {
+        aster = mapAsterDEXSignerSetup(options);
+      } catch (error) {
+        if (!(error instanceof ExchangeError)) throw error;
+        setupError = error;
+      }
+    }
+    const signerSetup = bridgeConstruction.dispatchSigning && !setupError
       ? delegated ? new DelegatedSignerSetup(exchangeName, options)
         : aster ? new LocalSignerSetup(aster.setupOptions, deriveSignerSetupPolicy(exchangeName), aster.secondarySigningFromPrimary)
           : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
@@ -634,7 +643,7 @@ export class RustEngineExchange extends BaseExchange {
       const message = 'This Rust account has no REST-only PayloadSigner lifecycle';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    if (signerSetup) options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
+    if (signerSetup || setupError) options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
     const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
       ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
       : [];
@@ -660,6 +669,7 @@ export class RustEngineExchange extends BaseExchange {
     this.bridgeConstruction = bridgeConstruction;
     this.signerSetup=signerSetup;
     this.asterPublicSetup = aster?.publicSetup;
+    this.setupError = setupError;
     if (signerSetup instanceof DelegatedSignerSetup) {
       this.delegatedIntent = signerSetup.intent;
       this.delegatedUsesPayloadSigner = signerSetup.usesPayloadSigner;
@@ -719,6 +729,7 @@ export class RustEngineExchange extends BaseExchange {
   private delegatedUsesPayloadSigner?: boolean;
   /** Resolved by trusted setup before credentials were stripped. */
   private asterPublicSetup?: AsterDEXPublicSetup;
+  private setupError?: ExchangeError;
 
   private get asterApiVersion() {
     // Construction/getters are synchronous; WASM loads asynchronously on first use.
@@ -816,6 +827,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
+    if (this.setupError) throw this.setupError;
     if (this.warnIgnoredCoinbaseReadOptions) {
       this.warnIgnoredCoinbaseReadOptions = false;
       this.log('Saved read credentials and their proxy are ignored; Coinbase private reads use primary credentials.', LogSeverity.Warning);
@@ -984,7 +996,7 @@ export class RustEngineExchange extends BaseExchange {
           },
         },
         { commandTimeoutMs: this.commandTimeoutMs, ownsEngine: true,
-          ...(this.signerSetup instanceof DelegatedSignerSetup ? { signer: this.signerSetup.signer } : {}) },
+          ...(this.signerSetup instanceof DelegatedSignerSetup ? { signer: this.signerSetup.signer, signerAlgorithms: this.signerSetup.signerAlgorithms } : {}) },
       );
     } catch (error) {
       try { engine.free?.(); } catch { /* Keep the original construction error. */ }

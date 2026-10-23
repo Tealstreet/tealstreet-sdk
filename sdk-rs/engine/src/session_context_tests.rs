@@ -2,7 +2,7 @@ use super::super::super::*;
 use super::SESSIONS;
 use crate::request_context::{
     Credential, Error, HttpAction, Operation, Owner, Policy, Preparation, Prepared, RetryPolicy,
-    Scope, Session, SessionPolicy, WriteResult,
+    Scope, Session, SessionPolicy, Waiter, WriteResult,
 };
 
 #[derive(Debug)]
@@ -18,14 +18,17 @@ enum Fact {
 struct Probe {
     fact: Fact,
     fact_on_failure: Fact,
+    command_fact: Fact,
     classified: bool,
     refusal: Option<&'static crate::classify::CodeTable>,
     finish_first: bool,
     retire_in_response: Option<Session>,
     facts: Vec<Result<(), Error>>,
+    completions: Vec<Result<(), Error>>,
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
     preparation_failures: Vec<(Error, Option<crate::Outcome>)>,
+    reconciles: usize,
 }
 
 impl Default for Probe {
@@ -33,14 +36,17 @@ impl Default for Probe {
         Self {
             fact: Fact::None,
             fact_on_failure: Fact::None,
+            command_fact: Fact::None,
             classified: false,
             refusal: None,
             finish_first: false,
             retire_in_response: None,
             facts: vec![],
+            completions: vec![],
             responses: vec![],
             failures: vec![],
             preparation_failures: vec![],
+            reconciles: 0,
         }
     }
 }
@@ -65,6 +71,18 @@ impl Venue for Probe {
         error: VenueError,
     ) {
         self.preparation_failures.push((reason, error.outcome));
+    }
+    fn on_session_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: VenueError,
+    ) {
+        if matches!(pending.0.owner(), Owner::Command { .. }) {
+            self.completions
+                .push(cx.fail_context(&pending.0, error.clone()));
+        }
+        self.on_http_preparation_failed(cx, pending, Error::TimedOut, error);
     }
     fn start(&mut self, _: &mut Cx<'_, Pending>) {}
     fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
@@ -108,6 +126,23 @@ impl Venue for Probe {
         {
             self.facts.push(cx.http_write_result(&pending.0, fact));
         }
+        if matches!(pending.0.owner(), Owner::Command { .. })
+            && pending.0.operation() == Operation::Mutation
+        {
+            // A resendable native refusal goes through the classifier, which
+            // alone grants the one resend a parked owner may later send.
+            if self.command_fact == Fact::Rejected {
+                let native = crate::classify::Native {
+                    code: crate::classify::NativeCode::Int(-1021),
+                    message: "timestamp outside recvWindow",
+                };
+                let failed =
+                    cx.http_write_failure(&pending.0, &RESEND, Some(&native), "refused", None);
+                self.facts.push(failed.map(drop));
+            } else if let Some(fact) = fact(self.command_fact) {
+                self.facts.push(cx.http_write_result(&pending.0, fact));
+            }
+        }
         if session && !self.finish_first {
             cx.finish_http_context(&pending.0).unwrap();
         }
@@ -122,6 +157,9 @@ impl Venue for Probe {
         panic!("engine timer leaked to venue");
     }
     fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
+    fn reconcile_uncertain(&mut self, _: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+        self.reconciles += 1;
+    }
     fn book(&self, _: &str) -> Option<&Book> {
         None
     }
@@ -129,6 +167,17 @@ impl Venue for Probe {
         Box::new(std::iter::empty())
     }
 }
+
+const RESEND: crate::classify::CodeTable = crate::classify::CodeTable {
+    rows: &[crate::classify::Row {
+        key: crate::classify::Key::Int(-1021),
+        verdict: crate::classify::Verdict::RefusedResend(crate::ErrorKind::AuthInvalid),
+        only: None,
+    }],
+    success: &[],
+    unlisted: crate::classify::Verdict::Unknown(None),
+    status: &[],
+};
 
 fn fact(fact: Fact) -> Option<WriteResult> {
     match fact {
@@ -378,8 +427,8 @@ fn retired_and_foreign_sessions_issue_nothing() {
         Err(Error::Revoked)
     );
     assert_eq!(
-        with(&mut engine, 0., |cx| cx.retire_session(&foreign)),
-        Err(Error::Revoked)
+        with(&mut engine, 0., |cx| cx.retire_session(&foreign)).err(),
+        Some(Error::Revoked)
     );
     let session = open(&mut engine, true);
     let context = with(&mut engine, 1., |cx| {
@@ -797,6 +846,30 @@ fn session_writes_supply_no_legacy_placement_evidence() {
     );
 }
 
+#[cfg(feature = "order-locks")]
+#[test]
+fn an_absent_order_answer_to_a_session_write_never_fences_or_reconciles() {
+    use crate::classify::{Key, Row, SatisfiedIntent, Verdict};
+    // Even an unrestricted absent-order row cannot make a setting a cancel.
+    const ABSENT: crate::classify::CodeTable = crate::classify::CodeTable {
+        rows: &[Row {
+            key: Key::Int(-2015),
+            verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+            only: None,
+        }],
+        ..refusing(Verdict::Refused(crate::ErrorKind::Rejected))
+    };
+    let mut engine = engine();
+    engine.venue.refusal = Some(&ABSENT);
+    let session = open(&mut engine, false);
+    let token = session_write(&mut engine, &session, 1.);
+    let request = release(&mut engine, token, 2.);
+    respond(&mut engine, request, 3., "{\"code\":-2015}");
+    assert_eq!(engine.venue.facts.len(), 1);
+    assert!(!engine.io.order_locks.uncertain(""), "no order fence");
+    assert_eq!(engine.venue.reconciles, 0, "no reconcile queued");
+}
+
 #[test]
 fn context_capacity_refusal_commits_nothing() {
     let mut engine = engine();
@@ -838,6 +911,307 @@ fn queued_session_packets_redact_the_listen_key() {
     .unwrap();
     let debug = format!("{:?}", engine.drain_actions().collect::<Vec<_>>());
     assert!(!debug.contains("secret-key"), "{debug}");
+}
+
+fn owner(
+    engine: &mut Engine<Probe>,
+    scope: Scope,
+    timeout_ms: u32,
+    now: f64,
+) -> crate::request_context::Context {
+    with(engine, now, |cx| {
+        cx.http_context(
+            scope,
+            Policy {
+                timeout_ms,
+                ..policy(Operation::Read)
+            },
+        )
+    })
+    .unwrap()
+}
+
+fn wait(
+    engine: &mut Engine<Probe>,
+    session: &Session,
+    owner: &crate::request_context::Context,
+    now: f64,
+) -> Result<(), Error> {
+    with(engine, now, |cx| {
+        cx.session_wait(session, owner, Pending(owner.clone()))
+    })
+    .map_err(|(pending, error)| {
+        assert_eq!(&pending.0, owner, "refusal returns the continuation");
+        error
+    })
+}
+
+fn timers(engine: &mut Engine<Probe>) -> Vec<Action> {
+    engine
+        .drain_actions()
+        .filter(|action| matches!(action, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect()
+}
+
+#[test]
+fn ready_returns_live_waiters_in_arrival_order_and_clears_their_timers() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let owners = [
+        owner(&mut engine, Scope::Background, 20_000, 1.),
+        owner(&mut engine, Scope::Command(7), 20_000, 1.),
+        owner(&mut engine, Scope::Background, 20_000, 1.),
+    ];
+    for owner in &owners {
+        wait(&mut engine, &session, owner, 1.).unwrap();
+    }
+    let armed = timers(&mut engine);
+    assert_eq!(armed.len(), 3);
+    assert!(armed.iter().all(|action| matches!(action,
+        Action::SetTimer { at_ms, .. } if *at_ms == owners[0].deadline())));
+    let ready = with(&mut engine, 2., |cx| cx.session_ready(&session));
+    let order = ready
+        .into_iter()
+        .map(|waiter| match waiter {
+            Waiter::Ready(context, pending) => {
+                assert_eq!(pending.0, context);
+                context
+            }
+            Waiter::Failed(..) => panic!("live owner failed"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(order, owners);
+    assert_eq!(
+        timers(&mut engine)
+            .iter()
+            .filter(|action| matches!(action, Action::ClearTimer { .. }))
+            .count(),
+        3
+    );
+    assert!(with(&mut engine, 3., |cx| cx.session_ready(&session)).is_empty());
+}
+
+#[test]
+fn an_expired_waiter_fails_alone_at_its_unchanged_deadline() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let short = owner(&mut engine, Scope::Background, 1_000, 1.);
+    let long = owner(&mut engine, Scope::Background, 20_000, 1.);
+    wait(&mut engine, &session, &short, 1.).unwrap();
+    wait(&mut engine, &session, &long, 1.).unwrap();
+    let timer = timers(&mut engine)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if at_ms == short.deadline() => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(500., Event::TimerFired { timer });
+    assert_eq!(
+        timers(&mut engine),
+        [Action::SetTimer {
+            timer,
+            at_ms: short.deadline()
+        }],
+        "early delivery re-arms without extending the bound"
+    );
+    assert!(engine.venue.preparation_failures.is_empty());
+    engine.handle(short.deadline(), Event::TimerFired { timer });
+    assert_eq!(
+        engine.venue.preparation_failures,
+        [(Error::TimedOut, Some(crate::Outcome::NotSent))]
+    );
+    let ready = with(&mut engine, short.deadline(), |cx| {
+        cx.session_ready(&session)
+    });
+    assert!(matches!(ready.as_slice(), [Waiter::Ready(context, _)] if *context == long));
+}
+
+#[test]
+fn prerequisite_failure_and_retirement_fan_out_not_sent() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let first = owner(&mut engine, Scope::Background, 20_000, 1.);
+    let second = owner(&mut engine, Scope::Command(7), 20_000, 1.);
+    wait(&mut engine, &session, &first, 1.).unwrap();
+    wait(&mut engine, &session, &second, 1.).unwrap();
+    let failed = with(&mut engine, 2., |cx| {
+        cx.session_failed(
+            &session,
+            VenueError::new("login refused").kind(crate::ErrorKind::AuthInvalid),
+        )
+    });
+    assert_eq!(failed.len(), 2);
+    for (_, _, error) in &failed {
+        assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
+        assert_eq!(error.kind, Some(crate::ErrorKind::AuthInvalid));
+    }
+    wait(&mut engine, &session, &first, 3.).unwrap();
+    let retired = with(&mut engine, 4., |cx| cx.retire_session(&session)).unwrap();
+    assert!(matches!(retired.as_slice(), [(context, _, error)]
+        if *context == first && error.outcome == Some(crate::Outcome::NotSent)));
+}
+
+#[test]
+fn expired_or_revoked_owners_come_back_failed_never_dropped() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let expired = owner(&mut engine, Scope::Background, 1_000, 1.);
+    let finished = owner(&mut engine, Scope::Background, 20_000, 1.);
+    wait(&mut engine, &session, &expired, 1.).unwrap();
+    wait(&mut engine, &session, &finished, 1.).unwrap();
+    with(&mut engine, 2., |cx| cx.finish_http_context(&finished)).unwrap();
+    let ready = with(&mut engine, expired.deadline() + 1., |cx| {
+        cx.session_ready(&session)
+    });
+    let kinds = ready
+        .iter()
+        .map(|waiter| match waiter {
+            Waiter::Failed(_, _, error) => {
+                assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
+                error.kind
+            }
+            Waiter::Ready(..) => panic!("inactive owner re-dispatched"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        [
+            Some(crate::ErrorKind::Timeout),
+            Some(crate::ErrorKind::InvalidInput)
+        ]
+    );
+}
+
+#[test]
+fn waits_refuse_invalid_owners_and_return_the_continuation() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let own = with(&mut engine, 1., |cx| {
+        cx.session_context(&session, policy(Operation::Read))
+    })
+    .unwrap();
+    assert_eq!(wait(&mut engine, &session, &own, 1.), Err(Error::Invalid));
+    let background = owner(&mut engine, Scope::Background, 1_000, 1.);
+    wait(&mut engine, &session, &background, 1.).unwrap();
+    assert_eq!(
+        wait(&mut engine, &session, &background, 1.),
+        Err(Error::Duplicate)
+    );
+    let late = owner(&mut engine, Scope::Background, 1_000, 1.);
+    assert_eq!(
+        wait(&mut engine, &session, &late, late.deadline()),
+        Err(Error::TimedOut)
+    );
+    let mut other = self::engine();
+    let foreign = open(&mut other, true);
+    let fresh = owner(&mut engine, Scope::Background, 20_000, 1.);
+    assert_eq!(wait(&mut engine, &foreign, &fresh, 1.), Err(Error::Revoked));
+    let retired = open(&mut engine, true);
+    let _ = with(&mut engine, 1., |cx| cx.retire_session(&retired)).unwrap();
+    assert_eq!(wait(&mut engine, &retired, &fresh, 1.), Err(Error::Revoked));
+}
+
+#[test]
+fn a_write_with_an_unproven_release_cannot_park_for_a_resend() {
+    for (lost, fact, retry, parks) in [
+        (true, Fact::None, RetryPolicy::DefinitiveRefusal, false),
+        (false, Fact::Accepted, RetryPolicy::DefinitiveRefusal, false),
+        (false, Fact::Rejected, RetryPolicy::Never, false),
+        (false, Fact::Rejected, RetryPolicy::DefinitiveRefusal, true),
+    ] {
+        let mut engine = engine();
+        engine.venue.command_fact = fact;
+        let session = open(&mut engine, false);
+        // Issued as during command dispatch, so the classifier knows its intent.
+        engine.io.request_contexts.dispatch = Some((7, crate::classify::Intent::Place));
+        let write = with(&mut engine, 1., |cx| {
+            cx.http_context(
+                Scope::Command(7),
+                Policy {
+                    retry,
+                    ..policy(Operation::Mutation)
+                },
+            )
+        })
+        .unwrap();
+        engine.io.request_contexts.dispatch = None;
+        let token = queue(&mut engine, &write, 1.);
+        let request = release(&mut engine, token, 2.);
+        if lost {
+            lose(&mut engine, request, 3.);
+        } else {
+            respond(&mut engine, request, 3., "{\"code\":401}");
+        }
+        assert_eq!(
+            wait(&mut engine, &session, &write, 4.).is_ok(),
+            parks,
+            "lost={lost} retry={retry:?}"
+        );
+    }
+}
+
+#[test]
+fn a_parked_command_keeps_completion_authority_past_its_deadline() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let drained = owner(&mut engine, Scope::Command(7), 1_000, 1.);
+    let expiring = owner(&mut engine, Scope::Command(8), 1_000, 1.);
+    wait(&mut engine, &session, &drained, 1.).unwrap();
+    wait(&mut engine, &session, &expiring, 1.).unwrap();
+    timers(&mut engine);
+    let late = drained.deadline() + 1.;
+    // Unrelated work prunes expired owners that hold nothing.
+    owner(&mut engine, Scope::Background, 20_000, late);
+    let ready = with(&mut engine, late, |cx| cx.session_ready(&session));
+    let [Waiter::Failed(context, _, error), Waiter::Failed(..)] = ready.as_slice() else {
+        panic!("expired owners must fail");
+    };
+    assert_eq!(
+        with(&mut engine, late, |cx| cx
+            .fail_context(context, error.clone())),
+        Ok(())
+    );
+    // The expiry path: a parked owner whose timer fires after pruning work.
+    let mut engine = self::engine();
+    let session = open(&mut engine, true);
+    let parked = owner(&mut engine, Scope::Command(9), 1_000, 1.);
+    wait(&mut engine, &session, &parked, 1.).unwrap();
+    let timer = timers(&mut engine)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    owner(
+        &mut engine,
+        Scope::Background,
+        20_000,
+        parked.deadline() + 1.,
+    );
+    engine.handle(parked.deadline() + 1., Event::TimerFired { timer });
+    assert_eq!(engine.venue.completions, [Ok(())]);
+}
+
+#[test]
+fn command_entry_cannot_reclaim_a_command_with_a_parked_waiter() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let parked = owner(&mut engine, Scope::Command(7), 1_000, 1.);
+    wait(&mut engine, &session, &parked, 1.).unwrap();
+    let late = parked.deadline() + 1.;
+    assert!(!engine.io.request_contexts.prepare_command_entry(7, late));
+    assert!(engine.io.request_contexts.command_live(7, late));
+    let ready = with(&mut engine, late, |cx| cx.session_ready(&session));
+    let [Waiter::Failed(context, _, error)] = ready.as_slice() else {
+        panic!("expired owner must fail");
+    };
+    with(&mut engine, late, |cx| {
+        cx.fail_context(context, error.clone())
+    })
+    .unwrap();
+    assert!(engine.io.request_contexts.prepare_command_entry(7, late));
 }
 
 #[test]
@@ -884,4 +1258,117 @@ fn a_classified_session_refusal_resolves_the_operation_without_a_resend_grant() 
             "a definitive refusal resolves the operation"
         );
     }
+}
+
+#[test]
+fn a_held_command_past_its_deadline_cannot_reissue_in_the_old_generation() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let parked = owner(&mut engine, Scope::Command(7), 1_000, 1.);
+    wait(&mut engine, &session, &parked, 1.).unwrap();
+    assert_eq!(
+        with(&mut engine, parked.deadline() + 1., |cx| cx
+            .http_context(Scope::Command(7), policy(Operation::Read))),
+        Err(Error::State)
+    );
+}
+
+fn entry_root(engine: &mut Engine<Probe>, command: CommandId) -> crate::request_context::Context {
+    let root = owner(engine, Scope::Command(command), 20_000, 1.);
+    engine.io.request_contexts.retain_command_entry(&root);
+    root
+}
+
+#[test]
+fn execution_observers_and_session_waiters_exclude_each_other() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let parked = entry_root(&mut engine, 7);
+    wait(&mut engine, &session, &parked, 1.).unwrap();
+    assert_eq!(
+        engine.io.request_contexts.begin_execution(
+            9_000,
+            &parked,
+            policy(Operation::Read),
+            crate::engine::Window::UntilTerminal,
+            "k",
+            2.,
+        ),
+        Err(Error::State),
+        "a parked root cannot become an execution observer"
+    );
+    let observer = entry_root(&mut engine, 8);
+    engine
+        .io
+        .request_contexts
+        .begin_execution(
+            9_001,
+            &observer,
+            policy(Operation::Read),
+            crate::engine::Window::UntilTerminal,
+            "k",
+            2.,
+        )
+        .unwrap();
+    assert_eq!(
+        wait(&mut engine, &session, &observer, 3.),
+        Err(Error::Revoked),
+        "an observer root cannot park behind a session"
+    );
+}
+
+#[cfg(feature = "http-plans")]
+#[test]
+fn a_planned_command_is_refused_a_session_wait_instead_of_parking() {
+    use crate::request_context::plan::{CallBound, RetryWindow, StepBound};
+    use crate::request_context::{PlanPolicy, PreflightPolicy, PreflightPurpose};
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let leg = with(&mut engine, 1., |cx| {
+        let preflight = cx
+            .issue_preflight(
+                7,
+                PreflightPolicy {
+                    purpose: PreflightPurpose::ReadOnly,
+                    read_credential: None,
+                    write_credential: None,
+                },
+            )
+            .unwrap();
+        let calls = [CallBound {
+            timeout_ms: 20_000,
+            attempts: 1,
+            retry_window: RetryWindow::FreshAttempt,
+            after_refusal: &[],
+        }];
+        let steps = [StepBound {
+            wait_ms: 0,
+            calls: &calls,
+        }];
+        let plan = cx
+            .admit_plan(
+                &preflight,
+                &steps,
+                PlanPolicy {
+                    operation: Operation::Read,
+                    credential: None,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .unwrap();
+        let slot = cx.plan_slots(&plan).unwrap().remove(0);
+        cx.plan_leg_context(&plan, &slot).unwrap()
+    });
+    assert!(matches!(leg.owner(), Owner::Command { id: 7, .. }));
+    // The Plan sequences its own legs: the venue gets its pending back now.
+    let refused = with(&mut engine, 1., |cx| {
+        cx.session_wait(&session, &leg, Pending(leg.clone()))
+    });
+    assert!(matches!(refused, Err((Pending(back), Error::State)) if back == leg));
+    assert!(engine.io.session_waits.entries.is_empty(), "nothing parked");
+    assert!(
+        with(&mut engine, 2., |cx| cx.session_ready(&session)).is_empty(),
+        "readiness has no planned leg to re-dispatch"
+    );
 }

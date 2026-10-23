@@ -292,6 +292,55 @@ Contract:
   command journal, never a session replay.
 - AsterDEX `awaiting_clock` stays with the clock lane.
 
+API (A2), revised after an independent audit:
+- `Cx::session_wait(&Session, owner: &Context, pending: P) -> Result<(), (P, Error)>`
+  parks a continuation behind a live session.
+  - **Owner:** must be live. It cannot be a Session owner, because a
+    Login→Discover sequence waiting on its own session would deadlock; that
+    two-stage flow is plain venue sequencing.
+  - **Mutation owners:** refused (`State`) while their latest attempt was
+    released without a definitive fact. A 401 must be recorded as a definitive
+    refusal before a relogin re-send.
+  - **Keys and bounds:** waiters are keyed by owner leg, and a second wait is
+    `Duplicate`. The registry's 256 live contexts bound them. A refusal
+    returns the continuation.
+  - **Timer:** one engine timer at the owner's existing raw deadline (already
+    parent-capped, never extended). It queues no HTTP.
+- `Cx` cannot call venue hooks, so draining returns the waiters to the caller
+  in FIFO order. A wait made during handling parks for the next drain:
+  - `#[must_use] session_ready(&Session) -> Vec<Waiter<P>>`, where
+    `Waiter::{Ready(Context, P), Failed(Context, P, VenueError)}`. A live owner
+    is `Ready`, and the venue then issues the owner's own request. An expired
+    or revoked owner is `Failed` with Timeout or Revoked and outcome NotSent.
+    It is never dropped, because pending values carry venue in-flight
+    bookkeeping.
+  - `#[must_use] session_failed(&Session, VenueError)` and `retire_session`
+    return every waiter as `(Context, P, VenueError)` with NotSent.
+- **Outcome:** the forced NotSent is only the waiter's own pre-send fact.
+  Command seals still recompute the outcome from the journal.
+- **Expiry hook:** expiry is the only engine-initiated callback, through
+  `Venue::on_session_wait_expired(cx, P, VenueError)`. By default it delegates
+  to `on_http_preparation_failed(.., Error::TimedOut, ..)` with outcome NotSent
+  and kind Timeout, so there are no fail-closed panics.
+- **Placement:**
+  - The `Io` field `session_waits` sits after `pending`/`signatures`, clear of
+    #1816's `http_failure_kind` insert.
+  - The timer lookup goes in `expire_http_timer`'s not-found branch in
+    `http_lifecycle.rs`, so `Engine::handle` is untouched (#1771's insert
+    window).
+  - The hook goes right after `on_http_preparation_failed`.
+  - This departs from Phase A's "no new `Io` field / no `engine.rs`" only
+    because pending values are generic over `P`.
+- **Not waiters:**
+  - WS auth sends (Paradex `send_auth`, GRVT private/proxy auth) are venue
+    continuations after `session_ready`.
+  - The Paradex sign queue becomes `request_signed_managed`.
+  - BreakoutProp issues `request_managed` as soon as each owner drains, with
+    its 5/s limit moved into engine `http_pacing`. Re-queuing contexts in a
+    venue rate queue would leave them without a timer.
+  - GRVT's early return in `login()` during `login_retry`, which is #1821's
+    hang, is covered by the per-waiter deadline.
+
 ## Phases
 
 - **A. Core (engine only).**
@@ -369,6 +418,22 @@ Contract:
     - **Not yet:** no venue adopts sessions at this checkpoint.
 - **A2. Session prerequisite gate** (above), engine-only, before the Paradex/
   GRVT/BreakoutProp adoptions.
+  - **Checkpoint:**
+    - **Code:** `Cx::session_wait`, `session_ready -> Vec<Waiter<P>>` and
+      `session_failed`; `retire_session` now returns its waiters; plus the
+      `Venue::on_session_wait_expired` hook and the waiter timer in the
+      `expire_http_timer` not-found branch.
+    - **Tests:** 29 session tests in all.
+    - **Fault controls:** seven compiled faults fail exact tests (no resend
+      gate, dropping revoked owners, no timer clear, early expiry, self-wait,
+      no command hold, no retry-policy check).
+    - **Gates:** engine 653 tests with order locks and 634 without, Binance
+      293, strict Clippy both ways, fmt, bans.
+    - **Review:** the independent review found that a parked command could
+      lose completion authority once pruned past its deadline. Waiters now
+      hold the command owner until it finishes. It also found the resend
+      check was looser than `retry`; it now shares `retry`'s journal
+      admission and requires the context's refusal policy.
 - **C. Cadence/feed linkage** as above, after #1771.
 - **D. Hand-off.** The API and adoption notes go to codex-9czdjh, codex-zs5e83,
   codex-ih35js and codex-hcmq3f. BingX adoption and deletion of the #1779
