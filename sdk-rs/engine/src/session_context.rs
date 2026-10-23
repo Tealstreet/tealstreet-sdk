@@ -289,7 +289,7 @@ impl<P> Cx<'_, P> {
             if matches!(owner.owner(), Owner::Session { .. }) {
                 return Err(Error::Invalid);
             }
-            if self.io.request_contexts.resend_blocked(owner) {
+            if self.io.request_contexts.resend_blocked(owner, self.now) {
                 return Err(Error::State);
             }
             if self
@@ -319,6 +319,7 @@ impl<P> Cx<'_, P> {
             timer,
             at_ms: owner.deadline(),
         });
+        self.io.request_contexts.hold_wait(owner);
         self.io.session_waits.entries.push(Wait {
             session: generation,
             owner: owner.clone(),
@@ -336,11 +337,16 @@ impl<P> Cx<'_, P> {
         let Ok(generation) = self.io.request_contexts.validate_session(session) else {
             return vec![];
         };
+        // A Ready owner is live by its own deadline; a Failed one keeps its
+        // hold until the venue fails the command, which removes the owner.
         self.take_waits(generation)
             .into_iter()
             .map(
                 |wait| match self.io.request_contexts.validate(&wait.owner, self.now) {
-                    Ok(()) => Waiter::Ready(wait.owner, wait.pending),
+                    Ok(()) => {
+                        self.io.request_contexts.release_wait(&wait.owner);
+                        Waiter::Ready(wait.owner, wait.pending)
+                    }
                     Err(reason) => Waiter::Failed(wait.owner, wait.pending, owner_error(reason)),
                 },
             )

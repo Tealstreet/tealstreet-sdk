@@ -961,29 +961,10 @@ impl CommandWrites {
     /// Only a typed definitive refusal may authorize another write attempt.
     /// The request context's policy/deadline must also authorize this retry.
     pub fn retry(&mut self, previous: RequestId, id: RequestId) -> Result<(), Error> {
-        if self.sealed {
-            return Err(Error::State);
-        }
-        if self.attempts.iter().any(|a| a.id == id) {
+        if self.attempts.iter().any(|a| a.id == id) && !self.sealed {
             return Err(Error::Duplicate);
         }
-        if self.occupied() >= self.capacity {
-            return Err(Error::Capacity);
-        }
-        let old = self
-            .attempts
-            .iter()
-            .find(|a| a.id == previous)
-            .ok_or(Error::Invalid)?;
-        if !self.active(old.leg)
-            || old.id_overflow
-            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
-            || self.attempts.iter().rposition(|a| a.leg == old.leg)
-                != self.attempts.iter().position(|a| a.id == previous)
-        {
-            return Err(Error::RetryForbidden);
-        }
-        let leg = old.leg;
+        let leg = self.retry_admissible(previous)?;
         self.attempts.push(WriteAttempt {
             id,
             leg,
@@ -1117,17 +1098,34 @@ impl CommandWrites {
         }
     }
 
-    /// A released attempt without a definitive effects-free refusal cannot be
-    /// re-sent, so its owner must not park waiting to re-send it.
+    /// Journal side of `retry`, without allocating the new attempt.
+    fn retry_admissible(&self, previous: RequestId) -> Result<u64, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        if self.occupied() >= self.capacity {
+            return Err(Error::Capacity);
+        }
+        let old = self
+            .attempts
+            .iter()
+            .find(|a| a.id == previous)
+            .ok_or(Error::Invalid)?;
+        if !self.active(old.leg)
+            || old.id_overflow
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self.attempts.iter().rposition(|a| a.leg == old.leg)
+                != self.attempts.iter().position(|a| a.id == previous)
+        {
+            return Err(Error::RetryForbidden);
+        }
+        Ok(old.leg)
+    }
+
+    /// An owner may park for a re-send only when `retry` would accept it.
     pub(crate) fn resend_blocked(&self, leg: u64) -> bool {
-        let Some(latest) = self.latest(leg) else {
-            return false;
-        };
-        self.attempts.iter().any(|attempt| {
-            attempt.id == latest
-                && attempt.released
-                && !matches!(&attempt.result, Some(WriteResult::Rejected(error)) if effects_free(error))
-        })
+        self.latest(leg)
+            .is_some_and(|latest| self.retry_admissible(latest).is_err())
     }
 
     pub(crate) fn latest(&self, leg: u64) -> Option<RequestId> {

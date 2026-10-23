@@ -340,11 +340,17 @@ API (A2), revised after an independent audit:
       `session_failed`; `retire_session` now returns its waiters; plus the
       `Venue::on_session_wait_expired` hook and the waiter timer in the
       `expire_http_timer` not-found branch.
-    - **Tests:** 28 session tests in all.
-    - **Fault controls:** five compiled faults fail exact tests (no resend
-      gate, dropping revoked owners, no timer clear, early expiry, self-wait).
-    - **Gates:** engine 652 tests with order locks and 633 without, Binance
+    - **Tests:** 29 session tests in all.
+    - **Fault controls:** seven compiled faults fail exact tests (no resend
+      gate, dropping revoked owners, no timer clear, early expiry, self-wait,
+      no command hold, no retry-policy check).
+    - **Gates:** engine 653 tests with order locks and 634 without, Binance
       293, strict Clippy both ways, fmt, bans.
+    - **Review:** the independent review found that a parked command could
+      lose completion authority once pruned past its deadline. Waiters now
+      hold the command owner until it finishes. It also found the resend
+      check was looser than `retry`; it now shares `retry`'s journal
+      admission and requires the context's refusal policy.
 - **C. Cadence/feed linkage** as above, after #1771.
 - **D. Hand-off.** The API and adoption notes go to codex-9czdjh, codex-zs5e83,
   codex-ih35js and codex-hcmq3f. BingX adoption and deletion of the #1779

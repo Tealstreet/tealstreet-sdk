@@ -22,6 +22,7 @@ struct Probe {
     finish_first: bool,
     retire_in_response: Option<Session>,
     facts: Vec<Result<(), Error>>,
+    completions: Vec<Result<(), Error>>,
     responses: Vec<(Owner, String)>,
     failures: Vec<Owner>,
     preparation_failures: Vec<(Error, Option<crate::Outcome>)>,
@@ -36,6 +37,7 @@ impl Default for Probe {
             finish_first: false,
             retire_in_response: None,
             facts: vec![],
+            completions: vec![],
             responses: vec![],
             failures: vec![],
             preparation_failures: vec![],
@@ -63,6 +65,18 @@ impl Venue for Probe {
         error: VenueError,
     ) {
         self.preparation_failures.push((reason, error.outcome));
+    }
+    fn on_session_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: VenueError,
+    ) {
+        if matches!(pending.0.owner(), Owner::Command { .. }) {
+            self.completions
+                .push(cx.fail_context(&pending.0, error.clone()));
+        }
+        self.on_http_preparation_failed(cx, pending, Error::TimedOut, error);
     }
     fn start(&mut self, _: &mut Cx<'_, Pending>) {}
     fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
@@ -1009,16 +1023,23 @@ fn waits_refuse_invalid_owners_and_return_the_continuation() {
 
 #[test]
 fn a_write_with_an_unproven_release_cannot_park_for_a_resend() {
-    for (lost, fact, parks) in [
-        (true, Fact::None, false),
-        (false, Fact::Accepted, false),
-        (false, Fact::Rejected, true),
+    for (lost, fact, retry, parks) in [
+        (true, Fact::None, RetryPolicy::DefinitiveRefusal, false),
+        (false, Fact::Accepted, RetryPolicy::DefinitiveRefusal, false),
+        (false, Fact::Rejected, RetryPolicy::Never, false),
+        (false, Fact::Rejected, RetryPolicy::DefinitiveRefusal, true),
     ] {
         let mut engine = engine();
         engine.venue.command_fact = fact;
         let session = open(&mut engine, false);
         let write = with(&mut engine, 1., |cx| {
-            cx.http_context(Scope::Command(7), policy(Operation::Mutation))
+            cx.http_context(
+                Scope::Command(7),
+                Policy {
+                    retry,
+                    ..policy(Operation::Mutation)
+                },
+            )
         })
         .unwrap();
         let token = queue(&mut engine, &write, 1.);
@@ -1031,7 +1052,50 @@ fn a_write_with_an_unproven_release_cannot_park_for_a_resend() {
         assert_eq!(
             wait(&mut engine, &session, &write, 4.).is_ok(),
             parks,
-            "lost={lost}"
+            "lost={lost} retry={retry:?}"
         );
     }
+}
+
+#[test]
+fn a_parked_command_keeps_completion_authority_past_its_deadline() {
+    let mut engine = engine();
+    let session = open(&mut engine, true);
+    let drained = owner(&mut engine, Scope::Command(7), 1_000, 1.);
+    let expiring = owner(&mut engine, Scope::Command(8), 1_000, 1.);
+    wait(&mut engine, &session, &drained, 1.).unwrap();
+    wait(&mut engine, &session, &expiring, 1.).unwrap();
+    timers(&mut engine);
+    let late = drained.deadline() + 1.;
+    // Unrelated work prunes expired owners that hold nothing.
+    owner(&mut engine, Scope::Background, 20_000, late);
+    let ready = with(&mut engine, late, |cx| cx.session_ready(&session));
+    let [Waiter::Failed(context, _, error), Waiter::Failed(..)] = ready.as_slice() else {
+        panic!("expired owners must fail");
+    };
+    assert_eq!(
+        with(&mut engine, late, |cx| cx
+            .fail_context(context, error.clone())),
+        Ok(())
+    );
+    // The expiry path: a parked owner whose timer fires after pruning work.
+    let mut engine = self::engine();
+    let session = open(&mut engine, true);
+    let parked = owner(&mut engine, Scope::Command(9), 1_000, 1.);
+    wait(&mut engine, &session, &parked, 1.).unwrap();
+    let timer = timers(&mut engine)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    owner(
+        &mut engine,
+        Scope::Background,
+        20_000,
+        parked.deadline() + 1.,
+    );
+    engine.handle(parked.deadline() + 1., Event::TimerFired { timer });
+    assert_eq!(engine.venue.completions, [Ok(())]);
 }
