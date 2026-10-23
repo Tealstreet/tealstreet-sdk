@@ -5306,3 +5306,17 @@ remain unchanged. The two private replay tape identities reflect the authorized
 master/harness integrator change; their eleven existing diagnostics each and all
 public declarations are unchanged. Raw replay reports remain FAIL with known
 failures; this content-hash refresh does not establish complete venue parity.
+
+## Phemex local history admission
+
+Synchronous Phemex history/income results use genuine engine command-entry
+admission before publishing their local terminal. Invalid engine time and
+exhausted managed-owner capacity produce one typed engine rejection. Finite
+admitted errors retain their native text, kind=None and outcome=None; unknown
+client-ID markets still return {"found":false,"definitive":false}.
+Native validation order, sixteen-query limits and duplicate-ID behavior remain.
+A local refusal preserves outstanding native history/income owners. Successful
+HTTP, signing, pagination and financial history completion retain their existing
+paths. Affected SDK callers are fetchHistoricalFills, fetchHistoricalOrders,
+fetchIncomeHistory/fetchIncomeHistoryRange, fetchPublicTrades and
+findOrderByClientOrderId through the Rust command bridge.

@@ -949,3 +949,20 @@ before the two-hash refresh, and zero errors/eleven known afterward; the public
 report remains186 known. Every diagnostic path/rationale and all other manifest
 entries are byte-preserved; the original reports remain strict FAIL. No replay,
 local release build, new declaration, threshold or comparison-policy change.
+
+## Phemex local history admission controls
+
+A separate original-RED commit adds nine integration controls on unchanged
+661427d10b3 production: four assertion failures and five passing compatibility
+controls. The same REDs reproduce after actual 1e8f600da75 integration. All nine
+pass with Context-owned local terminals. Real unsigned candle preparations fill
+all 256 managed owners; terminal preparation failure frees one slot and local
+results recover while the other owners remain pending. NaN and both infinities
+reject, then finite command-ID reuse succeeds. All eleven local branches retain
+their finite payload/error contract, with active-capacity, duplicate-ID,
+precedence, resource reuse and valid signed/public continuation controls.
+No existing assertion, fixture, engine, host, signer or shared policy changes.
+Both request-context ratchets verify only the exact eleven-entry Phemex prune.
+Local Phemex and Binance verification passes 491 tests across 39 targets with
+zero failed or ignored, strict all-target Clippy, scoped formatting, and both
+request-context checks (fifteen ratchet controls). CI supplies replay/size gates.

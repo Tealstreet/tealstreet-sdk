@@ -2383,3 +2383,15 @@ Each existing per-leg mint reservation considers the current candidate and
 retains monotonic state; exhaustion refuses without wrap. No transaction nonce,
 managed ownership, retry or outcome policy is introduced. No legacy inventory
 site changes; all incoming maps and the #1869 TS reference/harness remain exact.
+
+## Phemex synchronous history/income Context ownership
+
+~~Eleven synchronous local history/income exits publish numeric terminals without
+command-entry Context admission.~~ Local branches now borrow genuine shared
+admission and immediately use its Context terminal, before active-set mutation.
+Original-source controls show full-capacity local errors lack Internal typing,
+unknown-market lookup succeeds despite full capacity, and invalid-clock errors
+lack InvalidInput typing. Finite native payloads, refusal order and outstanding
+requests are preserved. Exactly eleven Phemex occurrences/entries are removed;
+managed network/history and signer adoption remain deferred. Architecture gate:
+No lifecycle copy; the adapter consumes shared admission and finalization.

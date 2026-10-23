@@ -287,8 +287,8 @@ fn duplicate(actions: &[Action], owner: u32) {
     assert!(matches!(actions, [Action::Notice(Notice::Event(event))]
         if event.code == safe_cex_engine::log::code::COMMAND_DUPLICATE));
 }
-fn dispatch(e: &mut TestEngine, owner: u32, read: Query) -> HttpRequest {
-    let actions = query(e, NOW, owner, read);
+fn dispatch_at(e: &mut TestEngine, now: f64, owner: u32, read: Query) -> HttpRequest {
+    let actions = query(e, now, owner, read);
     assert!(terminal(&actions, owner).is_empty());
     assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
     actions
@@ -299,9 +299,12 @@ fn dispatch(e: &mut TestEngine, owner: u32, read: Query) -> HttpRequest {
         })
         .expect("valid native path retains its physical dispatch")
 }
-fn fail_native(e: &mut TestEngine, owner: u32, request: &HttpRequest) {
+fn dispatch(e: &mut TestEngine, owner: u32, read: Query) -> HttpRequest {
+    dispatch_at(e, NOW, owner, read)
+}
+fn fail_native_at(e: &mut TestEngine, now: f64, owner: u32, request: &HttpRequest) {
     e.handle(
-        NOW + 1.,
+        now,
         Event::HttpFailed {
             request: request.id,
             error: "native peer completed",
@@ -327,14 +330,14 @@ fn active_history_capacity_duplicate_and_native_symbol_precedence_preserve_owner
         603,
         Err(HISTORY_CAPACITY),
     );
-    fail_native(&mut e, 1, &first);
+    fail_native_at(&mut e, NOW + 1., 1, &first);
     native(
         &query(&mut e, NOW + 1., 603, fills(Some(UNSAFE), None)),
         603,
         Err("Unsupported Phemex native history symbol"),
     );
-    let replacement = dispatch(&mut e, 603, fills(Some(SYMBOL), None));
-    fail_native(&mut e, 603, &replacement);
+    let replacement = dispatch_at(&mut e, NOW + 2., 603, fills(Some(SYMBOL), None));
+    fail_native_at(&mut e, NOW + 3., 603, &replacement);
 }
 #[test]
 fn active_income_capacity_and_duplicate_preserve_original_native_owner() {
@@ -349,9 +352,9 @@ fn active_income_capacity_and_duplicate_preserve_original_native_owner() {
         604,
         Err(INCOME_CAPACITY),
     );
-    fail_native(&mut e, 1, &first);
-    let replacement = dispatch(&mut e, 604, income(None, None));
-    fail_native(&mut e, 604, &replacement);
+    fail_native_at(&mut e, NOW + 1., 1, &first);
+    let replacement = dispatch_at(&mut e, NOW + 2., 604, income(None, None));
+    fail_native_at(&mut e, NOW + 3., 604, &replacement);
 }
 #[test]
 fn repeated_local_admission_does_not_accumulate_owners_or_block_native_paths() {
@@ -397,6 +400,6 @@ fn valid_signed_and_public_native_dispatch_keep_original_route_and_continuations
                 .any(|(key, _)| key.eq_ignore_ascii_case("x-phemex-request-signature")),
             private
         );
-        fail_native(&mut e, 606, &request);
+        fail_native_at(&mut e, NOW + 1., 606, &request);
     }
 }

@@ -148,3 +148,22 @@ capacity and duplicate preservation, repeated local reuse, and valid signed
 and public native dispatch/continuations. The engine itself rejects duplicate
 active command IDs before venue entry with COMMAND_DUPLICATE and no terminal;
 tests preserve that actual behavior and complete the original native owner.
+
+## Implementation receipt
+
+Original-RED commit: 0f089c48b59. Actual #1869 integration: f7c99052d4b
+(parent 1e8f600da75), with only the README index conflict resolved incoming-first
+plus the one Phemex row. All nine controls pass after the local adapter cutover;
+no valid native path issues a Context. The exact scanner delta matches all eleven
+planned hashes and changes no other source inventory.
+
+Local verification on the actual-#1869 integration passes: Phemex and Binance
+491 tests across 39 targets, zero failed/ignored; strict all-target Clippy and
+scoped formatting; exact request inventory and its fifteen regression controls.
+The original public/signed history and income tests are unchanged.
+
+Independent implementation reviews confirm the exact prune, incoming prefix
+preservation, unchanged native send/page/response code and shared-only admission
+authority. Review corrections keep replacement-dispatch clocks monotonic and use
+the actual SDK caller names in CALLERS; the focused controls and strict checks
+are rerun after those corrections.
