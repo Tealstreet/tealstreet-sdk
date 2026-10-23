@@ -48,10 +48,18 @@ Rule patterns (each a local copy of one policy):
 
 1. **GET → secondary, else primary, no exceptions:** asterdex
    `request.rs:198-202`, backpack `account.rs:310-328`, bingx `sign.rs:105-107`,
-   blofin `account.rs:291-315`, bybit `lib.rs:639-643`, mexc
-   `account.rs:135-146`, weex `lib.rs:390-405`, bitunix `account.rs:290-302`,
-   woo `lib.rs:177-183`, kucoin `lib.rs:265-285` (+ requires primary present),
-   binance legacy `lib.rs:413-418`, okx `lib.rs:330-344`.
+   bybit `lib.rs:639-643`, mexc `account.rs:135-146`, weex `lib.rs:390-405`,
+   bitunix `account.rs:290-302`, binance legacy `lib.rs:413-418`, okx
+   `lib.rs:330-344`. **Secondary only when a primary exists:** blofin
+   (`account.rs:275-315`), bitget (`account.rs:174-197`), woo
+   (`lib.rs:171-183`), bitrue (`lib.rs:307`); kucoin (`lib.rs:265-285`) instead
+   falls back to unsigned public headers without a primary (`lib.rs:268,283`).
+   Missing primary returns silently in bybit `lib.rs:645`, binance `lib.rs:419`,
+   mexc `account.rs:144`.
+1a. **Trade-owned GETs:** blofin's replacement-verify order detail is signed
+   with the secondary (`trading.rs:636-642,1327-1335`); coinbase's cancellation
+   proof and catalogue/trading GETs stay on the trading key (`rest.rs:77-80`).
+   Phase 2 lists every non-account signed GET per family with a role.
 2. **GET → secondary with named primary-only reads + `RequestRoute::Primary`:**
    bitget degraded balance/UTA (`account.rs:154-173,242-244`), bitrue markets
    (`lib.rs:291-336`), kraken `/api/history/` (`account.rs:389-431`), phemex
@@ -81,6 +89,16 @@ Rule patterns (each a local copy of one policy):
    funder ?? signer, orderly application_id, breakoutprop subaccount, apexomni
    discovered account_id, asterdex v3 user/signer, coinbase portfolio.
 9. **WS/session auth:** primary in every family.
+10. **Host egress inference (outside venues):** native
+    `hosts/native/src/routing.rs:186-222` and TS
+    `packages/safe-cex/src/transport/engine.ts:808-821` pick the read egress
+    from GET + read-header presence, the TS side with a hard-coded venue list
+    (binance, binancepm, binanceinverse, asterdex). `RequestRoute` has no
+    Secondary variant.
+11. **Registry construction:** AsterDEX read-agent exception
+    (`registry/src/lib.rs:745-750`), Binance identities (`:1147-1165`). Hosted
+    signing facade sets `stable_id: None` (`registry/src/hosted_signing.rs:251,325`,
+    `bybit/src/hosted_signing.rs:65`, `binance/src/sign.rs:54`).
 
 ### Nonce sources, 27 families
 
@@ -110,39 +128,61 @@ immutable `Selection`, used for signing, routing and evidence.
 ```rust
 pub enum CredentialRole {
     Public,
-    Read(AccountReadScope),      // eligible for the secondary
-    PrimaryRead(PrimaryReason),  // client-id lookup, post-unknown read, degraded balance, catalog, history
+    Read { scope: Option<AccountReadScope> },                     // eligible for the secondary
+    PrimaryRead { reason: PrimaryReason, scope: Option<AccountReadScope> },
     Mutation,
-    SessionAuth,                 // REST login, listenKey, WS auth
+    SessionAuth,                                                 // REST login, listenKey, WS auth
 }
-pub struct Selection { pub slot: CredentialSlot, pub reference: Option<KeyRef>,
-                       pub route: Option<RequestRoute>, generation: u32, evidence: Option<AccountReadScope> }
+pub struct SlotPolicy { secondary_requires_primary: bool, public_data_only: bool,
+                        no_primary: NoPrimary /* Unavailable | Silent | UnsignedPublic */ }
+pub struct Selection { pub slot: CredentialSlot, pub intent: RoutingIntent,
+                       pub reference: Option<KeyRef>, secondary_epoch: u32,
+                       evidence: Option<AccountReadScope> }
 pub struct Slots<T> { primary: Option<T>, secondary: Option<T> } // venue's signers, indexed only
 impl Cx { pub fn select_credential(&self, role: CredentialRole) -> Result<Selection, CredentialUnavailable> }
 ```
 
-Rules (exactly today's majority behaviour, now in one place): `Read` → secondary
-when configured and not retired, else primary. `PrimaryRead` → primary, with
-`RequestRoute::Primary` whenever a secondary is configured. `Mutation` /
-`SessionAuth` → primary; missing primary is a typed `notSent` failure. `Public`
-→ no credential. HTTP method is never an input, so POST reads and GET
-mutations are declared, not inferred. Selection feeds the existing
-`request_context::Credential{slot,reference}` (codex-uufub4's
-`PreflightPolicy` read/write intents consume it unchanged) and the legacy
-signed path alike. Equal slot/ref never implies equal account.
+Rules reproduce today's behaviour, with per-family `SlotPolicy` data from the
+inventory (rule 1 gates, KuCoin's unsigned fallback, silent missing primary):
+
+- `Read` → secondary when configured, not retired and the policy gate holds;
+  else primary.
+- `PrimaryRead` → primary with intent Primary, always (bitget, bitrue, kraken,
+  phemex, binance/okx history set `RequestRoute::Primary` unconditionally).
+- Any primary-signed private request carries intent Primary whenever a
+  secondary was supplied at construction, retired or not (coinbase
+  `read_supplied`, `rest.rs:81-84`).
+- `Mutation` / `SessionAuth` → primary. Missing primary keeps the family's
+  current `NoPrimary` behaviour; a typed `notSent` is a listed change per PR.
+- `Public` → no credential.
+
+HTTP method is never an input, end to end: every credential-bearing
+`HttpRequest` (legacy and managed) carries the selection's `RoutingIntent`
+(new `RequestRoute::Secondary` or an intent field), and hosts route on intent
+only. Phase 2 deletes the native GET/header inference and the TS venue list
+(inventory rule 10). `request_context::Credential.reference` becomes optional so
+raw-secret venues get Primary/Secondary intent rather than Public (agreed with
+codex-uufub4 before editing `request_context.rs`). Selection
+feeds codex-uufub4's `PreflightPolicy` read/write intents unchanged. Equal
+slot/ref never implies equal account.
 
 - **Raw and KeyRef venues alike:** `Slots<T>` holds whatever the venue signs
   with (raw `Credentials`, `Identity`, `Signer`); the venue only indexes it with
-  `selection.slot`. Passphrase fallback resolves once at construction through
-  `SetupFieldPolicy::RequiredWithPrimaryFallback`.
-- **Evidence:** a `Read` selection auto-tags `(slot, scope)`; venues stop
+  `selection.slot`. One engine resolver handles passphrase fallback for raw
+  slots (today `ReadCredentials::validate_passphrase`) and KeyRef slots
+  (`RequiredWithPrimaryFallback`); an explicitly empty secondary passphrase
+  never falls back (`credentials.rs:63-64`, `blofin/account.rs:296-305`).
+- **Evidence:** a scoped selection auto-tags `(slot, scope)`; venues stop
   calling `tag_account_read`. The venue codec still classifies native
-  success/refusal via `account_auth_outcome`. Evidence applies only if its
-  selection generation is current; history success never heals account auth.
-- **Retirement:** `Cx::retire_secondary(cause)` bumps the generation; later
-  selections fall back to primary. This generalizes Coinbase's runtime drop and
-  gives the other families the same transition point (behaviour change per
-  venue only by explicit adoption, listed per PR).
+  success/refusal via `account_auth_outcome`. Secondary evidence applies only
+  if its `secondary_epoch` is current; primary evidence is never discarded by
+  retirement. History success never heals account auth.
+- **Retirement:** `Cx::retire_secondary(cause)` bumps the secondary epoch only;
+  later selections fall back to primary. The request context pins the slot
+  across physical retries, so a retry of a leg whose secondary epoch is stale
+  is denied (typed, not sent) and the next logical read re-selects (tested).
+  Generalizes Coinbase's runtime drop; other families adopt it only
+  explicitly, listed per PR.
 
 ### C2. Account subject (decision required before implementation)
 
@@ -154,33 +194,58 @@ equals the primary's, where the venue can report it (Coinbase does this today);
 otherwise current behaviour. This changes behaviour for misconfigured read keys
 and needs a claude-ddi2il/owner decision. Not part of Phase 1.
 
-### C3. Nonce authority (`engine` wrapper over `crypto::nonce`)
+### C3. Nonce authority (single store, moved into the engine)
+
+`crypto` depends on `safe-cex-engine` (`crypto/Cargo.toml:8`), so the engine
+cannot wrap `crypto::nonce`. The one process-global `NONCES` store moves into
+the engine in the same PR, and `crypto::nonce::{next, ethereum_agent}` become
+thin callers of it. Map keys stay byte-identical (`sha256(lowercase address)`
+for `hyperliquid-agent`), so a family still calling the legacy function and an
+adopted family share one sequence. A test reserves alternately through both
+paths for one agent and asserts strict increase.
 
 ```rust
-pub enum NonceKey { StableId(String), PublicIdentifier([u8; 32]) } // never a secret digest
+pub struct NonceKey(Kind, [u8; 32]); // built only via the constructors below
+impl NonceKey {
+    pub fn stable_id(id: &str) -> Self;              // trusted Identity.stable_id, domain-tagged hash
+    pub fn ethereum_address(address: &str) -> Self;  // public material only
+}
 pub enum NonceFloor { RawMs { scale: u64 }, ProtocolMs { scale: u64 }, None }
 impl Cx { pub fn reserve_nonce(&mut self, domain: &'static str, key: &NonceKey,
                                floor: NonceFloor, limit: u64) -> Result<u64, NonceError> }
-pub struct VenueCounter; // seed(validated), take() -> reserve before signing, invalidate()
+pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalidate()
 ```
 
-- Same process-global monotonic store as today; domains stay distinct (HL/TxFlow
-  share `hyperliquid-agent` deliberately; Kraken and Aster keep their own).
-  Each family keeps its current floor clock (no clock-source change here;
-  clock policy is codex-5c57jl's lane).
-- `StableId` comes from trusted `Identity.stable_id`; remote-signed families
-  that need a monotonic domain require it (typed unavailable when absent).
-  `PublicIdentifier` covers protocol public ids (HL agent address).
-  Kraken's secret-digest key moves to `StableId` with its signer migration
-  (codex-5c57jl queue); this core supplies the domain, aliasing equal
-  primary/read credentials by stable id.
-- Remote/SignStep: `DispatchContext` gains the reservation at prepare time, so
-  every (re)preparation reserves a fresh value and no signer picks one. API is
-  reviewed with codex-5c57jl and codex-uufub4 before touching `SignStep` or
-  provider schemas; hosted external wire and remote precedence unchanged.
-- `VenueCounter` replaces Lighter's per-engine `next_nonce`: reserve before
-  signing, never re-reserve or replay an uncertain mutation, reseed only from a
-  validated `nextNonce`, keyed by (chain, account index, API key index).
+- No constructor accepts a raw digest, so a secret digest cannot enter. Stable
+  ids hash with a tag distinct from public identifiers.
+- Domains stay distinct: HL/TxFlow share `hyperliquid-agent` deliberately;
+  Kraken and Aster keep their own. Each family keeps its current floor clock;
+  clock policy is codex-5c57jl's lane.
+- Remote-signed families that need a monotonic domain require
+  `Identity.stable_id` (typed unavailable when absent). The hosted signing
+  facade passes `stable_id: None` today, so those families cannot be hosted
+  until trusted setup supplies one; the facade's caller-supplied `stamp_ms`
+  stays unchanged.
+- Kraken's secret-digest key moves to `stable_id` with its signer migration
+  (codex-5c57jl, #1718). Today slots with an equal API key share one sequence
+  even when their secrets differ (`kraken/account.rs:403-415`), so trusted
+  setup rejects an equal API key carrying different stable ids. The
+  equal-key/different-secret test stays.
+- Remote/SignStep: `DispatchContext` gains reservation at prepare time. A
+  fresh value is reserved only for an attempt proven not sent. A possibly-sent
+  attempt never re-reserves: the HL nonce is its replay-dedupe key. API is
+  reviewed with codex-5c57jl and codex-uufub4, after socket #1771 (which
+  touches `signing_dispatch.rs`), before touching `SignStep` or provider
+  schemas. Hosted external wire and remote precedence stay unchanged.
+- `VenueCounter` replaces Lighter's `next_nonce` and **stays per engine**; a
+  process-shared counter would change allocation, against the owner's
+  "document only" decision. Rules:
+  - reserve before signing;
+  - never re-reserve or replay an uncertain mutation;
+  - reseed only from a validated `nextNonce` whose epoch matches the counter
+    (drop seeds that predate a reservation or invalidation);
+  - keep the 21104 one-shot resync and re-sign after a definitive refusal
+    (`trading.rs:762-768`).
 - Random/derived/timestamp families keep their protocol data; they are listed
   so a future duplicate-timestamp defect (e.g. cryptocom nonce = request id)
   has one owner.
@@ -188,37 +253,72 @@ pub struct VenueCounter; // seed(validated), take() -> reserve before signing, i
 ### C4. Enforcement
 
 `scripts/check-credential-selection.py` + legacy-site JSON (same shape as
-`check-request-context.py`): bans new venue-side `ReadCredentials` method
-branches, `tag_account_read` calls, `crypto::nonce` calls and venue nonce
-statics outside the listed legacy sites; each adoption PR prunes its own rows.
+`check-request-context.py`) bans, outside listed legacy sites:
+- venue-side `ReadCredentials`/method credential branches and `tag_account_read`
+  calls;
+- `crypto::nonce` calls and venue nonce statics;
+- host egress inference from method or read headers (native `routing.rs`, TS
+  `transport/engine.ts` venue list).
+
+Each adoption PR prunes its own rows.
+
+### C5. Out of scope here, owned elsewhere
+
+- WS/session auth credential use: always primary. `SessionAuth` adoption
+  follows socket core #1771 (owns socket auth).
+- Server-held key lifetime and teardown (audit §D host lifetime): see
+  `codex-server-order-path-audit.md`; this core holds no key material.
 
 ## Phases and PRs
 
-Venue order avoids files under open PRs at the pin (#1771 bitunix/okx, #1773
-okx, #1779 bingx, #1747 bingx/weex, #1785-1788 aster/grvt/txflow/woo/cryptocom/
-backpack/paradex, #1793 mexc, #1795 phemex, #1797/#1798 hyperliquid/kraken,
-#1799 aster/bybit/coinbase, #1800 polymarket). Re-check before each PR.
+Open PRs at the pin, by area:
+
+| Area | PRs |
+| --- | --- |
+| `engine/src` | #1771 (`engine.rs`, `signing_dispatch.rs`, socket auth), #1747 and #1798 (`engine/src/lib.rs`) |
+| Venues | #1771 bitunix/okx; #1773 okx; #1779 bingx; #1747 bingx/weex; #1785-#1788 aster/grvt/txflow/woo/cryptocom/backpack/paradex; #1793 mexc; #1795 phemex; #1796 woo; #1797 breakoutprop/hyperliquid/kraken; #1798 bitget/kraken + `engine/src/lib.rs`; #1799 aster/bybit/coinbase; #1800 polymarket |
+| Lanes | #1802 BloFin request context (codex-9czdjh; KuCoin, Bitrue, Bitunix queued next); #1718 HMAC signer queue (codex-5c57jl; per-family slots and Kraken aliasing, covers BloFin/KuCoin) |
+
+Re-check before each PR.
 
 1. **This plan** (docs only) + independent review, reported to claude-ddi2il.
-2. **C1 core + two adopters:** Binance (managed KeyRef slot, client-id
-   `PrimaryRead`) and BloFin (raw GET rule, passphrase fallback), with KuCoin
-   as the alternate. Direct core tests: role matrix, POST read, GET mutation,
-   missing primary, retired secondary, stale-generation evidence, route
-   preservation. Before the change, attempt RED for production-impact
-   candidates: secondary-signed reads after retirement, evidence from a
-   rotated/stale selection, POST read signed by primary. Only proven failures are
-   called regressions; the rest are conformance tests. Adds C4 checker.
-3. **C3 core + two adopters:** Hyperliquid (`PublicIdentifier`, shared domain
-   with TxFlow unchanged) and Lighter (`VenueCounter`), after #1797 merges.
-   RED candidates: Lighter counter lost on engine recreation while venue state
-   persists; reservation after uncertain submit. Aster's allocator follows when
-   its open PRs land.
+2. **C1 core + two adopters + host routing:**
+   - Adopters: Binance (managed KeyRef slot; client-id `PrimaryRead`) and
+     Coinbase (inverted default, retirement, `read_supplied` route) once #1799
+     merges. Coinbase is a genuinely different family.
+   - Alternates: BloFin/KuCoin, only by agreement with codex-9czdjh and
+     codex-5c57jl.
+   - Includes intent-based host routing (native + TS) and the C4 checker.
+   - Core conformance fixtures model the hard cases even without adopting those
+     venues: Coinbase retirement, Bitget's dynamic degraded balance, KuCoin's
+     unsigned fallback, primary-required gates.
+   - Before the change, attempt RED for production-impact candidates:
+     - POST read signed by secondary but sent via primary egress (and the
+       reverse);
+     - secondary-signed reads after retirement;
+     - evidence from a stale secondary epoch.
+     Only proven failures are called regressions; the rest are conformance
+     tests.
+   - Sequenced after #1771 if it still touches `engine.rs` `Cx` regions.
+3. **C3 core + two adopters:** Hyperliquid and TxFlow together
+   (`ethereum_address`, shared domain), plus Lighter (`VenueCounter`), after
+   #1771.
+   - RED candidates: a Lighter seed accepted after a newer reservation;
+     reservation after an uncertain submit.
+   - Aster's allocator follows when its open PRs land.
 4. **Evidence fan-out:** BingX, MEXC, WEEX, Bitunix move tagging into selection
    once #1747/#1771/#1779/#1793 merge.
-5. **Selection fan-out:** remaining secondary-read families in PRs of 2-3
-   grouped by pattern; each prunes its checker rows.
+5. **Selection fan-out:** the remaining secondary-read families, in PRs of 2-3
+   grouped by pattern. Each PR lists the per-family role table and any behaviour
+   change, including:
+   - BloFin's verify GET (preserve as secondary unless decided);
+   - missing-primary handling;
+   - registry AsterDEX/Binance construction.
+
+   Each PR prunes its checker rows.
 6. **C2 subject**, only after a decision.
 
-Each PR: CARGO_BUILD_JOBS=2, `cargo test -p` touched crates plus clippy/fmt;
-independent review answers "per-venue fix of a cross-cutting concern?"; no merge
-until claude-ddi2il grants a window.
+Each PR:
+- CARGO_BUILD_JOBS=2; `cargo test -p` for touched crates, plus clippy/fmt;
+- independent review answers "per-venue fix of a cross-cutting concern?";
+- no merge until claude-ddi2il grants a window.
