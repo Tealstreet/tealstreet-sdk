@@ -922,6 +922,34 @@ lifecycle parity. The tested head has 43 successful checks and one browser skip;
 source-equivalent current integration, final guard and merge GO remain separate.
 The fixed gates and comparison policies are unchanged.
 
+## SDK master venue parity controls
+
+Separate original-RED commit637fe5832d6 pins seven assertion failures: three
+Hyperliquid fee-subject/startup controls, Lighter timestamp candidate and48-bit
+exhaustion, Robinhood approval preflight and signed attribution. The zero-candidate
+compatibility control remains positive1,2. Native private master/vault fee rates,
+empty-vault fallback, missing/empty applicationId agent discovery, public/default
+fee retention, both Robinhood networks and explicit builder overrides are covered.
+Existing Lighter split/bracket/batch, receipt and failed-send controls remain.
+Shared ProbeVenue tests seed boundary state privately without a production test
+hook. Master TS sources, prepared tape/harness and all incoming inventories remain
+unchanged. Native local checks and independent reviews precede the #1869 handoff;
+its owner supplies the full CI replay evidence.
+
+## Robinhood frozen CI fixture receipt
+
+CI39953255157/1845 supplies the frozen LightRobinhood engine and three reports.
+The original boundary control reproduces one NotSent builder-approval failure
+with21 other cases passing. The corrected fixture preserves every existing
+native assertion and adds exact signed attribution. Independent and executable
+provenance checks reproduce both old and new37-record tape hashes: only three
+approved account indices and seven order-attribute objects differ per tape.
+Existing assessGateReport finds eleven unknown diagnostics per private report
+before the two-hash refresh, and zero errors/eleven known afterward; the public
+report remains186 known. Every diagnostic path/rationale and all other manifest
+entries are byte-preserved; the original reports remain strict FAIL. No replay,
+local release build, new declaration, threshold or comparison-policy change.
+
 ## KuCoin local Read original-source controls
 
 Tests committed before production on frozen661427d10b3 produce ten assertion

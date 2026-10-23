@@ -2368,6 +2368,30 @@ Interleaved unchanged-source artifacts show a local median23.105→18.957ms;
 exact-head CI's fixed public/private, CPU, memory and size gates remain acceptance
 requirements. [Scope, raw evidence and limitations](RUST_WOO_PUBLIC_CPU.md).
 
+## SDK master Hyperliquid/Lighter parity
+
+~~Public or unresolved Hyperliquid startup asks userFees with an absent subject,
+and an empty vault masks a configured trading account.~~ The existing identity
+selector now follows master's nonempty vault/applicationId precedence; public or
+unresolved fees retain metadata defaults without HTTP. Actual agent discovery
+still establishes identity before private reads.
+
+~~Robinhood placements omit the newly configured integrator47296, and the
+instance client-order-index allocator wraps after its positive48-bit maximum.~~
+Robinhood uses its configured native builder and existing approval preflights.
+Each existing per-leg mint reservation considers the current candidate and
+retains monotonic state; exhaustion refuses without wrap. No transaction nonce,
+managed ownership, retry or outcome policy is introduced. No legacy inventory
+site changes; all incoming maps and the #1869 TS reference/harness remain exact.
+
+## Native mode-preflight redo liveness
+
+Repeated external mode changes can make an adapter redo its prerequisite mode
+reads indefinitely. Each request remains bounded by its declared read policy,
+but the final write-plan root starts only when the native write steps are fixed.
+No arbitrary whole-preflight or 120-second product cap is added. A finite redo
+limit would change caller-visible liveness policy and needs a separate decision.
+
 ## KuCoin local Read ownership
 
 Eight local terminal expressions use genuine initial Read command admission.
