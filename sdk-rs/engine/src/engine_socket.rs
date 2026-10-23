@@ -796,6 +796,10 @@ impl<V: Venue> Engine<V> {
 
 impl<V: Venue> Engine<V> {
     fn continuation_ready(&self, work: &Continuation<V::Pending>, now: f64) -> bool {
+        #[cfg(feature = "http-plans")]
+        if self.io.http_plan_expiring.is_some() {
+            return false;
+        }
         !self
             .io
             .socket_proposals
@@ -923,6 +927,14 @@ impl<V: Venue> Engine<V> {
                 .remove(index)
                 .expect("located cancelled continuation");
             self.discard_socket_continuation(work);
+            return true;
+        }
+        #[cfg(feature = "http-plans")]
+        if self.io.http_plan_expiring.is_some() {
+            self.io.timers.remove(&timer);
+            let work = &mut self.io.socket_continuations[index];
+            work.armed = false;
+            work.timer = None;
             return true;
         }
         if now < self.io.socket_continuations[index].armed_at {

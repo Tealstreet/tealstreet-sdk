@@ -1150,3 +1150,12 @@ initial implementation. A fourth actual-host control covers inline early
 rearming without losing the subsequent handle. The integrated predecessor run
 passes 1,269 focused tests, strict Clippy, formatting and bans; its initial stale
 inventory failure is resolved by genuine actual-landing integration.
+
+The refreshed complete host-unit command passes 195 tests, including all four
+handoff controls. Uufub4 independently executes the archived handoff file 4/4;
+ih35js's source/control clearance carries no independent build claim.
+
+The nineteenth handoff control covers #1932 composition: both initial arming and
+a previously armed wake remain blocked during the exact expiry barrier, retain
+the pending credit and barrier, and resume once afterward with a fresh timer.
+The unguarded integrated source is assertion RED at aa6613f7677.

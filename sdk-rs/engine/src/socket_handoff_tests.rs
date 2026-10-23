@@ -101,6 +101,8 @@ impl Venue for Probe {
         assert!(cx.io.order_response_token.is_none());
         #[cfg(feature = "http-plans")]
         assert!(cx.io.http_plan_ready.is_none());
+        #[cfg(feature = "http-plans")]
+        assert!(cx.io.http_plan_expiring.is_none());
         if self.retire {
             cx.stop_socket_feed(epoch.feed());
         }
@@ -749,10 +751,17 @@ fn expiry_cleanup_barrier_is_never_borrowed_by_a_socket_continuation() {
         let blocked: Vec<_> = e.drain_actions().collect();
         assert!(e.venue.calls.is_empty());
         assert!(
-            !blocked.iter().any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1.)),
+            !blocked
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1.)),
             "expiry cleanup cannot arm a native continuation"
         );
-        assert!(e.io.http_plan_expiring.as_ref().unwrap().same_plan(&barrier));
+        assert!(
+            e.io.http_plan_expiring
+                .as_ref()
+                .unwrap()
+                .same_plan(&barrier)
+        );
         assert_eq!(e.io.socket_continuations.len(), 1);
         assert!(e.io.socket_continuation_bytes > 0);
         e.io.http_plan_expiring = None;

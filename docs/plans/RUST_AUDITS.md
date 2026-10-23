@@ -2536,3 +2536,17 @@ armed custody without a returned rearm can strand work. The narrow correction
 re-emits the existing TimerId at its immutable armed_at, with no early callback
 or new authority. Original assertion RED and one-use host/engine controls bind
 the correction; final runtime clearance is tracked separately from API review.
+
+Final bounded runtime/drain clearance is recorded at 08fca8e6ec4 from uufub4,
+including independent archived host 4/4 execution and inspection of the early
+rearm correction. Ih35js independently clears that correction and its RED/control
+coverage at the same source pin without a build-execution claim. Actual #1932
+expiry cleanup is genuinely merged without conflicts at 856daa0a1c2; its incoming
+production bodies are retained verbatim.
+
+The #1932 owner confirms `http_plan_expiring` is an expiry cleanup/seal barrier,
+not a callback loan. Socket continuation readiness gates on its absence. A
+synthetic matching wake during cleanup consumes only its timer, unarms retained
+work and leaves the barrier intact; a fresh handoff arm resumes after cleanup.
+No expiry flush, lifecycle, seal or poison invariant is rewritten. Two cases in
+the original-RED composition control cover both initial arming and prior wakeup.
