@@ -122,37 +122,40 @@ impl<P> crate::Cx<'_, P> {
     }
 }
 
-/// A venue-issued nonce sequence (Lighter), one per engine. It is seeded only
-/// from a validated venue reply requested in the current epoch, reserved before
-/// signing, and invalidated on any sign error, refusal or uncertain send.
+/// A venue-issued nonce sequence (Lighter), one per engine, never above `LIMIT`.
+/// It is seeded only from a validated venue reply requested under the current
+/// ticket, reserved before signing, and invalidated on any refusal or doubt.
 #[derive(Debug, Default)]
-pub struct VenueCounter {
+pub struct VenueCounter<const LIMIT: u64> {
     next: Option<u64>,
     epoch: u64,
 }
 
-impl VenueCounter {
+/// Captured with a seed request; a reply after an invalidation cannot reseed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeedTicket(u64);
+
+impl<const LIMIT: u64> VenueCounter<LIMIT> {
     pub fn seeded(&self) -> bool {
         self.next.is_some()
     }
 
-    /// Capture with the seed request; a reply from an older epoch is dropped.
-    pub fn epoch(&self) -> u64 {
-        self.epoch
+    pub fn ticket(&self) -> SeedTicket {
+        SeedTicket(self.epoch)
     }
 
-    /// Install a venue-validated next nonce at or below `limit`.
-    pub fn seed(&mut self, epoch: u64, value: u64, limit: u64) -> bool {
-        let fresh = epoch == self.epoch && self.next.is_none() && value <= limit;
+    /// Install a venue-validated next nonce; false if stale, seeded or above LIMIT.
+    pub fn seed(&mut self, ticket: SeedTicket, value: u64) -> bool {
+        let fresh = ticket.0 == self.epoch && self.next.is_none() && value <= LIMIT;
         if fresh {
             self.next = Some(value);
         }
         fresh
     }
 
-    /// Reserve the next nonce; exhaustion leaves the counter unseeded.
+    /// Reserve the next nonce; past LIMIT the counter is exhausted and unseeded.
     pub fn take(&mut self) -> Option<u64> {
-        let nonce = self.next?;
+        let nonce = self.next.filter(|nonce| *nonce <= LIMIT)?;
         self.next = nonce.checked_add(1);
         Some(nonce)
     }
@@ -226,22 +229,28 @@ mod tests {
     }
 
     #[test]
-    fn venue_counters_reserve_in_order_and_drop_stale_or_invalid_seeds() {
-        let mut counter = VenueCounter::default();
+    fn venue_counter_reserves_in_order_until_its_limit() {
+        let mut counter = VenueCounter::<8>::default();
         assert_eq!(counter.take(), None);
-        let epoch = counter.epoch();
-        counter.invalidate();
-        // A reply requested before an invalidation never seeds the new epoch.
-        assert!(!counter.seed(epoch, 7, 100));
-        assert!(!counter.seed(counter.epoch(), 101, 100));
-        assert!(counter.seed(counter.epoch(), 7, 100));
-        assert!(!counter.seed(counter.epoch(), 9, 100), "already seeded");
+        assert!(!counter.seed(counter.ticket(), 9), "above the limit");
+        assert!(counter.seed(counter.ticket(), 7));
+        assert!(!counter.seed(counter.ticket(), 7), "already seeded");
         assert_eq!((counter.take(), counter.take()), (Some(7), Some(8)));
+        assert_eq!(counter.take(), None, "past the limit");
+        let mut last = VenueCounter::<{ u64::MAX }>::default();
+        assert!(last.seed(last.ticket(), u64::MAX));
+        assert_eq!((last.take(), last.seeded()), (Some(u64::MAX), false));
+    }
+
+    #[test]
+    fn venue_counter_drops_seeds_requested_before_an_invalidation() {
+        let mut counter = VenueCounter::<100>::default();
+        let stale = counter.ticket();
+        counter.invalidate();
+        assert!(!counter.seed(stale, 7));
+        assert!(counter.seed(counter.ticket(), 7));
         counter.invalidate();
         assert_eq!(counter.take(), None);
-        let mut last = VenueCounter::default();
-        assert!(last.seed(last.epoch(), u64::MAX, u64::MAX));
-        assert_eq!((last.take(), last.seeded()), (Some(u64::MAX), false));
     }
 
     #[test]

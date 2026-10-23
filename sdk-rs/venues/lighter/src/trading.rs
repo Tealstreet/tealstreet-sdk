@@ -20,9 +20,10 @@ pub struct Trading {
     active: Option<Job>,
     inflight: bool,
     waiting_limits: bool,
-    next_nonce: safe_cex_engine::nonce::VenueCounter,
-    /// Counter epoch captured with the in-flight nextNonce request.
-    nonce_epoch: u64,
+    /// Bounded by the signer's safe-integer nonce range.
+    next_nonce: safe_cex_engine::nonce::VenueCounter<{ (1 << 53) - 1 }>,
+    /// Captured with the in-flight nextNonce request.
+    nonce_ticket: safe_cex_engine::nonce::SeedTicket,
     next_id: u64,
     timer: Option<TimerId>,
     position_wait: Option<PositionWait>,
@@ -481,7 +482,7 @@ impl Lighter {
             let account = self.account.account_index.unwrap();
             let key = self.account.api_key_index.unwrap();
             self.trading.inflight = true;
-            self.trading.nonce_epoch = self.trading.next_nonce.epoch();
+            self.trading.nonce_ticket = self.trading.next_nonce.ticket();
             cx.request(
                 Method::Get,
                 format!(
@@ -720,21 +721,18 @@ impl Lighter {
                 self.trade_kick(cx);
             }
             Request::Nonce => {
-                let epoch = self.trading.nonce_epoch;
+                let ticket = self.trading.nonce_ticket;
                 let reply = serde_json::from_str::<Reply>(response.body);
                 match reply {
                     Ok(reply)
                         if response.status < 300
                             && reply.code.as_ref().and_then(Number::integer) == Some(200) =>
                     {
-                        let seeded =
-                            reply
-                                .nonce
-                                .as_ref()
-                                .and_then(Number::integer)
-                                .is_some_and(|n| {
-                                    self.trading.next_nonce.seed(epoch, n, i64::MAX as u64 - 1)
-                                });
+                        let seeded = reply
+                            .nonce
+                            .as_ref()
+                            .and_then(Number::integer)
+                            .is_some_and(|n| self.trading.next_nonce.seed(ticket, n));
                         if !seeded {
                             self.trade_finish(
                                 cx,

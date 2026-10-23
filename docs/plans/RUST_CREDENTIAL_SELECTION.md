@@ -274,7 +274,10 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 - Hyperliquid and TxFlow reserve through one `reserve_agent_nonce` helper.
   `crypto::nonce::ethereum_agent` is removed.
 - Lighter reserves from an engine `VenueCounter`:
-  - one per engine, as before;
+  - one per engine, as before. Two engines on one API key still rely on
+    Lighter's 21104 resync: sharing the counter would change allocation, and
+    the owner ruled nonce limits document-only;
+  - it is bounded by the signer's safe-integer range;
   - it is seeded only from a validated `nextNonce` reply whose request epoch is
     still current;
   - `take` reserves before signing;
