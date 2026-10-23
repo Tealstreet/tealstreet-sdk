@@ -1490,8 +1490,7 @@ struct Io<P> {
     execution_timer: Option<(TimerId, f64)>,
     /// Tracked caller-wait Read roots: (deadline, command, generation).
     /// Preallocated to owner capacity so tracking never allocates.
-    read_roots: Vec<(f64, CommandId, u64)>,
-    read_root_timer: Option<(TimerId, f64)>,
+    read_roots: Vec<(f64, CommandId, u64, TimerId)>,
     read_roots_expiring: bool,
     /// Action capacity right after the sweep's reservation, for tests.
     #[cfg(test)]
@@ -1586,7 +1585,6 @@ impl<P> Default for Io<P> {
             placement_acks: Default::default(),
             execution_timer: None,
             read_roots: Vec::with_capacity(256),
-            read_root_timer: None,
             read_roots_expiring: false,
             #[cfg(test)]
             read_root_sweep_capacity: None,
@@ -3320,7 +3318,9 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
-        // A due root is sealed before this receipt can find it still live.
+        // A poisoned engine traps before any expiry cleanup; then a due root
+        // is sealed before this receipt can find it still live.
+        self.assert_live();
         self.expire_read_roots(now);
         // An external command receipt gets the SDK default caller wait.
         if let Event::Command(command) = &event
@@ -3349,6 +3349,7 @@ impl<V: Venue> Engine<V> {
         }
         let deadline = command_entry::wait_deadline(now, wait_ms)
             .ok_or(crate::request_context::Error::Invalid)?;
+        self.assert_live();
         self.expire_read_roots(now);
         if let Some(id) = command.completion_id() {
             self.io.receive_command_wait(id, Some(deadline), now);
@@ -3363,7 +3364,7 @@ impl<V: Venue> Engine<V> {
         self.io.dispatch_now = now;
         self.expire_read_roots(now);
         if let Event::TimerFired { timer } = &event
-            && self.io.read_root_timer(*timer)
+            && self.io.read_root_timer(*timer, now)
         {
             return;
         }

@@ -355,7 +355,7 @@ impl ContextRegistry {
 
     /// `until` is an exact absolute deadline that replaces the policy timeout
     /// (the caller's raw receipt), never rounded through whole milliseconds.
-    fn issue_until(
+    pub(super) fn issue_until(
         &mut self,
         identity: u64,
         scope: Scope,
@@ -1155,6 +1155,11 @@ impl ContextRegistry {
         Ok(())
     }
 
+    /// Whether `root`'s owner is a tracked caller-wait Read root.
+    pub(super) fn tracked_owner(&self, root: &Context) -> bool {
+        matches!(root.owner(), Owner::Command { id, .. } if self.tracked(id))
+    }
+
     fn tracked(&self, command: CommandId) -> bool {
         self.commands
             .get(&command)
@@ -1361,6 +1366,12 @@ impl<P> Cx<'_, P> {
     ) -> Result<Context, Error> {
         if !self.io.entry_context_allowed(scope) {
             return Err(Error::Revoked);
+        }
+        // A tracked caller-wait root stays plain Read: refused before any spend.
+        if policy.operation == Operation::Mutation
+            && matches!(scope, Scope::Command(id) if self.io.request_contexts.tracked(id))
+        {
+            return Err(Error::Invalid);
         }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = self

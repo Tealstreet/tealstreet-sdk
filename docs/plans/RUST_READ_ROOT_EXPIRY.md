@@ -105,7 +105,8 @@ passes):
    validation; a raw deadline that is finite and later than now; free
    registry owner capacity; and the plain-Read compatibility of any existing
    owner.
-2. **Fallible storage reservations:**
+2. **Fallible storage reservations** (after the effect-free checks have also
+   confirmed two available identities and valid pacing):
    - an index slot, with `read_roots` preallocated to owner capacity, 256;
    - the timer action slot (`actions.try_reserve(2)`, for a clear plus an
      arm);
@@ -121,13 +122,15 @@ passes):
 ## Engine mechanism
 
 1. **Index.**
-   - `Io.read_roots: Vec<(f64, CommandId, generation)>` holds the entries,
-     bounded by owner capacity.
-   - One engine timer `(TimerId, at)` covers the earliest deadline, with an
-     exact generation per arm. It is re-armed like `execution_timer`
-     (`execution_cx.rs:20-38`): the old id is cleared and a new id armed when
-     the earliest deadline changes. It is never in `io.timers`, so it never
-     reaches a venue's `on_timer`.
+   - `Io.read_roots: Vec<(f64, CommandId, generation, TimerId)>` is bounded by
+     owner capacity and preallocated.
+   - Each tracked root owns one engine timer. Its id is reserved together with
+     the root identity at admission, armed at the root's exact deadline, and
+     cleared at the root's terminal.
+   - An early fire re-arms the same id for the same deadline. Expiry and
+     re-arm never need a fresh identity.
+   - The timers are never in `io.timers`, so they never reach a venue's
+     `on_timer`.
    - The sweep's empty guard is O(1).
    - Every terminal of a tracked owner removes its entry by exact
      (id, generation) at the `finish_sealed_command` retirement point. That
@@ -135,8 +138,8 @@ passes):
 2. **Sweep position.** `expire_read_roots(now)` runs at every timed public
    entry, before anything that can stamp, call a codec or lend authority:
    - **`handle` and `handle_command`:** after `handle_command`'s argument and
-     clock validation (invalid input still has no effect) and BEFORE the
-     external receipt stamp. A same-id command arriving at or after an old
+     clock validation (invalid input still has no effect), then the engine's
+     fail-stop `assert_live`, and BEFORE the external receipt stamp. A same-id command arriving at or after an old
      root's deadline therefore finds the old owner already sealed. It gets a
      new sequence and generation instead of being stamped as a duplicate.
    - **`handle_received`:** first, before `process_socket_work` (3294), the

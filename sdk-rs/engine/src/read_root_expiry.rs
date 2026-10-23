@@ -19,32 +19,29 @@ impl<V: Venue> Drop for SweepScope<'_, V> {
 }
 
 impl<P> Io<P> {
-    /// One engine timer for the earliest tracked deadline; never a venue timer.
-    fn rearm_read_root_timer(&mut self) {
-        let next = self.read_roots.iter().map(|(at, ..)| *at).reduce(f64::min);
-        if self.read_root_timer.map(|(_, at)| at) == next {
-            return;
-        }
-        if let Some((timer, _)) = self.read_root_timer.take() {
+    /// Every terminal of a tracked owner leaves the index and clears its own
+    /// timer; nothing here needs a fresh identity.
+    pub(super) fn untrack_read_root(&mut self, command: CommandId) {
+        if let Some(index) = self
+            .read_roots
+            .iter()
+            .position(|(_, id, ..)| *id == command)
+        {
+            let (.., timer) = self.read_roots.swap_remove(index);
             self.actions.push(Action::ClearTimer { timer });
         }
-        if let Some(at_ms) = next {
-            let timer = TimerId(self.next());
+    }
+
+    /// A tracked root's own timer; one that fires early re-arms the same
+    /// identity for the exact deadline (true: consumed here).
+    pub(super) fn read_root_timer(&mut self, timer: TimerId, now: f64) -> bool {
+        let Some(&(at_ms, ..)) = self.read_roots.iter().find(|(.., own)| *own == timer) else {
+            return false;
+        };
+        if now < at_ms {
             self.actions.push(Action::SetTimer { timer, at_ms });
-            self.read_root_timer = Some((timer, at_ms));
         }
-    }
-
-    /// Every terminal of a tracked owner leaves the index.
-    pub(super) fn untrack_read_root(&mut self, command: CommandId) {
-        if let Some(index) = self.read_roots.iter().position(|(_, id, _)| *id == command) {
-            self.read_roots.swap_remove(index);
-            self.rearm_read_root_timer();
-        }
-    }
-
-    pub(super) fn read_root_timer(&self, timer: TimerId) -> bool {
-        self.read_root_timer.is_some_and(|(own, _)| own == timer)
+        true
     }
 }
 
@@ -67,12 +64,14 @@ impl<V: Venue> Engine<V> {
         let reserved = due.try_reserve_exact(io.read_roots.len()).is_ok()
             && cleanup.try_reserve_exact(io.read_roots.len()).is_ok();
         assert!(reserved, "read root expiry storage");
-        for &(at, id, generation) in &io.read_roots {
+        for &(at, id, generation, _) in &io.read_roots {
             if now >= at {
                 due.push((id, generation));
             }
         }
-        // Prepare: every owner's requests and continuation storage, before any mark.
+        // Prepare: every owner's requests and continuation storage, and the
+        // whole sweep's actions in aggregate, before any mark.
+        let mut actions = 0_usize;
         for &(id, generation) in &due {
             let owner = Owner::Command { id, generation };
             let owned =
@@ -85,9 +84,11 @@ impl<V: Venue> Engine<V> {
             let mut requests = Vec::new();
             let mut pending = Vec::new();
             let reserved = requests.try_reserve_exact(count).is_ok()
-                && pending.try_reserve_exact(count).is_ok()
-                && io.actions.try_reserve(count * 2 + 3).is_ok();
+                && pending.try_reserve_exact(count).is_ok();
             assert!(reserved, "read root expiry storage");
+            // Per request: timer clear and cancel. Per owner: its timer clear,
+            // terminal notice and any classified error notice.
+            actions = actions.saturating_add(count.saturating_mul(2).saturating_add(3));
             requests.extend(
                 io.managed_http
                     .iter()
@@ -96,6 +97,10 @@ impl<V: Venue> Engine<V> {
             );
             cleanup.push((owner, requests, pending));
         }
+        assert!(
+            io.actions.try_reserve(actions).is_ok(),
+            "read root expiry storage"
+        );
         #[cfg(test)]
         {
             io.read_root_sweep_capacity = Some(io.actions.capacity());
@@ -152,17 +157,9 @@ impl<P> Cx<'_, P> {
             return Err(CommandEntryError::Revoked);
         }
         let command = self.io.command_entry_id().expect("fresh entry");
-        // Every check and reservation precedes the only spend, the root's ID.
-        let checked = credential
-            .as_ref()
-            .map_or(Ok(()), Credential::validate)
-            .and_then(|()| self.io.request_contexts.reserve_command_root(command))
-            .and_then(|()| {
-                if self.io.read_roots.len() >= self.io.read_roots.capacity() {
-                    return Err(Error::Capacity);
-                }
-                self.io.actions.try_reserve(2).map_err(|_| Error::Capacity)
-            });
+        // Every check and reservation precedes the only spend: the root's and
+        // its timer's identities, taken together.
+        let checked = self.root_admission_checks(command, credential.as_ref(), pacing);
         if let Err(reason) = checked {
             return self.with_command_entry(Operation::Read, |_, _| Err(reason));
         }
@@ -173,18 +170,54 @@ impl<P> Cx<'_, P> {
             pacing,
             retry: RetryPolicy::Never,
         };
+        let now = self.now;
         self.with_command_entry(Operation::Read, |cx, command| {
-            let root =
-                cx.make_http_context(Scope::Command(command), policy, None, Some(deadline))?;
+            let ids = cx.io.reserve_ids(2).ok_or(Error::Capacity)?;
+            let root = cx.io.request_contexts.issue_until(
+                ids.start,
+                Scope::Command(command),
+                policy,
+                now,
+                None,
+                Some(deadline),
+            )?;
             cx.io.request_contexts.retain_command_entry(&root);
             cx.io.request_contexts.track_read_root(&root);
             let Owner::Command { generation, .. } = root.owner() else {
                 unreachable!("command scope")
             };
-            cx.io.read_roots.push((deadline, command, generation));
-            cx.io.rearm_read_root_timer();
+            let timer = TimerId(ids.start + 1);
+            cx.io
+                .read_roots
+                .push((deadline, command, generation, timer));
+            cx.io.actions.push(Action::SetTimer {
+                timer,
+                at_ms: deadline,
+            });
             Ok(root)
         })
+    }
+
+    /// Effect-free checks and fallible reservations before any identity spend.
+    fn root_admission_checks(
+        &mut self,
+        command: CommandId,
+        credential: Option<&Credential>,
+        pacing: Option<Pacing>,
+    ) -> Result<(), Error> {
+        if let Some(credential) = credential {
+            credential.validate()?;
+        }
+        if pacing.is_some_and(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.) {
+            return Err(Error::Invalid);
+        }
+        if !self.io.next_id.available(2)
+            || self.io.read_roots.len() >= self.io.read_roots.capacity()
+        {
+            return Err(Error::Capacity);
+        }
+        self.io.request_contexts.reserve_command_root(command)?;
+        self.io.actions.try_reserve(1).map_err(|_| Error::Capacity)
     }
 
     /// A genuine Fresh entry whose own receipt is missing (exhausted sequence,

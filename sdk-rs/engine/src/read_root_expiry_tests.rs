@@ -659,7 +659,7 @@ fn a_full_registry_refuses_admission_atomically_and_recovers() {
     assert!(matches!(terminals.as_slice(), [Err(error)]
         if error.kind == Some(ErrorKind::Internal) && error.outcome.is_none()));
     assert!(!e.venue.roots.contains_key(&300));
-    assert!(!e.io.read_roots.iter().any(|(_, id, _)| *id == 300));
+    assert!(!e.io.read_roots.iter().any(|(_, id, ..)| *id == 300));
     assert_eq!(e.io.read_roots.len(), 256);
     tick(&mut e, 1_000.);
     receive(&mut e, 1_000., 301, 300_000);
