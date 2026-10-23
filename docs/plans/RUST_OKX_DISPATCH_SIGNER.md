@@ -160,3 +160,23 @@ aliases, 23 full-registry construction controls and 146 focused SDK tests pass;
 SDK typecheck and lint pass. The exact legacy ratchet is 516 actual / 516 allowed
 (517 before the native port), with every non-OKX declaration retained. Strict all-target registry/OKX/Binance Clippy passes. Actual landing
 integration, actual-WASM CI and replay proof remain readiness gates. The socket draft and allocator are separate workstreams.
+
+## Lane takeover status (claude-4yjlw0, 2026-10-23)
+
+Checkpoint `d8bbc31da9a` confirmed as the newest work: 10 commits ahead and 345
+behind landing `73d04380dd9`. PR #1773 head `1dc55f06624` is historical. Native
+and hosted adoption are implemented; CI, actual-WASM and replay evidence are
+stale. The branch edits `registry/src/hosted_signing.rs` and the registry
+`hosted_signing`/`dispatch_provider` tests, which overlap #1839.
+
+Next:
+1. Hold until #1839 is actual (agreed order). Then porcelain-merge one pinned
+   landing, preserve incoming entries, and default every Identity literal
+   this branch adds (`extra: Default::default()`).
+2. Reverify the #1814 error rows against current source (50001/50013/50026
+   Unknown with accepted IDs; missing 50100/50101/50103-50105). Close them
+   through shared Context and code tables only.
+3. Focused OKX/registry/Binance tests, Clippy/fmt and SDK setup checks. Push to
+   #1773 for per-alias actual-WASM positives and CI. Refresh the CALLERS text.
+4. The WS-seconds suffix-codec generalisation comes with the Bitget PR (second
+   consumer). Do not refreeze OKX for it.
