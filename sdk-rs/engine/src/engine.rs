@@ -1479,6 +1479,7 @@ struct Io<P> {
     private_feed_policy: crate::signing_policy::PrivateFeedPolicy,
     pending: HashMap<RequestId, PendingHttp<P>>,
     signatures: Vec<(RequestId, PendingSignature)>,
+    session_waits: request_context_registry::session::Waits<P>,
     signing: crate::signing_dispatch::Dispatch,
     protocol_clock: crate::protocol_clock::ProtocolClock,
     signer: Option<crate::signing::Provider>,
@@ -1566,6 +1567,7 @@ impl<P> Default for Io<P> {
             private_feed_policy: Default::default(),
             pending: HashMap::new(),
             signatures: Vec::new(),
+            session_waits: Default::default(),
             signing: Default::default(),
             protocol_clock: Default::default(),
             signer: None,
@@ -2608,6 +2610,22 @@ pub trait Venue {
         _cx: &mut Cx<'_, Self::Pending>,
         _symbols: Option<&[String]>,
     ) {
+    }
+
+    /// A session waiter reached its owner's original deadline before the venue
+    /// drained it. Nothing was sent for that owner.
+    fn on_session_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        error: VenueError,
+    ) {
+        self.on_http_preparation_failed(
+            cx,
+            pending,
+            crate::request_context::Error::TimedOut,
+            error,
+        );
     }
 
     /// Defer symbol cancellation until placement native identities are known.
@@ -4059,7 +4077,22 @@ impl<V: Venue> Engine<V> {
                     cx.store,
                     &mut cx.io.actions,
                 );
+                // Session writes skip the journaled collector, so expose the
+                // reply metadata the write classifier reads during this callback.
+                let session_write = cx.io.http_delivery.as_ref().is_some_and(|delivery| {
+                    delivery.context.operation() == crate::request_context::Operation::Mutation
+                        && matches!(
+                            delivery.context.owner(),
+                            crate::request_context::Owner::Session { .. }
+                        )
+                });
+                if session_write {
+                    cx.io.http_write_reply = Some((response.status, response.headers.to_owned()));
+                }
                 self.venue.on_response(&mut cx, pending.value, response);
+                if session_write {
+                    cx.io.http_write_reply = None;
+                }
             }
             Err(_) => {
                 let make_failure = || malformed_body("response body is not UTF-8");
