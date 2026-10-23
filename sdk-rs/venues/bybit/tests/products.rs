@@ -1272,3 +1272,103 @@ fn a_disabled_option_product_refuses_trading_as_invalid_input() {
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
     assert!(h.requests.iter().all(|r| !r.url.contains("/v5/position")));
 }
+
+// Slice 4b original REDs: option queries and seeds on managed reads.
+
+/// Q1: the option chain and account Greeks are managed command reads; Greeks
+/// are signed.
+#[test]
+fn option_queries_are_managed_command_reads() {
+    let mut h = ready(true);
+    h.command(Command::FetchOptionChain {
+        command: 91,
+        query: OptionChainQuery {
+            underlying: "BTC".into(),
+            expiry: None,
+            right: None,
+            strike_min: None,
+            strike_max: None,
+        },
+    });
+    let chain = h.take("/v5/market/tickers");
+    assert!(chain.url.contains("category=option"));
+    assert_eq!(chain.timeout_ms, Some(20_000), "the chain is managed");
+    h.command(Command::FetchAccountGreeks { command: 92 });
+    let greeks = h.take("/v5/asset/coin-greeks");
+    assert_eq!(greeks.timeout_ms, Some(20_000), "Greeks are managed");
+    assert!(Harness::header(&greeks, "X-BAPI-SIGN").is_some());
+}
+
+/// Q2: option expiries are answered from the catalogue only under the
+/// command's own admitted authority.
+#[test]
+fn option_expiries_need_command_authority() {
+    let mut h = ready(true);
+    support::park_owners(&mut h);
+    h.command(Command::FetchOptionExpiries {
+        command: 93,
+        underlying: "BTC".into(),
+    });
+    let error = failed(&h, 93);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 93).count(), 1);
+}
+
+/// Q3: option ticker seeds are managed Background discovery reads.
+#[test]
+fn option_seeds_are_managed_background_reads() {
+    let mut h = Harness::started(options(false));
+    for category in ["linear", "inverse"] {
+        respond(
+            &mut h,
+            "instruments-info",
+            category,
+            Some("status=PreLaunch"),
+            EMPTY,
+        );
+    }
+    respond(&mut h, "instruments-info", "option", None, OPTIONS);
+    respond(
+        &mut h,
+        "instruments-info",
+        "inverse",
+        None,
+        &inverse_instruments(),
+    );
+    respond(
+        &mut h,
+        "instruments-info",
+        "linear",
+        None,
+        support::INSTRUMENTS,
+    );
+    let seeds: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/market/tickers") && r.url.contains("category=option"))
+        .collect();
+    assert!(!seeds.is_empty(), "option seeds requested");
+    for seed in seeds {
+        assert_eq!(seed.timeout_ms, Some(20_000), "{} is managed", seed.url);
+    }
+}
+
+/// Q4: an option chain read that outlives its window fails as a timeout.
+#[test]
+fn an_option_chain_read_expires_as_a_timeout() {
+    let mut h = ready(true);
+    h.command(Command::FetchOptionChain {
+        command: 94,
+        query: OptionChainQuery {
+            underlying: "BTC".into(),
+            expiry: None,
+            right: None,
+            strike_min: None,
+            strike_max: None,
+        },
+    });
+    let _chain = h.take("/v5/market/tickers");
+    h.advance(20_001.);
+    let error = failed(&h, 94);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+}
