@@ -5709,3 +5709,17 @@ engine refusal without a financial outcome. Successful admission preserves the
 native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
+
+## Exact background read delivery
+
+Adapters publishing a one-leg Background Read use
+`validate_background_read_http_delivery` synchronously in its matching managed
+HTTP callback, before retiring the Context or changing native/cache/Store state.
+Logical liveness alone does not prove that a different live Context belongs to
+that response. Command, Execution and Session owners cannot use this Background-only gate.
+
+Native response validity and publication freshness remain separate checks. A
+failure callback can have valid delivery identity without response data to
+publish. A refused gate publishes no replacement response and grants no command
+completion, retry or send authority. SDK/NX order-error handling and native result
+shapes are unchanged; adopting venue adapters retain their own caller contracts.
