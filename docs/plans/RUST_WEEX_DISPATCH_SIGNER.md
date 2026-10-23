@@ -231,3 +231,11 @@ registry fixture and using its direct `expect_err` assertion. The full bans chec
 detects the newly landed Kraken history inventory reduction absent from this
 older branch; this unrelated integration requirement is retained as a failing
 check until actual #1768 is integrated, without changing or exempting the ratchet.
+
+Actual #1768 `848924471635eee7a0c61c64407a861c3aea37f3` is integrated at
+`1d92e296677`. Its sole conflict was independently appended caller sections,
+resolved with the complete incoming file first and the unchanged WEEX section
+once; the block/hash receipt is retained for the draft PR comment. Both
+preservation reviews confirm all nine nonconflicting owned blobs unchanged and
+all 5,301 unowned incoming entries exact. The unmodified full bans check passes
+after integration, as do all 708 WEEX/Binance/Kraken native tests.
