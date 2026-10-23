@@ -129,10 +129,14 @@ or a Plan transition with its root timer. Returning a selected `Stage::Ready`
 read Context alone is NOT progress: no HTTP action/timer exists at that point.
 Such a callback receives one shared failure/retirement, including cleanup of
 reserved call resources and preservation of imported facts. A selected Context
-cannot be saved to borrow authority in some future unrelated callback. A default/unhandled callback is completed as one typed local
-Internal/NotSent failure through the shared preflight failure/retirement path,
-not left silently stranded. A callback that panics poisons the engine under the
-existing callback discipline; scope tokens cannot leak after unwinding. Final
+cannot be saved to borrow authority in some future unrelated callback. A default/unhandled callback is completed as one typed local Internal
+failure through the shared preflight failure/retirement path: ReadOnly carries
+no write outcome; truly unissued WriteAfterReads projects NotSent; imported
+sent/maybe-sent facts retain their shared Unknown/partial projection.
+No retained caller is left silently stranded. A callback that panics poisons the engine under the
+existing callback discipline; scope tokens cannot leak after unwinding. A panic
+inside the restricted retirement-output wrapper uses the SAME sticky poison as
+the existing cleanup hook, so catching the unwind cannot resume an unsafe engine. Final
 policy/error wording is part of owner API-fit review before implementation.
 
 ### Restricted retirement-to-wake handoff
@@ -254,3 +258,11 @@ single Plan admission, followers keep their own bounds; drain after the executio
 sweep and rearm execution timers normally; retained Preflights are founder-only,
 not joinable. Pending-founder dedup belongs to the intent ledger, not this wake
 queue. Source controls and owner API-fit approval remain required.
+
+
+API-fit review by codex-uufub4 accepted these corrected contracts on the reviewed
+core boundary. Original genuine REDs may proceed in separate new test files;
+runtime hooks remain held until the owner's reviewed feature-isolation pin.
+ReadOnly default/activation failure has no write outcome, and the restricted
+retirement-output panic must preserve sticky poison. Neither this approval nor
+a future local test makes the feature-isolation WIP consumable.
