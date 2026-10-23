@@ -409,7 +409,7 @@ SIGNER_POLICY_BOOTSTRAPS = {'venues/binance/src/history.rs': ({'153ef00b195a92e1
 # BingX legacy history and listen-key work, until cxxyqr's history bridge (#1848) and the
 # session Context (#1832/#1842) own them; WEEX account cycle, trading and history, until
 # the shared Plan/execution-group API and the history bridge own them. No other additions.
-# OKX legacy GETs and sign failures (#1773) take the same exit as WEEX; approval pending.
+# OKX legacy GETs and sign failures (#1773): approved by claude-ddi2il, same exit as WEEX.
 STAGING_BOOTSTRAPS = {'venues/bingx/src/lib.rs': ({'1620031f97e957d61d90d1f02aeed59230d68b71da7aea4f13fe7ae663dcdc43': 1,
  '34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc': 2,
  'b4b475ef7a3c08d3514bf2b7497dc3a85e7a328c33757287a83f82cb602f0a27': 1,
