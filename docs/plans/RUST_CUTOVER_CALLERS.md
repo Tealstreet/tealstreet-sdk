@@ -5099,6 +5099,7 @@ Hyperliquid's existing earlier cache-hit and identity/client-ID shortcuts remain
 Live Store/cache access stays separate from history. No REST capability, result
 wrapper, managed-request migration or NX runtime adoption is added.
 [Scope and controls](RUST_OWNED_HISTORY.md).
+
 ## AsterDEX dispatch signing admission
 
 AsterDEX now signs only through the injected provider at dispatch
@@ -5338,3 +5339,37 @@ remain unchanged. The two private replay tape identities reflect the authorized
 master/harness integrator change; their eleven existing diagnostics each and all
 public declarations are unchanged. Raw replay reports remain FAIL with known
 failures; this content-hash refresh does not establish complete venue parity.
+## AsterDEX dispatch signing admission
+
+AsterDEX now signs only through the injected provider at dispatch
+([RUST_ASTER_SIGNER_ADMISSION.md](RUST_ASTER_SIGNER_ADMISSION.md), phases 2-3).
+Caller-visible changes:
+
+- **Setup carries the material.** `key`, `secret`, `auth.privateKey`,
+  `secondary_key` and `secondary_secret` reach the provider through the one-use
+  setup channel (raw WASM constructor argument 3, or native legacy setup). Generic
+  options and `exchange.options` keep only the public `auth.userAddress` /
+  `auth.signerAddress`. Native callers passing `asterdex.privateKey`,
+  `asterdex.readKey`, `asterdex.readSecret` or top-level key/secret beside opaque
+  `signing` refs are refused as invalid input.
+- **Setup resolves `apiVersion`.** TS and native setup resolve V1/V3 from the
+  material's shape and send it explicitly; the venue refuses a missing or
+  contradictory version instead of guessing. Keyless V3 callers should set
+  `extra.asterdexApiVersion`, since nothing inferred admits a keyless account.
+- **Encodings.** V3 wallet keys are trimmed hex, with an optional `0x`/`0X`;
+  V1 HMAC secrets stay byte-exact UTF-8. A whitespace-only key is absent.
+- **Read agent.** With an `auth.privateKey` wallet, the read agent presents its
+  own key and signs with the primary wallet's provider ref (one copy, one
+  revocation point), as before. Otherwise it signs with its own secret.
+- **Main-wallet hint.** The V1 "API Wallet keys require the Main Wallet Address"
+  refusal now happens at setup, with the same message.
+- **Read agent errors fail closed.** An empty read secret, or a V3 read secret
+  that is not hex, refuses setup instead of failing only the signed reads.
+- **`fetchAccount().userId`.** Without an `accountAlias`, V3 falls back to the
+  public signer address, as before. V1 previously fell back to the API key; it
+  now uses the trusted primary `localSigner.primary.stableId` (WEEX precedent)
+  and otherwise fails typed (`unsupported`). It is never the key and never
+  empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
+  Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
+  caller migration.
+
