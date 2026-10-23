@@ -224,3 +224,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | BreakoutProp legacy DXtrade RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_BREAKOUTPROP_REQUEST_CONTEXT.md](RUST_BREAKOUTPROP_REQUEST_CONTEXT.md) |
 | ApeX Omni RequestContext adoption | Inventory and phased migration plan | Before migrating ApeX HTTP/completion sites or pruning its legacy inventory. | [RUST_APEXOMNI_REQUEST_CONTEXT.md](RUST_APEXOMNI_REQUEST_CONTEXT.md) |
 | BloFin managed requests | Inventory and phased adoption plan | Before BloFin HTTP/completion migration; exact legacy map, caller effects and shared API dependencies. | [RUST_BLOFIN_REQUEST_CONTEXT.md](RUST_BLOFIN_REQUEST_CONTEXT.md) |
+
+| BloFin candle command entry | Focused adoption plan | Before removing the candle pre-Context numeric refusal or changing initial command ownership. | [RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md](RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md) |
