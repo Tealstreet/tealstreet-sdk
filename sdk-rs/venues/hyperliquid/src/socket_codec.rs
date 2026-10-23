@@ -23,12 +23,15 @@ struct Send<T> {
 }
 
 #[derive(serde::Deserialize)]
-struct EncodedTopic {
-    subscription: DepthOrder,
+struct EncodedTopic<'a> {
+    #[serde(borrow)]
+    subscription: DepthOrder<'a>,
 }
 
 #[derive(serde::Deserialize)]
-struct DepthOrder {
+struct DepthOrder<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
     #[serde(rename = "nSigFigs", default)]
     figures: Option<u8>,
 }
@@ -254,21 +257,23 @@ impl Hyperliquid {
         let mut ordered: Vec<_> = interests
             .iter()
             .map(|interest| {
-                let value: EncodedTopic = serde_json::from_str(&interest.wire_args)
+                let value: EncodedTopic<'_> = serde_json::from_str(&interest.wire_args)
                     .map_err(|_| SocketError::InvalidInterest)?;
                 let figures = value.subscription.figures.unwrap_or(0);
+                let book_order = usize::from(value.subscription.kind == "bbo");
                 Ok((
                     interest,
                     ranks
                         .get(interest.key.as_ref())
                         .copied()
                         .unwrap_or(usize::MAX),
+                    book_order,
                     figures,
                 ))
             })
             .collect::<Result<_, SocketError>>()?;
-        ordered.sort_by_key(|(_, rank, figures)| (*rank, *figures));
-        for (interest, _, _) in ordered {
+        ordered.sort_by_key(|(_, rank, book_order, figures)| (*rank, *book_order, *figures));
+        for (interest, _, _, _) in ordered {
             let text = if subscribe {
                 interest.wire_args.to_string()
             } else {
