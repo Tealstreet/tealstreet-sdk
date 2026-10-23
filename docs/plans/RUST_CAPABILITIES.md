@@ -63,3 +63,33 @@ assertions; run to capture V1 RED and V3 compatibility GREEN. Then apply the
 one-line correction, run Aster and engine tests/strict checks plus existing
 conformance controls, and obtain independent source/caller review. Full CI and
 source-bound proof remain subject to the owner's landing windows.
+
+
+Owner broadened the same small correction to all confirmed profile mismatches:
+
+- Bybit: `income_history = !self.variant.is_spot() && !self.variant.is_hyro()`.
+  Both variants reject Income unconditionally at history.rs:424; all other
+  variants retain true. uufub4 explicitly cleared the capabilities block and
+  capability assertions against the local managed Bybit child before editing.
+  No history, on_command, send/resend or Context source changes.
+- Coinbase: `income_history = false` for every profile. history_start rejects
+  Income before credentials/product selection, not only on Spot. The owner
+  explicitly accepted Spot/INTX/CFM false; native CFM PnL remains separate and
+  accepted. Existing spot_only/options/account state can be read by tests; no
+  new product plumbing is needed to make an unconditional unsupported bit false.
+- Aster remains the version predicate above. CALLERS also names per-order STP
+  alongside fetch/change STP, since all three are V3-only.
+
+Tests use existing native integration test files (Aster trading, Bybit history,
+Coinbase history) and prove refusing profiles false plus supported peers true.
+Each venue's actual command refusal remains asserted independently of its bit;
+V3 STP continues to dispatch exact GET/POST routes. Tests are committed and run
+on unchanged production before the three capability-field edits.
+
+TS comparison for income: BybitSpot inherits BaseExchange's branded inert
+fetchIncomeHistory/fetchIncomeHistoryRange; Hyro explicitly brands both empty
+fallbacks. Coinbase also inherits the branded base fallbacks (there are no
+income overrides in its TS exchange classes). BaseExchange.capabilities selects
+these method brands, so all report incomeHistory/incomeRange=false today. No TS
+production change or new endpoint is authorized. No other capability fields
+change, and the separate positive conformance branch keeps its gate strict.
