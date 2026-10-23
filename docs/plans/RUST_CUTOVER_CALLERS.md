@@ -6236,6 +6236,19 @@ or accepted-prefix recovery permission follows from observing this cap.
 Mutation and execution-owned capped Plans are outside this first slice; native
 mutation/provider errors and their outcome projections remain unchanged.
 
+## BingX FetchAccount selected Read custody
+
+FetchAccount admits its original Read before native eligibility diagnostics or
+signed HTTP. Shared capacity/invalid-clock denial emits one typed failure without
+a native diagnostic or financial outcome. Eligible requests retain the selected
+opaque identity and original 20s/Never Context through managed preparation and
+release; Secondary serves reads only with an eligible Primary, and a saved
+invalid Secondary keeps its native refusal even in public-only configurations.
+The exact GET/query/header bytes and userId codec are preserved. Rare identity
+reads leave live account state unchanged. Network/Timeout metadata now survives
+with the native correlated diagnostic before the single terminal. No history,
+account-poll, trading or socket caller is migrated by this slice.
+
 ## Engine-owned expiry of caller-wait Read roots (#1945 follow-up)
 
 A venue that admits its original Read root with `Cx::admit_caller_read_root`
