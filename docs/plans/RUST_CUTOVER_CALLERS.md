@@ -5783,7 +5783,7 @@ conversions adopt them. Caller-visible changes:
 - **`safe_cex_venues::fetch_public`.** Trusted setup asks a local provider
   inline for public values: at most 4 public-only operations, validated first.
   A host or remote provider gets `Unavailable` and nothing is scheduled. Every
-  answer is checked on the curve (Stark x, Ed25519 point), and a malformed one
+  answer is checked as a canonical curve value (Stark x, Ed25519 point), and a malformed one
   is `InvalidResult`. Those accounts
   supply the value as bound account metadata instead.
 - **`safe_cex_crypto::ethereum::signed_by`.** A shared pre-release check that

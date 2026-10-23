@@ -83,8 +83,11 @@ fn inline_provider_answers_exact_valid_public_values() {
         fetch_public(&signer, vec![address()]),
         Ok(vec![vec![1; 20]])
     );
+    let mut canonical_y3 = vec![0; 32];
+    canonical_y3[0] = 3;
     for (algorithm, value) in [
         (Algorithm::Ed25519, ed25519_vector()),
+        (Algorithm::Ed25519, canonical_y3),
         (Algorithm::StarkDigest, stark_vector()),
     ] {
         let (_, signer) = provider(true, value.clone());
@@ -99,11 +102,17 @@ fn inline_provider_answers_exact_valid_public_values() {
 fn malformed_provider_results_are_invalid() {
     let mut identity = vec![0; 32];
     identity[0] = 1;
+    // y = p + 3: decodes under ZIP-215 to the same non-weak point as y = 3,
+    // but is not the canonical encoding.
+    let mut non_canonical_y3 = vec![0xff; 32];
+    non_canonical_y3[0] = 0xf0;
+    non_canonical_y3[31] = 0x7f;
     for (operation, value) in [
         (address(), vec![1; 32]),
         (public_key(Algorithm::Ed25519), vec![1; 31]),
         // The identity point decodes but has small order.
         (public_key(Algorithm::Ed25519), identity),
+        (public_key(Algorithm::Ed25519), non_canonical_y3),
         (public_key(Algorithm::StarkDigest), vec![0; 32]),
         // At or above the field modulus: not a canonical felt.
         (public_key(Algorithm::StarkDigest), vec![0xff; 32]),

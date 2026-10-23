@@ -374,8 +374,8 @@ must never receive the key.
   
   The engine checks exact widths. `fetch_public`, the trusted setup boundary,
   also checks every provider's answer semantically through the crypto crate:
-  a canonical, nonzero, on-curve Stark x and a decodable, non-weak Ed25519
-  point. The engine stays crypto-free.
+  a canonical, nonzero, on-curve Stark x and a canonically encoded
+  (y < p), decodable, non-weak Ed25519 point. The engine stays crypto-free.
 - **Mixed requests.** Public operations may share a request with
   `Sign`/`Present`/`Sha256`. Ordering, atomicity and dependencies are
   unchanged. P8 `remote` still requires exactly one `Sign`: a remote request

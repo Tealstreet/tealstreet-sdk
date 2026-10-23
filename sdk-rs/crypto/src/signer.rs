@@ -575,6 +575,9 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
             ..
         } => <[u8; 32]>::try_from(value)
             .ok()
+            // Decoding is ZIP-215 tolerant and keeps the input bytes, so the
+            // canonical y < p check is explicit.
+            .filter(ed25519_canonical_y)
             .and_then(|bytes| ed25519_dalek::VerifyingKey::from_bytes(&bytes).ok())
             .is_some_and(|key| !key.is_weak()),
         Operation::PublicKey {
@@ -583,6 +586,15 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
         } => crate::starknet::is_public_key(value),
         _ => false,
     }
+}
+/// Little-endian y (sign bit cleared) strictly below p = 2^255 - 19.
+fn ed25519_canonical_y(bytes: &[u8; 32]) -> bool {
+    let mut y = *bytes;
+    y[31] &= 0x7f;
+    let mut modulus = [0xff; 32];
+    modulus[0] = 0xed;
+    modulus[31] = 0x7f;
+    y.iter().rev().lt(modulus.iter().rev())
 }
 /// Algorithms whose keys have a public form; MAC secrets never do.
 fn asymmetric(algorithm: Algorithm) -> bool {
