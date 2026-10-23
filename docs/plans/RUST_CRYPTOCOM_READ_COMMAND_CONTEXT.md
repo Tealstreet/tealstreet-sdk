@@ -176,3 +176,24 @@ retain numeric-string coercion and stream-list/native-error precedence, require
 full native error/auth-health controls, and restrict delivery validation to
 actual callbacks. No production/test change or executed original RED is claimed
 by this plan checkpoint; those are the next separate commit.
+
+## Original assertion RED receipt
+
+On unchanged production at78c443c2a64, two new integration targets compile and
+run16 tests: ten assertion failures and six passing native compatibility controls.
+Eight candle REDs cover preparation/claim custody, parked/released deadline,
+initial clocks/capacity, typed setup/transport and undecodable delivered bodies.
+Two local history REDs cover bounded-owner capacity and invalid command clocks.
+Finite controls preserve all five local branches, bounded Income limit0 dispatch,
+private/public history continuations, every candle timeframe/live-UAT URL and
+credential combination, numeric-string coercion, raw row order/timestamps, full
+native response error fields/auth-health, and local unsupported intervals.
+No compiler failure is counted, and no production file has changed at this point.
+
+The shared engine already supplies Internal through on_http_failed for a wholly
+undecodable delivered body. Managed candles preserve that typed cause plus read
+NotSent, alongside typed Network/Timeout. This is an intentional metadata change
+from the legacy adapter's string forwarding and must be in CALLERS. It does not
+apply to native envelope/status errors, malformed rows or stream-codec string
+errors; their full native fields stay unchanged. No local kind demotion or status
+classification is introduced.
